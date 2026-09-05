@@ -49,13 +49,18 @@ export interface DailyCalculationInput {
   /** Employee is subject to Ramadan hours (rules.ramadanMode decides). */
   ramadanEligible?: boolean;
   now?: string;                    // UTC ISO; used to decide whether a missing OUT is "still working"
+  /**
+   * Shifts of the previous / next attendance date, used to build the neighbouring punch windows for
+   * attribution (§G.3). `undefined` = same shift as `shift`; `null` = no shift on that day.
+   */
+  adjacentShifts?: { previous?: EngineShift | null; next?: EngineShift | null };
 }
 
 export interface TraceStep { step: string; detail: string; values?: Record<string, unknown> }
 export interface CalculationTrace {
   engineVersion: string;
   inputs: { shiftId: string | null; shiftType: ShiftType | null; ruleSetId: string | null; timezone: string; window: { start: string; end: string } | null; holiday: string | null; leave: string | null; weeklyOff: boolean };
-  punches: Array<{ eventId: string; punchedAt: string; local: string; role: 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END' | 'IGNORED' | 'DUPLICATE' | 'OUT_OF_WINDOW' }>;
+  punches: Array<{ eventId: string; punchedAt: string; local: string; role: 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END' | 'IGNORED' | 'DUPLICATE' | 'OUT_OF_WINDOW'; note?: string }>;
   steps: TraceStep[];
 }
 

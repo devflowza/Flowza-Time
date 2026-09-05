@@ -1,0 +1,40 @@
+{
+  "app": { "name": "فلوزا تايم", "tagline": "الحضور وإدارة وقت القوى العاملة بشكل واضح وقابل للتفسير." },
+  "nav": {
+    "dashboard": "لوحة التحكم", "employees": "الموظفون", "attendance": "الحضور", "devices": "الأجهزة", "sync": "مهام المزامنة",
+    "reconciliation": "المطابقة", "shifts": "الورديات", "holidays": "العطلات", "leave": "الإجازات", "corrections": "التصحيحات",
+    "approvals": "الموافقات", "reports": "التقارير", "payroll": "الرواتب", "structure": "المنظمة", "branches": "الفروع",
+    "departments": "الأقسام", "users": "المستخدمون والأدوار", "settings": "الإعدادات", "audit": "سجل التدقيق", "notifications": "الإشعارات",
+    "platform": "إدارة المنصة", "help": "المساعدة", "signOut": "تسجيل الخروج", "collapse": "طي الشريط الجانبي", "expand": "توسيع الشريط الجانبي",
+    "sections": { "workforce": "القوى العاملة", "devices": "الأجهزة والمزامنة", "time": "الوقت", "admin": "الإدارة" }
+  },
+  "auth": {
+    "signIn": "تسجيل الدخول", "signInTitle": "تسجيل الدخول إلى فلوزا تايم", "email": "البريد الإلكتروني للعمل", "password": "كلمة المرور",
+    "forgot": "هل نسيت كلمة المرور؟", "reset": "إعادة تعيين كلمة المرور", "resetSent": "إذا كان هناك حساب مرتبط بـ {{email}}، فقد تم إرسال رابط إعادة التعيين.",
+    "newPassword": "كلمة المرور الجديدة", "confirmPassword": "تأكيد كلمة المرور", "update": "تحديث كلمة المرور", "mfaTitle": "التحقق بخطوتين",
+    "mfaCode": "رمز مكوّن من 6 أرقام", "verify": "تحقق", "invalid": "البريد الإلكتروني أو كلمة المرور غير صحيحة.", "noOrg": "حسابك ليس عضواً في أي منظمة حتى الآن. اطلب دعوة من المسؤول.",
+    "acceptInvite": "قبول الدعوة", "signingIn": "جارٍ تسجيل الدخول…", "sessionExpired": "انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى."
+  },
+  "common": {
+    "loading": "جارٍ التحميل…", "save": "حفظ", "saving": "جارٍ الحفظ…", "cancel": "إلغاء", "close": "إغلاق", "delete": "حذف", "edit": "تعديل", "create": "إنشاء",
+    "add": "إضافة", "search": "بحث", "searchPlaceholder": "ابحث…", "filters": "عوامل التصفية", "clearFilters": "مسح عوامل التصفية", "actions": "الإجراءات",
+    "confirm": "تأكيد", "back": "رجوع", "next": "التالي", "previous": "السابق", "yes": "نعم", "no": "لا", "all": "الكل", "none": "لا شيء",
+    "status": "الحالة", "name": "الاسم", "code": "الرمز", "branch": "الفرع", "department": "القسم", "date": "التاريخ", "from": "من", "to": "إلى",
+    "today": "اليوم", "refresh": "تحديث", "export": "تصدير", "import": "استيراد", "download": "تنزيل", "upload": "رفع", "retry": "إعادة المحاولة",
+    "details": "التفاصيل", "view": "عرض", "more": "المزيد", "optional": "اختياري", "required": "مطلوب", "unknown": "غير معروف", "notAvailable": "—",
+    "rowsPerPage": "الصفوف في الصفحة", "pageOf": "صفحة {{page}} من {{total}}", "selected": "تم تحديد {{count}}", "results": "{{count}} نتيجة",
+    "noResults": "لا توجد نتائج", "noResultsHint": "جرّب تعديل البحث أو عوامل التصفية.", "error": "حدث خطأ ما", "errorHint": "يرجى المحاولة مرة أخرى. إذا استمرت المشكلة، تواصل مع الدعم مع رقم الطلب {{requestId}}.",
+    "queued": "تمت الإضافة إلى قائمة الانتظار بنجاح", "queuedHint": "تابع التقدم في مهام المزامنة.", "copy": "نسخ", "copied": "تم النسخ", "timezone": "المنطقة الزمنية",
+    "createdAt": "تاريخ الإنشاء", "updatedAt": "آخر تحديث", "language": "اللغة", "theme": "المظهر", "light": "فاتح", "dark": "داكن", "system": "النظام",
+    "switchOrg": "تبديل المنظمة", "comingSoon": "قريباً", "permissionDenied": "ليس لديك صلاحية لعرض هذه الصفحة.", "notFound": "الصفحة غير موجودة",
+    "notFoundHint": "الصفحة التي تبحث عنها غير موجودة أو تم نقلها.", "goHome": "الانتقال إلى لوحة التحكم", "minutes": "د", "hours": "س", "days": "أيام"
+  },
+  "dashboard": {
+    "title": "لوحة التحكم", "subtitle": "نظرة عامة على الحضور ليوم {{date}}", "employees": "الموظفون", "presentToday": "الحاضرون اليوم", "absent": "الغائبون", "late": "المتأخرون",
+    "onLeave": "في إجازة", "earlyDeparture": "الانصراف المبكر", "overtime": "العمل الإضافي", "missingPunch": "بصمات مفقودة", "devicesOnline": "أجهزة متصلة",
+    "devicesOffline": "أجهزة غير متصلة", "syncFailures": "إخفاقات المزامنة (24 ساعة)", "pendingApprovals": "موافقات معلّقة", "trend": "اتجاه الحضور", "presentVsAbsent": "الحضور مقابل الغياب",
+    "lateTrend": "التأخيرات", "branchComparison": "مقارنة الفروع", "deviceHealth": "صحة الأجهزة", "recentSync": "أحدث مهام المزامنة", "empty": "لا توجد بيانات حضور بعد",
+    "emptyHint": "سجّل جهازاً أو استورد الموظفين للبدء."
+  },
+  "notifications": { "title": "الإشعارات", "markAllRead": "تعليم الكل كمقروء", "empty": "لا توجد إشعارات جديدة", "emptyHint": "ستظهر هنا تنبيهات الأجهزة والحضور والموافقات.", "unread": "{{count}} غير مقروء" }
+}

@@ -1,0 +1,40 @@
+{
+  "app": { "name": "FlowZa Time", "tagline": "Attendance & workforce time, made explainable." },
+  "nav": {
+    "dashboard": "Dashboard", "employees": "Employees", "attendance": "Attendance", "devices": "Devices", "sync": "Sync jobs",
+    "reconciliation": "Reconciliation", "shifts": "Shifts", "holidays": "Holidays", "leave": "Leave", "corrections": "Corrections",
+    "approvals": "Approvals", "reports": "Reports", "payroll": "Payroll", "structure": "Organisation", "branches": "Branches",
+    "departments": "Departments", "users": "Users & roles", "settings": "Settings", "audit": "Audit log", "notifications": "Notifications",
+    "platform": "Platform admin", "help": "Help", "signOut": "Sign out", "collapse": "Collapse sidebar", "expand": "Expand sidebar",
+    "sections": { "workforce": "Workforce", "devices": "Devices & sync", "time": "Time", "admin": "Administration" }
+  },
+  "auth": {
+    "signIn": "Sign in", "signInTitle": "Sign in to FlowZa Time", "email": "Work email", "password": "Password",
+    "forgot": "Forgot password?", "reset": "Reset password", "resetSent": "If an account exists for {{email}}, a reset link has been sent.",
+    "newPassword": "New password", "confirmPassword": "Confirm password", "update": "Update password", "mfaTitle": "Two-factor verification",
+    "mfaCode": "6-digit code", "verify": "Verify", "invalid": "Invalid email or password.", "noOrg": "Your account is not a member of any organisation yet. Ask an administrator for an invitation.",
+    "acceptInvite": "Accept invitation", "signingIn": "Signing in…", "sessionExpired": "Your session has expired. Please sign in again."
+  },
+  "common": {
+    "loading": "Loading…", "save": "Save", "saving": "Saving…", "cancel": "Cancel", "close": "Close", "delete": "Delete", "edit": "Edit", "create": "Create",
+    "add": "Add", "search": "Search", "searchPlaceholder": "Search…", "filters": "Filters", "clearFilters": "Clear filters", "actions": "Actions",
+    "confirm": "Confirm", "back": "Back", "next": "Next", "previous": "Previous", "yes": "Yes", "no": "No", "all": "All", "none": "None",
+    "status": "Status", "name": "Name", "code": "Code", "branch": "Branch", "department": "Department", "date": "Date", "from": "From", "to": "To",
+    "today": "Today", "refresh": "Refresh", "export": "Export", "import": "Import", "download": "Download", "upload": "Upload", "retry": "Retry",
+    "details": "Details", "view": "View", "more": "More", "optional": "Optional", "required": "Required", "unknown": "Unknown", "notAvailable": "—",
+    "rowsPerPage": "Rows per page", "pageOf": "Page {{page}} of {{total}}", "selected": "{{count}} selected", "results": "{{count}} results",
+    "noResults": "No results", "noResultsHint": "Try adjusting your search or filters.", "error": "Something went wrong", "errorHint": "Please try again. If the problem persists, contact support with request id {{requestId}}.",
+    "queued": "Queued successfully", "queuedHint": "Follow progress in Sync jobs.", "copy": "Copy", "copied": "Copied", "timezone": "Timezone",
+    "createdAt": "Created", "updatedAt": "Updated", "language": "Language", "theme": "Theme", "light": "Light", "dark": "Dark", "system": "System",
+    "switchOrg": "Switch organisation", "comingSoon": "Coming soon", "permissionDenied": "You do not have permission to view this page.", "notFound": "Page not found",
+    "notFoundHint": "The page you are looking for does not exist or has moved.", "goHome": "Go to dashboard", "minutes": "min", "hours": "h", "days": "days"
+  },
+  "dashboard": {
+    "title": "Dashboard", "subtitle": "Attendance overview for {{date}}", "employees": "Employees", "presentToday": "Present today", "absent": "Absent", "late": "Late",
+    "onLeave": "On leave", "earlyDeparture": "Early departure", "overtime": "Overtime", "missingPunch": "Missing punches", "devicesOnline": "Devices online",
+    "devicesOffline": "Devices offline", "syncFailures": "Sync failures (24h)", "pendingApprovals": "Pending approvals", "trend": "Attendance trend", "presentVsAbsent": "Present vs absent",
+    "lateTrend": "Late arrivals", "branchComparison": "Branch comparison", "deviceHealth": "Device health", "recentSync": "Recent sync jobs", "empty": "No attendance data yet",
+    "emptyHint": "Register a device or import employees to get started."
+  },
+  "notifications": { "title": "Notifications", "markAllRead": "Mark all as read", "empty": "You're all caught up", "emptyHint": "Device, attendance and approval alerts will appear here.", "unread": "{{count}} unread" }
+}

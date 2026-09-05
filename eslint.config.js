@@ -25,6 +25,11 @@ export default tseslint.config(
     rules: { ...reactHooks.configs.recommended.rules, 'react-refresh/only-export-components': ['warn', { allowConstantExport: true }] },
   },
   {
+    // UI primitives export variants/hooks alongside components by design (shadcn convention); providers export hooks.
+    files: ['apps/web/src/components/ui/**/*.tsx', 'apps/web/src/features/**/*-provider.tsx', 'apps/web/src/routes.tsx'],
+    rules: { 'react-refresh/only-export-components': 'off' },
+  },
+  {
     files: ['**/*.test.{ts,tsx}', '**/test/**/*.{ts,tsx}', 'apps/worker/**/*.ts', 'apps/api/src/index.ts'],
     rules: { 'no-console': 'off', '@typescript-eslint/no-explicit-any': 'off' },
   },
