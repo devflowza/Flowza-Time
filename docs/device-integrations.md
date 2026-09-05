@@ -590,9 +590,13 @@ leave `placeholder`. Prerequisites: the `/device-push/iclock/*` route, `device_c
 
 ## 8. Open items to reconcile (code ⇄ research ⇄ blueprint)
 
-1. Implement `/device-push/:protocolKey/*` and `/webhooks/providers/:providerKey` in `apps/api` (stub today) with
-   `device_commands` persistence, stamp persistence and `lastSeenAt` maintenance; until then `zkteco_push` cannot be exercised
-   outside unit tests.
+1. ~~Implement `/device-push/:protocolKey/*` and `/webhooks/providers/:providerKey` in `apps/api`~~ — **done**
+   (`apps/api/src/routes/inbound`, `services/features/inbound.service.ts`: pending-device quarantine, per-device push token,
+   `device_commands` rendering/acks, stamp persistence, heartbeat maintenance, webhook signature verified once over the raw
+   bytes). Still open for this item: **zero-touch claim proof of possession** — an unattributed pending row can be claimed by
+   any organisation that knows the serial (denial-only today because uploads without the per-device token are refused; see
+   `docs/risks.md` D26). Planned: claim → device in a verification state → `pending_devices` link set on the first
+   token-authenticated push; hide `remote_ip` from unattributed rows; TTL purge / per-IP cap for pending rows.
 2. Re-derive the `mock` reference row from `definitionToRow(MOCK_DEFINITION)` (scenario list and fields drifted).
 3. Fix blueprint §E.3 keys and modes (`essl_push`, `fingertec_push`; `zkteco_biotime` is `ON_PREM_SERVER_API`).
 4. Correct `anviz_crosschex_cloud` and `hikvision_hpp` declared capabilities to match the research (see §3 drift list).

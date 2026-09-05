@@ -1,0 +1,25 @@
+# Gitleaks configuration for CI secret scanning (gitleaks/gitleaks-action, see .github/workflows/ci.yml).
+# Extends the default ruleset; the allowlist below only covers places that hold deliberately fake values.
+title = "FlowZa Time"
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Test fixtures, documentation prose and provider metadata that the generic-api-key rule mistakes for secrets"
+paths = [
+  # Vitest fixtures use throwaway credentials such as apiKey: 'test-key' to exercise the credentials store and mock provider
+  '''.*\.test\.tsx?$''',
+  '''.*\.db\.test\.ts$''',
+  # Provider definitions carry `key: '<provider_key>'` identifiers (e.g. 'suprema_biostar'), not credentials
+  '''packages/device-providers/src/providers/.*\.ts$''',
+  # Markdown prose ("integration paths, auth, ...") and example env files with placeholder values
+  '''docs/.*\.md$''',
+  '''\.env\.example$''',
+  '''apps/web/\.env\.example$''',
+]
+regexes = [
+  # explicit placeholders used across docs and examples
+  '''replace-me''',
+  '''FlowZa-Demo-2026!''',
+]
