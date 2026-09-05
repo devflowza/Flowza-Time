@@ -12,6 +12,7 @@ import { clientIp } from './lib/http.js';
 import { healthRoutes } from './routes/health.js';
 import { registerV1Routes } from './routes/v1/index.js';
 import { registerInboundRoutes } from './routes/inbound/index.js';
+import { edgeGate } from './middleware/edge-gate.js';
 
 /** Builds the Hono application. Route modules live in routes/v1/* (authenticated) and routes/inbound/* (devices/webhooks). */
 export function createApp(deps: ApiDeps) {
@@ -23,16 +24,25 @@ export function createApp(deps: ApiDeps) {
   app.onError(errorHandler);
   app.notFound((c) => c.json({ code: 'NOT_FOUND', message: 'Route not found.', requestId: c.get('requestId') }, 404));
 
+  // The edge gate runs before the rate limiters everywhere it applies: a request that did not come through the edge
+  // carries an unverifiable client IP, so letting it reach a limiter would let it write to a bucket it chose.
+  const edge = edgeGate(deps.config.EDGE_SHARED_SECRET);
+
+  // /api/health stays open — the platform's own health check reaches the container directly, without the edge, and it
+  // returns no data. /api/ready is gated: it reports database latency and queue depth.
+  app.use('/api/ready', edge);
   app.route('/api', healthRoutes(deps));
 
   // Inbound: vendor webhooks and device push protocols (device/webhook authentication inside)
   const inbound = new Hono<AppEnv>();
+  inbound.use('*', edge);
   inbound.use('*', rateLimit({ name: 'inbound', windowMs: 60_000, max: 1200, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
   registerInboundRoutes(inbound, deps);
   app.route('/', inbound);
 
   // Authenticated API
   const v1 = new Hono<AppEnv>();
+  v1.use('*', edge);
   v1.use('*', rateLimit({ name: 'api-ip', windowMs: deps.config.RATE_LIMIT_WINDOW_MS, max: deps.config.RATE_LIMIT_MAX * 2, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
   v1.use('*', requireAuth({ verify: deps.verifyToken, db: deps.db }));
   v1.use('*', rateLimit({ name: 'api-user', windowMs: deps.config.RATE_LIMIT_WINDOW_MS, max: deps.config.RATE_LIMIT_MAX, keyFn: (c) => c.get('principal')?.userId ?? 'anon' }));

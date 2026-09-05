@@ -7,6 +7,7 @@
 #
 # Secrets are NOT in this file. Set them once with `flyctl secrets set --app flowza-time-api ...`:
 #   DATABASE_URL_API, FLOWZA_CREDENTIALS_MASTER_KEYS, FLOWZA_DEVICE_PUSH_SECRET
+#   EDGE_SHARED_SECRET  -- required before CLIENT_IP_HEADER above can be trusted; see the note in [env]
 #   SUPABASE_SERVICE_ROLE_KEY  (optional: realtime broadcast + signed storage URLs; omit and both are no-ops)
 
 app = "flowza-time-api"
@@ -25,14 +26,19 @@ primary_region = "bom"
   SUPABASE_ANON_KEY = "sb_publishable_SDK8x_KVhjgXxrk-xvJ0Xw__LWSJIQF"
   DATABASE_POOL_MAX = "10"
 
-  # Client IP for rate limiting and the audit trail. CF-Connecting-IP is rewritten by Cloudflare on every request, so
-  # it cannot be spoofed — but ONLY while the origin refuses traffic that did not come through Cloudflare. Keep the
-  # Cloudflare-IP allowlist / Authenticated Origin Pulls in place or this header becomes attacker-controlled.
+  # Client IP for rate limiting and the audit trail. BOTH settings below assume the request actually traversed
+  # Cloudflare -> Fly: CF-Connecting-IP is only authoritative because Cloudflare rewrites it, and the hop count is only
+  # correct because two proxies appended. A request sent straight to the Fly hostname satisfies neither — it carries one
+  # fewer hop, so the count reads a client-supplied entry, and nothing overwrote the header.
+  #
+  # EDGE_SHARED_SECRET (set as a Fly secret, not here) is therefore a PRECONDITION, not hardening: until it is set and
+  # Cloudflare adds the matching header via a Transform Rule, the origin is open and neither setting can be trusted.
+  # Cloudflare Tunnel — no public listener at all — is the stronger end state; Authenticated Origin Pulls is not a
+  # practical option here because the Fly proxy does not validate a client certificate for the application.
   TRUST_PROXY = "true"
   CLIENT_IP_HEADER = "cf-connecting-ip"
-  # Fallback path only (used if the header is absent): Cloudflare and Fly each append to X-Forwarded-For, so the
-  # client entry sits two from the right. Verify against a real request before relying on it — if Fly's proxy stops
-  # appending, this becomes 1.
+  # Cloudflare and Fly each append to X-Forwarded-For, so the client entry sits two from the right. Verify this against
+  # a real request rather than assuming: if Fly's proxy does not append, the correct value is 1.
   TRUSTED_PROXY_HOPS = "2"
 
 [http_service]

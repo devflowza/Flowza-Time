@@ -37,20 +37,28 @@ re-entered per device; attendance data itself is unaffected (`docs/deployment.md
 The migrations create `flowza_api` and `flowza_worker` as login roles with **no password**, so no one can connect as
 them until you set one. Verified against the live project: `rolpassword is null` for both.
 
-In the Supabase SQL editor, as `postgres`:
+Prefer `psql` with `\password`, which hashes the value client-side so the plaintext never travels in a statement:
 
-```sql
-alter role flowza_api    password '<generated password>';
-alter role flowza_worker password '<generated password>';
+```
+psql "postgresql://postgres:<db password>@<direct host>:5432/postgres"
+\password flowza_api
+\password flowza_worker
 ```
 
-Confirm:
+The Supabase SQL editor also works, but `alter role … password '…'` sends the plaintext and the editor keeps a
+snippet history, so the password outlives the statement.
+
+Confirm — note this must read **`pg_authid`**, not `pg_roles`. `pg_roles` masks the column as `********` for every
+role, so `rolpassword is not null` there is true whatever the state and tells you nothing:
 
 ```sql
 select rolname, rolpassword is not null as password_set
 from pg_authid where rolname in ('flowza_api', 'flowza_worker');
 -- both rows must read true
 ```
+
+The end-to-end proof is still `/api/ready` returning 200 in step 2 — that is the only check that exercises the
+password, the pooler URL and the role grants together.
 
 ### Building the connection strings
 
@@ -137,16 +145,37 @@ The canonical origin is the custom domain, `https://time.flowza.ai`. Deliberatel
 unmaintainable list or a wildcard that lets any preview talk to production data. If you want previews to work, point
 them at a separate staging API rather than widening this one.
 
-### Lock the origin to Cloudflare
+### Lock the origin to Cloudflare — required, not hardening
 
-`fly.api.toml` sets `CLIENT_IP_HEADER=cf-connecting-ip`, and that header is only trustworthy while the origin refuses
-traffic that did not arrive through Cloudflare. An origin reachable directly lets anyone set the header themselves and
-hands back the rate-limit bypass this configuration exists to close.
+`fly.api.toml` sets `CLIENT_IP_HEADER=cf-connecting-ip` and `TRUSTED_PROXY_HOPS=2`. **Both settings assume the request
+actually came through Cloudflare**, and neither survives an origin that can be reached directly:
 
-Use Cloudflare **Authenticated Origin Pulls** (Pro includes it) so the origin rejects any TLS connection not
-presenting Cloudflare's client certificate, or restrict inbound traffic to Cloudflare's published IP ranges. Until one
-of those is in place, treat `CLIENT_IP_HEADER` as unset and rely on `TRUSTED_PROXY_HOPS` alone — that path is
-spoof-resistant on its own, which is why the code falls back to it rather than failing closed.
+- `CF-Connecting-IP` is authoritative only because Cloudflare overwrites it. Nothing overwrites it on a direct request.
+- The hop count is correct only because two proxies appended to `X-Forwarded-For`. A direct request has one fewer hop,
+  so counting two in from the right lands on a **client-supplied** entry.
+
+So closing the origin is the precondition the client-IP handling rests on, not a second layer over it.
+
+**Authenticated Origin Pulls is not the answer here.** Cloudflare's own panel says as much — it requires the origin to
+validate a client certificate, and the Fly proxy does not do that on the application's behalf. The Global tier is
+worse than useless for this: it is zone-wide (so it also covers `time.flowza.ai` and every other proxied record) and
+presents a certificate shared across all Cloudflare customers, so with no origin-side validation it changes nothing
+while reading as "on".
+
+Two options that do work:
+
+| | Effort | Strength |
+|---|---|---|
+| **`EDGE_SHARED_SECRET`** — Cloudflare Transform Rule adds `x-flowza-edge: <secret>`; the API refuses requests without it | minutes | Defeats anyone who has guessed the origin hostname but cannot read the secret |
+| **Cloudflare Tunnel** — `cloudflared` alongside the app, no public listener at all | a deploy change | Removes direct reachability entirely |
+
+Start with the shared secret and treat the tunnel as the end state. Generate the value, set it on the Fly app
+(`flyctl secrets set --app flowza-time-api EDGE_SHARED_SECRET='…'`), then add the matching Cloudflare Transform Rule
+for `api.flowza.ai` and `push.flowza.ai`. `/api/health` stays open so the platform's own health check still reaches
+the container; `/api/ready` is gated because it reports database latency and queue depth.
+
+Leave `EDGE_SHARED_SECRET` unset and the gate is inert — correct for local development, and honest about the fact that
+such a deployment has an open origin.
 
 **Verify before going further:**
 
