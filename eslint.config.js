@@ -30,6 +30,11 @@ export default tseslint.config(
     rules: { 'react-refresh/only-export-components': 'off' },
   },
   {
+    // TanStack Table v8 is flagged by the React Compiler heuristics; it is used in a plain hook without compiler assumptions.
+    files: ['apps/web/src/components/data-table/**/*.tsx'],
+    rules: { 'react-hooks/incompatible-library': 'off' },
+  },
+  {
     files: ['**/*.test.{ts,tsx}', '**/test/**/*.{ts,tsx}', 'apps/worker/**/*.ts', 'apps/api/src/index.ts'],
     rules: { 'no-console': 'off', '@typescript-eslint/no-explicit-any': 'off' },
   },

@@ -1,4 +1,4 @@
-import { z } from 'zod';
+import { type z } from 'zod';
 import { sql } from 'kysely';
 import type { branchInputSchema, departmentInputSchema, designationInputSchema, teamInputSchema, updateTeamSchema, BranchDto, DepartmentDto, DesignationDto, StructureListQuery, TeamDto } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';

@@ -1,5 +1,5 @@
-import { z } from 'zod';
-import { organizationSettingsSchema, updateOrganizationSchema, type OrganizationDto, type OrganizationSettings, type SettingsGroup } from '@flowza/contracts';
+import { type z } from 'zod';
+import { organizationSettingsSchema, type updateOrganizationSchema, type OrganizationDto, type OrganizationSettings, type SettingsGroup } from '@flowza/contracts';
 import { errors, isValidTimezone } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { requireMembership, requirePermission } from '../lib/authorize.js';

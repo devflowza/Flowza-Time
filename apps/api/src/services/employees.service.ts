@@ -1,8 +1,9 @@
-import { z } from 'zod';
+import { type z } from 'zod';
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import type { BulkEmployeeAction, CreateEmployeeInput, DeleteEmployeeInput, EmployeeDeviceStateDto, EmployeeDto, EmployeeListQuery, EmploymentHistoryDto, IdentityDocumentDto, UpdateEmployeeInput, identityDocumentInputSchema } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
+import type { MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { branchFilter, requireBranchAccess, requirePermission } from '../lib/authorize.js';
@@ -314,7 +315,7 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
         if (!shift) throw errors.validation('Shift not found in this organisation.', { issues: [{ path: 'shiftId', message: 'Unknown shift' }] });
         const employees = await visibleEmployees(trx, orgId, grant, input.employeeIds);
         for (const e of employees) {
-          await trx.updateTable('shiftAssignments').set({ effectiveTo: input.effectiveFrom }).where('organizationId', '=', orgId).where('targetType', '=', 'EMPLOYEE').where('targetId', '=', e.id).where('effectiveTo', 'is', null).where('effectiveFrom', '<', input.effectiveFrom).execute();
+          await trx.updateTable('shiftAssignments').set({ effectiveTo: input.effectiveFrom }).where('organizationId', '=', orgId).where('targetType', '=', 'EMPLOYEE').where('targetId', '=', e.id).where('effectiveTo', 'is', null).where('effectiveFrom', '<', sql<Date>`${input.effectiveFrom}::date`).execute();
           await trx.insertInto('shiftAssignments').values({ organizationId: orgId, targetType: 'EMPLOYEE', targetId: e.id, branchId: e.branchId, shiftId: input.shiftId, shiftPatternId: null, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo ?? null, createdBy: actor.userId }).execute();
         }
         await audit(trx, actor, orgId, 'employee.bulk_shift_assigned', 'employee', { newValue: { employeeIds: employees.map((e) => e.id), shiftId: input.shiftId, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo ?? null } });
@@ -352,14 +353,14 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
   }
 }
 
-async function visibleEmployees(trx: Trx, orgId: string, grant: { allBranches: boolean; branchIds: string[] }, ids: string[]) {
+async function visibleEmployees(trx: Trx, orgId: string, grant: MembershipGrant, ids: string[]) {
   const unique = [...new Set(ids)];
   const rows = await trx.selectFrom('employees').select(['id', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'employmentType', 'employmentStatus', 'joiningDate']).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('id', 'in', unique).execute();
   if (rows.length !== unique.length) throw errors.validation('One or more employees were not found or are outside your branch scope.', { missing: unique.filter((id) => !rows.some((r) => r.id === id)) });
   for (const r of rows) requireBranchAccess(grant, r.branchId);
   return rows;
 }
-async function visibleEmployeeIds(trx: Trx, orgId: string, grant: { allBranches: boolean; branchIds: string[] }, ids: string[]): Promise<string[]> {
+async function visibleEmployeeIds(trx: Trx, orgId: string, grant: MembershipGrant, ids: string[]): Promise<string[]> {
   return (await visibleEmployees(trx, orgId, grant, ids)).map((r) => r.id);
 }
 

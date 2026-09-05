@@ -1,6 +1,6 @@
-import { z } from 'zod';
+import { type z } from 'zod';
 import { sql } from 'kysely';
-import { SYSTEM_ROLE_IDS, updateMemberSchema, type InviteMemberInput, type InvitationDto, type MemberDto, type MemberListQuery } from '@flowza/contracts';
+import { SYSTEM_ROLE_IDS, type updateMemberSchema, type InviteMemberInput, type InvitationDto, type MemberDto, type MemberListQuery } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { errors, randomToken, sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
