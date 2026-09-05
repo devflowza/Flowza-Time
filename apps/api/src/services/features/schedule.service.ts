@@ -74,6 +74,9 @@ export async function updateShift(deps: ApiDeps, actor: Actor, orgId: string, id
   requirePermission(actor.principal, orgId, 'shift.manage');
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadShift(trx, orgId, id);
+    const merged = { type: before.type, startTime: before.startTime, endTime: before.endTime, requiredMinutes: before.requiredMinutes, ...Object.fromEntries(Object.entries(input).filter(([, v]) => v !== undefined)) } as { type: string; startTime: string | null; endTime: string | null; requiredMinutes: number | null };
+    if (merged.type === 'FIXED' && (!merged.startTime || !merged.endTime)) throw errors.validation('Fixed shifts need start and end time.', { issues: [{ path: 'startTime', message: 'Required for FIXED shifts' }] });
+    if (merged.type === 'FLEXIBLE' && merged.requiredMinutes === null) throw errors.validation('Flexible shifts need required minutes.', { issues: [{ path: 'requiredMinutes', message: 'Required for FLEXIBLE shifts' }] });
     const values = shiftValues(input);
     if (Object.keys(values).length) await trx.updateTable('shifts').set(values as never).where('id', '=', id).execute();
     const after = await loadShift(trx, orgId, id);
@@ -444,6 +447,13 @@ export async function listLeaveRecords(deps: ApiDeps, actor: Actor, orgId: strin
     return { data: rows.map(toLeaveDto), total };
   });
 }
+/** Any day of [start, end] inside an active lock for the employee's branch (or an organisation-wide lock) → PERIOD_LOCKED. */
+async function assertLeaveRangeUnlocked(trx: Trx, orgId: string, branchId: string | null, start: string, end: string): Promise<void> {
+  const lock = await trx.selectFrom('attendancePeriodLocks').select('id').where('organizationId', '=', orgId).where('unlockedAt', 'is', null)
+    .where('periodStart', '<=', dv(end)).where('periodEnd', '>=', dv(start))
+    .where((eb) => branchId ? eb.or([eb('branchId', 'is', null), eb('branchId', '=', branchId)]) : eb('branchId', 'is', null)).executeTakeFirst();
+  if (lock) throw errors.periodLocked('The period is locked; unlock it before changing leave in this range.');
+}
 async function assertNoLeaveOverlap(trx: Trx, orgId: string, employeeId: string, start: string, end: string, excludeId?: string): Promise<void> {
   let q = trx.selectFrom('leaveRecords').select('id').where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('status', 'in', ['PENDING', 'APPROVED']).where('startDate', '<=', dv(end)).where('endDate', '>=', dv(start));
   if (excludeId) q = q.where('id', '!=', excludeId);
@@ -458,7 +468,7 @@ export async function createLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     if (!emp) throw errors.validation('Employee not found.', { issues: [{ path: 'employeeId', message: 'Unknown employee' }] });
     requireBranchAccess(grant, emp.branchId);
     if (!(await trx.selectFrom('leaveTypes').select('id').where('organizationId', '=', orgId).where('id', '=', input.leaveTypeId).where('status', '=', 'active').executeTakeFirst())) throw errors.validation('Leave type not found or archived.', { issues: [{ path: 'leaveTypeId', message: 'Unknown leave type' }] });
-    if (await (async () => { for (const d of [input.startDate, input.endDate]) if (await sql<{ l: boolean }>`select app.is_period_locked(${orgId}::uuid, ${emp.branchId}::uuid, ${d}::date) as l`.execute(trx).then((r) => r.rows[0]?.l)) return true; return false; })()) throw errors.periodLocked('The period is locked; unlock it before recording leave.');
+    await assertLeaveRangeUnlocked(trx, orgId, emp.branchId, input.startDate, input.endDate);
     await assertNoLeaveOverlap(trx, orgId, input.employeeId, input.startDate, input.endDate);
     const row = await trx.insertInto('leaveRecords').values({ organizationId: orgId, employeeId: input.employeeId, leaveTypeId: input.leaveTypeId, branchId: emp.branchId, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart: input.isHalfDay ? input.halfDayPart ?? 'FIRST_HALF' : null, reason: input.reason ?? null, status: 'APPROVED', approvedBy: actor.userId, approvedAt: new Date(), createdBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'leave.recorded', 'leave_record', { entityId: row.id, branchId: emp.branchId, newValue: input });
@@ -475,6 +485,9 @@ export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     requireBranchAccess(grant, before.branchId);
     const start = input.startDate ?? isoDate(before.startDate); const end = input.endDate ?? isoDate(before.endDate);
     if (end < start) throw errors.validation('endDate must be on/after startDate.', { issues: [{ path: 'endDate', message: 'Before startDate' }] });
+    // both the range being left and the range being entered must be open (HR unlocks first, then edits)
+    await assertLeaveRangeUnlocked(trx, orgId, before.branchId, isoDate(before.startDate), isoDate(before.endDate));
+    await assertLeaveRangeUnlocked(trx, orgId, before.branchId, start, end);
     const status = input.status ?? before.status;
     if (status === 'APPROVED' || status === 'PENDING') await assertNoLeaveOverlap(trx, orgId, before.employeeId, start, end, id);
     const patch: Record<string, unknown> = {}; for (const [k, v] of Object.entries(input)) if (v !== undefined) patch[k] = v;
@@ -492,6 +505,8 @@ export async function deleteLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     const before = (await leaveQuery(trx, orgId).select(LEAVE_COLUMNS).where('l.id', '=', id).executeTakeFirst()) as LeaveRow | undefined;
     if (!before) throw errors.notFound('Leave record', id);
     requireBranchAccess(grant, before.branchId);
+    if (before.status === 'CANCELLED') throw errors.invalidState('The leave record is already cancelled.');
+    await assertLeaveRangeUnlocked(trx, orgId, before.branchId, isoDate(before.startDate), isoDate(before.endDate));
     await trx.updateTable('leaveRecords').set({ status: 'CANCELLED' }).where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'leave.cancelled', 'leave_record', { entityId: id, branchId: before.branchId, oldValue: toLeaveDto(before) });
     const recalc = before.status === 'APPROVED' ? await recalcIfPast(deps, trx, actor, orgId, isoDate(before.startDate), isoDate(before.endDate), { branchId: before.branchId, employeeIds: [before.employeeId], reason: 'leave cancelled' }) : null;

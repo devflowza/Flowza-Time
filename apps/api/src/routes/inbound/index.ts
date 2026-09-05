@@ -4,7 +4,7 @@ import type { AppEnv } from '../../middleware/request-context.js';
 import type { ApiDeps } from '../../deps.js';
 import { clientIp } from '../../lib/http.js';
 import { pushTokenMatches } from '../../services/features/devices.service.js';
-import { findPushDevice, findWebhookDevice, handleDevicePush, handleWebhook, INBOUND_MAX_BODY_BYTES, protocolErrorResponse, recordPendingDevice, SerialRateLimiter } from '../../services/features/inbound.service.js';
+import { findPushDevices, findWebhookDevice, handleDevicePush, handleWebhook, INBOUND_MAX_BODY_BYTES, protocolErrorResponse, recordPendingDevice, SerialRateLimiter } from '../../services/features/inbound.service.js';
 
 const TEXT = { 'content-type': 'text/plain; charset=utf-8' };
 const HEADER_ALLOWLIST = ['content-type', 'content-length', 'user-agent', 'x-request-id', 'x-mock-signature', 'x-signature', 'x-hub-signature-256', 'x-device-token', 'authorization'];
@@ -62,19 +62,28 @@ export function registerInboundRoutes(app: Hono<AppEnv>, deps: ApiDeps): void {
     const serial = identity.serialNumber;
     if (!serialLimiter.allow(serial)) { c.header('retry-after', '60'); return c.text('too many requests', 429, TEXT); }
     try {
-      const device = await findPushDevice(deps.db, serial, requestId);
-      if (!device) {
+      const candidates = await findPushDevices(deps, handler, serial, requestId);
+      if (candidates.length === 0) {
         await recordPendingDevice(deps, handler, serial, req, requestId, { ...(identity.extra ?? {}), route: identity.extra?.route ?? null }).catch((err) => log.warn({ event: 'pending_device_upsert_failed', serial, err: (err as Error).message }));
-        // keep the device retrying with the protocol's own acceptance so it registers as soon as an admin claims it
+        // Handshakes/heartbeats get the protocol's own answer so the terminal keeps polling and registers as soon as an admin
+        // claims it. Data uploads are NOT acknowledged: an "OK" would make the device discard punches nobody stored.
         let response: DevicePushResponse = { status: 200, body: 'OK', headers: TEXT };
-        try { response = handler.parseInbound(req, { timezone: 'UTC', serialNumber: serial }).response; } catch { /* fall back to OK */ }
-        log.info({ event: 'device_push_unknown_serial', protocolKey, serial });
+        try {
+          const parsed = handler.parseInbound(req, { timezone: 'UTC', serialNumber: serial });
+          const carriesData = parsed.transactions.length > 0 || (parsed.employees?.length ?? 0) > 0 || (parsed.commandResults?.length ?? 0) > 0;
+          response = carriesData ? { status: 401, body: 'unauthorized', headers: TEXT } : parsed.response;
+        } catch { /* unparseable: answer OK so the device does not loop on a request we will never store */ }
+        log.info({ event: 'device_push_unknown_serial', protocolKey, serial, status: response.status });
         return c.body(response.body, response.status as 200, response.headers ?? TEXT);
       }
-      if (device.pushTokenHash) {
-        const bearer = c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
-        const token = pathToken ?? c.req.header('x-device-token') ?? queryToken ?? bearer;
-        if (!pushTokenMatches(token, device.pushTokenHash)) { log.warn({ event: 'device_push_bad_token', protocolKey, serial, organizationId: device.organizationId, deviceId: device.id }); return c.text('unauthorized', 401, TEXT); }
+      // serial + per-device token, always: a DEVICE_PUSH row without a token is refused rather than trusted on serial alone
+      const bearer = c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
+      const token = pathToken ?? c.req.header('x-device-token') ?? queryToken ?? bearer;
+      const device = candidates.find((d) => pushTokenMatches(token, d.pushTokenHash));
+      if (!device) {
+        const first = candidates[0]!;
+        log.warn({ event: first.pushTokenHash ? 'device_push_bad_token' : 'device_push_no_token_configured', protocolKey, serial, organizationId: first.organizationId, deviceId: first.id });
+        return c.text('unauthorized', 401, TEXT);
       }
       const outcome = await handleDevicePush(deps, device, handler, req, requestId);
       log.info({ event: 'device_push', protocolKey, serial, organizationId: device.organizationId, deviceId: device.id, kind: outcome.kind, inserted: outcome.inserted, commandsSent: outcome.commandsSent });

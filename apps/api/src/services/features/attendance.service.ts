@@ -346,8 +346,11 @@ export async function approvalsInbox(deps: ApiDeps, actor: Actor, orgId: string,
   });
 }
 
-async function loadRequest(trx: Trx, orgId: string, id: string) {
-  const r = await trx.selectFrom('approvalRequests').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
+async function loadRequest(trx: Trx, orgId: string, id: string, opts: { lock?: boolean } = {}) {
+  // `lock` serialises concurrent decisions on one request (FOR UPDATE): the second approver re-reads the committed status.
+  let q = trx.selectFrom('approvalRequests').selectAll().where('organizationId', '=', orgId).where('id', '=', id);
+  if (opts.lock) q = q.forUpdate();
+  const r = await q.executeTakeFirst();
   if (!r) throw errors.notFound('Approval request', id);
   const steps = await trx.selectFrom('approvalSteps').selectAll().where('requestId', '=', id).orderBy('stepNo').execute();
   return { request: r, steps };
@@ -368,14 +371,17 @@ export async function decide(deps: ApiDeps, actor: Actor, orgId: string, request
   return runUser(deps.db, actor, async (trx) => {
     // System step: approvers assigned by user id (managers) do not necessarily hold attendance.approve.
     const result = await systemStep(trx, orgId, async (t) => {
-      const { request, steps } = await loadRequest(t, orgId, requestId);
+      const { request, steps } = await loadRequest(t, orgId, requestId, { lock: true });
       if (request.status !== 'PENDING') throw errors.invalidState(`The request is already ${request.status}.`);
       if (!grant.allBranches && request.branchId && !grant.branchIds.includes(request.branchId)) throw errors.forbidden('This request is outside your branch scope.');
       const step = steps.find((s) => s.stepNo === request.currentStep && s.status === 'PENDING');
       if (!step) throw errors.invalidState('The request has no pending step.');
       if (!canAct(grant, actor.userId, step)) throw errors.forbidden('You are not the approver of the current step.');
+      // separation of duties: a workflow exists, so the requester never decides on their own request (they can cancel it instead)
+      if (request.requestedBy === actor.userId) throw errors.forbidden('You cannot approve or reject your own request; cancel it instead.');
       const now = new Date();
-      await t.updateTable('approvalSteps').set({ status: decision === 'approve' ? 'APPROVED' : 'REJECTED', actedBy: actor.userId, actedAt: now, comment: input.comment ?? null }).where('id', '=', step.id).execute();
+      const acted = await t.updateTable('approvalSteps').set({ status: decision === 'approve' ? 'APPROVED' : 'REJECTED', actedBy: actor.userId, actedAt: now, comment: input.comment ?? null }).where('id', '=', step.id).where('status', '=', 'PENDING').executeTakeFirst();
+      if (Number(acted.numUpdatedRows) !== 1) throw errors.conflict('The step was decided concurrently. Please refresh.');
       const correction = request.entityType === 'ATTENDANCE_CORRECTION' ? await t.selectFrom('attendanceCorrections').selectAll().where('id', '=', request.entityId).executeTakeFirst() : undefined;
       if (decision === 'reject') {
         await t.updateTable('approvalSteps').set({ status: 'CANCELLED' }).where('requestId', '=', requestId).where('status', '=', 'PENDING').execute();

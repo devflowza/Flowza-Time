@@ -1,19 +1,14 @@
 import type { Hono } from 'hono';
 import { attendanceRuleSetInputSchema, holidayCalendarInputSchema, holidayInputSchema, leaveRecordInputSchema, leaveTypeInputSchema, shiftAssignmentInputSchema, shiftInputSchema, shiftPatternInputSchema } from '@flowza/contracts';
-import { z } from 'zod';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { created, noContent, ok, paginated } from '../../../lib/http.js';
 import { body, param, query } from '../../../lib/validate.js';
 import { actorOf } from '../../../lib/service.js';
 import * as s from '../../../services/features/schedule.service.js';
-import { holidayListQuerySchema, leaveRecordListQuerySchema, ruleSetListQuerySchema, shiftAssignmentListQuerySchema, shiftAssignmentUpdateSchema, shiftListQuerySchema, shiftResolveQuerySchema, updateLeaveRecordSchema } from './dto.js';
+import { holidayCalendarUpdateSchema, holidayListQuerySchema, holidayUpdateSchema, leaveRecordListQuerySchema, leaveTypeUpdateSchema, ruleSetListQuerySchema, ruleSetUpdateSchema, shiftAssignmentListQuerySchema, shiftAssignmentUpdateSchema, shiftListQuerySchema, shiftResolveQuerySchema, shiftUpdateSchema, updateLeaveRecordSchema } from './dto.js';
 
-// Zod v4: `.partial()` is not available on refined schemas, so the update shapes are declared from the inner objects.
-const shiftUpdateSchema = z.object({ ...shiftInputSchema.shape }).partial();
-const holidayUpdateSchema = holidayInputSchema.partial();
-const ruleSetUpdateSchema = attendanceRuleSetInputSchema.partial();
-const leaveTypeUpdateSchema = leaveTypeInputSchema.partial().extend({ status: z.enum(['active', 'inactive', 'archived']).optional() });
+// PATCH bodies come from dto.ts `updateSchemaOf(...)`: Zod 4 `.partial()` would re-apply `.default()`s and reset untouched columns.
 
 export function registerScheduleRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   // shifts
@@ -36,7 +31,7 @@ export function registerScheduleRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   // holidays
   v1.get('/orgs/:orgId/holiday-calendars', async (c) => ok(c, await s.listCalendars(deps, actorOf(c, deps), param(c, 'orgId'))));
   v1.post('/orgs/:orgId/holiday-calendars', async (c) => created(c, await s.createCalendar(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, holidayCalendarInputSchema))));
-  v1.patch('/orgs/:orgId/holiday-calendars/:id', async (c) => ok(c, await s.updateCalendar(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, holidayCalendarInputSchema.partial()))));
+  v1.patch('/orgs/:orgId/holiday-calendars/:id', async (c) => ok(c, await s.updateCalendar(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, holidayCalendarUpdateSchema))));
   v1.delete('/orgs/:orgId/holiday-calendars/:id', async (c) => { await s.deleteCalendar(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id')); return noContent(c); });
   v1.get('/orgs/:orgId/holidays', async (c) => ok(c, await s.listHolidays(deps, actorOf(c, deps), param(c, 'orgId'), query(c, holidayListQuerySchema))));
   v1.post('/orgs/:orgId/holidays', async (c) => created(c, await s.createHoliday(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, holidayInputSchema))));

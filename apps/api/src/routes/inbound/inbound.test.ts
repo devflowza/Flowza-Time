@@ -22,10 +22,12 @@ describe('device push: mock protocol', () => {
     expect(pending.claimCode).toMatch(/^[A-Z2-9]{6}$/);
     expect(pending.remoteIp).toBe('203.0.113.9');
     expect(pending.organizationId).toBeNull();
-    // attendance from an unknown device is acknowledged but never stored
+    // attendance from an unknown device is never stored — and never acknowledged, so the terminal keeps it until it is claimed
     const att = await text(`/device-push/mock/${SERIAL}/attendance`, 'POST', '1001,2026-08-03T08:00:00\n');
-    expect(att.text).toBe('OK: 1');
+    expect(att.status).toBe(401);
+    expect(att.text).not.toMatch(/^OK/);
     expect((await sql<{ n: string }>`select count(*) as n from public.attendance_raw_transactions`.execute(h.admin)).rows[0]!.n).toBe('0');
+    expect((await h.admin.selectFrom('pendingDevices').select('lastSeenAt').where('id', '=', pending.id).executeTakeFirstOrThrow()).lastSeenAt.getTime()).toBeGreaterThanOrEqual(pending.lastSeenAt.getTime());
     // admins find it by serial and claim it into a branch
     const list = await h.request('GET', `/api/v1/orgs/${f.orgId}/devices/pending?serialNumber=${SERIAL}`, { token: f.owner });
     expect(list.body.data.map((p: { id: string }) => p.id)).toEqual([pending.id]);
@@ -63,7 +65,9 @@ describe('device push: mock protocol', () => {
     expect((await h.admin.selectFrom('deviceLogs').select('event').where('deviceId', '=', deviceId).where('event', '=', 'push.duplicate').execute()).length).toBe(1);
     const events = await h.admin.selectFrom('providerWebhookEvents').selectAll().where('deviceId', '=', deviceId).execute();
     expect(events.filter((e) => e.eventType === 'device_push:attendance')).toHaveLength(1);
-    expect(events[0]!.status).toBe('queued');
+    expect(events[0]!.status).toBe('processed'); // ingested inline: nothing for a worker to pick up
+    expect(events[0]!.processedAt).not.toBeNull();
+    expect(JSON.stringify(events[0]!.payload)).not.toContain(token);
     // same punch again in a new body (different padding) → hash dedupe on the raw table
     const partial = await text(`/device-push/mock/${SERIAL}/attendance?token=${token}`, 'POST', '1001,2026-08-03T08:00:00,fingerprint,in\n1001,2026-08-03T18:00:00,card,out\n');
     expect(partial.text).toBe('OK: 2');
@@ -153,6 +157,28 @@ describe('device push: ZKTeco iclock protocol', () => {
     expect(states).toEqual([{ deviceUserId: '1002', employeeId: f.e2, desired: true }, { deviceUserId: '555', employeeId: null, desired: false }]);
     expect(((await h.admin.selectFrom('syncCursors').select('cursor').where('deviceId', '=', deviceId).executeTakeFirstOrThrow()).cursor as { stamps: Record<string, string> }).stamps).toEqual({ ATTLOG: '9001', OPERLOG: '77' });
     expect(JSON.stringify(states)).not.toContain('AAAA');
+    const stored = await h.admin.selectFrom('providerWebhookEvents').select(['payload', 'headers']).where('deviceId', '=', deviceId).execute();
+    expect(stored.length).toBeGreaterThan(0);
+    expect(JSON.stringify(stored)).not.toContain('AAAA'); // biometric template lines are never persisted, not even in the replay log
+  });
+
+  it('isolates an unrenderable command instead of failing the whole batch, and marks only rendered commands as sent', async () => {
+    const bogus = await h.admin.insertInto('deviceCommands').values({ organizationId: f.orgId, deviceId, commandType: 'BOGUS', payload: JSON.stringify({}) }).returning(['id', 'sequence']).executeTakeFirstOrThrow();
+    const good = await h.admin.insertInto('deviceCommands').values({ organizationId: f.orgId, deviceId, commandType: 'RESTART', payload: JSON.stringify({}) }).returning(['id', 'sequence']).executeTakeFirstOrThrow();
+    const poll = await text(p(`/iclock/getrequest?SN=${SN}`), 'GET');
+    expect(poll.status).toBe(200);
+    expect(poll.text).toBe(`C:${good.sequence}:REBOOT\n`);
+    expect((await h.admin.selectFrom('deviceCommands').select('status').where('id', '=', good.id).executeTakeFirstOrThrow()).status).toBe('sent');
+    expect((await h.admin.selectFrom('deviceCommands').select('status').where('id', '=', bogus.id).executeTakeFirstOrThrow()).status).toBe('failed');
+  });
+
+  it('refuses push traffic for a DEVICE_PUSH device that has no push token instead of trusting the serial', async () => {
+    const serial = 'ZK-NOTOKEN';
+    await seedDevice(h.admin, f.orgId, f.branchB, { providerKey: 'zkteco_push', integrationType: 'DEVICE_PUSH', serialNumber: serial, pushTokenHash: null, capabilities: { attendancePush: true, devicePush: true }, config: { serialNumber: serial } });
+    const r = await text(`/device-push/iclock/iclock/cdata?SN=${serial}&options=all`, 'GET');
+    expect(r.status).toBe(401);
+    expect((await h.admin.selectFrom('pendingDevices').select('id').where('serialNumber', '=', serial).execute()).length).toBe(0);
+    await h.admin.updateTable('devices').set({ status: 'decommissioned' }).where('serialNumber', '=', serial).execute(); // free the trial-plan device slot
   });
 
   it('rate-limits a chatty serial independently of the IP limiter', async () => {
@@ -170,11 +196,12 @@ describe('vendor webhooks', () => {
     const url = new URL(r.body.data.webhookUrl as string).pathname;
     const payload = { eventId: 'evt-1', deviceSerial: 'WH1', transactions: [{ deviceUserId: '1001', punchedAt: '2026-08-03T04:00:00Z', method: 'face' as const }] };
     const signed = signMockWebhook('whsec-1', payload);
-    const ok = await h.request('POST', url, { raw: signed.rawBody, headers: signed.headers });
+    const ok = await h.request('POST', url, { raw: signed.rawBody, headers: { ...signed.headers, 'x-device-token': 'must-not-persist', authorization: 'Bearer must-not-persist' } });
     expect(ok.status).toBe(200);
     expect(ok.body).toEqual({ received: 1 });
     const ev = await h.admin.selectFrom('providerWebhookEvents').selectAll().where('deviceId', '=', deviceId).executeTakeFirstOrThrow();
     expect(ev).toMatchObject({ status: 'queued', eventId: 'evt-1', signatureValid: true, organizationId: f.orgId });
+    expect(JSON.stringify(ev.headers)).not.toContain('must-not-persist');
     const jobs = await queueJobs(h.admin, 'WEBHOOK_EVENT');
     expect(jobs).toHaveLength(1);
     expect(jobs[0]!.payload).toEqual({ organizationId: f.orgId, webhookEventId: ev.id, deviceId });

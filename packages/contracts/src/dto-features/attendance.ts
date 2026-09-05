@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { APPROVAL_ENTITIES, APPROVAL_STATUSES, APPROVER_TYPES, CORRECTION_STATUSES, RECORD_STATUSES } from '../enums.js';
-import { cursorQuerySchema, isoDateSchema, isoDateTimeSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import { booleanQuerySchema, cursorQuerySchema, isoDateSchema, isoDateTimeSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import { updateSchemaOf } from './devices.js';
 import { dailyAttendanceQuerySchema, monthlyAttendanceQuerySchema } from '../attendance.js';
 
 export const dailyAttendanceListQuerySchema = dailyAttendanceQuerySchema.extend(paginationQuerySchema.shape);
@@ -52,9 +53,11 @@ export const approvalWorkflowInputSchema = z.object({
   steps: z.array(approvalWorkflowStepSchema).min(1).max(5),
 });
 export type ApprovalWorkflowInput = z.infer<typeof approvalWorkflowInputSchema>;
+/** PATCH body: no defaults, so a rename never flips isDefault/status/entityType. */
+export const approvalWorkflowUpdateSchema = updateSchemaOf<ApprovalWorkflowInput>(approvalWorkflowInputSchema.shape);
 
 export const periodUnlockSchema = z.object({ reason: z.string().trim().min(3).max(500) });
-export const periodLockListQuerySchema = z.object({ branchId: uuidSchema.optional(), includeUnlocked: z.coerce.boolean().default(false), year: z.coerce.number().int().min(2000).max(2100).optional() });
+export const periodLockListQuerySchema = z.object({ branchId: uuidSchema.optional(), includeUnlocked: booleanQuerySchema.default(false), year: z.coerce.number().int().min(2000).max(2100).optional() });
 export const recalculationListQuerySchema = paginationQuerySchema.extend({ status: z.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']).optional() });
 
 export const approvalStepDtoSchema = z.object({

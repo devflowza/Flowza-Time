@@ -135,6 +135,22 @@ async function loadJob(trx: Trx, orgId: string, id: string): Promise<SyncJobRow>
   return row as SyncJobRow;
 }
 
+/**
+ * Mutating a job (cancel / retry) needs the *whole* job inside the caller's branch scope. A job without a branch spans several
+ * branches; RLS would let a branch-scoped caller see only their own items, so cancelling would mark the job CANCELLED while
+ * other branches' items are still queued. Such callers are refused unless every item is in their scope.
+ */
+async function requireJobInScope(trx: Trx, grant: MembershipGrant, job: SyncJobRow): Promise<void> {
+  requireBranchAccess(grant, job.branchId);
+  if (grant.allBranches || job.branchId) return;
+  const outside = await trx.selectFrom('syncJobItems').select((eb) => eb.fn.countAll().as('n')).where('syncJobId', '=', job.id)
+    .where((eb) => eb.or([eb('branchId', 'is', null), eb('branchId', 'not in', grant.branchIds.length ? grant.branchIds : ['00000000-0000-0000-0000-000000000000'])])).executeTakeFirst();
+  // RLS already hides foreign items, so compare against the stored total as well
+  if (toCount(outside?.n) > 0 || toCount((await trx.selectFrom('syncJobItems').select((eb) => eb.fn.countAll().as('n')).where('syncJobId', '=', job.id).executeTakeFirst())?.n) !== job.itemsTotal) {
+    throw errors.forbidden('This job spans branches outside your access scope.');
+  }
+}
+
 export async function getJob(deps: ApiDeps, actor: Actor, orgId: string, id: string, itemsQuery: { page: number; pageSize: number; status?: string }): Promise<{ job: SyncJobDto; items: { data: SyncJobItemDto[]; total: number } }> {
   requirePermission(actor.principal, orgId, 'device.view');
   return runUser(deps.db, actor, async (trx) => {
@@ -163,7 +179,7 @@ export async function cancelJob(deps: ApiDeps, actor: Actor, orgId: string, id: 
   const grant = requirePermission(actor.principal, orgId, 'device.sync');
   return runUser(deps.db, actor, async (trx) => {
     const job = await loadJob(trx, orgId, id);
-    requireBranchAccess(grant, job.branchId);
+    await requireJobInScope(trx, grant, job);
     if (['SUCCESS', 'FAILED', 'CANCELLED', 'PARTIAL_SUCCESS'].includes(job.status)) throw errors.invalidState(`The job is already ${job.status}.`);
     const open = await trx.selectFrom('syncJobItems').select(['id', 'queueJobId']).where('syncJobId', '=', id).where('status', 'in', ['PENDING', 'QUEUED']).execute();
     for (const it of open) if (it.queueJobId) await cancelQueueJob(trx, String(it.queueJobId));
@@ -179,7 +195,7 @@ export async function retryFailed(deps: ApiDeps, actor: Actor, orgId: string, id
   const grant = requirePermission(actor.principal, orgId, 'device.sync');
   return runUser(deps.db, actor, async (trx) => {
     const job = await loadJob(trx, orgId, id);
-    requireBranchAccess(grant, job.branchId);
+    await requireJobInScope(trx, grant, job);
     const failed = await trx.selectFrom('syncJobItems').select(['deviceId', 'employeeId', 'branchId', 'operation']).where('syncJobId', '=', id).where('status', 'in', ['FAILED', 'OFFLINE']).execute();
     const items = failed.filter((f): f is typeof f & { deviceId: string } => f.deviceId !== null);
     if (!items.length) throw errors.invalidState('The job has no failed or offline items to retry.');

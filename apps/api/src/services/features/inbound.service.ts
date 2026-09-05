@@ -37,15 +37,25 @@ export class SerialRateLimiter {
 
 export interface PushDeviceRow { id: string; organizationId: string; branchId: string; code: string; timezone: string; generation: number; providerKey: string; pushTokenHash: string | null; serialNumber: string | null; config: unknown; status: string }
 
-export async function findPushDevice(db: Database, serialNumber: string, requestId: string): Promise<PushDeviceRow | null> {
-  const row = await withContext(db, { kind: 'platform', requestId }, (trx) => trx.selectFrom('devices').select(['id', 'organizationId', 'branchId', 'code', 'timezone', 'generation', 'providerKey', 'pushTokenHash', 'serialNumber', 'config', 'status'])
-    .where('serialNumber', '=', serialNumber).where('integrationType', '=', 'DEVICE_PUSH').where('status', '=', 'active').executeTakeFirst());
-  return row ?? null;
+/**
+ * Active DEVICE_PUSH devices announcing `serialNumber` over this protocol. Serials are unique per provider, but the same
+ * serial may legitimately exist under another provider (or protocol), so the lookup is restricted to the providers that speak
+ * this protocol and the route picks the candidate whose push token matches.
+ */
+export async function findPushDevices(deps: ApiDeps, handler: DevicePushProtocolHandler, serialNumber: string, requestId: string): Promise<PushDeviceRow[]> {
+  const providerKeys = providerKeysForProtocol(deps, handler);
+  if (providerKeys.length === 0) return [];
+  return withContext(deps.db, { kind: 'platform', requestId }, (trx) => trx.selectFrom('devices').select(['id', 'organizationId', 'branchId', 'code', 'timezone', 'generation', 'providerKey', 'pushTokenHash', 'serialNumber', 'config', 'status'])
+    .where('serialNumber', '=', serialNumber).where('integrationType', '=', 'DEVICE_PUSH').where('status', '=', 'active').where('providerKey', 'in', providerKeys).orderBy('createdAt').execute());
 }
 
+export function providerKeysForProtocol(deps: ApiDeps, handler: DevicePushProtocolHandler): string[] {
+  const keys: string[] = [];
+  for (const def of deps.providers.list()) { const p = deps.providers.tryGet(def.key); if (p?.pushProtocol === handler || p?.pushProtocol?.protocolKey === handler.protocolKey) keys.push(def.key); }
+  return keys;
+}
 export function providerKeyForProtocol(deps: ApiDeps, handler: DevicePushProtocolHandler): string {
-  for (const def of deps.providers.list()) { const p = deps.providers.tryGet(def.key); if (p?.pushProtocol === handler || p?.pushProtocol?.protocolKey === handler.protocolKey) return def.key; }
-  return 'mock';
+  return providerKeysForProtocol(deps, handler)[0] ?? 'mock';
 }
 
 /** Unknown serial → pending_devices (zero-touch onboarding). Platform context; the row has no organisation yet. */
@@ -87,10 +97,12 @@ export async function handleDevicePush(deps: ApiDeps, device: PushDeviceRow, han
       // Replay protection: data-bearing posts are unique per (provider, body|path|query); a handshake repeats legitimately so
       // its hash carries the minute. Heartbeat polls are not stored (they would be pure noise at 500 devices × 10 s).
       const hashInput = `${req.rawBody}|${req.path}|${JSON.stringify(req.query)}${inbound.kind === 'handshake' ? `|${Math.floor(now.getTime() / 60_000)}` : ''}`;
+      // status 'processed': the API ingests push data inline, so no worker must ever pick these rows up as pending work
       const stored = await trx.insertInto('providerWebhookEvents').values({
         providerKey: device.providerKey, organizationId: orgId, deviceId: device.id, eventType: `device_push:${inbound.kind}`, payloadHash: sha256Hex(hashInput), remoteIp: req.remoteIp ?? null, signatureValid: device.pushTokenHash ? true : null,
-        payload: JSON.stringify({ method: req.method, path: req.path, query: req.query, rawBody: req.rawBody.length > 65_536 ? `${req.rawBody.slice(0, 65_536)}…` : req.rawBody, kind: inbound.kind, transactionCount: inbound.transactions.length }),
-        headers: JSON.stringify({ 'user-agent': req.headers['user-agent'] ?? null, 'content-type': req.headers['content-type'] ?? null }), status: hasData ? 'queued' : 'processed', processedAt: hasData ? null : now,
+        // the body itself is never stored: OPERLOG/BIODATA uploads carry biometric templates (AGENTS.md: strip, keep a sha256)
+        payload: JSON.stringify({ method: req.method, path: req.path, query: req.query, bodySha256: sha256Hex(req.rawBody), bodyBytes: Buffer.byteLength(req.rawBody, 'utf8'), kind: inbound.kind, meta: inbound.meta ?? null, transactionCount: inbound.transactions.length, employeeCount: inbound.employees?.length ?? 0, commandResultCount: inbound.commandResults?.length ?? 0 }),
+        headers: JSON.stringify({ 'user-agent': req.headers['user-agent'] ?? null, 'content-type': req.headers['content-type'] ?? null }), status: 'processed', processedAt: now,
       }).onConflict((oc) => oc.columns(['providerKey', 'payloadHash']).doNothing()).returning('id').executeTakeFirst();
       duplicate = hasData && !stored;
       if (duplicate) await trx.insertInto('deviceLogs').values({ organizationId: orgId, deviceId: device.id, level: 'info', event: 'push.duplicate', message: `duplicate ${inbound.kind} upload ignored`, details: JSON.stringify({ path: req.path, transactions: inbound.transactions.length }) }).execute();
@@ -127,16 +139,23 @@ export async function handleDevicePush(deps: ApiDeps, device: PushDeviceRow, han
     let response = inbound.response;
     let commandsSent = 0;
     if (inbound.kind === 'heartbeat') {
-      const pending = await trx.selectFrom('deviceCommands').select(['id', 'sequence', 'commandType', 'payload']).where('deviceId', '=', device.id).where('status', '=', 'pending').where('expiresAt', '>', now).orderBy('sequence').limit(PENDING_COMMAND_BATCH).execute();
+      // FOR UPDATE SKIP LOCKED: two overlapping polls from the same terminal never hand out the same command twice
+      const pending = await trx.selectFrom('deviceCommands').select(['id', 'sequence', 'commandType', 'payload']).where('deviceId', '=', device.id).where('status', '=', 'pending').where('expiresAt', '>', now).orderBy('sequence').limit(PENDING_COMMAND_BATCH).forUpdate().skipLocked().execute();
       if (pending.length) {
-        try {
-          response = handler.renderCommands(pending.map((c) => ({ id: String(c.sequence), commandType: c.commandType, payload: jsonObject(c.payload) })), { serialNumber });
-          await trx.updateTable('deviceCommands').set({ status: 'sent', sentAt: now }).where('id', 'in', pending.map((c) => c.id)).execute();
-          commandsSent = pending.length;
-        } catch (err) {
-          // an unrenderable command must not block the device: fail it and answer the plain heartbeat
-          await trx.updateTable('deviceCommands').set({ status: 'failed', result: JSON.stringify({ error: (err as Error).message.slice(0, 500) }) }).where('id', 'in', pending.map((c) => c.id)).execute();
-          await trx.insertInto('deviceLogs').values({ organizationId: orgId, deviceId: device.id, level: 'error', event: 'push.command_render_failed', message: (err as Error).message.slice(0, 500) }).execute();
+        // Render one by one so a single unrenderable command fails alone; the rest is rendered together and only then marked sent.
+        const renderable: typeof pending = [];
+        for (const c of pending) {
+          const cmd = { id: String(c.sequence), commandType: c.commandType, payload: jsonObject(c.payload) };
+          try { handler.renderCommands([cmd], { serialNumber }); renderable.push(c); } catch (err) {
+            const message = (err as Error).message.slice(0, 500);
+            await trx.updateTable('deviceCommands').set({ status: 'failed', result: JSON.stringify({ error: message }) }).where('id', '=', c.id).execute();
+            await trx.insertInto('deviceLogs').values({ organizationId: orgId, deviceId: device.id, level: 'error', event: 'push.command_render_failed', message, details: JSON.stringify({ commandId: String(c.sequence), commandType: c.commandType }) }).execute();
+          }
+        }
+        if (renderable.length) {
+          response = handler.renderCommands(renderable.map((c) => ({ id: String(c.sequence), commandType: c.commandType, payload: jsonObject(c.payload) })), { serialNumber });
+          await trx.updateTable('deviceCommands').set({ status: 'sent', sentAt: now }).where('id', 'in', renderable.map((c) => c.id)).execute();
+          commandsSent = renderable.length;
         }
       }
     }
@@ -209,7 +228,7 @@ export async function handleWebhook(deps: ApiDeps, device: PushDeviceRow, token:
     const secrets = (await deps.credentials.get(trx, { organizationId: orgId, deviceId: device.id }).catch(() => null)) ?? {};
     const result = await provider.handleWebhook!(req, secrets);
     const payloadHash = sha256Hex(req.rawBody);
-    const base = { providerKey: device.providerKey, organizationId: orgId, deviceId: device.id, eventId: result.eventId, eventType: result.eventType ?? null, payloadHash, remoteIp: req.remoteIp ?? null, signatureValid: result.signatureValid, headers: JSON.stringify(Object.fromEntries(Object.entries(req.headers).filter(([k]) => !/authorization|cookie/i.test(k)))), payload: JSON.stringify({ rawBody: req.rawBody.length > 65_536 ? `${req.rawBody.slice(0, 65_536)}…` : req.rawBody, transactionCount: result.transactions.length }) };
+    const base = { providerKey: device.providerKey, organizationId: orgId, deviceId: device.id, eventId: result.eventId, eventType: result.eventType ?? null, payloadHash, remoteIp: req.remoteIp ?? null, signatureValid: result.signatureValid, headers: JSON.stringify(Object.fromEntries(Object.entries(req.headers).filter(([k]) => !/authorization|cookie|token|secret|api-?key/i.test(k)))), payload: JSON.stringify({ rawBody: req.rawBody.length > 65_536 ? `${req.rawBody.slice(0, 65_536)}…` : req.rawBody, transactionCount: result.transactions.length }) };
     if (result.signatureValid === false || !result.accepted) {
       await trx.insertInto('providerWebhookEvents').values({ ...base, status: 'rejected', error: typeof (result.response.body as { error?: unknown })?.error === 'string' ? String((result.response.body as { error: string }).error) : 'rejected' }).onConflict((oc) => oc.doNothing()).execute();
       await trx.insertInto('deviceLogs').values({ organizationId: orgId, deviceId: device.id, level: 'warn', event: 'webhook.rejected', message: result.signatureValid === false ? 'invalid signature' : 'payload rejected', details: JSON.stringify({ status: result.response.status }) }).execute();

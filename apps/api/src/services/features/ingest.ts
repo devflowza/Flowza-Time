@@ -5,8 +5,8 @@ import { sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { enqueueJob } from '../../lib/jobs.js';
 
-/** Punches this far in the future (server clock) are quarantined (device clock badly wrong). */
-export const FUTURE_SKEW_QUARANTINE_SECONDS = 300;
+/** Punches this far in the future (server clock) are quarantined (device clock badly wrong). Same tolerance as the worker's `FUTURE_TOLERANCE_MS` (10 min). */
+export const FUTURE_SKEW_QUARANTINE_SECONDS = 10 * 60;
 /** Raw payload budget (AGENTS.md service-level rules: 16 KB cap; binary/template fields stripped by the provider). */
 export const RAW_PAYLOAD_MAX_BYTES = 16 * 1024;
 /** Clock skew is stored in an int4 column; ±20 years is more than any real device drift. */
@@ -19,7 +19,7 @@ export interface IngestResult { received: number; inserted: number; duplicates: 
 /** Dedupe hash exactly as the worker computes it: sha256(device_id|device_generation|device_employee_id|punched_at|verification|direction). */
 export function dedupeHash(deviceId: string, generation: number, tx: RawTransaction): string {
   const at = DateTime.fromISO(tx.punchedAt, { setZone: true }).toUTC().toISO({ suppressMilliseconds: true }) ?? tx.punchedAt;
-  return sha256Hex(`${deviceId}|${generation}|${tx.deviceEmployeeId}|${at}|${tx.verificationMethod}|${tx.direction}`);
+  return sha256Hex(`${deviceId}|${generation}|${tx.deviceEmployeeId}|${at}|${tx.verificationMethod ?? 'unknown'}|${tx.direction ?? 'unknown'}`);
 }
 
 function boundedPayload(payload: Record<string, unknown>): string {

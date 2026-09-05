@@ -7,7 +7,7 @@ import { created, noContent, ok, paginated } from '../../../lib/http.js';
 import { body, param, query } from '../../../lib/validate.js';
 import { actorOf } from '../../../lib/service.js';
 import * as att from '../../../services/features/attendance.service.js';
-import { approvalInboxQuerySchema, approvalWorkflowInputSchema, correctionCancelSchema, correctionListQuerySchema, dailyAttendanceListQuerySchema, monthlyAttendanceListQuerySchema, periodLockListQuerySchema, periodUnlockSchema, rawTransactionsQuerySchema, recalculationListQuerySchema } from './dto.js';
+import { approvalInboxQuerySchema, approvalWorkflowInputSchema, approvalWorkflowUpdateSchema, correctionCancelSchema, correctionListQuerySchema, dailyAttendanceListQuerySchema, monthlyAttendanceListQuerySchema, periodLockListQuerySchema, periodUnlockSchema, rawTransactionsQuerySchema, recalculationListQuerySchema } from './dto.js';
 
 export function registerAttendanceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const idem = idempotency();
@@ -27,7 +27,7 @@ export function registerAttendanceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void 
   v1.post('/orgs/:orgId/approvals/:requestId/reject', async (c) => ok(c, await att.decide(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'requestId'), 'reject', await body(c, approvalDecisionSchema))));
   v1.get('/orgs/:orgId/approval-workflows', async (c) => ok(c, await att.listWorkflows(deps, actorOf(c, deps), param(c, 'orgId'))));
   v1.post('/orgs/:orgId/approval-workflows', async (c) => created(c, await att.createWorkflow(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, approvalWorkflowInputSchema))));
-  v1.patch('/orgs/:orgId/approval-workflows/:id', async (c) => ok(c, await att.updateWorkflow(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, approvalWorkflowInputSchema.partial()))));
+  v1.patch('/orgs/:orgId/approval-workflows/:id', async (c) => ok(c, await att.updateWorkflow(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, approvalWorkflowUpdateSchema))));
   v1.delete('/orgs/:orgId/approval-workflows/:id', async (c) => { await att.deleteWorkflow(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id')); return noContent(c); });
 
   v1.post('/orgs/:orgId/attendance/recalculate', idem, async (c) => c.json({ data: await att.requestRecalculation(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, recalculateSchema)) }, 202));

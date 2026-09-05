@@ -352,8 +352,10 @@ export async function testConnection(deps: ApiDeps, actor: Actor, orgId: string,
     const device = await runUser(deps.db, actor, async (trx) => { const d = await loadDeviceRow(trx, orgId, input.deviceId!); requireBranchAccess(grant, d.branchId); return d; });
     if (device.providerKey !== def.key) throw errors.validation('providerKey does not match the stored device.', { issues: [{ path: 'providerKey', message: 'Mismatch' }] });
     const storedConfig = jsonObject(device.config);
-    // stored credentials may only be reused for the *unchanged* endpoint (AGENTS.md service-level rules)
-    const endpointUnchanged = ENDPOINT_KEYS.every((k) => requestConfig[k] === undefined || String(requestConfig[k]) === String(storedConfig[k] ?? (k === 'endpointUrl' ? device.endpointUrl ?? '' : '')));
+    // stored credentials may only be reused for the *unchanged* endpoint (AGENTS.md service-level rules): generic endpoint keys
+    // plus every provider field typed `url`, so a request cannot point the stored secret at another host
+    const endpointKeys = [...new Set([...ENDPOINT_KEYS, ...def.configSchema.fields.filter((f) => f.type === 'url').map((f) => f.key)])];
+    const endpointUnchanged = endpointKeys.every((k) => requestConfig[k] === undefined || String(requestConfig[k]) === String(storedConfig[k] ?? (k === 'endpointUrl' ? device.endpointUrl ?? '' : '')));
     config = { ...storedConfig, ...requestConfig };
     deviceId = device.id; deviceCode = device.code; timezone = device.timezone; endpointUrl = device.endpointUrl; serialNumber = device.serialNumber;
     if (endpointUnchanged) {

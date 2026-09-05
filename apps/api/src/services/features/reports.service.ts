@@ -57,8 +57,13 @@ export async function createReport(deps: ApiDeps, actor: Actor, orgId: string, i
     const settings = await loadSettings(trx, orgId);
     if (settings.security.exportRequiresReason && !input.reason) throw errors.validation('This organisation requires a reason for exports.', { issues: [{ path: 'reason', message: 'Required' }] });
     if (parameters.employeeIds && Array.isArray(parameters.employeeIds) && parameters.employeeIds.length) {
-      const emps = await trx.selectFrom('employees').select(['id', 'branchId']).where('organizationId', '=', orgId).where('id', 'in', parameters.employeeIds as string[]).execute();
+      // every requested employee must exist *and* be visible to the caller; ids RLS hides would otherwise reach the worker (system context) unchecked
+      const ids = [...new Set(parameters.employeeIds as string[])];
+      const emps = await trx.selectFrom('employees').select(['id', 'branchId']).where('organizationId', '=', orgId).where('id', 'in', ids).execute();
+      const missing = ids.filter((id) => !emps.some((e) => e.id === id));
+      if (missing.length) throw errors.validation('One or more employees were not found or are outside your branch scope.', { issues: [{ path: 'parameters.employeeIds', message: 'Unknown employee' }], missing });
       for (const e of emps) requireBranchAccess(grant, e.branchId);
+      parameters.employeeIds = ids;
     }
     await systemStep(trx, orgId, (t) => consumeQuota(t, orgId, 'reports', 3600, REPORTS_PER_HOUR));
     const row = await trx.insertInto('reportRequests').values({ organizationId: orgId, reportType: input.reportType, format: input.format, parameters: JSON.stringify(parameters), status: 'QUEUED', requestedBy: actor.userId, branchId }).returning('id').executeTakeFirstOrThrow();

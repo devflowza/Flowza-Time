@@ -42,11 +42,13 @@ export async function createSyncJob(deps: ApiDeps, trx: Trx, input: CreateSyncJo
   if (input.items.length === 0) throw errors.validation('No devices matched the requested scope.');
   if (input.items.length > MAX_SYNC_ITEMS) throw errors.validation(`A sync job may contain at most ${MAX_SYNC_ITEMS} items (requested ${input.items.length}).`, { max: MAX_SYNC_ITEMS, requested: input.items.length });
   const priority = input.priority ?? 5;
+  const options = input.options ?? {};
   const job = await trx.insertInto('syncJobs').values({
     organizationId: input.organizationId,
     jobType: input.jobType,
     trigger: input.trigger,
-    scope: JSON.stringify(input.scope),
+    // options travel with the scope so `retry-failed` can replay them (fullResync, repair, removeStale)
+    scope: JSON.stringify({ ...input.scope, options }),
     branchId: input.branchId ?? null,
     status: 'QUEUED',
     priority,
@@ -60,7 +62,6 @@ export async function createSyncJob(deps: ApiDeps, trx: Trx, input: CreateSyncJo
 
   const itemIds: string[] = [];
   const queueJobIds: string[] = [];
-  const options = input.options ?? {};
   for (let i = 0; i < input.items.length; i += ITEM_CHUNK) {
     const chunk = input.items.slice(i, i + ITEM_CHUNK);
     const rows = await trx.insertInto('syncJobItems').values(chunk.map((it) => ({

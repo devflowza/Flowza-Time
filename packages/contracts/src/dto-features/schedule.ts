@@ -1,6 +1,9 @@
 import { z } from 'zod';
 import { ASSIGNMENT_TARGETS, LEAVE_STATUSES, RECORD_STATUSES } from '../enums.js';
-import { isoDateSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import { booleanQuerySchema, isoDateSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import { attendanceRuleSetInputSchema, type AttendanceRuleSetInput } from '../attendance.js';
+import { holidayCalendarInputSchema, holidayInputSchema, leaveTypeInputSchema, shiftInputSchema, type HolidayInput, type ShiftInput } from '../shifts.js';
+import { updateSchemaOf } from './devices.js';
 
 export const shiftListQuerySchema = paginationQuerySchema.extend({ status: z.enum(RECORD_STATUSES).optional(), search: z.string().trim().max(100).optional() });
 export const shiftAssignmentListQuerySchema = paginationQuerySchema.extend({
@@ -12,6 +15,12 @@ export const shiftAssignmentListQuerySchema = paginationQuerySchema.extend({
   activeOn: isoDateSchema.optional(),
 });
 export const shiftAssignmentUpdateSchema = z.object({ effectiveTo: isoDateSchema.nullable() });
+/** PATCH bodies without defaults (see updateSchemaOf). The FIXED/FLEXIBLE consistency check runs in the service on the merged row. */
+export const shiftUpdateSchema = updateSchemaOf<ShiftInput>(shiftInputSchema.shape);
+export const holidayUpdateSchema = updateSchemaOf<HolidayInput>(holidayInputSchema.shape);
+export const holidayCalendarUpdateSchema = updateSchemaOf<z.infer<typeof holidayCalendarInputSchema>>(holidayCalendarInputSchema.shape);
+export const leaveTypeUpdateSchema = updateSchemaOf<z.infer<typeof leaveTypeInputSchema>>(leaveTypeInputSchema.shape).and(z.object({ status: z.enum(RECORD_STATUSES).optional() }));
+export const ruleSetUpdateSchema = updateSchemaOf<AttendanceRuleSetInput>(attendanceRuleSetInputSchema.shape);
 export const shiftResolveQuerySchema = z.object({ employeeId: uuidSchema, date: isoDateSchema });
 
 export const holidayListQuerySchema = z.object({
@@ -38,4 +47,4 @@ export const updateLeaveRecordSchema = z.object({
   status: z.enum(LEAVE_STATUSES).optional(),
 });
 export type UpdateLeaveRecordInput = z.infer<typeof updateLeaveRecordSchema>;
-export const ruleSetListQuerySchema = z.object({ branchId: uuidSchema.optional(), activeOn: isoDateSchema.optional(), includeExpired: z.coerce.boolean().default(true) });
+export const ruleSetListQuerySchema = z.object({ branchId: uuidSchema.optional(), activeOn: isoDateSchema.optional(), includeExpired: booleanQuerySchema.default(true) });

@@ -102,13 +102,20 @@ Queue payload contract (queue `sync`): `{ syncJobId, syncJobItemId, organization
    the device push token for terminals that cannot set headers (`pushUrl` returned at registration); `x-device-token`,
    `?token=` and `Authorization: Bearer` are also accepted. Bodies above 2 MB → 413.
 2. `identifyDevice` → 400 when no serial. Per-serial limit 60 req/min (429) in addition to the IP limiter.
-3. Device lookup in platform context (`serial_number`, `integration_type = DEVICE_PUSH`, `status = active`). Unknown →
-   `pending_devices` upsert (provider = first provider exposing the handler, 6-char claim code, remote IP, device info) and
-   the protocol's own acceptance is returned so the device keeps retrying.
-4. Known device with `push_token_hash` → token required (`timingSafeEqual` on sha256) else 401.
+3. Device lookup in platform context (`serial_number`, `integration_type = DEVICE_PUSH`, `status = active`, provider among
+   those exposing this protocol). Unknown → `pending_devices` upsert (provider = first provider exposing the handler, 6-char
+   claim code, remote IP, device info); handshakes/heartbeats get the protocol's own answer so the terminal keeps polling, but
+   data uploads (punches, users, command results) are answered `401 unauthorized` — an `OK` would make the device discard
+   punches nobody stored.
+4. Known device → serial **and** push token required (`timingSafeEqual` on sha256; several candidates → the one whose token
+   matches). A DEVICE_PUSH row without `push_token_hash` is refused (401, `device_push_no_token_configured`), never trusted on
+   serial alone.
 5. System-for-org transaction: `parseInbound(req, { timezone, serialNumber, stamps })` (stamps from `sync_cursors`
-   stream `attendance`); data-bearing posts stored in `provider_webhook_events` (`device_push:<kind>`,
-   `payload_hash = sha256(rawBody|path|query)`, duplicate → no re-ingestion, `device_logs` `push.duplicate`, still OK);
+   stream `attendance`); data-bearing posts stored in `provider_webhook_events` (`device_push:<kind>`, status `processed`
+   because ingestion is inline, `payload_hash = sha256(rawBody|path|query)`, payload = body sha256/size + protocol meta —
+   never the body itself, which may carry biometric templates; duplicate → no re-ingestion, `device_logs` `push.duplicate`,
+   still OK); pending commands are rendered one by one so an unrenderable command fails alone and only rendered commands are
+   marked `sent`;
    heartbeat/liveness (`last_heartbeat_at`, `connection_status = online`, `config.lastSeenAt`, firmware/device info on
    handshake); stamps persisted; transactions ingested synchronously (`services/features/ingest.ts`: dedupe hash with device
    generation, `assumed_timezone`, `source = DEVICE_PUSH`, future punches → `quarantined`, locked period → `held`) and

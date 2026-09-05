@@ -4,7 +4,17 @@
  * from @flowza/contracts (then delete this file and import from the package).
  */
 import { z } from 'zod';
-import { APPROVAL_ENTITIES, APPROVAL_STATUSES, APPROVER_TYPES, ASSIGNMENT_TARGETS, CONNECTION_STATUSES, CORRECTION_STATUSES, DEVICE_EMPLOYEE_SYNC_STATUSES, DEVICE_STATUSES, LEAVE_STATUSES, LOG_LEVELS, RECORD_STATUSES, REPORT_FORMATS, REPORT_STATUSES, REPORT_TYPES, SYNC_ITEM_STATUSES, type ReportType, type Permission, codeSchema, cursorQuerySchema, isoDateSchema, isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, timezoneSchema, uuidSchema, dailyAttendanceQuerySchema, monthlyAttendanceQuerySchema } from '@flowza/contracts';
+import { APPROVAL_ENTITIES, APPROVAL_STATUSES, APPROVER_TYPES, ASSIGNMENT_TARGETS, CONNECTION_STATUSES, CORRECTION_STATUSES, DEVICE_EMPLOYEE_SYNC_STATUSES, DEVICE_STATUSES, LEAVE_STATUSES, LOG_LEVELS, RECORD_STATUSES, REPORT_FORMATS, REPORT_STATUSES, REPORT_TYPES, SYNC_ITEM_STATUSES, type ReportType, type Permission, booleanQuerySchema, codeSchema, cursorQuerySchema, isoDateSchema, isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, timezoneSchema, uuidSchema, dailyAttendanceQuerySchema, monthlyAttendanceQuerySchema, attendanceRuleSetInputSchema, holidayCalendarInputSchema, holidayInputSchema, leaveTypeInputSchema, shiftInputSchema, type AttendanceRuleSetInput, type HolidayInput, type ShiftInput } from '@flowza/contracts';
+
+/**
+ * PATCH schema derived from a create schema: every field optional and *without* its default. Zod 4 `.partial()` keeps
+ * `.default(...)` wrappers, so a one-field PATCH would silently reset every defaulted column (AGENTS.md "Zod 4 pitfalls").
+ */
+export function updateSchemaOf<T>(shape: z.ZodRawShape): z.ZodType<Partial<T>> {
+  const out: Record<string, z.ZodTypeAny> = {};
+  for (const [key, field] of Object.entries(shape)) { const inner = field instanceof z.ZodDefault ? (field as z.ZodDefault<z.ZodTypeAny>).removeDefault() : (field as z.ZodTypeAny); out[key] = inner.optional(); }
+  return z.object(out) as unknown as z.ZodType<Partial<T>>;
+}
 
 // ----- devices -----
 
@@ -20,11 +30,11 @@ export const deviceListQuerySchema = paginationQuerySchema.extend({
   tag: z.string().max(40).optional(),
   groupId: uuidSchema.optional(),
   search: z.string().trim().max(100).optional(),
-  includeDecommissioned: z.coerce.boolean().default(false),
+  includeDecommissioned: booleanQuerySchema.default(false),
 });
 export type DeviceListQuery = z.infer<typeof deviceListQuerySchema>;
 
-export const deleteDeviceQuerySchema = z.object({ decommission: z.coerce.boolean().default(false) });
+export const deleteDeviceQuerySchema = z.object({ decommission: booleanQuerySchema.default(false) });
 
 /** Secret config fields keyed by provider config field (validated against the provider's `secretFields`). */
 export const deviceCredentialsInputSchema = z.record(z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/), z.union([z.string().max(4096), z.number(), z.boolean()]))
@@ -40,7 +50,7 @@ export const deviceLogQuerySchema = paginationQuerySchema.extend({
 export const deviceCommandQuerySchema = paginationQuerySchema.extend({ status: z.enum(['pending', 'sent', 'acked', 'failed', 'expired']).optional() });
 export const deviceEmployeeQuerySchema = paginationQuerySchema.extend({
   syncStatus: z.enum(DEVICE_EMPLOYEE_SYNC_STATUSES).optional(),
-  desired: z.coerce.boolean().optional(),
+  desired: booleanQuerySchema.optional(),
   search: z.string().trim().max(100).optional(),
 });
 
@@ -225,9 +235,11 @@ export const approvalWorkflowInputSchema = z.object({
   steps: z.array(approvalWorkflowStepSchema).min(1).max(5),
 });
 export type ApprovalWorkflowInput = z.infer<typeof approvalWorkflowInputSchema>;
+/** PATCH body: no defaults, so a rename never flips isDefault/status/entityType. */
+export const approvalWorkflowUpdateSchema = updateSchemaOf<ApprovalWorkflowInput>(approvalWorkflowInputSchema.shape);
 
 export const periodUnlockSchema = z.object({ reason: z.string().trim().min(3).max(500) });
-export const periodLockListQuerySchema = z.object({ branchId: uuidSchema.optional(), includeUnlocked: z.coerce.boolean().default(false), year: z.coerce.number().int().min(2000).max(2100).optional() });
+export const periodLockListQuerySchema = z.object({ branchId: uuidSchema.optional(), includeUnlocked: booleanQuerySchema.default(false), year: z.coerce.number().int().min(2000).max(2100).optional() });
 export const recalculationListQuerySchema = paginationQuerySchema.extend({ status: z.enum(['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED']).optional() });
 
 export const approvalStepDtoSchema = z.object({
@@ -273,6 +285,12 @@ export const shiftAssignmentListQuerySchema = paginationQuerySchema.extend({
   activeOn: isoDateSchema.optional(),
 });
 export const shiftAssignmentUpdateSchema = z.object({ effectiveTo: isoDateSchema.nullable() });
+/** PATCH bodies without defaults (see updateSchemaOf). The FIXED/FLEXIBLE consistency check runs in the service on the merged row. */
+export const shiftUpdateSchema = updateSchemaOf<ShiftInput>(shiftInputSchema.shape);
+export const holidayUpdateSchema = updateSchemaOf<HolidayInput>(holidayInputSchema.shape);
+export const holidayCalendarUpdateSchema = updateSchemaOf<z.infer<typeof holidayCalendarInputSchema>>(holidayCalendarInputSchema.shape);
+export const leaveTypeUpdateSchema = updateSchemaOf<z.infer<typeof leaveTypeInputSchema>>(leaveTypeInputSchema.shape).and(z.object({ status: z.enum(RECORD_STATUSES).optional() }));
+export const ruleSetUpdateSchema = updateSchemaOf<AttendanceRuleSetInput>(attendanceRuleSetInputSchema.shape);
 export const shiftResolveQuerySchema = z.object({ employeeId: uuidSchema, date: isoDateSchema });
 
 export const holidayListQuerySchema = z.object({
@@ -299,7 +317,7 @@ export const updateLeaveRecordSchema = z.object({
   status: z.enum(LEAVE_STATUSES).optional(),
 });
 export type UpdateLeaveRecordInput = z.infer<typeof updateLeaveRecordSchema>;
-export const ruleSetListQuerySchema = z.object({ branchId: uuidSchema.optional(), activeOn: isoDateSchema.optional(), includeExpired: z.coerce.boolean().default(true) });
+export const ruleSetListQuerySchema = z.object({ branchId: uuidSchema.optional(), activeOn: isoDateSchema.optional(), includeExpired: booleanQuerySchema.default(true) });
 
 // ----- reports -----
 

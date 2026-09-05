@@ -1,6 +1,16 @@
 import { z } from 'zod';
 import { CONNECTION_STATUSES, DEVICE_EMPLOYEE_SYNC_STATUSES, DEVICE_STATUSES, LOG_LEVELS } from '../enums.js';
-import { codeSchema, isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, timezoneSchema, uuidSchema } from '../common.js';
+import { booleanQuerySchema, codeSchema, isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, timezoneSchema, uuidSchema } from '../common.js';
+
+/**
+ * PATCH schema derived from a create schema: every field optional and *without* its default. Zod 4 `.partial()` keeps
+ * `.default(...)` wrappers, so a one-field PATCH would silently reset every defaulted column (AGENTS.md "Zod 4 pitfalls").
+ */
+export function updateSchemaOf<T>(shape: z.ZodRawShape): z.ZodType<Partial<T>> {
+  const out: Record<string, z.ZodTypeAny> = {};
+  for (const [key, field] of Object.entries(shape)) { const inner = field instanceof z.ZodDefault ? (field as z.ZodDefault<z.ZodTypeAny>).removeDefault() : (field as z.ZodTypeAny); out[key] = inner.optional(); }
+  return z.object(out) as unknown as z.ZodType<Partial<T>>;
+}
 
 /** Query for GET /device-providers: when `orgId` is given the list is filtered by that organisation's provider_* flags. */
 export const deviceProvidersQuerySchema = z.object({ orgId: uuidSchema.optional() });
@@ -14,11 +24,11 @@ export const deviceListQuerySchema = paginationQuerySchema.extend({
   tag: z.string().max(40).optional(),
   groupId: uuidSchema.optional(),
   search: z.string().trim().max(100).optional(),
-  includeDecommissioned: z.coerce.boolean().default(false),
+  includeDecommissioned: booleanQuerySchema.default(false),
 });
 export type DeviceListQuery = z.infer<typeof deviceListQuerySchema>;
 
-export const deleteDeviceQuerySchema = z.object({ decommission: z.coerce.boolean().default(false) });
+export const deleteDeviceQuerySchema = z.object({ decommission: booleanQuerySchema.default(false) });
 
 /** Secret config fields keyed by provider config field (validated against the provider's `secretFields`). */
 export const deviceCredentialsInputSchema = z.record(z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/), z.union([z.string().max(4096), z.number(), z.boolean()]))
@@ -34,7 +44,7 @@ export const deviceLogQuerySchema = paginationQuerySchema.extend({
 export const deviceCommandQuerySchema = paginationQuerySchema.extend({ status: z.enum(['pending', 'sent', 'acked', 'failed', 'expired']).optional() });
 export const deviceEmployeeQuerySchema = paginationQuerySchema.extend({
   syncStatus: z.enum(DEVICE_EMPLOYEE_SYNC_STATUSES).optional(),
-  desired: z.coerce.boolean().optional(),
+  desired: booleanQuerySchema.optional(),
   search: z.string().trim().max(100).optional(),
 });
 
