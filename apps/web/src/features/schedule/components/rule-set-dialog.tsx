@@ -59,7 +59,7 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet }: { open: boolean; 
   const onSubmit = form.handleSubmit(async (values) => {
     try {
       const res = ruleSet ? await update.mutateAsync({ id: ruleSet.id, input: values }) : await create.mutateAsync(values);
-      if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('rules.recalcHint')); else toast.success(ruleSet ? t('rules.updated') : t('rules.created'));
+      if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('rules.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(ruleSet ? t('rules.updated') : t('rules.created'));
       onOpenChange(false);
     } catch (e) { toastError(e); }
   });

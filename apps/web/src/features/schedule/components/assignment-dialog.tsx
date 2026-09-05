@@ -52,7 +52,7 @@ export function AssignmentDialog({ open, onOpenChange, preset }: { open: boolean
   const onSubmit = form.handleSubmit(async (values) => {
     try {
       const res = await create.mutateAsync({ ...values, effectiveTo: values.effectiveTo || null, shiftId: mode === 'shift' ? values.shiftId : undefined, shiftPatternId: mode === 'pattern' ? values.shiftPatternId : undefined });
-      if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('assignments.recalcHint')); else toast.success(t('assignments.created'));
+      if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('assignments.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(t('assignments.created'));
       onOpenChange(false);
     } catch (e) { toastError(e); }
   });

@@ -34,7 +34,7 @@ export function RecalculateDialog({ open, onOpenChange, preset }: { open: boolea
     try {
       const payload: RecalculateInput = { ...values, employeeIds: values.employeeIds && values.employeeIds.length ? values.employeeIds : undefined, branchId: values.branchId || undefined, departmentId: values.departmentId || undefined };
       const res = await recalculate.mutateAsync(payload);
-      toastJobQueued(res.jobId, navigate, t('recalc.queuedHint'));
+      toastJobQueued(res.jobId, navigate, t('recalc.queuedHint'), { to: '/attendance?tab=recalc' });
       invalidate();
       onOpenChange(false);
     } catch (e) { toastMutationError(e, navigate); }

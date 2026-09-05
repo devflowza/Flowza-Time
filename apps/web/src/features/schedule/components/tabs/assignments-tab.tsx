@@ -40,7 +40,7 @@ export function AssignmentsTab() {
   const [endDate, setEndDate] = useState('');
   const [deleting, setDeleting] = useState<ShiftAssignmentDto | null>(null);
   const hasFilters = ['targetType', 'shiftId', 'branchId', 'activeOn'].some((k) => !!f[k]);
-  const afterMutation = (jobId: string | null, msg: string) => { if (jobId) toastJobQueued(jobId, navigate, t('assignments.recalcHint')); else toast.success(msg); };
+  const afterMutation = (jobId: string | null, msg: string) => { if (jobId) toastJobQueued(jobId, navigate, t('assignments.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(msg); };
 
   const columns = useMemo<ColumnDef<ShiftAssignmentDto, unknown>[]>(() => [
     { id: 'target', header: t('assignments.target'), cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.targetName ?? row.original.targetId.slice(0, 8)}</p><Badge variant="outline" className="mt-0.5">{t(`assignments.targets.${row.original.targetType}`, { defaultValue: row.original.targetType })}</Badge></div> },

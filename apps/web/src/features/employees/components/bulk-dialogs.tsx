@@ -45,7 +45,7 @@ export function BulkActionDialog({ kind, employeeIds, onClose, onDone }: { kind:
 
   const run = (action: BulkEmployeeAction) => bulk.mutate(action, {
     onSuccess: (res) => {
-      if (res.kind === 'job') toastJobQueued(res.jobId, navigate, t('bulk.queuedHint'));
+      if (res.kind === 'job') toastJobQueued(res.jobId, navigate, t('bulk.queuedHint'), { to: '/sync' });
       else toast.success(t('bulk.updated', { count: res.updated }));
       onDone(); onClose();
     },

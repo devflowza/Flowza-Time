@@ -19,6 +19,9 @@ export default defineConfig({
     trace: 'retain-on-failure',
     locale: 'en-GB',
     timezoneId: 'Asia/Muscat',
+    // CI runs `playwright install chromium`; a workstation or container that already ships a Chromium build can point at it
+    // with PLAYWRIGHT_CHROMIUM_EXECUTABLE (e.g. /opt/pw-browsers/chromium) instead of downloading a second copy.
+    ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } } : {}),
   },
   webServer: {
     command: 'pnpm exec vite preview --outDir dist-e2e --port 4173 --strictPort',

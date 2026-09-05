@@ -52,7 +52,7 @@ export default function PayrollPage() {
   const years = [thisYear + 1, thisYear, thisYear - 1, thisYear - 2];
   const canFinalize = can('payroll.finalize');
   const canLock = can('attendance.lock_period');
-  const runBuild = (p: PayrollPeriodDto) => build.mutate({ periodStart: p.periodStart, periodEnd: p.periodEnd, branchId }, { onSuccess: (r) => toastJobQueued(r.jobId, navigate, t('periods.buildQueued')), onError: toastError });
+  const runBuild = (p: PayrollPeriodDto) => build.mutate({ periodStart: p.periodStart, periodEnd: p.periodEnd, branchId }, { onSuccess: (r) => toastJobQueued(r.jobId, navigate, t('periods.buildQueued'), { to: null }), onError: toastError });
 
   const columns = useMemo<ColumnDef<PayrollSummaryDto, unknown>[]>(() => [
     { id: 'employee', header: t('summaries.employee'), cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.employeeName}</p><p className="font-mono text-xs text-muted-foreground" dir="ltr">{row.original.employeeNumber}{row.original.branchName ? ` · ${row.original.branchName}` : ''}</p></div> },
@@ -140,7 +140,7 @@ export default function PayrollPage() {
 
       <LockPeriodDialog key={lockFor ? periodKey(lockFor) : 'none'} open={!!lockFor} onOpenChange={(o) => !o && setLockFor(null)} preset={lockFor ? { periodStart: lockFor.periodStart, periodEnd: lockFor.periodEnd, branchId } : undefined} />
       <ConfirmDialog open={!!finalizing} onOpenChange={(o) => !o && setFinalizing(null)} title={t('periods.finalizeTitle', { period: finalizing ? fmtDate(finalizing.periodEnd, 'MMMM yyyy') : '' })} description={t('periods.finalizeHint')} confirmLabel={t('periods.finalize')} loading={finalize.isPending}
-        onConfirm={() => { if (!finalizing) return; finalize.mutate({ periodStart: finalizing.periodStart, periodEnd: finalizing.periodEnd, branchId }, { onSuccess: (r) => { toastJobQueued(r.jobId, navigate, t('periods.finalizeQueued')); setFinalizing(null); }, onError: toastError }); }} />
+        onConfirm={() => { if (!finalizing) return; finalize.mutate({ periodStart: finalizing.periodStart, periodEnd: finalizing.periodEnd, branchId }, { onSuccess: (r) => { toastJobQueued(r.jobId, navigate, t('periods.finalizeQueued'), { to: null }); setFinalizing(null); }, onError: toastError }); }} />
     </div>
   );
 }

@@ -46,7 +46,7 @@ export default function EmployeeImportPage() {
       setParams({ importId: created.id });
     } catch (e) { toastError(e); }
   };
-  const onConfirm = () => { if (!importId) return; confirm.mutate(importId, { onSuccess: (r) => { setQueuedJobId(r.jobId); setConfirmOpen(false); toastJobQueued(r.jobId, navigate, t('import.queuedHint')); }, onError: (e) => { setConfirmOpen(false); toastError(e); } }); };
+  const onConfirm = () => { if (!importId) return; confirm.mutate(importId, { onSuccess: (r) => { setQueuedJobId(r.jobId); setConfirmOpen(false); toastJobQueued(r.jobId, navigate, t('import.queuedHint'), { to: null }); }, onError: (e) => { setConfirmOpen(false); toastError(e); } }); };
   const onCancel = () => { if (!importId) return; cancel.mutate(importId, { onSuccess: () => { toast.success(t('import.cancelled')); setParams({}); }, onError: toastError }); };
 
   const columns = useMemo<ColumnDef<ImportJobRowDto, unknown>[]>(() => [
@@ -131,7 +131,7 @@ export default function EmployeeImportPage() {
             <h2 className="text-lg font-semibold">{detail && detail.status !== 'VALIDATED' && detail.status !== 'IMPORTING' ? t(`import.status.${detail.status}`) : t('import.queuedTitle')}</h2>
             <p className="max-w-md text-sm text-muted-foreground">{t('import.queuedHint')}</p>
             <div className="flex flex-wrap justify-center gap-2">
-              {(queuedJobId ?? detail?.queueJobId) ? <Button onClick={() => navigate(`/sync/${queuedJobId ?? detail?.queueJobId}`)}>{t('jobs.view')}</Button> : null}
+              
               <Button variant="outline" onClick={() => navigate('/employees')}>{t('import.backToList')}</Button>
               <Button variant="ghost" onClick={() => { setQueuedJobId(null); setFile(null); setParams({}); }}>{t('import.another')}</Button>
             </div>

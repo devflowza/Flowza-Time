@@ -34,7 +34,7 @@ export function LeaveRecordDialog({ open, onOpenChange, preset }: { open: boolea
   const onSubmit = form.handleSubmit(async (v) => {
     try {
       const res = await createRecord.mutateAsync({ ...v, halfDayPart: v.isHalfDay ? v.halfDayPart : undefined });
-      if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('records.recalcHint')); else toast.success(t('records.created'));
+      if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('records.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(t('records.created'));
       onOpenChange(false);
     } catch (e) { toastMutationError(e, navigate); }
   });

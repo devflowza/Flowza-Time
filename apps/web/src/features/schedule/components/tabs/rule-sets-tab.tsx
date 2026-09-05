@@ -64,7 +64,7 @@ export function RuleSetsTab() {
       </div>
       <RuleSetDialog key={`${dialog.open}-${dialog.ruleSet?.id ?? 'new'}`} open={dialog.open} onOpenChange={(o) => setDialog((d) => ({ ...d, open: o }))} ruleSet={dialog.ruleSet} />
       <ConfirmDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} title={t('rules.deleteTitle', { name: deleting?.name ?? '' })} description={t('rules.deleteHint')} confirmLabel={tc('common.delete')} destructive loading={remove.isPending}
-        onConfirm={() => { if (!deleting) return; remove.mutate(deleting.id, { onSuccess: (r) => { if (r.recalculationJobId) toastJobQueued(r.recalculationJobId, navigate, t('rules.recalcHint')); else toast.success(t('rules.deleted')); setDeleting(null); }, onError: toastError }); }} />
+        onConfirm={() => { if (!deleting) return; remove.mutate(deleting.id, { onSuccess: (r) => { if (r.recalculationJobId) toastJobQueued(r.recalculationJobId, navigate, t('rules.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(t('rules.deleted')); setDeleting(null); }, onError: toastError }); }} />
     </div>
   );
 }

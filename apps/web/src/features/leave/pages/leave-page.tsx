@@ -83,7 +83,7 @@ function RecordsTab() {
       />
       <LeaveRecordDialog key={String(createOpen)} open={createOpen} onOpenChange={setCreateOpen} />
       <ConfirmDialog open={!!cancelling} onOpenChange={(o) => !o && setCancelling(null)} title={t('records.cancelTitle')} description={t('records.cancelHint')} confirmLabel={t('records.cancel')} destructive loading={cancelRecord.isPending}
-        onConfirm={() => { if (!cancelling) return; cancelRecord.mutate(cancelling.id, { onSuccess: (r) => { if (r.recalculationJobId) toastJobQueued(r.recalculationJobId, navigate, t('records.recalcHint')); else toast.success(t('records.cancelled')); setCancelling(null); }, onError: (e) => toastMutationError(e, navigate) }); }} />
+        onConfirm={() => { if (!cancelling) return; cancelRecord.mutate(cancelling.id, { onSuccess: (r) => { if (r.recalculationJobId) toastJobQueued(r.recalculationJobId, navigate, t('records.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(t('records.cancelled')); setCancelling(null); }, onError: (e) => toastMutationError(e, navigate) }); }} />
     </>
   );
 }

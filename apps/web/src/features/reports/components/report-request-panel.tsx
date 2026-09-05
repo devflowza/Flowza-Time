@@ -61,7 +61,7 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
     try {
       const p = Object.fromEntries(Object.entries(values.parameters ?? {}).filter(([, v]) => !isEmpty(v)));
       const res = await create.mutateAsync({ ...values, parameters: p });
-      if (res.jobId) toastJobQueued(res.jobId, navigate, t('request.queuedHint')); else toast.success(t('request.queued'), { description: t('request.queuedHint') });
+      if (res.jobId) toastJobQueued(res.jobId, navigate, t('request.queuedHint'), { to: null }); else toast.success(t('request.queued'), { description: t('request.queuedHint') });
       onQueued(res.id);
     } catch (e) { toastError(e); }
   });

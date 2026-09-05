@@ -21,7 +21,7 @@ export function DevicesTab({ employeeId }: { employeeId: string }) {
   const can = useCan();
   const q = useEmployeeDevices(employeeId);
   const { bulk } = useEmployeeMutations();
-  const syncNow = (deviceIds?: string[]) => bulk.mutate({ action: 'sync_devices', employeeIds: [employeeId], deviceIds }, { onSuccess: (r) => { if (r.kind === 'job') toastJobQueued(r.jobId, navigate); }, onError: toastError });
+  const syncNow = (deviceIds?: string[]) => bulk.mutate({ action: 'sync_devices', employeeIds: [employeeId], deviceIds }, { onSuccess: (r) => { if (r.kind === 'job') toastJobQueued(r.jobId, navigate, undefined, { to: '/sync' }); }, onError: toastError });
 
   const columns: ColumnDef<EmployeeDeviceStateDto, unknown>[] = [
     { id: 'device', header: t('devices.device'), cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.deviceName}</p><p className="font-mono text-xs text-muted-foreground" dir="ltr">{row.original.deviceCode}</p></div> },

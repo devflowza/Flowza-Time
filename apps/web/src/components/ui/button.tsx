@@ -28,12 +28,17 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
 }
 
 export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(({ className, variant, size, asChild = false, loading = false, children, disabled, ...props }, ref) => {
-  const Comp = asChild ? Slot : 'button';
+  const classes = cn(buttonVariants({ variant, size, className }));
+  if (asChild) {
+    // Radix Slot accepts exactly one child: the element it merges into (e.g. <Link>). A spinner slot would be a second child
+    // and make Slot throw ("Slot failed to slot onto its children"), so `loading` is not supported together with `asChild`.
+    return <Slot className={classes} ref={ref} aria-busy={loading || undefined} {...props}>{children}</Slot>;
+  }
   return (
-    <Comp className={cn(buttonVariants({ variant, size, className }))} ref={ref} disabled={disabled || loading} aria-busy={loading || undefined} {...props}>
+    <button className={classes} ref={ref} disabled={disabled || loading} aria-busy={loading || undefined} {...props}>
       {loading ? <Loader2 className="animate-spin" aria-hidden /> : null}
       {children}
-    </Comp>
+    </button>
   );
 });
 Button.displayName = 'Button';

@@ -46,7 +46,7 @@ export default function EmployeeProfilePage() {
                   {e.deletedAt ? <Badge variant="neutral">{t('profile.archived')}</Badge> : null}
                   <Badge variant="outline" className="font-mono" dir="ltr">ID {e.deviceUserId}</Badge>
                   <span className="text-xs text-muted-foreground tnum">{t('profile.joined', { date: fmtDate(e.joiningDate) })}</span>
-                  {can('device.sync') && !e.deletedAt ? <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.mutate({ action: 'sync_devices', employeeIds: [e.id] }, { onSuccess: (r) => { if (r.kind === 'job') toastJobQueued(r.jobId, navigate); }, onError: toastError })}><RefreshCw /> {t('devices.syncNow')}</Button> : null}
+                  {can('device.sync') && !e.deletedAt ? <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.mutate({ action: 'sync_devices', employeeIds: [e.id] }, { onSuccess: (r) => { if (r.kind === 'job') toastJobQueued(r.jobId, navigate, undefined, { to: '/sync' }); }, onError: toastError })}><RefreshCw /> {t('devices.syncNow')}</Button> : null}
                 </div>
               }
             />
