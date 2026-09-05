@@ -8,7 +8,8 @@
 | API — auth, authorization, validation, error envelope | Vitest + Hono `app.request()` with a test database | `apps/api/src/**/*.test.ts` | CI |
 | Worker — handlers with mock provider, scheduler | Vitest + test database | `apps/worker/src/**/*.test.ts` | CI |
 | Web — components/hooks | Vitest + Testing Library (jsdom) | `apps/web/src/**/*.test.tsx` | CI |
-| E2E — critical flows (sign-in, create employee, register mock device, sync, view attendance, correction/approval) | Playwright against the seeded stack | `e2e/` (planned) | nightly / pre-release |
+| UI E2E — sign-in/redirect/validation, dashboard KPIs, employees list + URL search, devices list, ⌘K search, Arabic/RTL switch, no-membership state | Playwright (Chromium, desktop + tablet) against the production bundle with Supabase Auth + API answered by route handlers (`apps/web/e2e/support/mock-backend.ts`) | `apps/web/e2e/*.spec.ts` (`pnpm --filter @flowza/web run build:e2e && pnpm --filter @flowza/web run test:e2e`) | CI `e2e` job |
+| Full-stack E2E — create employee, register mock device, sync, view attendance, correction/approval against a seeded Supabase stack | Playwright + `supabase start` | planned (needs the Supabase Auth stack; the local Postgres shim has no GoTrue) | nightly / pre-release |
 
 ## Critical test cases (§75) and where they live
 | Case | Test |

@@ -1,0 +1,15 @@
+{
+  "title": "الرواتب",
+  "subtitle": "ملخصات فترات مقفلة ومُرقَّمة لكل موظف — حد التسليم إلى نظام الرواتب. فلوزا ليست نظام رواتب: بل تُنتج تغذية نظيفة وقابلة للتفسير.",
+  "periods": {
+    "year": "السنة", "allBranches": "كل الفروع", "period": "الفترة", "range": "التواريخ", "lock": "الإقفال", "summaries": "الملخصات", "current": "الحالية", "locked": "مقفلة", "open": "مفتوحة",
+    "noSummaries": "لم تُبنَ بعد", "summaryCounts": "{{employees}} موظف · {{draft}} مسودة · {{finalized}} نهائي", "empty": "لا توجد فترات لهذه السنة",
+    "build": "بناء الملخصات", "buildQueued": "يتم بناء ملخصات الفترة.", "lockAction": "إقفال الفترة", "finalize": "إنهاء", "finalizeNeedsLock": "أقفل الفترة قبل الإنهاء.",
+    "finalizeTitle": "إنهاء {{period}}؟", "finalizeHint": "يُعاد بناء الملخصات من السجلات المقفلة وتُعلَّم كنهائية. التصحيحات اللاحقة تتطلب فتح الفترة وتُنتج إصداراً جديداً.", "finalizeQueued": "يتم الإنهاء في الخلفية."
+  },
+  "summaries": {
+    "title": "الملخصات — {{period}}", "hint": "الأيام كأعداد (نصف اليوم = .5)، والوقت بصيغة س:دد.", "employee": "الموظف", "workingDays": "أيام العمل", "presentDays": "حضور", "absentDays": "غياب", "leaveDays": "إجازة (مدفوعة)", "holidayDays": "عطلات", "late": "أيام التأخير (س:دد)", "missingPunchDays": "بصمة مفقودة", "regular": "عادي س:دد", "overtime": "إضافي س:دد",
+    "overtimeBreakdown": "راحة أسبوعية {{weeklyOff}} · عطلة {{holiday}}", "computedAt": "تاريخ الحساب", "status": { "draft": "مسودة", "finalized": "نهائي" }, "allStatuses": "كل الحالات",
+    "empty": "لا توجد ملخصات لهذه الفترة", "emptyHint": "ابنِ الملخصات بعد مراجعة حضور الفترة."
+  }
+}

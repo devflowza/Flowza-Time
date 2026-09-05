@@ -1,0 +1,23 @@
+{
+  "title": "Leave",
+  "subtitle": "Leave records feed the attendance engine: days on leave are never marked absent. Leave types define paid / unpaid.",
+  "tabs": { "records": "Leave records", "types": "Leave types" },
+  "filters": { "allStatuses": "All statuses" },
+  "status": { "PENDING": "Pending", "APPROVED": "Approved", "REJECTED": "Rejected", "CANCELLED": "Cancelled" },
+  "recordStatus": { "active": "Active", "inactive": "Inactive", "archived": "Archived" },
+  "halfDayParts": { "FIRST_HALF": "First half", "SECOND_HALF": "Second half" },
+  "fields": {
+    "employee": "Employee", "selectEmployee": "Select an employee", "leaveType": "Leave type", "selectLeaveType": "Select a leave type", "startDate": "Start date", "endDate": "End date",
+    "halfDay": "Half day", "halfDayHint": "A single day, first or second half.", "halfDayPart": "Which half", "reason": "Reason", "nameAr": "Name (Arabic)", "isPaid": "Paid leave", "isPaidHint": "Paid days count towards the payroll summary.", "color": "Colour"
+  },
+  "records": {
+    "add": "Record leave", "dialogHint": "Leave recorded here is approved immediately. Overlapping leave and locked periods are rejected.", "submit": "Record leave", "created": "Leave recorded", "recalcHint": "Attendance for the range is being recalculated.",
+    "range": "Dates", "source": "Source", "selectedEmployee": "Selected employee", "cancel": "Cancel", "cancelTitle": "Cancel this leave?", "cancelHint": "The days are recomputed as normal working days.", "cancelled": "Leave cancelled",
+    "empty": "No leave records", "emptyHint": "Record leave here or import it from your HR system."
+  },
+  "types": {
+    "hint": "Leave types are referenced by leave records and payroll summaries.", "add": "Add leave type", "edit": "Edit leave type", "dialogHint": "The code is used by imports and integrations.", "created": "Leave type created", "updated": "Leave type updated", "deleted": "Leave type deleted",
+    "deleteTitle": "Delete “{{name}}”?", "deleteHint": "Types with existing leave records cannot be deleted — deactivate them instead.", "paid": "Paid", "unpaid": "Unpaid", "activate": "Activate", "deactivate": "Deactivate",
+    "empty": "No leave types", "emptyHint": "Create annual, sick or unpaid leave types to start recording leave."
+  }
+}

@@ -1,0 +1,33 @@
+{
+  "title": "Reports",
+  "subtitle": "Reports are generated in the background and stored securely for a limited time. Every download is audited.",
+  "formats": { "csv": "CSV", "xlsx": "Excel (XLSX)", "pdf": "PDF" },
+  "status": { "QUEUED": "Queued", "RUNNING": "Running", "COMPLETED": "Completed", "FAILED": "Failed", "EXPIRED": "Expired", "CANCELLED": "Cancelled" },
+  "types": {
+    "daily_attendance": { "name": "Daily attendance", "description": "Attendance status of every employee for one day." },
+    "monthly_attendance": { "name": "Monthly attendance", "description": "Per-employee day grid and totals for a month." },
+    "employee_attendance": { "name": "Employee attendance", "description": "Detailed attendance history for selected employees." },
+    "branch_attendance": { "name": "Branch attendance", "description": "Attendance totals grouped by branch." },
+    "department_attendance": { "name": "Department attendance", "description": "Attendance totals grouped by department." },
+    "late_report": { "name": "Late arrivals", "description": "Late arrivals with minutes per employee." },
+    "absence_report": { "name": "Absences", "description": "Absent days per employee." },
+    "overtime_report": { "name": "Overtime", "description": "Overtime minutes by category per employee." },
+    "missing_punch_report": { "name": "Missing punches", "description": "Days with a missing IN or OUT punch." },
+    "device_sync_report": { "name": "Device synchronisation", "description": "Sync jobs, failures and ingested records per device." },
+    "device_health_report": { "name": "Device health", "description": "Connection status, heartbeats and offline periods per device." },
+    "audit_report": { "name": "Audit log", "description": "Audit trail export for a date range." },
+    "payroll_summary": { "name": "Payroll summary", "description": "Period summaries ready for payroll." }
+  },
+  "request": {
+    "title": "Request a report", "hint": "Pick a report type, set its parameters and queue it. You are notified when it is ready.", "type": "Report type", "pickType": "Select a report type to set its parameters.", "notAllowed": "You lack the permissions for this report.",
+    "parametersFor": "Parameters — {{name}}", "required": "Required", "toBeforeFrom": "Must be on or after the start date", "month": "Month", "shift": "Shift", "allBranches": "All branches", "allDepartments": "All departments", "allShifts": "All shifts",
+    "format": "Format", "employees": "Employees", "employeesHint": "Add one or more employees.", "devices": "Devices", "addDevice": "Add device…", "reason": "Reason", "reasonHint": "Some organisations require a reason for exports; it is stored in the audit log.",
+    "submit": "Queue report", "queued": "Report queued", "queuedHint": "It appears below and refreshes automatically until it is ready."
+  },
+  "list": {
+    "title": "My reports", "type": "Report", "rows": "Rows", "requested": "Requested", "expires": "Expires", "nEmployees": "{{count}} employees", "oneBranch": "1 branch", "allStatuses": "All statuses", "allTypes": "All types",
+    "cancel": "Cancel", "cancelTitle": "Cancel this report?", "cancelHint": "Only queued reports can be cancelled.", "cancelled": "Report cancelled",
+    "downloadStarted": "Download started", "linkExpires": "The link is valid for {{seconds}} seconds.", "expiredHint": "File expired — request again",
+    "empty": "No reports yet", "emptyHint": "Requested reports appear here with their status; completed files can be downloaded until they expire."
+  }
+}

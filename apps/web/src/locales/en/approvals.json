@@ -1,0 +1,26 @@
+{
+  "title": "Approvals",
+  "subtitle": "Correction requests waiting for your decision, and the ones already decided.",
+  "tabs": { "pending": "Pending", "decided": "Decided" },
+  "columns": { "employee": "Employee", "date": "Date", "type": "Type", "change": "Proposed change", "reason": "Reason", "requester": "Requested by", "step": "Step", "stepN": "Step {{n}}", "decidedAt": "Decided" },
+  "actions": { "approve": "Approve", "reject": "Reject" },
+  "inbox": { "empty": "Nothing to approve", "emptyHint": "Requests assigned to you, your role or your branches appear here." },
+  "decided": { "empty": "No decided corrections", "emptyHint": "Approved, applied, rejected and cancelled corrections appear here." },
+  "entity": { "ATTENDANCE_CORRECTION": "Attendance correction", "OVERTIME": "Overtime", "MISSING_PUNCH": "Missing punch", "SHIFT_CHANGE": "Shift change", "MANUAL_ATTENDANCE": "Manual attendance", "LEAVE": "Leave" },
+  "approverType": { "MANAGER": "Manager", "ROLE": "Role", "USER": "User" },
+  "recordStatus": { "active": "Active", "inactive": "Inactive", "archived": "Archived" },
+  "decision": {
+    "approveTitle": "Approve correction", "approveHint": "The next step is notified; on the final step the correction is applied and the day recomputed.", "rejectTitle": "Reject correction", "rejectHint": "The requester sees your comment as the rejection reason.",
+    "comment": "Comment", "commentRequired": "A comment is required when rejecting.", "approvePlaceholder": "Optional note for the requester", "rejectPlaceholder": "Why is this correction rejected?",
+    "approved": "Correction approved", "stepApproved": "Step approved — waiting for the next approver", "rejected": "Correction rejected"
+  },
+  "workflows": {
+    "title": "Approval workflows", "subtitle": "Who approves corrections, in which order. The branch-specific default wins over the organisation default; without any workflow, requesters with the approve permission are auto-approved and others go to HR admins.",
+    "add": "Add workflow", "edit": "Edit workflow", "dialogHint": "Up to 5 ordered steps. MANAGER resolves to the employee's manager (falls back to HR admin).", "created": "Workflow created", "updated": "Workflow updated", "deleted": "Workflow deleted",
+    "entityType": "Applies to", "branchScope": "Branch", "branchScopeHint": "Leave empty for an organisation-wide workflow.", "allBranches": "All branches", "isDefault": "Default workflow", "isDefaultHint": "Used automatically for new requests in its scope.",
+    "steps": "Steps", "stepsCount": "{{count}} of {{max}}", "approverType": "Approver", "role": "Role", "selectRole": "Select a role", "user": "User", "selectUser": "Select a user", "systemRole": "System role", "managerHint": "The employee's manager decides this step.",
+    "moveUp": "Move up", "moveDown": "Move down", "removeStep": "Remove step", "addStep": "Add step", "default": "Default",
+    "empty": "No approval workflows", "emptyHint": "Without a workflow, corrections from users who can approve are applied immediately; others go to HR admins.",
+    "deleteTitle": "Delete “{{name}}”?", "deleteHint": "Pending requests already routed through this workflow keep their steps."
+  }
+}

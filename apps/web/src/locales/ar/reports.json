@@ -1,0 +1,33 @@
+{
+  "title": "التقارير",
+  "subtitle": "تُنشأ التقارير في الخلفية وتُخزَّن بأمان لفترة محدودة. يُسجَّل كل تنزيل في سجل التدقيق.",
+  "formats": { "csv": "CSV", "xlsx": "إكسل (XLSX)", "pdf": "PDF" },
+  "status": { "QUEUED": "في قائمة الانتظار", "RUNNING": "قيد التنفيذ", "COMPLETED": "مكتمل", "FAILED": "فشل", "EXPIRED": "منتهي الصلاحية", "CANCELLED": "ملغى" },
+  "types": {
+    "daily_attendance": { "name": "الحضور اليومي", "description": "حالة حضور كل موظف ليوم واحد." },
+    "monthly_attendance": { "name": "الحضور الشهري", "description": "شبكة أيام ومجاميع لكل موظف لشهر." },
+    "employee_attendance": { "name": "حضور الموظف", "description": "سجل حضور مفصّل لموظفين محددين." },
+    "branch_attendance": { "name": "حضور الفروع", "description": "مجاميع الحضور مجمّعة حسب الفرع." },
+    "department_attendance": { "name": "حضور الأقسام", "description": "مجاميع الحضور مجمّعة حسب القسم." },
+    "late_report": { "name": "التأخيرات", "description": "حالات التأخير مع الدقائق لكل موظف." },
+    "absence_report": { "name": "الغياب", "description": "أيام الغياب لكل موظف." },
+    "overtime_report": { "name": "العمل الإضافي", "description": "دقائق العمل الإضافي حسب الفئة لكل موظف." },
+    "missing_punch_report": { "name": "البصمات المفقودة", "description": "الأيام التي تفتقد بصمة دخول أو خروج." },
+    "device_sync_report": { "name": "مزامنة الأجهزة", "description": "مهام المزامنة والإخفاقات والسجلات المستوردة لكل جهاز." },
+    "device_health_report": { "name": "صحة الأجهزة", "description": "حالة الاتصال ونبضات القلب وفترات الانقطاع لكل جهاز." },
+    "audit_report": { "name": "سجل التدقيق", "description": "تصدير سجل التدقيق لنطاق تاريخي." },
+    "payroll_summary": { "name": "ملخص الرواتب", "description": "ملخصات الفترات الجاهزة للرواتب." }
+  },
+  "request": {
+    "title": "طلب تقرير", "hint": "اختر نوع التقرير وحدد معاييره وأدرجه في قائمة الانتظار. سيتم إشعارك عند اكتماله.", "type": "نوع التقرير", "pickType": "اختر نوع تقرير لتحديد معاييره.", "notAllowed": "ليست لديك الصلاحيات لهذا التقرير.",
+    "parametersFor": "المعايير — {{name}}", "required": "مطلوب", "toBeforeFrom": "يجب أن يكون في تاريخ البداية أو بعده", "month": "الشهر", "shift": "الوردية", "allBranches": "كل الفروع", "allDepartments": "كل الأقسام", "allShifts": "كل الورديات",
+    "format": "الصيغة", "employees": "الموظفون", "employeesHint": "أضف موظفاً واحداً أو أكثر.", "devices": "الأجهزة", "addDevice": "إضافة جهاز…", "reason": "السبب", "reasonHint": "تشترط بعض المنظمات سبباً للتصدير؛ يُحفظ في سجل التدقيق.",
+    "submit": "إدراج التقرير", "queued": "تم إدراج التقرير", "queuedHint": "يظهر أدناه ويُحدَّث تلقائياً حتى يصبح جاهزاً."
+  },
+  "list": {
+    "title": "تقاريري", "type": "التقرير", "rows": "الصفوف", "requested": "تاريخ الطلب", "expires": "ينتهي", "nEmployees": "{{count}} موظف", "oneBranch": "فرع واحد", "allStatuses": "كل الحالات", "allTypes": "كل الأنواع",
+    "cancel": "إلغاء", "cancelTitle": "إلغاء هذا التقرير؟", "cancelHint": "يمكن إلغاء التقارير في قائمة الانتظار فقط.", "cancelled": "تم إلغاء التقرير",
+    "downloadStarted": "بدأ التنزيل", "linkExpires": "الرابط صالح لمدة {{seconds}} ثانية.", "expiredHint": "انتهت صلاحية الملف — أعد الطلب",
+    "empty": "لا توجد تقارير بعد", "emptyHint": "تظهر هنا التقارير المطلوبة مع حالتها؛ يمكن تنزيل الملفات المكتملة حتى انتهاء صلاحيتها."
+  }
+}
