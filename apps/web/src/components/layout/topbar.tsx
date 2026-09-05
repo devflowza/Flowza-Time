@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import { Bell, ChevronsUpDown, LogOut, Menu, Moon, Search, Sun } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
@@ -7,9 +8,11 @@ import { useActiveMembership, useMe } from '@/features/me/use-me';
 import { useUiStore } from '@/stores/ui-store';
 import { LanguageSwitcher } from './language-switcher';
 import { useUnreadCount } from '@/features/notifications/use-notifications';
+import { GlobalSearchDialog } from '@/features/search/global-search';
 
 export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const { t } = useTranslation();
+  const [searchOpen, setSearchOpen] = useState(false);
   const { data: me } = useMe();
   const membership = useActiveMembership();
   const setActiveOrg = useUiStore((s) => s.setActiveOrg);
@@ -41,10 +44,12 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      <button type="button" onClick={() => navigate('/search')} className="ms-auto hidden h-9 w-64 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground hover:bg-accent lg:flex">
+      <button type="button" onClick={() => setSearchOpen(true)} className="ms-auto hidden h-9 w-64 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground hover:bg-accent lg:flex">
         <Search className="size-4" /> {t('common.searchPlaceholder')} <kbd className="ms-auto rounded border px-1.5 text-[10px]">⌘K</kbd>
       </button>
+      <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
       <div className="flex items-center gap-1 ms-auto lg:ms-0">
+        <Button variant="ghost" size="icon" className="lg:hidden" aria-label={t('common.searchPlaceholder')} onClick={() => setSearchOpen(true)}><Search /></Button>
         <LanguageSwitcher />
         <Button variant="ghost" size="icon" aria-label={t('common.theme')} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun /> : <Moon />}</Button>
         <Button variant="ghost" size="icon" asChild aria-label={t('nav.notifications')}>

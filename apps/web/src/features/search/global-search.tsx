@@ -23,12 +23,13 @@ export function GlobalSearchDialog({ open: controlledOpen, onOpenChange }: { ope
   const results = useSearch(debounced, open);
 
   useEffect(() => {
+    // toggles the *effective* state so a controlled parent (Topbar button) and the shortcut never drift apart
     const onKey = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setInternalOpen((o) => { onOpenChange?.(!o); return !o; }); }
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); setInternalOpen(!open); onOpenChange?.(!open); }
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onOpenChange]);
+  }, [open, onOpenChange]);
 
   return (
     <Dialog open={open} onOpenChange={(o) => { setOpen(o); if (!o) setQuery(''); }}>

@@ -11,6 +11,7 @@ pnpm install
 cp .env.example .env                       # API/worker config (see comments in the file)
 cp apps/web/.env.example apps/web/.env.local
 bash scripts/local-pg.sh start             # Postgres 16 on 127.0.0.1:54329
+# The cluster lives in $PGROOT (default ~/.flowza-pg); pass PGROOT=/var/lib/flowza-pg when the data directory was created elsewhere, e.g. on a shared CI/agent box.
 bash scripts/db-reset-local.sh --seed      # shim + migrations + deterministic seed
 pnpm build:packages
 pnpm dev:api                               # http://localhost:4000/api/health

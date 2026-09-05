@@ -39,3 +39,18 @@
 pnpm test:unit
 bash scripts/local-pg.sh start && bash supabase/tests/run-rls-tests.sh && pnpm test:db
 ```
+
+## Web component tests (jsdom) — harness notes
+- Shared harness: `apps/web/src/features/employees/test-utils.tsx` (`renderWithProviders`, `mockGet`, `page`, `grant`/`grantAll`, `testState`)
+  and `apps/web/src/features/employees/test-mocks.ts` (the module mocks for `@/lib/api-client`, `@/features/me/use-me`,
+  `@/lib/supabase`, `@/lib/env`). `vi.mock` factories must import **test-mocks**, never test-utils: test-utils imports the
+  UI barrel, whose `ErrorState` imports the mocked api-client, so a factory that awaits test-utils deadlocks the module graph
+  (the test file simply never finishes).
+- `vite.config.ts` gives vitest inert `VITE_*` values — `src/lib/env.ts` validates them at module load and nothing in jsdom
+  reaches the network.
+- `src/test/setup.ts` short-circuits the `:fullscreen` / `:modal` / `:popover-open` / `:picture-in-picture` pseudo-classes:
+  nwsapi 2.2.27 (bundled with jsdom 26) answers them by calling `element.matches()` again and recurses through jsdom —
+  opening one Radix Select cost ~87 million `matches()` calls (≈30 s). Re-check when bumping jsdom/nwsapi.
+- Radix in jsdom: open a Select with `fireEvent.keyDown(trigger, { key: 'ArrowDown' })` and pick with `fireEvent.click(option)`.
+  `DataTable` renders a table *and* a card fallback, so cell values appear twice (`getAllByText`). The harness's
+  `LocationDisplay` is an `<output>` (role `status`) — query bulk-action bars by text, not by that role.
