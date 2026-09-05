@@ -65,7 +65,13 @@ export function createThrottler(throttling: ProviderThrottling | undefined, time
     if (bucket.tokens >= 1) return 0;
     return Math.ceil((1 - bucket.tokens) / refillPerMs);
   };
-  const wake = (): void => { const next = waiters.shift(); if (next) next(); };
+  /**
+   * A release may free an account slot, a device slot and nothing else — which waiter can use it depends on its
+   * own device key and the bucket. Waking only the head would leave capacity idle (until that waiter's poll timer)
+   * whenever the head is blocked on a different device than the one just freed, so every waiter re-checks in FIFO
+   * order; each one that still cannot proceed simply stays queued.
+   */
+  const wake = (): void => { for (const attempt of [...waiters]) attempt(); };
   const lease = (accountKey: string, deviceKey: string | undefined): ThrottleLease => {
     const acc = counter(accounts, accountKey);
     acc.inFlight += 1;

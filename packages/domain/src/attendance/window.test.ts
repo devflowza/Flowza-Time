@@ -54,10 +54,10 @@ describe('computePunchWindow', () => {
     expect(w.scheduledEnd.diff(w.scheduledStart, 'hours').hours).toBe(4);
   });
 
-  it('is half-open: the end instant belongs to the next window', () => {
-    const w = computePunchWindow(fixedShift(), DATE, MUSCAT);
-    expect(isWithinWindow(w, parseInstant(at(DATE, '05:00'), MUSCAT))).toBe(true);
-    expect(isWithinWindow(w, parseInstant(at(DATE, '23:00'), MUSCAT))).toBe(false);
+  it('FLEXIBLE windows are half-open: the boundary instant belongs to the next day', () => {
+    const w = computePunchWindow(flexibleShift(), DATE, MUSCAT);
+    expect(isWithinWindow(w, parseInstant(at(DATE, '04:00'), MUSCAT))).toBe(true);
+    expect(isWithinWindow(w, parseInstant(at('2026-03-11', '04:00'), MUSCAT))).toBe(false);
   });
 
   it('rejects an invalid IANA timezone with a VALIDATION_ERROR', () => {
@@ -71,5 +71,17 @@ describe('computePunchWindow', () => {
 
   it('rejects a FIXED shift without times', () => {
     expect(() => computePunchWindow(fixedShift({ startTime: null }), DATE, MUSCAT)).toThrowError(AppError);
+  });
+});
+
+describe('isWithinWindow boundaries (review)', () => {
+  it('FIXED windows include their end instant; FLEXIBLE and calendar windows stay half-open', () => {
+    const fixed = computePunchWindow(fixedShift({ punchOutWindowAfterMinutes: 0 }), DATE, MUSCAT);
+    expect(isWithinWindow(fixed, parseInstant(at(DATE, '17:00'), MUSCAT))).toBe(true);
+    expect(isWithinWindow(fixed, parseInstant(at(DATE, '17:00:01'), MUSCAT))).toBe(false);
+    const flex = computePunchWindow(flexibleShift(), DATE, MUSCAT);
+    expect(isWithinWindow(flex, parseInstant(at('2026-03-11', '04:00'), MUSCAT))).toBe(false);
+    const none = computePunchWindow(null, DATE, MUSCAT);
+    expect(isWithinWindow(none, parseInstant(at('2026-03-11', '00:00'), MUSCAT))).toBe(false);
   });
 });

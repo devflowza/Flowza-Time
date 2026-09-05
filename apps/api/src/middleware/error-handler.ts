@@ -38,6 +38,12 @@ export function mapPgError(err: unknown): AppError | null {
     case '23514': return new AppError('VALIDATION_ERROR', 'A value violates a business rule.', { details: detail ? { constraint: detail } : undefined });
     case '23P01': return new AppError('CONFLICT', 'The date range overlaps an existing record.', { details: detail ? { constraint: detail } : undefined });
     case '42501': return new AppError('FORBIDDEN', 'You do not have permission to perform this action.');
+    case '22023': return new AppError('VALIDATION_ERROR', (err as Error).message.replace(/^error:\s*/i, '') || 'Invalid parameter value.');
+    case '22P02': return new AppError('VALIDATION_ERROR', 'A value has an invalid format.');
+    case '22001': return new AppError('VALIDATION_ERROR', 'A value is too long.');
+    case '22007': case '22008': return new AppError('VALIDATION_ERROR', 'Invalid date or time value.');
+    case '23502': return new AppError('VALIDATION_ERROR', 'A required value is missing.', { details: (err as { column?: string }).column ? { column: (err as { column?: string }).column } : undefined });
+    case '40001': case '40P01': return new AppError('CONFLICT', 'The operation conflicted with a concurrent change. Please retry.', { retryable: true });
     case 'P0002': return new AppError('PERIOD_LOCKED', 'The attendance period is locked.');
     case 'P0001': return new AppError('INVALID_STATE', (err as Error).message.replace(/^error:\s*/i, ''));
     default: return null;

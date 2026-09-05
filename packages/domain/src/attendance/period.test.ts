@@ -67,3 +67,10 @@ describe('summarisePeriod', () => {
     expect(s.recordCount).toBe(0);
   });
 });
+
+describe('summarisePeriod half-day leave on PRESENT records (review)', () => {
+  it('splits a PRESENT / MISSING_PUNCH record carrying HALF_DAY_LEAVE into half present + half leave', () => {
+    const s = summarisePeriod([record('2026-03-02', 'PRESENT', { flags: ['MISSING_OUT', 'HALF_DAY_LEAVE'], leaveIsPaid: true })], { periodStart: '2026-03-01', periodEnd: '2026-03-31' });
+    expect(s).toMatchObject({ presentDays: 0.5, leaveDays: 0.5, paidLeaveDays: 0.5, halfDays: 1, missingPunchDays: 1, absentDays: 0 });
+  });
+});

@@ -22,7 +22,7 @@ export const MOCK_DEFINITION = defineProvider({
       { key: 'employeeCount', label: 'Simulated employees', type: 'number', default: 25, required: false, secret: false },
       { key: 'seed', label: 'Random seed', type: 'number', default: 42, required: false, secret: false, help: 'Same seed + config = same transaction stream.' },
       { key: 'transactionsPerEmployeePerDay', label: 'Punches per employee per day', type: 'number', default: 0, required: false, secret: false, help: '0 = deterministic mix of 2–4 punches.' },
-      { key: 'startDate', label: 'Stream start date (YYYY-MM-DD)', type: 'text', required: false, secret: false, help: 'Defaults to 30 days before today.' },
+      { key: 'startDate', label: 'Stream start date (YYYY-MM-DD)', type: 'text', required: false, secret: false, help: 'Defaults to 30 days before the first pull. The sync cursor pins the start date it was created with; rewind the cursor to re-anchor.' },
       { key: 'latencyMs', label: 'Latency (ms, "slow" scenario)', type: 'number', default: 2000, required: false, secret: false },
       { key: 'apiKey', label: 'API key (simulated)', type: 'password', secret: true, required: false, help: 'Must be "valid" in the auth_failed scenario.' },
       { key: 'webhookSecret', label: 'Webhook signing secret (simulated)', type: 'password', secret: true, required: false },

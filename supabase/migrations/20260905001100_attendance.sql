@@ -89,8 +89,9 @@ select app.ensure_month_partitions('public.attendance_events', '2025-01-01', 36)
 create or replace function app.protect_attendance_events() returns trigger language plpgsql as $$
 begin
   if tg_op = 'DELETE' then raise exception 'attendance_events is append-only' using errcode = 'P0001'; end if;
+  -- raw_transaction_id may be set once (null → id) by the normaliser; everything else is immutable
   if new.employee_id <> old.employee_id or new.punched_at <> old.punched_at or new.event_type <> old.event_type
-     or new.source <> old.source or new.raw_transaction_id is distinct from old.raw_transaction_id then
+     or new.source <> old.source or (old.raw_transaction_id is not null and new.raw_transaction_id is distinct from old.raw_transaction_id) then
     raise exception 'attendance_events are immutable; void and re-add through a correction' using errcode = 'P0001';
   end if;
   return new;

@@ -14,6 +14,7 @@ done
 # local passwords for the application roles (never used in hosted environments)
 psql -d "$DB" -v ON_ERROR_STOP=1 -q -c "alter role flowza_api password 'flowza_api'; alter role flowza_worker password 'flowza_worker';"
 if [ "${1:-}" = "--seed" ]; then
-  echo ">> seed"; psql -d "$DB" -v ON_ERROR_STOP=1 -q -f "$ROOT/supabase/seed.sql"
+  echo ">> seed (deterministic TypeScript seed)"
+  (cd "$ROOT" && DATABASE_URL_ADMIN="postgres://$PGUSER@$PGHOST:$PGPORT/$DB" pnpm --filter @flowza/database run seed:local)
 fi
 echo "database $DB ready"

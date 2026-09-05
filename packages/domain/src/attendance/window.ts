@@ -12,8 +12,10 @@ import type { EngineShift } from './types.js';
  *   `scheduledStart` is the day boundary (used for attribution) and `scheduledEnd` the next boundary.
  * - No shift: the calendar day `[00:00, 00:00 next day)` in the branch timezone.
  *
- * All instants are Luxon DateTimes in the branch zone; the window is half-open `[windowStart, windowEnd)`
- * so adjacent flexible days never share an instant.
+ * All instants are Luxon DateTimes in the branch zone. FIXED windows are closed intervals
+ * `[windowStart, windowEnd]` exactly as §G.3 defines them, so an OUT punched at the very end of a shift with no
+ * punch-out margin is still accepted; FLEXIBLE and calendar-day windows are half-open `[windowStart, windowEnd)`
+ * so adjacent days never share an instant. Overlaps between FIXED windows are resolved by attribution.
  */
 export interface PunchWindow {
   attendanceDate: string;
@@ -86,9 +88,10 @@ export function computePunchWindow(shift: EngineShift | null, attendanceDate: st
   };
 }
 
-/** Half-open containment test used by attribution. */
+/** Containment test used by attribution: FIXED windows include their end instant, the others do not. */
 export function isWithinWindow(window: PunchWindow, instant: DateTime): boolean {
-  return instant >= window.windowStart && instant < window.windowEnd;
+  if (instant < window.windowStart) return false;
+  return window.kind === 'FIXED' ? instant <= window.windowEnd : instant < window.windowEnd;
 }
 
 /** UTC ISO string (millisecond precision suppressed when zero) — the engine's canonical output format. */

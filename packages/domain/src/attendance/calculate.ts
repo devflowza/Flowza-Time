@@ -59,6 +59,8 @@ interface MeasureOptions {
   assumed?: { firstIn?: DateTime; lastOut?: DateTime };
   /** Evaluate late / early departure (false on non-working days where nothing was expected). */
   punctuality?: boolean;
+  /** Evaluate regular overtime (false on non-working days, whose overtime rule is decided by the caller). */
+  overtime?: boolean;
 }
 
 interface WorkFigures {
@@ -107,14 +109,19 @@ export function calculateDailyRecord(input: DailyCalculationInput): DailyCalcula
   const attribution = attributeEvents(input.events, windows);
   const attributed = attribution.byDate.get(date) ?? [];
   const tracePunches = new Map<string, TracePunch>();
+  /** Attribution decisions worth keeping next to the interpretation note (§G.6: every punch with its attribution). */
+  const attributionNotes = new Map<string, string>();
+  const consideredDates = windows.map((w) => w.attendanceDate).join('..');
   let outOfWindowOnDate = 0;
   for (const d of attribution.decisions) {
     const at = parseInstant(d.punchedAt, zone);
     const base = { eventId: d.eventId, punchedAt: d.punchedAt, local: local(at) };
     if (d.reason === 'VOIDED') tracePunches.set(d.eventId, { ...base, role: 'IGNORED', note: 'voided event' });
-    else if (d.attendanceDate === date) tracePunches.set(d.eventId, { ...base, role: 'IGNORED', note: d.reason === 'NEAREST_SCHEDULED_START' ? `overlapping windows ${d.candidates.join('/')} → nearest scheduled start (${d.distanceMinutes} min)` : 'in window' });
-    else {
-      const note = d.attendanceDate === null ? 'outside every punch window' : `attributed to ${d.attendanceDate} (${d.reason === 'NEAREST_SCHEDULED_START' ? `nearest scheduled start, ${d.distanceMinutes} min` : 'only containing window'})`;
+    else if (d.attendanceDate === date) {
+      if (d.reason === 'NEAREST_SCHEDULED_START') attributionNotes.set(d.eventId, `overlapping windows ${d.candidates.join('/')} → nearest scheduled start (${d.distanceMinutes} min)`);
+      tracePunches.set(d.eventId, { ...base, role: 'IGNORED', note: attributionNotes.get(d.eventId) ?? 'in window' });
+    } else {
+      const note = d.attendanceDate === null ? `outside the punch windows of ${consideredDates}` : `attributed to ${d.attendanceDate} (${d.reason === 'NEAREST_SCHEDULED_START' ? `nearest scheduled start, ${d.distanceMinutes} min` : 'only containing window'})`;
       tracePunches.set(d.eventId, { ...base, role: 'OUT_OF_WINDOW', note });
       if (d.attendanceDate === null && at.toISODate() === date) outOfWindowOnDate += 1;
     }
@@ -145,7 +152,8 @@ export function calculateDailyRecord(input: DailyCalculationInput): DailyCalcula
   const interpretation = interpretPunches(kept, rules.punchInterpretation, zone);
   for (const p of interpretation.punches) {
     const entry = tracePunches.get(p.event.id);
-    if (entry) tracePunches.set(p.event.id, { ...entry, role: p.role, note: p.note });
+    const attributionNote = attributionNotes.get(p.event.id);
+    if (entry) tracePunches.set(p.event.id, { ...entry, role: p.role, note: attributionNote ? `${p.note}; ${attributionNote}` : p.note });
   }
   rec.step('interpretation', `${interpretation.effectiveMode}${interpretation.effectiveMode !== interpretation.mode ? ` (fallback from ${interpretation.mode})` : ''}: firstIn ${iso(interpretation.firstIn) ?? '—'}, lastOut ${iso(interpretation.lastOut) ?? '—'}`, {
     mode: interpretation.mode,
@@ -228,14 +236,16 @@ export function calculateDailyRecord(input: DailyCalculationInput): DailyCalcula
   if (dayType !== 'WORKING') {
     const status: AttendanceStatus = dayType;
     const restSchedule: Schedule = { ...schedule, scheduledMinutes: 0 };
+    rec.step('schedule.nonWorking', `${status}: nothing is expected → scheduled minutes 0 (shift schedule kept for reference only)`, { status, scheduledMinutes: 0, shiftScheduledMinutes: schedule.scheduledMinutes });
     if (interpretation.firstIn === null && interpretation.lastOut === null) {
       rec.step('status', `${status}: no punches`, { status });
       return finish(status, restSchedule, emptyWork);
     }
-    const work = measureWork(ctx, interpretation, schedule, { punctuality: false });
+    const work = measureWork(ctx, interpretation, schedule, { punctuality: false, overtime: false });
     if (dayType === 'HOLIDAY') rec.flag('WORKED_ON_HOLIDAY');
     if (dayType === 'WEEKLY_OFF') rec.flag('WORKED_ON_WEEKLY_OFF');
-    if (interpretation.missingOut) rec.flag('MISSING_OUT');
+    if (interpretation.missingOut && !dayOver) rec.step('missingPunch', `OUT not punched yet on ${status}; punch window still open → not flagged`, { missingOut: true, dayOver });
+    if (interpretation.missingOut && dayOver) rec.flag('MISSING_OUT');
     if (interpretation.missingIn) rec.flag('MISSING_IN');
     const otAllowed = rules.overtimeEnabled && ((dayType === 'HOLIDAY' && rules.holidayWorkCountsAsOvertime) || (dayType === 'WEEKLY_OFF' && rules.weeklyOffWorkCountsAsOvertime));
     let overtimeMinutes = 0;
@@ -267,10 +277,10 @@ export function calculateDailyRecord(input: DailyCalculationInput): DailyCalcula
   }
 
   // 9. Missing punch handling.
-  if (interpretation.missingOut && interpretation.lastOut === null && !dayOver) {
-    rec.step('status', 'IN without OUT while the punch window is open → still working → PENDING', { status: 'PENDING' });
-    const work = measureWork(ctx, interpretation, schedule);
-    return finish('PENDING', schedule, { ...work, workedMinutes: 0, breakMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 0 });
+  if (interpretation.missingOut && !dayOver) {
+    rec.step('status', 'last IN has no OUT while the punch window is open → still working → PENDING (worked minutes not yet known)', { status: 'PENDING', lastClosedOut: iso(interpretation.lastOut) });
+    const work = measureWork(ctx, { ...interpretation, lastOut: null }, schedule);
+    return finish('PENDING', schedule, { ...work, lastOut: null, workedMinutes: 0, breakMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 0, overtimeCategory: null });
   }
   if (interpretation.missingOut && interpretation.lastOut === null) return finish(...resolveMissingPunch('OUT', ctx, interpretation, schedule));
   if (interpretation.missingIn && interpretation.firstIn === null) return finish(...resolveMissingPunch('IN', ctx, interpretation, schedule));
@@ -278,6 +288,7 @@ export function calculateDailyRecord(input: DailyCalculationInput): DailyCalcula
   // 10. Complete day.
   const work = measureWork(ctx, interpretation, schedule);
   if (interpretation.missingOut) rec.flag('MISSING_OUT'); // PAIRED/DIRECTIONAL: last segment open but an earlier OUT exists
+  if (interpretation.missingIn) rec.flag('MISSING_IN'); // DIRECTIONAL: an OUT preceded the first IN
   const status = classifyWorkingStatus(work.workedMinutes, schedule, rules, halfDayOff, rec);
   return finish(status, schedule, work);
 }
@@ -378,6 +389,7 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
   const { rules, shift, date, zone, window, rec } = ctx;
   const assumed = options.assumed ?? {};
   const punctuality = options.punctuality ?? true;
+  const evaluateOvertime = options.overtime ?? true;
   const rawIn = interpretation.firstIn ?? assumed.firstIn ?? null;
   const rawOut = interpretation.lastOut ?? assumed.lastOut ?? null;
   const rounded = roundPunches(rawIn, rawOut, rules.punchRoundingMinutes, rules.punchRoundingMode);
@@ -424,16 +436,23 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
   let overtimeMinutes = 0;
   let overtimeCategory: WorkFigures['overtimeCategory'] = null;
   const assumedPunch = assumed.firstIn !== undefined || assumed.lastOut !== undefined;
-  if (!rules.overtimeEnabled) {
+  if (!evaluateOvertime) {
+    rec.step('overtime.regular', 'regular overtime not evaluated: nothing was scheduled on this day (see the day-type overtime rule)');
+  } else if (!rules.overtimeEnabled) {
     rec.step('overtime', 'overtime disabled by rule set', { overtimeEnabled: false });
   } else if (assumedPunch) {
     rec.step('overtime', 'no overtime on an assumed punch', { assumed: true });
   } else if (firstIn && lastOut && schedule.kind === 'FIXED' && schedule.expectedStart && schedule.expectedEnd) {
-    const afterEnd = Math.max(0, minutesBetween(schedule.expectedEnd, lastOut));
-    const earlyIn = rules.countEarlyInAsOvertime ? Math.max(0, minutesBetween(firstIn, schedule.expectedStart)) : 0;
-    const raw = Math.max(0, afterEnd + earlyIn - rules.overtimeStartAfterMinutes);
+    // §G.5: overtime is work beyond the scheduled minutes — and only the part outside the shift hours counts
+    // (after the expected end; before the expected start only when countEarlyInAsOvertime). A late arrival
+    // who merely completes the scheduled hours after the shift end earns nothing.
+    const afterEnd = Math.max(0, minutesBetween(schedule.expectedEnd > firstIn ? schedule.expectedEnd : firstIn, lastOut));
+    const earlyIn = rules.countEarlyInAsOvertime ? Math.max(0, minutesBetween(firstIn, lastOut < schedule.expectedStart ? lastOut : schedule.expectedStart)) : 0;
+    const beyondScheduled = Math.max(0, workedMinutes - schedule.scheduledMinutes);
+    const outsideShift = afterEnd + earlyIn;
+    const raw = Math.max(0, Math.min(beyondScheduled, outsideShift) - rules.overtimeStartAfterMinutes);
     overtimeMinutes = finaliseOvertime(raw, rules);
-    rec.step('overtime', `${afterEnd} min after expected end${rules.countEarlyInAsOvertime ? ` + ${earlyIn} min early in` : ''} − ${rules.overtimeStartAfterMinutes} min threshold = ${raw} raw → ${overtimeMinutes} min (round DOWN ${rules.overtimeRoundingMinutes}, block ${rules.overtimeMinBlockMinutes}, cap ${rules.overtimeMaxMinutesPerDay ?? '∞'})`, { afterEndMinutes: afterEnd, earlyInMinutes: earlyIn, rawOvertimeMinutes: raw, overtimeMinutes });
+    rec.step('overtime', `min(${workedMinutes} worked − ${schedule.scheduledMinutes} scheduled = ${beyondScheduled}, ${afterEnd} min after expected end${rules.countEarlyInAsOvertime ? ` + ${earlyIn} min early in` : ''}) − ${rules.overtimeStartAfterMinutes} min threshold = ${raw} raw → ${overtimeMinutes} min (round DOWN ${rules.overtimeRoundingMinutes}, block ${rules.overtimeMinBlockMinutes}, cap ${rules.overtimeMaxMinutesPerDay ?? '∞'})`, { workedMinutes, scheduledMinutes: schedule.scheduledMinutes, beyondScheduledMinutes: beyondScheduled, afterEndMinutes: afterEnd, earlyInMinutes: earlyIn, rawOvertimeMinutes: raw, overtimeMinutes });
   } else if (firstIn && lastOut && schedule.kind === 'FLEXIBLE') {
     const raw = Math.max(0, workedMinutes - schedule.scheduledMinutes - rules.overtimeStartAfterMinutes);
     overtimeMinutes = finaliseOvertime(raw, rules);
@@ -468,7 +487,11 @@ function resolveMissingPunch(side: MissingSide, ctx: WorkContext, interpretation
   const { rules, rec } = ctx;
   const flag: AttendanceFlag = side === 'OUT' ? 'MISSING_OUT' : 'MISSING_IN';
   rec.flag(flag);
+  if (interpretation.missingIn) rec.flag('MISSING_IN');
+  if (interpretation.missingOut) rec.flag('MISSING_OUT');
   const behaviour = rules.missingPunchBehavior;
+  // A half-day leave/holiday never becomes a full PRESENT day: the leave half must stay visible to payroll.
+  const presentStatus: AttendanceStatus = schedule.halfDayOff !== null ? 'HALF_DAY' : 'PRESENT';
   const partial = (): WorkFigures => {
     const w = measureWork(ctx, interpretation, schedule);
     return { ...w, workedMinutes: 0, breakMinutes: 0, overtimeMinutes: 0, overtimeCategory: null };
@@ -476,8 +499,8 @@ function resolveMissingPunch(side: MissingSide, ctx: WorkContext, interpretation
 
   switch (behaviour) {
     case 'FLAG_ONLY': {
-      rec.step('missingPunch', `${flag} after window close → FLAG_ONLY: PRESENT, worked minutes unknown (0)`, { behaviour, status: 'PRESENT' });
-      return ['PRESENT', schedule, partial()];
+      rec.step('missingPunch', `${flag} after window close → FLAG_ONLY: ${presentStatus}, worked minutes unknown (0)`, { behaviour, status: presentStatus });
+      return [presentStatus, schedule, partial()];
     }
     case 'TREAT_AS_ABSENT': {
       rec.step('missingPunch', `${flag} → TREAT_AS_ABSENT`, { behaviour, status: 'ABSENT' });
@@ -490,14 +513,14 @@ function resolveMissingPunch(side: MissingSide, ctx: WorkContext, interpretation
     case 'ASSUME_SHIFT_END': {
       const assumed = assumedInstant(side, interpretation, schedule);
       if (assumed === null) {
-        rec.step('missingPunch', `${flag} → ASSUME_SHIFT_END has no schedule to assume from (no shift) → FLAG_ONLY`, { behaviour, status: 'PRESENT' });
-        return ['PRESENT', schedule, partial()];
+        rec.step('missingPunch', `${flag} → ASSUME_SHIFT_END has no schedule to assume from (no shift) → FLAG_ONLY`, { behaviour, status: presentStatus });
+        return [presentStatus, schedule, partial()];
       }
-      rec.step('missingPunch', `${flag} → ASSUME_SHIFT_END: ${side} assumed at ${toUtcIso(assumed)}`, { behaviour, assumed: toUtcIso(assumed), status: 'PRESENT' });
+      rec.step('missingPunch', `${flag} → ASSUME_SHIFT_END: ${side} assumed at ${toUtcIso(assumed)}; status follows the assumed worked minutes`, { behaviour, assumed: toUtcIso(assumed) });
       const work = measureWork(ctx, interpretation, schedule, { assumed: side === 'OUT' ? { lastOut: assumed } : { firstIn: assumed } });
       // The assumed instant is not a punch: keep the real timestamps only.
       const figures: WorkFigures = side === 'OUT' ? { ...work, lastOut: null } : { ...work, firstIn: null };
-      return ['PRESENT', schedule, figures];
+      return [classifyWorkingStatus(work.workedMinutes, schedule, rules, schedule.halfDayOff, rec), schedule, figures];
     }
     default: {
       const exhaustive: never = behaviour;
@@ -518,6 +541,10 @@ function assumedInstant(side: MissingSide, interpretation: Interpretation, sched
 
 function classifyWorkingStatus(workedMinutes: number, schedule: Schedule, rules: AttendanceRules, halfDayOff: HalfDayOff, rec: Recorder): AttendanceStatus {
   if (schedule.kind === 'NONE') {
+    if (halfDayOff !== null) {
+      rec.step('status', `half-day leave/holiday without a shift: ${workedMinutes} worked minutes → HALF_DAY`, { status: 'HALF_DAY', workedMinutes });
+      return 'HALF_DAY';
+    }
     rec.step('status', `PRESENT (no shift: ${workedMinutes} worked minutes, no thresholds)`, { status: 'PRESENT', workedMinutes });
     return 'PRESENT';
   }

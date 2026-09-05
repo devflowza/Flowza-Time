@@ -21,6 +21,10 @@ export interface MockStreamConfig {
   scenario: string;
 }
 
+/**
+ * Upper bound on simulated days. The cap is applied from `startDate` forwards (never by dropping the oldest days):
+ * sequence numbers must stay stable for the lifetime of a cursor, so the window may only ever grow at its end.
+ */
 export const MAX_STREAM_DAYS = 400;
 
 /** 32-bit FNV-1a over the integer parts, followed by a murmur3 finaliser. */
@@ -104,9 +108,8 @@ export function streamDays(cfg: MockStreamConfig): string[] {
   if (!start.isValid || !today.isValid || start > today) return [];
   const total = Math.floor(today.diff(start, 'days').days) + 1;
   const count = Math.min(total, MAX_STREAM_DAYS);
-  const first = start.plus({ days: total - count });
   const out: string[] = [];
-  for (let i = 0; i < count; i += 1) out.push(first.plus({ days: i }).toISODate() ?? '');
+  for (let i = 0; i < count; i += 1) out.push(start.plus({ days: i }).toISODate() ?? '');
   return out;
 }
 

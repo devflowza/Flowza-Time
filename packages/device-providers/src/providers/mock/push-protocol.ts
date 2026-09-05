@@ -1,6 +1,6 @@
 import { PUNCH_DIRECTIONS, VERIFICATION_METHODS, type PunchDirection, type RawTransaction, type VerificationMethod } from '@flowza/contracts';
 import { ProtocolError } from '../../errors.js';
-import { parseDeviceTime, splitLines, toIsoUtc } from '../../protocol-utils.js';
+import { assertBodySize, parseDeviceTime, splitLines, toIsoUtc } from '../../protocol-utils.js';
 import type { DevicePushCommand, DevicePushInbound, DevicePushProtocolHandler, DevicePushRequest, DevicePushResponse } from '../../types.js';
 
 /**
@@ -58,6 +58,7 @@ export function createMockPushProtocol(): DevicePushProtocolHandler {
       const r = route(req);
       if (!r) throw new ProtocolError(`Unknown mock push route "${req.path}"`, { httpStatus: 404 });
       if (r.serialNumber !== ctx.serialNumber) throw new ProtocolError('Serial number mismatch between route and context');
+      assertBodySize(req.rawBody);
       const method = req.method.toUpperCase();
       switch (r.route) {
         case 'attendance': {

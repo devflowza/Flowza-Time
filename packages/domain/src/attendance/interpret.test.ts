@@ -147,3 +147,15 @@ describe('breaks', () => {
     expect(computeBreaks({ ...base, breaks: [{ minutes: 30, paid: false }], firstIn: t('09:00'), lastOut: null }).source).toBe('NONE');
   });
 });
+
+describe('interpretPunches DIRECTIONAL orphan OUT (review)', () => {
+  beforeEach(resetIds);
+
+  it('does not report an orphan OUT as lastOut when a later IN opened a segment', () => {
+    const r = interpretPunches([punch(DATE, '08:00', 'PUNCH_OUT'), punch(DATE, '09:00', 'PUNCH_IN')], 'DIRECTIONAL', MUSCAT);
+    expect(r.missingIn).toBe(true);
+    expect(r.missingOut).toBe(true);
+    expect(r.lastOut).toBeNull();
+    expect(r.firstIn?.equals(t('09:00'))).toBe(true);
+  });
+});

@@ -180,8 +180,9 @@ function interpretDirectional(ordered: readonly Timed[]): Interpretation {
   });
   const missingOut = state !== 'OUT';
   const result = finish('DIRECTIONAL', punches, segments, breaks, missingIn, missingOut);
-  // An OUT without any IN: the day has an OUT instant but no IN; later full segments (if any) still govern.
-  if (orphanOut !== null && result.lastOut === null) result.lastOut = orphanOut;
+  // A lone OUT without any IN is the day's OUT instant. Once a later IN opened a segment the orphan is only
+  // evidence of the missing IN: reporting it as lastOut would put the OUT before the IN (negative span).
+  if (orphanOut !== null && segments.length === 0) result.lastOut = orphanOut;
   return result;
 }
 

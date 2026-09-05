@@ -57,7 +57,8 @@ function has(flags: readonly AttendanceFlag[], flag: AttendanceFlag): boolean {
 /**
  * Aggregate daily records into payroll totals. Fractions: a HALF_DAY counts 0.5 present; the other half is
  * 0.5 leave when the record carries HALF_DAY_LEAVE, otherwise 0.5 absent. ABSENT + HALF_DAY_LEAVE is 0.5
- * absent + 0.5 leave. Regular minutes are `worked − overtime` per record (never negative).
+ * absent + 0.5 leave; PRESENT/MISSING_PUNCH + HALF_DAY_LEAVE is 0.5 present + 0.5 leave. Regular minutes are
+ * `worked − overtime` per record (never negative).
  */
 export function summarisePeriod(records: readonly PeriodRecordLike[], opts: PeriodSummaryOptions): PeriodSummary {
   const defaultLeavePaid = opts.defaultLeavePaid ?? true;
@@ -100,7 +101,9 @@ export function summarisePeriod(records: readonly PeriodRecordLike[], opts: Peri
     switch (record.status) {
       case 'PRESENT':
       case 'MISSING_PUNCH':
-        summary.presentDays += 1;
+        // A present record on a half-day leave (e.g. legacy rows) is still half a day of leave for payroll.
+        if (halfDayLeave) { summary.halfDays += 1; summary.presentDays += 0.5; addLeave(0.5); }
+        else summary.presentDays += 1;
         break;
       case 'HALF_DAY':
         summary.halfDays += 1;

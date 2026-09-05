@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { deviceEmployeeSchema, type DeviceEmployee, type PunchDirection, type RawTransaction, type VerificationMethod } from '@flowza/contracts';
 import { ProtocolError } from '../../errors.js';
-import { parseDeviceTime, queryValue, splitLines, toIsoUtc } from '../../protocol-utils.js';
+import { assertBodySize, boundedText, parseDeviceTime, queryValue, splitLines, toIsoUtc } from '../../protocol-utils.js';
 import { ProviderError, type DeviceInfo, type DevicePushCommand, type DevicePushInbound, type DevicePushParseContext, type DevicePushProtocolHandler, type DevicePushRequest, type DevicePushResponse } from '../../types.js';
 
 /**
@@ -63,6 +63,10 @@ const COMMAND_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
 const CONTROL_CHARS = /\p{Cc}/gu;
 const NAME_MAX = 24;
 const TAB = '\t';
+/** Raw-payload budget (§ raw payload allowlist, 16 KB cap): at most this many trailing ATTLOG columns are kept … */
+const MAX_RESERVED_FIELDS = 8;
+/** … and every free-text vendor field is cut at this length. */
+const MAX_RAW_FIELD = 64;
 
 type IclockRoute = 'cdata' | 'getrequest' | 'devicecmd' | 'registry' | 'push' | 'ping' | 'querydata';
 const ROUTES: ReadonlySet<string> = new Set<IclockRoute>(['cdata', 'getrequest', 'devicecmd', 'registry', 'push', 'ping', 'querydata']);
@@ -95,6 +99,10 @@ export function parseAttlogLine(line: string, index: number, timezone: string, s
   const at = parseDeviceTime(time, timezone);
   const status = intField(statusRaw, 'Status', n);
   const verify = intField(verifyRaw, 'Verify', n);
+  // Unknown trailing columns are kept for diagnostics but bounded: a firmware (or attacker) appending kilobytes
+  // per line must not inflate raw_payload beyond the 16 KB budget or smuggle binary data into the database.
+  const truncated = reserved.length > MAX_RESERVED_FIELDS || workCode.length > MAX_RAW_FIELD || reserved.some((f) => f.length > MAX_RAW_FIELD);
+  const boundedReserved = reserved.slice(0, MAX_RESERVED_FIELDS).map((f) => f.slice(0, MAX_RAW_FIELD));
   return {
     providerTransactionId: null, // the device has no stable record id; the ingestion dedupe hash applies
     deviceEmployeeId: pin,
@@ -102,7 +110,10 @@ export function parseAttlogLine(line: string, index: number, timezone: string, s
     deviceLocalTime: time,
     verificationMethod: verify !== undefined ? ZK_VERIFY_METHODS[verify] ?? 'unknown' : 'unknown',
     direction: status !== undefined ? ZK_STATUS_DIRECTIONS[status] ?? 'unknown' : 'unknown',
-    rawPayload: { protocol: ICLOCK_PROTOCOL_KEY, table: 'ATTLOG', serialNumber, pin, time, status: status ?? null, verify: verify ?? null, workCode, reserved },
+    rawPayload: {
+      protocol: ICLOCK_PROTOCOL_KEY, table: 'ATTLOG', serialNumber, pin, time, status: status ?? null, verify: verify ?? null,
+      workCode: workCode.slice(0, MAX_RAW_FIELD), reserved: boundedReserved, ...(truncated ? { truncated: true } : {}),
+    },
   };
 }
 
@@ -136,7 +147,7 @@ export function parseOperlogUserLine(line: string, index: number): DeviceEmploye
     privilege: ZK_ADMIN_PRIVILEGES.has(pri) ? 'admin' : 'user',
     enabled: true,
     photoUrl: null,
-    extra: { protocol: ICLOCK_PROTOCOL_KEY, pri, grp: kv.Grp ?? null, tz: kv.TZ ?? null, verify: kv.Verify ?? null },
+    extra: { protocol: ICLOCK_PROTOCOL_KEY, pri, grp: boundedText(kv.Grp, MAX_RAW_FIELD), tz: boundedText(kv.TZ, MAX_RAW_FIELD), verify: boundedText(kv.Verify, MAX_RAW_FIELD) },
   };
 }
 
@@ -282,6 +293,7 @@ function buildZkPushProtocol(options: ZkPushProtocolOptions): DevicePushProtocol
       const sn = serialOf(req);
       if (sn === null) throw new ProtocolError('Missing or invalid SN query parameter');
       if (sn !== ctx.serialNumber) throw new ProtocolError('Serial number mismatch between request and context', { details: { expected: ctx.serialNumber } });
+      assertBodySize(req.rawBody);
       const method = req.method.toUpperCase();
 
       if (r === 'cdata' && method === 'GET') {
@@ -292,7 +304,9 @@ function buildZkPushProtocol(options: ZkPushProtocolOptions): DevicePushProtocol
       if (r === 'cdata' && method === 'POST') {
         const table = (queryValue(req.query, 'table') ?? '').toUpperCase();
         if (table === '') throw new ProtocolError('POST /iclock/cdata requires a table parameter');
-        const stamp = queryValue(req.query, 'Stamp') ?? queryValue(req.query, 'OpStamp');
+        // The stamp is persisted by the route and echoed on the next handshake: only well-formed values may be stored.
+        const rawStamp = queryValue(req.query, 'Stamp') ?? queryValue(req.query, 'OpStamp');
+        const stamp = rawStamp !== undefined && STAMP_PATTERN.test(rawStamp) ? rawStamp : undefined;
         if (table === 'ATTLOG') {
           const transactions = splitLines(req.rawBody).map((line, i) => parseAttlogLine(line, i, ctx.timezone, sn));
           return { kind: 'attendance', transactions, response: text(`OK: ${transactions.length}`), meta: { table, stamp: stamp ?? null, lines: transactions.length } };

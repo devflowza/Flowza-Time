@@ -8,6 +8,13 @@ import { createZkPushProtocol, type ZkPushProtocolOptions } from './push-protoco
 export const PUSH_NOT_VERIFIED_MESSAGE = 'Push devices are verified when the device contacts FlowZa';
 const DEFAULT_RECENT_WINDOW_SECONDS = 300;
 
+/** Wizard config values arrive as string | number | boolean; a numeric string is as good as a number here. */
+function positiveInt(value: unknown): number | undefined {
+  if (typeof value === 'number') return Number.isInteger(value) && value > 0 ? value : undefined;
+  if (typeof value === 'string' && /^\d{1,9}$/.test(value)) return positiveInt(Number(value));
+  return undefined;
+}
+
 export interface ZKTecoPushProviderOptions {
   /** Override for ZKTeco-derived brands (eSSL, FingerTec) that reuse the protocol under their own key. */
   definition?: ProviderDefinition;
@@ -48,7 +55,8 @@ export class ZKTecoPushProvider implements DeviceProvider {
     if (!seen.isValid) return { lastSeenAt: undefined, ageSeconds: undefined, recent: false };
     const now = DateTime.fromJSDate(this.clock());
     const ageSeconds = Math.max(0, Math.round(now.diff(seen, 'seconds').seconds));
-    const interval = typeof ctx.config.pushInterval === 'number' && ctx.config.pushInterval > 0 ? ctx.config.pushInterval * 3 : DEFAULT_RECENT_WINDOW_SECONDS;
+    const pushInterval = positiveInt(ctx.config.pushInterval);
+    const interval = pushInterval !== undefined ? pushInterval * 3 : DEFAULT_RECENT_WINDOW_SECONDS;
     return { lastSeenAt: seen.toUTC().toISO({ suppressMilliseconds: true }) ?? undefined, ageSeconds, recent: ageSeconds <= Math.max(interval, DEFAULT_RECENT_WINDOW_SECONDS) };
   }
 

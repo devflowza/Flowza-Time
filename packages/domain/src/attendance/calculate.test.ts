@@ -471,3 +471,112 @@ describe('calculateDailyRecord — Ramadan and timezones', () => {
     expect(() => calculateDailyRecord(input({ timezone: 'Nowhere/City' }))).toThrowError(AppError);
   });
 });
+
+describe('calculateDailyRecord — adversarial review', () => {
+  beforeEach(resetIds);
+  const holiday = { id: 'hol-1', name: 'National Day', isHalfDay: false };
+  const halfLeave = { id: 'lv-h', leaveTypeCode: 'ANNUAL', isPaid: true, isHalfDay: true, halfDayPart: 'FIRST_HALF' as const };
+
+  it('never awards regular overtime for merely completing the hours after a late arrival (§G.5: worked beyond scheduled)', () => {
+    const r = calculateDailyRecord(input({ events: day('11:00', '19:00') }));
+    expect(r).toMatchObject({ workedMinutes: 480, lateMinutes: 110, overtimeMinutes: 0, overtimeCategory: null });
+    expect(r.flags).not.toContain('OVERTIME');
+    expect(r.trace.steps.find((s) => s.step === 'overtime')?.values).toMatchObject({ afterEndMinutes: 120, beyondScheduledMinutes: 0, rawOvertimeMinutes: 0 });
+  });
+
+  it('caps overtime by the minutes actually worked when the whole span lies after the shift end', () => {
+    const r = calculateDailyRecord(input({ events: day('18:00', '20:00'), rules: rules({ overtimeStartAfterMinutes: 0, overtimeMinBlockMinutes: 0, overtimeRoundingMinutes: 0 }) }));
+    expect(r.workedMinutes).toBe(120);
+    expect(r.overtimeMinutes).toBeLessThanOrEqual(120);
+    expect(r.overtimeMinutes).toBe(0); // worked (120) does not exceed the 480 scheduled minutes
+  });
+
+  it('does not leave a stale OVERTIME flag or a regular-overtime step on a holiday whose work earns no overtime', () => {
+    const r = calculateDailyRecord(input({ holiday, events: day('09:00', '18:50'), rules: rules({ holidayWorkCountsAsOvertime: false }) }));
+    expect(r).toMatchObject({ status: 'HOLIDAY', overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_HOLIDAY'] });
+    expect(r.trace.steps.filter((s) => s.step === 'overtime')).toHaveLength(1);
+  });
+
+  it('does not flag OVERTIME on a leave day with long hours', () => {
+    const leave = { id: 'lv-1', leaveTypeCode: 'SICK', isPaid: true, isHalfDay: false, halfDayPart: null };
+    const r = calculateDailyRecord(input({ leave, events: day('09:00', '19:00') }));
+    expect(r).toMatchObject({ status: 'LEAVE', workedMinutes: 600, overtimeMinutes: 0, flags: [] });
+  });
+
+  it('records that scheduled minutes are zeroed on a non-working day', () => {
+    const r = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00') }));
+    expect(r.scheduledMinutes).toBe(0);
+    expect(stepNames(r)).toContain('schedule.nonWorking');
+  });
+
+  it('does not flag MISSING_OUT on a holiday while the punch window is still open', () => {
+    const open = calculateDailyRecord(input({ holiday, events: day('10:00'), now: DURING_SHIFT }));
+    expect(open.status).toBe('HOLIDAY');
+    expect(open.flags).not.toContain('MISSING_OUT');
+    const closed = calculateDailyRecord(input({ holiday, events: day('10:00'), now: AFTER_WINDOW }));
+    expect(closed.flags).toContain('MISSING_OUT');
+  });
+
+  it('keeps an open PAIRED segment PENDING while the window is open instead of judging early departure', () => {
+    const paired = rules({ punchInterpretation: 'PAIRED' });
+    const r = calculateDailyRecord(input({ events: day('09:00', '13:00', '14:00'), rules: paired, now: at(DATE, '15:00') }));
+    expect(r.status).toBe('PENDING');
+    expect(r.flags).not.toContain('EARLY_DEPARTURE');
+    expect(r.flags).not.toContain('MISSING_OUT');
+    expect(r.lastOutAt).toBeNull();
+    expect(r.firstInAt).toBe(at(DATE, '09:00'));
+  });
+
+  it('DIRECTIONAL orphan OUT followed by an open IN is a missing OUT, not a negative span with early departure', () => {
+    const events = [punch(DATE, '08:00', 'PUNCH_OUT'), punch(DATE, '09:00', 'PUNCH_IN')];
+    const r = calculateDailyRecord(input({ events, rules: rules({ punchInterpretation: 'DIRECTIONAL' }), now: AFTER_WINDOW }));
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 0, earlyDepartureMinutes: 0, lastOutAt: null, firstInAt: at(DATE, '09:00') });
+    expect(r.flags).toEqual(['MISSING_IN', 'MISSING_OUT']);
+  });
+
+  it('flags MISSING_IN when a DIRECTIONAL day has an orphan OUT before a complete segment', () => {
+    const events = [punch(DATE, '08:00', 'PUNCH_OUT'), punch(DATE, '09:00', 'PUNCH_IN'), punch(DATE, '17:00', 'PUNCH_OUT')];
+    const r = calculateDailyRecord(input({ events, rules: rules({ punchInterpretation: 'DIRECTIONAL' }) }));
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 480 });
+    expect(r.flags).toContain('MISSING_IN');
+  });
+
+  it('half-day leave stays HALF_DAY when the OUT is missing (FLAG_ONLY / ASSUME_SHIFT_END) so payroll counts the leave half', () => {
+    const flagOnly = calculateDailyRecord(input({ leave: halfLeave, events: day('13:00'), now: AFTER_WINDOW }));
+    expect(flagOnly.status).toBe('HALF_DAY');
+    expect(flagOnly.flags).toEqual(['MISSING_OUT', 'HALF_DAY_LEAVE']);
+    const assumed = calculateDailyRecord(input({ leave: halfLeave, events: day('13:00'), now: AFTER_WINDOW, rules: rules({ missingPunchBehavior: 'ASSUME_SHIFT_END' }) }));
+    expect(assumed).toMatchObject({ status: 'HALF_DAY', workedMinutes: 240, scheduledMinutes: 240 });
+  });
+
+  it('half-day leave without a shift still yields HALF_DAY', () => {
+    const r = calculateDailyRecord(input({ shift: null, shiftAssignmentId: null, leave: halfLeave, events: day('13:00', '17:00') }));
+    expect(r.status).toBe('HALF_DAY');
+    expect(r.flags).toEqual(['HALF_DAY_LEAVE', 'NO_SHIFT']);
+  });
+
+  it('ASSUME_SHIFT_END classifies the assumed day like a real one (short assumed span → HALF_DAY, UNDER_HOURS)', () => {
+    const r = calculateDailyRecord(input({ events: day('15:00'), now: AFTER_WINDOW, rules: rules({ missingPunchBehavior: 'ASSUME_SHIFT_END' }) }));
+    expect(r).toMatchObject({ status: 'HALF_DAY', workedMinutes: 120 });
+    expect(r.flags).toEqual(expect.arrayContaining(['MISSING_OUT', 'UNDER_HOURS']));
+  });
+
+  it('keeps the attribution decision in the trace when overlapping windows were resolved by nearest scheduled start', () => {
+    const shift = nightShift({ punchInWindowBeforeMinutes: 720, punchOutWindowAfterMinutes: 720 });
+    // 10:00 D+1 lies in the D window (10:00 D → 18:00 D+1) and the D+1 window (10:00 D+1 → 18:00 D+2):
+    // 12 h from both scheduled starts → exact tie → earlier date D, recorded on the punch.
+    const r = calculateDailyRecord(input({ shift, events: [punch(DATE, '22:00'), punch(D1, '10:00')] }));
+    const outPunch = r.trace.punches.find((p) => p.punchedAt === at(D1, '10:00'));
+    expect(outPunch?.role).toBe('OUT');
+    expect(outPunch?.note).toBe('last punch in window; overlapping windows 2026-03-10/2026-03-11 → nearest scheduled start (720 min)');
+    expect(r.trace.punches.find((p) => p.punchedAt === at(DATE, '22:00'))?.note).toBe('first punch in window');
+    expect(r.workedMinutes).toBe(720);
+  });
+
+  it('accepts an OUT exactly at the end of a FIXED window with no punch-out margin (closed interval per §G.3)', () => {
+    const shift = fixedShift({ startTime: '16:00', endTime: '00:00', punchOutWindowAfterMinutes: 0 });
+    const r = calculateDailyRecord(input({ shift, events: [punch(DATE, '16:00'), punch(D1, '00:00')] }));
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 480, punchCount: 2 });
+    expect(r.flags).toEqual(['CROSS_MIDNIGHT']);
+  });
+});

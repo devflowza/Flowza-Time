@@ -4,6 +4,7 @@ import { z } from 'zod';
 import type { DeviceCapabilities, DeviceEmployee } from '@flowza/contracts';
 import { ProviderError, type AttendancePullResult, type ConnectionResult, type DeviceEmployeePage, type DeviceInfo, type DeviceOperationResult, type DeviceProvider, type DeviceStatus, type PageCursor, type ProviderContext, type SyncCursor, type WebhookHandlingResult, type WebhookRequest } from '../../types.js';
 import { MOCK_DEFINITION, MOCK_SCENARIOS, type MockScenario } from './definition.js';
+import { assertTimezone } from '../../protocol-utils.js';
 import { countStream, employeeId, employeeName, seqAtOrAfter, sliceStream, unit, type MockStreamConfig } from './stream.js';
 import { handleMockWebhook } from './webhook.js';
 import { createMockPushProtocol } from './push-protocol.js';
@@ -52,13 +53,28 @@ function delay(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export function parseMockCursor(cursor: SyncCursor | null): number {
-  if (cursor === null) return 0;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * Mock sync cursor. `lastSeq` is an offset into the deterministic stream; `startDate` pins the day the stream is
+ * anchored on. Without it the default anchor ("30 days before now") would move every day and `lastSeq` would
+ * silently point at different punches (a whole day skipped per day). A cursor's own `startDate` therefore always
+ * wins over the configured one — changing the anchor requires an operator cursor rewind.
+ */
+export interface MockCursor { lastSeq: number; startDate?: string }
+
+export function parseMockCursor(cursor: SyncCursor | null): MockCursor {
+  if (cursor === null) return { lastSeq: 0 };
   const lastSeq = cursor.lastSeq;
   if (typeof lastSeq !== 'number' || !Number.isInteger(lastSeq) || lastSeq < 0) {
     throw new ProviderError('INVALID_CONFIG', 'Invalid mock cursor: expected { lastSeq: non-negative integer }', { details: { cursor } });
   }
-  return lastSeq;
+  const startDate = cursor.startDate;
+  if (startDate === undefined) return { lastSeq };
+  if (typeof startDate !== 'string' || !ISO_DATE.test(startDate) || !DateTime.fromISO(startDate, { zone: 'utc' }).isValid) {
+    throw new ProviderError('INVALID_CONFIG', 'Invalid mock cursor: startDate must be YYYY-MM-DD', { details: { cursor } });
+  }
+  return { lastSeq, startDate };
 }
 
 function parseListCursor(page: PageCursor): number {
@@ -92,9 +108,10 @@ export class MockAttendanceProvider implements DeviceProvider {
 
   private now(): DateTime { return DateTime.fromJSDate(this.clock(), { zone: 'utc' }); }
 
-  private streamConfig(ctx: ProviderContext, cfg: MockConfig): MockStreamConfig {
+  private streamConfig(ctx: ProviderContext, cfg: MockConfig, anchor?: string): MockStreamConfig {
+    assertTimezone(ctx.timezone);
     const now = this.now();
-    const startDate = cfg.startDate ?? now.setZone(ctx.timezone).minus({ days: DEFAULT_HISTORY_DAYS }).toISODate() ?? '';
+    const startDate = anchor ?? cfg.startDate ?? now.setZone(ctx.timezone).minus({ days: DEFAULT_HISTORY_DAYS }).toISODate() ?? '';
     return {
       seed: cfg.seed,
       employeeCount: cfg.employeeCount ?? (cfg.scenario === 'large_batches' ? LARGE_BATCH_EMPLOYEES : DEFAULT_EMPLOYEES),
@@ -117,6 +134,8 @@ export class MockAttendanceProvider implements DeviceProvider {
   /** One simulated round trip to the device: throttle, count the call, apply the scenario. */
   private async simulate(ctx: ProviderContext, cfg: MockConfig, operation: string): Promise<void> {
     await ctx.acquire();
+    // A real HTTP client would fail immediately on an aborted signal; do the same in every scenario.
+    if (ctx.signal.aborted) throw timeoutError(`Operation ${operation} aborted before the simulated device was contacted`);
     const n = this.nextCall(ctx);
     const scenario: MockScenario = cfg.scenario;
     if (scenario === 'auth_failed' && ctx.credentials.apiKey !== 'valid') {
@@ -215,11 +234,11 @@ export class MockAttendanceProvider implements DeviceProvider {
 
   async pullAttendance(ctx: ProviderContext, cursor: SyncCursor | null, opts: { pageSize?: number; since?: string } = {}): Promise<AttendancePullResult> {
     const cfg = this.parseConfig(ctx);
-    const from0 = parseMockCursor(cursor); // validate before touching the device
+    const parsed = parseMockCursor(cursor); // validate before touching the device
     await this.simulate(ctx, cfg, 'pullAttendance');
-    const stream = this.streamConfig(ctx, cfg);
+    const stream = this.streamConfig(ctx, cfg, parsed.startDate);
     const pageSize = cfg.scenario === 'large_batches' ? LARGE_BATCH_PAGE_SIZE : Math.min(LARGE_BATCH_PAGE_SIZE, Math.max(1, opts.pageSize ?? cfg.pageSize));
-    let from = from0;
+    let from = parsed.lastSeq;
     if (cursor === null && opts.since !== undefined) {
       const since = DateTime.fromISO(opts.since, { setZone: true });
       if (!since.isValid) throw new ProviderError('INVALID_CONFIG', 'Invalid `since` timestamp', { details: { since: opts.since } });
@@ -235,11 +254,12 @@ export class MockAttendanceProvider implements DeviceProvider {
       duplicatesInjected = replay.length;
       transactions = [...replay, ...items];
     }
+    const nextCursor: MockCursor = { lastSeq: next, startDate: stream.startDate };
     return {
       transactions,
-      nextCursor: { lastSeq: next },
+      nextCursor: { ...nextCursor },
       hasMore: next < total,
-      meta: { scenario: cfg.scenario, pageSize, total, from, duplicatesInjected },
+      meta: { scenario: cfg.scenario, pageSize, total, from, duplicatesInjected, startDate: stream.startDate },
     };
   }
 
