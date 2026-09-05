@@ -109,3 +109,10 @@ Implement `DeviceProvider`; register in the `ProviderRegistry`; keep `device_pro
   `CONCURRENTLY` (non-transactional file); expand → backfill (worker job) → contract.
 - **Connection budget**: API pool ≤ 10 per instance, worker ≤ 10 per process (+1 scheduler session connection); sum below the Supabase
   tier limit with 30% headroom; transaction pooler for API, session pooler/direct for the worker.
+
+## Zod 4 pitfalls (found in review — apply everywhere)
+- `.partial()` of a schema that carries `.default(...)` **re-applies the defaults** on PATCH: a single-field update resets every
+  defaulted field. Build update schemas without defaults (e.g. `schema.omit(...).partial()` only when no defaults remain, or
+  define explicit update schemas with `.optional()` fields) and write a test that PATCHes one field and asserts nothing else changed.
+- `z.coerce.boolean()` treats the string `'false'` as `true`. Use the shared `booleanQuerySchema` from `@flowza/contracts`
+  (`'true' | 'false' | '1' | '0'`) for query parameters.
