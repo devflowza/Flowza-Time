@@ -52,9 +52,15 @@ export async function applyMigrations(connectionString: string, opts: { shim?: b
       }
     }
     if (opts.shim) {
-      // local passwords for the application roles (local development only)
-      await client.query(`alter role flowza_api password 'flowza_api'`);
-      await client.query(`alter role flowza_worker password 'flowza_worker'`);
+      // local passwords for the application roles (local development only); serialised because concurrent test files
+      // altering the same role raise "tuple concurrently updated"
+      await client.query('select pg_advisory_lock(424242)');
+      try {
+        await client.query(`alter role flowza_api password 'flowza_api'`);
+        await client.query(`alter role flowza_worker password 'flowza_worker'`);
+      } finally {
+        await client.query('select pg_advisory_unlock(424242)');
+      }
     }
   } finally {
     await client.end();

@@ -35,7 +35,7 @@ beforeAll(async () => {
   const dev = (id: string, code: string, scenario: string, extra: Record<string, unknown> = {}) => ({ id, organizationId: ORG, branchId: BRANCH, code, name: code, providerKey: 'mock', manufacturer: 'FlowZa', integrationType: 'VENDOR_CLOUD_PULL' as const, timezone: 'Asia/Muscat', config: cfg(scenario, extra), syncIntervalMinutes: 5 });
   await a.insertInto('devices').values([
     dev(D.healthy, 'HEALTHY', 'healthy'), dev(D.duplicates, 'DUPES', 'duplicates'), dev(D.flaky, 'FLAKY', 'flaky'), dev(D.offline, 'OFFLINE', 'offline'),
-    dev(D.unknown, 'UNKNOWN', 'unknown_employees'), dev(D.auth, 'AUTH', 'auth_failed'), dev(D.rate, 'RATE', 'rate_limited', { retryAfterMs: 120_000 }),
+    dev(D.unknown, 'UNKNOWN', 'unknown_employees', { employeeCount: 20 }), dev(D.auth, 'AUTH', 'auth_failed'), dev(D.rate, 'RATE', 'rate_limited', { retryAfterMs: 120_000 }),
     { ...dev(D.push, 'PUSH', 'healthy'), providerKey: 'zkteco_push', integrationType: 'DEVICE_PUSH' as const, serialNumber: 'ZK-PUSH-1', config: '{}' },
     { ...dev(D.webhook, 'HOOK', 'healthy'), integrationType: 'VENDOR_WEBHOOK' as const, serialNumber: 'HOOK-SERIAL-1' },
   ]).execute();
@@ -46,6 +46,9 @@ afterAll(async () => { await h?.close(); });
 /** Creates a one-item sync job for the device and returns a JobContext like the runner would build. */
 async function itemJob(deviceId: string, operation = 'PULL_ATTENDANCE', options: Record<string, unknown> = {}, opts: { trigger?: 'MANUAL' | 'SCHEDULED' | 'SYSTEM'; devices?: string[] } = {}) {
   const devices = opts.devices ?? [deviceId];
+  // handlers are invoked directly (no Runner), so the queue rows of earlier runs are still "pending": clear them like a
+  // completed run would, otherwise the dedupe key would mark the new item SKIPPED (which is exercised separately below)
+  await sql`delete from jobs.queue where dedupe_key = any(${sql.val(devices.map((d) => `${operation === 'DEVICE_HEALTH_CHECK' ? 'health' : 'pull'}:${d}`))}::text[])`.execute(h.tdb.adminDb);
   const created = await withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => createSyncJob(trx, h.deps.queue, {
     organizationId: ORG, jobType: operation as never, trigger: opts.trigger ?? 'MANUAL', items: devices.map((d) => ({ deviceId: d, operation: operation as never, options })),
   }));
@@ -326,6 +329,7 @@ describe('circuit breaker', () => {
   const key = { organizationId: ORG, providerKey: 'mock', accountKey: 'default' };
   it('opens after 5 consecutive vendor errors, marks devices vendor_degraded, rejects pulls until half-open, closes on success', async () => {
     expect(accountKeyFor(await device(D.healthy))).toBe('default');
+    await h.tdb.adminDb.deleteFrom('providerCircuitStates').where('organizationId', '=', ORG).execute(); // earlier scenarios (rate limit) left a count behind
     const run = <T,>(fn: (trx: Parameters<typeof recordFailure>[0]) => Promise<T>) => withContext(h.deps.db, { kind: 'system', organizationId: ORG }, fn);
     for (let i = 1; i <= 4; i++) {
       const r = await run((trx) => recordFailure(trx, key, { code: 'VENDOR_ERROR', message: `boom ${i}` }, clock));

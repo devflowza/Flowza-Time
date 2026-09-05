@@ -62,7 +62,8 @@ export class PgJobQueue implements JobQueue {
 
   async enqueue(opts: EnqueueOptions, trx?: Trx): Promise<string> {
     const executor = trx ?? this.db;
-    const res = await sql<{ id: string }>`select jobs.enqueue(
+    // app.enqueue_job is SECURITY DEFINER and works in user, system, platform and login-role contexts (membership-checked for users).
+    const res = await sql<{ id: string }>`select app.enqueue_job(
       ${opts.queue}, ${opts.jobType}, ${opts.organizationId}::uuid, ${JSON.stringify(opts.payload)}::jsonb,
       ${opts.priority ?? 5}, ${opts.runAt ?? new Date()}, ${opts.dedupeKey ?? null},
       ${opts.maxAttempts ?? 6}, ${opts.lockTimeoutSeconds ?? 600}, ${opts.correlationId ?? null}
