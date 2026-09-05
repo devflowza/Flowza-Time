@@ -21,7 +21,7 @@ export function InvitationsTab() {
   const { revoke } = useMemberMutations();
   const [revoking, setRevoking] = useState<InvitationDto | null>(null);
   const [inviting, setInviting] = useState(false);
-  const now = Date.now();
+  const [now] = useState(() => Date.now());
 
   return (
     <div className="space-y-3">

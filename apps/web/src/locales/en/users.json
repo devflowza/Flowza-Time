@@ -1,0 +1,35 @@
+{
+  "title": "Users & roles",
+  "subtitle": "Who can sign in to this organisation, what they may do, and which branches they see.",
+  "tabs": { "members": "Members", "invitations": "Invitations", "roles": "Roles" },
+  "status": { "active": "Active", "invited": "Invited", "suspended": "Suspended" },
+  "filters": { "allStatuses": "All statuses", "allRoles": "All roles" },
+  "categories": { "dashboard": "Dashboard", "organization": "Organisation", "users": "Users & roles", "structure": "Structure", "employees": "Employees", "devices": "Devices & sync", "shifts": "Shifts", "calendar": "Holidays", "leave": "Leave", "attendance": "Attendance", "payroll": "Payroll", "reports": "Reports", "audit": "Audit", "notifications": "Notifications" },
+  "fields": {
+    "email": "Email", "role": "Role", "selectRole": "Select a role", "branchScope": "Branch scope", "allBranches": "All branches", "allBranchesHint": "Turn off to limit access to selected branches.",
+    "branches": "Branches", "branchesRequired": "Select at least one branch or grant all branches", "noBranches": "No active branches", "lastLogin": "Last sign-in",
+    "linkEmployee": "Linked employee", "linkEmployeeHint": "Lets the user see their own attendance and request corrections."
+  },
+  "members": {
+    "you": "you", "searchPlaceholder": "Search name or email…", "empty": "No members", "emptyHint": "Invite colleagues to give them access.",
+    "edit": "Edit {{name}}", "updated": "{{name}} updated", "ownerHint": "Only owners can change the owner role; the last active owner cannot be demoted.",
+    "statusHint": "Suspending revokes the user's sessions immediately.", "suspend": "Suspend", "suspendTitle": "Suspend {{name}}?", "suspendHint": "The user loses access immediately and their sessions are revoked. Their history stays. You can reactivate them later.", "suspended": "Member suspended"
+  },
+  "invite": {
+    "title": "Invite member", "hint": "The invitation is bound to this email and expires in 7 days.", "send": "Create invitation",
+    "createdTitle": "Invitation created", "createdHint": "Share the token below with {{email}}. It is shown only once.", "createdExisting": "{{email}} already has an account — a pending membership was created; they can accept with the token below.",
+    "token": "Invitation token", "copyToken": "Copy token", "tokenOnce": "Copy it now — the token is never shown again. Expires {{expires}}."
+  },
+  "invitations": {
+    "hint": "Pending invitations. Revoking also removes the pending membership.", "empty": "No pending invitations", "emptyHint": "Invited users appear here until they accept.",
+    "invitedBy": "Invited by", "expires": "Expires", "expired": "Expired", "pending": "Pending", "revoke": "Revoke", "revokeTitle": "Revoke invitation for {{email}}?", "revokeHint": "The token stops working immediately.", "revoked": "Invitation revoked"
+  },
+  "roles": {
+    "hint": "System roles are fixed. Create custom roles to grant an exact permission set.", "empty": "No roles", "create": "Create role", "createHint": "Pick a name and the permissions this role grants.",
+    "created": "Role {{name}} created", "updated": "Role {{name}} saved", "deleted": "Role deleted", "deleteTitle": "Delete role {{name}}?", "deleteHint": "Roles assigned to members or pending invitations cannot be deleted.", "deleteFailed": "Could not delete this role.",
+    "key": "Key", "keyHint": "Lowercase identifier (letters, digits, underscore).", "type": "Type", "permissions": "Permissions", "members": "Members", "memberCount": "{{count}} members",
+    "system": "System", "custom": "Custom", "owner": "Owner", "systemReadOnly": "System role · read-only", "description": "Description", "discard": "Discard changes",
+    "grantHint": "You can only grant permissions you hold yourself. Locked permissions are outside your own role.", "notHeld": "You do not hold this permission", "toggleGroup": "Toggle all {{group}} permissions",
+    "permissionsRequired": "Select at least one permission", "notFound": "Role not found"
+  }
+}

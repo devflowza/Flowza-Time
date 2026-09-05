@@ -12,6 +12,7 @@ import { registerPlatformRoutes } from './platform.js';
 import { registerRoleRoutes } from './roles.js';
 import { registerSearchRoutes } from './search.js';
 import { registerStructureRoutes } from './structure.js';
+import { registerFeatureRoutes } from './features/index.js';
 
 /**
  * Registers all /api/v1 route modules. Each module exports `register<Name>Routes(v1, deps)` and lives in its own file
@@ -32,4 +33,5 @@ export function registerV1Routes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   registerAuditRoutes(v1, deps);
   registerDashboardRoutes(v1, deps);
   registerPlatformRoutes(v1, deps);
+  registerFeatureRoutes(v1, deps);
 }
