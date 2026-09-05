@@ -4,7 +4,7 @@ import type { BulkEmployeeAction, CreateEmployeeInput, DeleteEmployeeInput, Empl
 import type { z } from 'zod';
 import type { identityDocumentInputSchema } from '@flowza/contracts';
 import type { ComboboxOption } from '@/components/forms';
-import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
+import { api, apiFetch, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { supabase } from '@/lib/supabase';
 import { env } from '@/lib/env';
@@ -54,7 +54,7 @@ export function useEmployeeMutations() {
   const invalidateAll = () => qc.invalidateQueries({ queryKey: qk.entity(orgId, ENTITY) });
   const create = useMutation({ mutationFn: async (input: CreateEmployeeInput) => (await api.post<Envelope<EmployeeDto>>(`/orgs/${orgId}/employees`, input, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: invalidateAll });
   const update = useMutation({ mutationFn: async ({ id, input }: { id: string; input: UpdateEmployeeInput }) => (await api.patch<Envelope<EmployeeDto>>(`/orgs/${orgId}/employees/${id}`, input)).data, onSuccess: invalidateAll });
-  const remove = useMutation({ mutationFn: async ({ id, input }: { id: string; input?: DeleteEmployeeInput }) => (await api.post<Envelope<EmployeeDto>>(`/orgs/${orgId}/employees/${id}`, undefined, { method: 'DELETE', body: input })).data, onSuccess: invalidateAll });
+  const remove = useMutation({ mutationFn: async ({ id, input }: { id: string; input?: DeleteEmployeeInput }) => (await apiFetch<Envelope<EmployeeDto>>(`/orgs/${orgId}/employees/${id}`, { method: 'DELETE', body: input })).data, onSuccess: invalidateAll });
   const bulk = useMutation({
     mutationFn: async (input: BulkEmployeeAction): Promise<BulkResult> => {
       const res = await api.post<Envelope<JobAccepted | { updated: number; employeeIds: string[] }>>(`/orgs/${orgId}/employees/bulk`, input, { idempotencyKey: crypto.randomUUID() });
