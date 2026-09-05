@@ -116,12 +116,16 @@ export interface DevicePushInbound {
   commandResults?: { commandId: string; ok: boolean; message?: string }[];
   /** Response to send when no commands are pending. */
   response: DevicePushResponse;
+  /** Protocol-level facts the route may persist (e.g. ZKTeco `Stamp`, table name, line counts). Never secrets. */
+  meta?: Record<string, unknown>;
 }
+/** Context handed to `parseInbound`; `stamps` lets stateful protocols (ZKTeco ATTLOG/OPERLOG stamps) resume. */
+export interface DevicePushParseContext { timezone: string; serialNumber: string; stamps?: Record<string, string> }
 /** Protocol semantics live in the provider package; apps/api only hosts the HTTP route (§E.2). */
 export interface DevicePushProtocolHandler {
   readonly protocolKey: string; // path segment: /device-push/<protocolKey>/*
   identifyDevice(req: DevicePushRequest): DevicePushIdentity | null;
-  parseInbound(req: DevicePushRequest, ctx: { timezone: string; serialNumber: string }): DevicePushInbound;
+  parseInbound(req: DevicePushRequest, ctx: DevicePushParseContext): DevicePushInbound;
   /** Render pending outbound commands into the protocol's response format (employee push/delete…). */
   renderCommands(commands: DevicePushCommand[], ctx: { serialNumber: string }): DevicePushResponse;
   /** Translate a generic employee operation into protocol command payloads. */
