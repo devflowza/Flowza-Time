@@ -61,7 +61,10 @@ bash supabase/tests/run-rls-tests.sh  # SQL RLS isolation suites
 ```ts
 await withContext(db, { kind: 'user', userId, requestId }, async (trx) => { /* RLS as the user */ });
 await withContext(db, { kind: 'system', organizationId, jobId }, async (trx) => { /* RLS scoped to one org */ });
+await withContext(db, { kind: 'platform', jobId }, async (trx) => { /* cross-tenant maintenance: whitelisted tables only (migration 2000) */ });
 ```
+`platform` is for outbox relay, metering, partition upkeep and scheduler scans. It cannot read employees' personal data beyond
+counts, cannot write tenant business tables, and every use must be in apps/worker. Tenant work always uses `system` with one org.
 The API's pool connects as `flowza_api` (may SET ROLE authenticated / flowza_system); the worker's pool as `flowza_worker`.
 
 ## Attendance engine contract (packages/domain/src/attendance/types.ts)

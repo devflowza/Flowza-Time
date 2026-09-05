@@ -1,3 +1,4 @@
+import { withContext } from '@flowza/database';
 import type { ScheduledTask } from '../scheduler.js';
 
 /** Platform-wide maintenance ticks: each only ENQUEUES an idempotent job (dedupe_key) on the maintenance queue. */
@@ -12,7 +13,7 @@ export const maintenanceTasks: ScheduledTask[] = [
     name: 'retention',
     everyMs: 24 * 3_600_000,
     run: async (d) => {
-      const orgs = await d.db.selectFrom('organizations').select('id').where('legalHold', '=', false).execute();
+      const orgs = await withContext(d.db, { kind: 'platform' }, (trx) => trx.selectFrom('organizations').select('id').where('legalHold', '=', false).execute());
       for (const o of orgs) await d.queue.enqueue({ queue: 'maintenance', jobType: 'RETENTION', organizationId: o.id, payload: { organizationId: o.id }, priority: 1, dedupeKey: `retention:${o.id}`, lockTimeoutSeconds: 600, maxAttempts: 2 });
       return { organizations: orgs.length };
     },

@@ -60,6 +60,41 @@ this is the OMR 100k–500k band; it is the single largest regulatory exposure o
 | Region choice for launch (S12) | One cell for the Oman pilot: **eu-central-1 Frankfurt** (adequacy defensibility under Bahrain Order 42/2022 and KSA assessments) *or* **ap-south-1 Mumbai** (latency, ~35–45 ms). Decide with counsel **before any customer data lands**; record as ADR-008 with legal rationale; `docs/deployment.md` must stop implying a Bahrain region may appear | `deployment.md` says "Mumbai or Bahrain when offered" — **incorrect**, fix | **MVP — blocking** |
 | KSA / sovereign tenants (S8, R2) | Dedicated cell (new Supabase project or self-hosted/BYOC Postgres) per residency demand; `JobQueue`/`RealtimePublisher` ports keep a non-Supabase cell buildable; sales told plainly that no ME region exists today | Cell seam designed (§K), single cell at launch | Later (Phase 4) |
 
+### A.3 Country launch gates (compliance checklist per market)
+
+Each gate must be green before the first tenant in that country is created. Items marked *(law)* need counsel
+sign-off; items marked *(product)* are FlowZa deliverables from §A.2.
+
+- **Oman (pilot, Phase 1)**
+  - *(law)* Confirm RD 6/2022 Arts 5, 11, 15, 19, 20, 23 and MD 34/2024 Arts 27, 30–33, 37–40 against the Gazette; confirm
+    that punch data from biometric devices (without templates) is *not* itself Art 5 data — if it is, every Omani tenant
+    needs an MTCIT permit before go-live.
+  - *(law)* Transfer risk assessment (Reg Art 39) naming the chosen AWS region, transit path and Supabase as sub-processor.
+  - *(product)* `region_cell` immutable and shown in settings; DPO fields; `employee_consents` with `CROSS_BORDER_TRANSFER`
+    and `ATTENDANCE_PROCESSING` purposes and the signed artefact; `security_incidents` table + notification runbook;
+    retention defaults with reasons; `ramadan_reduced_hours` flag; bilingual consent template.
+  - *(product)* Signed DPA with sub-processor list; privacy notice EN/AR.
+- **UAE (Phase 4)**
+  - *(law)* Executive Regulations status (Cabinet Decision 111/2023 vs pending); breach deadline; onshore vs DIFC/ADGM.
+  - *(product)* `jurisdiction_regime` value per tenant; DPIA template (Art 9, systematic monitoring); DPO fields;
+    UAE preset (8/48, Ramadan −2 h **all** staff, night 22:00–04:00, OT cap 2 h); retention ≥2 y post-termination.
+- **KSA (Phase 4)**
+  - *(law)* SDAIA controller registration for tenants; SCC module for FlowZa as processor; mandatory TRA for continuous
+    sensitive transfers; base hours (45 vs 48) and rest days (1 vs 2) confirmed.
+  - *(product)* Dedicated cell decision (Frankfurt/Mumbai project vs self-hosted); Arabic privacy notice mandatory;
+    KSA preset with weekly-criterion OT and "all holiday hours = OT"; 12 h presence flag; annual OT cap alarm.
+- **Qatar (Later)**
+  - *(law)* NCGAA permit rules for biometric-derived data; QFC regime; breach SLA.
+  - *(product)* `QA` / `QA_QFC` regimes; preset 8/48, Ramadan 6/36, night 21:00–03:00, Friday 150 %.
+- **Kuwait (Later)**
+  - *(law)* Confirm no omnibus statute applies to a SaaS processor; CITRA scope.
+  - *(product)* Oman-grade baseline anyway; Overtime Register report (Art 66); caps 2 h/day, 3 d/wk, 90 d/yr, 180 h/yr.
+- **Bahrain (Later)**
+  - *(law)* Confirm tenant holds PDPA Art 15 prior authorisation + DPIA (Orders 43/44 of 2022) before biometric devices go
+    live; confirm hosting country is on the Order 42/2022 adequacy list (Frankfurt/EU is; Mumbai is to be checked).
+  - *(product)* `data_protection_authorisations` record gates biometric-capability devices; preset 8/48, 60 h ceiling,
+    night 19:00–07:00, Friday 150 %.
+
 ---
 
 ## B. Labour-law attendance rules → engine knobs
@@ -165,7 +200,7 @@ L = likelihood, I = impact (H/M/L). "Where" points to the artefact that owns the
 |---|---|---|---|---|---|
 | D1 | **Edge Function limits** — 2 s CPU/request → HTTP 546 (hard failure), 256 MB, 150 s idle, 100 secrets, Deno/Node driver drift; fat API or import preview trips it | H (if API on Edge) | H | API runs as a **Node container** in the DB region (all three judges + proposals 12/13); Edge Functions only for auth hooks/glue; anything heavy returns `202 + jobId`; keep Hono runtime-agnostic so an Edge adapter stays possible | ADR-001, blueprint §B.1/§C; `apps/api` |
 | D2 | **pg_cron granularity/reliability** — 1-min default, sub-minute needs specific build, single scheduler on primary, ticks skipped on failover, overlapping ticks, `cron.job_run_details` growth | M | M | Scheduler lives in the **worker** under a session-level advisory lock (`apps/worker/src/scheduler.ts`, `pg_try_advisory_lock`); pg_cron optional backstop only; if adopted, wrap dispatchers in `pg_try_advisory_xact_lock` and prune `cron.job_run_details` | ADR-006; §C "Cron"; `docs/deployment.md` |
-| D3 | **Supavisor transaction-mode pitfalls** — `SET LOCAL ROLE`/`set_config(…, true)` only inside a transaction, stray query runs as `flowza_api` unscoped; prepared statements must be off; **LISTEN/NOTIFY and long polls unsupported**; non-LOCAL `SET ROLE` leaks to next pooled client (no `DISCARD ALL`); **advisory session locks need a direct/session connection** | H | H | `withContext()` is the only DB entry (ESLint rule bans raw client in routes/handlers); `flowza_api`/`flowza_worker` have **zero direct table grants** (fail closed); `prepare:false` / no named statements in Kysely-pg; scheduler lock and any long poll on port 5432 / session pooler (`DATABASE_URL_WORKER`); pgTAP test that a non-LOCAL `SET ROLE` is rejected and that `flowza_api` without `SET ROLE` reads nothing; direct connections are IPv6-first → verify worker host egress or budget IPv4 add-on | `docs/security.md` Authorization; `docs/deployment.md` DB roles; `packages/database` |
+| D3 | **Supavisor transaction-mode pitfalls** — `SET LOCAL ROLE`/`set_config(…, true)` only inside a transaction, stray query runs as `flowza_api` unscoped; prepared statements must be off; **LISTEN/NOTIFY and long polls unsupported**; non-LOCAL `SET ROLE` leaks to next pooled client (no `DISCARD ALL`); **advisory session locks need a direct/session connection** | H | H | `withContext()` is the only DB entry (ESLint rule bans raw client in routes/handlers); `flowza_api`/`flowza_worker` hold **no direct grants on tenant tables** (only `jobs.*`/`secrets.*` functions), so a statement outside `withContext()` fails closed; `prepare:false` / no named statements in Kysely-pg; scheduler lock and any long poll on port 5432 / session pooler (`DATABASE_URL_WORKER`); pgTAP test that a non-LOCAL `SET ROLE` is rejected and that `flowza_api` without `SET ROLE` reads nothing; direct connections are IPv6-first → verify worker host egress or budget IPv4 add-on | `docs/security.md` Authorization; `docs/deployment.md` DB roles; `packages/database` |
 | D4 | **RLS performance at millions of rows** — per-row helper calls, `= any(fn())` without tenant-leading indexes, BitmapOr from OR-ed self/branch/org predicates; 12 policies in `1400` call bare `app.is_system()` | M | H | Uncorrelated `(select app.fn())` initPlan pattern (STABLE, argument-free asserted in `rls_coverage.sql`); wrap the 12 bare `is_system()` calls; every tenant table indexed leading with `organization_id` (+ `employee_id/branch_id, punched_at/attendance_date`); pgTAP `EXPLAIN` gate on ≥1 M-row fixtures (no seq scan); consider splitting self-service into a separate permissive policy | ADR-002; blueprint §D.3/§H.2; `supabase/tests/` (add `rls_coverage.sql`, `rls_perf.sql`) |
 | D5 | **Partitioning** — 36 monthly partitions pre-created (through 2027-12) then rows fall into `*_default`; `attendance_daily_record_history`, `audit.logs`, `sync_attempts`, `jobs.queue_archive` unpartitioned; unique indexes must include partition key | M | H | Worker `ENSURE_PARTITIONS` maintenance job runs monthly with 12-month look-ahead + alert if `<6` future partitions; partition history/audit/archive by month before 100 orgs; raw/events partitioned by `punched_at` so idempotency keys remain true uniques (never by `received_at`) | `apps/worker/src/handlers` (ENSURE_PARTITIONS); migrations `0700/1100`; §K |
 | D6 | **Queue write amplification** on the primary — per device op ≈ item update + queue row + archive + attempt + raw + events + record + history (3–5×); archive/logs grow unbounded | M | M | Archive purge + retention crons from day one (`RETENTION`, `REAP_STALE`); batch raw inserts per page (`COPY`-style), batch dirty-day upserts per page not per punch; per-vendor-account poll batching; adaptive intervals; alert on queue age >5 min and bloat; `JobQueue` port → dedicated Postgres/Redis or pgmq when measurable | ADR-006; §F.1/§K; `jobs.stats()` in `/api/ready` |
@@ -240,3 +275,25 @@ L = likelihood, I = impact (H/M/L). "Where" points to the artefact that owns the
 | F-5 | PDF pipeline for Arabic | Headless Chromium + Noto Naskh vs library | Phase 1 |
 | F-6 | pgmq revisit trigger | Define measurable threshold (queue age p95 > 30 s at ≥50 orgs, or primary write IOPS > 60% from `jobs.*`) | No |
 | F-7 | Ramadan 2027 readiness | `employees.ramadan_reduced_hours` + OM preset dates before ≈ 8 Feb 2027 | Yes — pilot month 1 |
+
+---
+
+## Appendix — traceability to blueprint §N
+
+| Blueprint §N item | Register entries |
+|---|---|
+| N.1 Cloud-connected devices are not one thing | E (cloud-first), D13, D23, C-16 |
+| N.2 Vendor documentation and partner gating | D23 |
+| N.3 Device clocks and time zones | D10, C-16 |
+| N.4 Vendor transaction IDs reset | D11, C-11 |
+| N.5 RLS performance at scale | D4, D5 |
+| N.6 JWT claim staleness | D14, D.2 (DB-driven permissions) |
+| N.7 Edge Function / Cron limits | D1, D2, D.2 (API host) |
+| N.8 Single-database queue contention | D6, D7, D8, D.2 (queue transport), F-6 |
+| N.9 Biometric and personal data regulation | A.1–A.3, C-21, E (templates), F-1, F-2 |
+| N.10 Labour-law modelling gaps | B.1, B.2, C-0, C-2, C-7, C-13, C-14 |
+| N.11 Month-end integrity | C-9, D22 |
+| N.12 Operational blind spots | D6, D7, D9, D12, D17, D18, D19 |
+
+**Change control.** Every new risk gets the next free id in its section; a mitigation that lands in code updates the
+"Where" / "State today" column and the phase; legal facts change only with a source URL and verification level.

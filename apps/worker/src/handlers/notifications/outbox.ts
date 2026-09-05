@@ -37,16 +37,17 @@ function realtimeTarget(row: OutboxRow): { channel: string; event: string } | nu
  */
 export async function relayOutbox({ deps, log, job }: JobContext) {
   const batch = Number(job.payload['batchSize'] ?? 200);
-  const rows = await sql<OutboxRow>`select id, organization_id, event_type, aggregate_type, aggregate_id, payload, actor_user_id, occurred_at
-    from public.domain_events where published_at is null order by id asc limit ${batch} for update skip locked`.execute(deps.db);
-  if (rows.rows.length === 0) return { relayed: 0 };
+  return withContext(deps.db, { kind: 'platform', jobId: job.id }, async (trx) => {
+  const rows = await sql<OutboxRow>`select id, organization_id as "organizationId", event_type as "eventType", aggregate_type as "aggregateType", aggregate_id as "aggregateId", payload, actor_user_id as "actorUserId", occurred_at as "occurredAt"
+    from public.domain_events where published_at is null order by id asc limit ${batch} for update skip locked`.execute(trx);
+  if (rows.rows.length === 0) return { relayed: 0, notifications: 0 };
   const coalesced = new Map<string, { channel: string; event: string; ids: string[] }>();
   let notifications = 0;
   for (const row of rows.rows) {
     try {
       const route = ROUTING[row.eventType];
       if (route && row.organizationId) {
-        notifications += await withContext(deps.db, { kind: 'system', organizationId: row.organizationId, jobId: job.id }, async (trx) => {
+        notifications += await (async () => {
           // recipients: active members whose role holds the permission (+ specific user in payload.userId)
           const recipients = await sql<{ userId: string }>`
             select distinct m.user_id as "userId" from public.org_memberships m
@@ -68,7 +69,7 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
             if (pref?.enabled) await trx.insertInto('notificationDeliveries').values({ organizationId: row.organizationId, notificationId: inserted.id, channel: 'EMAIL', status: 'pending' }).execute();
           }
           return created;
-        });
+        })();
       }
       const target = realtimeTarget(row);
       if (target) {
@@ -77,36 +78,39 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
         if (row.aggregateId) c.ids.push(row.aggregateId);
         coalesced.set(key, c);
       }
-      await sql`update public.domain_events set published_at = now(), publish_attempts = publish_attempts + 1 where id = ${row.id}::bigint`.execute(deps.db);
+      await sql`update public.domain_events set published_at = now(), publish_attempts = publish_attempts + 1 where id = ${row.id}::bigint`.execute(trx);
     } catch (err) {
-      await sql`update public.domain_events set publish_attempts = publish_attempts + 1, publish_error = ${String((err as Error).message).slice(0, 500)} where id = ${row.id}::bigint`.execute(deps.db);
+      await sql`update public.domain_events set publish_attempts = publish_attempts + 1, publish_error = ${String((err as Error).message).slice(0, 500)} where id = ${row.id}::bigint`.execute(trx);
       log.warn(event('outbox_relay_failed', { eventId: row.id, err: (err as Error).message }));
     }
   }
   for (const c of coalesced.values()) await deps.realtime.publish(c.channel, c.event, { ids: c.ids.slice(0, 200), count: c.ids.length, at: deps.now().toISOString() });
   log.info(event('outbox_relayed', { events: rows.rows.length, notifications, channels: coalesced.size }));
   return { relayed: rows.rows.length, notifications };
+  });
 }
 
 /** Sends pending email deliveries (worker mailer), one batch per run. */
 export async function deliverNotifications({ deps, log, job }: JobContext) {
+  return withContext(deps.db, { kind: 'platform', jobId: job.id }, async (trx) => {
   const pending = await sql<{ id: string; organizationId: string | null; notificationId: string; title: string; body: string | null; email: string; link: string | null }>`
     select d.id, d.organization_id as "organizationId", d.notification_id as "notificationId", n.title, n.body, n.link, u.email
     from public.notification_deliveries d join public.notifications n on n.id = d.notification_id join public.user_profiles u on u.id = n.user_id
-    where d.status = 'pending' and d.channel = 'EMAIL' order by d.created_at limit ${Number(job.payload['batchSize'] ?? 100)} for update of d skip locked`.execute(deps.db);
+    where d.status = 'pending' and d.channel = 'EMAIL' order by d.created_at limit ${Number(job.payload['batchSize'] ?? 100)} for update of d skip locked`.execute(trx);
   let sent = 0;
   for (const d of pending.rows) {
     try {
       const link = d.link ? `${deps.config.WEB_PUBLIC_URL}${d.link}` : deps.config.WEB_PUBLIC_URL;
       const res = await deps.mailer.send({ to: d.email, subject: `[FlowZa Time] ${d.title}`, html: `<p>${escapeHtml(d.title)}</p>${d.body ? `<p>${escapeHtml(d.body)}</p>` : ''}<p><a href="${link}">Open FlowZa Time</a></p>`, text: `${d.title}\n${d.body ?? ''}\n${link}` });
-      await sql`update public.notification_deliveries set status = 'sent', provider = ${res.provider}, provider_message_id = ${res.id}, sent_at = now(), attempts = attempts + 1 where id = ${d.id}::bigint`.execute(deps.db);
+      await sql`update public.notification_deliveries set status = 'sent', provider = ${res.provider}, provider_message_id = ${res.id}, sent_at = now(), attempts = attempts + 1 where id = ${d.id}::bigint`.execute(trx);
       sent++;
     } catch (err) {
-      await sql`update public.notification_deliveries set status = case when attempts >= 4 then 'failed'::public.delivery_status else 'pending'::public.delivery_status end, attempts = attempts + 1, error = ${String((err as Error).message).slice(0, 500)} where id = ${d.id}::bigint`.execute(deps.db);
+      await sql`update public.notification_deliveries set status = case when attempts >= 4 then 'failed'::public.delivery_status else 'pending'::public.delivery_status end, attempts = attempts + 1, error = ${String((err as Error).message).slice(0, 500)} where id = ${d.id}::bigint`.execute(trx);
     }
   }
   if (pending.rows.length) log.info(event('notifications_delivered', { attempted: pending.rows.length, sent }));
   return { attempted: pending.rows.length, sent };
+  });
 }
 
 function escapeHtml(s: string): string { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c); }

@@ -6,15 +6,17 @@ import type { HandlerRegistry, JobContext } from '../types.js';
 const PARTITIONED_TABLES = ['public.attendance_raw_transactions', 'public.attendance_events', 'public.device_logs', 'public.sync_logs'] as const;
 
 /** Keep ≥ 12 months of future partitions and alert when rows land in a default partition. */
-export async function ensurePartitions({ deps, log }: JobContext) {
+export async function ensurePartitions({ deps, log, job }: JobContext) {
   const created: Record<string, number> = {};
   const from = new Date(Date.UTC(deps.now().getUTCFullYear(), deps.now().getUTCMonth(), 1));
-  for (const table of PARTITIONED_TABLES) {
-    const res = await sql<{ n: number }>`select app.ensure_month_partitions(${table}::regclass, ${from}::date, 14) as n`.execute(deps.db);
-    created[table] = res.rows[0]?.n ?? 0;
-    const def = await sql<{ c: string }>`select count(*)::text as c from ${sql.raw(`${table}_default`)}`.execute(deps.db);
-    if (Number(def.rows[0]?.c ?? 0) > 0) log.error(event('default_partition_has_rows', { table, rows: def.rows[0]?.c }));
-  }
+  await withContext(deps.db, { kind: 'platform', jobId: job.id }, async (trx) => {
+    for (const table of PARTITIONED_TABLES) {
+      const res = await sql<{ n: number }>`select app.ensure_month_partitions(${table}::regclass, ${from}::date, 14) as n`.execute(trx);
+      created[table] = res.rows[0]?.n ?? 0;
+    }
+    const def = await sql<{ tableName: string; rowCount: string }>`select * from app.default_partition_rows()`.execute(trx);
+    for (const r of def.rows) if (Number(r.rowCount) > 0) log.error(event('default_partition_has_rows', { table: r.tableName, rows: r.rowCount }));
+  });
   log.info(event('partitions_ensured', { created }));
   return created;
 }
@@ -78,10 +80,10 @@ export async function applyRetention({ job, deps, log }: JobContext) {
 }
 
 /** Monthly usage metering per organisation (employees, devices, branches, users, raw rows, storage estimate). */
-export async function meterUsage({ deps, log }: JobContext) {
+export async function meterUsage({ deps, log, job }: JobContext) {
   const periodStart = new Date(Date.UTC(deps.now().getUTCFullYear(), deps.now().getUTCMonth(), 1));
   const periodEnd = new Date(Date.UTC(deps.now().getUTCFullYear(), deps.now().getUTCMonth() + 1, 0));
-  const res = await sql`
+  const res = await withContext(deps.db, { kind: 'platform', jobId: job.id }, (trx) => sql`
     insert into public.usage_records (organization_id, metric, period_start, period_end, value)
     select o.id, m.metric, ${periodStart}::date, ${periodEnd}::date, m.value
     from public.organizations o
@@ -92,7 +94,7 @@ export async function meterUsage({ deps, log }: JobContext) {
       union all select 'users', count(*) from public.org_memberships mm where mm.organization_id = o.id and mm.status = 'active'
       union all select 'raw_transactions_month', count(*) from public.attendance_raw_transactions r where r.organization_id = o.id and r.received_at >= ${periodStart}
     ) m
-    on conflict (organization_id, metric, period_start) do update set value = excluded.value, updated_at = now()`.execute(deps.db);
+    on conflict (organization_id, metric, period_start) do update set value = excluded.value, updated_at = now()`.execute(trx));
   log.info(event('usage_metered', { rows: Number(res.numAffectedRows ?? 0) }));
   return { rows: Number(res.numAffectedRows ?? 0) };
 }

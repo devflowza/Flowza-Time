@@ -6,18 +6,23 @@ import type { Database } from './client.js';
  * Execution context = who the database should treat the current unit of work as (ADR-002).
  *  - user:   an authenticated person; RLS applies via memberships/roles/branch scope.
  *  - system: the platform acting for exactly one organisation (worker job, webhook, device push).
+ *  - platform: cross-tenant maintenance under the same DB role, allowed only on an explicit table whitelist.
  * There is deliberately no "bypass" context: application code never runs unscoped.
  */
 export type ExecutionContext =
   | { kind: 'user'; userId: string; email?: string; requestId?: string }
-  | { kind: 'system'; organizationId: string; requestId?: string; jobId?: string };
+  | { kind: 'system'; organizationId: string; requestId?: string; jobId?: string }
+  /** Cross-tenant maintenance (outbox relay, metering, partitions, scheduler scans). Whitelisted tables only — see migration 2000. */
+  | { kind: 'platform'; jobId?: string; requestId?: string };
 
 export type Trx = Transaction<DB>;
 
 function claimsFor(ctx: ExecutionContext): Record<string, string> {
-  return ctx.kind === 'user'
-    ? { sub: ctx.userId, role: 'authenticated', ...(ctx.email ? { email: ctx.email } : {}) }
-    : { role: 'flowza_system', org_id: ctx.organizationId };
+  switch (ctx.kind) {
+    case 'user': return { sub: ctx.userId, role: 'authenticated', ...(ctx.email ? { email: ctx.email } : {}) };
+    case 'system': return { role: 'flowza_system', org_id: ctx.organizationId };
+    case 'platform': return { role: 'flowza_system', scope: 'platform' };
+  }
 }
 
 /** Apply the context to the current transaction (SET LOCAL ROLE + request.jwt.claims). */
