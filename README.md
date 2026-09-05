@@ -55,17 +55,17 @@ supabase/migrations · supabase/tests · supabase/functions · scripts · docs
 
 | Area | State |
 |---|---|
-| Database — 20 migrations, 74 base tables, RLS on every tenant table, job queue, partitions, envelope-encrypted credentials | **Working**, proven by the SQL isolation suites and integration tests |
+| Database — 21 migrations, 74 base tables, RLS on every tenant table, job queue, partitions, envelope-encrypted credentials | **Working**, proven by the SQL isolation suites and integration tests |
 | Attendance engine, shift/rule resolution, period summaries (pure, traced) | **Working** — 156 tests |
 | Device provider framework, registry, conformance suite, deterministic mock provider | **Working** — 140 tests |
 | ZKTeco PUSH/ADMS protocol (handshake, ATTLOG, commands, OPERLOG) | **Beta, never run against hardware** — `verification_status = REPORTED`; see the checklist in `docs/device-integrations.md` §6 |
 | Hikvision, Suprema, Anviz, eSSL, FingerTec, Matrix, NITGEN | **Placeholders that fail with `NOT_IMPLEMENTED`** — never presented as working |
-| API — 177 authenticated endpoints plus device-push and webhook ingress | **Working** — 112 tests incl. an adversarial security suite |
-| Worker — sync, attendance processing, notifications, maintenance | **Working** — 73 tests |
+| API — 178 authenticated endpoints plus device-push and webhook ingress | **Working** — 114 tests incl. an adversarial security suite |
+| Worker — sync, attendance processing, notifications, maintenance | **Working** — 74 tests |
 | Web — 35 routes across employees, organisation, users, settings, audit, search, devices, sync, attendance, corrections, approvals, schedule, leave, reports, payroll, platform (en + ar, RTL) | **Working** — 64 component tests, 18 UI end-to-end tests |
 | Seed — 1 organisation, 5 branches, 20 departments, 500 employees, 20 devices, 30 days (~22k punches through the real engine) | **Working** |
 | Supabase hosted project, Auth stack, Storage, Realtime authorisation policies | **Not provisioned** — everything runs against local Postgres with a Supabase-compatibility shim (`supabase/tests/00_local_supabase_shim.sql`) |
-| Device restart, platform-wide feature-flag defaults, full-stack E2E against a seeded Supabase stack | **Not implemented** — tracked in `docs/risks.md` and `docs/device-integrations.md` §8 |
+| Platform-wide feature-flag defaults, full-stack E2E against a seeded Supabase stack | **Not implemented** — tracked in `docs/risks.md` and `docs/device-integrations.md` §8 |
 
 Known limits worth stating: rate limiting and idempotency storage are per API instance (multi-instance needs an edge limiter or a shared store), zero-touch device claiming trusts serial knowledge (risk D26), and the web main chunk is ~245 kB gzipped because every feature registers its translations eagerly.
 
