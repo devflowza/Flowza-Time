@@ -3,7 +3,7 @@ import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Activity, Cpu, FolderKanban, HeartPulse, Plus, RefreshCw, Users, WifiOff, X, CircleHelp, AlertTriangle } from 'lucide-react';
-import { CONNECTION_STATUSES, DEVICE_STATUSES } from '@flowza/contracts';
+import { CONNECTION_STATUSES, DEVICE_STATUSES, type SyncJobAcceptedDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
 import { Button, ConfirmDialog, EmptyState, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StatCard, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, FormField } from '@/components/ui';
@@ -15,8 +15,8 @@ import { useCan } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { SearchBox } from '@/features/organization/components/search-box';
 import { useSyncMutations } from '@/features/sync/api';
-import { toastJobQueued } from '@/features/sync/job-toast';
-import { useDevices, useGroupMutations, useGroupOptions, useProviders, type DeviceRow } from '../api';
+import { toastJobAccepted } from '@/features/sync/job-toast';
+import { useDeviceSummary, useDevices, useGroupMutations, useGroupOptions, useProviders, type DeviceRow } from '../api';
 import { ConnectionBadge, DeviceStatusBadge, ProviderStatusBadge, TagChips } from '../components/device-badges';
 import { PendingDevicesPanel } from '../components/pending-devices-panel';
 
@@ -30,7 +30,6 @@ export default function DevicesListPage() {
   const can = useCan();
   const table = useServerTable({ sort: 'name' });
   const q = useDevices(table.query);
-  const summary = useDevices({ pageSize: 200 });
   const branches = useBranchOptions();
   const providers = useProviders();
   const groups = useGroupOptions();
@@ -40,18 +39,15 @@ export default function DevicesListPage() {
   const [bulk, setBulk] = useState<{ kind: BulkKind; ids: string[] } | null>(null);
   const [groupId, setGroupId] = useState<string | null>(null);
   const filters = table.state.filters;
+  // fleet counts come from the server (branch-scoped like the list) — a page of the list must never be aggregated client-side
+  const summary = useDeviceSummary({ branchId: filters['branchId'] });
   const hasFilters = Object.keys(filters).length > 0;
   const providerNames = useMemo(() => new Map((providers.data ?? []).map((p) => [p.key, p])), [providers.data]);
 
   const counts = useMemo(() => {
-    const c = { online: 0, offline: 0, degraded: 0, unknown: 0 };
-    for (const d of summary.data?.data ?? []) {
-      if (d.connectionStatus === 'online') c.online += 1;
-      else if (d.connectionStatus === 'offline' || d.connectionStatus === 'error') c.offline += 1;
-      else if (d.connectionStatus === 'degraded' || d.connectionStatus === 'vendor_degraded') c.degraded += 1;
-      else c.unknown += 1;
-    }
-    return c;
+    const by = summary.data?.byConnectionStatus ?? {};
+    const n = (k: string) => by[k] ?? 0;
+    return { online: n('online'), offline: n('offline') + n('error'), degraded: n('degraded') + n('vendor_degraded'), unknown: n('unknown'), stale: summary.data?.staleHeartbeats ?? 0 };
   }, [summary.data]);
 
   const columns = useMemo<ColumnDef<DeviceRow, unknown>[]>(() => [
@@ -69,11 +65,11 @@ export default function DevicesListPage() {
 
   const runBulk = () => {
     if (!bulk) return;
-    const done = (jobId: string | null) => { toastJobQueued(jobId, navigate); setBulk(null); setSelection({}); };
+    const done = (r: SyncJobAcceptedDto) => { toastJobAccepted(r, navigate); setBulk(null); setSelection({}); };
     const opts = { onError: toastError };
-    if (bulk.kind === 'sync-attendance') sync.syncAttendance.mutate({ deviceIds: bulk.ids, all: false, fullResync: false }, { ...opts, onSuccess: (r) => done(r.jobId) });
-    if (bulk.kind === 'sync-employees') sync.syncEmployees.mutate({ deviceIds: bulk.ids, all: false, removeStale: false }, { ...opts, onSuccess: (r) => done(r.jobId) });
-    if (bulk.kind === 'health-check') sync.healthCheck.mutate({ deviceIds: bulk.ids, all: false }, { ...opts, onSuccess: (r) => done(r.jobId) });
+    if (bulk.kind === 'sync-attendance') sync.syncAttendance.mutate({ deviceIds: bulk.ids, all: false, fullResync: false }, { ...opts, onSuccess: done });
+    if (bulk.kind === 'sync-employees') sync.syncEmployees.mutate({ deviceIds: bulk.ids, all: false, removeStale: false }, { ...opts, onSuccess: done });
+    if (bulk.kind === 'health-check') sync.healthCheck.mutate({ deviceIds: bulk.ids, all: false }, { ...opts, onSuccess: done });
     if (bulk.kind === 'assign-group' && groupId) groupMut.addMembers.mutate({ id: groupId, deviceIds: bulk.ids }, { ...opts, onSuccess: () => { setBulk(null); setSelection({}); } });
   };
   const bulkPending = sync.syncAttendance.isPending || sync.syncEmployees.isPending || sync.healthCheck.isPending || groupMut.addMembers.isPending;
@@ -114,7 +110,7 @@ export default function DevicesListPage() {
         <StatCard label={t('summary.online')} value={fmtNumber(counts.online)} icon={Activity} tone="success" loading={summary.isLoading} onClick={() => table.setFilter('connectionStatus', 'online')} />
         <StatCard label={t('summary.offline')} value={fmtNumber(counts.offline)} icon={WifiOff} tone={counts.offline > 0 ? 'danger' : 'default'} loading={summary.isLoading} onClick={() => table.setFilter('connectionStatus', 'offline')} />
         <StatCard label={t('summary.degraded')} value={fmtNumber(counts.degraded)} icon={AlertTriangle} tone={counts.degraded > 0 ? 'warning' : 'default'} loading={summary.isLoading} onClick={() => table.setFilter('connectionStatus', 'degraded')} />
-        <StatCard label={t('summary.unknown')} value={fmtNumber(counts.unknown)} icon={CircleHelp} loading={summary.isLoading} onClick={() => table.setFilter('connectionStatus', 'unknown')} />
+        <StatCard label={t('summary.unknown')} value={fmtNumber(counts.unknown)} icon={CircleHelp} hint={counts.stale > 0 ? t('summary.staleHeartbeats', { count: counts.stale }) : undefined} loading={summary.isLoading} onClick={() => table.setFilter('connectionStatus', 'unknown')} />
       </div>
       {can('device.create') ? <PendingDevicesPanel /> : null}
       {isTrulyEmpty ? (

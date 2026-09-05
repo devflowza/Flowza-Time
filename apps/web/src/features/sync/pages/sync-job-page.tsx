@@ -15,7 +15,7 @@ import { useCan, useOrgId, useOrgTimezone } from '@/features/me/use-me';
 import { isActiveJob, useSyncJob, useSyncJobItems, useSyncMutations, useSyncRealtime } from '../api';
 import { fmtDuration } from '../duration';
 import { JobProgress, JobTypeLabel, SyncItemStatusBadge, SyncStatusBadge, TriggerBadge } from '../components/status-badges';
-import { toastJobQueued } from '../job-toast';
+import { toastJobAccepted } from '../job-toast';
 
 const ALL = '__all__';
 
@@ -58,7 +58,7 @@ export default function SyncJobPage() {
 
   const onConfirm = () => {
     if (confirm === 'cancel') cancel.mutate(id, { onSuccess: (r) => { toast.success(t('detail.cancelled', { count: r.cancelledItems })); setConfirm(null); }, onError: toastError });
-    if (confirm === 'retry') retryFailed.mutate(id, { onSuccess: (r) => { toastJobQueued(r.jobId, navigate, t('detail.retryQueued')); setConfirm(null); }, onError: toastError });
+    if (confirm === 'retry') retryFailed.mutate(id, { onSuccess: (r) => { toastJobAccepted(r, navigate, t('detail.retryQueued')); setConfirm(null); }, onError: toastError });
   };
 
   return (

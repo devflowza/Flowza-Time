@@ -3,7 +3,8 @@
   "subtitle": "Every exchange with a device — attendance pulls, employee pushes, health checks and reconciliations.",
   "jobs": {
     "view": "View job", "empty": "No sync jobs yet", "emptyHint": "Jobs appear here when devices are synced manually, on schedule or by a push terminal.",
-    "emptyDeviceHint": "No sync job has touched this device yet.", "live": "Live — refreshing while jobs are running", "activeCount": "{{count}} running"
+    "emptyDeviceHint": "No sync job has touched this device yet.", "live": "Live — refreshing while jobs are running", "activeCount": "{{count}} running",
+    "nothingQueued": "Nothing new was queued", "nothingQueuedHint": "Every item is already covered by a job that is running — follow that job instead.", "skipped": "{{count}} already in flight"
   },
   "columns": { "type": "Type", "trigger": "Trigger", "status": "Status", "progress": "Progress", "records": "Records", "requestedBy": "Requested by", "started": "Started", "finished": "Finished", "duration": "Duration", "scope": "Scope" },
   "status": { "PENDING": "Pending", "QUEUED": "Queued", "RUNNING": "Running", "SUCCESS": "Success", "PARTIAL_SUCCESS": "Partial success", "FAILED": "Failed", "RETRYING": "Retrying", "CANCELLED": "Cancelled" },
@@ -11,7 +12,7 @@
   "jobType": { "PULL_ATTENDANCE": "Pull attendance", "PULL_EMPLOYEES": "Pull employees", "PUSH_EMPLOYEE": "Push employee", "PUSH_EMPLOYEES": "Push employees", "DEVICE_HEALTH_CHECK": "Health check", "RECONCILIATION": "Reconciliation", "TEST_CONNECTION": "Connection test", "DELETE_EMPLOYEE": "Delete employee" },
   "trigger": { "MANUAL": "Manual", "SCHEDULED": "Scheduled", "WEBHOOK": "Webhook", "SYSTEM": "System", "DEVICE_PUSH": "Device push" },
   "progress": { "label": "{{done}} / {{total}}", "success": "succeeded", "failed": "failed", "pending": "pending" },
-  "list": { "allStatuses": "All statuses", "allTypes": "All types", "device": "Device", "branch": "Branch", "system": "System", "scheduler": "Scheduler" },
+  "list": { "allStatuses": "All statuses", "allTypes": "All types", "device": "Device", "branch": "Branch", "system": "System", "scheduler": "Scheduler", "scopeDevices": "{{count}} devices", "scopeEmployees": "{{count}} employees" },
   "actions": { "syncAttendance": "Sync attendance", "syncEmployees": "Sync employees", "retryFailed": "Retry failed", "cancel": "Cancel job", "queue": "Queue sync", "runReconciliation": "Run reconciliation", "repair": "Repair", "runAll": "Reconcile all", "repairAll": "Repair all" },
   "detail": {
     "title": "Sync job", "notFound": "Job not found", "items": "Items", "itemsEmpty": "No items", "itemsEmptyHint": "This job did not produce any per-device or per-employee work items.",

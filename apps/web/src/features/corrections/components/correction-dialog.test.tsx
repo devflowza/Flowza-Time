@@ -60,7 +60,7 @@ describe('CorrectionDialog', () => {
     const [path, body, opts] = apiMock.post.mock.calls[0] as [string, Record<string, unknown>, Record<string, unknown>];
     expect(path).toBe('/orgs/org-1/attendance/corrections');
     expect(body).toMatchObject({ employeeId: EMP, attendanceDate: '2024-03-01', type: 'ADD_PUNCH', proposedPunchedAt: '2024-03-01T04:30:00.000Z', proposedEventType: 'PUNCH', reason: 'Forgot to badge in' });
-    expect(body).not.toHaveProperty('originalEventId');
+    expect(body['originalEventId']).toBeUndefined(); // stripped for ADD_PUNCH (JSON drops undefined)
     expect(opts).toMatchObject({ idempotencyKey: expect.any(String) });
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });

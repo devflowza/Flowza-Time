@@ -7,7 +7,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, ErrorState, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
-import { toastJobQueued } from '@/features/sync/job-toast';
+import { toastJobAccepted } from '@/features/sync/job-toast';
 import { useDevice, useDeviceMutations, type DeviceAction } from '../api';
 import { ConnectionBadge, DeviceStatusBadge, IntegrationBadge } from '../components/device-badges';
 import { PushCredentialsDialog } from '../components/push-credentials-dialog';
@@ -43,7 +43,7 @@ export default function DeviceDetailPage() {
 
   const run = (action: DeviceAction, kind: DeviceActionKind) => {
     setBusy(kind);
-    runAction.mutate({ id, action }, { onSuccess: (r) => toastJobQueued(r.jobId, navigate), onError: toastError, onSettled: () => setBusy(null) });
+    runAction.mutate({ id, action }, { onSuccess: (r) => toastJobAccepted(r, navigate), onError: toastError, onSettled: () => setBusy(null) });
   };
 
   const onAction = (kind: DeviceActionKind) => {

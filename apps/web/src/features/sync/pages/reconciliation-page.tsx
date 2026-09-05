@@ -16,7 +16,7 @@ import { useBranchOptions } from '@/features/organization/lookups';
 import { useDeviceOptions } from '@/features/devices/api';
 import { useReconciliation, useSyncMutations } from '../api';
 import { SyncItemStatusBadge } from '../components/status-badges';
-import { toastJobQueued } from '../job-toast';
+import { toastJobAccepted } from '../job-toast';
 
 type Confirm = { kind: 'run-all' } | { kind: 'repair-all' } | { kind: 'repair'; device: DeviceReconciliationDto } | null;
 const COUNTERS = [
@@ -31,18 +31,17 @@ const COUNTERS = [
 const num = (v: unknown): number => (typeof v === 'number' ? v : Array.isArray(v) ? v.length : 0);
 const isItemStatus = (s: string | null): s is SyncItemStatus => !!s && (SYNC_ITEM_STATUSES as readonly string[]).includes(s);
 
-function DeviceCard({ row, tz, onRun, onRepair, busy }: { row: DeviceReconciliationDto; tz: string; onRun: () => void; onRepair: () => void; busy: boolean }) {
+function DeviceCard({ row, tz, branchName, onRun, onRepair, busy }: { row: DeviceReconciliationDto; tz: string; branchName: string | undefined; onRun: () => void; onRepair: () => void; busy: boolean }) {
   const { t } = useTranslation('sync');
   const can = useCan();
   const s = row.summary ?? {};
   const issues = COUNTERS.reduce((acc, c) => acc + num(s[c.key]), 0);
-  const branches = useBranchOptions();
   return (
     <Card className={cn(row.summary && issues === 0 && 'border-emerald-300/60')}>
       <CardHeader className="flex-row items-start justify-between gap-3 space-y-0">
         <div className="min-w-0">
           <CardTitle className="truncate"><Link to={`/devices/${row.deviceId}`} className="hover:underline">{row.deviceName}</Link> <span className="font-mono text-xs font-normal text-muted-foreground" dir="ltr">{row.deviceCode}</span></CardTitle>
-          <CardDescription>{branches.byId.get(row.branchId)?.name ?? '—'} · {row.finishedAt ? <span title={fmtDateTime(row.finishedAt, tz)} className="tnum">{t('reconciliation.lastRun', { when: fmtRelative(row.finishedAt) })}</span> : t('reconciliation.neverRun')}</CardDescription>
+          <CardDescription>{branchName ?? '—'} · {row.finishedAt ? <span title={fmtDateTime(row.finishedAt, tz)} className="tnum">{t('reconciliation.lastRun', { when: fmtRelative(row.finishedAt) })}</span> : t('reconciliation.neverRun')}</CardDescription>
         </div>
         <div className="flex shrink-0 flex-col items-end gap-1">
           {isItemStatus(row.status) ? <SyncItemStatusBadge status={row.status} /> : null}
@@ -101,9 +100,10 @@ export default function ReconciliationPage() {
 
   const run = (input: { deviceIds?: string[]; all?: boolean; branchId?: string; repair: boolean }, deviceId?: string) => {
     setBusyDevice(deviceId ?? null);
-    reconcile.mutate({ all: false, ...input }, { onSuccess: (r) => { toastJobQueued(r.jobId, navigate, t('dialog.queued', { count: r.itemsTotal, devices: r.deviceCount })); setConfirm(null); }, onError: toastError, onSettled: () => setBusyDevice(null) });
+    reconcile.mutate({ all: false, ...input }, { onSuccess: (r) => { toastJobAccepted(r, navigate, t('dialog.queued', { count: r.itemsTotal, devices: r.deviceCount })); setConfirm(null); }, onError: toastError, onSettled: () => setBusyDevice(null) });
   };
-  const scopeAll = filters['branchId'] ? { branchId: filters['branchId'] } : { all: true };
+  // "all" means everything currently shown: the filtered device, else the filtered branch, else the whole fleet
+  const scopeAll = filters['deviceId'] ? { deviceIds: [filters['deviceId']] } : filters['branchId'] ? { branchId: filters['branchId'] } : { all: true };
   const onConfirm = () => {
     if (!confirm) return;
     if (confirm.kind === 'run-all') run({ ...scopeAll, repair: false });
@@ -127,7 +127,7 @@ export default function ReconciliationPage() {
       {q.isLoading ? <div className="grid gap-4 xl:grid-cols-2">{Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-44" />)}</div>
         : q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} />
         : rows.length === 0 ? <EmptyState icon={GitCompare} title={hasFilters ? tc('common.noResults') : t('reconciliation.empty')} description={hasFilters ? tc('common.noResultsHint') : t('reconciliation.emptyHint')} />
-        : <div className="grid gap-4 xl:grid-cols-2">{rows.map((r) => <DeviceCard key={r.deviceId} row={r} tz={tz} busy={busyDevice === r.deviceId} onRun={() => run({ deviceIds: [r.deviceId], repair: false }, r.deviceId)} onRepair={() => setConfirm({ kind: 'repair', device: r })} />)}</div>}
+        : <div className="grid gap-4 xl:grid-cols-2">{rows.map((r) => <DeviceCard key={r.deviceId} row={r} tz={tz} branchName={branches.byId.get(r.branchId)?.name} busy={busyDevice === r.deviceId} onRun={() => run({ deviceIds: [r.deviceId], repair: false }, r.deviceId)} onRepair={() => setConfirm({ kind: 'repair', device: r })} />)}</div>}
       <ConfirmDialog open={confirm?.kind === 'run-all'} onOpenChange={(o) => !o && setConfirm(null)} title={t('reconciliation.runAllTitle')} description={t('reconciliation.runAllHint')} confirmLabel={t('actions.runAll')} loading={reconcile.isPending} onConfirm={onConfirm} />
       <ConfirmDialog open={confirm?.kind === 'repair-all'} onOpenChange={(o) => !o && setConfirm(null)} title={t('reconciliation.repairAllTitle')} description={t('reconciliation.repairAllHint')} confirmLabel={t('actions.repairAll')} destructive loading={reconcile.isPending} onConfirm={onConfirm} />
       <ConfirmDialog open={confirm?.kind === 'repair'} onOpenChange={(o) => !o && setConfirm(null)} title={confirm?.kind === 'repair' ? t('reconciliation.repairTitle', { name: confirm.device.deviceName }) : ''} description={t('reconciliation.repairHint')} confirmLabel={t('actions.repair')} destructive loading={reconcile.isPending} onConfirm={onConfirm} />

@@ -18,7 +18,8 @@ export function DeviceActions({ device, busy, onAction }: { device: DeviceDetail
   const isPush = device.integrationType === 'DEVICE_PUSH';
   const canSync = can('device.sync') && active;
   const canTest = (can('device.update') || can('device.manage')) && active && !isPush;
-  const hasPushAuth = isPush || device.hasPushToken || caps.webhooks;
+  // mirrors the API's needsToken(): push terminals, vendor webhooks and providers with a webhook handler authenticate with a token
+  const hasPushAuth = isPush || device.integrationType === 'VENDOR_WEBHOOK' || device.hasPushToken || caps.webhooks;
   const showMore = can('device.update') || can('device.manage');
   const isBusy = (k: DeviceActionKind) => busy === k;
 

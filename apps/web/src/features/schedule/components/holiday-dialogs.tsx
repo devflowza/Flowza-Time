@@ -1,3 +1,4 @@
+import { useMemo } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
@@ -56,8 +57,13 @@ export function HolidayDialog({ open, onOpenChange, calendarId, holiday }: { ope
   const tz = useOrgTimezone();
   const branches = useBranchOptions();
   const { createHoliday, updateHoliday } = useHolidayMutations();
+  // Same contract schema the API validates, plus the two service-level checks so they fail inline instead of as a 400 toast.
+  const schema = useMemo(() => holidayInputSchema.superRefine((v, ctx) => {
+    if (v.endDate && v.endDate < v.date) ctx.addIssue({ code: 'custom', path: ['endDate'], message: t('holidays.endBeforeStart') });
+    if (Array.isArray(v.branchIds) && v.branchIds.length === 0) ctx.addIssue({ code: 'custom', path: ['branchIds'], message: t('holidays.pickBranch') });
+  }), [t]);
   const form = useForm<HolidayValues, unknown, HolidayInput>({
-    resolver: zodResolver(holidayInputSchema),
+    resolver: zodResolver(schema),
     defaultValues: holiday ? { calendarId: holiday.calendarId, name: holiday.name, nameAr: holiday.nameAr ?? undefined, date: holiday.date, endDate: holiday.endDate, isHalfDay: holiday.isHalfDay, type: holiday.type as HolidayValues['type'], branchIds: holiday.branchIds, isTentative: holiday.isTentative }
       : { calendarId, name: '', date: todayIso(tz), endDate: null, isHalfDay: false, type: 'PUBLIC', branchIds: null, isTentative: false },
   });

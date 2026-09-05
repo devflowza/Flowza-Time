@@ -93,8 +93,8 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet }: { open: boolean; 
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
             <FormField label={tc('common.name')} htmlFor="rs-name" required error={errors.name?.message}><Input id="rs-name" {...register('name')} aria-invalid={!!errors.name} /></FormField>
-            <FormField label={tc('common.branch')} htmlFor="rs-branch" optional hint={t('rules.branchHint')} error={errors.branchId?.message}>
-              <Controller control={control} name="branchId" render={({ field }) => <Combobox id="rs-branch" value={field.value ?? null} onChange={(v) => field.onChange(v)} options={branches.options} loading={branches.isLoading} clearable placeholder={t('rules.orgWide')} />} />
+            <FormField label={tc('common.branch')} htmlFor="rs-branch" optional hint={ruleSet ? t('rules.branchImmutable') : t('rules.branchHint')} error={errors.branchId?.message}>
+              <Controller control={control} name="branchId" render={({ field }) => <Combobox id="rs-branch" value={field.value ?? null} onChange={(v) => field.onChange(v)} options={branches.options} loading={branches.isLoading} clearable={!ruleSet} disabled={!!ruleSet} placeholder={t('rules.orgWide')} />} />
             </FormField>
             <FormField label={t('rules.effectiveFrom')} htmlFor="rs-from" required error={errors.effectiveFrom?.message}><Input id="rs-from" type="date" dir="ltr" {...register('effectiveFrom')} aria-invalid={!!errors.effectiveFrom} /></FormField>
             <FormField label={t('rules.effectiveTo')} htmlFor="rs-to" optional error={errors.effectiveTo?.message}><Input id="rs-to" type="date" dir="ltr" {...register('effectiveTo', { setValueAs: (v: unknown) => (v === '' ? null : v) })} /></FormField>

@@ -3,7 +3,8 @@
   "subtitle": "كل تبادل مع جهاز — سحب الحضور ودفع الموظفين وفحوص الحالة والمطابقات.",
   "jobs": {
     "view": "عرض المهمة", "empty": "لا توجد مهام مزامنة بعد", "emptyHint": "تظهر المهام هنا عند مزامنة الأجهزة يدوياً أو وفق جدول أو عبر جهاز دفع.",
-    "emptyDeviceHint": "لم تلمس أي مهمة مزامنة هذا الجهاز بعد.", "live": "مباشر — يتم التحديث أثناء تشغيل المهام", "activeCount": "{{count}} قيد التشغيل"
+    "emptyDeviceHint": "لم تلمس أي مهمة مزامنة هذا الجهاز بعد.", "live": "مباشر — يتم التحديث أثناء تشغيل المهام", "activeCount": "{{count}} قيد التشغيل",
+    "nothingQueued": "لم تتم إضافة أي عنصر جديد إلى الطابور", "nothingQueuedHint": "كل العناصر مشمولة بالفعل بمهمة قيد التشغيل — تابع تلك المهمة بدلاً من ذلك.", "skipped": "{{count}} قيد التنفيذ بالفعل"
   },
   "columns": { "type": "النوع", "trigger": "المُشغِّل", "status": "الحالة", "progress": "التقدّم", "records": "السجلات", "requestedBy": "بطلب من", "started": "البدء", "finished": "الانتهاء", "duration": "المدة", "scope": "النطاق" },
   "status": { "PENDING": "قيد الانتظار", "QUEUED": "في الطابور", "RUNNING": "قيد التشغيل", "SUCCESS": "نجاح", "PARTIAL_SUCCESS": "نجاح جزئي", "FAILED": "فشل", "RETRYING": "إعادة المحاولة", "CANCELLED": "أُلغيت" },
@@ -11,7 +12,7 @@
   "jobType": { "PULL_ATTENDANCE": "سحب الحضور", "PULL_EMPLOYEES": "سحب الموظفين", "PUSH_EMPLOYEE": "دفع موظف", "PUSH_EMPLOYEES": "دفع الموظفين", "DEVICE_HEALTH_CHECK": "فحص الحالة", "RECONCILIATION": "مطابقة", "TEST_CONNECTION": "اختبار الاتصال", "DELETE_EMPLOYEE": "حذف موظف" },
   "trigger": { "MANUAL": "يدوي", "SCHEDULED": "مجدول", "WEBHOOK": "ويب هوك", "SYSTEM": "النظام", "DEVICE_PUSH": "دفع من الجهاز" },
   "progress": { "label": "{{done}} / {{total}}", "success": "نجحت", "failed": "فشلت", "pending": "معلّقة" },
-  "list": { "allStatuses": "كل الحالات", "allTypes": "كل الأنواع", "device": "الجهاز", "branch": "الفرع", "system": "النظام", "scheduler": "المُجدوِل" },
+  "list": { "allStatuses": "كل الحالات", "allTypes": "كل الأنواع", "device": "الجهاز", "branch": "الفرع", "system": "النظام", "scheduler": "المُجدوِل", "scopeDevices": "{{count}} جهاز", "scopeEmployees": "{{count}} موظف" },
   "actions": { "syncAttendance": "مزامنة الحضور", "syncEmployees": "مزامنة الموظفين", "retryFailed": "إعادة محاولة الفاشلة", "cancel": "إلغاء المهمة", "queue": "بدء المزامنة", "runReconciliation": "تشغيل المطابقة", "repair": "إصلاح", "runAll": "مطابقة الكل", "repairAll": "إصلاح الكل" },
   "detail": {
     "title": "مهمة مزامنة", "notFound": "المهمة غير موجودة", "items": "العناصر", "itemsEmpty": "لا توجد عناصر", "itemsEmptyHint": "لم تُنتج هذه المهمة أي عناصر عمل لكل جهاز أو موظف.",

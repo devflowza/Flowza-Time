@@ -6,7 +6,7 @@ import { useTranslation } from 'react-i18next';
 import type { z } from 'zod';
 import { Radio, Search } from 'lucide-react';
 import { claimPendingDeviceSchema, type ClaimPendingDeviceInput, type PendingDeviceDto } from '@flowza/contracts';
-import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Skeleton } from '@/components/ui';
+import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, ErrorState, FormField, Input, Skeleton } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { fmtRelative } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
@@ -113,7 +113,7 @@ export function PendingDevicesPanel() {
         </div>
       </CardHeader>
       <CardContent>
-        {q.isLoading ? <Skeleton className="h-12 w-full" /> : q.isError ? <p className="text-sm text-destructive">{t('pending.loadError')}</p> : rows.length === 0 ? <p className="text-sm text-muted-foreground">{t('pending.noMatch')}</p> : (
+        {q.isLoading ? <Skeleton className="h-12 w-full" /> : q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : rows.length === 0 ? <p className="text-sm text-muted-foreground">{t('pending.noMatch')}</p> : (
           <ul className="divide-y">
             {rows.map((p) => (
               <li key={p.id} className="flex flex-wrap items-center gap-3 py-2 text-sm">

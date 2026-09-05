@@ -5,7 +5,7 @@
     "allStatuses": "All statuses", "allConnections": "All connections", "allProviders": "All providers", "tagPlaceholder": "Tag…",
     "clearSelection": "Clear selection", "empty": "No devices yet", "emptyHint": "Register your first attendance terminal or connect a vendor cloud account. Punches start flowing as soon as the device is online."
   },
-  "summary": { "online": "Online", "offline": "Offline", "degraded": "Degraded", "unknown": "Unknown" },
+  "summary": { "online": "Online", "offline": "Offline", "degraded": "Degraded", "unknown": "Unknown", "staleHeartbeats": "{{count}} active devices without a heartbeat in 24 h" },
   "columns": { "model": "Manufacturer / model", "connection": "Connection", "lastAttendanceSync": "Last attendance sync", "lastEmployeeSync": "Last employee sync", "employees": "Employees", "provider": "Provider" },
   "connection": { "unknown": "Unknown", "online": "Online", "offline": "Offline", "degraded": "Degraded", "error": "Error", "vendor_degraded": "Vendor degraded" },
   "deviceStatus": { "active": "Active", "disabled": "Disabled", "decommissioned": "Decommissioned" },
@@ -40,7 +40,7 @@
   },
   "groups": {
     "title": "Device groups", "subtitle": "Group terminals to sync, filter and report on them together.", "group": "Group", "select": "Select a group…", "none": "No groups yet",
-    "add": "New group", "edit": "Edit group", "delete": "Delete group", "deleteHint": "Devices stay registered; only the grouping is removed.", "empty": "No device groups yet",
+    "add": "New group", "edit": "Edit group", "delete": "Delete group", "deleteTitle": "Delete group \"{{name}}\"?", "deleteHint": "Devices stay registered; only the grouping is removed.", "empty": "No device groups yet",
     "emptyHint": "Create a group (e.g. \"Head office gates\") and add devices to it to sync and filter them together.", "members": "{{count}} devices", "noMembers": "No devices in this group yet",
     "addMember": "Add device", "removeMember": "Remove from group", "branchBound": "Branch-bound", "anyBranch": "Any branch", "color": "Colour", "description": "Description",
     "created": "Group created", "updated": "Group saved", "deleted": "Group deleted", "membersUpdated": "Members updated", "selectDevice": "Select a device…", "allDevicesAdded": "Every device is already in this group.",
@@ -48,11 +48,11 @@
   },
   "pending": {
     "title": "Devices waiting to be claimed", "hint": "These terminals contacted FlowZa with an unknown serial number. Claim them to start receiving punches.", "none": "No unclaimed devices have contacted FlowZa.",
-    "searchSerial": "Look up a serial number…", "loadError": "Could not load pending devices.", "noMatch": "No pending device matches that serial.", "lastSeen": "Seen {{when}}",
+    "searchSerial": "Look up a serial number…", "noMatch": "No pending device matches that serial.", "lastSeen": "Seen {{when}}",
     "claim": "Claim", "claimTitle": "Claim device", "claimHint": "Serial {{serial}} ({{provider}}) will be registered as a push device in the selected branch.", "claimCode": "Claim code", "claimed": "{{name}} claimed"
   },
   "wizard": {
-    "title": "Register device", "subtitle": "Connect a terminal or vendor cloud account in a few steps.", "steps": "Registration steps", "invalid": "Please complete the required fields before registering.",
+    "title": "Register device", "subtitle": "Connect a terminal or vendor cloud account in a few steps.", "steps": "Registration steps", "invalid": "Please complete the required fields before registering.", "invalidField": "Check \"{{field}}\": {{message}}",
     "created": "{{name}} registered", "testQueued": "A connection test has been queued for the new device.", "register": "Register device", "docs": "Documentation",
     "step": { "provider": "Provider", "model": "Model", "details": "Details", "connection": "Connection", "test": "Test", "review": "Review" },
     "stepHint": {
@@ -81,7 +81,7 @@
     "fingerprints": "{{count}} fingerprints", "face": "Face enrolled", "card": "Card enrolled", "lastSync": "Last sync", "lastError": "Last error", "repair": "Repair",
     "allStatuses": "All statuses", "searchPlaceholder": "Search employee…", "empty": "No employees on this device", "emptyHint": "Push employees to the device or run a reconciliation to load its user list."
   },
-  "logs": { "time": "Time", "level": "Level", "event": "Event", "message": "Message", "details": "Details", "job": "Job", "allLevels": "All levels", "empty": "No log entries", "emptyHint": "Connection attempts, sync runs and push traffic are logged here." },
+  "logs": { "time": "Time", "level": "Level", "event": "Event", "message": "Message", "details": "Details", "job": "Job", "allLevels": "All levels", "empty": "No log entries", "emptyHint": "Connection attempts, sync runs and push traffic are logged here.", "keys": "{{count}} fields" },
   "commands": {
     "type": "Command", "status": "Status", "created": "Created", "sent": "Sent", "acked": "Acknowledged", "expires": "Expires", "payload": "Payload", "result": "Result", "allStatuses": "All statuses",
     "statuses": { "pending": "Pending", "sent": "Sent", "acked": "Acknowledged", "failed": "Failed", "expired": "Expired" },

@@ -24,8 +24,8 @@ export default function AttendancePage() {
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
   const requested = params.get('tab') ?? (params.get('employeeId') ? 'monthly' : 'daily');
-  const tab: Tab = (TABS as readonly string[]).includes(requested) ? (requested as Tab) : 'daily';
   const visible = TABS.filter((tb) => (tb === 'raw' ? can('attendance.view_raw') : true));
+  const tab: Tab = (visible as readonly string[]).includes(requested) ? (requested as Tab) : 'daily';
   const [correction, setCorrection] = useState<{ open: boolean; preset?: CorrectionPreset }>({ open: false });
   const [recalcOpen, setRecalcOpen] = useState(false);
   const setTab = (v: string) => setParams((prev) => { const n = new URLSearchParams(prev); n.set('tab', v); n.delete('page'); return n; });

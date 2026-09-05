@@ -27,10 +27,12 @@ function GeneralForm({ device, onCredentialsRequired }: { device: DeviceDetail; 
   const { update } = useDeviceMutations();
   const isPush = device.integrationType === 'DEVICE_PUSH';
   const editable = can('device.update') && device.status !== 'decommissioned';
-  const defaults = useMemo<Values>(() => ({
+  // Baseline captured once per mount (the parent keys this form by device id): the device query polls while the user edits,
+  // and rebuilding the form from every refetch would throw away unsaved input. After a successful save the baseline moves on.
+  const [defaults, setDefaults] = useState<Values>(() => ({
     name: device.name, code: device.code, branchId: device.branchId, timezone: device.timezone, manufacturer: device.manufacturer, modelName: device.modelName ?? undefined, serialNumber: device.serialNumber ?? undefined,
     endpointUrl: device.endpointUrl ?? undefined, offlineThresholdMinutes: device.offlineThresholdMinutes, autoSyncEnabled: device.autoSyncEnabled, syncIntervalMinutes: device.syncIntervalMinutes, tags: device.tags, notes: device.notes ?? undefined,
-  }), [device]);
+  }));
   const form = useForm<Values, unknown, UpdateDeviceInput>({ resolver: zodResolver(updateDeviceSchema), defaultValues: defaults });
   const { register, control, formState: { errors, isDirty }, reset } = form;
   const endpoint = useWatch({ control, name: 'endpointUrl' });
@@ -46,7 +48,7 @@ function GeneralForm({ device, onCredentialsRequired }: { device: DeviceDetail; 
     }
     if (Object.keys(patch).length === 0) return;
     update.mutate({ id: device.id, input: patch }, {
-      onSuccess: (res) => { toast.success(t('settings.saved')); reset(values); if (res.credentialsRequired) { toast.warning(t('settings.credentialsRequired')); onCredentialsRequired(); } },
+      onSuccess: (res) => { toast.success(t('settings.saved')); setDefaults(values); reset(values); if (res.credentialsRequired) { toast.warning(t('settings.credentialsRequired')); onCredentialsRequired(); } },
       onError: toastError,
     });
   });
@@ -145,7 +147,7 @@ export function SettingsTab({ device }: { device: DeviceDetail }) {
   const [needsCredentials, setNeedsCredentials] = useState(false);
   return (
     <div className="space-y-6">
-      <GeneralForm key={device.updatedAt} device={device} onCredentialsRequired={() => { setNeedsCredentials(true); document.getElementById('device-credentials')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} />
+      <GeneralForm key={device.id} device={device} onCredentialsRequired={() => { setNeedsCredentials(true); document.getElementById('device-credentials')?.scrollIntoView({ behavior: 'smooth', block: 'start' }); }} />
       <CredentialsForm device={device} highlight={needsCredentials} />
     </div>
   );

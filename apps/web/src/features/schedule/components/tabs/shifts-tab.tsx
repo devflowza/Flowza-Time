@@ -22,9 +22,9 @@ export function ShiftsTab() {
   const { t: tc } = useTranslation();
   const can = useCan();
   const canManage = can('shift.manage');
-  const table = useTabTable({ sort: 'name' });
+  const table = useTabTable();
   const f = table.state.filters;
-  const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize, sort: table.state.sort, order: table.state.order, status: f['status'], search: f['search'] }), [table.state, f]);
+  const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize, status: f['status'], search: f['search'] }), [table.state.page, table.state.pageSize, f]);
   const q = useShifts(query);
   const { remove } = useShiftMutations();
   const [dialog, setDialog] = useState<{ open: boolean; shift: ShiftDto | null }>({ open: false, shift: null });
@@ -32,14 +32,14 @@ export function ShiftsTab() {
   const hasFilters = !!f['status'] || !!f['search'];
 
   const columns = useMemo<ColumnDef<ShiftDto, unknown>[]>(() => [
-    { id: 'code', accessorKey: 'code', header: tc('common.code'), cell: ({ row }) => <span className="flex items-center gap-2 font-mono text-xs" dir="ltr"><span className="size-2.5 rounded-full" style={{ backgroundColor: row.original.color ?? '#94a3b8' }} aria-hidden />{row.original.code}</span> },
-    { id: 'name', accessorKey: 'name', header: tc('common.name'), cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.name}</p>{row.original.nameAr ? <p className="truncate text-xs text-muted-foreground" dir="rtl">{row.original.nameAr}</p> : null}</div> },
+    { id: 'code', header: tc('common.code'), enableSorting: false, cell: ({ row }) => <span className="flex items-center gap-2 font-mono text-xs" dir="ltr"><span className="size-2.5 rounded-full" style={{ backgroundColor: row.original.color ?? '#94a3b8' }} aria-hidden />{row.original.code}</span> },
+    { id: 'name', header: tc('common.name'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.name}</p>{row.original.nameAr ? <p className="truncate text-xs text-muted-foreground" dir="rtl">{row.original.nameAr}</p> : null}</div> },
     { id: 'type', header: t('shifts.type'), enableSorting: false, cell: ({ row }) => <Badge variant={row.original.type === 'FIXED' ? 'secondary' : 'info'}>{t(`shifts.types.${row.original.type}`, { defaultValue: row.original.type })}</Badge> },
     { id: 'hours', header: t('shifts.hours'), enableSorting: false, cell: ({ row }) => { const s = row.original; return s.type === 'FIXED' ? <span className="font-mono text-xs tnum" dir="ltr">{s.startTime} – {s.endTime}{s.crossesMidnight ? <span className="ms-1 text-muted-foreground" title={t('shifts.crossesMidnight')}>+1</span> : null}</span> : <span className="text-xs tnum">{t('shifts.required', { value: fmtMinutes(s.requiredMinutes ?? 0) })}{s.coreStart && s.coreEnd ? <span className="text-muted-foreground" dir="ltr"> · {s.coreStart}–{s.coreEnd}</span> : null}</span>; } },
     { id: 'breaks', header: t('shifts.breaks'), enableSorting: false, cell: ({ row }) => <span className="text-xs tnum">{row.original.breaks.length ? t('shifts.breakCount', { count: row.original.breaks.length }) : '—'}</span> },
     { id: 'windows', header: t('shifts.windows'), enableSorting: false, cell: ({ row }) => <span className="text-xs tnum text-muted-foreground" dir="ltr">−{row.original.punchInWindowBeforeMinutes}m / +{row.original.punchOutWindowAfterMinutes}m</span> },
     { id: 'assignments', header: t('shifts.assignments'), enableSorting: false, cell: ({ row }) => <span className="tnum">{row.original.assignmentCount ?? 0}</span> },
-    { id: 'status', accessorKey: 'status', header: tc('common.status'), cell: ({ row }) => <Badge variant={row.original.status === 'active' ? 'success' : row.original.status === 'inactive' ? 'warning' : 'neutral'} dot>{t(`recordStatus.${row.original.status}`, { defaultValue: row.original.status })}</Badge> },
+    { id: 'status', header: tc('common.status'), enableSorting: false, cell: ({ row }) => <Badge variant={row.original.status === 'active' ? 'success' : row.original.status === 'inactive' ? 'warning' : 'neutral'} dot>{t(`recordStatus.${row.original.status}`, { defaultValue: row.original.status })}</Badge> },
     { id: 'actions', header: '', enableSorting: false, cell: ({ row }) => canManage ? <RowActions actions={[{ key: 'edit', label: tc('common.edit'), icon: <Pencil />, onSelect: () => setDialog({ open: true, shift: row.original }) }, { key: 'delete', label: tc('common.delete'), icon: <Trash2 />, destructive: true, disabled: (row.original.assignmentCount ?? 0) > 0, onSelect: () => setDeleting(row.original) }]} /> : null },
   ], [t, tc, canManage]);
 
@@ -47,7 +47,7 @@ export function ShiftsTab() {
     <div className="space-y-3">
       <DataTable
         columns={columns} data={q.data?.data} total={q.data?.meta.total} page={table.state.page} pageSize={table.state.pageSize}
-        onPageChange={table.setPage} onPageSizeChange={table.setPageSize} sort={table.state.sort} order={table.state.order} onSort={table.toggleSort}
+        onPageChange={table.setPage} onPageSizeChange={table.setPageSize}
         isLoading={q.isLoading || q.isFetching} error={q.error} onRetry={() => void q.refetch()} storageKey="shifts"
         onRowClick={canManage ? (s) => setDialog({ open: true, shift: s }) : undefined}
         emptyTitle={t('shifts.empty')} emptyDescription={hasFilters ? tc('common.noResultsHint') : t('shifts.emptyHint')}

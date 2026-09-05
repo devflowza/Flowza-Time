@@ -157,7 +157,7 @@ export default function DeviceGroupsPage() {
           </div>
         )}
       {editing.open ? <GroupDialog key={editing.group?.id ?? 'new'} group={editing.group} open onOpenChange={(o) => !o && setEditing({ open: false, group: null })} /> : null}
-      <ConfirmDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} title={deleting ? `${t('groups.delete')}: ${deleting.name}` : ''} description={t('groups.deleteHint')} confirmLabel={tc('common.delete')} destructive loading={remove.isPending}
+      <ConfirmDialog open={!!deleting} onOpenChange={(o) => !o && setDeleting(null)} title={deleting ? t('groups.deleteTitle', { name: deleting.name }) : ''} description={t('groups.deleteHint')} confirmLabel={tc('common.delete')} destructive loading={remove.isPending}
         onConfirm={() => { if (!deleting) return; remove.mutate(deleting.id, { onSuccess: () => { toast.success(t('groups.deleted')); setDeleting(null); if (selectedId === deleting.id) setSelectedId(null); }, onError: toastError }); }} />
     </div>
   );

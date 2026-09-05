@@ -4,7 +4,7 @@
   "tabs": { "pending": "قيد الانتظار", "decided": "تم البت فيها" },
   "columns": { "employee": "الموظف", "date": "التاريخ", "type": "النوع", "change": "التغيير المقترح", "reason": "السبب", "requester": "بطلب من", "step": "الخطوة", "stepN": "الخطوة {{n}}", "decidedAt": "تاريخ القرار" },
   "actions": { "approve": "اعتماد", "reject": "رفض" },
-  "inbox": { "empty": "لا يوجد ما يحتاج اعتماداً", "emptyHint": "تظهر هنا الطلبات المسندة إليك أو إلى دورك أو فروعك." },
+  "inbox": { "empty": "لا يوجد ما يحتاج اعتماداً", "emptyHint": "تظهر هنا الطلبات المسندة إليك أو إلى دورك أو فروعك.", "ownRequest": "طلبك", "ownRequestHint": "لا يمكنك اعتماد طلبك أو رفضه. يمكنك إلغاؤه من صفحة التصحيحات.", "cancelInstead": "الإلغاء من التصحيحات" },
   "decided": { "empty": "لا توجد تصحيحات تم البت فيها", "emptyHint": "تظهر هنا التصحيحات المعتمدة والمطبَّقة والمرفوضة والملغاة." },
   "entity": { "ATTENDANCE_CORRECTION": "تصحيح حضور", "OVERTIME": "عمل إضافي", "MISSING_PUNCH": "بصمة مفقودة", "SHIFT_CHANGE": "تغيير وردية", "MANUAL_ATTENDANCE": "حضور يدوي", "LEAVE": "إجازة" },
   "approverType": { "MANAGER": "المدير", "ROLE": "دور", "USER": "مستخدم" },

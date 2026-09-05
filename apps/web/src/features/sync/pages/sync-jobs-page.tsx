@@ -20,13 +20,13 @@ import { SyncAttendanceDialog, SyncEmployeesDialog } from '../components/sync-di
 
 const ALL = '__all__';
 
-function scopeLabel(scope: Record<string, unknown>, t: (k: string) => string): string {
+function scopeLabel(scope: Record<string, unknown>, t: (k: string, opts?: Record<string, unknown>) => string): string {
   if (scope['all'] === true) return t('dialog.targets.all');
   if (typeof scope['branchId'] === 'string') return t('dialog.targets.branch');
   const ids = scope['deviceIds'];
-  if (Array.isArray(ids)) return `${ids.length} × ${t('list.device')}`;
+  if (Array.isArray(ids)) return t('list.scopeDevices', { count: ids.length });
   const emps = scope['employeeIds'];
-  if (Array.isArray(emps)) return `${emps.length} × ${t('dialog.targets.employees')}`;
+  if (Array.isArray(emps)) return t('list.scopeEmployees', { count: emps.length });
   return '—';
 }
 

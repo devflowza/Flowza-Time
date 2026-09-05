@@ -13,8 +13,9 @@ const LEVEL_TONE: Record<LogLevel, 'neutral' | 'info' | 'warning' | 'danger'> = 
 const CMD_TONE: Record<DeviceCommandDto['status'], 'neutral' | 'info' | 'success' | 'danger' | 'warning'> = { pending: 'neutral', sent: 'info', acked: 'success', failed: 'danger', expired: 'warning' };
 
 function Details({ data }: { data: Record<string, unknown> | null }) {
+  const { t } = useTranslation('devices');
   if (!data || Object.keys(data).length === 0) return <span className="text-muted-foreground">—</span>;
-  return <details className="text-xs"><summary className="cursor-pointer text-primary">{Object.keys(data).length} keys</summary><pre dir="ltr" className="mt-1 max-h-48 max-w-[420px] overflow-auto rounded bg-muted p-2 font-mono text-[11px] scrollbar-thin">{JSON.stringify(data, null, 2)}</pre></details>;
+  return <details className="text-xs"><summary className="cursor-pointer text-primary tnum">{t('logs.keys', { count: Object.keys(data).length })}</summary><pre dir="ltr" className="mt-1 max-h-48 max-w-[420px] overflow-auto rounded bg-muted p-2 font-mono text-[11px] scrollbar-thin">{JSON.stringify(data, null, 2)}</pre></details>;
 }
 
 export function LogsTab({ deviceId, tz }: { deviceId: string; tz: string }) {

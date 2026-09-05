@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
 import type { z } from 'zod';
@@ -8,11 +9,12 @@ import { ATTENDANCE_EVENT_TYPES, ATTENDANCE_STATUSES, CORRECTION_TYPES, createCo
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { fmtDateTime, todayIso } from '@/lib/format';
-import { toast, toastError } from '@/lib/toast';
+import { toast } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useEmployee, useEmployeeOptions } from '@/features/employees/api';
 import { useAttendanceEvents } from '@/features/attendance/api';
+import { toastMutationError } from '@/features/attendance/period-locked';
 import type { CorrectionPreset } from '@/features/attendance/components/record-dialog';
 import { useCorrectionMutations } from '../api';
 import { localToUtcIso } from '../time';
@@ -30,6 +32,7 @@ export function CorrectionDialog({ open, onOpenChange, preset, onCreated }: { op
   const { t: ta } = useTranslation('attendance');
   const { t: tc } = useTranslation();
   const orgTz = useOrgTimezone();
+  const navigate = useNavigate();
   const { create } = useCorrectionMutations();
   const employees = useEmployeeOptions();
   const branches = useBranchOptions();
@@ -59,7 +62,7 @@ export function CorrectionDialog({ open, onOpenChange, preset, onCreated }: { op
       toast.success(res.approval === 'AUTO_APPROVED' ? t('dialog.autoApproved') : t('dialog.submitted'));
       onOpenChange(false);
       onCreated?.(res.id);
-    } catch (e) { toastError(e); }
+    } catch (e) { toastMutationError(e, navigate); }
   });
 
   return (

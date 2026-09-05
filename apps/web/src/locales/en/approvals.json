@@ -4,7 +4,7 @@
   "tabs": { "pending": "Pending", "decided": "Decided" },
   "columns": { "employee": "Employee", "date": "Date", "type": "Type", "change": "Proposed change", "reason": "Reason", "requester": "Requested by", "step": "Step", "stepN": "Step {{n}}", "decidedAt": "Decided" },
   "actions": { "approve": "Approve", "reject": "Reject" },
-  "inbox": { "empty": "Nothing to approve", "emptyHint": "Requests assigned to you, your role or your branches appear here." },
+  "inbox": { "empty": "Nothing to approve", "emptyHint": "Requests assigned to you, your role or your branches appear here.", "ownRequest": "Your request", "ownRequestHint": "You cannot approve or reject your own request. Cancel it from Corrections instead.", "cancelInstead": "Cancel in Corrections" },
   "decided": { "empty": "No decided corrections", "emptyHint": "Approved, applied, rejected and cancelled corrections appear here." },
   "entity": { "ATTENDANCE_CORRECTION": "Attendance correction", "OVERTIME": "Overtime", "MISSING_PUNCH": "Missing punch", "SHIFT_CHANGE": "Shift change", "MANUAL_ATTENDANCE": "Manual attendance", "LEAVE": "Leave" },
   "approverType": { "MANAGER": "Manager", "ROLE": "Role", "USER": "User" },

@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCommandDto, DeviceCredentialsInput, DeviceDto, DeviceEmployeeSyncStatus, DeviceGroupDto, DeviceGroupInput, DeviceLogDto, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, EmploymentStatus, JobAccepted, PendingDeviceDto, ProviderThrottling, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
+import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCommandDto, DeviceCredentialsInput, DeviceDto, DeviceEmployeeSyncStatus, DeviceGroupDto, DeviceGroupInput, DeviceLogDto, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, DeviceSummaryDto, EmploymentStatus, PendingDeviceDto, ProviderThrottling, SyncJobAcceptedDto, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
 import type { ComboboxOption } from '@/components/forms';
 import { api, apiFetch, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
@@ -17,7 +17,8 @@ export interface DeviceEmployeeStateDto {
   inSync: boolean; deviceOnly: boolean; lastSyncAt: string | null; lastSuccessAt: string | null; lastErrorCode: string | null; lastError: string | null; fingerprintCount: number; faceEnrolled: boolean; cardEnrolled: boolean; deviceRecord: Record<string, unknown> | null; updatedAt: string;
 }
 export type DeviceAction = 'sync-attendance' | 'sync-employees' | 'health-check' | 'reconcile';
-export type DeviceActionAccepted = JobAccepted & { itemsTotal: number };
+/** 202 body of POST /devices/:id/actions/:action — same shape as the sync endpoints (status SUCCESS when every item was already in flight). */
+export type DeviceActionAccepted = SyncJobAcceptedDto;
 
 const ENTITY = 'devices';
 const GROUPS = 'device-groups';
@@ -37,6 +38,11 @@ export function useDeviceModels(providerKey: string | undefined) {
 export function useDevices(query: ListQuery, enabled = true) {
   const orgId = useOrgId();
   return useQuery({ queryKey: qk.list(orgId, ENTITY, query), queryFn: () => api.get<PageEnvelope<DeviceRow>>(`/orgs/${orgId}/devices`, query), placeholderData: keepPreviousData, enabled, refetchInterval: 30_000 });
+}
+/** Fleet counts from GET /devices/summary (server-side, branch-scoped) — never aggregate a page of the list client-side. */
+export function useDeviceSummary(query: { branchId?: string; includeDecommissioned?: boolean } = {}) {
+  const orgId = useOrgId();
+  return useQuery({ queryKey: [...qk.entity(orgId, ENTITY), 'summary', query], queryFn: async () => (await api.get<Envelope<DeviceSummaryDto>>(`/orgs/${orgId}/devices/summary`, query)).data, placeholderData: keepPreviousData, refetchInterval: 30_000 });
 }
 export function useDevice(id: string | undefined) {
   const orgId = useOrgId();

@@ -203,13 +203,15 @@ export default function DeviceNewPage() {
 
   const detailDefaults: DetailsValues = details ?? { code: '', name: '', branchId: '', timezone: orgTz, tags: [], manufacturer: provider?.vendor ?? '', modelName: model?.model, serialNumber: undefined, notes: undefined };
 
-  const buildInput = (): CreateDeviceInput | null => {
+  const buildInput = (): CreateDeviceInput | { issue: { field: string; message: string } } | null => {
     if (!provider || !details) return null;
     const cfg = normalizeProviderConfig(fields, config);
     const urlField = fields.find((f) => f.type === 'url');
     const endpointUrl = urlField && typeof cfg[urlField.key] === 'string' ? String(cfg[urlField.key]) : undefined;
     const parsed = createDeviceSchema.safeParse({ ...details, providerKey: provider.key, modelId: model?.id, config: cfg, endpointUrl, serialNumber: details.serialNumber ?? (typeof cfg.serialNumber === 'string' ? cfg.serialNumber : undefined) });
-    return parsed.success ? parsed.data : null;
+    if (parsed.success) return parsed.data;
+    const first = parsed.error.issues[0];
+    return { issue: { field: first?.path.join('.') || '—', message: first?.message ?? '' } };
   };
 
   const validateConnection = () => { const errs = validateProviderConfig(fields, config); setConfigErrors(errs); return Object.keys(errs).length === 0; };
@@ -223,6 +225,7 @@ export default function DeviceNewPage() {
   const register = () => {
     const input = buildInput();
     if (!input) { toast.error(t('wizard.invalid')); return; }
+    if ('issue' in input) { toast.error(t('wizard.invalid'), { description: t('wizard.invalidField', input.issue) }); return; }
     create.mutate(input, {
       onSuccess: (res) => {
         toast.success(t('wizard.created', { name: res.device.name }));

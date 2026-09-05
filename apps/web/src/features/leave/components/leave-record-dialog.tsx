@@ -7,11 +7,12 @@ import { HALF_DAY_PARTS, leaveRecordInputSchema, type LeaveRecordInput } from '@
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Textarea } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { todayIso } from '@/lib/format';
-import { toast, toastError } from '@/lib/toast';
+import { toast } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { blankToUndefined } from '@/features/organization/form-utils';
 import { useEmployeeOptions } from '@/features/employees/api';
 import { toastJobQueued } from '@/features/employees/job-toast';
+import { toastMutationError } from '@/features/attendance/period-locked';
 import { useLeaveMutations, useLeaveTypeOptions } from '../api';
 
 type FormValues = z.input<typeof leaveRecordInputSchema>;
@@ -35,7 +36,7 @@ export function LeaveRecordDialog({ open, onOpenChange, preset }: { open: boolea
       const res = await createRecord.mutateAsync({ ...v, halfDayPart: v.isHalfDay ? v.halfDayPart : undefined });
       if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('records.recalcHint')); else toast.success(t('records.created'));
       onOpenChange(false);
-    } catch (e) { toastError(e); }
+    } catch (e) { toastMutationError(e, navigate); }
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

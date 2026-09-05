@@ -5,6 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { Calculator, ExternalLink } from 'lucide-react';
 import { DataTable } from '@/components/data-table';
 import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
+import { buttonVariants } from '@/components/ui/button';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 import { useCan, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
@@ -36,7 +37,7 @@ export function RecalculationsTab() {
     { id: 'status', header: tc('common.status'), cell: ({ row }) => <div className="flex flex-col gap-0.5"><JobStatusBadge status={row.original.status} />{row.original.summary && typeof row.original.summary['recordsUpdated'] === 'number' ? <span className="text-[11px] text-muted-foreground tnum">{t('recalc.recordsUpdated', { count: Number(row.original.summary['recordsUpdated']) })}</span> : null}</div> },
     { id: 'requestedBy', header: t('recalc.requestedBy'), cell: ({ row }) => <span className="text-xs">{row.original.requestedByName ?? '—'}</span> },
     { id: 'createdAt', header: tc('common.createdAt'), cell: ({ row }) => <span className="whitespace-nowrap text-xs tnum">{fmtDateTime(row.original.createdAt, tz)}</span> },
-    { id: 'job', header: t('recalc.job'), cell: ({ row }) => row.original.jobId ? <Button asChild variant="link" size="sm" className="h-auto p-0"><Link to={`/sync/${row.original.jobId}`} onClick={(e) => e.stopPropagation()}>{t('recalc.viewJob')} <ExternalLink className="size-3" /></Link></Button> : '—' },
+    { id: 'job', header: t('recalc.job'), cell: ({ row }) => row.original.jobId ? <Link to={`/sync/${row.original.jobId}`} onClick={(e) => e.stopPropagation()} className={buttonVariants({ variant: 'link', size: 'sm', className: 'h-auto p-0' })}>{t('recalc.viewJob')} <ExternalLink className="size-3" /></Link> : '—' },
   ], [t, tc, tz, branches.byId]);
 
   return (

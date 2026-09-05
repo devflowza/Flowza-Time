@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
+import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { BarChart3, Lock, Send } from 'lucide-react';
 import { createReportRequestSchema, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
@@ -16,6 +17,7 @@ import { cn } from '@/lib/utils';
 import { useOrgId, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { blankToUndefined } from '@/features/organization/form-utils';
+import { toastJobQueued } from '@/features/employees/job-toast';
 import { useShiftOptions } from '@/features/schedule/api';
 import { EmployeeMultiSelect } from '@/features/attendance/components/employee-multi-select';
 import { useReportMutations, useReportTypes, type ReportTypeDef } from '../api';
@@ -34,6 +36,7 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
   const { t } = useTranslation('reports');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
+  const navigate = useNavigate();
   const { create } = useReportMutations();
   const branches = useBranchOptions();
   const shifts = useShiftOptions(true);
@@ -58,7 +61,7 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
     try {
       const p = Object.fromEntries(Object.entries(values.parameters ?? {}).filter(([, v]) => !isEmpty(v)));
       const res = await create.mutateAsync({ ...values, parameters: p });
-      toast.success(t('request.queued'), { description: t('request.queuedHint') });
+      if (res.jobId) toastJobQueued(res.jobId, navigate, t('request.queuedHint')); else toast.success(t('request.queued'), { description: t('request.queuedHint') });
       onQueued(res.id);
     } catch (e) { toastError(e); }
   });

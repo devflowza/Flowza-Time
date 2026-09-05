@@ -50,7 +50,7 @@ describe('ShiftDialog', () => {
     const [path, body] = apiMock.post.mock.calls[0] as [string, Record<string, unknown>];
     expect(path).toBe('/orgs/org-1/shifts');
     expect(body).toMatchObject({ code: 'MORN', name: 'Morning', type: 'FLEXIBLE', requiredMinutes: 480, coreStart: '10:00', coreEnd: '14:00', dayBoundary: '04:00', punchInWindowBeforeMinutes: 240, punchOutWindowAfterMinutes: 360, graceInMinutes: null, breaks: [{ start: '12:00', end: '13:00', paid: false }], status: 'active' });
-    expect(body).not.toHaveProperty('startTime');
+    expect(body['startTime']).toBeUndefined(); // FIXED-only fields are cleared for FLEXIBLE
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 

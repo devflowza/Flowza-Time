@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,7 @@ import { toastError } from '@/lib/toast';
 import { useCan } from '@/features/me/use-me';
 import { SearchBox } from '@/features/organization/components/search-box';
 import { useSyncMutations } from '@/features/sync/api';
-import { toastJobQueued } from '@/features/sync/job-toast';
+import { toastJobAccepted } from '@/features/sync/job-toast';
 import { useDeviceEmployees, type DeviceEmployeeStateDto } from '../../api';
 import { EmployeeSyncBadge } from '../device-badges';
 
@@ -31,11 +31,14 @@ export function EmployeesTab({ deviceId, tz, canPush }: { deviceId: string; tz: 
   const { syncEmployees } = useSyncMutations();
   const [repairing, setRepairing] = useState<string | null>(null);
 
-  const repair = (row: DeviceEmployeeStateDto) => {
+  const canRepair = canPush && can('device.sync');
+  const repairPending = syncEmployees.isPending;
+  const { mutate: pushEmployee } = syncEmployees;
+  const repair = useCallback((row: DeviceEmployeeStateDto) => {
     if (!row.employeeId) return;
     setRepairing(row.id);
-    syncEmployees.mutate({ employeeIds: [row.employeeId], deviceIds: [deviceId], all: false, removeStale: false }, { onSuccess: (r) => toastJobQueued(r.jobId, navigate), onError: toastError, onSettled: () => setRepairing(null) });
-  };
+    pushEmployee({ employeeIds: [row.employeeId], deviceIds: [deviceId], all: false, removeStale: false }, { onSuccess: (r) => toastJobAccepted(r, navigate), onError: toastError, onSettled: () => setRepairing(null) });
+  }, [pushEmployee, deviceId, navigate]);
 
   const columns = useMemo<ColumnDef<DeviceEmployeeStateDto, unknown>[]>(() => [
     { id: 'employee', header: t('employees.employee'), cell: ({ row }) => row.original.employeeId ? (
@@ -52,11 +55,10 @@ export function EmployeesTab({ deviceId, tz, canPush }: { deviceId: string; tz: 
     ) },
     { id: 'lastSync', header: t('employees.lastSync'), cell: ({ row }) => <span className="text-xs tnum" title={row.original.lastSyncAt ? fmtDateTime(row.original.lastSyncAt, tz) : ''}>{fmtRelative(row.original.lastSyncAt)}</span> },
     { id: 'error', header: t('employees.lastError'), cell: ({ row }) => row.original.lastError ? <span className="max-w-[260px] truncate text-xs text-destructive" title={row.original.lastError}>{row.original.lastErrorCode ? `${row.original.lastErrorCode}: ` : ''}{row.original.lastError}</span> : <span className="text-muted-foreground">—</span> },
-    { id: 'actions', header: '', enableHiding: false, cell: ({ row }) => (row.original.employeeId && canPush && can('device.sync') ? (
-      <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); repair(row.original); }} loading={repairing === row.original.id} disabled={syncEmployees.isPending && repairing !== row.original.id}><Wrench /> {t('employees.repair')}</Button>
+    { id: 'actions', header: '', enableHiding: false, cell: ({ row }) => (row.original.employeeId && canRepair ? (
+      <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); repair(row.original); }} loading={repairing === row.original.id} disabled={repairPending && repairing !== row.original.id}><Wrench /> {t('employees.repair')}</Button>
     ) : null) },
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [t, tz, canPush, repairing, syncEmployees.isPending]);
+  ], [t, tz, canRepair, repair, repairing, repairPending]);
 
   return (
     <DataTable

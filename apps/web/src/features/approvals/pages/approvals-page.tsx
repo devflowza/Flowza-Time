@@ -6,8 +6,9 @@ import { Check, Inbox, Settings2, X } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
 import { Badge, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
+import { buttonVariants } from '@/components/ui/button';
 import { fmtDate, fmtDateTime } from '@/lib/format';
-import { useCan, useOrgTimezone } from '@/features/me/use-me';
+import { useCan, useMe, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useTabTable } from '@/features/organization/use-tab-table';
 import type { CorrectionDto } from '@/features/attendance/types';
@@ -28,6 +29,8 @@ function PendingTab() {
   const table = useTabTable();
   const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize }), [table.state.page, table.state.pageSize]);
   const q = useApprovalInbox(query);
+  const myId = useMe().data?.user.id;
+  const isOwn = (i: InboxItem) => !!myId && i.requestedBy === myId;
   const [dialog, setDialog] = useState<{ item: InboxItem | null; decision: Decision }>({ item: null, decision: 'approve' });
   const byId = branches.byId;
   const tzOf = useMemo(() => (branchId: string | null) => (branchId ? byId.get(branchId)?.timezone : undefined) ?? tz, [byId, tz]);
@@ -40,13 +43,16 @@ function PendingTab() {
     { id: 'reason', header: t('columns.reason'), cell: ({ row }) => <span className="block max-w-[240px] truncate text-xs" title={row.original.correction?.reason}>{row.original.correction?.reason ?? '—'}</span> },
     { id: 'requester', header: t('columns.requester'), cell: ({ row }) => <div className="text-xs"><p>{row.original.requestedByName ?? '—'}</p><p className="text-muted-foreground tnum">{fmtDateTime(row.original.createdAt, tz)}</p></div> },
     { id: 'step', header: t('columns.step'), cell: ({ row }) => <Badge variant="outline" className="tnum">{t('columns.stepN', { n: row.original.stepNo })} · {t(`approverType.${row.original.approverType}`, { defaultValue: row.original.approverType })}</Badge> },
-    { id: 'actions', header: '', cell: ({ row }) => (
+    { id: 'actions', header: '', cell: ({ row }) => !!myId && row.original.requestedBy === myId ? (
+      // Separation of duties: the requester never decides on their own request (the API rejects it); they can cancel it instead.
+      <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()} title={t('inbox.ownRequestHint')}><Badge variant="outline">{t('inbox.ownRequest')}</Badge><Link to="/corrections?status=PENDING" className="text-xs text-muted-foreground underline-offset-2 hover:underline">{t('inbox.cancelInstead')}</Link></div>
+    ) : (
       <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
         <Button size="sm" variant="outline" onClick={() => setDialog({ item: row.original, decision: 'reject' })}><X /> {t('actions.reject')}</Button>
         <Button size="sm" onClick={() => setDialog({ item: row.original, decision: 'approve' })}><Check /> {t('actions.approve')}</Button>
       </div>
     ) },
-  ], [t, tz, tzOf]);
+  ], [t, tz, tzOf, myId]);
 
   return (
     <>
@@ -54,7 +60,7 @@ function PendingTab() {
         columns={columns} data={q.data?.data} total={q.data?.meta.total} page={table.state.page} pageSize={table.state.pageSize}
         onPageChange={table.setPage} onPageSizeChange={table.setPageSize} isLoading={q.isLoading || q.isFetching} error={q.error} onRetry={() => void q.refetch()}
         emptyTitle={t('inbox.empty')} emptyDescription={t('inbox.emptyHint')}
-        renderCard={(i) => <div className="space-y-2"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{i.correction?.employeeName ?? '—'}</span>{i.correction ? <CorrectionTypeBadge type={i.correction.type} /> : null}</div><p className="text-xs text-muted-foreground">{i.correction ? fmtDate(i.correction.attendanceDate) : ''} · {i.correction?.reason}</p><div className="flex gap-2"><Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setDialog({ item: i, decision: 'reject' }); }}><X /> {t('actions.reject')}</Button><Button size="sm" onClick={(e) => { e.stopPropagation(); setDialog({ item: i, decision: 'approve' }); }}><Check /> {t('actions.approve')}</Button></div></div>}
+        renderCard={(i) => <div className="space-y-2"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{i.correction?.employeeName ?? '—'}</span>{i.correction ? <CorrectionTypeBadge type={i.correction.type} /> : null}</div><p className="text-xs text-muted-foreground">{i.correction ? fmtDate(i.correction.attendanceDate) : ''} · {i.correction?.reason}</p>{isOwn(i) ? <p className="text-xs text-muted-foreground">{t('inbox.ownRequestHint')}</p> : <div className="flex gap-2"><Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setDialog({ item: i, decision: 'reject' }); }}><X /> {t('actions.reject')}</Button><Button size="sm" onClick={(e) => { e.stopPropagation(); setDialog({ item: i, decision: 'approve' }); }}><Check /> {t('actions.approve')}</Button></div>}</div>}
       />
       <DecisionDialog key={`${dialog.item?.stepId ?? ''}-${dialog.decision}`} item={dialog.item} decision={dialog.decision} timezone={tzOf(dialog.item?.branchId ?? null)} onClose={() => setDialog((d) => ({ ...d, item: null }))} />
     </>
@@ -103,7 +109,7 @@ export default function ApprovalsPage() {
   const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'pending';
   return (
     <div className="page-container">
-      <PageHeader title={t('title')} description={t('subtitle')} actions={can('organization.manage') ? <Button asChild variant="outline" size="sm"><Link to="/approvals/workflows"><Settings2 /> {t('workflows.title')}</Link></Button> : undefined} />
+      <PageHeader title={t('title')} description={t('subtitle')} actions={can('organization.manage') ? <Link to="/approvals/workflows" className={buttonVariants({ variant: 'outline', size: 'sm' })}><Settings2 /> {t('workflows.title')}</Link> : undefined} />
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
         <TabsList aria-label={t('title')}>
           <TabsTrigger value="pending"><Inbox className="me-1.5 size-4" /> {t('tabs.pending')}</TabsTrigger>

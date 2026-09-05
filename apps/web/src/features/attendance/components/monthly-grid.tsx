@@ -1,7 +1,7 @@
 import { memo, useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
-import { fmtMinutes } from '@/lib/format';
+import { fmtDate, fmtMinutes } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { cellClass, STATUS_LETTER } from '../status';
 import type { MonthlyDayCell, MonthlyRow } from '../types';
@@ -33,7 +33,7 @@ const DayCell = memo(function DayCell({ day, cell, label, onOpen }: CellProps) {
 });
 
 function cellLabel(t: (k: string, o?: Record<string, unknown>) => string, day: string, cell: MonthlyDayCell | null): string {
-  const date = DateTime.fromISO(day).toFormat('dd MMM');
+  const date = fmtDate(day, 'dd MMM');
   if (!cell) return `${date}: ${t('monthly.noRecord')}`;
   const parts = [t(`status.${cell.status}`, { defaultValue: cell.status })];
   if (cell.workedMinutes) parts.push(`${t('columns.worked')} ${fmtMinutes(cell.workedMinutes)}`);
@@ -69,7 +69,7 @@ const GridRow = memo(function GridRow({ row, days, onOpen, onEmployee }: { row: 
  */
 export function MonthlyGrid({ rows, days, weeklyOffDays = [], onOpenRecord, onOpenEmployee }: { rows: MonthlyRow[]; days: string[]; weeklyOffDays?: number[]; onOpenRecord?: (recordId: string) => void; onOpenEmployee?: (employeeId: string) => void }) {
   const { t } = useTranslation('attendance');
-  const headers = useMemo(() => days.map((d) => { const dt = DateTime.fromISO(d); return { d, num: dt.day, dow: dt.toFormat('ccc'), off: weeklyOffDays.includes(dt.weekday % 7) }; }), [days, weeklyOffDays]);
+  const headers = useMemo(() => days.map((d) => { const dt = DateTime.fromISO(d); return { d, num: dt.day, dow: fmtDate(d, 'ccc'), off: weeklyOffDays.includes(dt.weekday % 7) }; }), [days, weeklyOffDays]);
   const totals = useMemo(() => rows.reduce((a, r) => ({ present: a.present + r.totals.present, absent: a.absent + r.totals.absent, leave: a.leave + r.totals.leave, late: a.late + r.totals.late, missingPunch: a.missingPunch + r.totals.missingPunch, workedMinutes: a.workedMinutes + r.totals.workedMinutes, overtimeMinutes: a.overtimeMinutes + r.totals.overtimeMinutes }), { present: 0, absent: 0, leave: 0, late: 0, missingPunch: 0, workedMinutes: 0, overtimeMinutes: 0 }), [rows]);
   return (
     <div className="relative w-full overflow-x-auto rounded-lg border bg-card shadow-card scrollbar-thin" data-testid="monthly-grid">

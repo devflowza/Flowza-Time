@@ -1,7 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
-import { DateTime } from 'luxon';
 import { CalendarOff, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ConfirmDialog, EmptyState, ErrorState, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@/components/ui';
@@ -88,11 +87,11 @@ export default function HolidaysPage() {
               <div className={cn('space-y-4', holidays.isFetching && 'opacity-70')}>
                 {groups.map(([month, items]) => (
                   <Card key={month}>
-                    <CardHeader className="py-3"><CardTitle className="text-sm">{DateTime.fromISO(`${month}-01`).toFormat('MMMM yyyy')} <span className="text-xs font-normal text-muted-foreground">· {t('holidays.count', { count: items.length })}</span></CardTitle></CardHeader>
+                    <CardHeader className="py-3"><CardTitle className="text-sm">{fmtDate(`${month}-01`, 'MMMM yyyy')} <span className="text-xs font-normal text-muted-foreground">· {t('holidays.count', { count: items.length })}</span></CardTitle></CardHeader>
                     <CardContent className="divide-y p-0">
                       {items.map((h) => (
                         <div key={h.id} className={cn('flex items-center gap-3 px-5 py-2.5', h.date < today && 'text-muted-foreground')}>
-                          <div className="w-14 shrink-0 text-center"><p className="text-lg font-semibold leading-none tnum">{h.date.slice(8, 10)}</p><p className="text-[10px] uppercase text-muted-foreground">{DateTime.fromISO(h.date).toFormat('ccc')}</p></div>
+                          <div className="w-14 shrink-0 text-center"><p className="text-lg font-semibold leading-none tnum">{h.date.slice(8, 10)}</p><p className="text-[10px] uppercase text-muted-foreground">{fmtDate(h.date, 'ccc')}</p></div>
                           <div className="min-w-0 flex-1">
                             <p className="flex flex-wrap items-center gap-2 text-sm font-medium"><span className="truncate">{h.name}</span>{h.nameAr ? <span className="text-xs font-normal text-muted-foreground" dir="rtl">{h.nameAr}</span> : null}{h.isTentative ? <Badge variant="warning">{t('holidays.tentative')}</Badge> : null}{h.isHalfDay ? <Badge variant="outline">{t('holidays.halfDay')}</Badge> : null}</p>
                             <p className="text-xs text-muted-foreground">{h.endDate && h.endDate !== h.date ? <span className="tnum">{fmtDate(h.date)} → {fmtDate(h.endDate)} · </span> : null}<Badge variant={TYPE_TONE[h.type] ?? 'secondary'} className="me-1">{t(`holidays.types.${h.type}`, { defaultValue: h.type })}</Badge>{h.branchIds && h.branchIds.length ? h.branchIds.map((b) => branches.byId.get(b)?.name ?? b.slice(0, 8)).join(', ') : t('holidays.allBranches')}</p>

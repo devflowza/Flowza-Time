@@ -37,8 +37,8 @@ describe('ReportRequestPanel', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Late arrivals/ }));
     expect(await screen.findByText('Parameters — Late arrivals')).toBeInTheDocument();
     // date range defaults to the current month; clearing the end date makes the required refinement fail
-    const to = screen.getByLabelText(/^To/);
-    expect(to).toHaveValue(expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/));
+    const to = screen.getByLabelText(/^To/) as HTMLInputElement;
+    expect(to.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
     fireEvent.change(to, { target: { value: '' } });
     fireEvent.click(screen.getByRole('button', { name: 'Queue report' }));
     await screen.findByText('Required');
@@ -60,7 +60,7 @@ describe('ReportRequestPanel', () => {
   it('shows a month picker for month-based reports', async () => {
     renderWithProviders(<ReportRequestPanel onQueued={() => {}} />);
     fireEvent.click(await screen.findByRole('radio', { name: /Monthly attendance/ }));
-    expect(await screen.findByLabelText(/Month/)).toHaveValue(expect.stringMatching(/^\d{4}-\d{2}$/));
+    expect((await screen.findByLabelText(/Month/) as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}$/);
     expect(screen.queryByLabelText(/^From/)).not.toBeInTheDocument();
   });
 });

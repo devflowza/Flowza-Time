@@ -11,7 +11,7 @@ import { useBranchOptions } from '@/features/organization/lookups';
 import { useDeviceOptions } from '@/features/devices/api';
 import { useEmployeeOptions } from '@/features/employees/api';
 import { useSyncMutations } from '../api';
-import { toastJobQueued } from '../job-toast';
+import { toastJobAccepted } from '../job-toast';
 
 /** Chip multi-select built on the searchable Combobox: pick one at a time, remove with the chip's button. */
 function MultiPick({ id, value, onChange, options, loading, placeholder, onSearch, labelOf }: { id: string; value: string[]; onChange: (ids: string[]) => void; options: ComboboxOption[]; loading?: boolean; placeholder: string; onSearch?: (q: string) => void; labelOf: (id: string) => string }) {
@@ -59,7 +59,7 @@ export function SyncAttendanceDialog({ open, onOpenChange, defaultDeviceIds = []
   const [fullResync, setFullResync] = useState(false);
   const labelOf = (id: string) => devices.options.find((o) => o.value === id)?.label ?? id;
   const body: SyncAttendanceRequest | null = target === 'all' ? { all: true, fullResync } : target === 'branch' ? (branchId ? { branchId, all: false, fullResync } : null) : deviceIds.length ? { deviceIds, all: false, fullResync } : null;
-  const submit = () => { if (!body) return; syncAttendance.mutate(body, { onSuccess: (r) => { toastJobQueued(r.jobId, navigate, t('dialog.queued', { count: r.itemsTotal, devices: r.deviceCount })); onOpenChange(false); }, onError: toastError }); };
+  const submit = () => { if (!body) return; syncAttendance.mutate(body, { onSuccess: (r) => { toastJobAccepted(r, navigate, t('dialog.queued', { count: r.itemsTotal, devices: r.deviceCount })); onOpenChange(false); }, onError: toastError }); };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="lg">
@@ -108,7 +108,7 @@ export function SyncEmployeesDialog({ open, onOpenChange, defaultDeviceIds = [],
       : target === 'branch' ? (branchId ? { branchId, all: false, removeStale } : null)
       : target === 'devices' ? (deviceIds.length ? { deviceIds, all: false, removeStale } : null)
       : employeeIds.length ? { employeeIds, deviceIds: deviceIds.length ? deviceIds : undefined, all: false, removeStale } : null;
-  const submit = () => { if (!body) return; syncEmployees.mutate(body, { onSuccess: (r) => { toastJobQueued(r.jobId, navigate, t('dialog.queued', { count: r.itemsTotal, devices: r.deviceCount })); onOpenChange(false); }, onError: toastError }); };
+  const submit = () => { if (!body) return; syncEmployees.mutate(body, { onSuccess: (r) => { toastJobAccepted(r, navigate, t('dialog.queued', { count: r.itemsTotal, devices: r.deviceCount })); onOpenChange(false); }, onError: toastError }); };
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent size="lg">

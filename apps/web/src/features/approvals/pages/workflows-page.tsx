@@ -7,7 +7,7 @@ import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitl
 import { toast, toastError } from '@/lib/toast';
 import { useCan } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
-import { useRoles } from '@/features/users/api';
+import { useMembers, useRoles } from '@/features/users/api';
 import { useWorkflowMutations, useWorkflows, type WorkflowDto } from '../api';
 import { WorkflowDialog } from '../components/workflow-dialog';
 
@@ -20,10 +20,12 @@ export default function WorkflowsPage() {
   const q = useWorkflows();
   const branches = useBranchOptions();
   const roles = useRoles();
+  const members = useMembers({ pageSize: 200, sort: 'fullName', status: 'active' });
   const { remove } = useWorkflowMutations();
   const [dialog, setDialog] = useState<{ open: boolean; workflow: WorkflowDto | null }>({ open: false, workflow: null });
   const [deleting, setDeleting] = useState<WorkflowDto | null>(null);
   const roleName = (id?: string) => roles.data?.find((r) => r.id === id)?.name ?? id?.slice(0, 8) ?? '—';
+  const userName = (id?: string) => { const m = members.data?.data.find((x) => x.userId === id); return m ? m.fullName || m.email : `${id?.slice(0, 8) ?? '—'}…`; };
 
   return (
     <div className="page-container">
@@ -46,7 +48,7 @@ export default function WorkflowsPage() {
                 <CardContent>
                   <ol className="space-y-1.5">
                     {w.steps.map((s, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm"><Badge variant="outline" className="tnum">{i + 1}</Badge><span className="font-medium">{t(`approverType.${s.approverType}`)}</span>{s.approverType === 'ROLE' ? <span className="text-muted-foreground">· {roleName(s.roleId)}</span> : s.approverType === 'USER' ? <span className="font-mono text-xs text-muted-foreground" dir="ltr">· {s.userId?.slice(0, 8)}…</span> : null}</li>
+                      <li key={i} className="flex items-center gap-2 text-sm"><Badge variant="outline" className="tnum">{i + 1}</Badge><span className="font-medium">{t(`approverType.${s.approverType}`)}</span>{s.approverType === 'ROLE' ? <span className="text-muted-foreground">· {roleName(s.roleId)}</span> : s.approverType === 'USER' ? <span className="text-muted-foreground">· {userName(s.userId)}</span> : null}</li>
                     ))}
                   </ol>
                 </CardContent>

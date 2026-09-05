@@ -54,5 +54,6 @@
     "statusLocked": "Locked", "statusUnlocked": "Unlocked", "unlockedAt": "Unlocked {{at}}", "unlockReasonLabel": "Unlock reason", "empty": "No period locks", "emptyHint": "Lock a period once attendance has been reviewed so payroll can be finalised.",
     "lockTitle": "Lock period", "lockHint": "Pending corrections in the range must be decided first.", "start": "Period start", "end": "Period end", "branchHint": "Leave empty to lock all branches.", "lock": "Lock", "locked": "Period locked",
     "unlockTitle": "Unlock period", "unlockHint": "Unlock {{from}} → {{to}}? The action is audited.", "unlockReason": "Reason", "unlockReasonHint": "At least 3 characters; stored in the audit log.", "reasonTooShort": "Please enter at least 3 characters.", "unlock": "Unlock", "unlocked": "Period unlocked"
-  }
+  },
+  "periodLocked": { "title": "Period is locked", "hint": "Attendance in this range is locked. Unlock the period under Attendance → Period locks before changing it.", "view": "View period locks" }
 }

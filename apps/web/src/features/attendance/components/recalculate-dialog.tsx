@@ -7,11 +7,11 @@ import { recalculateSchema, type RecalculateInput } from '@flowza/contracts';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Textarea } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { todayIso } from '@/lib/format';
-import { toastError } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { toastJobQueued } from '@/features/employees/job-toast';
 import { useAttendanceMutations, useInvalidateAttendance } from '../api';
+import { toastMutationError } from '../period-locked';
 import { EmployeeMultiSelect } from './employee-multi-select';
 
 type FormValues = z.input<typeof recalculateSchema>;
@@ -37,7 +37,7 @@ export function RecalculateDialog({ open, onOpenChange, preset }: { open: boolea
       toastJobQueued(res.jobId, navigate, t('recalc.queuedHint'));
       invalidate();
       onOpenChange(false);
-    } catch (e) { toastError(e); }
+    } catch (e) { toastMutationError(e, navigate); }
   });
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
