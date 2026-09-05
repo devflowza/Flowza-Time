@@ -28,20 +28,9 @@ export interface IngestInput {
 
 export interface IngestResult { inserted: number; duplicates: number; quarantined: number; held: number; ids: string[] }
 
-/** Canonical `punched_at` inside the dedupe hash: UTC ISO-8601, milliseconds only when non-zero ("2026-09-05T03:00:00Z"). */
-export function canonicalPunchedAt(punchedAt: string): string {
-  const dt = DateTime.fromISO(punchedAt, { setZone: true });
-  return dt.isValid ? (dt.toUTC().toISO({ suppressMilliseconds: true }) ?? punchedAt) : punchedAt;
-}
-
-/**
- * Dedupe hash contract (AGENTS.md): sha256(device_id|device_generation|device_employee_id|punched_at|verification|direction),
- * with `punched_at` in the canonical form above. The API's device-push ingest (apps/api/src/services/features/ingest.ts)
- * computes the same string, so a punch that arrives by push and later by poll hashes identically.
- */
-export function dedupeHash(deviceId: string, generation: number, t: { deviceEmployeeId: string; punchedAt: string; verificationMethod?: string; direction?: string }): string {
-  return sha256Hex(`${deviceId}|${generation}|${t.deviceEmployeeId}|${canonicalPunchedAt(t.punchedAt)}|${t.verificationMethod ?? 'unknown'}|${t.direction ?? 'unknown'}`);
-}
+// Dedupe hash + canonical punched_at live in @flowza/database (shared with the API device-push ingest).
+import { canonicalPunchedAt, dedupeHash } from '@flowza/database';
+export { canonicalPunchedAt, dedupeHash };
 
 /** Raw payloads are capped at 16 KB; oversize payloads are replaced by their hash (never silently truncated JSON). */
 export function boundRawPayload(payload: unknown): string {

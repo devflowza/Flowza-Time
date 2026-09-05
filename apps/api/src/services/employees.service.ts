@@ -11,6 +11,7 @@ import { type Actor, runUser, audit, diffObjects, withSystemScope } from '../lib
 import { enqueueJob } from '../lib/jobs.js';
 import { hashPin } from '../lib/hashing.js';
 import { loadSettings } from '../lib/settings.js';
+import { assertWithinLimit } from './features/entitlements.js';
 import { likeContains, pageOf, prefixTsQuery, resolveSort, toCount } from '../lib/pagination.js';
 import { isoDate } from '../lib/mappers.js';
 import { DOCUMENT_COLUMNS, EMPLOYEE_COLUMNS, EMPTY_SYNC_SUMMARY, HISTORY_COLUMNS, toDeviceStateDto, toDocumentDto, toEmployeeDto, toHistoryDto, type DeviceSyncSummary, type DeviceStateRow, type EmployeeRow, type HistoryRow } from './employees.mappers.js';
@@ -239,6 +240,12 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
   requireBranchAccess(grant, input.branchId);
   return runUser(deps.db, actor, async (trx) => {
     await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId });
+    // plan entitlement: count active employees org-wide (system scope, since branch-restricted creators only see their branch)
+    const activeCount = await withSystemScope(trx, orgId, async (t) => {
+      const row = await t.selectFrom('employees').select(({ fn }) => fn.countAll<string>().as('c')).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('employmentStatus', 'not in', ['terminated', 'resigned']).executeTakeFirstOrThrow();
+      return Number(row.c);
+    });
+    await assertWithinLimit(trx, orgId, 'employees', activeCount);
     const displayName = input.displayName ?? [input.firstName, input.lastName].filter(Boolean).join(' ');
     const pinHash = input.pin ? hashPin(input.pin) : null;
     const insert = (deviceUserId: string) => trx.insertInto('employees').values({
