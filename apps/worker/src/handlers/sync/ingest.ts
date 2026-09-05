@@ -74,7 +74,7 @@ export async function ingestRawTransactions(trx: Trx, input: IngestInput): Promi
     const rows: Array<Record<string, unknown>> = [];
     for (const t of input.transactions) {
       const punched = new Date(t.punchedAt);
-      if (Number.isNaN(punched.getTime())) { result.quarantined += 0; continue; }
+      if (Number.isNaN(punched.getTime())) continue; // unparseable timestamp: the provider contract (rawTransactionSchema) forbids it; never insert garbage
       const hash = dedupeHash(device.id, device.generation, t);
       if (seen.has(hash)) { result.duplicates++; continue; }
       seen.add(hash);
