@@ -19,7 +19,9 @@ export type AttendanceStatus = "ABSENT" | "EXITED" | "HALF_DAY" | "HOLIDAY" | "L
 
 export type AuditActorType = "API_KEY" | "DEVICE" | "PLATFORM_ADMIN" | "SYSTEM" | "USER";
 
-export type ConnectionStatus = "degraded" | "error" | "offline" | "online" | "unknown";
+export type CircuitState = "closed" | "half_open" | "open";
+
+export type ConnectionStatus = "degraded" | "error" | "offline" | "online" | "unknown" | "vendor_degraded";
 
 export type CorrectionStatus = "APPLIED" | "APPROVED" | "CANCELLED" | "PENDING" | "REJECTED";
 
@@ -107,7 +109,7 @@ export type PunchDirection = "break_in" | "break_out" | "in" | "out" | "overtime
 
 export type PunchInterpretation = "DIRECTIONAL" | "FIRST_LAST" | "PAIRED";
 
-export type RawProcessingStatus = "error" | "ignored" | "normalized" | "pending" | "unmatched";
+export type RawProcessingStatus = "error" | "held" | "ignored" | "normalized" | "pending" | "quarantined" | "unmatched";
 
 export type RawSource = "DEVICE_PUSH" | "IMPORT" | "MANUAL" | "POLL" | "WEBHOOK";
 
@@ -343,9 +345,12 @@ export interface AttendancePeriodSummaries {
 }
 
 export interface AttendanceRawTransactions {
+  assumedTimezone: string | null;
   branchId: string | null;
+  clockSkewSeconds: number | null;
   dedupeHash: string;
   deviceEmployeeId: string;
+  deviceGeneration: Generated<number>;
   deviceId: string;
   deviceLocalTime: string | null;
   direction: Generated<PunchDirection>;
@@ -615,15 +620,18 @@ export interface Devices {
   code: string;
   config: Generated<Json>;
   connectionStatus: Generated<ConnectionStatus>;
+  consecutiveFailures: Generated<number>;
   createdAt: Generated<Timestamp>;
   createdBy: string | null;
   deviceTimeOffsetSeconds: number | null;
   emptyPollCount: Generated<number>;
   endpointUrl: string | null;
   firmwareVersion: string | null;
+  generation: Generated<number>;
   id: Generated<string>;
   integrationType: IntegrationType;
   lastAttendanceSyncAt: Timestamp | null;
+  lastClockSkewSeconds: number | null;
   lastEmployeeSyncAt: Timestamp | null;
   lastError: string | null;
   lastErrorAt: Timestamp | null;
@@ -640,6 +648,7 @@ export interface Devices {
   organizationId: string;
   providerKey: string;
   pushTokenHash: string | null;
+  pushTokenRotatedAt: Timestamp | null;
   serialNumber: string | null;
   status: Generated<DeviceStatus>;
   syncIntervalMinutes: Generated<number>;
@@ -993,10 +1002,13 @@ export interface Organizations {
   currencyCode: Generated<string>;
   displayName: string;
   id: Generated<string>;
+  legalHold: Generated<boolean>;
+  legalHoldReason: string | null;
   legalName: string;
   locale: Generated<string>;
   logoPath: string | null;
   regionCell: Generated<string>;
+  securityContactEmail: string | null;
   status: Generated<OrgStatus>;
   timezone: Generated<string>;
   updatedAt: Generated<Timestamp>;
@@ -1077,6 +1089,7 @@ export interface Plans {
 
 export interface PlatformAccessGrants {
   accessLevel: Generated<GrantAccessLevel>;
+  approvedBy: string | null;
   createdAt: Generated<Timestamp>;
   expiresAt: Timestamp;
   grantedBy: string | null;
@@ -1095,6 +1108,20 @@ export interface PlatformAdmins {
   level: Generated<PlatformAdminLevel>;
   status: Generated<string>;
   userId: string;
+}
+
+export interface ProviderCircuitStates {
+  accountKey: Generated<string>;
+  failureCount: Generated<number>;
+  halfOpenAt: Timestamp | null;
+  id: Generated<string>;
+  lastError: string | null;
+  lastErrorCode: string | null;
+  openedAt: Timestamp | null;
+  organizationId: string;
+  providerKey: string;
+  state: Generated<CircuitState>;
+  updatedAt: Generated<Timestamp>;
 }
 
 export interface ProviderWebhookEvents {
@@ -1237,9 +1264,14 @@ export interface SyncCursors {
   cursor: Generated<Json>;
   deviceId: string;
   id: Generated<string>;
+  invalidSince: Timestamp | null;
   lastPulledAt: Timestamp | null;
   lastTransactionAt: Timestamp | null;
   organizationId: string;
+  previousCursor: Json | null;
+  rewindReason: string | null;
+  rewoundAt: Timestamp | null;
+  rewoundBy: string | null;
   stream: string;
   updatedAt: Generated<Timestamp>;
 }
@@ -1328,6 +1360,14 @@ export interface Teams {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface UsageQuotas {
+  count: Generated<number>;
+  metric: string;
+  organizationId: string;
+  windowSeconds: number;
+  windowStart: Timestamp;
+}
+
 export interface UsageRecords {
   id: Generated<Int8>;
   metric: string;
@@ -1410,6 +1450,7 @@ export interface DB {
   plans: Plans;
   platformAccessGrants: PlatformAccessGrants;
   platformAdmins: PlatformAdmins;
+  providerCircuitStates: ProviderCircuitStates;
   providerWebhookEvents: ProviderWebhookEvents;
   reportRequests: ReportRequests;
   rolePermissions: RolePermissions;
@@ -1425,6 +1466,7 @@ export interface DB {
   syncLogs: SyncLogs;
   teamMembers: TeamMembers;
   teams: Teams;
+  usageQuotas: UsageQuotas;
   usageRecords: UsageRecords;
   userProfiles: UserProfiles;
 }

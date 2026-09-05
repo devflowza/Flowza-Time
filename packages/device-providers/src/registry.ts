@@ -3,6 +3,7 @@ import { secretFieldsOf } from './definition.js';
 import { createPlaceholderProviders } from './providers/placeholders.js';
 import { createMockProvider, type MockProviderOptions } from './providers/mock/mock-provider.js';
 import { ZKTecoPushProvider } from './providers/zkteco/provider.js';
+import { createZkPushProtocol } from './providers/zkteco/push-protocol.js';
 import { ProviderError, type DeviceProvider, type DevicePushProtocolHandler, type ProviderDefinition, type ProviderRegistry } from './types.js';
 
 export { secretFieldsOf };
@@ -42,10 +43,11 @@ export interface DefaultRegistryOptions { mock?: MockProviderOptions; clock?: ()
 /** Every provider FlowZa ships: the simulator, the ZKTeco push handler (beta) and the honest placeholders. */
 export function defaultProviders(options: DefaultRegistryOptions = {}): DeviceProvider[] {
   const clock = options.clock;
+  const iclock = createZkPushProtocol(); // one handler shared by every ZKTeco-derived provider
   return [
     createMockProvider({ ...(clock ? { clock } : {}), ...(options.mock ?? {}) }),
-    new ZKTecoPushProvider(clock ? { clock } : {}),
-    ...createPlaceholderProviders(clock ? { clock } : {}),
+    new ZKTecoPushProvider({ protocol: iclock, ...(clock ? { clock } : {}) }),
+    ...createPlaceholderProviders({ protocol: iclock, ...(clock ? { clock } : {}) }),
   ];
 }
 export const defaultRegistry = (options: DefaultRegistryOptions = {}): ProviderRegistry => createProviderRegistry(defaultProviders(options));

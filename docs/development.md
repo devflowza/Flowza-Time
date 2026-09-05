@@ -43,6 +43,15 @@ See `AGENTS.md` for the layout, coding rules and the two execution contexts (`us
    `1400_rls_policies.sql` pattern (every table must have RLS) should be repeated at the end of your migration.
 4. Regenerate types: `pnpm db:types`; update `packages/contracts/src/enums.ts` if you added enums.
 
+## Migration safety policy (hot tables)
+- Begin DDL migrations on hot tables with `set lock_timeout = '5s'; set statement_timeout = '60s';` and retry on failure instead of
+  waiting behind long transactions.
+- Create indexes on hot tables with `CONCURRENTLY` in a dedicated, non-transactional migration file (the Supabase CLI runs each
+  file in its own transaction unless the file contains `-- supabase: no-transaction`… verify for your CLI version; locally the
+  tool `packages/database/src/tools/migrate.ts` wraps files in transactions — split such statements into their own file and mark it).
+- Expand → backfill (as a worker job in batches) → contract; never rewrite partitioned tables in place.
+- Enum values are added with `alter type … add value if not exists` and used only in later files.
+
 ## Adding a device provider
 See `docs/device-integrations.md` → "Adding a vendor".
 

@@ -71,3 +71,38 @@ Attendance date attribution uses the shift punch window (see docs/blueprint.md �
 ## Provider contract (packages/device-providers/src/types.ts)
 Implement `DeviceProvider`; register in the `ProviderRegistry`; keep `device_providers` reference data
 (supabase/migrations/*_reference_data.sql) in sync with `definition`.
+
+## Service-level rules added after the security/SRE review (apply when implementing the API/worker)
+- **Device credentials are scoped**: `DeviceCredentialsStore.put/get(trx, { organizationId, deviceId }, …)`. Changing a device's
+  `endpoint_url`/host/port/protocol must **invalidate stored credentials** (delete + audit) and require re-entry; `testConnection`
+  may only use credentials supplied in the same request or the stored ones for the *unchanged* endpoint. Outbound provider calls go
+  through one egress helper that blocks private IP ranges and cross-host redirects.
+- **Push devices** authenticate with serial + per-device push token (hash in `devices.push_token_hash`, rotate via
+  `push_token_rotated_at`); unknown serials → `pending_devices`; per-serial rate limits; raw rows from push carry `source='DEVICE_PUSH'`.
+- **Dedupe hash** = sha256(`device_id|device_generation|device_employee_id|punched_at|verification|direction`); bump `devices.generation`
+  when a device is factory-reset / re-registered (invalidates cursors → reconciliation job).
+- **Timestamps**: raw rows store `device_local_time` (verbatim), `assumed_timezone`, `clock_skew_seconds`; punches with skew beyond
+  the org threshold or in the future → `processing_status='quarantined'`; punches inside a locked period → `'held'` (HR decides).
+- **Cursors** are validated by the provider; unparseable cursor → reset to a safe time-based cursor, `invalid_since` set, alert emitted;
+  operator rewind stores `previous_cursor`, `rewound_by`, `rewind_reason`.
+- **Circuit breaker** per (org, provider, account) in `provider_circuit_states`; open circuit → devices show `vendor_degraded`, not `offline`.
+- **Invitations**: token ≥ 128 bits random, only the sha256 hash stored, 7-day expiry, single use, bound to the lower-cased email;
+  compare with `timingSafeEqual`. Suspension / role downgrade → revoke the user's sessions through the Supabase Auth admin API.
+- **MFA**: when `organization_settings.security.mfaRequired` is true (or the caller is a platform admin), require `aal2` in the JWT →
+  otherwise `403 FORBIDDEN` with code detail `MFA_REQUIRED`.
+- **Roles**: actors can only grant permissions they hold (DB trigger `role_permissions_no_escalation` + service check); system roles are
+  immutable; the last active owner cannot be demoted; ownership transfer is two-step.
+- **Platform grants**: default 8 h, max 72 h; write grants need `approved_by` (second platform admin); org owners can list grants on their org.
+- **Exports**: sensitive columns (national id, passport, DOB, phone, address) masked unless `employee.view_sensitive`; escape cells
+  starting with `= + - @ \t \r` (formula injection); every export audited with row count; per-org quotas via `usage_quotas`.
+- **Raw payloads**: providers declare an allowlist; binary/template/photo fields are stripped and replaced by a sha256; size cap 16 KB.
+- **Termination** (`employment_status → terminated/resigned`) enqueues `DELETE_EMPLOYEE` for every device the employee is enrolled on.
+- **Realtime** carries invalidation signals only (ids + event type), coalesced per org channel (≤ 1 message / 5 s); UI refetches via API
+  and always has polling as baseline (kill switch flag `realtime_progress`).
+- **Notifications** dedupe by (device, state) within 15 min and use hysteresis (N consecutive failures) before "offline".
+- **Retention**: platform floors per data class (raw ≥ 365 d, daily records ≥ 730 d) and `organizations.legal_hold` block purges;
+  purge = partition detach + archive export, delayed 7 days, cancellable, audited.
+- **Migrations**: every migration sets `lock_timeout = '5s'`/`statement_timeout` for DDL on hot tables; indexes on hot tables use
+  `CONCURRENTLY` (non-transactional file); expand → backfill (worker job) → contract.
+- **Connection budget**: API pool ≤ 10 per instance, worker ≤ 10 per process (+1 scheduler session connection); sum below the Supabase
+  tier limit with 30% headroom; transaction pooler for API, session pooler/direct for the worker.

@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { deviceEmployeeSchema, type DeviceEmployee, type PunchDirection, type RawTransaction, type VerificationMethod } from '@flowza/contracts';
 import { ProtocolError } from '../../errors.js';
 import { parseDeviceTime, queryValue, splitLines, toIsoUtc } from '../../protocol-utils.js';
@@ -114,7 +115,7 @@ function kvPairs(fields: string[]): Record<string, string> {
   }
   return out;
 }
-const sanitizeName = (name: string): string => name.replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX);
+const sanitizeName = (name: string): string => name.replace(CONTROL_CHARS, ' ').replace(/\s+/g, ' ').trim().slice(0, NAME_MAX).trim();
 
 /** Parses a `USER PIN=…\tName=…\tPri=…\tPasswd=…\tCard=…\tGrp=…\tTZ=…` line into a DeviceEmployee (REPORTED layout). */
 export function parseOperlogUserLine(line: string, index: number): DeviceEmployee {
@@ -200,17 +201,26 @@ export function renderHandshake(serialNumber: string, stamps: Record<string, str
 }
 
 // ----- outbound commands ------------------------------------------------------------------------------------
-const upsertPayloadSchema = deviceEmployeeSchema.pick({ deviceUserId: true, name: true, cardNumber: true, pin: true, privilege: true });
-const zkUserPayloadSchema = upsertPayloadSchema.transform((e) => ({ pin: e.deviceUserId, name: sanitizeName(e.name), pri: e.privilege === 'admin' ? ZK_PRI_ADMIN : ZK_PRI_USER, passwd: e.pin ?? '', card: e.cardNumber ?? '', grp: ZK_DEFAULT_GROUP, tz: ZK_DEFAULT_TZ }));
-export type ZkUserCommandPayload = ReturnType<typeof zkUserPayloadSchema.parse>;
+/** Protocol-ready payload persisted in device_commands (what `buildCommands` emits and `renderCommands` reads back). */
+const persistedUserPayloadSchema = z.object({
+  pin: z.string(), name: z.string(), pri: z.number().int(), passwd: z.string(), card: z.string(), grp: z.number().int(), tz: z.string(),
+});
+export type ZkUserCommandPayload = z.infer<typeof persistedUserPayloadSchema>;
+const employeePayloadSchema = deviceEmployeeSchema.pick({ deviceUserId: true, name: true, cardNumber: true, pin: true, privilege: true })
+  .transform((e): ZkUserCommandPayload => ({ pin: e.deviceUserId, name: sanitizeName(e.name), pri: e.privilege === 'admin' ? ZK_PRI_ADMIN : ZK_PRI_USER, passwd: e.pin ?? '', card: e.cardNumber ?? '', grp: ZK_DEFAULT_GROUP, tz: ZK_DEFAULT_TZ }));
 
 function invalid(message: string, details: Record<string, unknown>): ProviderError {
   return new ProviderError('INVALID_CONFIG', message, { retryable: false, details });
 }
+/** Accepts either the persisted protocol payload or a DeviceEmployee; every field is re-validated before rendering. */
 function userPayload(input: unknown): ZkUserCommandPayload {
-  const parsed = zkUserPayloadSchema.safeParse(input);
+  const persisted = persistedUserPayloadSchema.safeParse(input);
+  const parsed = persisted.success ? persisted : employeePayloadSchema.safeParse(input);
   if (!parsed.success) throw invalid('Employee cannot be pushed to a ZKTeco device', { issues: parsed.error.issues.map((i) => i.message) });
-  const p = parsed.data;
+  const p = { ...parsed.data, name: sanitizeName(parsed.data.name) };
+  if (!Number.isInteger(p.pri) || p.pri < 0 || p.pri > 14) throw invalid('ZKTeco Pri must be 0-14', { deviceUserId: p.pin });
+  if (!/^[0-9]{16}$/.test(p.tz)) throw invalid('ZKTeco TZ must be 16 digits', { deviceUserId: p.pin });
+  if (!Number.isInteger(p.grp) || p.grp < 0) throw invalid('ZKTeco Grp must be a non-negative integer', { deviceUserId: p.pin });
   if (!PIN_PATTERN.test(p.pin)) throw invalid('ZKTeco PIN must be 1-24 alphanumeric characters (numeric on most firmware)', { deviceUserId: p.pin });
   if (p.passwd !== '' && !PASSWD_PATTERN.test(p.passwd)) throw invalid('ZKTeco password must be 1-8 digits', { deviceUserId: p.pin });
   if (p.card !== '' && !CARD_PATTERN.test(p.card)) throw invalid('ZKTeco card number must be 1-20 digits', { deviceUserId: p.pin });
@@ -238,7 +248,22 @@ export function renderCommandLine(cmd: DevicePushCommand): string {
   }
 }
 
-export function createZkPushProtocol(options: ZkPushProtocolOptions = {}): DevicePushProtocolHandler {
+let defaultHandler: DevicePushProtocolHandler | undefined;
+
+/**
+ * Creates the iclock handler. With no options the same shared instance is returned every time, so every
+ * ZKTeco-derived provider (zkteco_push, essl_push, fingertec_push) exposes one handler and the registry can
+ * route `/device-push/iclock/*` unambiguously.
+ */
+export function createZkPushProtocol(options?: ZkPushProtocolOptions): DevicePushProtocolHandler {
+  if (options === undefined) {
+    defaultHandler ??= buildZkPushProtocol({});
+    return defaultHandler;
+  }
+  return buildZkPushProtocol(options);
+}
+
+function buildZkPushProtocol(options: ZkPushProtocolOptions): DevicePushProtocolHandler {
   const opts: Required<ZkPushProtocolOptions> = { ...DEFAULT_OPTIONS, ...options };
   return {
     protocolKey: ICLOCK_PROTOCOL_KEY,

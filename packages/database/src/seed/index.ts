@@ -187,7 +187,7 @@ async function seedDevices(db: Database, rng: Prng, ids: Ids, masterKey?: string
     }).execute();
     if (d.provider === 'mock') {
       const secretsObj = { apiKey: `mock-${rng.uuid()}` };
-      const blob = cipher.encrypt(secretsObj, id);
+      const blob = cipher.encrypt(secretsObj, { organizationId: ORG.id, deviceId: id });
       await db.insertInto('deviceCredentials').values({ deviceId: id, organizationId: ORG.id, keyId: blob.keyId, nonce: blob.nonce, ciphertext: blob.ciphertext, authTag: blob.authTag, masked: JSON.stringify({ apiKey: `****${secretsObj.apiKey.slice(-4)}` }) }).execute();
     }
   }

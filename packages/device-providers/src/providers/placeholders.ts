@@ -1,7 +1,7 @@
 import type { DeviceCapabilities, DeviceEmployee } from '@flowza/contracts';
 import { defineProvider } from '../definition.js';
 import { notImplemented } from '../errors.js';
-import type { AttendancePullResult, ConnectionResult, DeviceEmployeePage, DeviceInfo, DeviceOperationResult, DeviceProvider, DeviceStatus, PageCursor, ProviderContext, ProviderDefinition, SyncCursor } from '../types.js';
+import type { AttendancePullResult, ConnectionResult, DeviceEmployeePage, DeviceInfo, DeviceOperationResult, DeviceProvider, DevicePushProtocolHandler, DeviceStatus, PageCursor, ProviderContext, ProviderDefinition, SyncCursor } from '../types.js';
 import { ZKTecoPushProvider } from './zkteco/provider.js';
 
 /**
@@ -104,8 +104,10 @@ export const ESSL_PUSH_DEFINITION = defineProvider({
   ] },
   throttling: { maxConcurrentPerDevice: 1 }, verificationStatus: 'UNVERIFIED', docsUrl: 'https://esslsecurity.com',
 });
+/** Options for ZKTeco-derived brands: share the `protocol` instance so the registry sees one iclock handler. */
+export interface DerivedPushOptions { clock?: () => Date; protocol?: DevicePushProtocolHandler }
 /** ZKTeco-derived: shares the iclock protocol handler (inbound parsing) but stays a placeholder until verified on hardware. */
-export class EsslPushProvider extends ZKTecoPushProvider { constructor(options: { clock?: () => Date } = {}) { super({ definition: ESSL_PUSH_DEFINITION, mode: 'placeholder', ...options }); } }
+export class EsslPushProvider extends ZKTecoPushProvider { constructor(options: DerivedPushOptions = {}) { super({ definition: ESSL_PUSH_DEFINITION, mode: 'placeholder', ...options }); } }
 
 export const FINGERTEC_PUSH_DEFINITION = defineProvider({
   key: 'fingertec_push', vendor: 'FingerTec', name: 'FingerTec devices (Webster/PUSH-compatible)',
@@ -115,7 +117,7 @@ export const FINGERTEC_PUSH_DEFINITION = defineProvider({
   configSchema: { fields: [{ key: 'serialNumber', label: 'Device serial number', type: 'text', required: true, secret: false }] },
   throttling: { maxConcurrentPerDevice: 1 }, verificationStatus: 'UNVERIFIED', docsUrl: 'https://www.fingertec.com',
 });
-export class FingerTecPushProvider extends ZKTecoPushProvider { constructor(options: { clock?: () => Date } = {}) { super({ definition: FINGERTEC_PUSH_DEFINITION, mode: 'placeholder', ...options }); } }
+export class FingerTecPushProvider extends ZKTecoPushProvider { constructor(options: DerivedPushOptions = {}) { super({ definition: FINGERTEC_PUSH_DEFINITION, mode: 'placeholder', ...options }); } }
 
 export const MATRIX_COSEC_DEFINITION = defineProvider({
   key: 'matrix_cosec', vendor: 'Matrix Comsec', name: 'Matrix COSEC (CENTRA/VYOM API)',
@@ -145,7 +147,7 @@ export const NITGEN_DEFINITION = defineProvider({
 export class NitgenProvider extends PlaceholderProvider { constructor() { super(NITGEN_DEFINITION); } }
 
 /** All placeholder providers, in reference-data order. */
-export function createPlaceholderProviders(options: { clock?: () => Date } = {}): DeviceProvider[] {
+export function createPlaceholderProviders(options: DerivedPushOptions = {}): DeviceProvider[] {
   return [
     new ZKBioTimeProvider(), new HikvisionIsapiProvider(), new HikvisionHppProvider(), new SupremaBioStar2Provider(), new AnvizCrossChexCloudProvider(),
     new EsslPushProvider(options), new FingerTecPushProvider(options), new MatrixCosecProvider(), new NitgenProvider(),

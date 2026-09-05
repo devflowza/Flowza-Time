@@ -1,4 +1,4 @@
-import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
+import { createCipheriv, createDecipheriv, hkdfSync, randomBytes } from 'node:crypto';
 import { sql } from 'kysely';
 import type { MasterKey } from '@flowza/shared';
 import { AppError } from '@flowza/shared';
@@ -11,6 +11,9 @@ import type { Trx } from './context.js';
  */
 export interface EncryptedBlob { keyId: string; nonce: Buffer; ciphertext: Buffer; authTag: Buffer }
 
+/** Scope of an encrypted secret: the data key is derived per organisation (HKDF) and the AAD binds the device. */
+export interface SecretScope { organizationId: string; deviceId: string }
+
 export class SecretsCipher {
   private readonly byId: Map<string, Uint8Array>;
   private readonly primary: MasterKey;
@@ -21,19 +24,26 @@ export class SecretsCipher {
     this.byId = new Map(keys.map((k) => [k.id, k.material]));
   }
 
-  encrypt(plaintext: Record<string, unknown>, aad: string): EncryptedBlob {
+  /** Per-organisation data key: HKDF-SHA256(master, salt = organizationId, info = 'flowza-device-credentials'). */
+  private dataKey(material: Uint8Array, organizationId: string): Buffer {
+    return Buffer.from(hkdfSync('sha256', material, Buffer.from(organizationId, 'utf8'), Buffer.from('flowza-device-credentials', 'utf8'), 32));
+  }
+
+  private aad(scope: SecretScope): Buffer { return Buffer.from(`${scope.organizationId}:${scope.deviceId}`, 'utf8'); }
+
+  encrypt(plaintext: Record<string, unknown>, scope: SecretScope): EncryptedBlob {
     const nonce = randomBytes(12);
-    const cipher = createCipheriv('aes-256-gcm', this.primary.material, nonce);
-    cipher.setAAD(Buffer.from(aad, 'utf8'));
+    const cipher = createCipheriv('aes-256-gcm', this.dataKey(this.primary.material, scope.organizationId), nonce);
+    cipher.setAAD(this.aad(scope));
     const ciphertext = Buffer.concat([cipher.update(JSON.stringify(plaintext), 'utf8'), cipher.final()]);
     return { keyId: this.primary.id, nonce, ciphertext, authTag: cipher.getAuthTag() };
   }
 
-  decrypt(blob: EncryptedBlob, aad: string): Record<string, unknown> {
+  decrypt(blob: EncryptedBlob, scope: SecretScope): Record<string, unknown> {
     const key = this.byId.get(blob.keyId);
     if (!key) throw new AppError('INTERNAL_ERROR', `Unknown credentials key id ${blob.keyId}`);
-    const decipher = createDecipheriv('aes-256-gcm', key, blob.nonce);
-    decipher.setAAD(Buffer.from(aad, 'utf8'));
+    const decipher = createDecipheriv('aes-256-gcm', this.dataKey(key, scope.organizationId), blob.nonce);
+    decipher.setAAD(this.aad(scope));
     decipher.setAuthTag(blob.authTag);
     const plain = Buffer.concat([decipher.update(blob.ciphertext), decipher.final()]).toString('utf8');
     return JSON.parse(plain) as Record<string, unknown>;
@@ -63,19 +73,21 @@ export function maskCredentials(values: Record<string, unknown>, secretKeys: str
 export class DeviceCredentialsStore {
   constructor(private readonly cipher: SecretsCipher) {}
 
-  async put(trx: Trx, deviceId: string, secrets: Record<string, unknown>, masked: Record<string, unknown>, updatedBy: string | null): Promise<number> {
-    const blob = this.cipher.encrypt(secrets, deviceId);
+  async put(trx: Trx, scope: SecretScope, secrets: Record<string, unknown>, masked: Record<string, unknown>, updatedBy: string | null): Promise<number> {
+    const { deviceId } = scope;
+    const blob = this.cipher.encrypt(secrets, scope);
     const res = await sql<{ version: number }>`select secrets.put_device_credentials(
       ${deviceId}::uuid, ${blob.keyId}, ${blob.nonce}, ${blob.ciphertext}, ${blob.authTag}, ${JSON.stringify(masked)}::jsonb, ${updatedBy}::uuid
     ) as version`.execute(trx);
     return res.rows[0]?.version ?? 0;
   }
 
-  async get(trx: Trx, deviceId: string): Promise<Record<string, unknown> | null> {
+  async get(trx: Trx, scope: SecretScope): Promise<Record<string, unknown> | null> {
+    const { deviceId } = scope;
     const res = await sql<{ keyId: string; nonce: Buffer; ciphertext: Buffer; authTag: Buffer }>`select key_id, nonce, ciphertext, auth_tag from secrets.get_device_credentials(${deviceId}::uuid)`.execute(trx);
     const row = res.rows[0];
     if (!row) return null;
-    return this.cipher.decrypt({ keyId: row.keyId, nonce: row.nonce, ciphertext: row.ciphertext, authTag: row.authTag }, deviceId);
+    return this.cipher.decrypt({ keyId: row.keyId, nonce: row.nonce, ciphertext: row.ciphertext, authTag: row.authTag }, scope);
   }
 
   async delete(trx: Trx, deviceId: string): Promise<boolean> {

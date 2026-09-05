@@ -121,19 +121,25 @@ export function describeProviderConformance(name: string, factory: ConformanceFa
       let page = first;
       let pages = 1;
       const seen = new Set<string>();
+      const remember = (r: AttendancePullResult): void => { for (const t of r.transactions) if (t.providerTransactionId !== null) seen.add(t.providerTransactionId); };
+      remember(first);
       while (page.hasMore && pages < maxPages) {
         const next = await provider.pullAttendance(ctx, page.nextCursor);
         assert.notDeepEqual(next.nextCursor, page.nextCursor, 'hasMore=true must be followed by a cursor that advances');
         for (const t of next.transactions) assert.ok(rawTransactionSchema.safeParse(t).success);
-        for (const t of page.transactions) if (t.providerTransactionId) seen.add(t.providerTransactionId);
+        remember(next);
         page = next;
         pages += 1;
       }
       if (!page.hasMore) {
+        // A device may legitimately re-send records it already delivered (idempotent ingestion absorbs them),
+        // but it must not invent new ones or move the cursor once it has claimed there is nothing more.
         const tail = await provider.pullAttendance(ctx, page.nextCursor);
-        assert.equal(tail.transactions.length, 0, 'hasMore=false must mean the next page is empty');
-        assert.equal(tail.hasMore, false);
-        assert.deepEqual(tail.nextCursor, page.nextCursor, 'an empty page must not move the cursor');
+        for (const t of tail.transactions) {
+          assert.ok(t.providerTransactionId !== null && seen.has(t.providerTransactionId), 'hasMore=false: the next page may only replay already-delivered transactions');
+        }
+        assert.equal(tail.hasMore, false, 'hasMore must stay false once the stream is exhausted');
+        assert.deepEqual(tail.nextCursor, page.nextCursor, 'a page without new data must not move the cursor');
       }
     });
 

@@ -109,29 +109,31 @@ describe('DeviceCredentialsStore', () => {
   it('round-trips encrypted credentials in system context and never exposes them to users', async () => {
     const store = new DeviceCredentialsStore(new SecretsCipher(keys));
     await withContext(tdb.workerDb, { kind: 'system', organizationId: ORG_A }, async (trx) => {
-      const version = await store.put(trx, DEVICE_A, { apiKey: 'sk-live-abcd1234', username: 'admin' }, { apiKey: '****1234', username: 'admin' }, USER_A);
+      const version = await store.put(trx, { organizationId: ORG_A, deviceId: DEVICE_A }, { apiKey: 'sk-live-abcd1234', username: 'admin' }, { apiKey: '****1234', username: 'admin' }, USER_A);
       expect(version).toBe(1);
-      const back = await store.get(trx, DEVICE_A);
+      const back = await store.get(trx, { organizationId: ORG_A, deviceId: DEVICE_A });
       expect(back).toEqual({ apiKey: 'sk-live-abcd1234', username: 'admin' });
-      expect(await store.put(trx, DEVICE_A, { apiKey: 'sk-live-new' }, { apiKey: '****-new' }, USER_A)).toBe(2);
+      expect(await store.put(trx, { organizationId: ORG_A, deviceId: DEVICE_A }, { apiKey: 'sk-live-new' }, { apiKey: '****-new' }, USER_A)).toBe(2);
     });
     // another organisation's system context cannot read them
     await withContext(tdb.workerDb, { kind: 'system', organizationId: ORG_B }, async (trx) => {
-      expect(await store.get(trx, DEVICE_A)).toBeNull();
+      expect(await store.get(trx, { organizationId: ORG_B, deviceId: DEVICE_A })).toBeNull();
     });
     // a user only gets the masked view
     await withContext(tdb.db, { kind: 'user', userId: USER_A }, async (trx) => {
       const masked = await store.masked(trx, DEVICE_A);
       expect(masked.apiKey).toBe('****-new');
       expect(masked.version).toBe(2);
-      await expect(store.get(trx, DEVICE_A)).rejects.toThrow(/permission denied/);
+      await expect(store.get(trx, { organizationId: ORG_A, deviceId: DEVICE_A })).rejects.toThrow(/permission denied/);
     });
     // ciphertext is bound to the device id (AAD): decrypting with another id fails
     const cipher = new SecretsCipher(keys);
-    const blob = cipher.encrypt({ a: 1 }, 'device-1');
-    expect(() => cipher.decrypt(blob, 'device-2')).toThrow();
+    const blob = cipher.encrypt({ a: 1 }, { organizationId: ORG_A, deviceId: 'device-1' });
+    expect(() => cipher.decrypt(blob, { organizationId: ORG_A, deviceId: 'device-2' })).toThrow();
+    // ...and the data key is per organisation: another org cannot decrypt even with the same device id
+    expect(() => cipher.decrypt(blob, { organizationId: ORG_B, deviceId: 'device-1' })).toThrow();
     // old key still decrypts
-    const old = new SecretsCipher([keys[1]!]).encrypt({ a: 2 }, 'x');
-    expect(cipher.decrypt(old, 'x')).toEqual({ a: 2 });
+    const old = new SecretsCipher([keys[1]!]).encrypt({ a: 2 }, { organizationId: ORG_A, deviceId: 'x' });
+    expect(cipher.decrypt(old, { organizationId: ORG_A, deviceId: 'x' })).toEqual({ a: 2 });
   });
 });
