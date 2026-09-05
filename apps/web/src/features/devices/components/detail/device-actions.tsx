@@ -1,10 +1,10 @@
 import { useTranslation } from 'react-i18next';
 import { HeartPulse, KeyRound, MoreHorizontal, Pencil, Plug, Power, PowerOff, RefreshCw, RotateCcw, Trash2, Users } from 'lucide-react';
-import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger, Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui';
+import { Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui';
 import { useCan } from '@/features/me/use-me';
 import type { DeviceDetail } from '../../api';
 
-export type DeviceActionKind = 'sync-attendance' | 'sync-employees' | 'health-check' | 'test-connection' | 'rotate-token' | 'edit' | 'disable' | 'enable' | 'decommission';
+export type DeviceActionKind = 'sync-attendance' | 'sync-employees' | 'health-check' | 'restart' | 'test-connection' | 'rotate-token' | 'edit' | 'disable' | 'enable' | 'decommission';
 
 /**
  * Header actions of the device page. Only actions the device actually supports are rendered: the capability matrix and the
@@ -29,12 +29,7 @@ export function DeviceActions({ device, busy, onAction }: { device: DeviceDetail
       {canSync && caps.employeePush ? <Button size="sm" variant="outline" onClick={() => onAction('sync-employees')} loading={isBusy('sync-employees')}><Users /> {t('actions.syncEmployees')}</Button> : null}
       {canSync ? <Button size="sm" variant="outline" onClick={() => onAction('health-check')} loading={isBusy('health-check')}><HeartPulse /> {t('actions.healthCheck')}</Button> : null}
       {canTest ? <Button size="sm" variant="outline" onClick={() => onAction('test-connection')} loading={isBusy('test-connection')}><Plug /> {t('actions.testConnection')}</Button> : null}
-      {canSync && caps.remoteRestart ? (
-        <Tooltip>
-          <TooltipTrigger asChild><span tabIndex={0}><Button size="sm" variant="outline" disabled aria-describedby="restart-unavailable"><RotateCcw /> {t('actions.restart')}</Button></span></TooltipTrigger>
-          <TooltipContent id="restart-unavailable">{t('actions.restartUnavailable')}</TooltipContent>
-        </Tooltip>
-      ) : null}
+      {canSync && caps.remoteRestart ? <Button size="sm" variant="outline" onClick={() => onAction('restart')} loading={isBusy('restart')}><RotateCcw /> {t('actions.restart')}</Button> : null}
       {showMore ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button size="sm" variant="outline" aria-label={t('actions.more')}><MoreHorizontal /></Button></DropdownMenuTrigger>

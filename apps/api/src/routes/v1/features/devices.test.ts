@@ -206,3 +206,34 @@ describe('device fleet summary', () => {
     expect(denied.status).toBe(403);
   });
 });
+
+describe('device restart', () => {
+  it('queues a RESTART_DEVICE job for a capable device, refuses one that cannot restart, and needs device.sync', async () => {
+    const capable = await seedDevice(h.admin, f.orgId, f.branchA, { code: 'RB-1', capabilities: { attendancePull: true, employeePush: true, deviceStatus: true, remoteRestart: true } });
+    const r = await h.request('POST', `${base()}/devices/${capable}/actions/restart`, { token: f.owner });
+    expect(r.status).toBe(202);
+    expect(r.body.data.status).toBe('QUEUED');
+    const jobs = await queueJobs(h.admin, 'RESTART_DEVICE');
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]!.payload).toMatchObject({ organizationId: f.orgId, deviceId: capable, operation: 'RESTART_DEVICE' });
+    expect(jobs[0]!.dedupeKey).toBe(`restart:${capable}`); // a second reboot while one is pending is a duplicate, not a second reboot
+    const syncJob = await h.admin.selectFrom('syncJobs').select(['jobType', 'itemsTotal']).where('id', '=', r.body.data.jobId).executeTakeFirstOrThrow();
+    expect(syncJob.jobType).toBe('RESTART_DEVICE');
+    expect(syncJob.itemsTotal).toBe(1);
+    expect((await auditRows(h.admin, 'device.action_restart'))).toHaveLength(1);
+
+    const again = await h.request('POST', `${base()}/devices/${capable}/actions/restart`, { token: f.owner });
+    expect(again.status).toBe(202);
+    expect(again.body.data.itemsSkipped).toBe(1); // covered by the pending reboot
+    expect(await queueJobs(h.admin, 'RESTART_DEVICE')).toHaveLength(1);
+
+    const incapable = await seedDevice(h.admin, f.orgId, f.branchA, { code: 'RB-2', capabilities: { attendancePull: true, remoteRestart: false } });
+    const denied = await h.request('POST', `${base()}/devices/${incapable}/actions/restart`, { token: f.owner });
+    expect(denied.status).toBe(422);
+    expect(denied.body.code).toBe('DEVICE_UNSUPPORTED_OPERATION');
+
+    // hr_user holds device.sync, so restart is theirs to run; a plain employee (no device permissions) is refused
+    const noPermission = await h.request('POST', `${base()}/devices/${capable}/actions/restart`, { token: f.employeeUser });
+    expect(noPermission.status).toBe(403);
+  });
+});

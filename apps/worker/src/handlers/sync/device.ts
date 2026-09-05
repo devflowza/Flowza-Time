@@ -93,6 +93,60 @@ export async function deviceHealthCheck(ctx: JobContext) {
 }
 
 /**
+ * RESTART_DEVICE: reboots one terminal. Cloud/LAN providers are asked directly through `provider.restart()`; push devices
+ * cannot be called, so the protocol's REBOOT command is persisted and the terminal executes it on its next poll (the item
+ * succeeds as "queued to the device", which is all the cloud can honestly claim). A provider that declares `remoteRestart`
+ * but implements no `restart()` yields an UNSUPPORTED item rather than a silent success.
+ */
+export async function restartDevice(ctx: JobContext) {
+  const { deps, log } = ctx;
+  return runItem(ctx, async (item, payload) => {
+    const now = deps.now();
+    const prep = await withContext(deps.db, { kind: 'system', organizationId: payload.organizationId, jobId: ctx.job.id }, async (trx) => {
+      const device = await loadDeviceOrThrow(trx, payload.deviceId);
+      const provider = deps.providers.get(device.providerKey);
+      if (!capabilitiesOf(device, provider).remoteRestart) throw new AppError('DEVICE_UNSUPPORTED_OPERATION', `provider ${device.providerKey} cannot restart devices`, { retryable: false });
+      if (device.integrationType === 'DEVICE_PUSH') return { device, provider, push: true as const };
+      const built = await buildProviderContext(trx, deps, device, ctx.job.id, ctx.signal, { log, provider, timeoutMs: 60_000 });
+      const circuit = await checkCircuit(trx, { organizationId: device.organizationId, providerKey: device.providerKey, accountKey: built.accountKey }, now);
+      return { device, provider, push: false as const, built, circuit };
+    });
+    const { device } = prep;
+
+    if (prep.push) {
+      const protocol = prep.provider.pushProtocol;
+      if (!protocol) throw new AppError('DEVICE_UNSUPPORTED_OPERATION', `provider ${device.providerKey} has no push protocol`, { retryable: false });
+      const commands = protocol.buildCommands({ type: 'RESTART' });
+      return withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
+        await trx.insertInto('deviceCommands').values(commands.map((c) => ({ organizationId: device.organizationId, deviceId: device.id, commandType: c.commandType, payload: JSON.stringify(c.payload ?? {}), syncJobItemId: item.id }))).execute();
+        await trx.insertInto('deviceLogs').values({ organizationId: device.organizationId, deviceId: device.id, level: 'info', event: 'restart.queued', jobId: item.syncJobId, message: 'restart command queued for the next device poll', details: JSON.stringify({ commands: commands.map((c) => c.commandType) }) }).execute();
+        return { result: { mode: 'push', queuedCommands: commands.length, executed: false } };
+      });
+    }
+
+    const { built } = prep;
+    if (!prep.circuit.allow) { built.dispose(); return { result: { skipped: 'circuit_open', halfOpenAt: prep.circuit.halfOpenAt?.toISOString() ?? null } }; }
+    try {
+      if (!built.provider.restart) throw new AppError('DEVICE_UNSUPPORTED_OPERATION', `provider ${device.providerKey} declares remoteRestart but implements no restart()`, { retryable: false });
+      const res = await built.provider.restart(built.ctx);
+      if (!res.ok) throw new AppError('PROVIDER_ERROR', res.message ?? 'the device refused the restart', { retryable: true, details: redactForAudit(res.details ?? {}) });
+      await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
+        await handleProviderSuccess(trx, device, built.accountKey);
+        await trx.insertInto('deviceLogs').values({ organizationId: device.organizationId, deviceId: device.id, level: 'warn', event: 'restart', jobId: item.syncJobId, message: 'device restart requested', details: JSON.stringify(redactForAudit(res.details ?? {})) }).execute();
+        // the terminal is rebooting: it is not reachable until it reports back, and the next health check decides its status
+        await trx.updateTable('devices').set({ lastSuccessfulCommunicationAt: now }).where('id', '=', device.id).execute();
+      });
+      return { result: { mode: 'provider', executed: !res.async, message: res.message ?? null, details: redactForAudit(res.details ?? {}) } };
+    } catch (err) {
+      await handleProviderFailure(ctx, device, built.accountKey, err);
+      throw err;
+    } finally {
+      built.dispose();
+    }
+  });
+}
+
+/**
  * TEST_CONNECTION: uses the credentials stored for the device (never credentials from the payload); the sanitised
  * ConnectionResult is the item result. A negative answer is a terminal FAILED item with the result kept.
  */

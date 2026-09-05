@@ -36,7 +36,9 @@ describe('DeviceActions', () => {
     expect(screen.getByRole('button', { name: /Sync employees/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Health check/ })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Test connection/ })).toBeInTheDocument(); // pull-style integration can be tested
-    expect(screen.getByRole('button', { name: /Restart/ })).toBeDisabled(); // declared by the provider, not exposed by the API
+    // remoteRestart is a real action now: it is offered and dispatches 'restart' (the page confirms before rebooting)
+    fireEvent.click(screen.getByRole('button', { name: /Restart/ }));
+    expect(onAction).toHaveBeenCalledWith('restart');
     fireEvent.click(screen.getByRole('button', { name: /Sync employees/ }));
     expect(onAction).toHaveBeenCalledWith('sync-employees');
 

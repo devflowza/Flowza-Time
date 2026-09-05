@@ -453,7 +453,7 @@ export async function listDeviceCommands(deps: ApiDeps, actor: Actor, orgId: str
   });
 }
 
-export type DeviceAction = 'sync-attendance' | 'sync-employees' | 'health-check' | 'reconcile';
+export type DeviceAction = 'sync-attendance' | 'sync-employees' | 'health-check' | 'reconcile' | 'restart';
 
 export async function runDeviceAction(deps: ApiDeps, actor: Actor, orgId: string, id: string, action: DeviceAction): Promise<CreatedSyncJob> {
   const grant = requirePermission(actor.principal, orgId, 'device.sync');
@@ -479,6 +479,11 @@ export async function runDeviceAction(deps: ApiDeps, actor: Actor, orgId: string
         break;
       case 'reconcile':
         job = await createSyncJob(deps, trx, { ...base, jobType: 'RECONCILIATION', scope: { deviceIds: [id] }, items: [{ deviceId: id, branchId: device.branchId }], priority: 4 });
+        break;
+      case 'restart':
+        // an operator is waiting for the terminal to come back, so this outranks scheduled work
+        if (!caps.remoteRestart) throw errorUnsupported('remoteRestart');
+        job = await createSyncJob(deps, trx, { ...base, jobType: 'RESTART_DEVICE', scope: { deviceIds: [id] }, items: [{ deviceId: id, branchId: device.branchId }], priority: 2 });
         break;
     }
     await audit(trx, actor, orgId, `device.action_${action.replace(/-/g, '_')}`, 'device', { entityId: id, branchId: device.branchId, newValue: { syncJobId: job.id, itemsTotal: job.itemsTotal } });

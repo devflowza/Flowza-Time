@@ -21,7 +21,7 @@ import { SettingsTab } from '../components/detail/settings-tab';
 
 const TABS = ['overview', 'employees', 'logs', 'commands', 'sync', 'settings'] as const;
 type Tab = (typeof TABS)[number];
-type Confirm = 'disable' | 'decommission' | 'rotate-token' | null;
+type Confirm = 'disable' | 'decommission' | 'rotate-token' | 'restart' | null;
 
 export default function DeviceDetailPage() {
   const { t } = useTranslation('devices');
@@ -57,11 +57,12 @@ export default function DeviceDetailPage() {
         return testConnection.mutate({ providerKey: d.providerKey, config: {}, deviceId: d.id }, { onSuccess: setTestResult, onError: toastError, onSettled: () => setBusy(null) });
       case 'edit': return setParams({ tab: 'settings' });
       case 'enable': return update.mutate({ id, input: { status: 'active' } }, { onSuccess: () => toast.success(t('detail.enabled')), onError: toastError });
-      case 'disable': case 'decommission': case 'rotate-token': return setConfirm(kind);
+      case 'disable': case 'decommission': case 'rotate-token': case 'restart': return setConfirm(kind);
     }
   };
 
   const onConfirm = () => {
+    if (confirm === 'restart') { setConfirm(null); return run('restart', 'restart'); }
     if (confirm === 'rotate-token') rotatePushToken.mutate(id, { onSuccess: (creds) => { setConfirm(null); toast.success(t('push.rotated')); setRotated(creds); }, onError: toastError });
     else if (confirm) {
       const decommission = confirm === 'decommission';
@@ -100,6 +101,7 @@ export default function DeviceDetailPage() {
 
             <ConfirmDialog open={confirm === 'disable'} onOpenChange={(o) => !o && setConfirm(null)} title={t('detail.disableTitle', { name: d.name })} description={t('detail.disableHint')} confirmLabel={t('actions.disable')} loading={confirming} onConfirm={onConfirm} />
             <ConfirmDialog open={confirm === 'decommission'} onOpenChange={(o) => !o && setConfirm(null)} title={t('detail.decommissionTitle', { name: d.name })} description={t('detail.decommissionHint')} confirmLabel={t('actions.decommission')} destructive loading={confirming} onConfirm={onConfirm} />
+            <ConfirmDialog open={confirm === 'restart'} onOpenChange={(o) => !o && setConfirm(null)} title={t('detail.restartTitle', { name: d.name })} description={t(isPush ? 'detail.restartHintPush' : 'detail.restartHint')} confirmLabel={t('actions.restart')} destructive loading={busy === 'restart'} onConfirm={onConfirm} />
             <ConfirmDialog open={confirm === 'rotate-token'} onOpenChange={(o) => !o && setConfirm(null)} title={t('detail.rotateTitle')} description={t('detail.rotateHint')} confirmLabel={t('actions.rotateToken')} destructive loading={confirming} onConfirm={onConfirm} />
             <PushCredentialsDialog credentials={rotated} onClose={() => setRotated(null)} title={t('push.rotated')} />
             <Dialog open={!!testResult} onOpenChange={(o) => !o && setTestResult(null)}>

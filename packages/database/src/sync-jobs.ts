@@ -44,6 +44,8 @@ export function dedupeKeyFor(op: SyncJobType, deviceId: string | null, employeeI
   switch (op) {
     case 'PULL_ATTENDANCE': return `pull:${deviceId}`;
     case 'DEVICE_HEALTH_CHECK': return `health:${deviceId}`;
+    // a second reboot while one is still pending is a duplicate, never a second reboot
+    case 'RESTART_DEVICE': return `restart:${deviceId}`;
     case 'PUSH_EMPLOYEE': return `push:${deviceId}:${employeeId}:${syncJobId}`;
     case 'DELETE_EMPLOYEE': return `delete:${deviceId}:${employeeId ?? String(options['deviceUserId'] ?? '')}:${syncJobId}`;
     default: return `${op.toLowerCase()}:${deviceId}:${syncJobId}`;

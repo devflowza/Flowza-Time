@@ -1,9 +1,9 @@
 import type { HandlerRegistry } from '../types.js';
 import { pullAttendance } from './attendance.js';
-import { deviceHealthCheck, testConnection, webhookEvent } from './device.js';
+import { deviceHealthCheck, restartDevice, testConnection, webhookEvent } from './device.js';
 import { deleteEmployee, pullEmployees, pushEmployee, pushEmployees, reconciliation } from './employees.js';
 
-export { pullAttendance, deviceHealthCheck, testConnection, webhookEvent, deleteEmployee, pullEmployees, pushEmployee, pushEmployees, reconciliation };
+export { pullAttendance, deviceHealthCheck, restartDevice, testConnection, webhookEvent, deleteEmployee, pullEmployees, pushEmployee, pushEmployees, reconciliation };
 
 /**
  * Sync job handlers (docs/sync-engine.md). Every per-item handler runs through `runItem()` (handlers/sync/items.ts): one
@@ -18,6 +18,7 @@ export function registerSyncHandlers(registry: HandlerRegistry): void {
   registry.register({ jobType: 'PULL_EMPLOYEES', handler: pullEmployees, timeoutMs: 10 * 60_000 });
   registry.register({ jobType: 'DEVICE_HEALTH_CHECK', handler: deviceHealthCheck, timeoutMs: 2 * 60_000 });
   registry.register({ jobType: 'TEST_CONNECTION', handler: testConnection, timeoutMs: 2 * 60_000 });
+  registry.register({ jobType: 'RESTART_DEVICE', handler: restartDevice, timeoutMs: 2 * 60_000 });
   registry.register({ jobType: 'RECONCILIATION', handler: reconciliation, timeoutMs: 5 * 60_000 });
   registry.register({ jobType: 'WEBHOOK_EVENT', handler: webhookEvent, timeoutMs: 2 * 60_000 });
 }

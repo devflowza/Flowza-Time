@@ -46,9 +46,9 @@ jobs only: enqueueing a key that is currently *running* creates the next run, so
 ## Connectivity modes and handlers
 | Mode | Trigger | Handler(s) |
 |---|---|---|
-| `VENDOR_CLOUD_PULL` / `ON_PREM_SERVER_API` / `LAN` | scheduler poll or manual | `PULL_ATTENDANCE` (cursor from `sync_cursors`, page loop, `ingestRawTransactions`, advance cursor after commit), `PULL_EMPLOYEES`, `PUSH_EMPLOYEE(S)`, `DELETE_EMPLOYEE`, `DEVICE_HEALTH_CHECK`, `TEST_CONNECTION` |
+| `VENDOR_CLOUD_PULL` / `ON_PREM_SERVER_API` / `LAN` | scheduler poll or manual | `PULL_ATTENDANCE` (cursor from `sync_cursors`, page loop, `ingestRawTransactions`, advance cursor after commit), `PULL_EMPLOYEES`, `PUSH_EMPLOYEE(S)`, `DELETE_EMPLOYEE`, `DEVICE_HEALTH_CHECK`, `TEST_CONNECTION`, `RESTART_DEVICE` (provider `restart()`) |
 | `VENDOR_WEBHOOK` | API `/webhooks/providers/:key/:deviceId/:token` | API verifies the vendor signature **once, over the original raw bytes**, stores the verified *normalised* result in `provider_webhook_events` (replay protection), enqueues `WEBHOOK_EVENT` → handler ingests the stored transactions without re-parsing or re-verifying; slow reconciliation poll still runs |
-| `DEVICE_PUSH` | API `/device-push/:protocol/*` | API identifies the device by serial (+ push token), ingests raw rows synchronously (idempotent, cheap), updates heartbeat, returns pending `device_commands`; employee push = command rows created by `PUSH_EMPLOYEE`, acknowledged via the protocol's result endpoint |
+| `DEVICE_PUSH` | API `/device-push/:protocol/*` | API identifies the device by serial (+ push token), ingests raw rows synchronously (idempotent, cheap), updates heartbeat, returns pending `device_commands`; employee push = command rows created by `PUSH_EMPLOYEE`, acknowledged via the protocol's result endpoint; `RESTART_DEVICE` stores the protocol's REBOOT command the same way, so the item succeeds as *queued to the device*, never as *rebooted* |
 
 ## Webhook verification happens exactly once (decision)
 HMAC-style vendor signatures cover the raw request bytes. Those bytes exist only while the API handles the call: anything

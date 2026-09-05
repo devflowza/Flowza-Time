@@ -9,7 +9,7 @@ import { body, param, query } from '../../../lib/validate.js';
 import { actorOf } from '../../../lib/service.js';
 import * as devices from '../../../services/features/devices.service.js';
 
-const ACTIONS = ['sync-attendance', 'sync-employees', 'health-check', 'reconcile'] as const;
+const ACTIONS = ['sync-attendance', 'sync-employees', 'health-check', 'reconcile', 'restart'] as const;
 
 export function registerDeviceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const idem = idempotency();

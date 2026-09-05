@@ -16,7 +16,7 @@ export interface DeviceEmployeeStateDto {
   id: string; deviceId: string; employeeId: string | null; employeeNumber: string | null; employeeName: string | null; employmentStatus: EmploymentStatus | null; deviceUserId: string; syncStatus: DeviceEmployeeSyncStatus; desired: boolean;
   inSync: boolean; deviceOnly: boolean; lastSyncAt: string | null; lastSuccessAt: string | null; lastErrorCode: string | null; lastError: string | null; fingerprintCount: number; faceEnrolled: boolean; cardEnrolled: boolean; deviceRecord: Record<string, unknown> | null; updatedAt: string;
 }
-export type DeviceAction = 'sync-attendance' | 'sync-employees' | 'health-check' | 'reconcile';
+export type DeviceAction = 'sync-attendance' | 'sync-employees' | 'health-check' | 'reconcile' | 'restart';
 /** 202 body of POST /devices/:id/actions/:action — same shape as the sync endpoints (status SUCCESS when every item was already in flight). */
 export type DeviceActionAccepted = SyncJobAcceptedDto;
 

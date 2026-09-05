@@ -604,6 +604,7 @@ leave `placeholder`. Prerequisites: the `/device-push/iclock/*` route, `device_c
    re-modelled as a bridge-agent provider, or both be kept as honest `UNVERIFIED` placeholders with corrected descriptions.
 6. Consider a `fingertec_timetec` (`VENDOR_CLOUD_PULL`) placeholder reflecting the research's recommended first path.
 7. Extend `ZK_VERIFY_METHODS` with `4 → card`, `25 → palm` after hardware confirmation; add `DATA QUERY ATTLOG` to `buildCommands`.
+   (Remote restart is implemented: `POST /devices/:id/actions/restart` → `RESTART_DEVICE`; push terminals receive `C:<id>:REBOOT` on their next poll. Hardware confirmation of the reboot is still pending, like the rest of the protocol.)
 8. Track official documents still to be opened (all blocked during research): ZKTeco PUSH SDK PDFs, Hikvision TPP wiki, Anviz
    community API definition, Suprema support KB (WebSocket, licence tiers), eSSL eBioServer manuals, Matrix PUSH API guide, NITGEN
    SDK manual, FingerTec API-TimeTecCloud.pdf and WSDL.

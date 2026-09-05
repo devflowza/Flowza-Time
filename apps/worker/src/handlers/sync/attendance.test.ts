@@ -7,7 +7,7 @@ import { AppError } from '@flowza/shared';
 import { createHarness, type TestHarness } from '../../test/harness.js';
 import type { JobContext } from '../types.js';
 import { pullAttendance } from './attendance.js';
-import { webhookEvent } from './device.js';
+import { restartDevice, webhookEvent } from './device.js';
 import { createSyncJob } from './api.js';
 import { checkCircuit, recordFailure, recordSuccess } from './circuit.js';
 import { ingestRawTransactions, dedupeHash } from './ingest.js';
@@ -48,7 +48,8 @@ async function itemJob(deviceId: string, operation = 'PULL_ATTENDANCE', options:
   const devices = opts.devices ?? [deviceId];
   // handlers are invoked directly (no Runner), so the queue rows of earlier runs are still "pending": clear them like a
   // completed run would, otherwise the dedupe key would mark the new item SKIPPED (which is exercised separately below)
-  await sql`delete from jobs.queue where dedupe_key = any(${sql.val(devices.map((d) => `${operation === 'DEVICE_HEALTH_CHECK' ? 'health' : 'pull'}:${d}`))}::text[])`.execute(h.tdb.adminDb);
+  const dedupePrefix = operation === 'DEVICE_HEALTH_CHECK' ? 'health' : operation === 'RESTART_DEVICE' ? 'restart' : 'pull';
+  await sql`delete from jobs.queue where dedupe_key = any(${sql.val(devices.map((d) => `${dedupePrefix}:${d}`))}::text[])`.execute(h.tdb.adminDb);
   const created = await withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => createSyncJob(trx, h.deps.queue, {
     organizationId: ORG, jobType: operation as never, trigger: opts.trigger ?? 'MANUAL', items: devices.map((d) => ({ deviceId: d, operation: operation as never, options })),
   }));
@@ -375,5 +376,33 @@ describe('circuit breaker', () => {
     const j2 = await itemJob(D.duplicates);
     expect((await pullAttendance(j2.ctx))['status']).toBe('SUCCESS');
     expect((await device(D.duplicates)).connectionStatus).toBe('online');
+  });
+});
+
+describe('RESTART_DEVICE', () => {
+  it('restarts a cloud device through the provider and queues a REBOOT command for a push terminal', async () => {
+    // cloud/LAN device: the provider is called and the reboot is logged
+    const cloud = await itemJob(D.healthy, 'RESTART_DEVICE');
+    const res = await restartDevice(cloud.ctx) as { mode: string; executed: boolean };
+    expect(res.mode).toBe('provider');
+    expect(res.executed).toBe(true);
+    const item = await h.tdb.adminDb.selectFrom('syncJobItems').select(['status', 'result']).where('syncJobId', '=', cloud.syncJobId).executeTakeFirstOrThrow();
+    expect(item.status).toBe('SUCCESS');
+    const log = await h.tdb.adminDb.selectFrom('deviceLogs').select(['event', 'level']).where('deviceId', '=', D.healthy).where('event', '=', 'restart').executeTakeFirstOrThrow();
+    expect(log.level).toBe('warn');
+
+    // push terminal: nothing can be called, so the protocol command waits for the next poll
+    const push = await itemJob(D.push, 'RESTART_DEVICE');
+    const pushRes = await restartDevice(push.ctx) as { mode: string; queuedCommands: number; executed: boolean };
+    expect(pushRes).toMatchObject({ mode: 'push', queuedCommands: 1, executed: false });
+    const cmd = await h.tdb.adminDb.selectFrom('deviceCommands').select(['commandType', 'status']).where('deviceId', '=', D.push).executeTakeFirstOrThrow();
+    expect(cmd).toMatchObject({ commandType: 'RESTART', status: 'pending' });
+
+    // a device whose capabilities deny remote restart is UNSUPPORTED, never a silent success
+    await h.tdb.adminDb.updateTable('devices').set({ capabilities: JSON.stringify({ remoteRestart: false }) }).where('id', '=', D.duplicates).execute();
+    const denied = await itemJob(D.duplicates, 'RESTART_DEVICE');
+    await restartDevice(denied.ctx);
+    const deniedItem = await h.tdb.adminDb.selectFrom('syncJobItems').select(['status', 'lastErrorCode']).where('syncJobId', '=', denied.syncJobId).executeTakeFirstOrThrow();
+    expect(deniedItem.status).toBe('UNSUPPORTED');
   });
 });
