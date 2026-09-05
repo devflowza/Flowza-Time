@@ -97,7 +97,7 @@ DATABASE_POOL_MAX=10
 FLOWZA_CREDENTIALS_MASTER_KEYS=<from step 0>
 FLOWZA_DEVICE_PUSH_SECRET=<from step 0>
 API_PUBLIC_URL=https://<api-host>
-WEB_ORIGINS=https://flowza-time-prd.pages.dev
+WEB_ORIGINS=https://time.flowza.ai
 TRUST_PROXY=true
 ```
 
@@ -110,7 +110,12 @@ Optional:
   (`/auth/v1/.well-known/jwks.json`), which is what a project with asymmetric signing keys uses.
 
 `WEB_ORIGINS` must be the exact browser origin, comma-separated for more than one. A mismatch shows up as a CORS
-failure in the browser with the API logging nothing.
+failure in the browser with the API logging nothing — the request never reaches a handler.
+
+The canonical origin is the custom domain, `https://time.flowza.ai`. Deliberately **not** listed: the
+`*.pages.dev` deployment URLs. Every Cloudflare preview build gets its own hostname, so allowing them either means an
+unmaintainable list or a wildcard that lets any preview talk to production data. If you want previews to work, point
+them at a separate staging API rather than widening this one.
 
 **Verify before going further:**
 
@@ -139,7 +144,7 @@ WORKER_QUEUES=sync,processing,reports,notifications,maintenance
 WORKER_PER_ORG_CONCURRENCY=5
 SCHEDULER_ENABLED=true
 API_PUBLIC_URL=https://<api-host>
-WEB_PUBLIC_URL=https://flowza-time-prd.pages.dev
+WEB_PUBLIC_URL=https://time.flowza.ai
 EMAIL_PROVIDER=console
 ```
 
@@ -174,9 +179,49 @@ doubled paths and 404s.
 Verify by opening the site and watching the network tab: requests should go to `https://<api-host>/api/v1/...` and come
 back 200 or 401 — not fail to connect, and not be blocked by CORS.
 
+### Hostnames
+
+The web app is served from the custom domain **`https://time.flowza.ai`**. Three other names are worth deciding on
+together rather than one at a time, because two of them appear in configuration that is awkward to change later:
+
+| Name | Serves | Notes |
+|---|---|---|
+| `time.flowza.ai` | the web app | live |
+| `api.flowza.ai` (suggested) | `apps/api` | goes in `API_PUBLIC_URL` and `VITE_API_URL` |
+| `push.flowza.ai` (suggested) | device push ingress | **must accept plain HTTP on port 80** — see below |
+
+Device push is the constraint that shapes the choice. Legacy ZKTeco/eSSL/FingerTec firmware speaks plain HTTP to
+`/iclock/*` and cannot do TLS, so that hostname needs an HTTP listener restricted to `/device-push/*` and `/iclock/*`
+and rate-limited per source IP and serial, with everything else redirected to HTTPS
+(`docs/deployment.md` → Device push ingress). Do not put that on the same hostname as the web app or the API.
+
+A device's push URL is written into its firmware during commissioning, so changing `push.flowza.ai` later means
+physically revisiting every terminal. Pick it once.
+
 ---
 
-## 5. Register the auth hook
+## 5. Configure the Auth URLs, then register the auth hook
+
+### 5a. Auth URL configuration
+
+Supabase Auth builds the links in password-reset and invitation emails from its own configuration, not from where the
+request came from. Left at its default a reset email sends the user to `localhost`, so this must be set before anyone
+relies on password recovery.
+
+**Dashboard → Authentication → URL Configuration:**
+
+| Field | Value |
+|---|---|
+| Site URL | `https://time.flowza.ai` |
+| Redirect URLs | `https://time.flowza.ai/auth/reset`, `https://time.flowza.ai/auth/callback` |
+
+Add `http://localhost:5173/**` to the redirect list as well if developers need password reset to work locally.
+
+The web app calls `resetPasswordForEmail(email, { redirectTo: `${window.location.origin}/auth/reset` })`, so the
+origin it sends is whatever host the browser is on. Supabase rejects any `redirectTo` that is not on the allow list and
+silently falls back to the Site URL, which looks like "the reset link goes to the wrong page" rather than an error.
+
+### 5b. The password verification hook
 
 `app.on_password_verification_attempt(jsonb)` exists in the database and is already granted to `supabase_auth_admin`,
 but Supabase Auth does not call it until it is registered.
