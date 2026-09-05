@@ -28,16 +28,16 @@ alter table public.permissions enable row level security;
 create policy permissions_read on public.permissions for select to authenticated, flowza_system using (true);
 alter table public.device_providers enable row level security;
 create policy device_providers_read on public.device_providers for select to authenticated, flowza_system using (true);
-create policy device_providers_system_write on public.device_providers for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy device_providers_system_write on public.device_providers for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 alter table public.device_models enable row level security;
 create policy device_models_read on public.device_models for select to authenticated, flowza_system using (true);
-create policy device_models_system_write on public.device_models for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy device_models_system_write on public.device_models for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 alter table public.plans enable row level security;
-create policy plans_read on public.plans for select to authenticated, flowza_system using (is_active or app.is_platform_admin() or app.is_system());
-create policy plans_platform_write on public.plans for all to authenticated, flowza_system using (app.is_platform_admin() or app.is_system()) with check (app.is_platform_admin() or app.is_system());
+create policy plans_read on public.plans for select to authenticated, flowza_system using (is_active or (select app.is_platform_admin()) or (select app.is_system()));
+create policy plans_platform_write on public.plans for all to authenticated, flowza_system using ((select app.is_platform_admin()) or (select app.is_system())) with check ((select app.is_platform_admin()) or (select app.is_system()));
 alter table public.feature_flags enable row level security;
 create policy feature_flags_read on public.feature_flags for select to authenticated, flowza_system using (true);
-create policy feature_flags_platform_write on public.feature_flags for all to authenticated, flowza_system using (app.is_platform_admin() or app.is_system()) with check (app.is_platform_admin() or app.is_system());
+create policy feature_flags_platform_write on public.feature_flags for all to authenticated, flowza_system using ((select app.is_platform_admin()) or (select app.is_system())) with check ((select app.is_platform_admin()) or (select app.is_system()));
 
 -- Users / platform admins -----------------------------------------------------------------------
 alter table public.user_profiles enable row level security;
@@ -48,27 +48,27 @@ create policy user_profiles_self_insert on public.user_profiles for insert to au
 create policy user_profiles_org_peers on public.user_profiles for select to authenticated using (
   exists (select 1 from public.org_memberships m where m.user_id = user_profiles.id and m.organization_id = any ((select app.org_ids_with_permission('user.view'))::uuid[]))
 );
-create policy user_profiles_system on public.user_profiles for all to flowza_system using (app.is_system()) with check (app.is_system());
-create policy user_profiles_platform on public.user_profiles for select to authenticated using (app.is_platform_admin());
+create policy user_profiles_system on public.user_profiles for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
+create policy user_profiles_platform on public.user_profiles for select to authenticated using ((select app.is_platform_admin()));
 
 alter table public.platform_admins enable row level security;
-create policy platform_admins_self on public.platform_admins for select to authenticated using (user_id = app.uid() or app.is_platform_admin());
-create policy platform_admins_system on public.platform_admins for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy platform_admins_self on public.platform_admins for select to authenticated using (user_id = app.uid() or (select app.is_platform_admin()));
+create policy platform_admins_system on public.platform_admins for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 
 alter table public.platform_access_grants enable row level security;
-create policy platform_access_grants_admin on public.platform_access_grants for select to authenticated using (app.is_platform_admin() or organization_id = any ((select app.org_ids_with_permission('organization.manage'))::uuid[]));
-create policy platform_access_grants_system on public.platform_access_grants for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy platform_access_grants_admin on public.platform_access_grants for select to authenticated using ((select app.is_platform_admin()) or organization_id = any ((select app.org_ids_with_permission('organization.manage'))::uuid[]));
+create policy platform_access_grants_system on public.platform_access_grants for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 
 alter table public.login_history enable row level security;
 create policy login_history_self on public.login_history for select to authenticated using (user_id = app.uid());
-create policy login_history_system on public.login_history for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy login_history_system on public.login_history for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 
 -- Organisations ----------------------------------------------------------------------------------
 alter table public.organizations enable row level security;
-create policy organizations_member_read on public.organizations for select to authenticated, flowza_system using (id = any ((select app.member_org_ids())::uuid[]) or app.is_platform_admin());
+create policy organizations_member_read on public.organizations for select to authenticated, flowza_system using (id = any ((select app.member_org_ids())::uuid[]) or (select app.is_platform_admin()));
 create policy organizations_manage on public.organizations for update to authenticated, flowza_system using (id = any ((select app.org_ids_with_permission('organization.manage'))::uuid[])) with check (id = any ((select app.org_ids_with_permission('organization.manage'))::uuid[]));
-create policy organizations_platform_write on public.organizations for insert to authenticated, flowza_system with check (app.is_platform_admin() or app.is_system());
-create policy organizations_platform_delete on public.organizations for delete to authenticated using (app.is_platform_admin());
+create policy organizations_platform_write on public.organizations for insert to authenticated, flowza_system with check ((select app.is_platform_admin()) or (select app.is_system()));
+create policy organizations_platform_delete on public.organizations for delete to authenticated using ((select app.is_platform_admin()));
 
 alter table public.organization_settings enable row level security;
 create policy organization_settings_read on public.organization_settings for select to authenticated, flowza_system using (organization_id = any ((select app.member_org_ids())::uuid[]));
@@ -138,9 +138,9 @@ alter table public.device_credentials enable row level security;
 create policy device_credentials_system on public.device_credentials for all to flowza_system using (organization_id = app.system_org_id()) with check (organization_id = app.system_org_id());
 alter table public.pending_devices enable row level security;
 create policy pending_devices_read on public.pending_devices for select to authenticated, flowza_system using (
-  app.is_system() or (organization_id is not null and organization_id = any ((select app.org_ids_with_permission('device.create'))::uuid[]))
+  (select app.is_system()) or (organization_id is not null and organization_id = any ((select app.org_ids_with_permission('device.create'))::uuid[]))
 );
-create policy pending_devices_system on public.pending_devices for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy pending_devices_system on public.pending_devices for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 call app.apply_tenant_policies('public.device_groups', 'device.view', 'device.manage', 'branch_id');
 call app.apply_tenant_policies('public.device_group_members', 'device.view', 'device.manage');
 call app.apply_readonly_tenant_policies('public.device_commands', 'device.view');
@@ -154,9 +154,9 @@ call app.apply_readonly_tenant_policies('public.sync_cursors', 'device.view');
 call app.apply_readonly_tenant_policies('public.sync_logs', 'device.view');
 alter table public.provider_webhook_events enable row level security;
 create policy provider_webhook_events_read on public.provider_webhook_events for select to authenticated, flowza_system using (
-  app.is_system() or (organization_id is not null and organization_id = any ((select app.org_ids_with_permission('device.view'))::uuid[]))
+  (select app.is_system()) or (organization_id is not null and organization_id = any ((select app.org_ids_with_permission('device.view'))::uuid[]))
 );
-create policy provider_webhook_events_system on public.provider_webhook_events for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy provider_webhook_events_system on public.provider_webhook_events for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 
 -- Shifts, rules, holidays, leave -----------------------------------------------------------------
 call app.apply_tenant_policies('public.shifts', 'shift.view', 'shift.manage');
@@ -187,48 +187,48 @@ call app.apply_readonly_tenant_policies('public.attendance_period_summaries', 'p
 call app.apply_tenant_policies('public.report_requests', 'report.view', 'report.view', 'branch_id');
 drop policy report_requests_select on public.report_requests;
 create policy report_requests_select on public.report_requests for select to authenticated, flowza_system using (
-  requested_by = app.uid() or app.is_system() or organization_id = any ((select app.org_ids_with_permission('report.manage'))::uuid[])
+  requested_by = app.uid() or (select app.is_system()) or organization_id = any ((select app.org_ids_with_permission('report.manage'))::uuid[])
 );
 call app.apply_tenant_policies('public.import_jobs', 'employee.import', 'employee.import');
 call app.apply_tenant_policies('public.import_job_rows', 'employee.import', 'employee.import');
 alter table public.notifications enable row level security;
 create policy notifications_self on public.notifications for select to authenticated using (user_id = app.uid());
 create policy notifications_self_update on public.notifications for update to authenticated using (user_id = app.uid()) with check (user_id = app.uid());
-create policy notifications_system on public.notifications for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy notifications_system on public.notifications for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 alter table public.notification_preferences enable row level security;
 create policy notification_preferences_self on public.notification_preferences for all to authenticated using (user_id = app.uid()) with check (user_id = app.uid());
-create policy notification_preferences_system on public.notification_preferences for select to flowza_system using (app.is_system());
+create policy notification_preferences_system on public.notification_preferences for select to flowza_system using ((select app.is_system()));
 alter table public.notification_deliveries enable row level security;
-create policy notification_deliveries_system on public.notification_deliveries for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy notification_deliveries_system on public.notification_deliveries for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 
 -- Audit (append-only; readers need audit.view; branch-scoped) -------------------------------------
 alter table audit.logs enable row level security;
 create policy audit_logs_read on audit.logs for select to authenticated, flowza_system using (
   (organization_id is not null and organization_id = any ((select app.org_ids_with_permission('audit.view'))::uuid[])
      and (organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or branch_id is null or branch_id = any ((select app.allowed_branch_ids())::uuid[])))
-  or (organization_id is null and app.is_platform_admin())
-  or app.is_system()
+  or (organization_id is null and (select app.is_platform_admin()))
+  or (select app.is_system())
 );
 create policy audit_logs_insert on audit.logs for insert to authenticated, flowza_system with check (
-  app.is_system() or (organization_id is not null and organization_id = any ((select app.member_org_ids())::uuid[]) and actor_user_id = app.uid())
+  (select app.is_system()) or (organization_id is not null and organization_id = any ((select app.member_org_ids())::uuid[]) and actor_user_id = app.uid())
 );
 
 -- Subscription, flags, api keys, outbox, retention ------------------------------------------------
 alter table public.subscriptions enable row level security;
-create policy subscriptions_read on public.subscriptions for select to authenticated, flowza_system using (organization_id = any ((select app.member_org_ids())::uuid[]) or app.is_platform_admin());
-create policy subscriptions_platform_write on public.subscriptions for all to authenticated, flowza_system using (app.is_platform_admin() or app.is_system()) with check (app.is_platform_admin() or app.is_system());
+create policy subscriptions_read on public.subscriptions for select to authenticated, flowza_system using (organization_id = any ((select app.member_org_ids())::uuid[]) or (select app.is_platform_admin()));
+create policy subscriptions_platform_write on public.subscriptions for all to authenticated, flowza_system using ((select app.is_platform_admin()) or (select app.is_system())) with check ((select app.is_platform_admin()) or (select app.is_system()));
 alter table public.entitlements enable row level security;
-create policy entitlements_read on public.entitlements for select to authenticated, flowza_system using (organization_id = any ((select app.member_org_ids())::uuid[]) or app.is_platform_admin());
-create policy entitlements_platform_write on public.entitlements for all to authenticated, flowza_system using (app.is_platform_admin() or app.is_system()) with check (app.is_platform_admin() or app.is_system());
+create policy entitlements_read on public.entitlements for select to authenticated, flowza_system using (organization_id = any ((select app.member_org_ids())::uuid[]) or (select app.is_platform_admin()));
+create policy entitlements_platform_write on public.entitlements for all to authenticated, flowza_system using ((select app.is_platform_admin()) or (select app.is_system())) with check ((select app.is_platform_admin()) or (select app.is_system()));
 alter table public.usage_records enable row level security;
-create policy usage_records_read on public.usage_records for select to authenticated, flowza_system using (organization_id = any ((select app.org_ids_with_permission('organization.manage'))::uuid[]) or app.is_platform_admin());
-create policy usage_records_system on public.usage_records for all to flowza_system using (app.is_system()) with check (app.is_system());
+create policy usage_records_read on public.usage_records for select to authenticated, flowza_system using (organization_id = any ((select app.org_ids_with_permission('organization.manage'))::uuid[]) or (select app.is_platform_admin()));
+create policy usage_records_system on public.usage_records for all to flowza_system using ((select app.is_system())) with check ((select app.is_system()));
 alter table public.organization_feature_flags enable row level security;
-create policy organization_feature_flags_read on public.organization_feature_flags for select to authenticated, flowza_system using (organization_id = any ((select app.member_org_ids())::uuid[]) or app.is_platform_admin());
-create policy organization_feature_flags_platform_write on public.organization_feature_flags for all to authenticated, flowza_system using (app.is_platform_admin() or app.is_system()) with check (app.is_platform_admin() or app.is_system());
+create policy organization_feature_flags_read on public.organization_feature_flags for select to authenticated, flowza_system using (organization_id = any ((select app.member_org_ids())::uuid[]) or (select app.is_platform_admin()));
+create policy organization_feature_flags_platform_write on public.organization_feature_flags for all to authenticated, flowza_system using ((select app.is_platform_admin()) or (select app.is_system())) with check ((select app.is_platform_admin()) or (select app.is_system()));
 call app.apply_tenant_policies('public.api_keys', 'organization.manage', 'organization.manage');
 alter table public.domain_events enable row level security;
-create policy domain_events_system on public.domain_events for all to flowza_system using (app.is_system() or (organization_id = app.system_org_id())) with check (app.is_system());
+create policy domain_events_system on public.domain_events for all to flowza_system using ((select app.is_system()) or (organization_id = app.system_org_id())) with check ((select app.is_system()));
 -- authenticated sessions may only INSERT outbox rows for their own organisation (through the API service layer)
 grant insert on public.domain_events to authenticated;
 create policy domain_events_insert on public.domain_events for insert to authenticated with check (organization_id = any ((select app.member_org_ids())::uuid[]));

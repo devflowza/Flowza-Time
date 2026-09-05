@@ -25,8 +25,10 @@ export interface AttributionResult {
  * A punch belongs to the window that contains it. When consecutive windows overlap (generous punch
  * windows on cross-midnight shifts, flexible day boundaries) the punch goes to the window whose
  * scheduled start is nearest in absolute time; ties resolve to the earlier attendance date so the same
- * input always yields the same result. Voided events are never attributed but are still reported so the
- * calculation trace can list them as IGNORED. Events within a date are ordered by `punchedAt`, then `id`.
+ * input always yields the same result. A day without a shift (kind `NONE`) has no scheduled start to be
+ * near, so it only receives punches that no shift window contains. Voided events are never attributed but
+ * are still reported so the calculation trace can list them as IGNORED. Events within a date are ordered
+ * by `punchedAt`, then `id`.
  */
 export function attributeEvents(events: readonly EngineEvent[], windows: readonly PunchWindow[]): AttributionResult {
   const ordered = [...windows].sort((a, b) => a.attendanceDate.localeCompare(b.attendanceDate));
@@ -62,9 +64,11 @@ export function attributeEvents(events: readonly EngineEvent[], windows: readonl
 }
 
 function nearestScheduledStart(candidates: readonly PunchWindow[], instant: DateTime): PunchWindow | undefined {
+  const scheduled = candidates.filter((w) => w.kind !== 'NONE');
+  const pool = scheduled.length > 0 ? scheduled : candidates;
   let best: PunchWindow | undefined;
   let bestDistance = Number.POSITIVE_INFINITY;
-  for (const w of candidates) {
+  for (const w of pool) {
     const distance = Math.abs(instant.diff(w.scheduledStart, 'milliseconds').milliseconds);
     if (distance < bestDistance) {
       best = w;

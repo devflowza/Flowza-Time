@@ -95,6 +95,15 @@ describe('withContext (RLS impersonation)', () => {
   });
 });
 
+describe('defence in depth: login roles have no direct table access', () => {
+  it('flowza_api / flowza_worker cannot read tenant tables without SET ROLE (noinherit)', async () => {
+    await expect(tdb.db.selectFrom('employees').select('id').execute()).rejects.toThrow(/permission denied/);
+    await expect(tdb.workerDb.selectFrom('organizations').select('id').execute()).rejects.toThrow(/permission denied/);
+    // but the worker login role may use the job queue directly (no tenant data inside)
+    await expect(sql`select count(*) from jobs.queue`.execute(tdb.workerDb)).resolves.toBeTruthy();
+  });
+});
+
 describe('DeviceCredentialsStore', () => {
   const keys = [{ id: 'k2', material: Buffer.alloc(32, 2) }, { id: 'k1', material: Buffer.alloc(32, 1) }];
   it('round-trips encrypted credentials in system context and never exposes them to users', async () => {

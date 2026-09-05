@@ -59,7 +59,7 @@ const PASSWD_PATTERN = /^\d{1,8}$/;
 const CARD_PATTERN = /^\d{1,20}$/;
 const STAMP_PATTERN = /^[A-Za-z0-9]{1,32}$/;
 const COMMAND_ID_PATTERN = /^[A-Za-z0-9_-]{1,64}$/;
-const CONTROL_CHARS = /[\x00-\x1f\x7f-\x9f]/g;
+const CONTROL_CHARS = /\p{Cc}/gu;
 const NAME_MAX = 24;
 const TAB = '\t';
 

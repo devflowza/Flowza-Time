@@ -64,6 +64,17 @@ describe('attributeEvents', () => {
     expect(byDate.get(D1)?.map((e) => e.id)).toEqual([afterBoundary.id]);
   });
 
+  it('never lets a no-shift calendar day steal a punch from an overlapping shift window', () => {
+    // Night shift on D, no shift on D+1: the D+1 calendar window [00:00, 24:00) overlaps the night window.
+    const windows = [computePunchWindow(nightShift(), DATE, MUSCAT), computePunchWindow(null, D1, MUSCAT)];
+    const morningOut = punch(D1, '06:08');
+    const afternoon = punch(D1, '15:00'); // after the night window closes at 12:00 → calendar day
+    const { byDate, decisions } = attributeEvents([morningOut, afternoon], windows);
+    expect(byDate.get(DATE)?.map((e) => e.id)).toEqual([morningOut.id]);
+    expect(byDate.get(D1)?.map((e) => e.id)).toEqual([afternoon.id]);
+    expect(decisions.find((d) => d.eventId === morningOut.id)?.reason).toBe('NEAREST_SCHEDULED_START');
+  });
+
   it('reports voided and out-of-window events without attributing them', () => {
     const windows = [computePunchWindow(fixedShift(), DATE, MUSCAT)];
     const voided = punch(DATE, '09:00', 'PUNCH', MUSCAT, { voided: true });

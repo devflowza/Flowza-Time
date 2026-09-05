@@ -32,17 +32,17 @@ begin
       app.path_org_id(name) is not null and (
         (bucket_id = 'org-logos'       and app.path_org_id(name) = any ((select app.org_ids_with_permission('organization.manage'))::uuid[])) or
         (bucket_id = 'employee-photos' and app.path_org_id(name) = any ((select app.org_ids_with_permission('employee.update'))::uuid[])) or
-        (bucket_id = 'reports'         and app.is_system()) or
+        (bucket_id = 'reports'         and (select app.is_system())) or
         (bucket_id = 'imports'         and app.path_org_id(name) = any ((select app.org_ids_with_permission('employee.import'))::uuid[])) or
         (bucket_id = 'documents'       and app.path_org_id(name) = any ((select app.org_ids_with_permission('employee.update'))::uuid[]))
       )) $p$;
     execute $p$ drop policy if exists flowza_objects_update on storage.objects $p$;
     execute $p$ create policy flowza_objects_update on storage.objects for update to authenticated, flowza_system using (
-      app.path_org_id(name) is not null and (app.is_system() or app.path_org_id(name) = any ((select app.org_ids_with_permission('organization.manage'))::uuid[])
+      app.path_org_id(name) is not null and ((select app.is_system()) or app.path_org_id(name) = any ((select app.org_ids_with_permission('organization.manage'))::uuid[])
         or (bucket_id in ('employee-photos', 'documents') and app.path_org_id(name) = any ((select app.org_ids_with_permission('employee.update'))::uuid[])))) $p$;
     execute $p$ drop policy if exists flowza_objects_delete on storage.objects $p$;
     execute $p$ create policy flowza_objects_delete on storage.objects for delete to authenticated, flowza_system using (
-      app.path_org_id(name) is not null and (app.is_system() or app.path_org_id(name) = any ((select app.org_ids_with_permission('organization.manage'))::uuid[])
+      app.path_org_id(name) is not null and ((select app.is_system()) or app.path_org_id(name) = any ((select app.org_ids_with_permission('organization.manage'))::uuid[])
         or (bucket_id in ('employee-photos', 'documents') and app.path_org_id(name) = any ((select app.org_ids_with_permission('employee.update'))::uuid[])))) $p$;
   end if;
 end $$;

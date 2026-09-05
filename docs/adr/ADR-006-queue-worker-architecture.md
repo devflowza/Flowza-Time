@@ -26,6 +26,14 @@ Option 4.
 - The port keeps the door open: when queue throughput or write amplification becomes a problem, the same
   handlers run on BullMQ or a dedicated queue database.
 
+## Review note (2026-09-05)
+An independent architecture review preferred **Supabase Queues (pgmq)** as the transport (maintained extension,
+`read_with_poll`, `set_vt` lease extension, archive tables) with a SQL admission dispatcher for fairness. We agree pgmq
+is a sound transport and it satisfies the same transactional-enqueue property; we keep the custom table for v1 because
+(a) fairness/throttling logic must be written either way, (b) plain Postgres (local/CI) has no pgmq, and (c) the
+`JobQueue` port lets us swap to pgmq (or Redis/BullMQ) without touching handlers. Revisit when queue throughput or
+write amplification on the primary becomes measurable; the migration path is documented in `docs/sync-engine.md`.
+
 ## Trade-offs
 - We own ~300 lines of queue SQL/TS and must test crash recovery (lock timeouts/reaper) ourselves.
 - Queue writes share the primary database; mitigated by archiving, batching and adaptive polling; scale

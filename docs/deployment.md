@@ -30,6 +30,12 @@ be a direct (session) connection — set `DATABASE_URL_WORKER` to the session po
    ship in two releases (add → backfill → switch → drop).
 4. Post-deploy: watch `job_failed` / `unhandled_error` log events, queue depth in `/api/ready`, Supabase advisors.
 
+## Device push ingress (plain HTTP)
+Legacy ZKTeco/eSSL/FingerTec push firmware often speaks **plain HTTP** to `/iclock/*` and cannot do TLS. Expose a
+dedicated hostname (e.g. `push.flowza.example`) that accepts HTTP on port 80 **only** for `/device-push/*` and
+`/iclock/*` paths (platform routing rule / small reverse proxy), rate-limited per source IP and serial, with everything
+else redirected to HTTPS. Prefer TLS-capable firmware where the vendor offers it. The API container itself is unchanged.
+
 ## Residency (GCC)
 An organisation is pinned to a `region_cell`. MVP runs one cell. Adding a cell = a new Supabase project + API/worker
 deployment with the same images; the platform admin API routes tenants by cell. Choose Supabase regions with the lowest
