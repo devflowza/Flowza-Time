@@ -82,8 +82,19 @@ under the caller's own RLS policies rather than with blanket privileges.
 
 ## 2. Deploy the API
 
+The repository ships Fly.io configuration for both services: `fly.api.toml` and `fly.worker.toml` at the root, plus
+`.github/workflows/deploy.yml` (manual dispatch — there is no staging environment, so every deploy reaches production).
+Region is `bom` (Mumbai) to sit beside the `ap-south-1` Supabase project; a request makes several database round trips,
+so the distance is paid multiple times per request.
+
+```bash
+flyctl apps create flowza-time-api
+flyctl apps create flowza-time-worker
+```
+
 Build context is the **repository root** (the workspace is needed to resolve `@flowza/contracts`), Dockerfile is
-`apps/api/Dockerfile`. It listens on **4000** and runs as a non-root user.
+`apps/api/Dockerfile`. It listens on **4000** and runs as a non-root user. `.dockerignore` keeps `node_modules`, git
+history and the web build out of the ~370 MB that would otherwise upload to the builder on every deploy.
 
 Environment:
 
@@ -99,6 +110,15 @@ FLOWZA_DEVICE_PUSH_SECRET=<from step 0>
 API_PUBLIC_URL=https://<api-host>
 WEB_ORIGINS=https://time.flowza.ai
 TRUST_PROXY=true
+```
+
+Non-secret values are already in `fly.api.toml`'s `[env]`. Set the rest as secrets, which never enter the repository:
+
+```bash
+flyctl secrets set --app flowza-time-api \
+  DATABASE_URL_API='<from step 1>' \
+  FLOWZA_CREDENTIALS_MASTER_KEYS='<from step 0>' \
+  FLOWZA_DEVICE_PUSH_SECRET='<from step 0>'
 ```
 
 Optional:
@@ -117,6 +137,17 @@ The canonical origin is the custom domain, `https://time.flowza.ai`. Deliberatel
 unmaintainable list or a wildcard that lets any preview talk to production data. If you want previews to work, point
 them at a separate staging API rather than widening this one.
 
+### Lock the origin to Cloudflare
+
+`fly.api.toml` sets `CLIENT_IP_HEADER=cf-connecting-ip`, and that header is only trustworthy while the origin refuses
+traffic that did not arrive through Cloudflare. An origin reachable directly lets anyone set the header themselves and
+hands back the rate-limit bypass this configuration exists to close.
+
+Use Cloudflare **Authenticated Origin Pulls** (Pro includes it) so the origin rejects any TLS connection not
+presenting Cloudflare's client certificate, or restrict inbound traffic to Cloudflare's published IP ranges. Until one
+of those is in place, treat `CLIENT_IP_HEADER` as unset and rely on `TRUSTED_PROXY_HOPS` alone — that path is
+spoof-resistant on its own, which is why the code falls back to it rather than failing closed.
+
 **Verify before going further:**
 
 ```bash
@@ -131,7 +162,14 @@ proves step 1 was done correctly — do not move on while it is red.
 
 ## 3. Deploy the worker
 
-Same repository-root build context, `apps/worker/Dockerfile`. No inbound port; it is a queue consumer.
+Same repository-root build context, `apps/worker/Dockerfile`, configured by `fly.worker.toml`. No inbound port; it is
+a queue consumer, so the config declares no `[http_service]` at all.
+
+```bash
+flyctl secrets set --app flowza-time-worker \
+  DATABASE_URL_WORKER='<from step 1 — the SESSION pooler, port 5432>' \
+  FLOWZA_CREDENTIALS_MASTER_KEYS='<byte-identical to the API's>'
+```
 
 ```
 NODE_ENV=production

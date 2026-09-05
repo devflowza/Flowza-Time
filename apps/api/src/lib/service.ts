@@ -26,7 +26,7 @@ export function actorOf(c: Context<AppEnv>, deps: ApiDeps): Actor {
     userId: principal.userId,
     email: principal.email,
     requestId: c.get('requestId'),
-    ip: clientIp(c, deps.config.TRUST_PROXY),
+    ip: clientIp(c, deps.config),
     userAgent: c.req.header('user-agent')?.slice(0, 500) ?? null,
   };
 }

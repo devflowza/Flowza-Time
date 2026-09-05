@@ -27,13 +27,13 @@ export function createApp(deps: ApiDeps) {
 
   // Inbound: vendor webhooks and device push protocols (device/webhook authentication inside)
   const inbound = new Hono<AppEnv>();
-  inbound.use('*', rateLimit({ name: 'inbound', windowMs: 60_000, max: 1200, keyFn: (c) => clientIp(c, deps.config.TRUST_PROXY) ?? 'unknown' }));
+  inbound.use('*', rateLimit({ name: 'inbound', windowMs: 60_000, max: 1200, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
   registerInboundRoutes(inbound, deps);
   app.route('/', inbound);
 
   // Authenticated API
   const v1 = new Hono<AppEnv>();
-  v1.use('*', rateLimit({ name: 'api-ip', windowMs: deps.config.RATE_LIMIT_WINDOW_MS, max: deps.config.RATE_LIMIT_MAX * 2, keyFn: (c) => clientIp(c, deps.config.TRUST_PROXY) ?? 'unknown' }));
+  v1.use('*', rateLimit({ name: 'api-ip', windowMs: deps.config.RATE_LIMIT_WINDOW_MS, max: deps.config.RATE_LIMIT_MAX * 2, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
   v1.use('*', requireAuth({ verify: deps.verifyToken, db: deps.db }));
   v1.use('*', rateLimit({ name: 'api-user', windowMs: deps.config.RATE_LIMIT_WINDOW_MS, max: deps.config.RATE_LIMIT_MAX, keyFn: (c) => c.get('principal')?.userId ?? 'anon' }));
   v1.use('/orgs/:orgId', orgMfaGate());
