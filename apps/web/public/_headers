@@ -2,6 +2,11 @@
 # No Content-Security-Policy here on purpose: the app talks to a per-deployment Supabase host and API
 # origin, so a CSP belongs with those values rather than hard-coded in the bundle (see docs/deployment.md).
 /*
+  # The zone this is served from has "Always Use HTTPS" off (a device-push hostname in the same zone must accept plain
+  # HTTP, and that switch is zone-wide). HSTS is the per-host half of the fix: after one HTTPS visit the browser
+  # refuses to speak HTTP to this host at all. It binds only the host that sends it, so the push hostname is untouched.
+  # No includeSubDomains, deliberately — nothing under this name is ours to speak for.
+  Strict-Transport-Security: max-age=31536000
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin

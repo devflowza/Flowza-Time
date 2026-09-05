@@ -246,6 +246,44 @@ doubled paths and 404s.
 Verify by opening the site and watching the network tab: requests should go to `https://<api-host>/api/v1/...` and come
 back 200 or 401 — not fail to connect, and not be blocked by CORS.
 
+### TLS certificates on Fly — required before Cloudflare can reach the origin
+
+A proxied Cloudflare CNAME does **not** hide the original hostname from the origin. Cloudflare connects sending SNI and
+Host of `api.flowza.ai`, not of the CNAME target, and Fly routes by SNI and only serves certificates for hostnames it
+has issued. Without a certificate for the custom hostname the TLS handshake fails outright — a 525/526 at the edge,
+whatever the SSL mode is set to.
+
+```bash
+flyctl certs add api.flowza.ai  --app flowza-time-api
+flyctl certs add push.flowza.ai --app flowza-time-api
+flyctl certs show api.flowza.ai --app flowza-time-api   # until it reads Ready
+```
+
+Because the DNS records are proxied, Fly cannot use HTTP-01 validation — the challenge never reaches the origin. Use
+the DNS-01 `_acme-challenge` CNAMEs that `flyctl certs add` prints, and **leave them in place permanently**: renewal
+uses them too, and deleting them turns into an outage ninety days later rather than immediately.
+
+A Cloudflare **Origin Rule** overriding SNI and Host to `flowza-time-api.fly.dev` is a valid alternative that needs no
+Fly certificates, and it is safe for this application specifically — nothing here reads the `Host` header, and the one
+absolute URL the API builds (the device push URL, `devices.service.ts`) comes from `API_PUBLIC_URL`, not from the
+request. It relies on the SNI override field being available on the plan, and it leaves a rewritten Host for a future
+reader to trip over, so prefer the certificates unless you have a reason not to.
+
+### Forcing HTTPS when the zone cannot
+
+`push.flowza.ai` must accept plain HTTP, and Cloudflare's "Always Use HTTPS" is zone-wide with no per-hostname
+override — so the zone switch stays off and every other hostname in it is served over HTTP too if asked. For the web
+app that means the bundle in the clear; for the API it means bearer tokens in the clear on the browser-to-Cloudflare
+leg.
+
+Close it per hostname instead, which is also how this zone already handles it (there is an existing redirect rule of
+this shape for `finance.flowza.ai`):
+
+- A **Redirect Rule** matching hostname `time.flowza.ai` or `api.flowza.ai` with scheme `http`, to the same URI over
+  `https`, 301. Do not include `push.flowza.ai`.
+- `apps/web/public/_headers` sends `Strict-Transport-Security` for the web app, so after one HTTPS visit a browser
+  will not use HTTP for that host again. It binds only the host that sends it, so it cannot reach the push hostname.
+
 ### Hostnames
 
 The web app is served from the custom domain **`https://time.flowza.ai`**. Three other names are worth deciding on
