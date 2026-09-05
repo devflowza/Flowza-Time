@@ -2,7 +2,7 @@
   "name": "flowza-time",
   "private": true,
   "version": "0.1.0",
-  "description": "FlowZa Time — cloud attendance & workforce time management SaaS (F & Z Capital)",
+  "description": "FlowZa Time \u2014 cloud attendance & workforce time management SaaS (F & Z Capital)",
   "type": "module",
   "packageManager": "pnpm@10.33.0",
   "engines": {
@@ -10,6 +10,7 @@
   },
   "scripts": {
     "build": "pnpm -r run build",
+    "build:web": "pnpm --filter \"@flowza/web...\" run build",
     "typecheck": "pnpm -r --filter \"./packages/*\" run build && pnpm -r --filter \"./apps/*\" run typecheck",
     "lint": "eslint . --max-warnings 0",
     "format": "prettier --write .",
