@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { claimPendingDeviceSchema, createDeviceSchema, deleteDeviceQuerySchema, deviceCommandQuerySchema, deviceCredentialsInputSchema, deviceEmployeeQuerySchema, deviceGroupInputSchema, deviceGroupMembersSchema, deviceListQuerySchema, deviceLogQuerySchema, deviceModelsQuerySchema, deviceProvidersQuerySchema, pendingDevicesQuerySchema, testConnectionSchema, updateDeviceSchema } from '@flowza/contracts';
+import { claimPendingDeviceSchema, createDeviceSchema, deleteDeviceQuerySchema, deviceCommandQuerySchema, deviceCredentialsInputSchema, deviceEmployeeQuerySchema, deviceGroupInputSchema, deviceGroupMembersSchema, deviceListQuerySchema, deviceLogQuerySchema, deviceModelsQuerySchema, deviceProvidersQuerySchema, deviceSummaryQuerySchema, pendingDevicesQuerySchema, testConnectionSchema, updateDeviceSchema } from '@flowza/contracts';
 import { z } from 'zod';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
@@ -19,6 +19,7 @@ export function registerDeviceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.get('/orgs/:orgId/devices', async (c) => { const q = query(c, deviceListQuerySchema); const r = await devices.listDevices(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.post('/orgs/:orgId/devices', idem, async (c) => created(c, await devices.createDevice(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, createDeviceSchema))));
   v1.post('/orgs/:orgId/devices/test-connection', async (c) => ok(c, await devices.testConnection(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, testConnectionSchema))));
+  v1.get('/orgs/:orgId/devices/summary', async (c) => ok(c, await devices.summarizeDevices(deps, actorOf(c, deps), param(c, 'orgId'), query(c, deviceSummaryQuerySchema))));
   // pending (zero-touch) devices — registered before /:id so "pending" is never parsed as an id
   v1.get('/orgs/:orgId/devices/pending', async (c) => ok(c, await devices.listPending(deps, actorOf(c, deps), param(c, 'orgId'), query(c, pendingDevicesQuerySchema).serialNumber)));
   v1.post('/orgs/:orgId/devices/pending/:id/claim', idem, async (c) => created(c, await devices.claimPending(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, claimPendingDeviceSchema))));

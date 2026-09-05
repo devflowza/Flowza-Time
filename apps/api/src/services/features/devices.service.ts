@@ -1,6 +1,7 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
 import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCredentialsInput, DeviceGroupDto, DeviceGroupInput, DeviceListQuery, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
+import type { DeviceSummaryDto, DeviceSummaryQuery } from '@flowza/contracts';
 import { emitDomainEvent, maskCredentials, type Trx } from '@flowza/database';
 import { createThrottler, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
 import { AppError, errors, sha256Hex } from '@flowza/shared';
@@ -139,6 +140,23 @@ export async function loadDeviceRow(trx: Trx, orgId: string, id: string): Promis
   const row = await deviceQuery(trx, orgId).select(DEVICE_COLUMNS).where('d.id', '=', id).executeTakeFirst();
   if (!row) throw errors.notFound('Device', id);
   return row as DeviceRow;
+}
+
+/** Fleet counts by connection/status for the caller's branch scope (the web list header shows these; the list itself is paginated). */
+export async function summarizeDevices(deps: ApiDeps, actor: Actor, orgId: string, q: DeviceSummaryQuery): Promise<DeviceSummaryDto> {
+  const grant = requirePermission(actor.principal, orgId, 'device.view');
+  const scope = branchFilter(grant, q.branchId);
+  return runUser(deps.db, actor, async (trx) => {
+    let base = trx.selectFrom('devices as d').where('d.organizationId', '=', orgId);
+    if (scope) base = base.where('d.branchId', 'in', scope);
+    if (!q.includeDecommissioned) base = base.where('d.status', '!=', 'decommissioned');
+    const rows = await base.select(['d.status', 'd.connectionStatus', (eb) => eb.fn.countAll().as('n')]).groupBy(['d.status', 'd.connectionStatus']).execute();
+    const stale = await base.select((eb) => eb.fn.countAll().as('n')).where('d.status', '=', 'active')
+      .where((eb) => eb.or([eb('d.lastHeartbeatAt', 'is', null), eb('d.lastHeartbeatAt', '<', sql<Date>`now() - interval '24 hours'`)])).executeTakeFirst();
+    const byConnectionStatus: Record<string, number> = {}; const byStatus: Record<string, number> = {}; let total = 0;
+    for (const r of rows) { const n = toCount(r.n); total += n; byConnectionStatus[r.connectionStatus] = (byConnectionStatus[r.connectionStatus] ?? 0) + n; byStatus[r.status] = (byStatus[r.status] ?? 0) + n; }
+    return { total, byConnectionStatus, byStatus, staleHeartbeats: toCount(stale?.n) };
+  });
 }
 
 export async function listDevices(deps: ApiDeps, actor: Actor, orgId: string, q: DeviceListQuery): Promise<{ data: DeviceDtoExt[]; total: number }> {

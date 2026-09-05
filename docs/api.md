@@ -28,6 +28,7 @@ PATCH bodies use `updateSchemaOf(...)` so no `.default()` is re-applied on parti
 | `GET /orgs/:orgId/devices/:id/logs` · `/employees` · `/commands` | `device.view` | Paginated `device_logs` (`level, event, from, to`), `device_employee_states` (+ employee), `device_commands` (`status`). |
 | `POST /orgs/:orgId/devices/:id/actions/{sync-attendance\|sync-employees\|health-check\|reconcile}` | `device.sync` | 202 → sync job (capability-checked: `attendancePull`, `employeePush`; `sync-employees` fans out one `PUSH_EMPLOYEE` item per active employee of the device branch). Audited as `device.action_<action>`. Same 202 body as the sync endpoints. |
 | `GET/POST /orgs/:orgId/device-groups`, `GET/PATCH/DELETE …/:id`, `POST/DELETE …/:id/members` | `device.view` / `device.manage` | Groups may be branch-bound; members must belong to that branch. |
+| `GET /orgs/:orgId/devices/summary?branchId=&includeDecommissioned=` | `device.view` | Fleet counts for the caller's branch scope: `total`, `byConnectionStatus`, `byStatus`, `staleHeartbeats` (active devices silent for 24 h). |
 | `GET /orgs/:orgId/devices/pending?serialNumber=` | `device.create` | Unclaimed push devices attributed to the org, plus an exact-serial lookup for unattributed rows. |
 | `POST /orgs/:orgId/devices/pending/:id/claim` | `device.create` + branch | `{ branchId, name, code, timezone?, modelId?, tags? }` → creates the device (provider/serial from the pending row, `integrationType = DEVICE_PUSH`), links `claimed_device_id`, returns the push token once. |
 

@@ -183,3 +183,26 @@ describe('device providers and registration', () => {
     expect(hidden.body.data.some((d: { id: string }) => d.id === id)).toBe(false);
   });
 });
+
+describe('device fleet summary', () => {
+  it('counts devices by connection status and status within the caller branch scope; excludes decommissioned by default', async () => {
+    const all = await h.request('GET', `${base()}/devices/summary`, { token: f.owner });
+    expect(all.status).toBe(200);
+    const dbAll = await h.admin.selectFrom('devices').select(({ fn }) => fn.countAll<string>().as('n')).where('organizationId', '=', f.orgId).where('status', '!=', 'decommissioned').executeTakeFirstOrThrow();
+    expect(all.body.data.total).toBe(Number(dbAll.n));
+    expect(Object.values(all.body.data.byConnectionStatus as Record<string, number>).reduce((a, b) => a + b, 0)).toBe(all.body.data.total);
+    expect(all.body.data.byStatus.decommissioned).toBeUndefined();
+    expect(all.body.data.staleHeartbeats).toBeGreaterThanOrEqual(0);
+    const withDecommissioned = await h.request('GET', `${base()}/devices/summary?includeDecommissioned=true`, { token: f.owner });
+    expect(withDecommissioned.body.data.byStatus.decommissioned).toBeGreaterThanOrEqual(1); // D-DEL above
+    // branch-scoped manager sees only branch B
+    const scoped = await h.request('GET', `${base()}/devices/summary`, { token: f.branchManagerB });
+    expect(scoped.status).toBe(200);
+    const dbB = await h.admin.selectFrom('devices').select(({ fn }) => fn.countAll<string>().as('n')).where('organizationId', '=', f.orgId).where('branchId', '=', f.branchB).where('status', '!=', 'decommissioned').executeTakeFirstOrThrow();
+    expect(scoped.body.data.total).toBe(Number(dbB.n));
+    expect(all.body.data.total).toBeGreaterThan(scoped.body.data.total);
+    // no device.view → 403
+    const denied = await h.request('GET', `${base()}/devices/summary`, { token: f.employeeUser });
+    expect(denied.status).toBe(403);
+  });
+});

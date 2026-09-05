@@ -30,6 +30,19 @@ export type DeviceListQuery = z.infer<typeof deviceListQuerySchema>;
 
 export const deleteDeviceQuerySchema = z.object({ decommission: booleanQuerySchema.default(false) });
 
+/** Fleet summary query — same branch scoping as the list. */
+export const deviceSummaryQuerySchema = z.object({ branchId: uuidSchema.optional(), includeDecommissioned: booleanQuerySchema.default(false) });
+export type DeviceSummaryQuery = z.infer<typeof deviceSummaryQuerySchema>;
+/** Counts for list headers / dashboards; keys of `byConnectionStatus` are CONNECTION_STATUSES (+ 'vendor_degraded'), of `byStatus` DEVICE_STATUSES. */
+export const deviceSummaryDtoSchema = z.object({
+  total: z.number().int(),
+  byConnectionStatus: z.record(z.string(), z.number().int()),
+  byStatus: z.record(z.string(), z.number().int()),
+  /** active devices without any heartbeat in the last 24 hours (or never seen) */
+  staleHeartbeats: z.number().int(),
+});
+export type DeviceSummaryDto = z.infer<typeof deviceSummaryDtoSchema>;
+
 /** Secret config fields keyed by provider config field (validated against the provider's `secretFields`). */
 export const deviceCredentialsInputSchema = z.record(z.string().regex(/^[a-zA-Z][a-zA-Z0-9_]{0,63}$/), z.union([z.string().max(4096), z.number(), z.boolean()]))
   .refine((v) => Object.keys(v).length > 0, { message: 'Provide at least one credential field' });
