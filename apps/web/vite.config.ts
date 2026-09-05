@@ -14,7 +14,9 @@ export default defineConfig({
     rollupOptions: {
       output: {
         manualChunks: {
-          react: ['react', 'react-dom', 'react-router'],
+          // 'react-dom/client' is a distinct specifier: without it react-dom's runtime lands in the entry chunk instead of
+          // this long-lived vendor chunk (measured against dist/assets/index-*.js.map).
+          react: ['react', 'react-dom', 'react-dom/client', 'react-router'],
           query: ['@tanstack/react-query', '@tanstack/react-table'],
           supabase: ['@supabase/supabase-js'],
           charts: ['recharts'],

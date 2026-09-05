@@ -67,7 +67,7 @@ supabase/migrations · supabase/tests · supabase/functions · scripts · docs
 | Supabase hosted project, Auth stack, Storage, Realtime authorisation policies | **Not provisioned** — everything runs against local Postgres with a Supabase-compatibility shim (`supabase/tests/00_local_supabase_shim.sql`) |
 | Platform-wide feature-flag defaults, full-stack E2E against a seeded Supabase stack | **Not implemented** — tracked in `docs/risks.md` and `docs/device-integrations.md` §8 |
 
-Known limits worth stating: rate limiting and idempotency storage are per API instance (multi-instance needs an edge limiter or a shared store), zero-touch device claiming trusts serial knowledge (risk D26), and the web main chunk is ~245 kB gzipped because every feature registers its translations eagerly.
+Known limits worth stating: rate limiting and idempotency storage are per API instance (multi-instance needs an edge limiter or a shared store), zero-touch device claiming trusts serial knowledge (risk D26), and the web app ships ~188 kB gzipped of application code on top of the vendor chunks (React, Supabase, TanStack Query, i18next, Luxon), all pages beyond the shell being lazy.
 
 ## Quality gates
 `pnpm verify` runs lint, typecheck, unit tests and builds. `bash supabase/tests/run-rls-tests.sh` and `pnpm test:db`
