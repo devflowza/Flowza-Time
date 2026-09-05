@@ -1,4 +1,4 @@
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, useWatch, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 import { useTranslation } from 'react-i18next';
@@ -27,8 +27,9 @@ export function BranchDialog({ open, onOpenChange, branch, orgTimezone }: { open
   const { create, update } = useStructureMutations<BranchDto, BranchInput>('branches');
   const calendars = useHolidayCalendars();
   const form = useForm<FormValues, unknown, BranchInput>({ resolver: zodResolver(branchInputSchema), defaultValues: toDefaults(branch, orgTimezone) });
-  const { register, control, formState: { errors, isSubmitting }, watch, setValue } = form;
-  const inheritWeeklyOff = watch('weeklyOffDays') === null || watch('weeklyOffDays') === undefined;
+  const { register, control, formState: { errors, isSubmitting }, setValue } = form;
+  const weeklyOff = useWatch({ control, name: 'weeklyOffDays' });
+  const inheritWeeklyOff = weeklyOff === null || weeklyOff === undefined;
 
   const onSubmit = form.handleSubmit(async (values) => {
     try {

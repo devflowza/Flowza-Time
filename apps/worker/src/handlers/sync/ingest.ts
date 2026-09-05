@@ -1,7 +1,8 @@
 import { DateTime } from 'luxon';
 import type { RawSource, RawTransaction } from '@flowza/contracts';
 import { sha256Hex } from '@flowza/shared';
-import type { JobQueue, RawProcessingStatus, Trx } from '@flowza/database';
+import { emitDomainEvent, type JobQueue, type RawProcessingStatus, type Trx } from '@flowza/database';
+import { sql } from 'kysely';
 import type { DeviceRow, OrgSyncSettings } from './types.js';
 import { loadOrgSyncSettings } from './context.js';
 
@@ -9,7 +10,7 @@ export const FUTURE_TOLERANCE_MS = 10 * 60_000;
 export const RAW_PAYLOAD_MAX_BYTES = 16 * 1024;
 const INSERT_CHUNK = 500;
 
-export type IngestDevice = Pick<DeviceRow, 'id' | 'organizationId' | 'branchId' | 'providerKey' | 'generation' | 'timezone' | 'lastClockSkewSeconds'>;
+export type IngestDevice = Pick<DeviceRow, 'id' | 'organizationId' | 'branchId' | 'name' | 'providerKey' | 'generation' | 'timezone' | 'lastClockSkewSeconds'>;
 
 export interface IngestInput {
   organizationId: string;
@@ -27,10 +28,19 @@ export interface IngestInput {
 
 export interface IngestResult { inserted: number; duplicates: number; quarantined: number; held: number; ids: string[] }
 
-/** Dedupe hash contract (AGENTS.md): sha256(device_id|device_generation|device_employee_id|punched_at|verification|direction). */
+/** Canonical `punched_at` inside the dedupe hash: UTC ISO-8601, milliseconds only when non-zero ("2026-09-05T03:00:00Z"). */
+export function canonicalPunchedAt(punchedAt: string): string {
+  const dt = DateTime.fromISO(punchedAt, { setZone: true });
+  return dt.isValid ? (dt.toUTC().toISO({ suppressMilliseconds: true }) ?? punchedAt) : punchedAt;
+}
+
+/**
+ * Dedupe hash contract (AGENTS.md): sha256(device_id|device_generation|device_employee_id|punched_at|verification|direction),
+ * with `punched_at` in the canonical form above. The API's device-push ingest (apps/api/src/services/features/ingest.ts)
+ * computes the same string, so a punch that arrives by push and later by poll hashes identically.
+ */
 export function dedupeHash(deviceId: string, generation: number, t: { deviceEmployeeId: string; punchedAt: string; verificationMethod?: string; direction?: string }): string {
-  const punchedAt = new Date(t.punchedAt).toISOString();
-  return sha256Hex(`${deviceId}|${generation}|${t.deviceEmployeeId}|${punchedAt}|${t.verificationMethod ?? 'unknown'}|${t.direction ?? 'unknown'}`);
+  return sha256Hex(`${deviceId}|${generation}|${t.deviceEmployeeId}|${canonicalPunchedAt(t.punchedAt)}|${t.verificationMethod ?? 'unknown'}|${t.direction ?? 'unknown'}`);
 }
 
 /** Raw payloads are capped at 16 KB; oversize payloads are replaced by their hash (never silently truncated JSON). */
@@ -40,7 +50,7 @@ export function boundRawPayload(payload: unknown): string {
   return JSON.stringify({ truncated: true, bytes: Buffer.byteLength(json, 'utf8'), sha256: sha256Hex(json) });
 }
 
-interface LockRow { branchId: string | null; periodStart: Date; periodEnd: Date }
+export interface LockRow { branchId: string | null; periodStart: Date | string; periodEnd: Date | string }
 
 async function loadActiveLocks(trx: Trx, organizationId: string, branchId: string | null): Promise<LockRow[]> {
   let q = trx.selectFrom('attendancePeriodLocks').select(['branchId', 'periodStart', 'periodEnd']).where('organizationId', '=', organizationId).where('unlockedAt', 'is', null);
@@ -48,10 +58,15 @@ async function loadActiveLocks(trx: Trx, organizationId: string, branchId: strin
   return q.execute();
 }
 
-const isoDate = (d: Date): string => DateTime.fromJSDate(d, { zone: 'utc' }).toISODate() ?? '';
+/**
+ * `period_start` / `period_end` are SQL `date` columns; node-pg materialises them as a JS Date at *local* midnight of the
+ * worker process. Reading the calendar date back therefore has to use the same (process-local) zone — formatting in UTC
+ * shifts every lock by a day on hosts east of Greenwich.
+ */
+export const lockDate = (d: Date | string): string => (typeof d === 'string' ? d.slice(0, 10) : DateTime.fromJSDate(d).toISODate() ?? '');
 
-function isLocked(locks: LockRow[], localDate: string): boolean {
-  return locks.some((l) => localDate >= isoDate(new Date(l.periodStart)) && localDate <= isoDate(new Date(l.periodEnd)));
+export function isLocked(locks: LockRow[], localDate: string): boolean {
+  return locks.some((l) => localDate >= lockDate(l.periodStart) && localDate <= lockDate(l.periodEnd));
 }
 
 /**
@@ -106,12 +121,24 @@ export async function ingestRawTransactions(trx: Trx, input: IngestInput): Promi
     }
   }
   if (!input.skipDeviceUpdate) {
-    await trx.updateTable('devices').set({ lastAttendanceSyncAt: now, lastSuccessfulCommunicationAt: now, connectionStatus: 'online', consecutiveFailures: 0, lastErrorCode: null, lastError: null }).where('id', '=', device.id).execute();
+    // one statement: bookkeeping + the previous connection status, so a device that was declared offline and answers again
+    // emits `device.online` exactly like a health check would (the "back online" notification must not depend on the path)
+    const prev = await sql<{ previous: string }>`
+      update public.devices d set last_attendance_sync_at = ${now}, last_successful_communication_at = ${now}, connection_status = 'online', consecutive_failures = 0, last_error_code = null, last_error = null
+      from (select id, connection_status from public.devices where id = ${device.id}::uuid for update) o
+      where d.id = o.id
+      returning o.connection_status::text as previous`.execute(trx);
     await trx.insertInto('deviceLogs').values({
       organizationId, deviceId: device.id, level: result.quarantined > 0 ? 'warn' : 'info', event: 'attendance_pulled', jobId: input.syncJobId,
       message: `${result.inserted} new punches (${result.duplicates} duplicates, ${result.quarantined} quarantined, ${result.held} held)`,
       details: JSON.stringify({ source: input.source, offered, inserted: result.inserted, duplicates: result.duplicates, quarantined: result.quarantined, held: result.held }),
     }).execute();
+    if (prev.rows[0]?.previous === 'offline') {
+      await emitDomainEvent(trx, {
+        organizationId, eventType: 'device.online', aggregateType: 'device', aggregateId: device.id,
+        payload: { deviceId: device.id, deviceName: device.name, branchId: device.branchId, lastSeenAt: now.toISOString(), via: input.source },
+      });
+    }
   }
   return result;
 }

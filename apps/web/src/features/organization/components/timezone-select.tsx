@@ -2,8 +2,7 @@ import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Select, SelectContent, SelectGroup, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
 
-/** GCC zones first (the product's home market), then every zone the browser knows. */
-export const GCC_TIMEZONES = ['Asia/Muscat', 'Asia/Dubai', 'Asia/Riyadh', 'Asia/Qatar', 'Asia/Kuwait', 'Asia/Bahrain'] as const;
+import { GCC_TIMEZONES } from '../timezones';
 const FALLBACK_ZONES = ['UTC', 'Asia/Baghdad', 'Asia/Amman', 'Asia/Beirut', 'Africa/Cairo', 'Asia/Karachi', 'Asia/Kolkata', 'Asia/Dhaka', 'Asia/Manila', 'Asia/Jakarta', 'Europe/London', 'Europe/Paris', 'Europe/Istanbul', 'America/New_York', 'America/Los_Angeles'];
 
 function allZones(): string[] {

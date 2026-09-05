@@ -3,8 +3,8 @@ import { DateTime } from 'luxon';
 import { z } from 'zod';
 import type { AttendanceEventType, PunchDirection, VerificationMethod } from '@flowza/contracts';
 import { uuidSchema } from '@flowza/contracts';
-import { addDays, event, isValidTimezone, localDateOf } from '@flowza/shared';
-import { withContext, type Trx } from '@flowza/database';
+import { addDays, event, isValidTimezone, localDateOf, timeToMinutes } from '@flowza/shared';
+import { withContext, type EventSource, type RawSource, type Trx } from '@flowza/database';
 import type { HandlerRegistry, JobContext } from '../types.js';
 import { enqueueNormalizeRaw, enqueueRecompute, isoDate, loadProcessingDelaySeconds, parsePayload, uniq } from './common.js';
 
@@ -25,7 +25,16 @@ export function eventTypeForDirection(direction: PunchDirection): AttendanceEven
   }
 }
 
-interface RawRow { id: string; deviceId: string; providerKey: string; deviceEmployeeId: string; punchedAt: Date; verificationMethod: VerificationMethod; direction: PunchDirection }
+/** Raw row origin → event source: imported / manually entered raw punches are not device punches (§G.1). */
+export function eventSourceForRaw(source: RawSource): EventSource {
+  switch (source) {
+    case 'IMPORT': return 'IMPORT';
+    case 'MANUAL': return 'MANUAL';
+    default: return 'DEVICE';
+  }
+}
+
+interface RawRow { id: string; deviceId: string; providerKey: string; deviceEmployeeId: string; punchedAt: Date; verificationMethod: VerificationMethod; direction: PunchDirection; source: RawSource }
 interface HistoryRow { employeeId: string; branchId: string; effectiveFrom: string; effectiveTo: string | null }
 
 export interface NormalizeBatchResult { fetched: number; normalized: number; unmatched: number; events: number; recomputeJobs: number }
@@ -36,6 +45,43 @@ export function historyOn<T extends { effectiveFrom: string; effectiveTo: string
 }
 
 /**
+ * How far the organisation's punch windows reach into the neighbouring calendar days (§G.3), in local minutes of day:
+ * a punch at or before `previousUntil` may belong to the previous attendance date (cross-midnight shift ends, punch-out
+ * margins past midnight, flexible day boundaries); a punch at or after `nextFrom` may belong to the next one (shifts whose
+ * punch-in margin starts before midnight). `null` = no shift reaches that way. Derived from the shifts themselves rather than
+ * a fixed "before noon" rule so that unusual windows (e.g. a 12 h punch-out margin) still trigger the neighbour's recompute.
+ */
+export interface NeighbourReach { previousUntil: number | null; nextFrom: number | null }
+export function neighbourReach(shifts: ReadonlyArray<{ type: 'FIXED' | 'FLEXIBLE'; startTime: string | null; endTime: string | null; dayBoundary: string; punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number }>): NeighbourReach {
+  const DAY = 24 * 60;
+  let previousUntil: number | null = null;
+  let nextFrom: number | null = null;
+  const reachPrevious = (m: number): void => { previousUntil = previousUntil === null ? m : Math.max(previousUntil, m); };
+  const reachNext = (m: number): void => { nextFrom = nextFrom === null ? m : Math.min(nextFrom, m); };
+  for (const s of shifts) {
+    if (s.type === 'FLEXIBLE') {
+      const boundary = timeToMinutes(s.dayBoundary);
+      if (boundary > 0) reachPrevious(boundary); // [boundary(D), boundary(D+1)): punches before the boundary belong to D−1
+      continue;
+    }
+    if (s.startTime === null || s.endTime === null) continue;
+    const start = timeToMinutes(s.startTime);
+    const end = timeToMinutes(s.endTime);
+    const windowEnd = (end <= start ? DAY : 0) + end + s.punchOutWindowAfterMinutes; // FIXED windows include their end instant
+    if (windowEnd >= DAY) reachPrevious(windowEnd - DAY);
+    const windowStart = start - s.punchInWindowBeforeMinutes;
+    if (windowStart < 0) reachNext(DAY + windowStart);
+  }
+  return { previousUntil, nextFrom };
+}
+
+export async function loadNeighbourReach(trx: Trx, organizationId: string): Promise<NeighbourReach> {
+  const shifts = await trx.selectFrom('shifts').select(['type', 'startTime', 'endTime', 'dayBoundary', 'punchInWindowBeforeMinutes', 'punchOutWindowAfterMinutes'])
+    .where('organizationId', '=', organizationId).execute();
+  return neighbourReach(shifts);
+}
+
+/**
  * One batch of the normaliser (§E.4, docs/attendance-engine.md "Worker integration contract"): resolves the employee for
  * each pending raw punch, attaches the branch effective on the local date of the punch, inserts the event and enqueues
  * debounced recomputes. Rows that cannot be resolved become `unmatched` (visible in reconciliation); `held` and
@@ -43,7 +89,7 @@ export function historyOn<T extends { effectiveFrom: string; effectiveTo: string
  */
 export async function normalizeBatch(trx: Trx, organizationId: string, now: Date, queue: JobContext['deps']['queue']): Promise<NormalizeBatchResult> {
   const rows = (await trx.selectFrom('attendanceRawTransactions')
-    .select(['id', 'deviceId', 'providerKey', 'deviceEmployeeId', 'punchedAt', 'verificationMethod', 'direction'])
+    .select(['id', 'deviceId', 'providerKey', 'deviceEmployeeId', 'punchedAt', 'verificationMethod', 'direction', 'source'])
     .where('organizationId', '=', organizationId)
     .where('processingStatus', '=', 'pending')
     .orderBy('punchedAt', 'asc').orderBy('id', 'asc')
@@ -57,7 +103,7 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
   const providerKeys = uniq(rows.map((r) => r.providerKey));
 
   // 1. Identity resolution: device state → provider identity → employees.device_user_id.
-  const [states, identities, byDeviceUser, devices, branches] = await Promise.all([
+  const [states, identities, byDeviceUser, devices, branches, reach] = await Promise.all([
     trx.selectFrom('deviceEmployeeStates').select(['deviceId', 'deviceUserId', 'employeeId'])
       .where('organizationId', '=', organizationId).where('deviceId', 'in', deviceIds).where('deviceUserId', 'in', deviceUserIds).where('employeeId', 'is not', null).execute(),
     trx.selectFrom('employeeProviderIdentities').select(['providerKey', 'deviceUserId', 'employeeId'])
@@ -66,6 +112,7 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
       .where('organizationId', '=', organizationId).where('deviceUserId', 'in', deviceUserIds).where('deletedAt', 'is', null).execute(),
     trx.selectFrom('devices').select(['id', 'timezone', 'branchId']).where('organizationId', '=', organizationId).where('id', 'in', deviceIds).execute(),
     trx.selectFrom('branches').select(['id', 'timezone']).where('organizationId', '=', organizationId).execute(),
+    loadNeighbourReach(trx, organizationId),
   ]);
   const stateMap = new Map(states.map((s) => [`${s.deviceId}|${s.deviceUserId}`, s.employeeId as string]));
   const identityMap = new Map(identities.map((i) => [`${i.providerKey}|${i.deviceUserId}`, i.employeeId]));
@@ -93,7 +140,7 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
   }
 
   // 2. Build events + touched (employee, local date) pairs.
-  const eventRows: Array<{ organizationId: string; employeeId: string; branchId: string; deviceId: string; rawTransactionId: string; source: 'DEVICE'; eventType: AttendanceEventType; punchedAt: Date; verificationMethod: VerificationMethod }> = [];
+  const eventRows: Array<{ organizationId: string; employeeId: string; branchId: string; deviceId: string; rawTransactionId: string; source: EventSource; eventType: AttendanceEventType; punchedAt: Date; verificationMethod: VerificationMethod }> = [];
   const normalized: Array<{ id: string; employeeId: string }> = [];
   const unmatched: string[] = [];
   const touched = new Map<string, { employeeId: string; date: string }>();
@@ -119,11 +166,14 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
       tz = branchTz.get(branchId) ?? deviceTz;
       localDate = localDateOf(punchedAt, tz);
     }
-    eventRows.push({ organizationId, employeeId, branchId, deviceId: r.deviceId, rawTransactionId: r.id, source: 'DEVICE', eventType: eventTypeForDirection(r.direction), punchedAt, verificationMethod: r.verificationMethod });
+    eventRows.push({ organizationId, employeeId, branchId, deviceId: r.deviceId, rawTransactionId: r.id, source: eventSourceForRaw(r.source), eventType: eventTypeForDirection(r.direction), punchedAt, verificationMethod: r.verificationMethod });
     normalized.push({ id: r.id, employeeId });
     touch(employeeId, localDate);
-    // before noon local the punch may close a shift that started the previous day (§G.3 cross-midnight)
-    if (DateTime.fromJSDate(punchedAt).setZone(tz).hour < 12) touch(employeeId, addDays(localDate, -1));
+    // the punch may fall inside the punch window of the previous / next attendance date (§G.3 cross-midnight): recompute those too
+    const local = DateTime.fromJSDate(punchedAt).setZone(tz);
+    const minuteOfDay = local.hour * 60 + local.minute + local.second / 60;
+    if (reach.previousUntil !== null && minuteOfDay <= reach.previousUntil) touch(employeeId, addDays(localDate, -1));
+    if (reach.nextFrom !== null && minuteOfDay >= reach.nextFrom) touch(employeeId, addDays(localDate, 1));
   }
 
   // 3. Persist: events (idempotent on raw id), raw bookkeeping, recompute jobs — all in this transaction.

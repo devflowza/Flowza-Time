@@ -49,7 +49,13 @@ export function registerInboundRoutes(app: Hono<AppEnv>, deps: ApiDeps): void {
     if (m) { pathToken = m[1]; rest = rest.slice(m[0].length) || '/'; }
     const rawBody = await readBody(c);
     if (rawBody === null) return c.text('payload too large', 413, TEXT);
-    const req: DevicePushRequest = { method: c.req.method, path: `/${protocolKey}${rest}`, query: queryOf(c), headers: subsetHeaders(c), rawBody, remoteIp: clientIp(c, deps.config.TRUST_PROXY) ?? undefined };
+    // the push token must never reach the protocol handler, the replay hash or the stored payload
+    const query = queryOf(c);
+    const queryToken = query.token;
+    delete query.token;
+    const headers = subsetHeaders(c);
+    delete headers.authorization; delete headers['x-device-token'];
+    const req: DevicePushRequest = { method: c.req.method, path: `/${protocolKey}${rest}`, query, headers, rawBody, remoteIp: clientIp(c, deps.config.TRUST_PROXY) ?? undefined };
     let identity: ReturnType<typeof handler.identifyDevice>;
     try { identity = handler.identifyDevice(req); } catch { identity = null; }
     if (!identity) return c.text('device not identified', 400, TEXT);
@@ -67,7 +73,7 @@ export function registerInboundRoutes(app: Hono<AppEnv>, deps: ApiDeps): void {
       }
       if (device.pushTokenHash) {
         const bearer = c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
-        const token = pathToken ?? c.req.header('x-device-token') ?? c.req.query('token') ?? bearer;
+        const token = pathToken ?? c.req.header('x-device-token') ?? queryToken ?? bearer;
         if (!pushTokenMatches(token, device.pushTokenHash)) { log.warn({ event: 'device_push_bad_token', protocolKey, serial, organizationId: device.organizationId, deviceId: device.id }); return c.text('unauthorized', 401, TEXT); }
       }
       const outcome = await handleDevicePush(deps, device, handler, req, requestId);

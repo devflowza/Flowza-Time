@@ -1,7 +1,7 @@
-import { Controller, type UseFormReturn } from 'react-hook-form';
+import { Controller, useWatch, type UseFormReturn } from 'react-hook-form';
 import { useTranslation } from 'react-i18next';
 import type { z } from 'zod';
-import { createEmployeeSchema, EMPLOYMENT_STATUSES, EMPLOYMENT_TYPES, GENDERS } from '@flowza/contracts';
+import { EMPLOYMENT_STATUSES, EMPLOYMENT_TYPES, GENDERS, type createEmployeeSchema } from '@flowza/contracts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { useBranchOptions, useDepartmentOptions, useDesignationOptions } from '@/features/organization/lookups';
@@ -15,8 +15,8 @@ export type EmployeeFormValues = z.input<typeof createEmployeeSchema> & { exitDa
 export function EmployeeFormFields({ form, mode, excludeEmployeeId }: { form: UseFormReturn<EmployeeFormValues, unknown, unknown>; mode: 'create' | 'edit'; excludeEmployeeId?: string }) {
   const { t } = useTranslation('employees');
   const { t: tc } = useTranslation();
-  const { register, control, watch, formState: { errors } } = form;
-  const branchId = watch('branchId');
+  const { register, control, formState: { errors } } = form;
+  const branchId = useWatch({ control, name: 'branchId' });
   const branches = useBranchOptions();
   const departments = useDepartmentOptions(branchId || undefined);
   const designations = useDesignationOptions();

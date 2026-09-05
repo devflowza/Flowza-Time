@@ -1,6 +1,7 @@
+import { DateTime } from 'luxon';
 import { rawTransactionSchema, type RawTransaction } from '@flowza/contracts';
 import { redactForAudit, withContext, type Trx } from '@flowza/database';
-import type { ProviderError, DeviceInfo, DeviceStatus } from '@flowza/device-providers';
+import { ProviderError, type DeviceInfo, type DeviceStatus } from '@flowza/device-providers';
 import { AppError, event } from '@flowza/shared';
 import type { JobContext } from '../types.js';
 import { checkCircuit } from './circuit.js';
@@ -11,11 +12,22 @@ import { ingestRawTransactions } from './ingest.js';
 import { runItem } from './items.js';
 import type { DeviceRow } from './types.js';
 
-const skewSeconds = (deviceTime: string | undefined, now: Date): number | null => {
+/**
+ * Clock skew (device − server, seconds) from the time string a device reports. Devices frequently report *local* time
+ * without an offset ("2026-09-05T12:00:00", "2026-09-05 12:00:00"); such strings are interpreted in the device's IANA
+ * zone (AGENTS.md: convert with Luxon, never hand-compute offsets) — `Date.parse` would read them in the server zone and
+ * invent an offset-sized skew that quarantines every punch of the device. Strings carrying an offset/Z keep it.
+ */
+export function deviceClockSkewSeconds(deviceTime: string | undefined | null, timezone: string, now: Date): number | null {
   if (!deviceTime) return null;
-  const t = Date.parse(deviceTime);
-  return Number.isNaN(t) ? null : Math.round((t - now.getTime()) / 1000);
-};
+  const text = deviceTime.trim();
+  const opts = { zone: timezone, setZone: true } as const;
+  let dt = DateTime.fromISO(text, opts);
+  if (!dt.isValid) dt = DateTime.fromSQL(text, opts);
+  if (!dt.isValid) dt = DateTime.fromRFC2822(text);
+  if (!dt.isValid) return null;
+  return Math.round((dt.toMillis() - now.getTime()) / 1000);
+}
 
 function heartbeatObservation(device: DeviceRow, now: Date): HealthObservation {
   const seen = device.lastHeartbeatAt ? new Date(device.lastHeartbeatAt) : null;
@@ -59,7 +71,7 @@ export async function deviceHealthCheck(ctx: JobContext) {
         const deviceTime = status.deviceTime ?? info?.deviceTime;
         obs = {
           online: status.online, lastSeenAt: status.lastSeenAt ? new Date(status.lastSeenAt) : status.online ? now : null,
-          clockSkewSeconds: status.clockSkewSeconds ?? skewSeconds(deviceTime, now), firmwareVersion: info?.firmwareVersion ?? null,
+          clockSkewSeconds: status.clockSkewSeconds ?? deviceClockSkewSeconds(deviceTime, device.timezone, now), firmwareVersion: info?.firmwareVersion ?? null,
           errorCode: status.online ? null : String(status.details?.['code'] ?? 'DEVICE_OFFLINE'), error: status.online ? null : String(status.details?.['reason'] ?? 'device reported offline'),
           details: { ...(status.details ?? {}), ...(info ? { model: info.model ?? null, userCount: info.userCount ?? null, transactionCount: info.transactionCount ?? null } : {}) },
         };
@@ -72,7 +84,8 @@ export async function deviceHealthCheck(ctx: JobContext) {
     }
     const outcome = await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
       const o = await applyHealth(trx, device, { ...obs, event: 'health_check', jobId: item.syncJobId }, now);
-      if (obs.online && !prep.push) await handleProviderSuccess(trx, device, prep.built.accountKey);
+      // the provider answered (online or "device offline"): the vendor account is reachable → a half-open circuit closes
+      if (!prep.push) await handleProviderSuccess(trx, device, prep.built.accountKey);
       return o;
     });
     return { result: { online: obs.online, connectionStatus: outcome.current, previous: outcome.previous, transition: outcome.transition, consecutiveFailures: outcome.consecutiveFailures, clockSkewSeconds: obs.clockSkewSeconds ?? null, firmwareVersion: obs.firmwareVersion ?? null } };
@@ -96,7 +109,7 @@ export async function testConnection(ctx: JobContext) {
       const result = redactForAudit({ ok: res.ok, message: res.message, latencyMs: res.latencyMs, deviceInfo: res.deviceInfo ?? null, details: res.details ?? null }) as Record<string, unknown>;
       await withContext(deps.db, { kind: 'system', organizationId: built.device.organizationId, jobId: ctx.job.id }, async (trx) => {
         if (res.ok) {
-          await applyHealth(trx, built.device, { online: true, lastSeenAt: now, firmwareVersion: res.deviceInfo?.firmwareVersion ?? null, clockSkewSeconds: skewSeconds(res.deviceInfo?.deviceTime, now), event: 'test_connection', jobId: item.syncJobId, details: { latencyMs: res.latencyMs } }, now);
+          await applyHealth(trx, built.device, { online: true, lastSeenAt: now, firmwareVersion: res.deviceInfo?.firmwareVersion ?? null, clockSkewSeconds: deviceClockSkewSeconds(res.deviceInfo?.deviceTime, built.device.timezone, now), event: 'test_connection', jobId: item.syncJobId, details: { latencyMs: res.latencyMs } }, now);
           await handleProviderSuccess(trx, built.device, built.accountKey);
         } else {
           await trx.insertInto('deviceLogs').values({ organizationId: built.device.organizationId, deviceId: built.device.id, level: 'warn', event: 'test_connection', jobId: item.syncJobId, message: res.message.slice(0, 300), details: JSON.stringify(result['details'] ?? {}) }).execute();
@@ -170,9 +183,12 @@ export async function webhookEvent(ctx: JobContext) {
       return { status: 'processed', deviceId: device.id, inserted: ingested.inserted, duplicates: ingested.duplicates, quarantined: ingested.quarantined, held: ingested.held };
     });
   } catch (err) {
-    // the processing transaction rolled back; record the outcome in a fresh one
+    // the processing transaction rolled back; record a *terminal* outcome in a fresh one. Anything else (DB hiccup, enqueue
+    // failure…) is transient: rethrow so the queue retries and the row stays `queued`; only the last delivery gives up.
     if (err instanceof WebhookFailure) return markFailed(err.message, err.status);
-    return markFailed((err as Error).message);
+    if (ProviderError.is(err) || (AppError.is(err) && !err.retryable)) return markFailed(`${(err as { code: string }).code}: ${(err as Error).message}`);
+    if (ctx.job.attempts >= ctx.job.maxAttempts) return markFailed(`gave up after ${ctx.job.attempts} attempts: ${(err as Error).message}`);
+    throw err;
   }
 }
 

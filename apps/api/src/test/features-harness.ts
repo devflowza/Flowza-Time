@@ -1,4 +1,5 @@
 import { sql } from 'kysely';
+import pg from 'pg';
 import { createTestDatabase, DeviceCredentialsStore, PgJobQueue, SecretsCipher, type Database, type TestDatabase } from '@flowza/database';
 import { defaultRegistry } from '@flowza/device-providers';
 import { SYSTEM_ROLE_IDS } from '@flowza/contracts';
@@ -6,6 +7,10 @@ import { createLogger } from '@flowza/shared';
 import type { ApiConfig } from '../config.js';
 import type { ApiDeps } from '../deps.js';
 import { createApp } from '../app.js';
+import { Hono } from 'hono';
+import type { AppEnv } from '../middleware/request-context.js';
+import { requireAuth } from '../middleware/auth.js';
+import { registerFeatureRoutes } from '../routes/v1/features/index.js';
 
 /**
  * HTTP-level test harness for the feature modules: real Postgres (shim + migrations), the real Hono app, a fake token
@@ -25,8 +30,26 @@ export interface ApiHarness {
 
 export const TEST_MASTER_KEYS = [{ id: 't', material: Buffer.alloc(32, 7) }];
 
+/** Test databases share cluster-wide roles: creating several concurrently can fail with "tuple concurrently updated", so creation is serialised + retried. */
+async function createDatabaseSerialised(name: string): Promise<TestDatabase> {
+  const base = process.env.TEST_PG_URL ?? 'postgres://postgres@127.0.0.1:54329/postgres';
+  const lock = new pg.Client({ connectionString: base });
+  await lock.connect();
+  try {
+    await lock.query('select pg_advisory_lock(7242027)');
+    let lastErr: unknown;
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      try { return await createTestDatabase(name); } catch (err) { lastErr = err; await new Promise((r) => setTimeout(r, 500 * (attempt + 1))); }
+    }
+    throw lastErr;
+  } finally {
+    await lock.query('select pg_advisory_unlock(7242027)').catch(() => undefined);
+    await lock.end();
+  }
+}
+
 export async function createApiHarness(name: string, opts: { config?: Partial<ApiConfig> } = {}): Promise<ApiHarness> {
-  const tdb = await createTestDatabase(name);
+  const tdb = await createDatabaseSerialised(name);
   const published: ApiHarness['published'] = [];
   const signedUrls: string[] = [];
   const config = {
@@ -35,7 +58,7 @@ export async function createApiHarness(name: string, opts: { config?: Partial<Ap
   } as unknown as ApiConfig;
   const deps: ApiDeps = {
     config,
-    log: createLogger({ name: 'api-test', level: 'silent' }),
+    log: createLogger({ name: 'api-test', level: process.env.API_TEST_LOG ? 'error' : 'silent' }),
     db: tdb.db,
     queue: new PgJobQueue(tdb.db),
     credentials: new DeviceCredentialsStore(new SecretsCipher(TEST_MASTER_KEYS)),
@@ -49,13 +72,18 @@ export async function createApiHarness(name: string, opts: { config?: Partial<Ap
     storage: { async signedUrl(bucket, path, expires = 300) { if (path.includes('missing')) return null; const u = `https://storage.test/${bucket}/${path}?exp=${expires}`; signedUrls.push(u); return u; } },
   };
   const app = createApp(deps);
+  // Until the integrator wires registerFeatureRoutes into routes/v1/index.ts, mount the feature routes here (same auth chain).
+  const features = new Hono<AppEnv>();
+  features.use('*', requireAuth({ verify: deps.verifyToken, db: deps.db }));
+  registerFeatureRoutes(features, deps);
+  app.route('/api/v1', features);
   const request: ApiHarness['request'] = async (method, path, o = {}) => {
     const headers: Record<string, string> = { ...(o.headers ?? {}) };
     if (o.token) headers.authorization = `Bearer user:${o.token}`;
     let body: string | undefined;
     if (o.raw !== undefined) body = o.raw;
     else if (o.body !== undefined) { body = JSON.stringify(o.body); headers['content-type'] ??= 'application/json'; }
-    const res = await app.request(path, { method, headers, body });
+    const res = await app.request(path, { method, headers, body: method === 'GET' || method === 'HEAD' ? undefined : body });
     const text = await res.text();
     let json: unknown = null;
     try { json = text ? JSON.parse(text) : null; } catch { json = null; }

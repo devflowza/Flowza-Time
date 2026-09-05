@@ -11,6 +11,7 @@ import { applyApprovedCorrection, applyCorrectionHandler } from './corrections.j
 import { enqueueRecalculationForScope, recalculateRange } from './recalculate.js';
 import { buildPeriodSummaryHandler } from './period-summary.js';
 import { normaliseRamadanMode, loadDailyInputs } from './load-inputs.js';
+import { enqueueRecompute, recomputeDedupeKey } from './common.js';
 import { attendanceTasks } from './tasks.js';
 import { registerAttendanceHandlers } from './index.js';
 import { HandlerRegistry } from '../types.js';
@@ -261,8 +262,18 @@ describe('corrections', () => {
     const corr = await a.selectFrom('attendanceCorrections').selectAll().where('id', '=', c.id).executeTakeFirstOrThrow();
     expect(corr).toMatchObject({ status: 'APPLIED', appliedEventId: res.appliedEventId, appliedBy: OWNER });
     expect(corr.appliedAt).not.toBeNull();
-    const job = await sql<{ n: string }>`select count(*) as n from jobs.queue where dedupe_key = ${`recompute:${E1}:2026-03-17`} and status = 'pending'`.execute(a);
-    expect(job.rows[0]!.n).toBe('1');
+    // the debounced job keeps waiting; the correction gets its own immediate job with the CORRECTION reason
+    const debounced = await pendingJobs(recomputeDedupeKey(E1, '2026-03-17'));
+    expect(debounced).toHaveLength(1);
+    expect(debounced[0]).toMatchObject({ payload: { reason: 'NEW_EVENT' }, runAt: new Date(NOW.getTime() + 30_000) });
+    const immediate = await pendingJobs(recomputeDedupeKey(E1, '2026-03-17', true));
+    expect(immediate).toHaveLength(1);
+    expect(immediate[0]).toMatchObject({ payload: { reason: 'CORRECTION', triggeredBy: OWNER }, runAt: NOW });
+    // applying a correction is audited (who applied what, which events were created/voided)
+    const audit = await a.selectFrom('audit.logs').selectAll().where('action', '=', 'attendance.correction_applied').where('entityId', '=', c.id).execute();
+    expect(audit).toHaveLength(1);
+    expect(audit[0]).toMatchObject({ organizationId: ORG, actorUserId: OWNER, actorType: 'USER', entityType: 'attendance_correction', branchId: BRANCH_A, reason: 'Forgot to punch in' });
+    expect(audit[0]!.newValue).toMatchObject({ type: 'ADD_PUNCH', status: 'APPLIED', appliedEventId: res.appliedEventId, voidedEventId: null, employeeId: E1, attendanceDate: '2026-03-17' });
     // applying twice is idempotent
     expect((await withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => applyApprovedCorrection(trx, c.id, { queue: h.deps.queue, now: NOW }))).status).toBe('ALREADY_APPLIED');
   });
@@ -289,8 +300,8 @@ describe('corrections', () => {
     const c = await h.tdb.adminDb.insertInto('attendanceCorrections').values({ organizationId: ORG, employeeId: E2, branchId: BRANCH_A, attendanceDate: '2026-03-12', type: 'SET_STATUS', proposedStatus: 'PRESENT', reason: 'Worked off-site', requestedBy: OWNER, status: 'APPROVED' }).returning('id').executeTakeFirstOrThrow();
     const res = await applyCorrectionHandler(ctx('APPLY_CORRECTION', { organizationId: ORG, correctionId: c.id, appliedBy: OWNER }));
     expect(res).toMatchObject({ status: 'APPLIED', appliedEventId: null });
-    const job = await sql<{ payload: Record<string, unknown> }>`select payload from jobs.queue where dedupe_key = ${`recompute:${E2}:2026-03-12`}`.execute(h.tdb.adminDb);
-    expect(job.rows[0]!.payload).toMatchObject({ reason: 'MANUAL_OVERRIDE' });
+    const job = await pendingJobs(recomputeDedupeKey(E2, '2026-03-12', true));
+    expect(job[0]!.payload).toMatchObject({ reason: 'MANUAL_OVERRIDE' });
     expect(await recompute(E2, '2026-03-12', { reason: 'MANUAL_OVERRIDE' })).toMatchObject({ outcome: 'updated', version: 2, status: 'PRESENT' });
     const r = await record(E2, '2026-03-12');
     expect(r).toMatchObject({ status: 'PRESENT', hasCorrection: true, punchCount: 0 });
@@ -315,6 +326,10 @@ describe('corrections', () => {
     const rec = await record(E3, '2026-03-15');
     expect(rec).toMatchObject({ punchCount: 1, lastOutAt: null });
     expect(rec.flags).toContain('MISSING_OUT');
+    // a voided punch is still a correction of this day: has_correction + MANUAL_CORRECTION come from the applied correction, not only from added events
+    expect(rec.hasCorrection).toBe(true);
+    expect(rec.flags).toContain('MANUAL_CORRECTION');
+    expect((rec.trace as { steps: Array<{ step: string }> }).steps.some((s) => s.step === 'corrections')).toBe(true);
     // voiding again through another correction is rejected
     const c1b = await a.insertInto('attendanceCorrections').values({ organizationId: ORG, employeeId: E3, branchId: BRANCH_A, attendanceDate: '2026-03-15', type: 'REMOVE_PUNCH', originalEventId: out15.id, reason: 'Again', requestedBy: OWNER, status: 'APPROVED' }).returning('id').executeTakeFirstOrThrow();
     await expect(withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => applyApprovedCorrection(trx, c1b.id, { queue: h.deps.queue, now: NOW }))).rejects.toMatchObject({ code: 'INVALID_STATE' });
@@ -357,6 +372,14 @@ describe('period locks and RECALCULATE_RANGE', () => {
     // the lock also blocks corrections
     const c = await h.tdb.adminDb.insertInto('attendanceCorrections').values({ organizationId: ORG, employeeId: E1, branchId: BRANCH_A, attendanceDate: '2026-03-05', type: 'ADD_PUNCH', proposedPunchedAt: at('2026-03-05', '08:00'), reason: 'Locked period', requestedBy: OWNER, status: 'APPROVED' }).returning('id').executeTakeFirstOrThrow();
     await expect(withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => applyApprovedCorrection(trx, c.id, { queue: h.deps.queue, now: NOW }))).rejects.toMatchObject({ code: 'PERIOD_LOCKED' });
+  });
+
+  it('scopes the period-lock bypass to the record write, not to the rest of the transaction', async () => {
+    await expect(withContext(h.deps.db, { kind: 'system', organizationId: ORG }, async (trx) => {
+      expect(await recomputeDaily(trx, { organizationId: ORG, employeeId: E1, date: '2026-03-05', now: NOW, reason: 'UNLOCK', bypassLock: true })).toMatchObject({ outcome: 'unchanged' });
+      // the same transaction must not be able to touch another locked record afterwards
+      await sql`update public.attendance_daily_records set punch_count = punch_count where employee_id = ${E1}::uuid and attendance_date = '2026-03-05'::date`.execute(trx);
+    })).rejects.toMatchObject({ code: 'P0002' });
   });
 
   it('enqueueRecalculationForScope creates the request + job; the handler counts skippedLocked, completes and audits', async () => {
@@ -417,17 +440,34 @@ describe('BUILD_PERIOD_SUMMARY', () => {
     expect(audit[0]!.actorType).toBe('SYSTEM');
   });
 
-  it('finalize requires an active period lock covering the whole period, then stamps finalized_by/at', async () => {
-    const payload = { organizationId: ORG, periodStart: '2026-03-01', periodEnd: '2026-03-31', employeeIds: [E1], finalize: true, requestedBy: OWNER };
+  it('scopes a branch build by employee, aggregating all of a transferred employee\'s records in the period', async () => {
+    // E3 moved A → B on 03-16: 03-14 WEEKLY_OFF (A), 03-15 PRESENT with a voided OUT (A), 03-16 PRESENT (B). A branch-B build must not overwrite the
+    // employee's single (employee, period) summary with a partial one built from the branch-B records only.
+    const res = await buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', { organizationId: ORG, periodStart: '2026-03-01', periodEnd: '2026-03-31', branchId: BRANCH_B }));
+    expect(res).toMatchObject({ employees: 1, built: 1 });
+    const s = await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').selectAll().where('employeeId', '=', E3).where('periodStart', '=', sql<Date>`'2026-03-01'::date`).executeTakeFirstOrThrow();
+    expect(s).toMatchObject({ branchId: BRANCH_B, workingDays: 2, presentDays: '2.00', weeklyOffDays: 1, missingPunchDays: 1 });
+    expect(Object.keys(s.recordVersions as Record<string, number>)).toHaveLength(3);
+    // E1/E2 have no branch-B records → untouched
+    expect(await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').select('employeeId').where('employeeId', '=', E2).execute()).toHaveLength(0);
+  });
+
+  it('finalize requires an active period lock covering the whole period and no PENDING days, then stamps finalized_by/at', async () => {
+    const march = { organizationId: ORG, periodStart: '2026-03-01', periodEnd: '2026-03-31', employeeIds: [E1], finalize: true, requestedBy: OWNER };
     // only 03-01..03-07 is locked for branch A → not enough
-    await expect(buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', payload))).rejects.toSatisfy((e: unknown) => AppError.is(e) && e.code === 'INVALID_STATE' && e.retryable === false);
+    await expect(buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', march))).rejects.toSatisfy((e: unknown) => AppError.is(e) && e.code === 'INVALID_STATE' && e.retryable === false);
     await h.tdb.adminDb.insertInto('attendancePeriodLocks').values({ organizationId: ORG, branchId: null, periodStart: '2026-03-01', periodEnd: '2026-03-31', lockedBy: OWNER, reason: 'March payroll' }).execute();
-    expect(await buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', payload))).toMatchObject({ built: 1, finalized: 1, changed: 0 });
-    const s = await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').selectAll().where('employeeId', '=', E1).executeTakeFirstOrThrow();
-    expect(s).toMatchObject({ status: 'finalized', finalizedBy: OWNER, version: 1 });
+    // 03-19 (today) is still PENDING → payroll cannot be finalised over an unknown day; nothing is written
+    await expect(buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', march))).rejects.toSatisfy((e: unknown) => AppError.is(e) && e.code === 'INVALID_STATE' && (e.details as { pending: unknown[] }).pending.length === 1);
+    expect((await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').selectAll().where('employeeId', '=', E1).where('periodStart', '=', sql<Date>`'2026-03-01'::date`).executeTakeFirstOrThrow()).status).toBe('draft');
+    // a period without pending days finalises under the (wider) lock
+    const payload = { ...march, periodEnd: '2026-03-18' };
+    expect(await buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', payload))).toMatchObject({ built: 1, finalized: 1, changed: 1, pendingDays: 0 });
+    const s = await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').selectAll().where('employeeId', '=', E1).where('periodEnd', '=', sql<Date>`'2026-03-18'::date`).executeTakeFirstOrThrow();
+    expect(s).toMatchObject({ status: 'finalized', finalizedBy: OWNER, version: 1, presentDays: '3.00' });
     expect(s.finalizedAt).not.toBeNull();
     // a finalized summary is not silently rebuilt
-    expect(await buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', { organizationId: ORG, periodStart: '2026-03-01', periodEnd: '2026-03-31', employeeIds: [E1] }))).toMatchObject({ skippedFinalized: 1, built: 0 });
+    expect(await buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', { organizationId: ORG, periodStart: '2026-03-01', periodEnd: '2026-03-18', employeeIds: [E1] }))).toMatchObject({ skippedFinalized: 1, built: 0 });
     // and the month-wide lock now blocks recomputes
     expect(await withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => recomputeDaily(trx, { organizationId: ORG, employeeId: E1, date: '2026-03-18', now: NOW, reason: 'RECALCULATION' }))).toMatchObject({ outcome: 'skipped_locked' });
   });
@@ -446,5 +486,33 @@ describe('normalize-sweep task', () => {
     // the queued job resolves the new punch through employees.device_user_id ('102' → E2)
     expect(await normalizeRaw(ctx('NORMALIZE_RAW', { organizationId: ORG }))).toMatchObject({ fetched: 1, normalized: 1, events: 1 });
     expect(await task.run(h.deps)).toEqual({ organizations: 0 });
+  });
+});
+
+describe('normaliser neighbour dates and sources', () => {
+  it('derives the D−1 / D+1 recompute reach from the organisation\'s shifts (punch windows), not from a fixed noon rule', async () => {
+    const a = h.tdb.adminDb;
+    // a 20:00–08:00 shift whose punch-out window reaches 18:00 on D+1, and a 01:00 shift whose punch-in window starts 21:00 on D−1
+    await a.insertInto('shifts').values([
+      { organizationId: ORG, code: 'LATE', name: 'Late night 20:00–08:00', type: 'FIXED', startTime: '20:00', endTime: '08:00', punchOutWindowAfterMinutes: 600, breaks: JSON.stringify([]) },
+      { organizationId: ORG, code: 'EARLY', name: 'Early 01:00–09:00', type: 'FIXED', startTime: '01:00', endTime: '09:00', punchInWindowBeforeMinutes: 240, breaks: JSON.stringify([]) },
+    ]).execute();
+    await insertRaw([
+      { deviceUserId: 'X202', punchedAt: at('2026-04-03', '13:00') }, // may close the 20:00–08:00 shift of 04-02 → recompute 04-02 too
+      { deviceUserId: 'X202', punchedAt: at('2026-04-03', '22:00') }, // may open the 01:00 shift of 04-04 → recompute 04-04 too
+      { deviceUserId: 'X202', punchedAt: at('2026-04-03', '19:00') }, // inside neither neighbouring window → 04-03 only
+    ]);
+    const res = await normalizeRaw(ctx('NORMALIZE_RAW', { organizationId: ORG }));
+    expect(res).toMatchObject({ fetched: 3, normalized: 3, events: 3, recomputeJobs: 3 });
+    // (the sweep test above already queued 04-01 for the 04-01 08:00 punch)
+    const keys = (await sql<{ k: string }>`select dedupe_key as k from jobs.queue where job_type = 'RECOMPUTE_DAILY' and status = 'pending' and dedupe_key like ${`recompute:${E2}:2026-04-%`} and dedupe_key <> ${recomputeDedupeKey(E2, '2026-04-01')} order by 1`.execute(a)).rows.map((r) => r.k);
+    expect(keys).toEqual([recomputeDedupeKey(E2, '2026-04-02'), recomputeDedupeKey(E2, '2026-04-03'), recomputeDedupeKey(E2, '2026-04-04')]);
+  });
+
+  it('keeps the raw source on the event (IMPORT/MANUAL are not device punches)', async () => {
+    await insertRaw([{ deviceUserId: '101', punchedAt: at('2026-04-06', '08:00'), direction: 'in', source: 'IMPORT' }]);
+    expect(await normalizeRaw(ctx('NORMALIZE_RAW', { organizationId: ORG }))).toMatchObject({ fetched: 1, events: 1 });
+    const ev = await h.tdb.adminDb.selectFrom('attendanceEvents').select(['source', 'eventType']).where('employeeId', '=', E1).where('punchedAt', '=', at('2026-04-06', '08:00')).executeTakeFirstOrThrow();
+    expect(ev).toEqual({ source: 'IMPORT', eventType: 'PUNCH_IN' });
   });
 });

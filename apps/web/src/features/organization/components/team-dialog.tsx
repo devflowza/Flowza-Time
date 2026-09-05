@@ -1,4 +1,4 @@
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, useWatch, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 import { useTranslation } from 'react-i18next';
@@ -30,8 +30,8 @@ function TeamForm({ open, onOpenChange, team }: { open: boolean; onOpenChange: (
     resolver: zodResolver(teamInputSchema),
     defaultValues: team ? { code: team.code, name: team.name, branchId: team.branchId, leadEmployeeId: team.leadEmployeeId, memberIds: (team.members ?? []).map((m) => m.employeeId) } : { code: '', name: '', branchId: null, leadEmployeeId: null, memberIds: [] },
   });
-  const { register, control, formState: { errors, isSubmitting }, watch, setValue } = form;
-  const memberIds = watch('memberIds') ?? [];
+  const { register, control, formState: { errors, isSubmitting }, setValue } = form;
+  const memberIds = useWatch({ control, name: 'memberIds' }) ?? [];
   const knownNames = new Map<string, string>((team?.members ?? []).map((m) => [m.employeeId, `${m.displayName} · ${m.employeeNumber}`]));
   for (const o of employees.options) knownNames.set(o.value, o.label);
 

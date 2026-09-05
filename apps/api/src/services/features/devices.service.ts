@@ -180,8 +180,9 @@ export async function getDevice(deps: ApiDeps, actor: Actor, orgId: string, id: 
 
 export interface DeviceCreatedDto { device: DeviceDtoExt; pushToken: string | null; pushUrl: string | null; webhookUrl: string | null; credentialsStored: boolean; credentialsError: string | null; testConnectionJobId: string | null }
 
-async function insertDevice(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, provider: DeviceProvider, input: CreateDeviceInput & { serialNumber?: string }, extra: { pushTokenHash: string | null; secretsProvided: string[]; config: Record<string, ConfigValue> }): Promise<{ id: string; testJob: CreatedSyncJob | null }> {
+async function insertDevice(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, provider: DeviceProvider, input: CreateDeviceInput & { serialNumber?: string }, extra: { pushTokenHash: string | null; secretsProvided: string[]; config: Record<string, ConfigValue>; integrationType?: DeviceProvider['definition']['integrationType'] }): Promise<{ id: string; testJob: CreatedSyncJob | null }> {
   const def = provider.definition;
+  const integrationType = extra.integrationType ?? def.integrationType;
   const branch = await trx.selectFrom('branches').select(['id', 'timezone', 'status']).where('organizationId', '=', orgId).where('id', '=', input.branchId).executeTakeFirst();
   if (!branch) throw errors.validation('Branch not found in this organisation.', { issues: [{ path: 'branchId', message: 'Unknown branch' }] });
   if (branch.status === 'archived') throw errors.validation('Branch is archived.', { issues: [{ path: 'branchId', message: 'Archived' }] });
@@ -194,16 +195,16 @@ async function insertDevice(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string
   const settings = await loadSettings(trx, orgId);
   const row = await trx.insertInto('devices').values({
     organizationId: orgId, branchId: input.branchId, code: input.code, name: input.name, providerKey: def.key, modelId: input.modelId ?? null, manufacturer: input.manufacturer, modelName: input.modelName ?? null,
-    serialNumber: input.serialNumber ?? null, timezone: input.timezone ?? branch.timezone, integrationType: def.integrationType, endpointUrl: input.endpointUrl ?? null, config: JSON.stringify(extra.config),
+    serialNumber: input.serialNumber ?? null, timezone: input.timezone ?? branch.timezone, integrationType, endpointUrl: input.endpointUrl ?? null, config: JSON.stringify(extra.config),
     capabilities: JSON.stringify(def.capabilities), offlineThresholdMinutes: input.offlineThresholdMinutes ?? settings.sync.offlineThresholdMinutes ?? 15,
-    autoSyncEnabled: input.autoSyncEnabled ?? def.capabilities.attendancePull, syncIntervalMinutes: input.syncIntervalMinutes ?? settings.sync.defaultIntervalMinutes ?? 5,
+    autoSyncEnabled: input.autoSyncEnabled ?? (integrationType !== 'DEVICE_PUSH' && def.capabilities.attendancePull), syncIntervalMinutes: input.syncIntervalMinutes ?? settings.sync.defaultIntervalMinutes ?? 5,
     tags: input.tags ?? [], notes: input.notes ?? null, pushTokenHash: extra.pushTokenHash, pushTokenRotatedAt: extra.pushTokenHash ? new Date() : null, createdBy: actor.userId,
-    nextAttendanceSyncAt: def.capabilities.attendancePull && (input.autoSyncEnabled ?? true) ? new Date() : null,
+    nextAttendanceSyncAt: integrationType !== 'DEVICE_PUSH' && def.capabilities.attendancePull && (input.autoSyncEnabled ?? true) ? new Date() : null,
   }).returning('id').executeTakeFirstOrThrow();
   await audit(trx, actor, orgId, 'device.created', 'device', { entityId: row.id, branchId: input.branchId, newValue: { code: input.code, name: input.name, providerKey: def.key, branchId: input.branchId, serialNumber: input.serialNumber ?? null, endpointUrl: input.endpointUrl ?? null, config: extra.config, secretFieldsProvided: extra.secretsProvided, pushTokenIssued: extra.pushTokenHash !== null } });
   await emitDomainEvent(trx, { organizationId: orgId, eventType: 'device.created', aggregateType: 'device', aggregateId: row.id, payload: { code: input.code, providerKey: def.key, branchId: input.branchId }, actorUserId: actor.userId, requestId: actor.requestId });
   let testJob: CreatedSyncJob | null = null;
-  if (def.integrationType !== 'DEVICE_PUSH' && def.status !== 'placeholder') {
+  if (integrationType !== 'DEVICE_PUSH' && def.status !== 'placeholder') {
     testJob = await createSyncJob(deps, trx, { organizationId: orgId, jobType: 'TEST_CONNECTION', trigger: 'SYSTEM', scope: { deviceIds: [row.id], reason: 'device.created' }, branchId: input.branchId, requestedBy: actor.userId, correlationId: actor.requestId, priority: 7, items: [{ deviceId: row.id, branchId: input.branchId }] });
   }
   return { id: row.id, testJob };
@@ -571,7 +572,7 @@ export async function claimPending(deps: ApiDeps, actor: Actor, orgId: string, p
     return insertDevice(deps, trx, actor, orgId, provider, {
       code: input.code, name: input.name, branchId: input.branchId, providerKey: def.key, modelId: input.modelId, manufacturer: def.vendor, modelName: typeof info.model === 'string' ? info.model : undefined,
       serialNumber: pending.serialNumber, timezone: input.timezone, config: {}, tags: input.tags,
-    }, { pushTokenHash: token?.hash ?? null, secretsProvided: [], config });
+    }, { pushTokenHash: token?.hash ?? null, secretsProvided: [], config, integrationType: 'DEVICE_PUSH' }); // it announced itself over a push protocol
   });
   await runSystem(deps.db, orgId, actor.requestId, async (trx) => {
     await trx.updateTable('pendingDevices').set({ claimedDeviceId: created.id, organizationId: orgId }).where('id', '=', pendingId).execute();

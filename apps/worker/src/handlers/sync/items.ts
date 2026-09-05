@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import { SYNC_JOB_TYPES, type SyncJobType } from '@flowza/contracts';
+import { SYNC_JOB_TYPES, SYNC_TRIGGERS, type SyncJobType, type SyncTrigger } from '@flowza/contracts';
 import { emitDomainEvent, withContext, type SyncItemStatus, type SyncStatus, type Trx } from '@flowza/database';
 import { ProviderError } from '@flowza/device-providers';
 import { DEFAULT_RETRY_POLICY, decideRetry, type RetryDecision, type SyncErrorCode } from '@flowza/domain';
@@ -60,7 +60,7 @@ async function startItem(trx: Trx, ctx: JobContext, parsed: ReturnType<typeof pa
   if (!itemId) {
     // itemless payload → materialise a one-item sync job so progress/results are visible like any other sync
     const job = await trx.insertInto('syncJobs').values({
-      organizationId: parsed.organizationId, jobType: parsed.operation, trigger: (str(ctx.job.payload['trigger']) ?? 'SYSTEM') as never, scope: JSON.stringify({ deviceIds: parsed.deviceId ? [parsed.deviceId] : [], employeeIds: parsed.employeeId ? [parsed.employeeId] : [] }),
+      organizationId: parsed.organizationId, jobType: parsed.operation, trigger: ((SYNC_TRIGGERS as readonly string[]).includes(str(ctx.job.payload['trigger']) ?? '') ? str(ctx.job.payload['trigger']) : 'SYSTEM') as SyncTrigger, scope: JSON.stringify({ deviceIds: parsed.deviceId ? [parsed.deviceId] : [], employeeIds: parsed.employeeId ? [parsed.employeeId] : [] }),
       status: 'QUEUED', priority: ctx.job.priority, itemsTotal: 1, itemsPending: 1, requestedBy: str(ctx.job.payload['requestedBy']), correlationId: ctx.job.correlationId ?? newCorrelationId('sync'), queuedAt: now,
     }).returning('id').executeTakeFirstOrThrow();
     syncJobId = job.id;
@@ -173,7 +173,14 @@ export async function runItem(ctx: JobContext, work: ItemWork): Promise<Record<s
     return { syncJobId: item.syncJobId, syncJobItemId: item.id, status, ...(out.failure ? { errorCode: out.failure.code, error: out.failure.message } : {}), ...(out.result ?? {}) };
   } catch (err) {
     const mapped = toSyncError(err);
-    const decision: RetryDecision = decideRetry(mapped.code, item.attempts, { ...DEFAULT_RETRY_POLICY, maxAttempts: item.maxAttempts }, mapped.retryAfterMs, `${item.id}:${item.attempts}`);
+    let decision: RetryDecision = decideRetry(mapped.code, item.attempts, { ...DEFAULT_RETRY_POLICY, maxAttempts: item.maxAttempts }, mapped.retryAfterMs, `${item.id}:${item.attempts}`);
+    // The queue counts attempts per delivery, the item per started run; they drift when a delivery fails before startItem commits
+    // (transient DB error, payload problem). Once the queue is about to dead-letter, the item MUST reach a terminal state or the
+    // sync job would stay RUNNING forever with an item that is never re-delivered.
+    if (decision.retry && ctx.job.attempts >= ctx.job.maxAttempts) {
+      decision = { retry: false, delayMs: 0, itemStatus: decision.itemStatus === 'OFFLINE' ? 'OFFLINE' : 'FAILED' };
+      itemLog.warn(event('sync_item_queue_exhausted', { code: mapped.code, queueAttempts: ctx.job.attempts, queueMaxAttempts: ctx.job.maxAttempts, itemAttempts: item.attempts }));
+    }
     const finishedAt = deps.now();
     const nextAttemptAt = decision.retry ? new Date(finishedAt.getTime() + decision.delayMs) : null;
     await withContext(deps.db, { kind: 'system', organizationId: parsed.organizationId, jobId: ctx.job.id }, (trx) =>

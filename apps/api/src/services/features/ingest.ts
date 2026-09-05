@@ -9,6 +9,8 @@ import { enqueueJob } from '../../lib/jobs.js';
 export const FUTURE_SKEW_QUARANTINE_SECONDS = 300;
 /** Raw payload budget (AGENTS.md service-level rules: 16 KB cap; binary/template fields stripped by the provider). */
 export const RAW_PAYLOAD_MAX_BYTES = 16 * 1024;
+/** Clock skew is stored in an int4 column; ±20 years is more than any real device drift. */
+export const MAX_SKEW_SECONDS = 20 * 365 * 86_400;
 
 export interface IngestDevice { id: string; organizationId: string; generation: number; providerKey: string; branchId: string | null; timezone: string }
 export interface IngestOptions { source: RawSource; syncJobId?: string | null; now?: Date; locks?: { branchId: string | null; periodStart: string; periodEnd: string }[] }
@@ -38,7 +40,8 @@ export async function ingestRawTransactions(trx: Trx, device: IngestDevice, tran
   const locks = opts.locks ?? (await trx.selectFrom('attendancePeriodLocks').select(['branchId', 'periodStart', 'periodEnd']).where('organizationId', '=', device.organizationId).where('unlockedAt', 'is', null).execute()).map((l) => ({ branchId: l.branchId, periodStart: iso(l.periodStart), periodEnd: iso(l.periodEnd) }));
   const rows = transactions.map((tx) => {
     const punchedAt = new Date(tx.punchedAt);
-    const skew = Math.round((punchedAt.getTime() - now.getTime()) / 1000);
+    // int4 column: clamp absurd device clocks (a year 2099 punch) instead of failing the whole upload
+    const skew = Math.max(-MAX_SKEW_SECONDS, Math.min(MAX_SKEW_SECONDS, Math.round((punchedAt.getTime() - now.getTime()) / 1000)));
     const localDate = DateTime.fromJSDate(punchedAt).setZone(device.timezone).toISODate() ?? tx.punchedAt.slice(0, 10);
     let status: 'pending' | 'quarantined' | 'held' = 'pending';
     if (skew > FUTURE_SKEW_QUARANTINE_SECONDS) status = 'quarantined';

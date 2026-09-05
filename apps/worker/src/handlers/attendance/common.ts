@@ -60,7 +60,12 @@ export async function loadProcessingDelaySeconds(trx: Trx, organizationId: strin
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(3600, Math.floor(v)) : DEFAULT_PROCESSING_DELAY_SECONDS;
 }
 
-export const recomputeDedupeKey = (employeeId: string, date: string): string => `recompute:${employeeId}:${date}`;
+/**
+ * Reasons whose recompute must run now. They get their own dedupe key so a debounced NEW_EVENT job that is already
+ * pending (with a later `runAt` and the wrong reason) cannot absorb them — both jobs are idempotent, the later one is a no-op.
+ */
+export const IMMEDIATE_RECOMPUTE_REASONS: ReadonlySet<RecomputeReason> = new Set<RecomputeReason>(['CORRECTION', 'MANUAL_OVERRIDE', 'UNLOCK']);
+export const recomputeDedupeKey = (employeeId: string, date: string, immediate = false): string => `recompute:${employeeId}:${date}${immediate ? ':immediate' : ''}`;
 export const normalizeDedupeKey = (organizationId: string): string => `normalize:${organizationId}`;
 
 export interface EnqueueRecomputeInput {
@@ -79,7 +84,9 @@ export interface EnqueueRecomputeInput {
  * already pending keeps its original `runAt` (jobs.enqueue returns the existing id).
  */
 export async function enqueueRecompute(queue: JobQueue, input: EnqueueRecomputeInput, trx?: Trx): Promise<string> {
-  const payload: Record<string, unknown> = { organizationId: input.organizationId, employeeId: input.employeeId, date: input.date, reason: input.reason ?? 'NEW_EVENT' };
+  const reason = input.reason ?? 'NEW_EVENT';
+  const immediate = IMMEDIATE_RECOMPUTE_REASONS.has(reason);
+  const payload: Record<string, unknown> = { organizationId: input.organizationId, employeeId: input.employeeId, date: input.date, reason };
   if (input.bypassLock) payload['bypassLock'] = true;
   if (input.triggeredBy) payload['triggeredBy'] = input.triggeredBy;
   return queue.enqueue({
@@ -87,9 +94,9 @@ export async function enqueueRecompute(queue: JobQueue, input: EnqueueRecomputeI
     jobType: 'RECOMPUTE_DAILY',
     organizationId: input.organizationId,
     payload,
-    priority: input.reason === 'CORRECTION' || input.reason === 'MANUAL_OVERRIDE' ? 7 : 5,
+    priority: immediate ? 7 : 5,
     runAt: input.runAt ?? new Date(),
-    dedupeKey: recomputeDedupeKey(input.employeeId, input.date),
+    dedupeKey: recomputeDedupeKey(input.employeeId, input.date, immediate),
     lockTimeoutSeconds: 120,
     maxAttempts: 5,
     ...(input.correlationId ? { correlationId: input.correlationId } : {}),

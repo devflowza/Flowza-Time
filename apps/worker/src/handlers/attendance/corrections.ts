@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { uuidSchema } from '@flowza/contracts';
 import { errors, event, localDateOf } from '@flowza/shared';
-import { withContext, type JobQueue, type Trx } from '@flowza/database';
+import { withContext, writeAudit, type JobQueue, type Trx } from '@flowza/database';
 import type { HandlerRegistry, JobContext } from '../types.js';
 import { enqueueRecompute, isoDate, parsePayload, type RecomputeReason } from './common.js';
 import { isPeriodLocked } from './recompute.js';
@@ -14,6 +14,8 @@ export interface ApplyCorrectionOptions {
   /** User applying the correction (the approver); null for system. */
   appliedBy?: string | null;
   now?: Date;
+  /** Worker job id, recorded on the audit row. */
+  jobId?: string | null;
 }
 
 export interface ApplyCorrectionResult {
@@ -93,6 +95,14 @@ export async function applyApprovedCorrection(trx: Trx, correctionId: string, op
   await trx.updateTable('attendanceCorrections').set({ status: 'APPLIED', appliedEventId, appliedAt: now, appliedBy: opts.appliedBy ?? null }).where('id', '=', c.id).execute();
   const recomputeDates = [...dates].sort();
   for (const date of recomputeDates) await enqueueRecompute(opts.queue, { organizationId: c.organizationId, employeeId: c.employeeId, date, reason, runAt: now, triggeredBy: opts.appliedBy ?? null }, trx);
+  // events were created/voided on behalf of a person: leave the who/what/when next to the immutable event rows
+  await writeAudit(trx, {
+    organizationId: c.organizationId, actorUserId: opts.appliedBy ?? null, actorType: opts.appliedBy ? 'USER' : 'SYSTEM', action: 'attendance.correction_applied',
+    entityType: 'attendance_correction', entityId: c.id, branchId: c.branchId,
+    oldValue: { status: c.status },
+    newValue: { type: c.type, status: 'APPLIED', employeeId: c.employeeId, attendanceDate, originalEventId: c.originalEventId, appliedEventId, voidedEventId, proposedStatus: c.proposedStatus, requestedBy: c.requestedBy, recomputeDates },
+    reason: c.reason, jobId: opts.jobId ?? null,
+  });
   return { correctionId, status: 'APPLIED', appliedEventId, voidedEventId, recomputeDates };
 }
 
@@ -102,7 +112,7 @@ export async function applyCorrectionHandler({ job, deps, log }: JobContext) {
   const res = await withContext(deps.db, { kind: 'system', organizationId: p.organizationId, jobId: job.id }, async (trx) => {
     const c = await trx.selectFrom('attendanceCorrections').select('organizationId').where('id', '=', p.correctionId).executeTakeFirst();
     if (!c || c.organizationId !== p.organizationId) throw errors.notFound('Correction', p.correctionId);
-    return applyApprovedCorrection(trx, p.correctionId, { queue: deps.queue, appliedBy: p.appliedBy ?? null, now: deps.now() });
+    return applyApprovedCorrection(trx, p.correctionId, { queue: deps.queue, appliedBy: p.appliedBy ?? null, now: deps.now(), jobId: job.id });
   });
   log.info(event('attendance_correction_applied', { ...res }));
   return res;

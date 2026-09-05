@@ -1,0 +1,83 @@
+{
+  "title": "Employees",
+  "jobs": { "view": "View job" },
+  "list": {
+    "subtitle": "{{count}} employees", "add": "Add employee", "import": "Import from CSV", "searchPlaceholder": "Search number, name, email, device id…",
+    "allStatuses": "All statuses", "allTypes": "All types",
+    "empty": "No employees yet", "emptyHint": "Add employees one by one or import them from a CSV file. They are pushed to your devices automatically."
+  },
+  "employmentStatus": { "active": "Active", "on_leave": "On leave", "suspended": "Suspended", "terminated": "Terminated", "resigned": "Resigned" },
+  "employmentType": { "full_time": "Full time", "part_time": "Part time", "contract": "Contract", "intern": "Intern", "temporary": "Temporary" },
+  "gender": { "male": "Male", "female": "Female", "other": "Other", "unspecified": "Unspecified" },
+  "syncStatus": { "PENDING": "Pending", "IN_SYNC": "In sync", "OUT_OF_SYNC": "Out of sync", "FAILED": "Failed", "OFFLINE": "Device offline", "UNSUPPORTED": "Unsupported", "REMOVING": "Removing", "REMOVED": "Removed" },
+  "sync": { "devices": "Devices", "noDevices": "Not on any device", "inSync": "in sync", "pending": "pending", "failed": "failed", "offline": "offline", "summaryTooltip": "{{inSync}} of {{total}} devices in sync" },
+  "fields": {
+    "employeeNumber": "Employee number", "employeeNumberHint": "Unique, letters/digits/- _ . (max 32)", "firstName": "First name", "middleName": "Middle name", "lastName": "Last name",
+    "displayName": "Display name", "displayNameHint": "Defaults to first + last name", "displayNameAr": "Display name (Arabic)", "gender": "Gender", "dateOfBirth": "Date of birth",
+    "nationality": "Nationality", "nationalityHint": "ISO country code, e.g. OM", "email": "Email", "phone": "Phone", "joiningDate": "Joining date", "exitDate": "Exit date",
+    "employmentStatus": "Employment status", "employmentType": "Employment type", "branchId": "Branch", "departmentId": "Department", "designationId": "Designation", "managerEmployeeId": "Manager",
+    "designation": "Designation", "manager": "Manager", "selectBranch": "Select a branch", "weeklyOffDays": "Weekly off days", "weeklyOffDaysHint": "Leave empty to inherit from the branch / organisation.",
+    "deviceUserId": "Device user id", "deviceUserIdAuto": "Leave blank to auto-assign the next free numeric id for this organisation.", "deviceUserIdEditHint": "Changing the id re-pushes the employee to every device.",
+    "autoAssigned": "Auto-assigned", "cardNumber": "Card number", "pin": "Device PIN", "pinHint": "4–8 digits; stored hashed and never shown again."
+  },
+  "form": {
+    "newTitle": "Add employee", "newHint": "Create the employee record; device enrolment happens when the record is pushed to devices.", "create": "Create employee",
+    "created": "{{name}} created", "saved": "{{name}} saved", "noChanges": "Nothing to save", "discard": "Discard changes",
+    "basic": "Basic information", "basicHint": "Identity and contact details.",
+    "employment": "Employment", "employmentHint": "Where and how the employee works. These fields are effective-dated.", "employmentEditHint": "Changing branch, department, designation, manager, type or status asks for an effective date and closes the current employment record.",
+    "device": "Device identity", "deviceHint": "How the employee is recognised on attendance devices."
+  },
+  "effective": {
+    "title": "Effective date of this change", "hint": "The current employment record is closed and a new one starts from this date. Attendance is recalculated from that day.",
+    "effectiveFrom": "Effective from", "dateInvalid": "Must be a valid date on or after {{min}}", "reason": "Reason", "reasonPlaceholder": "e.g. Transfer to Salalah branch", "apply": "Apply change"
+  },
+  "bulk": {
+    "assign": "Assign…", "apply": "Apply to {{count}}", "clearSelection": "Clear selection", "syncToDevices": "Sync to devices", "updated": "{{count}} employees updated", "queuedHint": "Follow the push job in Sync jobs.",
+    "syncTitle": "Sync {{count}} employees to devices?", "syncHint": "A push job is queued for every device the employees should be enrolled on.", "syncConfirm": "Queue sync",
+    "assign_branch": { "title": "Assign branch ({{count}})", "hint": "Moves the selected employees to a branch. Effective-dated; devices are re-pushed." },
+    "assign_department": { "title": "Assign department ({{count}})", "hint": "Sets the department of the selected employees.", "clearHint": "Leave empty to remove the department." },
+    "assign_shift": { "title": "Assign shift ({{count}})", "hint": "Closes open employee shift assignments and starts a new one.", "shift": "Shift", "select": "Select a shift", "none": "No shifts found. Create shifts first.", "effectiveTo": "Effective to" },
+    "set_status": { "title": "Set status ({{count}})", "hint": "Changes the employment status. Termination removes the employees from devices." },
+    "export": { "title": "Export employees", "hint": "A file is generated in the background; sensitive columns are masked unless you may view them.", "format": "Format" }
+  },
+  "profile": { "archived": "Archived", "joined": "Joined {{date}}", "tabs": { "overview": "Overview", "history": "Employment history", "devices": "Devices", "attendance": "Attendance", "documents": "Documents", "danger": "Danger zone" } },
+  "history": { "empty": "No employment history", "emptyHint": "History rows are created automatically when employment details change.", "current": "Current", "reason": "Reason", "recorded": "Recorded {{at}}" },
+  "devices": {
+    "device": "Device", "connection": "Connection", "syncStatus": "Sync status", "enrolment": "Enrolment", "lastSync": "Last sync", "lastSuccess": "Last success {{at}}", "removing": "Removing", "error": "Error",
+    "fingerprints": "{{count}} fingerprints", "face": "Face", "card": "Card", "syncNow": "Sync now", "syncOne": "Sync this device", "hint": "Desired state per device. Failed items retry automatically; use Sync now to force a push.",
+    "empty": "Not enrolled on any device", "emptyHint": "The employee is pushed to the devices of their branch when a sync runs.",
+    "conn": { "online": "Online", "offline": "Offline", "degraded": "Degraded", "error": "Error", "unknown": "Unknown" }
+  },
+  "attendance": {
+    "recent": "Recent attendance", "recentHint": "Daily records for {{month}}.", "openFull": "Open attendance", "date": "Date", "status": "Status", "in": "First in", "out": "Last out", "worked": "Worked", "flags": "Flags",
+    "empty": "No attendance records this month", "emptyHint": "Records appear once punches are processed.", "unavailable": "Attendance module not available", "unavailableHint": "Open the attendance page for this employee's records."
+  },
+  "documents": {
+    "add": "Add document", "addHint": "Identity documents are sensitive: numbers are visible only to users with the view-sensitive permission.", "added": "Document added", "deleted": "Document deleted",
+    "auditNotice": "Every view of this tab is recorded in the audit log.", "restricted": "Restricted", "restrictedHint": "You need the “view sensitive data” permission to see identity documents.",
+    "empty": "No documents", "emptyHint": "Add civil id, passport or labour card details.",
+    "type": "Type", "number": "Number", "country": "Issuing country", "issued": "Issued", "expires": "Expires", "notes": "Notes", "expired": "Expired", "expiringSoon": "Expires soon",
+    "deleteTitle": "Delete this document?", "deleteHint": "The deletion is audited. This cannot be undone.",
+    "types": { "civil_id": "Civil ID", "passport": "Passport", "labour_card": "Labour card", "residence_card": "Residence card", "visa": "Visa", "other": "Other" }
+  },
+  "danger": {
+    "title": "Danger zone", "hint": "Destructive actions are audited and require confirmation.", "archive": "Archive employee", "alreadyArchived": "Archived",
+    "archiveHint": "Marks the employee as terminated, sets the exit date and removes them from all devices. Attendance history is kept.",
+    "confirmTitle": "Archive {{name}}?", "confirmHint": "The employee is removed from devices and hidden from lists. This can only be reversed by support.", "archived": "Employee archived"
+  },
+  "import": {
+    "title": "Import employees", "subtitle": "Upload a CSV, review validation results, then confirm. Nothing is written until you confirm.", "steps": "Import steps",
+    "step": { "template": "Template", "upload": "Upload", "review": "Review", "done": "Done" },
+    "templateHint": "Download the CSV template with the exact column headers. Codes (branch, department, designation) must match existing records.",
+    "downloadTemplate": "Download template", "uploadHint": "CSV only (UTF-8, comma/semicolon/tab). Up to 5,000 rows and 20 MB.", "chooseFile": "Choose a CSV file or drop it here", "fileRules": ".csv · max 20 MB · 5,000 rows",
+    "updateExisting": "Update existing employees", "updateExistingHint": "Rows matching an existing employee number update that record instead of being reported as duplicates.",
+    "autoAssign": "Auto-assign device user ids", "autoAssignHint": "Rows without a device user id get the next free numeric id.",
+    "validate": "Upload and validate", "totalRows": "Rows", "validRows": "Valid", "errorRows": "With errors", "invalidOnly": "Show only rows with errors", "errors": "Errors", "noRows": "No rows to show", "rowValid": "Valid",
+    "rowStatus": { "valid": "Valid", "invalid": "Invalid", "imported": "Imported", "skipped": "Skipped", "failed": "Failed" },
+    "confirmHint": "{{valid}} rows will be imported; {{invalid}} rows with errors are skipped.", "nothingValid": "No valid rows — fix the file and upload again.",
+    "confirm": "Import {{count}} rows", "confirmTitle": "Import {{count}} employees?", "confirmDescription": "Employees are created in the background and pushed to devices. Rows with errors are skipped.", "confirmAction": "Confirm import",
+    "cancel": "Discard upload", "cancelled": "Import discarded", "queuedTitle": "Import queued", "queuedHint": "Employees are being created in the background. Follow progress in Sync jobs.",
+    "backToList": "Back to employees", "another": "Import another file",
+    "status": { "UPLOADED": "Uploaded", "VALIDATING": "Validating", "VALIDATED": "Validated", "IMPORTING": "Importing", "COMPLETED": "Import completed", "FAILED": "Import failed", "CANCELLED": "Import cancelled" }
+  }
+}

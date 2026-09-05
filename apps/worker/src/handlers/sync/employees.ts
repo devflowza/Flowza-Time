@@ -1,5 +1,5 @@
 import { sql } from 'kysely';
-import type { DeviceEmployee, SyncJobType, SyncTrigger } from '@flowza/contracts';
+import { SYNC_TRIGGERS, type DeviceEmployee, type SyncJobType, type SyncTrigger } from '@flowza/contracts';
 import { withContext, type DeviceEmployeeSyncStatus, type Trx } from '@flowza/database';
 import { ProviderError, type DeviceOperationResult, type DeviceProvider } from '@flowza/device-providers';
 import { AppError, event, newCorrelationId, sha256Hex } from '@flowza/shared';
@@ -272,6 +272,12 @@ export async function pullEmployees(ctx: JobContext) {
         const employees = res.employees;
         await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
           const resolved = await resolveDeviceUsers(trx, device.organizationId, device.providerKey, employees.map((e) => e.deviceUserId));
+          // existing state rows for this page in one query (by device user id or by resolved employee) — no per-user lookup
+          const knownEmployeeIds = [...resolved.values()].map((e) => e.id);
+          const existingRows = employees.length > 0 ? await trx.selectFrom('deviceEmployeeStates').select(['deviceUserId', 'employeeId']).where('deviceId', '=', device.id)
+            .where((eb) => eb.or([eb('deviceUserId', 'in', employees.map((e) => e.deviceUserId)), ...(knownEmployeeIds.length > 0 ? [eb('employeeId', 'in', knownEmployeeIds)] : [])])).execute() : [];
+          const existingByUser = new Set(existingRows.map((r) => r.deviceUserId));
+          const existingByEmployee = new Set(existingRows.map((r) => r.employeeId).filter((id): id is string => id !== null));
           const at = deps.now();
           for (const de of employees) {
             const deviceHash = hashDeviceEmployee(de);
@@ -282,7 +288,7 @@ export async function pullEmployees(ctx: JobContext) {
               const cloudHash = hashDeviceEmployee(buildDeviceEmployee(emp, emp.identity, { ascii }));
               const inSync = cloudHash === deviceHash;
               // desired is only defaulted for rows we create (same branch + eligible); existing rows keep the decision made by push/delete
-              const existing = await trx.selectFrom('deviceEmployeeStates').select('id').where('deviceId', '=', device.id).where((eb) => eb.or([eb('deviceUserId', '=', de.deviceUserId), eb('employeeId', '=', emp.id)])).executeTakeFirst();
+              const existing = existingByUser.has(de.deviceUserId) || existingByEmployee.has(emp.id);
               const desired = existing ? undefined : emp.branchId === device.branchId && isEligible(emp);
               await upsertState(trx, device, de.deviceUserId, { employeeId: emp.id, cloudHash, deviceHash, syncStatus: inSync ? 'IN_SYNC' : 'OUT_OF_SYNC', ...(desired === undefined ? {} : { desired }), lastSuccessAt: at, deviceRecord: record, ...enrolment }, at);
               totals.known++; if (inSync) totals.inSync++; else totals.outOfSync++;
@@ -332,7 +338,7 @@ export async function pushEmployees(ctx: JobContext) {
   const deviceIds = ids(job.payload['deviceIds']) ?? ids(scope['deviceIds']);
   const branchId = typeof scope['branchId'] === 'string' ? scope['branchId'] : null;
   const options = job.payload['options'] && typeof job.payload['options'] === 'object' ? (job.payload['options'] as Record<string, unknown>) : {};
-  const trigger = (typeof job.payload['trigger'] === 'string' ? job.payload['trigger'] : 'SYSTEM') as SyncTrigger;
+  const trigger: SyncTrigger = (SYNC_TRIGGERS as readonly string[]).includes(String(job.payload['trigger'])) ? (job.payload['trigger'] as SyncTrigger) : 'SYSTEM';
   const requestedBy = typeof job.payload['requestedBy'] === 'string' ? job.payload['requestedBy'] : null;
   return withContext(deps.db, { kind: 'system', organizationId, jobId: job.id }, async (trx) => {
     let syncJobId = typeof job.payload['syncJobId'] === 'string' ? job.payload['syncJobId'] : null;

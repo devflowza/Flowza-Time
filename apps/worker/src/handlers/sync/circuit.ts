@@ -23,17 +23,27 @@ async function loadRow(trx: Trx, key: CircuitKey): Promise<CircuitRow | null> {
  * Circuit breaker check before a vendor call (§F.6, AGENTS.md). `open` → the caller reschedules to `halfOpenAt`;
  * when `halfOpenAt` has passed the circuit moves to `half_open` and exactly this caller gets the probe.
  */
-export async function checkCircuit(trx: Trx, key: CircuitKey, now: Date): Promise<CircuitDecision> {
+export async function checkCircuit(trx: Trx, key: CircuitKey, now: Date, policy: CircuitPolicy = DEFAULT_CIRCUIT_POLICY): Promise<CircuitDecision> {
   const row = await loadRow(trx, key);
   if (!row || row.state === 'closed') return { state: 'closed', halfOpenAt: null, failureCount: row?.failureCount ?? 0, allow: true };
   if (row.state === 'open' && row.halfOpenAt && row.halfOpenAt.getTime() <= now.getTime()) {
-    const probe = await trx.updateTable('providerCircuitStates').set({ state: 'half_open' })
+    const probe = await trx.updateTable('providerCircuitStates').set({ state: 'half_open', halfOpenAt: now })
       .where('organizationId', '=', key.organizationId).where('providerKey', '=', key.providerKey).where('accountKey', '=', key.accountKey).where('state', '=', 'open')
       .returning('id').executeTakeFirst();
     // Another worker may have flipped it first and is already probing; only one probe per half-open window.
     return { state: 'half_open', halfOpenAt: row.halfOpenAt, failureCount: row.failureCount, allow: probe !== undefined };
   }
-  if (row.state === 'half_open') return { state: 'half_open', halfOpenAt: row.halfOpenAt, failureCount: row.failureCount, allow: false };
+  if (row.state === 'half_open') {
+    // `half_open_at` is stamped when the probe was handed out. A probe whose worker died (or whose outcome never reached the
+    // breaker) would otherwise pin the circuit half-open forever; after a full open window a new probe may be handed out.
+    const probeExpired = !row.halfOpenAt || row.halfOpenAt.getTime() + policy.openMs <= now.getTime();
+    if (!probeExpired) return { state: 'half_open', halfOpenAt: row.halfOpenAt, failureCount: row.failureCount, allow: false };
+    const probe = await trx.updateTable('providerCircuitStates').set({ halfOpenAt: now })
+      .where('organizationId', '=', key.organizationId).where('providerKey', '=', key.providerKey).where('accountKey', '=', key.accountKey).where('state', '=', 'half_open')
+      .where((eb) => eb.or([eb('halfOpenAt', 'is', null), eb('halfOpenAt', '<=', new Date(now.getTime() - policy.openMs))]))
+      .returning('id').executeTakeFirst();
+    return { state: 'half_open', halfOpenAt: row.halfOpenAt, failureCount: row.failureCount, allow: probe !== undefined };
+  }
   return { state: 'open', halfOpenAt: row.halfOpenAt, failureCount: row.failureCount, allow: false };
 }
 

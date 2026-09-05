@@ -38,19 +38,27 @@ function fromRow(r: { workingDays: number; presentDays: string; absentDays: stri
 /**
  * Build (or refresh) `attendance_period_summaries` for the employees in scope (§G.8). Values come from `summarisePeriod`
  * over the daily records of the period with the leave paid flag joined from `leave_records`/`leave_types`. A changed
- * summary bumps `version` and stores the aggregated `record_versions`. `finalize` requires an active period lock covering
- * the whole period for the summary's branch and stamps `finalized_by/at`; already finalized summaries are left alone
- * unless `finalize` is requested again.
+ * summary bumps `version` and stores the aggregated `record_versions`. `branchId` selects the employees (anyone with a record
+ * under that branch in the period); each summary always aggregates all of the employee's records. `finalize` requires an
+ * active period lock covering the whole period for the summary's branch and no PENDING days in scope, then stamps
+ * `finalized_by/at`; already finalized summaries are left alone unless `finalize` is requested again.
  */
 export async function buildPeriodSummaries(trx: Trx, p: PeriodSummaryPayload, now: Date, jobId: string | null): Promise<PeriodSummaryResult> {
   if (p.periodEnd < p.periodStart) throw errors.validation('periodEnd must not precede periodStart.');
   const { organizationId, periodStart, periodEnd } = p;
 
+  // A summary is per (employee, period) and must aggregate ALL of the employee's records in the period: `branchId` therefore
+  // scopes the employee set (anyone with a record under that branch in the period), never the record set — otherwise a
+  // branch build would overwrite a transferred employee's summary with a partial one.
   let recordsQ = trx.selectFrom('attendanceDailyRecords')
     .select(['id', 'employeeId', 'attendanceDate', 'branchId', 'status', 'flags', 'workedMinutes', 'overtimeMinutes', 'overtimeCategory', 'lateMinutes', 'earlyDepartureMinutes', 'calculationVersion'])
     .where('organizationId', '=', organizationId).where('attendanceDate', '>=', asDate(periodStart)).where('attendanceDate', '<=', asDate(periodEnd));
   if (p.employeeIds?.length) recordsQ = recordsQ.where('employeeId', 'in', p.employeeIds);
-  if (p.branchId) recordsQ = recordsQ.where('branchId', '=', p.branchId);
+  if (p.branchId) {
+    const branchId = p.branchId;
+    recordsQ = recordsQ.where('employeeId', 'in', (eb) => eb.selectFrom('attendanceDailyRecords').select('employeeId')
+      .where('organizationId', '=', organizationId).where('branchId', '=', branchId).where('attendanceDate', '>=', asDate(periodStart)).where('attendanceDate', '<=', asDate(periodEnd)));
+  }
   const records = await recordsQ.orderBy('employeeId').orderBy('attendanceDate').execute();
 
   const employeeIds = new Set<string>(records.map((r) => r.employeeId));
@@ -95,17 +103,26 @@ export async function buildPeriodSummaries(trx: Trx, p: PeriodSummaryPayload, no
     if (missing.length) throw errors.invalidState('Finalising a period summary requires an active period lock covering the whole period.', { periodStart, periodEnd, branchIds: missing });
   }
 
-  const result: PeriodSummaryResult = { employees: perEmployee.size, built: 0, changed: 0, unchanged: 0, finalized: 0, skippedFinalized: 0, pendingDays: 0 };
-  for (const [employeeId, { branchId, records: own }] of perEmployee) {
+  // Aggregate first, write second: finalisation is all-or-nothing over the scope.
+  const computed = [...perEmployee].map(([employeeId, { branchId, records: own }]) => {
     const like: PeriodRecordLike[] = own.map((r) => ({
       attendanceDate: isoDate(r.attendanceDate), status: r.status as AttendanceStatus, flags: r.flags as AttendanceFlag[], workedMinutes: r.workedMinutes, overtimeMinutes: r.overtimeMinutes,
       overtimeCategory: (r.overtimeCategory === 'REGULAR' || r.overtimeCategory === 'WEEKLY_OFF' || r.overtimeCategory === 'HOLIDAY') ? r.overtimeCategory : null,
       lateMinutes: r.lateMinutes, earlyDepartureMinutes: r.earlyDepartureMinutes,
       leaveIsPaid: (r.status === 'LEAVE' || (r.flags as string[]).includes('HALF_DAY_LEAVE')) ? leavePaid(r.employeeId, isoDate(r.attendanceDate)) : null,
     }));
-    const summary = summarisePeriod(like, { periodStart, periodEnd });
     const recordVersions: Record<string, number> = {};
     for (const r of own) recordVersions[r.id] = r.calculationVersion;
+    return { employeeId, branchId, summary: summarisePeriod(like, { periodStart, periodEnd }), recordVersions };
+  });
+  if (p.finalize) {
+    // a PENDING day contributes to nothing (neither present nor absent): payroll must not be finalised over unknown days (§G.8)
+    const pending = computed.filter((c) => c.summary.pendingDays > 0).map((c) => ({ employeeId: c.employeeId, pendingDays: c.summary.pendingDays }));
+    if (pending.length) throw errors.invalidState('Cannot finalise a period with PENDING attendance days; resolve them first.', { periodStart, periodEnd, pending: pending.slice(0, 100), pendingEmployees: pending.length });
+  }
+
+  const result: PeriodSummaryResult = { employees: perEmployee.size, built: 0, changed: 0, unchanged: 0, finalized: 0, skippedFinalized: 0, pendingDays: 0 };
+  for (const { employeeId, branchId, summary, recordVersions } of computed) {
     result.pendingDays += summary.pendingDays;
     const existing = existingByEmployee.get(employeeId);
     const values = {

@@ -1,11 +1,13 @@
-import { sql } from 'kysely';
-import type { AttendanceFlag, AttendanceStatus } from '@flowza/contracts';
+import { sql, type Selectable } from 'kysely';
+import { ATTENDANCE_FLAGS, type AttendanceFlag, type AttendanceStatus } from '@flowza/contracts';
 import { event } from '@flowza/shared';
-import { bypassPeriodLock, emitDomainEvent, withContext, type RecordHistoryReason, type Trx } from '@flowza/database';
+import { bypassPeriodLock, emitDomainEvent, withContext, type DB, type RecordHistoryReason, type Trx } from '@flowza/database';
 import { calculateDailyRecord, type DailyCalculationResult } from '@flowza/domain';
 import type { HandlerRegistry, JobContext } from '../types.js';
 import { asDate, parsePayload, recomputePayloadSchema } from './common.js';
-import { loadDailyInputs } from './load-inputs.js';
+import { loadDailyInputs, type LoadedDailyInputs } from './load-inputs.js';
+
+type DailyRecordRow = Selectable<DB['attendanceDailyRecords']>;
 
 export interface RecomputeOptions {
   organizationId: string;
@@ -48,8 +50,10 @@ export async function recomputeDaily(trx: Trx, opts: RecomputeOptions): Promise<
   const loaded = await loadDailyInputs(trx, organizationId, employeeId, date, opts.now);
   if (!loaded) return { outcome: 'skipped_missing' };
 
+  // Row lock: an immediate (correction) and a debounced recompute of the same day may run concurrently; serialise them so the
+  // version chain and history snapshots stay linear.
   const existing = await trx.selectFrom('attendanceDailyRecords').selectAll()
-    .where('organizationId', '=', organizationId).where('employeeId', '=', employeeId).where('attendanceDate', '=', asDate(date)).executeTakeFirst();
+    .where('organizationId', '=', organizationId).where('employeeId', '=', employeeId).where('attendanceDate', '=', asDate(date)).forUpdate().executeTakeFirst();
 
   // Lock check on the new branch and, when the record moves branches, on the old one too.
   const branchesToCheck = [...new Set([loaded.branchId, ...(existing ? [existing.branchId] : [])])];
@@ -59,9 +63,17 @@ export async function recomputeDaily(trx: Trx, opts: RecomputeOptions): Promise<
     if (!opts.bypassLock) return { outcome: 'skipped_locked', branchId: loaded.branchId, ...(existing ? { recordId: existing.id, version: existing.calculationVersion, status: existing.status } : {}) };
     await bypassPeriodLock(trx);
   }
+  const outcome = await writeRecord(trx, opts, loaded, existing);
+  // The bypass is transaction-local, but a transaction may hold many records (recalculation chunks): switch it off again right
+  // after this record so nothing else in the same transaction can slip past the period-lock trigger.
+  if (locked) await sql`select set_config('flowza.bypass_period_lock', 'off', true)`.execute(trx);
+  return outcome;
+}
 
+async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDailyInputs, existing: DailyRecordRow | undefined): Promise<RecomputeOutcome> {
+  const { organizationId, employeeId, date } = opts;
   const result = calculateDailyRecord(loaded.input);
-  const { status, flags, hasCorrection } = await applyManualOverride(trx, organizationId, employeeId, date, result, loaded.eventSources);
+  const { status, flags, hasCorrection } = await applyCorrections(trx, organizationId, employeeId, date, result, loaded.eventSources);
 
   const next: Comparable = {
     branchId: loaded.branchId, departmentId: loaded.departmentId, shiftId: result.shiftId, shiftAssignmentId: result.shiftAssignmentId, ruleSetId: result.ruleSetId, timezone: result.timezone,
@@ -110,26 +122,32 @@ function snapshotOf(row: Record<string, unknown>): Record<string, unknown> {
 }
 
 /**
- * An applied SET_STATUS correction overrides the computed status (the engine result stays in the trace). The override is
- * re-applied on every recompute so the record remains reproducible from raw + corrections.
+ * Applied corrections for the date are folded into the record on every recompute, so it stays reproducible from
+ * raw + corrections: any applied correction (also a REMOVE_PUNCH, whose voided event the engine never sees) marks the record
+ * `has_correction` + MANUAL_CORRECTION, and the latest applied SET_STATUS overrides the computed status (the engine result
+ * stays in the trace).
  */
-async function applyManualOverride(trx: Trx, organizationId: string, employeeId: string, date: string, result: DailyCalculationResult, eventSources: Map<string, 'DEVICE' | 'MANUAL' | 'CORRECTION' | 'IMPORT' | 'MOBILE'>): Promise<{ status: AttendanceStatus; flags: AttendanceFlag[]; hasCorrection: boolean }> {
+async function applyCorrections(trx: Trx, organizationId: string, employeeId: string, date: string, result: DailyCalculationResult, eventSources: Map<string, 'DEVICE' | 'MANUAL' | 'CORRECTION' | 'IMPORT' | 'MOBILE'>): Promise<{ status: AttendanceStatus; flags: AttendanceFlag[]; hasCorrection: boolean }> {
   let hasCorrection = result.eventIds.some((id) => { const s = eventSources.get(id); return s === 'CORRECTION' || s === 'MANUAL'; });
   let status = result.status;
   const flags = new Set<AttendanceFlag>(result.flags);
-  const override = await trx.selectFrom('attendanceCorrections').select(['id', 'proposedStatus', 'appliedAt'])
+  const applied = await trx.selectFrom('attendanceCorrections').select(['id', 'type', 'proposedStatus', 'appliedAt'])
     .where('organizationId', '=', organizationId).where('employeeId', '=', employeeId).where('attendanceDate', '=', asDate(date))
-    .where('type', '=', 'SET_STATUS').where('status', '=', 'APPLIED').where('proposedStatus', 'is not', null)
-    .orderBy('appliedAt', 'desc').orderBy('id', 'desc').executeTakeFirst();
+    .where('status', '=', 'APPLIED')
+    .orderBy('appliedAt', 'asc').orderBy('id', 'asc').execute();
+  if (applied.length > 0) {
+    hasCorrection = true;
+    flags.add('MANUAL_CORRECTION');
+    result.trace.steps.push({ step: 'corrections', detail: `${applied.length} applied correction(s) on this date → has_correction`, values: { corrections: applied.map((c) => ({ id: c.id, type: c.type })) } });
+  }
+  const override = [...applied].reverse().find((c) => c.type === 'SET_STATUS' && c.proposedStatus !== null);
   if (override?.proposedStatus) {
     status = override.proposedStatus;
-    flags.add('MANUAL_CORRECTION');
-    hasCorrection = true;
     result.trace.steps.push({ step: 'manualOverride', detail: `status ${result.status} overridden to ${status} by approved correction ${override.id}`, values: { correctionId: override.id, computedStatus: result.status, status } });
   }
-  return { status, flags: [...flags].sort((a, b) => FLAG_ORDER.indexOf(a) - FLAG_ORDER.indexOf(b)), hasCorrection };
+  // canonical flag order (the engine uses the same one) so equal results always serialise identically
+  return { status, flags: ATTENDANCE_FLAGS.filter((f) => flags.has(f)), hasCorrection };
 }
-const FLAG_ORDER: readonly AttendanceFlag[] = ['LATE', 'EARLY_DEPARTURE', 'OVERTIME', 'MISSING_IN', 'MISSING_OUT', 'MANUAL_CORRECTION', 'OUT_OF_WINDOW', 'WORKED_ON_HOLIDAY', 'WORKED_ON_WEEKLY_OFF', 'HALF_DAY_LEAVE', 'DUPLICATE_PUNCHES_COLLAPSED', 'RAMADAN_HOURS', 'CROSS_MIDNIGHT', 'NO_SHIFT', 'UNDER_HOURS'];
 
 /** RECOMPUTE_DAILY handler: payload `{ organizationId, employeeId, date, reason?, bypassLock?, triggeredBy? }`. */
 export async function recomputeDailyHandler({ job, deps, log }: JobContext) {

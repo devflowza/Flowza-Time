@@ -23,9 +23,14 @@ function groupByOrg<T extends { organizationId: string }>(rows: T[]): Map<string
  * talk to us) and that has no PULL_ATTENDANCE item in flight, capped per organisation. One SCHEDULED sync job per organisation
  * per tick with one item per device; the queue jobs carry dedupe key `pull:<deviceId>`.
  */
-export async function pollDueDevices(deps: WorkerDeps): Promise<{ organizations: number; devices: number; jobs: string[] }> {
+export interface TickOptions { /** Per-organisation admission cap for this tick (defaults to the module constants). */ cap?: number }
+
+export async function pollDueDevices(deps: WorkerDeps, opts: TickOptions = {}): Promise<{ organizations: number; devices: number; jobs: string[] }> {
   const now = deps.now();
+  const cap = opts.cap ?? POLL_ADMISSION_CAP;
   const due = await withContext(deps.db, { kind: 'platform' }, async (trx) => {
+    // Devices declared offline are left to the health check (§F.3: "offline devices are polled at the health-check interval
+    // only"): they are re-admitted once their last failed observation is older than their offline threshold.
     const res = await sql<DueDevice>`
       with candidates as (
         select d.id, d.organization_id as "organizationId", d.branch_id as "branchId", d.sync_interval_minutes as "syncIntervalMinutes",
@@ -34,13 +39,14 @@ export async function pollDueDevices(deps: WorkerDeps): Promise<{ organizations:
         join public.organizations o on o.id = d.organization_id
         where d.status = 'active' and d.auto_sync_enabled and d.integration_type <> 'DEVICE_PUSH'
           and (d.next_attendance_sync_at is null or d.next_attendance_sync_at <= ${now})
+          and (d.connection_status <> 'offline' or coalesce(d.last_error_at, 'epoch'::timestamptz) < ${now}::timestamptz - make_interval(mins => d.offline_threshold_minutes))
           and o.status in ('active', 'trial')
           and not exists (
             select 1 from public.sync_job_items i
             where i.device_id = d.id and i.operation = 'PULL_ATTENDANCE' and i.status in ('PENDING', 'QUEUED', 'RUNNING', 'RETRYING')
           )
       )
-      select id, "organizationId", "branchId", "syncIntervalMinutes" from candidates where rn <= ${POLL_ADMISSION_CAP} order by "organizationId", rn`.execute(trx);
+      select id, "organizationId", "branchId", "syncIntervalMinutes" from candidates where rn <= ${cap} order by "organizationId", rn`.execute(trx);
     return res.rows;
   });
   const jobs: string[] = [];
@@ -51,8 +57,10 @@ export async function pollDueDevices(deps: WorkerDeps): Promise<{ organizations:
           organizationId, jobType: 'PULL_ATTENDANCE', trigger: 'SCHEDULED', scope: { scheduled: true, deviceIds: devices.map((d) => d.id), tickAt: now.toISOString() },
           items: devices.map((d) => ({ deviceId: d.id, operation: 'PULL_ATTENDANCE', branchId: d.branchId })),
         });
-        // push the due time forward so a slow queue does not re-admit the same device every tick; the pull recomputes it adaptively
-        for (const d of devices) await trx.updateTable('devices').set({ nextAttendanceSyncAt: new Date(now.getTime() + Math.max(1, d.syncIntervalMinutes) * 60_000) }).where('id', '=', d.id).execute();
+        // push the due time forward (one statement for the whole batch) so a slow queue does not re-admit the same device every
+        // tick; the pull recomputes it adaptively
+        await sql`update public.devices set next_attendance_sync_at = ${now}::timestamptz + make_interval(mins => greatest(1, sync_interval_minutes))
+                  where organization_id = ${organizationId}::uuid and id = any(${sql.val(devices.map((d) => d.id))}::uuid[])`.execute(trx);
         return created.syncJobId;
       });
       jobs.push(jobId);
@@ -63,14 +71,20 @@ export async function pollDueDevices(deps: WorkerDeps): Promise<{ organizations:
   return { organizations: jobs.length, devices: due.length, jobs };
 }
 
-/** health-check: devices not seen within their offline threshold get a DEVICE_HEALTH_CHECK (dedupe `health:<deviceId>`, low priority). */
-export async function scheduleHealthChecks(deps: WorkerDeps): Promise<{ organizations: number; devices: number; jobs: string[] }> {
+/**
+ * health-check: devices not seen within their offline threshold get a DEVICE_HEALTH_CHECK (dedupe `health:<deviceId>`, low
+ * priority). Admission is round-robin on the *last observation of any kind* (success, heartbeat or failed check): a failed
+ * check stamps `last_error_at`, so permanently dead devices move to the back and cannot monopolise the cap.
+ */
+export async function scheduleHealthChecks(deps: WorkerDeps, opts: TickOptions = {}): Promise<{ organizations: number; devices: number; jobs: string[] }> {
   const now = deps.now();
+  const cap = opts.cap ?? HEALTH_ADMISSION_CAP;
   const stale = await withContext(deps.db, { kind: 'platform' }, async (trx) => {
     const res = await sql<{ id: string; organizationId: string; branchId: string }>`
       with candidates as (
         select d.id, d.organization_id as "organizationId", d.branch_id as "branchId",
-               row_number() over (partition by d.organization_id order by coalesce(d.last_successful_communication_at, d.last_heartbeat_at, d.created_at) asc, d.id) as rn
+               row_number() over (partition by d.organization_id
+                 order by coalesce(greatest(d.last_successful_communication_at, d.last_heartbeat_at, d.last_error_at), d.created_at) asc, d.id) as rn
         from public.devices d
         join public.organizations o on o.id = d.organization_id
         where d.status = 'active' and o.status in ('active', 'trial')
@@ -81,7 +95,7 @@ export async function scheduleHealthChecks(deps: WorkerDeps): Promise<{ organiza
             where i.device_id = d.id and i.operation = 'DEVICE_HEALTH_CHECK' and i.status in ('PENDING', 'QUEUED', 'RUNNING', 'RETRYING')
           )
       )
-      select id, "organizationId", "branchId" from candidates where rn <= ${HEALTH_ADMISSION_CAP} order by "organizationId", rn`.execute(trx);
+      select id, "organizationId", "branchId" from candidates where rn <= ${cap} order by "organizationId", rn`.execute(trx);
     return res.rows;
   });
   const jobs: string[] = [];

@@ -6,6 +6,7 @@ import type { JobContext } from '../types.js';
 import { recordFailure, recordSuccess, VENDOR_ERROR_CODES } from './circuit.js';
 import { loadDevice } from './context.js';
 import { applyHealth } from './health.js';
+import { toSyncError } from './items.js';
 import type { DeviceRow } from './types.js';
 
 export async function loadDeviceOrThrow(trx: Trx, deviceId: string | null): Promise<DeviceRow> {
@@ -36,19 +37,24 @@ export function isProviderCode(err: unknown, ...codes: string[]): boolean { retu
  * Failure bookkeeping after a provider call (own transaction — the failing work's transaction is gone):
  *  - vendor-level codes feed the circuit breaker for (org, provider, account);
  *  - device-level codes (offline/timeout) count towards the device's offline hysteresis;
- *  - credential/config errors flag the device `error` so the UI shows what to fix.
+ *  - credential/config errors flag the device `error` so the UI shows what to fix; any of these answers proves the vendor
+ *    account is reachable, so they resolve a half-open probe (circuit closes) instead of leaving it pending;
+ *  - INTERNAL errors (our own DB/bugs) are logged only — they are not the device's fault and must not flag it.
  * Never throws (a bookkeeping failure must not mask the original error).
  */
 export async function handleProviderFailure(ctx: JobContext, device: DeviceRow, accountKey: string, err: unknown): Promise<void> {
   const { deps, log } = ctx;
-  const code = ProviderError.is(err) ? err.code : AppError.is(err) ? err.code : (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError') ? 'TIMEOUT' : 'INTERNAL');
-  const message = err instanceof Error ? err.message : String(err);
+  const { code, message } = toSyncError(err);
+  if (code === 'INTERNAL') { log.error(event('sync_internal_failure', { deviceId: device.id, err: message })); return; }
   const now = deps.now();
   try {
     await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
+      const key = { organizationId: device.organizationId, providerKey: device.providerKey, accountKey };
       if (VENDOR_ERROR_CODES.has(code)) {
-        const c = await recordFailure(trx, { organizationId: device.organizationId, providerKey: device.providerKey, accountKey }, { code, message }, now);
+        const c = await recordFailure(trx, key, { code, message }, now);
         if (c.opened) log.warn(event('provider_circuit_opened', { providerKey: device.providerKey, accountKey, failureCount: c.failureCount }));
+      } else if (code !== 'DEVICE_OFFLINE') {
+        await recordSuccess(trx, key); // the vendor answered (auth/config/unsupported…): the account is reachable
       }
       if (code === 'DEVICE_OFFLINE' || code === 'TIMEOUT') {
         await applyHealth(trx, device, { online: false, errorCode: code, error: message, event: 'sync_failed', jobId: null }, now);

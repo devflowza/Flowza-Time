@@ -87,21 +87,33 @@ export async function addSyncJobItems(trx: Trx, queue: JobQueue, input: AddItems
   const inserted = await trx.insertInto('syncJobItems').values(input.items.map((it) => ({
     organizationId: input.organizationId, syncJobId, deviceId: it.deviceId, employeeId: it.employeeId ?? null, operation: it.operation, branchId: it.branchId ?? input.branchId ?? null, status: 'QUEUED' as const, maxAttempts,
   }))).returning(['id', 'deviceId', 'employeeId', 'operation']).execute();
+  // one enqueue per item (app.enqueue_job is a per-row function), then ONE lookup + two batched updates instead of 3 statements per item
+  const queueJobByItem = new Map<string, string>();
   for (const [i, row] of inserted.entries()) {
     const options = { ...(input.options ?? {}), ...(input.items[i]?.options ?? {}) };
     const dedupeKey = dedupeKeyFor(row.operation, row.deviceId, row.employeeId, syncJobId, options);
     const payload = { syncJobId, syncJobItemId: row.id, organizationId: input.organizationId, deviceId: row.deviceId, employeeId: row.employeeId, operation: row.operation, options };
     const queueJobId = await queue.enqueue({ queue: 'sync', jobType: row.operation, organizationId: input.organizationId, payload, priority: input.priority, dedupeKey, maxAttempts, lockTimeoutSeconds: input.lockTimeoutSeconds ?? (row.operation === 'PULL_ATTENDANCE' ? 900 : 600), correlationId: input.correlationId }, trx);
-    // jobs.enqueue returns the in-flight job when the dedupe key collides; that job carries another item id
-    const owner = await sql<{ itemId: string | null }>`select payload->>'syncJobItemId' as "itemId" from jobs.queue where id = ${queueJobId}::bigint`.execute(trx);
-    if (owner.rows[0]?.itemId === row.id) {
-      await trx.updateTable('syncJobItems').set({ queueJobId }).where('id', '=', row.id).execute();
-      queued++;
-    } else {
-      await trx.updateTable('syncJobItems').set({ status: 'SKIPPED', finishedAt: now, result: JSON.stringify({ skipped: 'duplicate_in_flight', queueJobId }) }).where('id', '=', row.id).execute();
-      skipped++;
-    }
+    queueJobByItem.set(row.id, queueJobId);
     itemIds.push(row.id);
+  }
+  // jobs.enqueue returns the in-flight job when the dedupe key collides; that job carries another item id
+  const owners = await sql<{ id: string; itemId: string | null }>`select id::text as id, payload->>'syncJobItemId' as "itemId" from jobs.queue where id = any(${sql.val([...queueJobByItem.values()])}::bigint[])`.execute(trx);
+  const ownerOf = new Map(owners.rows.map((r) => [r.id, r.itemId]));
+  const ownItems: Array<{ id: string; queueJobId: string }> = [];
+  const dupItems: Array<{ id: string; queueJobId: string }> = [];
+  for (const [itemId, queueJobId] of queueJobByItem) (ownerOf.get(queueJobId) === itemId ? ownItems : dupItems).push({ id: itemId, queueJobId });
+  if (ownItems.length > 0) {
+    await sql`update public.sync_job_items i set queue_job_id = v.queue_job_id
+              from (select unnest(${sql.val(ownItems.map((o) => o.id))}::uuid[]) as id, unnest(${sql.val(ownItems.map((o) => o.queueJobId))}::bigint[]) as queue_job_id) v
+              where i.id = v.id`.execute(trx);
+    queued = ownItems.length;
+  }
+  if (dupItems.length > 0) {
+    await sql`update public.sync_job_items i set status = 'SKIPPED', finished_at = ${now}, result = jsonb_build_object('skipped', 'duplicate_in_flight', 'queueJobId', v.queue_job_id::text)
+              from (select unnest(${sql.val(dupItems.map((o) => o.id))}::uuid[]) as id, unnest(${sql.val(dupItems.map((o) => o.queueJobId))}::bigint[]) as queue_job_id) v
+              where i.id = v.id`.execute(trx);
+    skipped = dupItems.length;
   }
   await trx.updateTable('syncJobs').set((eb) => ({
     itemsTotal: eb('itemsTotal', '+', inserted.length), itemsPending: eb('itemsPending', '+', queued),

@@ -22,10 +22,10 @@ export function registerAttendanceHandlers(registry: HandlerRegistry): void {
 }
 
 export { attendanceTasks } from './tasks.js';
-export { normalizeRaw, normalizeBatch, eventTypeForDirection, historyOn } from './normalize.js';
+export { normalizeRaw, normalizeBatch, eventTypeForDirection, eventSourceForRaw, historyOn, neighbourReach, type NeighbourReach } from './normalize.js';
 export { loadDailyInputs, type LoadedDailyInputs } from './load-inputs.js';
 export { recomputeDaily, recomputeDailyHandler, isPeriodLocked, type RecomputeOptions, type RecomputeOutcome } from './recompute.js';
 export { recalculateRange, enqueueRecalculationForScope, recalculationScopeSchema, type RecalculationScope, type RecalculationSummary } from './recalculate.js';
 export { buildPeriodSummaries, buildPeriodSummaryHandler, periodSummaryPayloadSchema, type PeriodSummaryPayload, type PeriodSummaryResult } from './period-summary.js';
 export { applyApprovedCorrection, applyCorrectionHandler, applyCorrectionPayloadSchema, type ApplyCorrectionOptions, type ApplyCorrectionResult } from './corrections.js';
-export { enqueueRecompute, enqueueNormalizeRaw, recomputeDedupeKey, normalizeDedupeKey, recomputePayloadSchema, type RecomputeReason, type EnqueueRecomputeInput } from './common.js';
+export { enqueueRecompute, enqueueNormalizeRaw, recomputeDedupeKey, normalizeDedupeKey, recomputePayloadSchema, IMMEDIATE_RECOMPUTE_REASONS, type RecomputeReason, type EnqueueRecomputeInput } from './common.js';
