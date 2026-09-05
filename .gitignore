@@ -8,6 +8,8 @@ coverage/
 .env
 .env.*
 !.env.example
+# committed on purpose: publishable build-time values only, never secrets (see the header in that file)
+!apps/web/.env.production
 .supabase/
 supabase/.temp/
 supabase/.branches/

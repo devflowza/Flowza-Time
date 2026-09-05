@@ -17,6 +17,8 @@ paths = [
   '''docs/.*\.md$''',
   '''\.env\.example$''',
   '''apps/web/\.env\.example$''',
+  # publishable Supabase URL + anon key only; the header in the file forbids anything server-side
+  '''apps/web/\.env\.production$''',
 ]
 regexes = [
   # explicit placeholders used across docs and examples
