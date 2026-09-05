@@ -6,7 +6,8 @@ import '@/lib/i18n';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/devices.json';
 import ar from '@/locales/ar/devices.json';
-import { normalizeProviderConfig, ProviderConfigForm, validateProviderConfig, type ConfigValues } from './provider-config-form';
+import { ProviderConfigForm } from './provider-config-form';
+import { normalizeProviderConfig, validateProviderConfig, type ConfigValues } from './provider-config';
 
 registerNamespace('devices', en, ar);
 
