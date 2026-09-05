@@ -116,3 +116,18 @@ Implement `DeviceProvider`; register in the `ProviderRegistry`; keep `device_pro
   define explicit update schemas with `.optional()` fields) and write a test that PATCHes one field and asserts nothing else changed.
 - `z.coerce.boolean()` treats the string `'false'` as `true`. Use the shared `booleanQuerySchema` from `@flowza/contracts`
   (`'true' | 'false' | '1' | '0'`) for query parameters.
+
+## Frontend pitfalls (found in review — apply everywhere)
+- **Job ids are not interchangeable.** Device and sync endpoints return `sync_jobs` ids that `/sync/:id` can render; recalculation,
+  report, payroll, import and employee-bulk 202s return **queue** job ids (`jobs.queue`), which that page cannot resolve. Point a
+  "Queued" toast at the page that tracks the work (`toastJobQueued(..., { to })`), never at `/sync/<queue job id>`.
+- **`Button asChild` takes exactly one child.** Radix `Slot` throws "Slot failed to slot onto its children" if a spinner slot is
+  rendered next to the child, so `loading` is only supported on a real `<button>`. Wrap links as `<Button asChild><Link…/></Button>`
+  with no other children.
+- **jsdom + Radix.** Open a `Select` with `fireEvent.keyDown(trigger, { key: 'ArrowDown' })` and pick with `fireEvent.click(option)`.
+  `DataTable` renders a table *and* a card fallback, so every cell value exists twice: assert with `getAllByText`, or in Playwright
+  with `.locator('visible=true')`.
+- **Test module mocks live in `features/employees/test-mocks.ts`,** never in `test-utils.tsx`: a `vi.mock` factory that awaits a
+  module which imports the mocked module deadlocks the module graph and the test file simply never finishes.
+- **Vendor chunking follows specifiers, not packages.** `react-dom` and `react-dom/client` are different module ids; a
+  `manualChunks` entry must list every specifier the app imports or the runtime lands in the entry chunk.
