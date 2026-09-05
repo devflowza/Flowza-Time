@@ -1,6 +1,6 @@
 import { DateTime } from 'luxon';
 import type { RawTransaction, RawSource } from '@flowza/contracts';
-import type { Trx } from '@flowza/database';
+import { dedupeHash, type Trx } from '@flowza/database';
 import { sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { enqueueJob } from '../../lib/jobs.js';
@@ -16,11 +16,12 @@ export interface IngestDevice { id: string; organizationId: string; generation: 
 export interface IngestOptions { source: RawSource; syncJobId?: string | null; now?: Date; locks?: { branchId: string | null; periodStart: string; periodEnd: string }[] }
 export interface IngestResult { received: number; inserted: number; duplicates: number; quarantined: number; held: number; ids: string[] }
 
-/** Dedupe hash exactly as the worker computes it: sha256(device_id|device_generation|device_employee_id|punched_at|verification|direction). */
-export function dedupeHash(deviceId: string, generation: number, tx: RawTransaction): string {
-  const at = DateTime.fromISO(tx.punchedAt, { setZone: true }).toUTC().toISO({ suppressMilliseconds: true }) ?? tx.punchedAt;
-  return sha256Hex(`${deviceId}|${generation}|${tx.deviceEmployeeId}|${at}|${tx.verificationMethod ?? 'unknown'}|${tx.direction ?? 'unknown'}`);
-}
+/**
+ * Dedupe hash + canonical punched_at come from `@flowza/database` (`ingest-hash.ts`) — the ONE implementation shared with the
+ * worker's `apps/worker/src/handlers/sync/ingest.ts`, so a punch delivered by device push and later re-offered by a poll or
+ * webhook hashes identically and is dropped by the unique index instead of being counted twice.
+ */
+export { dedupeHash };
 
 function boundedPayload(payload: Record<string, unknown>): string {
   const json = JSON.stringify(payload ?? {});
@@ -47,8 +48,8 @@ export async function ingestRawTransactions(trx: Trx, device: IngestDevice, tran
     if (skew > FUTURE_SKEW_QUARANTINE_SECONDS) status = 'quarantined';
     else if (locks.some((l) => (l.branchId === null || l.branchId === device.branchId) && l.periodStart <= localDate && localDate <= l.periodEnd)) status = 'held';
     return {
-      organizationId: device.organizationId, deviceId: device.id, branchId: device.branchId, providerKey: device.providerKey, providerTransactionId: tx.providerTransactionId, deviceEmployeeId: tx.deviceEmployeeId, punchedAt,
-      deviceLocalTime: tx.deviceLocalTime ?? null, assumedTimezone: device.timezone, clockSkewSeconds: skew, verificationMethod: tx.verificationMethod, direction: tx.direction, rawPayload: boundedPayload(tx.rawPayload), dedupeHash: dedupeHash(device.id, device.generation, tx),
+      organizationId: device.organizationId, deviceId: device.id, branchId: device.branchId, providerKey: device.providerKey, providerTransactionId: tx.providerTransactionId ?? null, deviceEmployeeId: tx.deviceEmployeeId, punchedAt,
+      deviceLocalTime: tx.deviceLocalTime ?? null, assumedTimezone: device.timezone, clockSkewSeconds: skew, verificationMethod: tx.verificationMethod ?? 'unknown', direction: tx.direction ?? 'unknown', rawPayload: boundedPayload(tx.rawPayload), dedupeHash: dedupeHash(device.id, device.generation, tx),
       deviceGeneration: device.generation, source: opts.source, syncJobId: opts.syncJobId ?? null, processingStatus: status, processingError: status === 'quarantined' ? `clock skew ${skew}s (future punch)` : status === 'held' ? 'period locked at ingestion' : null,
     };
   });

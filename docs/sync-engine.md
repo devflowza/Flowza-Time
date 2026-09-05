@@ -47,8 +47,28 @@ jobs only: enqueueing a key that is currently *running* creates the next run, so
 | Mode | Trigger | Handler(s) |
 |---|---|---|
 | `VENDOR_CLOUD_PULL` / `ON_PREM_SERVER_API` / `LAN` | scheduler poll or manual | `PULL_ATTENDANCE` (cursor from `sync_cursors`, page loop, `ingestRawTransactions`, advance cursor after commit), `PULL_EMPLOYEES`, `PUSH_EMPLOYEE(S)`, `DELETE_EMPLOYEE`, `DEVICE_HEALTH_CHECK`, `TEST_CONNECTION` |
-| `VENDOR_WEBHOOK` | API `/webhooks/providers/:key` | API validates signature, stores `provider_webhook_events` (replay protection), enqueues `WEBHOOK_EVENT` → handler ingests transactions; slow reconciliation poll still runs |
+| `VENDOR_WEBHOOK` | API `/webhooks/providers/:key/:deviceId/:token` | API verifies the vendor signature **once, over the original raw bytes**, stores the verified *normalised* result in `provider_webhook_events` (replay protection), enqueues `WEBHOOK_EVENT` → handler ingests the stored transactions without re-parsing or re-verifying; slow reconciliation poll still runs |
 | `DEVICE_PUSH` | API `/device-push/:protocol/*` | API identifies the device by serial (+ push token), ingests raw rows synchronously (idempotent, cheap), updates heartbeat, returns pending `device_commands`; employee push = command rows created by `PUSH_EMPLOYEE`, acknowledged via the protocol's result endpoint |
+
+## Webhook verification happens exactly once (decision)
+HMAC-style vendor signatures cover the raw request bytes. Those bytes exist only while the API handles the call: anything
+re-serialised later (`JSON.stringify(parsedBody)`) differs in key order, whitespace and unicode escapes and would fail the
+check — the earlier worker fallback that re-parsed a stored body through `provider.handleWebhook` could therefore never succeed
+and would also have required the raw body (possibly carrying biometric templates) to be persisted. Decision: the API is the
+single verification point; `provider_webhook_events.payload` stores `{ vendorDeviceId, eventType, transactions: RawTransaction[],
+rawBodySha256, rawBodyBytes, verifiedAt }` with `signature_valid` on the row, `payload_hash = sha256(rawBody)` for replay
+protection, and the worker's `WEBHOOK_EVENT` handler only ingests `transactions` (a row without them is marked `failed`).
+Rejected signatures are stored as `rejected` rows with the body hash only.
+
+## One fan-out implementation
+`createSyncJob(trx, queue, input)` lives in `@flowza/database` (`packages/database/src/sync-jobs.ts`) and is used by the worker
+(scheduler ticks, PUSH_EMPLOYEES/RECONCILIATION fan-outs) and by the API (`apps/api/src/services/features/sync-jobs.ts`, run as a
+system step inside the caller's transaction after the permission/branch checks). It inserts `sync_jobs` + `sync_job_items`, enqueues
+one queue job per item through `JobQueue.enqueue` (`app.enqueue_job`, same transaction) with the dedupe keys documented in
+`apps/worker/src/handlers/sync/api.ts`; an item whose key is already pending (a manual pull while the scheduled pull waits) is
+marked `SKIPPED` (`result.skipped = 'duplicate_in_flight'`) and the 202 reply reports `itemsQueued` / `itemsSkipped`
+(`status: 'SUCCESS'` when nothing new was queued). Likewise the dedupe hash of raw punches is computed by ONE function
+(`dedupeHash` in `packages/database/src/ingest-hash.ts`) for device push (API) and polls/webhooks (worker).
 
 ## Idempotency & cursors
 - Raw rows are unique on `(organization_id, device_id, provider_transaction_id, punched_at)` and on the dedupe hash

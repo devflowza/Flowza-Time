@@ -24,8 +24,12 @@ export type SyncReconcileRequest = z.infer<typeof syncReconcileRequestSchema>;
 export const syncJobItemsQuerySchema = paginationQuerySchema.extend({ status: z.enum(SYNC_ITEM_STATUSES).optional(), deviceId: uuidSchema.optional() });
 export const reconciliationQuerySchema = z.object({ branchId: uuidSchema.optional(), deviceId: uuidSchema.optional() });
 
-/** 202 body for every sync-job-creating endpoint. `jobId` is the user-facing sync_jobs id. */
-export interface SyncJobAcceptedDto { jobId: string; status: 'QUEUED'; message: string; itemsTotal: number; deviceCount: number }
+/**
+ * 202 body for every sync-job-creating endpoint. `jobId` is the user-facing sync_jobs id. Items whose work is already in flight
+ * (same dedupe key, e.g. a manual pull while the scheduled pull runs) are recorded as SKIPPED and covered by the running job;
+ * when every item was skipped the job is already `SUCCESS` and nothing new was queued.
+ */
+export interface SyncJobAcceptedDto { jobId: string; status: 'QUEUED' | 'SUCCESS'; message: string; itemsTotal: number; itemsQueued: number; itemsSkipped: number; deviceCount: number }
 
 export interface DeviceReconciliationDto {
   deviceId: string;

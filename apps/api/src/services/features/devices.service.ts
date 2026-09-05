@@ -1,6 +1,6 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
-import type { CreateDeviceInput, DeviceModelDto, DeviceProviderDto, TestConnectionInput, UpdateDeviceInput } from '@flowza/contracts';
+import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCredentialsInput, DeviceGroupDto, DeviceGroupInput, DeviceListQuery, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
 import { emitDomainEvent, maskCredentials, type Trx } from '@flowza/database';
 import { createThrottler, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
 import { AppError, errors, sha256Hex } from '@flowza/shared';
@@ -10,7 +10,6 @@ import { type Actor, audit, diffObjects, runSystem, runUser } from '../../lib/se
 import { loadFeatureFlags, loadSettings } from '../../lib/settings.js';
 import { likeContains, pageOf, resolveSort, toCount } from '../../lib/pagination.js';
 import { jsonObject } from '../../lib/mappers.js';
-import type { ClaimPendingDeviceInput, DeviceCredentialsInput, DeviceGroupDto, DeviceGroupInput, DeviceListQuery, DevicePushCredentials, TestConnectionResultDto } from '../../routes/v1/features/dto.js';
 import { assertWithinLimit } from './entitlements.js';
 import { systemStep } from './context.js';
 import { createSyncJob, type CreatedSyncJob } from './sync-jobs.js';
@@ -445,20 +444,27 @@ export async function runDeviceAction(deps: ApiDeps, actor: Actor, orgId: string
     if (device.status !== 'active') throw errors.invalidState('The device is not active.');
     const caps = jsonObject(device.capabilities) as Record<string, boolean>;
     const base = { organizationId: orgId, trigger: 'MANUAL' as const, branchId: device.branchId, requestedBy: actor.userId, correlationId: actor.requestId, priority: 7 };
+    let job: CreatedSyncJob;
     switch (action) {
       case 'sync-attendance':
         if (!caps.attendancePull) throw errorUnsupported('attendancePull');
-        return createSyncJob(deps, trx, { ...base, jobType: 'PULL_ATTENDANCE', scope: { deviceIds: [id] }, items: [{ deviceId: id, branchId: device.branchId }] });
+        job = await createSyncJob(deps, trx, { ...base, jobType: 'PULL_ATTENDANCE', scope: { deviceIds: [id] }, items: [{ deviceId: id, branchId: device.branchId }] });
+        break;
       case 'sync-employees': {
         if (!caps.employeePush) throw errorUnsupported('employeePush');
         const employees = await trx.selectFrom('employees').select('id').where('organizationId', '=', orgId).where('branchId', '=', device.branchId).where('employmentStatus', 'in', ['active', 'on_leave']).where('deletedAt', 'is', null).execute();
-        return createSyncJob(deps, trx, { ...base, jobType: 'PUSH_EMPLOYEES', scope: { deviceIds: [id], branchId: device.branchId }, items: employees.map((e) => ({ deviceId: id, employeeId: e.id, branchId: device.branchId })) });
+        job = await createSyncJob(deps, trx, { ...base, jobType: 'PUSH_EMPLOYEES', scope: { deviceIds: [id], branchId: device.branchId }, items: employees.map((e) => ({ deviceId: id, employeeId: e.id, branchId: device.branchId, operation: 'PUSH_EMPLOYEE' as const })) });
+        break;
       }
       case 'health-check':
-        return createSyncJob(deps, trx, { ...base, jobType: 'DEVICE_HEALTH_CHECK', scope: { deviceIds: [id] }, items: [{ deviceId: id, branchId: device.branchId }], priority: 3 });
+        job = await createSyncJob(deps, trx, { ...base, jobType: 'DEVICE_HEALTH_CHECK', scope: { deviceIds: [id] }, items: [{ deviceId: id, branchId: device.branchId }], priority: 3 });
+        break;
       case 'reconcile':
-        return createSyncJob(deps, trx, { ...base, jobType: 'RECONCILIATION', scope: { deviceIds: [id] }, items: [{ deviceId: id, branchId: device.branchId }], priority: 4 });
+        job = await createSyncJob(deps, trx, { ...base, jobType: 'RECONCILIATION', scope: { deviceIds: [id] }, items: [{ deviceId: id, branchId: device.branchId }], priority: 4 });
+        break;
     }
+    await audit(trx, actor, orgId, `device.action_${action.replace(/-/g, '_')}`, 'device', { entityId: id, branchId: device.branchId, newValue: { syncJobId: job.id, itemsTotal: job.itemsTotal } });
+    return job;
   });
 }
 function errorUnsupported(capability: string): AppError {
@@ -577,7 +583,8 @@ export async function claimPending(deps: ApiDeps, actor: Actor, orgId: string, p
     }, { pushTokenHash: token?.hash ?? null, secretsProvided: [], config, integrationType: 'DEVICE_PUSH' }); // it announced itself over a push protocol
   });
   await runSystem(deps.db, orgId, actor.requestId, async (trx) => {
-    await trx.updateTable('pendingDevices').set({ claimedDeviceId: created.id, organizationId: orgId }).where('id', '=', pendingId).execute();
+    // the claim is a one-shot: a concurrent claim that won the race keeps its link (the unique serial per provider on `devices` is the hard stop)
+    await trx.updateTable('pendingDevices').set({ claimedDeviceId: created.id, organizationId: orgId }).where('id', '=', pendingId).where('claimedDeviceId', 'is', null).execute();
     if (typeof info.firmwareVersion === 'string') await trx.updateTable('devices').set({ firmwareVersion: info.firmwareVersion }).where('id', '=', created.id).execute();
   });
   const device = await runUser(deps.db, actor, async (trx) => { await audit(trx, actor, orgId, 'device.claimed', 'device', { entityId: created.id, branchId: input.branchId, newValue: { pendingId, serialNumber: pending.serialNumber, providerKey: def.key } }); return loadDeviceRow(trx, orgId, created.id); });

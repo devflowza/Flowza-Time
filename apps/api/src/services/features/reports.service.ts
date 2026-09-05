@@ -1,7 +1,8 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import type { CreateReportRequest, ReportRequestDto } from '@flowza/contracts';
+import { REPORT_TYPE_DEFINITIONS, type CreateReportRequest, type PayrollPeriodActionInput, type PayrollPeriodDto, type ReportRequestDto, type ReportTypeDefinition } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
+import type { MembershipGrant } from '@flowza/domain';
 import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
@@ -10,7 +11,6 @@ import { enqueueJob } from '../../lib/jobs.js';
 import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
 import { loadSettings } from '../../lib/settings.js';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonObject, numberOrNull } from '../../lib/mappers.js';
-import { REPORT_TYPE_DEFINITIONS, type PayrollPeriodActionInput, type PayrollPeriodDto, type ReportTypeDefinition } from '../../routes/v1/features/dto.js';
 import { cancelQueueJob, systemStep } from './context.js';
 import { REPORT_COLUMNS, toReportDto, type ReportRow } from './mappers.js';
 import { dv } from './sql-helpers.js';
@@ -80,6 +80,7 @@ export async function listReports(deps: ApiDeps, actor: Actor, orgId: string, q:
   return runUser(deps.db, actor, async (trx) => {
     let base = reportQuery(trx, orgId);
     if (!hasPermission(grant, 'report.manage')) base = base.where('r.requestedBy', '=', actor.userId);
+    else if (!grant.allBranches) base = base.where((eb) => eb.or([eb('r.requestedBy', '=', actor.userId), eb('r.branchId', 'in', grant.branchIds.length ? grant.branchIds : ['00000000-0000-0000-0000-000000000000'])]));
     if (q.status) base = base.where('r.status', '=', q.status as never);
     if (q.reportType) base = base.where('r.reportType', '=', q.reportType);
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
@@ -88,19 +89,28 @@ export async function listReports(deps: ApiDeps, actor: Actor, orgId: string, q:
     return { data: rows.map(toReportDto), total };
   });
 }
-async function loadReport(trx: Trx, actor: Actor, orgId: string, id: string, canManage: boolean): Promise<ReportRow> {
+/**
+ * Own requests are always visible; `report.manage` widens that to other people's requests — but never beyond the caller's branch
+ * scope: an organisation-wide report (branch_id null) requested by someone else contains data of every branch, so a
+ * branch-scoped manager gets 404 for it exactly like for a report of another branch (which RLS already hides).
+ */
+async function loadReport(trx: Trx, actor: Actor, orgId: string, id: string, grant: MembershipGrant): Promise<ReportRow> {
   const row = (await reportQuery(trx, orgId).select(REPORT_COLUMNS).where('r.id', '=', id).executeTakeFirst()) as ReportRow | undefined;
-  if (!row || (!canManage && row.requestedBy !== actor.userId)) throw errors.notFound('Report request', id);
+  if (!row) throw errors.notFound('Report request', id);
+  if (row.requestedBy !== actor.userId) {
+    if (!hasPermission(grant, 'report.manage')) throw errors.notFound('Report request', id);
+    if (!grant.allBranches && (!row.branchId || !grant.branchIds.includes(row.branchId))) throw errors.notFound('Report request', id);
+  }
   return row;
 }
 export async function getReport(deps: ApiDeps, actor: Actor, orgId: string, id: string) {
   const grant = requirePermission(actor.principal, orgId, 'report.view');
-  return runUser(deps.db, actor, async (trx) => toReportDto(await loadReport(trx, actor, orgId, id, hasPermission(grant, 'report.manage'))));
+  return runUser(deps.db, actor, async (trx) => toReportDto(await loadReport(trx, actor, orgId, id, grant)));
 }
 export async function downloadReport(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<{ url: string; expiresInSeconds: number; fileName: string }> {
   const grant = requirePermission(actor.principal, orgId, 'report.view');
   return runUser(deps.db, actor, async (trx) => {
-    const r = await loadReport(trx, actor, orgId, id, hasPermission(grant, 'report.manage'));
+    const r = await loadReport(trx, actor, orgId, id, grant);
     if (r.status !== 'COMPLETED' || !r.filePath) throw errors.invalidState(`The report is ${r.status}; only completed reports can be downloaded.`);
     if (r.expiresAt && r.expiresAt < new Date()) throw errors.invalidState('The report file has expired; request it again.');
     const url = await deps.storage.signedUrl('reports', r.filePath, 300);
@@ -112,12 +122,12 @@ export async function downloadReport(deps: ApiDeps, actor: Actor, orgId: string,
 export async function cancelReport(deps: ApiDeps, actor: Actor, orgId: string, id: string) {
   const grant = requirePermission(actor.principal, orgId, 'report.view');
   return runUser(deps.db, actor, async (trx) => {
-    const r = await loadReport(trx, actor, orgId, id, hasPermission(grant, 'report.manage'));
+    const r = await loadReport(trx, actor, orgId, id, grant);
     if (r.status !== 'QUEUED') throw errors.invalidState(`Only queued reports can be cancelled (current: ${r.status}).`);
     if (r.queueJobId !== null) await cancelQueueJob(trx, String(r.queueJobId));
     await trx.updateTable('reportRequests').set({ status: 'CANCELLED', completedAt: new Date() }).where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'report.cancelled', 'report_request', { entityId: id, branchId: r.branchId });
-    return toReportDto(await loadReport(trx, actor, orgId, id, true));
+    return toReportDto(await loadReport(trx, actor, orgId, id, grant));
   });
 }
 
@@ -145,7 +155,8 @@ export async function listPayrollPeriods(deps: ApiDeps, actor: Actor, orgId: str
     const periods = payrollPeriodsFor(year, settings.attendance.payrollPeriod ?? 'calendar_month', settings.attendance.payrollCutoffDay ?? 25);
     const locks = await trx.selectFrom('attendancePeriodLocks').selectAll().where('organizationId', '=', orgId).where('unlockedAt', 'is', null).where('periodEnd', '>=', dv(periods[0]!.periodStart)).where('periodStart', '<=', dv(periods[periods.length - 1]!.periodEnd)).execute();
     let sq = trx.selectFrom('attendancePeriodSummaries').select(['periodStart', 'periodEnd', 'status', (eb) => eb.fn.countAll().as('n')]).where('organizationId', '=', orgId).where('periodEnd', '>=', dv(periods[0]!.periodStart)).where('periodStart', '<=', dv(periods[periods.length - 1]!.periodEnd));
-    if (q.branchId) sq = sq.where('branchId', '=', q.branchId);
+    const branchScope = branchFilter(grant, q.branchId);
+    if (branchScope) sq = sq.where('branchId', 'in', branchScope);
     const summaries = await sq.groupBy(['periodStart', 'periodEnd', 'status']).execute();
     return periods.map((p) => {
       const lock = locks.find((l) => isoDate(l.periodStart) <= p.periodStart && isoDate(l.periodEnd) >= p.periodEnd && (l.branchId === null || l.branchId === (q.branchId ?? l.branchId)));

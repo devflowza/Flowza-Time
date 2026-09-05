@@ -1,24 +1,22 @@
 import { sql } from 'kysely';
 import type { SyncJobType, SyncTrigger } from '@flowza/contracts';
-import type { Trx } from '@flowza/database';
-import { emitDomainEvent } from '@flowza/database';
+import { createSyncJob as createSyncJobShared, type Trx } from '@flowza/database';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
-import { withQueueRole } from './context.js';
+import { systemStep } from './context.js';
 
 /**
- * Sync job fan-out (docs/sync-engine.md "Two layers"). One user-facing `sync_jobs` row, one `sync_job_items` row per
- * (device[, employee]) and one queue job per item on the `sync` queue — all in the caller's transaction so a rollback
- * leaves nothing behind (AGENTS.md rule 5).
+ * Sync job fan-out for the API (docs/sync-engine.md "Two layers"). The implementation is the shared
+ * `createSyncJob` from `@flowza/database` (packages/database/src/sync-jobs.ts) — the same code the worker's scheduler and
+ * fan-out handlers use — so both sides produce identical `sync_jobs` / `sync_job_items` rows, dedupe keys and queue payloads:
+ *   { syncJobId, syncJobItemId, organizationId, deviceId, employeeId, operation, options }   (queue `sync`, jobType = operation)
  *
- * Queue payload contract (consumed by apps/worker/src/handlers/sync/*):
- *   { syncJobId, syncJobItemId, organizationId, deviceId, employeeId?, operation, options }
- *
- * NOTE for the integrator: the worker's own fan-out (scheduler ticks, PUSH_EMPLOYEES from employee changes) should
- * converge on this helper; it lives here (not in @flowza/database) only because package exports are frozen for this
- * work stream.
+ * The API adds request-level validation (empty scope, item cap) and runs the fan-out as a *system step inside the caller's
+ * transaction*: the service has already checked the permission and resolved devices/employees under the caller's RLS, and the
+ * shared code reads `jobs.queue` (dedupe collisions → SKIPPED items), which only `flowza_system` may do. Everything still
+ * commits or rolls back together with the caller's writes (AGENTS.md rule 5).
  */
-export interface SyncJobItemInput { deviceId: string; employeeId?: string | null; branchId?: string | null; operation?: SyncJobType }
+export interface SyncJobItemInput { deviceId: string; employeeId?: string | null; branchId?: string | null; operation?: SyncJobType; options?: Record<string, unknown> }
 export interface CreateSyncJobInput {
   organizationId: string;
   jobType: SyncJobType;
@@ -33,75 +31,30 @@ export interface CreateSyncJobInput {
   options?: Record<string, unknown>;
   maxAttempts?: number;
 }
-export interface CreatedSyncJob { id: string; itemsTotal: number; itemIds: string[]; queueJobIds: string[] }
+export interface CreatedSyncJob { id: string; itemsTotal: number; itemIds: string[]; queued: number; skipped: number }
 
 export const MAX_SYNC_ITEMS = 50_000;
-const ITEM_CHUNK = 500;
 
 export async function createSyncJob(deps: ApiDeps, trx: Trx, input: CreateSyncJobInput): Promise<CreatedSyncJob> {
   if (input.items.length === 0) throw errors.validation('No devices matched the requested scope.');
   if (input.items.length > MAX_SYNC_ITEMS) throw errors.validation(`A sync job may contain at most ${MAX_SYNC_ITEMS} items (requested ${input.items.length}).`, { max: MAX_SYNC_ITEMS, requested: input.items.length });
-  const priority = input.priority ?? 5;
   const options = input.options ?? {};
-  const job = await trx.insertInto('syncJobs').values({
+  const created = await systemStep(trx, input.organizationId, (t) => createSyncJobShared(t, deps.queue, {
     organizationId: input.organizationId,
     jobType: input.jobType,
     trigger: input.trigger,
     // options travel with the scope so `retry-failed` can replay them (fullResync, repair, removeStale)
-    scope: JSON.stringify({ ...input.scope, options }),
+    scope: { ...input.scope, options },
     branchId: input.branchId ?? null,
-    status: 'QUEUED',
-    priority,
-    itemsTotal: input.items.length,
-    itemsPending: input.items.length,
     requestedBy: input.requestedBy ?? null,
     correlationId: input.correlationId,
+    priority: input.priority ?? 5,
     parentJobId: input.parentJobId ?? null,
-    queuedAt: new Date(),
-  }).returning('id').executeTakeFirstOrThrow();
-
-  const itemIds: string[] = [];
-  const queueJobIds: string[] = [];
-  for (let i = 0; i < input.items.length; i += ITEM_CHUNK) {
-    const chunk = input.items.slice(i, i + ITEM_CHUNK);
-    const rows = await trx.insertInto('syncJobItems').values(chunk.map((it) => ({
-      organizationId: input.organizationId,
-      syncJobId: job.id,
-      deviceId: it.deviceId,
-      branchId: it.branchId ?? null,
-      employeeId: it.employeeId ?? null,
-      operation: it.operation ?? input.jobType,
-      status: 'QUEUED',
-      maxAttempts: input.maxAttempts ?? 6,
-    }))).returning(['id', 'deviceId', 'employeeId', 'operation']).execute();
-    // bulk enqueue: one queue job per item, inserted directly (jobs.enqueue is per-row; 50k round trips would be too slow)
-    const queued = await withQueueRole(trx, (t) => t.insertInto('jobs.queue').values(rows.map((r) => ({
-      queueName: 'sync',
-      jobType: r.operation,
-      organizationId: input.organizationId,
-      payload: JSON.stringify({ syncJobId: job.id, syncJobItemId: r.id, organizationId: input.organizationId, deviceId: r.deviceId, ...(r.employeeId ? { employeeId: r.employeeId } : {}), operation: r.operation, options }),
-      priority,
-      runAt: new Date(),
-      maxAttempts: input.maxAttempts ?? 6,
-      lockTimeoutSeconds: 600,
-      correlationId: input.correlationId,
-    }))).returning(['id', 'payload']).execute());
-    const byItem = new Map<string, string>();
-    for (const q of queued) {
-      const p = q.payload as { syncJobItemId?: string };
-      if (p.syncJobItemId) byItem.set(p.syncJobItemId, String(q.id));
-    }
-    for (const r of rows) {
-      const qid = byItem.get(r.id);
-      itemIds.push(r.id);
-      if (qid) {
-        queueJobIds.push(qid);
-        await trx.updateTable('syncJobItems').set({ queueJobId: qid }).where('id', '=', r.id).execute();
-      }
-    }
-  }
-  await emitDomainEvent(trx, { organizationId: input.organizationId, eventType: 'sync.queued', aggregateType: 'sync_job', aggregateId: job.id, payload: { jobType: input.jobType, itemsTotal: input.items.length, trigger: input.trigger }, actorUserId: input.requestedBy ?? null, requestId: input.correlationId });
-  return { id: job.id, itemsTotal: input.items.length, itemIds, queueJobIds };
+    items: input.items.map((it) => ({ deviceId: it.deviceId, employeeId: it.employeeId ?? null, branchId: it.branchId ?? null, operation: it.operation ?? input.jobType, ...(it.options ? { options: it.options } : {}) })),
+    options,
+    maxAttempts: input.maxAttempts ?? 6,
+  }));
+  return { id: created.syncJobId, itemsTotal: input.items.length, itemIds: created.itemIds, queued: created.queued, skipped: created.skipped };
 }
 
 /** Count helper used by list endpoints (bigint → number). */

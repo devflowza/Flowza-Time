@@ -1,16 +1,14 @@
 import { sql } from 'kysely';
 import type { z } from 'zod';
-import type { AttendanceRuleSetInput, HolidayInput, LeaveRecordInput, ShiftAssignmentInput, ShiftInput, ShiftPatternInput } from '@flowza/contracts';
-import type { holidayCalendarInputSchema, leaveTypeInputSchema } from '@flowza/contracts';
+import type { AttendanceRuleSetInput, HolidayInput, LeaveRecordInput, ShiftAssignmentInput, ShiftInput, ShiftPatternInput, UpdateLeaveRecordInput, holidayCalendarInputSchema, leaveTypeInputSchema } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
-import { resolveShift, resolveRuleSet, type EngineShiftAssignment, type EngineShiftPattern } from '@flowza/domain';
+import { resolveShift, resolveRuleSet, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
 import { type Actor, audit, diffObjects, runUser } from '../../lib/service.js';
 import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
 import { isoDate, isoDateOrNull, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject } from '../../lib/mappers.js';
-import type { UpdateLeaveRecordInput } from '../../routes/v1/features/dto.js';
 import { enqueueRecalculation, orgToday } from './recalc.js';
 import { dv, today } from './sql-helpers.js';
 
@@ -335,6 +333,16 @@ export async function listHolidays(deps: ApiDeps, actor: Actor, orgId: string, q
     return (await base.orderBy('date').limit(2000).execute()).map(toHolidayDto);
   });
 }
+/**
+ * Holidays apply organisation-wide when `branchIds` is null/empty. A branch-scoped caller may only create, change or delete
+ * holidays that are restricted to branches inside their scope — otherwise a branch manager with `holiday.manage` could declare
+ * (or remove) a day off for the whole organisation.
+ */
+function requireHolidayScope(grant: MembershipGrant, branchIds: string[] | null | undefined): void {
+  if (grant.allBranches) return;
+  if (!branchIds || branchIds.length === 0) throw errors.forbidden('Branch-scoped users can only manage holidays restricted to their branches.');
+  for (const b of branchIds) requireBranchAccess(grant, b);
+}
 async function holidayRecalc(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, h: { date: string; endDate: string | null; branchIds: string[] | null }, reason: string) {
   // holidays may apply to several branches; recompute per branch (or organisation-wide when unrestricted)
   if (h.branchIds && h.branchIds.length) { for (const b of h.branchIds) await recalcIfPast(deps, trx, actor, orgId, h.date, h.endDate, { branchId: b, reason }); }
@@ -342,7 +350,7 @@ async function holidayRecalc(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
 }
 export async function createHoliday(deps: ApiDeps, actor: Actor, orgId: string, input: HolidayInput): Promise<HolidayDto> {
   const grant = requirePermission(actor.principal, orgId, 'holiday.manage');
-  for (const b of input.branchIds ?? []) requireBranchAccess(grant, b);
+  requireHolidayScope(grant, input.branchIds ?? null);
   if (input.endDate && input.endDate < input.date) throw errors.validation('endDate must be on/after date.', { issues: [{ path: 'endDate', message: 'Before date' }] });
   return runUser(deps.db, actor, async (trx) => {
     if (!(await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('id', '=', input.calendarId).executeTakeFirst())) throw errors.validation('Holiday calendar not found.', { issues: [{ path: 'calendarId', message: 'Unknown calendar' }] });
@@ -354,10 +362,11 @@ export async function createHoliday(deps: ApiDeps, actor: Actor, orgId: string, 
 }
 export async function updateHoliday(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<HolidayInput>): Promise<HolidayDto> {
   const grant = requirePermission(actor.principal, orgId, 'holiday.manage');
-  for (const b of input.branchIds ?? []) requireBranchAccess(grant, b);
+  if (input.branchIds !== undefined) requireHolidayScope(grant, input.branchIds);
   return runUser(deps.db, actor, async (trx) => {
     const before = await trx.selectFrom('holidays').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!before) throw errors.notFound('Holiday', id);
+    requireHolidayScope(grant, before.branchIds);
     const patch: Record<string, unknown> = {}; for (const [k, v] of Object.entries(input)) if (v !== undefined) patch[k] = v;
     if (Object.keys(patch).length) await trx.updateTable('holidays').set(patch as never).where('id', '=', id).execute();
     const after = await trx.selectFrom('holidays').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
@@ -368,10 +377,11 @@ export async function updateHoliday(deps: ApiDeps, actor: Actor, orgId: string, 
   });
 }
 export async function deleteHoliday(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
-  requirePermission(actor.principal, orgId, 'holiday.manage');
+  const grant = requirePermission(actor.principal, orgId, 'holiday.manage');
   return runUser(deps.db, actor, async (trx) => {
     const h = await trx.selectFrom('holidays').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!h) throw errors.notFound('Holiday', id);
+    requireHolidayScope(grant, h.branchIds);
     await trx.deleteFrom('holidays').where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'holiday.deleted', 'holiday', { entityId: id, oldValue: toHolidayDto(h) });
     await holidayRecalc(deps, trx, actor, orgId, { date: isoDate(h.date), endDate: isoDateOrNull(h.endDate), branchIds: h.branchIds }, `holiday ${h.name} removed`);
@@ -558,6 +568,7 @@ export async function updateRuleSet(deps: ApiDeps, actor: Actor, orgId: string, 
     const before = await trx.selectFrom('attendanceRuleSets').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!before) throw errors.notFound('Rule set', id);
     requireBranchAccess(grant, before.branchId);
+    if (!grant.allBranches && !before.branchId) throw errors.forbidden('Branch-scoped users cannot change the organisation-wide rule set.');
     if (input.branchId !== undefined && input.branchId !== before.branchId) throw errors.validation('The branch of a rule set cannot change; create a new rule set instead.', { issues: [{ path: 'branchId', message: 'Immutable' }] });
     const values = ruleSetValues(input); delete values.branchId;
     if (Object.keys(values).length) await trx.updateTable('attendanceRuleSets').set({ ...values, version: sql`version + 1` } as never).where('id', '=', id).execute();
@@ -574,6 +585,7 @@ export async function deleteRuleSet(deps: ApiDeps, actor: Actor, orgId: string, 
     const r = await trx.selectFrom('attendanceRuleSets').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!r) throw errors.notFound('Rule set', id);
     requireBranchAccess(grant, r.branchId);
+    if (!grant.allBranches && !r.branchId) throw errors.forbidden('Branch-scoped users cannot delete the organisation-wide rule set.');
     await trx.deleteFrom('attendanceRuleSets').where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'attendance.rule_set_deleted', 'attendance_rule_set', { entityId: id, branchId: r.branchId, oldValue: toRuleSetDto(r as never) });
     const recalc = await recalcIfPast(deps, trx, actor, orgId, isoDate(r.effectiveFrom), isoDateOrNull(r.effectiveTo), { branchId: r.branchId, reason: `rule set ${r.name} deleted` });

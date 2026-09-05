@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from 'kysely';
 import { signMockWebhook } from '@flowza/device-providers';
 import { sha256Hex } from '@flowza/shared';
+import { dedupeHash } from '@flowza/database';
 import { createApiHarness, queueJobs, seedDevice, seedOrg, type ApiHarness, type OrgFixture } from '../../test/features-harness.js';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
@@ -54,6 +55,9 @@ describe('device push: mock protocol', () => {
     expect(rows[0]!.deviceLocalTime).toBe('2026-08-03T08:00:00');
     expect(rows[3]!.processingStatus).toBe('quarantined');
     expect(rows[0]!.dedupeHash).toBe(sha256Hex(`${deviceId}|1|1001|2026-08-03T04:00:00Z|fingerprint|in`));
+    // the worker (PULL_ATTENDANCE / WEBHOOK_EVENT) hashes the same punch with the shared @flowza/database `dedupeHash`; a vendor
+    // cloud re-offering it with an offset and milliseconds must collapse onto the row the device pushed
+    expect(rows[0]!.dedupeHash).toBe(dedupeHash(deviceId, 1, { deviceEmployeeId: '1001', punchedAt: '2026-08-03T08:00:00.000+04:00', verificationMethod: 'fingerprint', direction: 'in' }));
     expect((await queueJobs(h.admin, 'NORMALIZE_RAW')).some((j) => j.dedupeKey === `normalize:${f.orgId}`)).toBe(true);
     const device = await h.admin.selectFrom('devices').select(['connectionStatus', 'lastHeartbeatAt', 'config']).where('id', '=', deviceId).executeTakeFirstOrThrow();
     expect(device.connectionStatus).toBe('online');
@@ -200,8 +204,11 @@ describe('vendor webhooks', () => {
     expect(ok.status).toBe(200);
     expect(ok.body).toEqual({ received: 1 });
     const ev = await h.admin.selectFrom('providerWebhookEvents').selectAll().where('deviceId', '=', deviceId).executeTakeFirstOrThrow();
-    expect(ev).toMatchObject({ status: 'queued', eventId: 'evt-1', signatureValid: true, organizationId: f.orgId });
+    expect(ev).toMatchObject({ status: 'queued', eventId: 'evt-1', signatureValid: true, organizationId: f.orgId, payloadHash: sha256Hex(signed.rawBody) });
     expect(JSON.stringify(ev.headers)).not.toContain('must-not-persist');
+    // the signature was verified once, over the raw bytes; the row carries the verified *normalised* transactions (never the body)
+    expect(ev.payload).toMatchObject({ vendorDeviceId: 'WH1', eventType: 'attendance', rawBodySha256: sha256Hex(signed.rawBody), rawBodyBytes: Buffer.byteLength(signed.rawBody), transactions: [{ deviceEmployeeId: '1001', punchedAt: '2026-08-03T04:00:00Z', verificationMethod: 'face', direction: 'unknown' }] });
+    expect(JSON.stringify(ev.payload)).not.toContain('"rawBody":');
     const jobs = await queueJobs(h.admin, 'WEBHOOK_EVENT');
     expect(jobs).toHaveLength(1);
     expect(jobs[0]!.payload).toEqual({ organizationId: f.orgId, webhookEventId: ev.id, deviceId });

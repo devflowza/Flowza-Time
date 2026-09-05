@@ -3,6 +3,8 @@ import { REPORT_FORMATS, REPORT_STATUSES, REPORT_TYPES, type ReportType } from '
 import type { Permission } from '../permissions.js';
 import { isoDateSchema, paginationQuerySchema, uuidSchema } from '../common.js';
 
+/** Query for GET /report-types: `allowed` is computed against the caller's membership in `orgId`. */
+export const reportTypesQuerySchema = z.object({ orgId: uuidSchema.optional() });
 export const reportListQuerySchema = paginationQuerySchema.extend({ status: z.enum(REPORT_STATUSES).optional(), reportType: z.enum(REPORT_TYPES).optional() });
 
 export interface ReportTypeDefinition {

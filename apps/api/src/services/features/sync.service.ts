@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
-import type { SyncAttendanceRequest, SyncEmployeesRequest, SyncJobDto, SyncJobItemDto } from '@flowza/contracts';
-import { emitDomainEvent, type Trx } from '@flowza/database';
+import type { DeviceReconciliationDto, SyncAttendanceRequest, SyncDeviceScope, SyncEmployeesRequest, SyncJobAcceptedDto, SyncJobDto, SyncJobItemDto, SyncReconcileRequest, syncJobListQuerySchema } from '@flowza/contracts';
+import type { Trx } from '@flowza/database';
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
 import type { ApiDeps } from '../../deps.js';
@@ -9,8 +9,6 @@ import { type Actor, audit, runUser } from '../../lib/service.js';
 import type { MembershipGrant } from '@flowza/domain';
 import { pageOf, resolveSort, toCount } from '../../lib/pagination.js';
 import { jsonObject } from '../../lib/mappers.js';
-import type { syncJobListQuerySchema } from '@flowza/contracts';
-import type { DeviceReconciliationDto, SyncDeviceScope, SyncJobAcceptedDto, SyncReconcileRequest } from '../../routes/v1/features/dto.js';
 import { cancelQueueJob } from './context.js';
 import { createSyncJob, MAX_SYNC_ITEMS, type CreatedSyncJob } from './sync-jobs.js';
 import { SYNC_ITEM_COLUMNS, SYNC_JOB_COLUMNS, toSyncItemDto, toSyncJobDto, type SyncItemRow, type SyncJobRow } from './mappers.js';
@@ -34,7 +32,8 @@ async function resolveDevices(trx: Trx, orgId: string, grant: MembershipGrant, s
 }
 
 function accepted(job: CreatedSyncJob, deviceCount: number, message: string): SyncJobAcceptedDto {
-  return { jobId: job.id, status: 'QUEUED', message, itemsTotal: job.itemsTotal, deviceCount };
+  const allSkipped = job.queued === 0;
+  return { jobId: job.id, status: allSkipped ? 'SUCCESS' : 'QUEUED', message: allSkipped ? `${message} All ${job.skipped} item(s) were already in flight and are covered by the running job.` : message, itemsTotal: job.itemsTotal, itemsQueued: job.queued, itemsSkipped: job.skipped, deviceCount };
 }
 
 export async function syncAttendance(deps: ApiDeps, actor: Actor, orgId: string, input: SyncAttendanceRequest): Promise<SyncJobAcceptedDto> {
@@ -89,6 +88,7 @@ export async function healthCheck(deps: ApiDeps, actor: Actor, orgId: string, in
     const devices = await resolveDevices(trx, orgId, grant, input);
     if (!devices.length) throw errors.validation('No active devices matched the scope.');
     const job = await createSyncJob(deps, trx, { organizationId: orgId, jobType: 'DEVICE_HEALTH_CHECK', trigger: 'MANUAL', scope: { ...input }, branchId: input.branchId ?? null, requestedBy: actor.userId, correlationId: actor.requestId, priority: 3, items: devices.map((d) => ({ deviceId: d.id, branchId: d.branchId })) });
+    await audit(trx, actor, orgId, 'sync.health_check_requested', 'sync_job', { entityId: job.id, branchId: input.branchId ?? null, newValue: { deviceCount: devices.length } });
     return accepted(job, devices.length, `Health check queued for ${devices.length} device(s).`);
   });
 }
@@ -206,8 +206,8 @@ export async function retryFailed(deps: ApiDeps, actor: Actor, orgId: string, id
       organizationId: orgId, jobType: job.jobType, trigger: 'MANUAL', scope: { ...jsonObject(job.scope), retryOf: id }, branchId: job.branchId, requestedBy: actor.userId, correlationId: actor.requestId, priority: 7, parentJobId: id,
       items: retryable.map((i) => ({ deviceId: i.deviceId, employeeId: i.employeeId, branchId: i.branchId, operation: i.operation })), options: jsonObject(jsonObject(job.scope).options),
     });
+    // createSyncJob already emitted `sync.queued` for the new job; `retryOf` travels in its scope
     await audit(trx, actor, orgId, 'sync.retry_requested', 'sync_job', { entityId: created.id, branchId: job.branchId, newValue: { parentJobId: id, items: retryable.length } });
-    await emitDomainEvent(trx, { organizationId: orgId, eventType: 'sync.queued', aggregateType: 'sync_job', aggregateId: created.id, payload: { retryOf: id }, actorUserId: actor.userId, requestId: actor.requestId });
     return { ...accepted(created, new Set(retryable.map((i) => i.deviceId)).size, `Retry queued for ${retryable.length} item(s).`), parentJobId: id };
   });
 }

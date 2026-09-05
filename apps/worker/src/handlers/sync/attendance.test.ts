@@ -323,6 +323,14 @@ describe('WEBHOOK_EVENT', () => {
     expect(r2).toMatchObject({ status: 'failed' });
     expect((await h.tdb.adminDb.selectFrom('providerWebhookEvents').select('error').where('id', '=', bad.id).executeTakeFirstOrThrow()).error).toMatch(/no active device/);
   });
+
+  it('never re-parses or re-verifies a raw vendor body: a row without normalised transactions is marked failed', async () => {
+    // signature verification happens exactly once in the API over the original bytes; a stored/re-serialised body could not reproduce them
+    const raw = await h.tdb.adminDb.insertInto('providerWebhookEvents').values({ providerKey: 'mock', organizationId: ORG, deviceId: D.webhook, eventId: 'evt-raw', payloadHash: 'h3', status: 'queued', payload: JSON.stringify({ rawBody: '{"eventId":"evt-raw","deviceSerial":"HOOK-SERIAL-1","transactions":[]}' }), headers: JSON.stringify({ 'x-mock-signature': 'deadbeef' }) }).returning('id').executeTakeFirstOrThrow();
+    const ctx: JobContext = { job: { id: '901', queueName: 'sync', jobType: 'WEBHOOK_EVENT', organizationId: ORG, payload: { webhookEventId: raw.id, organizationId: ORG }, priority: 6, attempts: 1, maxAttempts: 3, correlationId: null, lockedBy: 't', runAt: clock }, log: h.deps.log, deps: h.deps, signal: new AbortController().signal };
+    expect(await webhookEvent(ctx)).toMatchObject({ status: 'failed' });
+    expect((await h.tdb.adminDb.selectFrom('providerWebhookEvents').select('error').where('id', '=', raw.id).executeTakeFirstOrThrow()).error).toMatch(/no normalised transactions/);
+  });
 });
 
 describe('circuit breaker', () => {

@@ -1,5 +1,7 @@
 /**
- * Sync job creation — shared by the scheduler ticks, the fan-out handlers and (by contract) the API.
+ * Sync job creation — the implementation lives in `@flowza/database` (`packages/database/src/sync-jobs.ts`) and is shared by
+ * the scheduler ticks, the fan-out handlers and the API (`apps/api/src/services/features/sync-jobs.ts`). This module keeps the
+ * worker-side contract documentation and re-exports the shared functions under their historical import path.
  *
  * QUEUE PAYLOAD CONTRACT (the API must follow this when it enqueues sync work itself; ADR-006, docs/sync-engine.md)
  * ----------------------------------------------------------------------------------------------------------------
@@ -20,9 +22,11 @@
  *     materialises a one-item sync job on first run. Prefer `createSyncJob()` so the job is visible before it runs.
  *   payload (PUSH_EMPLOYEES fan-out): { syncJobId?: uuid, employeeIds?: uuid[], deviceIds?: uuid[], scope?: { employeeIds?, deviceIds?, branchId? },
  *     trigger?: SyncTrigger, requestedBy?: uuid, options?: { force?: boolean } } — creates the sync job (when absent) and one PUSH_EMPLOYEE item per (employee, device).
- *   payload (WEBHOOK_EVENT): { webhookEventId: uuid, organizationId: uuid } — the provider_webhook_events row holds either the
- *     normalised form { vendorDeviceId, eventType?, transactions: RawTransaction[] } or the raw vendor body (+ headers) which the
- *     handler re-parses through provider.handleWebhook with the device's stored secrets.
+ *   payload (WEBHOOK_EVENT): { webhookEventId: uuid, organizationId: uuid, deviceId?: uuid } — the provider_webhook_events row
+ *     holds the NORMALISED form { vendorDeviceId, eventType?, transactions: RawTransaction[], rawBodySha256, rawBodyBytes,
+ *     verifiedAt } written by the API after it verified the vendor signature over the original raw bytes (exactly once; the
+ *     worker never re-verifies — a re-serialised body would not reproduce those bytes). Rows without `transactions` are marked
+ *     `failed`.
  *   dedupeKey:  PULL_ATTENDANCE → `pull:<deviceId>`; DEVICE_HEALTH_CHECK → `health:<deviceId>`; PUSH_EMPLOYEE →
  *               `push:<deviceId>:<employeeId>:<syncJobId>`; DELETE_EMPLOYEE → `delete:<deviceId>:<employeeId|deviceUserId>:<syncJobId>`;
  *               others → `<operation lower-case>:<deviceId>:<syncJobId>`; WEBHOOK_EVENT → `webhook:<webhookEventId>`.
@@ -30,115 +34,5 @@
  *   maxAttempts must equal sync_job_items.max_attempts (default 6) so the item reaches a terminal state before the queue dead-letters.
  *   Always enqueue in the SAME transaction as the sync_jobs/sync_job_items insert (JobQueue.enqueue(opts, trx)).
  */
-import { sql } from 'kysely';
-import type { SyncJobType, SyncTrigger } from '@flowza/contracts';
-import { emitDomainEvent, type JobQueue, type Trx } from '@flowza/database';
-import { newCorrelationId } from '@flowza/shared';
-
-export interface SyncJobItemInput { deviceId: string | null; employeeId?: string | null; operation: SyncJobType; branchId?: string | null; options?: Record<string, unknown> }
-
-export interface CreateSyncJobInput {
-  organizationId: string;
-  jobType: SyncJobType;
-  trigger: SyncTrigger;
-  scope?: Record<string, unknown>;
-  branchId?: string | null;
-  requestedBy?: string | null;
-  correlationId?: string;
-  parentJobId?: string | null;
-  items: SyncJobItemInput[];
-  priority?: number;
-  /** Default options merged into every item (item options win). */
-  options?: Record<string, unknown>;
-  maxAttempts?: number;
-  lockTimeoutSeconds?: number;
-}
-
-export interface CreateSyncJobResult { syncJobId: string; itemIds: string[]; queued: number; skipped: number }
-
-export function dedupeKeyFor(op: SyncJobType, deviceId: string | null, employeeId: string | null, syncJobId: string, options: Record<string, unknown> = {}): string {
-  switch (op) {
-    case 'PULL_ATTENDANCE': return `pull:${deviceId}`;
-    case 'DEVICE_HEALTH_CHECK': return `health:${deviceId}`;
-    case 'PUSH_EMPLOYEE': return `push:${deviceId}:${employeeId}:${syncJobId}`;
-    case 'DELETE_EMPLOYEE': return `delete:${deviceId}:${employeeId ?? String(options['deviceUserId'] ?? '')}:${syncJobId}`;
-    default: return `${op.toLowerCase()}:${deviceId}:${syncJobId}`;
-  }
-}
-
-export const DEFAULT_PRIORITY: Record<SyncTrigger, number> = { MANUAL: 7, SYSTEM: 5, WEBHOOK: 6, DEVICE_PUSH: 6, SCHEDULED: 4 };
-
-export interface AddItemsInput { organizationId: string; syncJobId: string; items: SyncJobItemInput[]; priority: number; correlationId: string; options?: Record<string, unknown>; maxAttempts?: number; lockTimeoutSeconds?: number; branchId?: string | null }
-export interface AddItemsResult { itemIds: string[]; queued: number; skipped: number }
-
-/**
- * Inserts items for an existing sync job and enqueues one queue job per item in the same transaction, then bumps
- * `items_total` / `items_pending`. An item whose dedupe key is already in flight (e.g. a manual pull while the scheduled pull
- * runs) is marked SKIPPED at once so the job can still complete; the running job's results cover it.
- */
-export async function addSyncJobItems(trx: Trx, queue: JobQueue, input: AddItemsInput): Promise<AddItemsResult> {
-  const now = new Date();
-  const maxAttempts = input.maxAttempts ?? 6;
-  const { syncJobId } = input;
-  const itemIds: string[] = [];
-  let queued = 0;
-  let skipped = 0;
-  if (input.items.length === 0) return { itemIds, queued, skipped };
-  const inserted = await trx.insertInto('syncJobItems').values(input.items.map((it) => ({
-    organizationId: input.organizationId, syncJobId, deviceId: it.deviceId, employeeId: it.employeeId ?? null, operation: it.operation, branchId: it.branchId ?? input.branchId ?? null, status: 'QUEUED' as const, maxAttempts,
-  }))).returning(['id', 'deviceId', 'employeeId', 'operation']).execute();
-  // one enqueue per item (app.enqueue_job is a per-row function), then ONE lookup + two batched updates instead of 3 statements per item
-  const queueJobByItem = new Map<string, string>();
-  for (const [i, row] of inserted.entries()) {
-    const options = { ...(input.options ?? {}), ...(input.items[i]?.options ?? {}) };
-    const dedupeKey = dedupeKeyFor(row.operation, row.deviceId, row.employeeId, syncJobId, options);
-    const payload = { syncJobId, syncJobItemId: row.id, organizationId: input.organizationId, deviceId: row.deviceId, employeeId: row.employeeId, operation: row.operation, options };
-    const queueJobId = await queue.enqueue({ queue: 'sync', jobType: row.operation, organizationId: input.organizationId, payload, priority: input.priority, dedupeKey, maxAttempts, lockTimeoutSeconds: input.lockTimeoutSeconds ?? (row.operation === 'PULL_ATTENDANCE' ? 900 : 600), correlationId: input.correlationId }, trx);
-    queueJobByItem.set(row.id, queueJobId);
-    itemIds.push(row.id);
-  }
-  // jobs.enqueue returns the in-flight job when the dedupe key collides; that job carries another item id
-  const owners = await sql<{ id: string; itemId: string | null }>`select id::text as id, payload->>'syncJobItemId' as "itemId" from jobs.queue where id = any(${sql.val([...queueJobByItem.values()])}::bigint[])`.execute(trx);
-  const ownerOf = new Map(owners.rows.map((r) => [r.id, r.itemId]));
-  const ownItems: Array<{ id: string; queueJobId: string }> = [];
-  const dupItems: Array<{ id: string; queueJobId: string }> = [];
-  for (const [itemId, queueJobId] of queueJobByItem) (ownerOf.get(queueJobId) === itemId ? ownItems : dupItems).push({ id: itemId, queueJobId });
-  if (ownItems.length > 0) {
-    await sql`update public.sync_job_items i set queue_job_id = v.queue_job_id
-              from (select unnest(${sql.val(ownItems.map((o) => o.id))}::uuid[]) as id, unnest(${sql.val(ownItems.map((o) => o.queueJobId))}::bigint[]) as queue_job_id) v
-              where i.id = v.id`.execute(trx);
-    queued = ownItems.length;
-  }
-  if (dupItems.length > 0) {
-    await sql`update public.sync_job_items i set status = 'SKIPPED', finished_at = ${now}, result = jsonb_build_object('skipped', 'duplicate_in_flight', 'queueJobId', v.queue_job_id::text)
-              from (select unnest(${sql.val(dupItems.map((o) => o.id))}::uuid[]) as id, unnest(${sql.val(dupItems.map((o) => o.queueJobId))}::bigint[]) as queue_job_id) v
-              where i.id = v.id`.execute(trx);
-    skipped = dupItems.length;
-  }
-  await trx.updateTable('syncJobs').set((eb) => ({
-    itemsTotal: eb('itemsTotal', '+', inserted.length), itemsPending: eb('itemsPending', '+', queued),
-    status: sql`case when status in ('PENDING', 'SUCCESS') and ${queued} > 0 then 'QUEUED'::public.sync_status else status end`, queuedAt: sql`coalesce(queued_at, ${now})`, finishedAt: queued > 0 ? null : sql`finished_at`,
-  })).where('id', '=', syncJobId).execute();
-  return { itemIds, queued, skipped };
-}
-
-/**
- * Inserts the user-facing sync job + its items and enqueues one queue job per item in the same transaction (§F.2).
- * Returns the job id for the `{ jobId, status: 'QUEUED' }` reply. A job without runnable items completes immediately.
- */
-export async function createSyncJob(trx: Trx, queue: JobQueue, input: CreateSyncJobInput): Promise<CreateSyncJobResult> {
-  const now = new Date();
-  const priority = input.priority ?? DEFAULT_PRIORITY[input.trigger];
-  const correlationId = input.correlationId ?? newCorrelationId('sync');
-  const job = await trx.insertInto('syncJobs').values({
-    organizationId: input.organizationId, jobType: input.jobType, trigger: input.trigger, scope: JSON.stringify(input.scope ?? {}), branchId: input.branchId ?? null,
-    status: 'PENDING', priority, requestedBy: input.requestedBy ?? null, correlationId, parentJobId: input.parentJobId ?? null,
-  }).returning('id').executeTakeFirstOrThrow();
-  const syncJobId = job.id;
-  const added = await addSyncJobItems(trx, queue, { organizationId: input.organizationId, syncJobId, items: input.items, priority, correlationId, options: input.options, maxAttempts: input.maxAttempts, lockTimeoutSeconds: input.lockTimeoutSeconds, branchId: input.branchId });
-  if (added.queued === 0) {
-    await trx.updateTable('syncJobs').set({ status: 'SUCCESS', queuedAt: now, finishedAt: now, summary: JSON.stringify({ items: input.items.length, skipped: added.skipped }) }).where('id', '=', syncJobId).execute();
-  }
-  await emitDomainEvent(trx, { organizationId: input.organizationId, eventType: 'sync.queued', aggregateType: 'sync_job', aggregateId: syncJobId, payload: { syncJobId, jobType: input.jobType, trigger: input.trigger, items: input.items.length }, actorUserId: input.requestedBy ?? null });
-  return { syncJobId, itemIds: added.itemIds, queued: added.queued, skipped: added.skipped };
-}
+export { addSyncJobItems, createSyncJob, dedupeKeyFor, DEFAULT_PRIORITY } from '@flowza/database';
+export type { AddItemsInput, AddItemsResult, CreateSyncJobInput, CreateSyncJobResult, SyncJobItemInput } from '@flowza/database';

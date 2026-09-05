@@ -137,9 +137,11 @@ async function resolveWebhookDevice(trx: Trx, organizationId: string, row: Webho
 }
 
 /**
- * WEBHOOK_EVENT: turns a stored `provider_webhook_events` row into raw transactions (source WEBHOOK). The API stores either the
- * normalised `{ vendorDeviceId, transactions }` form or the raw vendor body, which is re-parsed here through
- * `provider.handleWebhook` with the mapped device's stored secrets. Outcome is written back to the row (processed / failed).
+ * WEBHOOK_EVENT: turns a stored `provider_webhook_events` row into raw transactions (source WEBHOOK). The API verified the
+ * vendor signature over the original raw bytes when it received the call and stored the *normalised* result
+ * `{ vendorDeviceId, eventType?, transactions: RawTransaction[], rawBodySha256, rawBodyBytes, verifiedAt }`; the worker never
+ * re-verifies or re-parses a body (a re-serialised JSON body would not reproduce the signed bytes — docs/sync-engine.md).
+ * A row without `transactions` is marked `failed`. Outcome is written back to the row (processed / failed).
  */
 export async function webhookEvent(ctx: JobContext) {
   const { deps, log } = ctx;
@@ -157,25 +159,10 @@ export async function webhookEvent(ctx: JobContext) {
       if (!row) return { skipped: 'event_missing' };
       if (row.status === 'processed' || row.status === 'duplicate' || row.status === 'rejected') return { skipped: `already_${row.status}` };
       const body = row.payload as Record<string, unknown> | null;
-      let transactions: RawTransaction[] = [];
-      let vendorDeviceId: string | null = null;
-      let device: DeviceRow | null = null;
-      if (body && Array.isArray(body['transactions'])) {
-        vendorDeviceId = typeof body['vendorDeviceId'] === 'string' ? body['vendorDeviceId'] : typeof body['deviceSerial'] === 'string' ? body['deviceSerial'] : null;
-        transactions = (body['transactions'] as unknown[]).flatMap((t) => { const p = rawTransactionSchema.safeParse(t); return p.success ? [p.data] : []; });
-        device = await resolveWebhookDevice(trx, organizationId, row, vendorDeviceId);
-      } else {
-        const provider = deps.providers.tryGet(row.providerKey);
-        if (!provider?.handleWebhook) throw new WebhookFailure(`provider ${row.providerKey} cannot parse webhooks`, 'rejected');
-        device = await resolveWebhookDevice(trx, organizationId, row, null);
-        if (!device) throw new WebhookFailure('raw webhook payload requires device_id to look up the signing secret');
-        const secrets = (await deps.credentials.get(trx, { organizationId, deviceId: device.id })) ?? {};
-        const headers = row.headers && typeof row.headers === 'object' ? (row.headers as Record<string, string>) : {};
-        const parsed = await provider.handleWebhook({ headers, rawBody: JSON.stringify(row.payload), body: row.payload, query: {} }, secrets);
-        if (!parsed.accepted) throw new WebhookFailure(`webhook rejected by provider (${parsed.response.status})`, 'rejected');
-        transactions = parsed.transactions;
-        vendorDeviceId = parsed.vendorDeviceId ?? null;
-      }
+      if (!body || !Array.isArray(body['transactions'])) throw new WebhookFailure('webhook row carries no normalised transactions; the API verifies and normalises payloads at receipt and the worker never re-parses raw bodies');
+      const vendorDeviceId = typeof body['vendorDeviceId'] === 'string' ? body['vendorDeviceId'] : typeof body['deviceSerial'] === 'string' ? body['deviceSerial'] : null;
+      const transactions: RawTransaction[] = (body['transactions'] as unknown[]).flatMap((t) => { const p = rawTransactionSchema.safeParse(t); return p.success ? [p.data] : []; });
+      const device: DeviceRow | null = await resolveWebhookDevice(trx, organizationId, row, vendorDeviceId);
       if (!device) throw new WebhookFailure(`no active device matches vendor device ${vendorDeviceId ?? '(unknown)'}`);
       const ingested = await ingestRawTransactions(trx, { organizationId, device, source: 'WEBHOOK', syncJobId: null, transactions, now: deps.now(), queue: deps.queue });
       await trx.updateTable('providerWebhookEvents').set({ status: 'processed', deviceId: device.id, processedAt: deps.now(), error: null }).where('id', '=', row.id).execute();

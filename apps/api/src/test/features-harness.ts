@@ -7,10 +7,6 @@ import { createLogger } from '@flowza/shared';
 import type { ApiConfig } from '../config.js';
 import type { ApiDeps } from '../deps.js';
 import { createApp } from '../app.js';
-import { Hono } from 'hono';
-import type { AppEnv } from '../middleware/request-context.js';
-import { requireAuth } from '../middleware/auth.js';
-import { registerFeatureRoutes } from '../routes/v1/features/index.js';
 
 /**
  * HTTP-level test harness for the feature modules: real Postgres (shim + migrations), the real Hono app, a fake token
@@ -71,12 +67,8 @@ export async function createApiHarness(name: string, opts: { config?: Partial<Ap
     realtime: { async publish(channel, event, payload) { published.push({ channel, event, payload }); } },
     storage: { async signedUrl(bucket, path, expires = 300) { if (path.includes('missing')) return null; const u = `https://storage.test/${bucket}/${path}?exp=${expires}`; signedUrls.push(u); return u; } },
   };
+  // the feature routes are registered by createApp → registerV1Routes → registerFeatureRoutes (same auth/MFA chain as production)
   const app = createApp(deps);
-  // Until the integrator wires registerFeatureRoutes into routes/v1/index.ts, mount the feature routes here (same auth chain).
-  const features = new Hono<AppEnv>();
-  features.use('*', requireAuth({ verify: deps.verifyToken, db: deps.db }));
-  registerFeatureRoutes(features, deps);
-  app.route('/api/v1', features);
   const request: ApiHarness['request'] = async (method, path, o = {}) => {
     const headers: Record<string, string> = { ...(o.headers ?? {}) };
     if (o.token) headers.authorization = `Bearer user:${o.token}`;

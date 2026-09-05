@@ -1,18 +1,16 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { SYSTEM_ROLE_IDS, type AttendanceDailyRecordDto, type CreateCorrectionInput, type PeriodLockInput, type RecalculateInput } from '@flowza/contracts';
+import { SYSTEM_ROLE_IDS, type ApprovalRequestDto, type ApprovalStepDto, type ApprovalWorkflowInput, type AttendanceDailyRecordDto, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
-import type { approvalDecisionSchema, attendanceEventsQuerySchema } from '@flowza/contracts';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
 import { type Actor, audit, runUser } from '../../lib/service.js';
 import { enqueueJob } from '../../lib/jobs.js';
 import { likeContains, pageOf, prefixTsQuery, toCount } from '../../lib/pagination.js';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject } from '../../lib/mappers.js';
-import type { ApprovalRequestDto, ApprovalStepDto, ApprovalWorkflowInput, DailyAttendanceListQuery, MonthlyAttendanceListQuery, RawTransactionsQuery } from '../../routes/v1/features/dto.js';
 import { systemStep } from './context.js';
 import { enqueueRecalculation } from './recalc.js';
 import { DAILY_RECORD_COLUMNS, toDailyRecordDto, type DailyRecordRow } from './mappers.js';
@@ -513,6 +511,8 @@ export async function unlockPeriod(deps: ApiDeps, actor: Actor, orgId: string, i
     const lock = await trx.selectFrom('attendancePeriodLocks').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!lock) throw errors.notFound('Period lock', id);
     requireBranchAccess(grant, lock.branchId);
+    // symmetric with lockPeriod: an organisation-wide lock (branch_id null) is never a branch-scoped user's to release
+    if (!grant.allBranches && !lock.branchId) throw errors.forbidden('Branch-scoped users cannot unlock organisation-wide periods.');
     if (lock.unlockedAt) throw errors.invalidState('The period is already unlocked.');
     await trx.updateTable('attendancePeriodLocks').set({ unlockedAt: new Date(), unlockedBy: actor.userId, unlockReason: reason }).where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'attendance.period_unlocked', 'attendance_period_lock', { entityId: id, branchId: lock.branchId, oldValue: { periodStart: isoDate(lock.periodStart), periodEnd: isoDate(lock.periodEnd) }, reason });

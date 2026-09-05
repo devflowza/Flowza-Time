@@ -163,20 +163,31 @@ export async function handleDevicePush(deps: ApiDeps, device: PushDeviceRow, han
   });
 }
 
-/** OPERLOG-style user data from the device → device_employee_states (device-only rows when the user is unknown). */
+/**
+ * OPERLOG-style user data from the device → device_employee_states (device-only rows when the user is unknown). One batched
+ * upsert per 500 users instead of two statements per user: a 2 MB OPERLOG upload may list tens of thousands of users and runs
+ * inside the request transaction. Existing rows keep `desired`/`sync_status` and only gain an employee link when they had none.
+ * The device record never contains templates/PINs (the protocol handler strips them; only `hasPin` is kept).
+ */
 async function upsertDeviceEmployees(trx: Trx, device: PushDeviceRow, employees: DeviceEmployee[], now: Date): Promise<void> {
-  const ids = [...new Set(employees.map((e) => e.deviceUserId))];
+  const latest = new Map<string, DeviceEmployee>();
+  for (const e of employees) latest.set(e.deviceUserId, e); // the last line of a duplicate user id wins (device sends the current state)
+  const ids = [...latest.keys()];
   const known = await trx.selectFrom('employees').select(['id', 'deviceUserId', 'branchId']).where('organizationId', '=', device.organizationId).where('deviceUserId', 'in', ids).where('deletedAt', 'is', null).execute();
   const byDeviceUser = new Map(known.map((k) => [k.deviceUserId, k]));
-  for (const e of employees) {
-    const emp = byDeviceUser.get(e.deviceUserId);
-    const record = JSON.stringify({ name: e.name, cardNumber: e.cardNumber ?? null, privilege: e.privilege, enabled: e.enabled, hasPin: !!e.pin, extra: e.extra });
-    const existing = await trx.selectFrom('deviceEmployeeStates').select(['id', 'employeeId']).where('deviceId', '=', device.id).where('deviceUserId', '=', e.deviceUserId).executeTakeFirst();
-    if (existing) {
-      await trx.updateTable('deviceEmployeeStates').set({ deviceRecord: record, lastSyncAt: now, cardEnrolled: !!e.cardNumber, ...(existing.employeeId === null && emp ? { employeeId: emp.id, branchId: emp.branchId } : {}) }).where('id', '=', existing.id).execute();
-    } else {
-      await trx.insertInto('deviceEmployeeStates').values({ organizationId: device.organizationId, deviceId: device.id, deviceUserId: e.deviceUserId, employeeId: emp?.id ?? null, branchId: emp?.branchId ?? device.branchId, desired: !!emp, syncStatus: emp ? 'OUT_OF_SYNC' : 'OUT_OF_SYNC', deviceRecord: record, lastSyncAt: now, cardEnrolled: !!e.cardNumber }).onConflict((oc) => oc.columns(['deviceId', 'deviceUserId']).doUpdateSet({ deviceRecord: record, lastSyncAt: now })).execute();
-    }
+  const rows = ids.map((deviceUserId) => {
+    const e = latest.get(deviceUserId)!;
+    const emp = byDeviceUser.get(deviceUserId);
+    return {
+      organizationId: device.organizationId, deviceId: device.id, deviceUserId, employeeId: emp?.id ?? null, branchId: emp?.branchId ?? device.branchId, desired: !!emp, syncStatus: 'OUT_OF_SYNC' as const,
+      deviceRecord: JSON.stringify({ name: e.name, cardNumber: e.cardNumber ?? null, privilege: e.privilege, enabled: e.enabled, hasPin: !!e.pin, extra: e.extra }), lastSyncAt: now, cardEnrolled: !!e.cardNumber,
+    };
+  });
+  for (let i = 0; i < rows.length; i += 500) {
+    await trx.insertInto('deviceEmployeeStates').values(rows.slice(i, i + 500)).onConflict((oc) => oc.columns(['deviceId', 'deviceUserId']).doUpdateSet((eb) => ({
+      deviceRecord: eb.ref('excluded.deviceRecord'), lastSyncAt: eb.ref('excluded.lastSyncAt'), cardEnrolled: eb.ref('excluded.cardEnrolled'),
+      employeeId: sql`coalesce(device_employee_states.employee_id, excluded.employee_id)`, branchId: sql`coalesce(device_employee_states.branch_id, excluded.branch_id)`,
+    }))).execute();
   }
 }
 
@@ -226,15 +237,22 @@ export async function handleWebhook(deps: ApiDeps, device: PushDeviceRow, token:
   const orgId = device.organizationId;
   return withContext(deps.db, { kind: 'system', organizationId: orgId, requestId }, async (trx) => {
     const secrets = (await deps.credentials.get(trx, { organizationId: orgId, deviceId: device.id }).catch(() => null)) ?? {};
+    // The vendor signature is verified HERE, exactly once, over the original raw bytes (HMAC-over-raw-body providers). The row
+    // stores the *verified, normalised* result — never the raw body — so the worker ingests without re-parsing/re-verifying:
+    // a re-serialised body could not reproduce the signed bytes, and the raw body may carry biometric templates.
     const result = await provider.handleWebhook!(req, secrets);
     const payloadHash = sha256Hex(req.rawBody);
-    const base = { providerKey: device.providerKey, organizationId: orgId, deviceId: device.id, eventId: result.eventId, eventType: result.eventType ?? null, payloadHash, remoteIp: req.remoteIp ?? null, signatureValid: result.signatureValid, headers: JSON.stringify(Object.fromEntries(Object.entries(req.headers).filter(([k]) => !/authorization|cookie|token|secret|api-?key/i.test(k)))), payload: JSON.stringify({ rawBody: req.rawBody.length > 65_536 ? `${req.rawBody.slice(0, 65_536)}…` : req.rawBody, transactionCount: result.transactions.length }) };
+    const rawBodyBytes = Buffer.byteLength(req.rawBody, 'utf8');
+    const headers = JSON.stringify(Object.fromEntries(Object.entries(req.headers).filter(([k]) => !/authorization|cookie|token|secret|api-?key/i.test(k))));
+    const base = { providerKey: device.providerKey, organizationId: orgId, deviceId: device.id, eventId: result.eventId, eventType: result.eventType ?? null, payloadHash, remoteIp: req.remoteIp ?? null, signatureValid: result.signatureValid, headers };
     if (result.signatureValid === false || !result.accepted) {
-      await trx.insertInto('providerWebhookEvents').values({ ...base, status: 'rejected', error: typeof (result.response.body as { error?: unknown })?.error === 'string' ? String((result.response.body as { error: string }).error) : 'rejected' }).onConflict((oc) => oc.doNothing()).execute();
+      const error = typeof (result.response.body as { error?: unknown })?.error === 'string' ? String((result.response.body as { error: string }).error) : 'rejected';
+      await trx.insertInto('providerWebhookEvents').values({ ...base, status: 'rejected', error, payload: JSON.stringify({ rawBodySha256: payloadHash, rawBodyBytes, error }) }).onConflict((oc) => oc.doNothing()).execute();
       await trx.insertInto('deviceLogs').values({ organizationId: orgId, deviceId: device.id, level: 'warn', event: 'webhook.rejected', message: result.signatureValid === false ? 'invalid signature' : 'payload rejected', details: JSON.stringify({ status: result.response.status }) }).execute();
       return { status: result.signatureValid === false ? 401 : result.response.status, body: result.response.body ?? { error: 'rejected' }, headers: result.response.headers };
     }
-    const stored = await trx.insertInto('providerWebhookEvents').values({ ...base, status: 'queued' }).onConflict((oc) => oc.doNothing()).returning('id').executeTakeFirst();
+    const normalised = { vendorDeviceId: result.vendorDeviceId ?? null, eventType: result.eventType ?? null, transactions: result.transactions, rawBodySha256: payloadHash, rawBodyBytes, verifiedAt: new Date().toISOString(), ...(result.deviceStatus ? { deviceStatus: result.deviceStatus } : {}) };
+    const stored = await trx.insertInto('providerWebhookEvents').values({ ...base, status: 'queued', payload: JSON.stringify(normalised) }).onConflict((oc) => oc.doNothing()).returning('id').executeTakeFirst();
     if (!stored) {
       await trx.insertInto('deviceLogs').values({ organizationId: orgId, deviceId: device.id, level: 'info', event: 'webhook.duplicate', message: `replayed event ${result.eventId ?? payloadHash.slice(0, 12)} ignored` }).execute();
       return { status: 200, body: { received: 0, duplicate: true } };

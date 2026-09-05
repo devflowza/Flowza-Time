@@ -1,6 +1,5 @@
 import type { Hono } from 'hono';
-import { createReportRequestSchema } from '@flowza/contracts';
-import { z } from 'zod';
+import { createReportRequestSchema, payrollPeriodActionSchema, payrollPeriodsQuerySchema, payrollSummariesQuerySchema, reportListQuerySchema, reportTypesQuerySchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { idempotency } from '../../../middleware/idempotency.js';
@@ -8,11 +7,10 @@ import { ok, paginated } from '../../../lib/http.js';
 import { body, param, query } from '../../../lib/validate.js';
 import { actorOf } from '../../../lib/service.js';
 import * as reports from '../../../services/features/reports.service.js';
-import { payrollPeriodActionSchema, payrollPeriodsQuerySchema, payrollSummariesQuerySchema, reportListQuerySchema } from './dto.js';
 
 export function registerReportRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const idem = idempotency();
-  v1.get('/report-types', async (c) => ok(c, reports.listReportTypes(actorOf(c, deps), query(c, z.object({ orgId: z.uuid().optional() })).orgId)));
+  v1.get('/report-types', async (c) => ok(c, reports.listReportTypes(actorOf(c, deps), query(c, reportTypesQuerySchema).orgId)));
   v1.post('/orgs/:orgId/reports', idem, async (c) => c.json({ data: await reports.createReport(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, createReportRequestSchema)) }, 202));
   v1.get('/orgs/:orgId/reports', async (c) => { const q = query(c, reportListQuerySchema); const r = await reports.listReports(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.get('/orgs/:orgId/reports/:id', async (c) => ok(c, await reports.getReport(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));

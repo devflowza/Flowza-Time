@@ -28,6 +28,14 @@ export async function createTestDatabase(name = `flowza_test_${process.pid}`): P
       await Promise.all([api.db.destroy(), worker.db.destroy(), admin.db.destroy()]);
       const client = new pg.Client({ connectionString: base });
       await client.connect();
+      // pool.end() resolves when the client sockets are closing, not when the server has processed every Terminate message;
+      // `drop ... with (force)` racing that sends a FATAL "terminating connection due to administrator command" to a socket
+      // that no longer has an error listener (an unhandled error in vitest). Let the backends leave first (bounded wait).
+      for (let i = 0; i < 40; i += 1) {
+        const { rows } = await client.query<{ n: string }>('select count(*) as n from pg_stat_activity where datname = $1 and pid <> pg_backend_pid()', [name]);
+        if (Number(rows[0]?.n ?? 0) === 0) break;
+        await new Promise((r) => setTimeout(r, 50));
+      }
       await client.query(`drop database if exists "${name}" with (force)`);
       await client.end();
     },

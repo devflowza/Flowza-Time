@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { createDeviceSchema, testConnectionSchema, updateDeviceSchema } from '@flowza/contracts';
+import { claimPendingDeviceSchema, createDeviceSchema, deleteDeviceQuerySchema, deviceCommandQuerySchema, deviceCredentialsInputSchema, deviceEmployeeQuerySchema, deviceGroupInputSchema, deviceGroupMembersSchema, deviceListQuerySchema, deviceLogQuerySchema, deviceModelsQuerySchema, deviceProvidersQuerySchema, pendingDevicesQuerySchema, testConnectionSchema, updateDeviceSchema } from '@flowza/contracts';
 import { z } from 'zod';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
@@ -8,7 +8,6 @@ import { created, noContent, ok, paginated } from '../../../lib/http.js';
 import { body, param, query } from '../../../lib/validate.js';
 import { actorOf } from '../../../lib/service.js';
 import * as devices from '../../../services/features/devices.service.js';
-import { claimPendingDeviceSchema, deleteDeviceQuerySchema, deviceCommandQuerySchema, deviceCredentialsInputSchema, deviceEmployeeQuerySchema, deviceGroupInputSchema, deviceGroupMembersSchema, deviceListQuerySchema, deviceLogQuerySchema, deviceModelsQuerySchema, deviceProvidersQuerySchema, pendingDevicesQuerySchema } from './dto.js';
 
 const ACTIONS = ['sync-attendance', 'sync-employees', 'health-check', 'reconcile'] as const;
 
@@ -35,7 +34,7 @@ export function registerDeviceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.post('/orgs/:orgId/devices/:id/actions/:action', idem, async (c) => {
     const action = z.enum(ACTIONS).parse(param(c, 'action'));
     const job = await devices.runDeviceAction(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), action);
-    return c.json({ data: { jobId: job.id, status: 'QUEUED', message: `${action} queued.`, itemsTotal: job.itemsTotal } }, 202);
+    return c.json({ data: { jobId: job.id, status: job.queued === 0 ? 'SUCCESS' : 'QUEUED', message: job.queued === 0 ? `${action}: already in flight, covered by the running job.` : `${action} queued.`, itemsTotal: job.itemsTotal, itemsQueued: job.queued, itemsSkipped: job.skipped, deviceCount: 1 } }, 202);
   });
 
   // device groups

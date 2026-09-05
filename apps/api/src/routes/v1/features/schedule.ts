@@ -1,12 +1,11 @@
 import type { Hono } from 'hono';
-import { attendanceRuleSetInputSchema, holidayCalendarInputSchema, holidayInputSchema, leaveRecordInputSchema, leaveTypeInputSchema, shiftAssignmentInputSchema, shiftInputSchema, shiftPatternInputSchema } from '@flowza/contracts';
+import { attendanceRuleSetInputSchema, holidayCalendarInputSchema, holidayCalendarUpdateSchema, holidayInputSchema, holidayListQuerySchema, holidayUpdateSchema, leaveRecordInputSchema, leaveRecordListQuerySchema, leaveTypeInputSchema, leaveTypeUpdateSchema, ruleSetListQuerySchema, ruleSetUpdateSchema, shiftAssignmentInputSchema, shiftAssignmentListQuerySchema, shiftAssignmentUpdateSchema, shiftInputSchema, shiftListQuerySchema, shiftPatternInputSchema, shiftResolveQuerySchema, shiftUpdateSchema, updateLeaveRecordSchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { created, noContent, ok, paginated } from '../../../lib/http.js';
 import { body, param, query } from '../../../lib/validate.js';
 import { actorOf } from '../../../lib/service.js';
 import * as s from '../../../services/features/schedule.service.js';
-import { holidayCalendarUpdateSchema, holidayListQuerySchema, holidayUpdateSchema, leaveRecordListQuerySchema, leaveTypeUpdateSchema, ruleSetListQuerySchema, ruleSetUpdateSchema, shiftAssignmentListQuerySchema, shiftAssignmentUpdateSchema, shiftListQuerySchema, shiftResolveQuerySchema, shiftUpdateSchema, updateLeaveRecordSchema } from './dto.js';
 
 // PATCH bodies come from dto.ts `updateSchemaOf(...)`: Zod 4 `.partial()` would re-apply `.default()`s and reset untouched columns.
 

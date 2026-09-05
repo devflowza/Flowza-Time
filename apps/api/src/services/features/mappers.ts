@@ -1,6 +1,4 @@
-import type { DeviceDto, SyncJobDto, SyncJobItemDto, AttendanceDailyRecordDto, ReportRequestDto } from '@flowza/contracts';
-import { deviceCapabilitiesSchema } from '@flowza/contracts';
-import type { DeviceCommandDto, DeviceGroupDto, DeviceLogDto, PendingDeviceDto } from '../../routes/v1/features/dto.js';
+import { deviceCapabilitiesSchema, type AttendanceDailyRecordDto, type DeviceCommandDto, type DeviceDto, type DeviceGroupDto, type DeviceLogDto, type PendingDeviceDto, type ReportRequestDto, type SyncJobDto, type SyncJobItemDto } from '@flowza/contracts';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
 
 export const DEVICE_COLUMNS = [

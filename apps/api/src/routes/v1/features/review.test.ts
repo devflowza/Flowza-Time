@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { sql } from 'kysely';
 import { createApiHarness, queueJobs, seedDevice, seedOrg, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
 
 /**
@@ -112,6 +113,8 @@ describe('sync jobs: branch scope on organisation-wide jobs', () => {
     const cancel = await h.request('POST', `${base()}/sync/jobs/${job.body.data.jobId}/cancel`, { token: f.branchManagerB });
     expect(cancel.status).toBe(403);
     expect((await h.admin.selectFrom('syncJobs').select('status').where('id', '=', job.body.data.jobId).executeTakeFirstOrThrow()).status).toBe('QUEUED');
+    // simulate the worker: a FAILED item's queue job is no longer pending
+    for (const it of await h.admin.selectFrom('syncJobItems').select('queueJobId').where('syncJobId', '=', job.body.data.jobId).execute()) if (it.queueJobId) await sql`select jobs.cancel(${String(it.queueJobId)}::bigint)`.execute(h.admin);
     await h.admin.updateTable('syncJobItems').set({ status: 'FAILED' }).where('syncJobId', '=', job.body.data.jobId).execute();
     expect((await h.request('POST', `${base()}/sync/jobs/${job.body.data.jobId}/retry-failed`, { token: f.branchManagerB })).status).toBe(403);
     expect((await h.request('POST', `${base()}/sync/jobs/${job.body.data.jobId}/cancel`, { token: f.owner })).status).toBe(200);
@@ -120,6 +123,8 @@ describe('sync jobs: branch scope on organisation-wide jobs', () => {
   it('retry-failed replays the original options (fullResync) instead of dropping them', async () => {
     const job = await h.request('POST', `${base()}/sync/attendance`, { token: f.owner, body: { branchId: f.branchA, fullResync: true } });
     expect(job.status).toBe(202);
+    const items = await h.admin.selectFrom('syncJobItems').select('queueJobId').where('syncJobId', '=', job.body.data.jobId).execute();
+    for (const it of items) if (it.queueJobId) await sql`select jobs.cancel(${String(it.queueJobId)}::bigint)`.execute(h.admin); // failed items have no pending queue job
     await h.admin.updateTable('syncJobItems').set({ status: 'FAILED' }).where('syncJobId', '=', job.body.data.jobId).execute();
     await h.admin.updateTable('syncJobs').set({ status: 'FAILED' }).where('id', '=', job.body.data.jobId).execute();
     const retry = await h.request('POST', `${base()}/sync/jobs/${job.body.data.jobId}/retry-failed`, { token: f.owner });

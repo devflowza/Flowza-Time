@@ -1,5 +1,5 @@
 import type { Context, Hono } from 'hono';
-import { syncAttendanceRequestSchema, syncEmployeesRequestSchema, syncJobListQuerySchema } from '@flowza/contracts';
+import { reconciliationQuerySchema, syncAttendanceRequestSchema, syncEmployeesRequestSchema, syncHealthCheckRequestSchema, syncJobItemsQuerySchema, syncJobListQuerySchema, syncReconcileRequestSchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { idempotency } from '../../../middleware/idempotency.js';
@@ -7,7 +7,6 @@ import { ok, paginated } from '../../../lib/http.js';
 import { body, param, query } from '../../../lib/validate.js';
 import { actorOf } from '../../../lib/service.js';
 import * as sync from '../../../services/features/sync.service.js';
-import { reconciliationQuerySchema, syncHealthCheckRequestSchema, syncJobItemsQuerySchema, syncReconcileRequestSchema } from './dto.js';
 
 export function registerSyncRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const idem = idempotency();

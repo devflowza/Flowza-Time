@@ -21,12 +21,21 @@ export async function systemStep<T>(trx: Trx, organizationId: string, fn: (trx: 
   const prevRole = prev.role && prev.role !== 'none' ? prev.role : prev.user;
   await sql`set local role flowza_system`.execute(trx);
   await sql`select set_config('request.jwt.claims', ${JSON.stringify({ role: 'flowza_system', org_id: organizationId })}, true)`.execute(trx);
-  try {
-    return await fn(trx);
-  } finally {
+  const restore = async () => {
     await sql`set local role ${sql.raw(quoteIdent(prevRole))}`.execute(trx);
     await sql`select set_config('request.jwt.claims', ${prev.claims ?? ''}, true)`.execute(trx);
+  };
+  let result: T;
+  try {
+    result = await fn(trx);
+  } catch (err) {
+    // the transaction is aborted after a failed statement: the restore would fail with "current transaction is aborted" and
+    // MASK the real cause (a mapped constraint violation would surface as a 500). The caller rolls back anyway.
+    await restore().catch(() => undefined);
+    throw err;
   }
+  await restore();
+  return result;
 }
 
 /**
