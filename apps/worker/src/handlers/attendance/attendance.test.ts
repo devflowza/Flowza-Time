@@ -42,12 +42,13 @@ const recompute = (employeeId: string, date: string, extra: Record<string, unkno
 const record = (employeeId: string, date: string) => h.tdb.adminDb.selectFrom('attendanceDailyRecords').selectAll().where('employeeId', '=', employeeId).where('attendanceDate', '=', sql<Date>`${date}::date`).executeTakeFirstOrThrow();
 const iso = (d: Date | null) => (d ? d.toISOString() : null);
 
-async function insertRaw(rows: Array<{ deviceUserId: string; punchedAt: Date; direction?: 'in' | 'out' | 'break_out' | 'break_in' | 'unknown'; status?: 'pending' | 'held' | 'quarantined' }>) {
+async function insertRaw(rows: Array<{ deviceUserId: string; punchedAt: Date; direction?: 'in' | 'out' | 'break_out' | 'break_in' | 'unknown'; status?: 'pending' | 'held' | 'quarantined'; source?: 'POLL' | 'IMPORT' | 'MANUAL' }>) {
   await h.tdb.adminDb.insertInto('attendanceRawTransactions').values(rows.map((r) => ({
     organizationId: ORG, deviceId: DEVICE, branchId: BRANCH_A, providerKey: 'mock', providerTransactionId: `tx-${++rawSeq}`, deviceEmployeeId: r.deviceUserId, punchedAt: r.punchedAt,
-    verificationMethod: 'fingerprint', direction: r.direction ?? 'unknown', rawPayload: JSON.stringify({}), source: 'POLL', dedupeHash: `hash-${rawSeq}`, processingStatus: r.status ?? 'pending',
+    verificationMethod: 'fingerprint', direction: r.direction ?? 'unknown', rawPayload: JSON.stringify({}), source: r.source ?? 'POLL', dedupeHash: `hash-${rawSeq}`, processingStatus: r.status ?? 'pending',
   }))).execute();
 }
+const pendingJobs = (dedupeKey: string) => sql<{ payload: Record<string, unknown>; runAt: Date }>`select payload, run_at as "runAt" from jobs.queue where dedupe_key = ${dedupeKey} and status = 'pending' order by id`.execute(h.tdb.adminDb).then((r) => r.rows);
 
 beforeAll(async () => {
   h = await createHarness(`flowza_worker_att_${process.pid}`, defaultRegistry(), () => NOW);
@@ -251,6 +252,8 @@ describe('corrections', () => {
   it('ADD_PUNCH inserts a CORRECTION event, marks the correction APPLIED and enqueues an immediate recompute', async () => {
     const a = h.tdb.adminDb;
     const c = await a.insertInto('attendanceCorrections').values({ organizationId: ORG, employeeId: E1, branchId: BRANCH_A, attendanceDate: '2026-03-17', type: 'ADD_PUNCH', proposedPunchedAt: at('2026-03-17', '08:00'), proposedEventType: 'PUNCH_IN', reason: 'Forgot to punch in', requestedBy: OWNER, status: 'APPROVED' }).returning('id').executeTakeFirstOrThrow();
+    // a debounced NEW_EVENT recompute is already waiting for the same (employee, date) — it must not swallow the immediate correction recompute
+    await enqueueRecompute(h.deps.queue, { organizationId: ORG, employeeId: E1, date: '2026-03-17', reason: 'NEW_EVENT', runAt: new Date(NOW.getTime() + 30_000) });
     const res = await withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => applyApprovedCorrection(trx, c.id, { queue: h.deps.queue, appliedBy: OWNER, now: NOW }));
     expect(res).toMatchObject({ status: 'APPLIED', voidedEventId: null, recomputeDates: ['2026-03-17'] });
     const ev = await a.selectFrom('attendanceEvents').selectAll().where('id', '=', res.appliedEventId!).executeTakeFirstOrThrow();
