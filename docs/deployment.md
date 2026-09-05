@@ -38,6 +38,17 @@ VITE_SUPABASE_ANON_KEY=<publishable or anon key>
 VITE_API_URL=https://<api-host>          # defaults to http://localhost:4000
 ```
 
+`apps/web/.env.production` is committed and carries the defaults for the current project, so a build with no host
+configuration produces a working site rather than a blank page. Only publishable values belong in it: the Supabase URL
+and the anon/publishable key ship inside every browser bundle anyway and grant nothing on their own, because the `anon`
+role holds no table privileges and row-level security denies it every row. A service-role key, a database password or a
+provider credential must never go there.
+
+An environment variable set by the host or CI **overrides** the file (verified: an inline `VITE_SUPABASE_URL` wins over
+the committed value), so each environment can point at its own Supabase project. The corollary is that an environment
+which sets nothing inherits the committed project, so set the variables explicitly on any deployment that is not the
+default one — host variables are the better end state.
+
 `apps/web/public/_redirects` returns `index.html` for every path so React Router deep links survive a refresh, and
 `apps/web/public/_headers` sets `nosniff`, `DENY` framing, a referrer policy and immutable caching for the
 content-hashed assets. Both are copied verbatim into `dist` by Vite and are read by Cloudflare Pages and Netlify;
