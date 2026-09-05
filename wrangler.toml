@@ -1,0 +1,12 @@
+# Cloudflare Pages configuration for the `apps/web` static bundle.
+#
+# Cloudflare's default output directory is `dist` at the repository root, but this is a pnpm workspace and Vite emits
+# the bundle to `apps/web/dist`, so a deploy without this file ends in `Output directory "dist" not found` even though
+# the build itself succeeded. Declaring it here keeps the setting in version control instead of only in the dashboard,
+# where it silently drifts. When this file is present Cloudflare uses it in preference to the dashboard value.
+#
+# The build command stays a dashboard/CI setting; `pnpm build:web` is the cheapest one that produces this directory
+# (the repository-root `build` script also compiles the API and worker, which a static host does not need).
+name = "flowza-time-prd"
+pages_build_output_dir = "apps/web/dist"
+compatibility_date = "2026-09-05"

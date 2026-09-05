@@ -14,11 +14,16 @@
 The bundle is built inside a pnpm workspace, so the output is **`apps/web/dist`, not `dist`**. A host left on its
 default settings runs the build successfully and then fails with `Output directory "dist" not found`.
 
-| Setting | Value |
-|---|---|
-| Root directory | repository root (the build needs the workspace to resolve `@flowza/contracts`) |
-| Build command | `pnpm build:web` |
-| Output directory | `apps/web/dist` |
+| Setting | Value | Where it lives |
+|---|---|---|
+| Root directory | repository root (the build needs the workspace to resolve `@flowza/contracts`) | host settings |
+| Build command | `pnpm build:web` | host settings |
+| Output directory | `apps/web/dist` | `wrangler.toml` (`pages_build_output_dir`) on Cloudflare; host settings elsewhere |
+
+The repository-root `wrangler.toml` declares `pages_build_output_dir = "apps/web/dist"`, so a Cloudflare Pages project
+picks the right directory up from version control and takes it in preference to the dashboard value. Keep its `name`
+in sync with the Pages project (`flowza-time-prd` today); other hosts have no equivalent file, so set the output
+directory in their settings.
 
 `pnpm build:web` builds only the packages the web app depends on and then the bundle; the repository-root `build`
 script builds the API and worker too, which a static host does not need.
