@@ -69,14 +69,14 @@ export async function createOrganization(deps: ApiDeps, actor: Actor, input: Cre
   if (!isValidTimezone(input.timezone)) throw errors.validation('Invalid IANA timezone.', { issues: [{ path: 'timezone', message: 'Unknown timezone' }] });
   // Owner lookup and plan validation as the platform admin (read policies allow it)
   const { owner, plan } = await runUser(deps.db, actor, async (trx) => ({
-    owner: await trx.selectFrom('userProfiles').select(['id', 'email']).where('email', '=', input.ownerEmail).executeTakeFirst(),
+    owner: await trx.selectFrom('userProfiles').select(['id', 'email']).where(sql`lower(email::text)`, '=', input.ownerEmail.toLowerCase()).executeTakeFirst(),
     plan: await trx.selectFrom('plans').select(['id', 'key', 'limits']).where('key', '=', input.planKey).where('isActive', '=', true).executeTakeFirst(),
   }));
   if (!plan) throw errors.validation(`Unknown or inactive plan "${input.planKey}".`, { issues: [{ path: 'planKey', message: 'Unknown plan' }] });
   const orgId = newId();
   // Writes run in the system context of the new organisation (a platform admin holds no tenant permissions without a grant).
   return runSystem(deps.db, orgId, actor.requestId, async (trx) => {
-    const clash = await trx.selectFrom('organizations').select('id').where('companyCode', '=', input.companyCode).executeTakeFirst();
+    const clash = await trx.selectFrom('organizations').select('id').where(sql`lower(company_code::text)`, '=', input.companyCode.toLowerCase()).executeTakeFirst();
     if (clash) throw errors.conflict('An organisation with this company code already exists.');
     const org = await trx.insertInto('organizations').values({
       id: orgId, companyCode: input.companyCode, legalName: input.legalName, displayName: input.displayName, countryCode: input.countryCode, timezone: input.timezone, currencyCode: input.currencyCode,

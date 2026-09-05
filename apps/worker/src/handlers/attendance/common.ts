@@ -1,3 +1,4 @@
+import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
 import { isoDateSchema, uuidSchema } from '@flowza/contracts';
@@ -33,6 +34,9 @@ export function isoDate(v: Date | string): string {
   if (typeof v === 'string') return v.slice(0, 10);
   return DateTime.fromJSDate(v).toISODate() ?? v.toISOString().slice(0, 10);
 }
+
+/** `YYYY-MM-DD` → a `date` expression usable against Kysely's Date-typed date columns. */
+export const asDate = (date: string) => sql<Date>`${date}::date`;
 
 export function toDate(v: Date | string): Date {
   return v instanceof Date ? v : new Date(v);

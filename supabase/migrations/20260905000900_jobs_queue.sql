@@ -26,7 +26,9 @@ create table jobs.queue (
 create index jobs_queue_dequeue_idx on jobs.queue (queue_name, priority desc, run_at) where status = 'pending';
 create index jobs_queue_running_org_idx on jobs.queue (organization_id) where status = 'running';
 create index jobs_queue_running_lock_idx on jobs.queue (locked_at) where status = 'running';
-create unique index jobs_queue_dedupe_idx on jobs.queue (dedupe_key) where dedupe_key is not null and status in ('pending', 'running');
+-- Dedupe applies to PENDING jobs only: a job enqueued while the same key is RUNNING becomes the next run, so work that
+-- arrives mid-flight (e.g. a punch during a recompute) is never lost.
+create unique index jobs_queue_dedupe_idx on jobs.queue (dedupe_key) where dedupe_key is not null and status = 'pending';
 create index jobs_queue_org_idx on jobs.queue (organization_id, created_at desc);
 
 create table jobs.queue_archive (like jobs.queue including defaults);
@@ -43,7 +45,7 @@ create or replace function jobs.enqueue(
 declare v_id bigint;
 begin
   if p_dedupe_key is not null then
-    select id into v_id from jobs.queue where dedupe_key = p_dedupe_key and status in ('pending', 'running') limit 1;
+    select id into v_id from jobs.queue where dedupe_key = p_dedupe_key and status = 'pending' limit 1;
     if v_id is not null then return v_id; end if;
   end if;
   insert into jobs.queue (queue_name, job_type, organization_id, payload, priority, run_at, dedupe_key, max_attempts, lock_timeout_seconds, correlation_id)
@@ -51,7 +53,7 @@ begin
   on conflict do nothing
   returning id into v_id;
   if v_id is null and p_dedupe_key is not null then
-    select id into v_id from jobs.queue where dedupe_key = p_dedupe_key and status in ('pending', 'running') limit 1;
+    select id into v_id from jobs.queue where dedupe_key = p_dedupe_key and status = 'pending' limit 1;
   end if;
   return v_id;
 end $$;

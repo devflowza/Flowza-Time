@@ -3,7 +3,7 @@ import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, shiftBreakSchem
 import { addDays, dayOfWeek, errors, isValidTimezone, localDateTime } from '@flowza/shared';
 import type { Trx } from '@flowza/database';
 import { resolveRuleSet, resolveShift, type DailyCalculationInput, type EngineEvent, type EngineHoliday, type EngineLeave, type EngineRuleSet, type EngineShift, type EngineShiftAssignment, type EngineShiftPattern, type EmployeeScope } from '@flowza/domain';
-import { asArray, asObject, isoDate } from './common.js';
+import { asArray, asDate, asObject, isoDate } from './common.js';
 import { historyOn } from './normalize.js';
 
 export interface LoadedDailyInputs {
@@ -167,7 +167,7 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   if (calendarId) {
     const h = await trx.selectFrom('holidays').select(['id', 'name', 'isHalfDay'])
       .where('organizationId', '=', organizationId).where('calendarId', '=', calendarId)
-      .where('date', '<=', date)
+      .where('date', '<=', asDate(date))
       .where(sql<boolean>`coalesce(end_date, date) >= ${date}::date`)
       .where(sql<boolean>`(branch_ids is null or ${today.branchId}::uuid = any(branch_ids))`)
       .orderBy('isHalfDay', 'asc').orderBy('date', 'desc').orderBy('id', 'asc')
@@ -179,7 +179,7 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   const leaveRow = await trx.selectFrom('leaveRecords as l').innerJoin('leaveTypes as t', 't.id', 'l.leaveTypeId')
     .select(['l.id', 'l.isHalfDay', 'l.halfDayPart', 't.code', 't.isPaid'])
     .where('l.organizationId', '=', organizationId).where('l.employeeId', '=', employeeId).where('l.status', '=', 'APPROVED')
-    .where('l.startDate', '<=', date).where('l.endDate', '>=', date)
+    .where('l.startDate', '<=', asDate(date)).where('l.endDate', '>=', asDate(date))
     .orderBy('l.isHalfDay', 'asc').orderBy('l.createdAt', 'desc')
     .executeTakeFirst();
   const leave: EngineLeave | null = leaveRow ? { id: leaveRow.id, leaveTypeCode: String(leaveRow.code), isPaid: leaveRow.isPaid, isHalfDay: leaveRow.isHalfDay, halfDayPart: leaveRow.halfDayPart } : null;

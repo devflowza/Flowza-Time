@@ -3,7 +3,7 @@ import { bulkEmployeeActionSchema, createEmployeeSchema, deleteEmployeeSchema, e
 import type { AppEnv } from '../../middleware/request-context.js';
 import type { ApiDeps } from '../../deps.js';
 import { accepted, created, noContent, ok, paginated } from '../../lib/http.js';
-import { body, param, query } from '../../lib/validate.js';
+import { body, optionalBody, param, query } from '../../lib/validate.js';
 import { actorOf } from '../../lib/service.js';
 import { idempotency } from '../../middleware/idempotency.js';
 import * as emp from '../../services/employees.service.js';
@@ -23,7 +23,7 @@ export function registerEmployeeRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.get('/orgs/:orgId/employees/:id', async (c) => ok(c, await emp.getEmployee(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
   v1.patch('/orgs/:orgId/employees/:id', async (c) => ok(c, await emp.updateEmployee(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, updateEmployeeSchema))));
   v1.delete('/orgs/:orgId/employees/:id', async (c) => {
-    const input = c.req.header('content-length') && c.req.header('content-length') !== '0' ? await body(c, deleteEmployeeSchema) : {};
+    const input = await optionalBody(c, deleteEmployeeSchema);
     return ok(c, await emp.deleteEmployee(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), input));
   });
   v1.get('/orgs/:orgId/employees/:id/history', async (c) => ok(c, await emp.getEmployeeHistory(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));

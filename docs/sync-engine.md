@@ -40,7 +40,8 @@ One worker holds `pg_try_advisory_lock(7242026)` on a dedicated session connecti
 | reap-stale | 60 s | `REAP_STALE` |
 | ensure-partitions | 6 h | `ENSURE_PARTITIONS` (keeps 14 months ahead, alerts on default partitions) |
 | usage-metering / retention / prune-queue-archive | 1 h / 24 h / 24 h | platform maintenance |
-Ticks never do heavy work; missed ticks coalesce because every job is idempotent via `dedupe_key`.
+Ticks never do heavy work; missed ticks coalesce because every job is idempotent via `dedupe_key`. Dedupe applies to **pending**
+jobs only: enqueueing a key that is currently *running* creates the next run, so data arriving mid-flight is never lost.
 
 ## Connectivity modes and handlers
 | Mode | Trigger | Handler(s) |

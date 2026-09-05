@@ -91,6 +91,9 @@ function parseToken(token: string): { orgId: string; hash: string } | null {
 export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, input: InviteMemberInput): Promise<InvitationDto> {
   const grant = requirePermission(actor.principal, orgId, 'user.manage');
   for (const b of input.branchIds) requireBranchAccess(grant, b);
+  // The invitee's profile is not visible to the inviter under RLS until they are an org peer: resolve the id (nothing else)
+  // in the organisation's system context; all writes then happen in the caller's own transaction.
+  const profile = await runSystem(deps.db, orgId, actor.requestId, (trx) => trx.selectFrom('userProfiles').select('id').where(sql`lower(email::text)`, '=', input.email.toLowerCase()).executeTakeFirst());
   return runUser(deps.db, actor, async (trx) => {
     await assertRoleUsable(trx, orgId, input.roleId);
     await assertBranchesInOrg(trx, orgId, input.branchIds);
@@ -98,9 +101,9 @@ export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, i
     if (input.roleId === SYSTEM_ROLE_IDS.owner && actor.principal.memberships.find((m) => m.organizationId === orgId)?.roleKey !== 'owner') {
       throw errors.forbidden('Only an owner can invite another owner.');
     }
-    const existingMember = await trx.selectFrom('orgMemberships as m').innerJoin('userProfiles as u', 'u.id', 'm.userId').select(['m.id', 'm.status']).where('m.organizationId', '=', orgId).where('u.email', '=', input.email).executeTakeFirst();
+    const existingMember = await trx.selectFrom('orgMemberships as m').innerJoin('userProfiles as u', 'u.id', 'm.userId').select(['m.id', 'm.status']).where('m.organizationId', '=', orgId).where(sql`lower(u.email::text)`, '=', input.email.toLowerCase()).executeTakeFirst();
     if (existingMember && existingMember.status !== 'suspended') throw errors.conflict('This user is already a member of the organisation.');
-    const pending = await trx.selectFrom('invitations').select('id').where('organizationId', '=', orgId).where('email', '=', input.email).where('acceptedAt', 'is', null).where('expiresAt', '>', new Date()).executeTakeFirst();
+    const pending = await trx.selectFrom('invitations').select('id').where('organizationId', '=', orgId).where(sql`lower(email::text)`, '=', input.email.toLowerCase()).where('acceptedAt', 'is', null).where('expiresAt', '>', new Date()).executeTakeFirst();
     if (pending) throw errors.conflict('An invitation for this email is already pending.', { invitationId: pending.id });
 
     const { token, hash } = buildToken(orgId);
@@ -112,7 +115,6 @@ export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, i
 
     // Existing account (visible to us as an org peer or not at all): create the membership up-front as 'invited'.
     let membershipId: string | null = null;
-    const profile = await trx.selectFrom('userProfiles').select('id').where('email', '=', input.email).executeTakeFirst();
     if (profile) {
       const m = await trx.insertInto('orgMemberships').values({ organizationId: orgId, userId: profile.id, roleId: input.roleId, status: 'invited', allBranches: input.allBranches, employeeId: input.employeeId ?? null, invitedBy: actor.userId })
         .onConflict((oc) => oc.columns(['organizationId', 'userId']).doUpdateSet({ roleId: input.roleId, status: 'invited', allBranches: input.allBranches, employeeId: input.employeeId ?? null, invitedBy: actor.userId }))
@@ -144,7 +146,7 @@ export async function revokeInvitation(deps: ApiDeps, actor: Actor, orgId: strin
     if (inv.acceptedAt) throw errors.invalidState('The invitation was already accepted.');
     await trx.deleteFrom('invitations').where('id', '=', id).execute();
     await trx.deleteFrom('orgMemberships').where('organizationId', '=', orgId).where('status', '=', 'invited')
-      .where('userId', 'in', trx.selectFrom('userProfiles').select('id').where('email', '=', inv.email)).execute();
+      .where('userId', 'in', trx.selectFrom('userProfiles').select('id').where(sql`lower(email::text)`, '=', String(inv.email).toLowerCase())).execute();
     await audit(trx, actor, orgId, 'member.invitation_revoked', 'invitation', { entityId: id, oldValue: { email: inv.email } });
   });
 }

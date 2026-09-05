@@ -22,7 +22,8 @@ const emptyAgg = (): DayAgg => ({ present: 0, absent: 0, late: 0, onLeave: 0, ea
 async function attendanceAgg(trx: Trx, orgId: string, from: string, to: string, scope: string[] | null, groupBy: 'date' | 'branch' | null): Promise<Map<string, DayAgg>> {
   let q = trx.selectFrom('attendanceDailyRecords as r').where('r.organizationId', '=', orgId).where('r.attendanceDate', '>=', sql<Date>`${from}::date`).where('r.attendanceDate', '<=', sql<Date>`${to}::date`);
   if (scope) q = q.where('r.branchId', 'in', scope);
-  const keyExpr = groupBy === 'date' ? sql<string>`to_char(r.attendance_date, 'YYYY-MM-DD')` : groupBy === 'branch' ? sql<string>`r.branch_id::text` : sql<string>`'all'`;
+  // grouping by a constant is not allowed in GROUP BY; all rows share the organisation id, mapped to 'all' below
+  const keyExpr = groupBy === 'date' ? sql<string>`to_char(r.attendance_date, 'YYYY-MM-DD')` : groupBy === 'branch' ? sql<string>`r.branch_id::text` : sql<string>`r.organization_id::text`;
   const rows = await q.select([
     keyExpr.as('key'),
     sql<string>`count(*) filter (where r.status in ('PRESENT', 'HALF_DAY'))`.as('present'),
@@ -33,7 +34,7 @@ async function attendanceAgg(trx: Trx, orgId: string, from: string, to: string, 
     sql<string>`coalesce(sum(r.overtime_minutes), 0)`.as('overtimeMinutes'),
     sql<string>`count(*) filter (where r.status = 'MISSING_PUNCH')`.as('missingPunch'),
   ]).groupBy(keyExpr).execute();
-  return new Map(rows.map((r) => [r.key, { present: toCount(r.present), absent: toCount(r.absent), late: toCount(r.late), onLeave: toCount(r.onLeave), earlyDeparture: toCount(r.earlyDeparture), overtimeMinutes: toCount(r.overtimeMinutes), missingPunch: toCount(r.missingPunch) }]));
+  return new Map(rows.map((r) => [groupBy ? r.key : 'all', { present: toCount(r.present), absent: toCount(r.absent), late: toCount(r.late), onLeave: toCount(r.onLeave), earlyDeparture: toCount(r.earlyDeparture), overtimeMinutes: toCount(r.overtimeMinutes), missingPunch: toCount(r.missingPunch) }]));
 }
 
 async function deviceCounts(trx: Trx, orgId: string, scope: string[] | null): Promise<Map<string, { online: number; offline: number; unknown: number }>> {

@@ -1,3 +1,4 @@
+import { sql } from 'kysely';
 import { EMPLOYEE_IMPORT_COLUMNS, employeeImportRowSchema, type ImportJobDto, type ImportJobRowDto, type ImportRowError, type ImportUploadInput, type PaginationQuery } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import { errors, chunk } from '@flowza/shared';
@@ -70,11 +71,11 @@ export async function createImport(deps: ApiDeps, actor: Actor, orgId: string, i
     const deviceIds = [...new Set(objects.map((o) => o['deviceUserId']).filter((v): v is string => !!v))];
     const emails = [...new Set(objects.map((o) => o['email']).filter((v): v is string => !!v).map((v) => v.toLowerCase()))];
     const existingByNumber = new Map<string, { id: string; deletedAt: Date | null }>();
-    for (const part of chunk(numbers, 500)) for (const e of await trx.selectFrom('employees').select(['id', 'employeeNumber', 'deletedAt']).where('organizationId', '=', orgId).where('employeeNumber', 'in', part).execute()) existingByNumber.set(String(e.employeeNumber).toLowerCase(), e);
+    for (const part of chunk(numbers, 500)) for (const e of await trx.selectFrom('employees').select(['id', 'employeeNumber', 'deletedAt']).where('organizationId', '=', orgId).where(sql`lower(employee_number::text)`, 'in', part).execute()) existingByNumber.set(String(e.employeeNumber).toLowerCase(), e);
     const existingDeviceIds = new Set<string>();
     for (const part of chunk(deviceIds, 500)) for (const e of await trx.selectFrom('employees').select('deviceUserId').where('organizationId', '=', orgId).where('deviceUserId', 'in', part).execute()) existingDeviceIds.add(e.deviceUserId);
     const existingEmails = new Set<string>();
-    for (const part of chunk(emails, 500)) for (const e of await trx.selectFrom('employees').select('email').where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('email', 'in', part).execute()) if (e.email) existingEmails.add(String(e.email).toLowerCase());
+    for (const part of chunk(emails, 500)) for (const e of await trx.selectFrom('employees').select('email').where('organizationId', '=', orgId).where('deletedAt', 'is', null).where(sql`lower(email::text)`, 'in', part).execute()) if (e.email) existingEmails.add(String(e.email).toLowerCase());
 
     const seenNumbers = new Map<string, number>(); const seenDeviceIds = new Map<string, number>(); const seenEmails = new Map<string, number>();
     const fileNumbers = new Set(objects.map((o) => o['employeeNumber']?.toLowerCase()).filter(Boolean));
