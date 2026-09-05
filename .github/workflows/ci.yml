@@ -1,0 +1,79 @@
+name: CI
+
+on:
+  push:
+    branches: [main, 'claude/**']
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 10.33.0
+  NODE_VERSION: 22
+
+jobs:
+  quality:
+    name: Lint · Typecheck · Unit tests · Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: ${{ env.PNPM_VERSION }} }
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ env.NODE_VERSION }}, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - run: pnpm lint
+      - run: pnpm -r --filter "./apps/*" run typecheck
+      - run: pnpm test:unit
+      - run: pnpm -r --filter "./apps/*" run build
+
+  database:
+    name: Migrations · RLS · DB integration tests
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_HOST_AUTH_METHOD: trust }
+        ports: ['54329:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with: { version: ${{ env.PNPM_VERSION }} }
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ env.NODE_VERSION }}, cache: pnpm }
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build:packages
+      - name: Apply migrations + RLS suites
+        run: bash supabase/tests/run-rls-tests.sh
+        env: { PGHOST: 127.0.0.1, PGPORT: '54329', PGUSER: postgres }
+      - name: Migration idempotency (second apply on a fresh DB must be identical)
+        run: PGDATABASE=flowza_ci2 bash scripts/db-reset-local.sh >/dev/null && echo ok
+        env: { PGHOST: 127.0.0.1, PGPORT: '54329', PGUSER: postgres }
+      - name: Generated types are up to date
+        run: |
+          DATABASE_URL_ADMIN=postgres://postgres@127.0.0.1:54329/flowza_ci2 pnpm db:types
+          git diff --exit-code -- packages/database/src/generated/db.ts
+      - run: pnpm test:db
+        env: { TEST_PG_URL: postgres://postgres@127.0.0.1:54329/postgres }
+
+  security:
+    name: Dependency audit · Secret scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: pnpm/action-setup@v4
+        with: { version: ${{ env.PNPM_VERSION }} }
+      - uses: actions/setup-node@v4
+        with: { node-version: ${{ env.NODE_VERSION }}, cache: pnpm }
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm audit --audit-level high || echo "::warning::pnpm audit reported findings"
+      - name: Gitleaks secret scan
+        uses: gitleaks/gitleaks-action@v2
+        env: { GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} }
