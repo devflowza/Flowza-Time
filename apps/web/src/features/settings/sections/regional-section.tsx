@@ -2,17 +2,17 @@ import { useForm, Controller } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 import { useTranslation } from 'react-i18next';
-import { updateOrganizationSchema, type OrganizationDto, type OrganizationSettings } from '@flowza/contracts';
+import { organizationSettingsSchema, updateOrganizationSchema, type OrganizationDto, type OrganizationSettings } from '@flowza/contracts';
 import { FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
 import { useCan } from '@/features/me/use-me';
 import { TimezoneSelect } from '@/features/organization/components/timezone-select';
 import { WeeklyOffToggles } from '@/features/organization/components/weekly-off-toggles';
 import { toNumber } from '@/features/organization/form-utils';
-import { settingsGroupSchema, useOrganization, useSettingsGroup, useSettingsMutations, type UpdateOrganizationInput } from '../api';
+import { useOrganization, useSettingsGroup, useSettingsMutations, type UpdateOrganizationInput } from '../api';
 import { SectionError, SectionSkeleton, SettingsSection } from '../components/settings-section';
 
-const generalSchema = settingsGroupSchema('general');
+const generalSchema = organizationSettingsSchema.shape.general.unwrap();
 type GeneralValues = z.input<typeof generalSchema>;
 type GeneralOutput = z.output<typeof generalSchema>;
 type OrgOutput = z.output<typeof updateOrganizationSchema>;
@@ -65,7 +65,7 @@ function FormatsForm({ initial }: { initial: OrganizationSettings['general'] }) 
   const readOnly = !useCan()('organization.manage');
   const { putGroup } = useSettingsMutations();
   const form = useForm<GeneralValues, unknown, GeneralOutput>({ resolver: zodResolver(generalSchema), defaultValues: initial, disabled: readOnly });
-  const { register, control, formState: { errors, isSubmitting, isDirty } } = form;
+  const { control, formState: { errors, isSubmitting, isDirty } } = form;
   const onSubmit = form.handleSubmit(async (values) => { try { await putGroup.mutateAsync({ group: 'general', value: values }); toast.success(t('saved')); form.reset(values); } catch (e) { toastError(e); } });
   return (
     <SettingsSection title={t('regional.formats')} description={t('regional.formatsHint')} onSubmit={onSubmit} saving={isSubmitting} dirty={isDirty} readOnly={readOnly}>
@@ -91,7 +91,6 @@ function FormatsForm({ initial }: { initial: OrganizationSettings['general'] }) 
           )} />
         </FormField>
       </div>
-      <input type="hidden" {...register('dateFormat')} />
     </SettingsSection>
   );
 }

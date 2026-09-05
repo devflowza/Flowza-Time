@@ -24,5 +24,14 @@ export default defineConfig({
       },
     },
   },
-  test: { environment: 'jsdom', globals: true, setupFiles: ['./src/test/setup.ts'], include: ['src/**/*.test.{ts,tsx}'], passWithNoTests: true },
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./src/test/setup.ts'],
+    include: ['src/**/*.test.{ts,tsx}'],
+    passWithNoTests: true,
+    testTimeout: 20_000,
+    // component tests import the app shell, which validates these at module load; the values are inert (no network in jsdom)
+    env: { VITE_SUPABASE_URL: 'http://127.0.0.1:54321', VITE_SUPABASE_ANON_KEY: 'test-anon-key', VITE_API_URL: 'http://localhost:4000' },
+  },
 });

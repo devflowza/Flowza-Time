@@ -1,0 +1,12 @@
+{
+  "title": "Search",
+  "subtitle": "Find employees, devices, branches and departments.",
+  "placeholder": "Search by name, number, email, serial…",
+  "hint": "Type at least one character. Use ↑ ↓ to move and Enter to open.",
+  "searching": "Searching…",
+  "empty": "Nothing found for “{{q}}”",
+  "count": "{{count}} results for “{{q}}”",
+  "openFull": "Open full results for “{{q}}”",
+  "shortcutHint": "Tip: press Ctrl+K (⌘K on Mac) anywhere to search.",
+  "groups": { "employees": "Employees", "devices": "Devices", "branches": "Branches", "departments": "Departments" }
+}

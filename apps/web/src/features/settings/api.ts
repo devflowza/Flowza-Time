@@ -1,13 +1,12 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { z } from 'zod';
-import { organizationSettingsSchema, type OrganizationDto, type OrganizationSettings, type SettingsGroup, type updateOrganizationSchema } from '@flowza/contracts';
+import type { OrganizationDto, OrganizationSettings, SettingsGroup, updateOrganizationSchema } from '@flowza/contracts';
 import { api, type Envelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { meQueryKey, useOrgId } from '@/features/me/use-me';
 
 export type UpdateOrganizationInput = z.input<typeof updateOrganizationSchema>;
-/** The API validates PUT /settings/:group with `organizationSettingsSchema.shape[group]` — the same object schema (minus the default wrapper) drives the form. */
-export const settingsGroupSchema = <G extends SettingsGroup>(group: G) => organizationSettingsSchema.shape[group].unwrap();
+/** The API validates PUT /settings/:group with `organizationSettingsSchema.shape[group]`; forms use the same object schema via `.unwrap()` (drops the default wrapper). */
 
 export function useOrganization() {
   const orgId = useOrgId();
@@ -22,7 +21,7 @@ export function useSettingsMutations() {
   const qc = useQueryClient();
   const invalidate = () => { void qc.invalidateQueries({ queryKey: qk.org(orgId) }); void qc.invalidateQueries({ queryKey: meQueryKey }); };
   const updateOrganization = useMutation({ mutationFn: async (input: UpdateOrganizationInput) => (await api.patch<Envelope<OrganizationDto>>(`/orgs/${orgId}`, input)).data, onSuccess: invalidate });
-  const putGroup = useMutation({ mutationFn: async <G extends SettingsGroup>({ group, value }: { group: G; value: OrganizationSettings[G] }) => (await api.put<Envelope<OrganizationSettings[G]>>(`/orgs/${orgId}/settings/${group}`, value)).data, onSuccess: invalidate });
+  const putGroup = useMutation({ mutationFn: async ({ group, value }: { group: SettingsGroup; value: OrganizationSettings[SettingsGroup] }) => (await api.put<Envelope<OrganizationSettings[SettingsGroup]>>(`/orgs/${orgId}/settings/${group}`, value)).data, onSuccess: invalidate });
   return { updateOrganization, putGroup };
 }
 
