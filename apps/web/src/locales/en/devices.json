@@ -1,0 +1,108 @@
+{
+  "title": "Devices",
+  "list": {
+    "subtitle": "{{count}} devices", "register": "Register device", "searchPlaceholder": "Search name, code, serial…",
+    "allStatuses": "All statuses", "allConnections": "All connections", "allProviders": "All providers", "tagPlaceholder": "Tag…",
+    "clearSelection": "Clear selection", "empty": "No devices yet", "emptyHint": "Register your first attendance terminal or connect a vendor cloud account. Punches start flowing as soon as the device is online."
+  },
+  "summary": { "online": "Online", "offline": "Offline", "degraded": "Degraded", "unknown": "Unknown" },
+  "columns": { "model": "Manufacturer / model", "connection": "Connection", "lastAttendanceSync": "Last attendance sync", "lastEmployeeSync": "Last employee sync", "employees": "Employees", "provider": "Provider" },
+  "connection": { "unknown": "Unknown", "online": "Online", "offline": "Offline", "degraded": "Degraded", "error": "Error", "vendor_degraded": "Vendor degraded" },
+  "deviceStatus": { "active": "Active", "disabled": "Disabled", "decommissioned": "Decommissioned" },
+  "providerStatus": { "available": "Available", "beta": "Beta", "placeholder": "Coming soon", "deprecated": "Deprecated" },
+  "verification": { "VERIFIED": "Verified", "REPORTED": "Reported working", "UNVERIFIED": "Unverified" },
+  "integration": { "VENDOR_CLOUD_PULL": "Vendor cloud", "VENDOR_WEBHOOK": "Vendor webhook", "DEVICE_PUSH": "Device push", "ON_PREM_SERVER_API": "On-premise server", "LAN": "LAN" },
+  "syncStatus": { "PENDING": "Pending", "IN_SYNC": "In sync", "OUT_OF_SYNC": "Out of sync", "FAILED": "Failed", "OFFLINE": "Device offline", "UNSUPPORTED": "Unsupported", "REMOVING": "Removing", "REMOVED": "Removed" },
+  "capabilities": {
+    "none": "No capabilities declared", "attendancePull": "Attendance pull", "attendancePush": "Attendance push", "employeePush": "Employee push", "employeePull": "Employee pull",
+    "employeeDelete": "Employee delete", "fingerprint": "Fingerprint", "face": "Face", "card": "Card", "pin": "PIN", "deviceStatus": "Device status",
+    "remoteRestart": "Remote restart", "webhooks": "Webhooks", "devicePush": "Device push", "biometricTemplatePush": "Template push"
+  },
+  "fields": {
+    "codeHint": "Unique within the organisation; letters, digits, - _ . (max 32)", "selectBranch": "Select a branch…", "timezoneHint": "Defaults to the branch timezone; punches are interpreted in this zone.",
+    "serialNumber": "Serial number", "serialPushHint": "Printed on the terminal; the device identifies itself with it when it contacts FlowZa.", "manufacturer": "Manufacturer", "modelName": "Model",
+    "tags": "Tags", "tagsHint": "Free labels for filtering (e.g. gate, hq, floor-2).", "notes": "Notes", "provider": "Provider", "integration": "Integration",
+    "offlineThreshold": "Offline threshold", "offlineThresholdHint": "Minutes without a heartbeat before the device is reported offline.", "endpointUrl": "Endpoint URL",
+    "autoSync": "Automatic attendance sync", "autoSyncHint": "Pull attendance on a schedule (pull-capable providers only).", "syncInterval": "Sync interval", "syncIntervalHint": "Minutes between automatic pulls (1–1440).",
+    "status": "Device status"
+  },
+  "actions": {
+    "syncAttendance": "Sync attendance", "syncEmployees": "Sync employees", "healthCheck": "Health check", "assignGroup": "Assign to group", "restart": "Restart",
+    "restartUnavailable": "Remote restart is declared by the provider but not exposed by the API yet.", "testConnection": "Test connection", "rotateToken": "Rotate push token",
+    "edit": "Edit", "disable": "Disable", "enable": "Enable", "decommission": "Decommission", "more": "More actions"
+  },
+  "bulk": {
+    "queue": "Queue",
+    "sync-attendance": { "title": "Sync attendance on {{count}} devices", "hint": "A pull job is queued for every selected pull-capable device. Devices without attendance pull are skipped." },
+    "sync-employees": { "title": "Push employees to {{count}} devices", "hint": "Every active employee of the device's branch is pushed. Devices without employee push are skipped." },
+    "health-check": { "title": "Health check {{count}} devices", "hint": "Contacts each device and updates its connection status." },
+    "assign-group": { "title": "Assign {{count}} devices to a group", "hint": "Branch-bound groups only accept devices of that branch.", "apply": "Assign" }
+  },
+  "groups": {
+    "title": "Device groups", "subtitle": "Group terminals to sync, filter and report on them together.", "group": "Group", "select": "Select a group…", "none": "No groups yet",
+    "add": "New group", "edit": "Edit group", "delete": "Delete group", "deleteHint": "Devices stay registered; only the grouping is removed.", "empty": "No device groups yet",
+    "emptyHint": "Create a group (e.g. \"Head office gates\") and add devices to it to sync and filter them together.", "members": "{{count}} devices", "noMembers": "No devices in this group yet",
+    "addMember": "Add device", "removeMember": "Remove from group", "branchBound": "Branch-bound", "anyBranch": "Any branch", "color": "Colour", "description": "Description",
+    "created": "Group created", "updated": "Group saved", "deleted": "Group deleted", "membersUpdated": "Members updated", "selectDevice": "Select a device…", "allDevicesAdded": "Every device is already in this group.",
+    "viewDevices": "View devices"
+  },
+  "pending": {
+    "title": "Devices waiting to be claimed", "hint": "These terminals contacted FlowZa with an unknown serial number. Claim them to start receiving punches.", "none": "No unclaimed devices have contacted FlowZa.",
+    "searchSerial": "Look up a serial number…", "loadError": "Could not load pending devices.", "noMatch": "No pending device matches that serial.", "lastSeen": "Seen {{when}}",
+    "claim": "Claim", "claimTitle": "Claim device", "claimHint": "Serial {{serial}} ({{provider}}) will be registered as a push device in the selected branch.", "claimCode": "Claim code", "claimed": "{{name}} claimed"
+  },
+  "wizard": {
+    "title": "Register device", "subtitle": "Connect a terminal or vendor cloud account in a few steps.", "steps": "Registration steps", "invalid": "Please complete the required fields before registering.",
+    "created": "{{name}} registered", "testQueued": "A connection test has been queued for the new device.", "register": "Register device", "docs": "Documentation",
+    "step": { "provider": "Provider", "model": "Model", "details": "Details", "connection": "Connection", "test": "Test", "review": "Review" },
+    "stepHint": {
+      "provider": "Choose the manufacturer and integration you want to connect.", "model": "Optionally pick the exact model to preload its capabilities.", "details": "Identify the device and place it in a branch.",
+      "connection": "Enter the connection settings the provider needs.", "test": "Check that FlowZa can reach the device before saving.", "review": "Confirm the details and register the device."
+    },
+    "placeholderNote": "Integration not implemented yet — this provider cannot be registered.", "modelHint": "Picking a model preloads the verified capability matrix. You can skip this step.",
+    "noModel": "No specific model", "noModelHint": "Use the provider's default capabilities.", "noConfig": "This provider needs no connection settings.",
+    "pushTitle": "This device contacts FlowZa (push)", "pushStep1": "Register the device here to obtain its push URL and token.", "pushStep2": "Enter the URL and token in the terminal's server / cloud settings.",
+    "pushStep3": "The device appears online after its first heartbeat.", "pushTestHint": "Push devices cannot be tested from here: the terminal must contact FlowZa first. Register it, configure the URL and token on the device, and watch for the first heartbeat on the device page.",
+    "throttling": "Provider limits: {{perMinute}} requests/min, {{perDevice}} concurrent per device.", "configSummary": "Connection settings", "selectPlaceholder": "Select…", "enabled": "Enabled", "disabled": "Disabled",
+    "maskedHint": "Stored value {{masked}} — leave empty to keep it.",
+    "configErrors": { "required": "This field is required", "number": "Enter a number", "url": "Enter a valid http(s) URL", "select": "Pick one of the options", "boolean": "Invalid value" }
+  },
+  "test": {
+    "run": "Test connection", "hint": "Uses the settings entered above; secrets are never stored by the test.", "skip": "Skip test", "ok": "Connection succeeded", "failed": "Connection failed",
+    "latency": "{{ms}} ms", "retryable": "Retryable", "usedStored": "Used stored credentials", "deviceInfo": "Device info", "details": "Details", "title": "Connection test"
+  },
+  "push": {
+    "title": "Push credentials", "onceHint": "Copy these now — the token is shown only once and cannot be retrieved later.", "token": "Push token", "url": "Push URL", "webhookUrl": "Webhook URL",
+    "instructions": "Enter the URL and token in the terminal's server settings (or the vendor's webhook configuration). Rotating the token invalidates the previous one immediately.", "rotated": "Push token rotated"
+  },
+  "tags": { "placeholder": "Add tag…", "remove": "Remove tag {{tag}}" },
+  "employees": {
+    "employee": "Employee", "deviceOnly": "Device only", "deviceUserId": "Device user id", "syncStatus": "Sync status", "notDesired": "Not expected", "enrolment": "Enrolment",
+    "fingerprints": "{{count}} fingerprints", "face": "Face enrolled", "card": "Card enrolled", "lastSync": "Last sync", "lastError": "Last error", "repair": "Repair",
+    "allStatuses": "All statuses", "searchPlaceholder": "Search employee…", "empty": "No employees on this device", "emptyHint": "Push employees to the device or run a reconciliation to load its user list."
+  },
+  "logs": { "time": "Time", "level": "Level", "event": "Event", "message": "Message", "details": "Details", "job": "Job", "allLevels": "All levels", "empty": "No log entries", "emptyHint": "Connection attempts, sync runs and push traffic are logged here." },
+  "commands": {
+    "type": "Command", "status": "Status", "created": "Created", "sent": "Sent", "acked": "Acknowledged", "expires": "Expires", "payload": "Payload", "result": "Result", "allStatuses": "All statuses",
+    "statuses": { "pending": "Pending", "sent": "Sent", "acked": "Acknowledged", "failed": "Failed", "expired": "Expired" },
+    "empty": "No commands", "emptyHint": "Commands are queued when employees are pushed to a push device and delivered on its next heartbeat."
+  },
+  "detail": {
+    "status": "Status", "identity": "Identity", "capabilities": "Capabilities", "lastHeartbeat": "Last heartbeat", "lastSuccess": "Last successful communication", "lastError": "Last error",
+    "consecutiveFailures": "{{count}} consecutive failures", "autoSync": "Automatic sync", "autoSyncEvery": "Every {{minutes}} min", "generation": "Generation", "pushToken": "Push token", "tokenSet": "Configured",
+    "firmware": "Firmware", "inGroups": "In {{count}} groups", "notFound": "Device not found",
+    "tabs": { "overview": "Overview", "employees": "Employees", "logs": "Logs", "commands": "Commands", "sync": "Sync history", "settings": "Settings" },
+    "disableTitle": "Disable {{name}}?", "disableHint": "Scheduled syncs stop and the device is skipped by bulk actions. Punches already received are kept. You can re-enable it later.",
+    "decommissionTitle": "Decommission {{name}}?", "decommissionHint": "Pending commands expire and stored credentials are deleted. The device can no longer be reactivated — register it again if needed.",
+    "rotateTitle": "Rotate the push token?", "rotateHint": "The current token stops working immediately. You will need to update the terminal with the new token.",
+    "enabled": "Device enabled", "disabled": "Device disabled", "decommissioned": "Device decommissioned", "notActiveHint": "This device is {{status}}. Sync actions are unavailable until it is active again."
+  },
+  "settings": {
+    "general": "General", "generalHint": "Name, placement and sync behaviour.", "saved": "Device saved", "save": "Save changes",
+    "connection": "Connection", "connectionHint": "Endpoint and non-secret provider settings.", "endpointWarning": "Changing the endpoint deletes the stored credentials — you will be asked to enter them again.",
+    "credentialsRequired": "The endpoint changed: enter the credentials again to restore the connection.",
+    "credentials": "Credentials", "credentialsHint": "Secrets are stored encrypted and shown masked; enter a value to replace it.", "credentialsSaved": "Credentials updated (version {{version}})",
+    "saveCredentials": "Save credentials", "noCredentials": "This provider has no secret settings.", "noStored": "No credentials stored yet.", "pushNoCredentials": "Push devices authenticate with the push token; there are no credentials to store.",
+    "danger": "Danger zone", "dangerHint": "Disabling keeps the device; decommissioning is permanent.", "readOnly": "You do not have permission to change device settings."
+  }
+}

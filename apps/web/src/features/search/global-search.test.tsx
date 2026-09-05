@@ -11,7 +11,7 @@ describe('GlobalSearchDialog', () => {
   beforeEach(() => { resetApiMock(); grantAll(); });
 
   it('opens with Ctrl+K, shows grouped results and navigates on Enter', async () => {
-    mockGet({ '/orgs/org-1/search': (q) => ({ data: { q: String(q?.['q']), employees: [{ type: 'employee', id: 'e1', title: 'Ali Said', subtitle: '1001', branchId: 'b1', status: 'active' }], devices: [{ type: 'device', id: 'd1', title: 'Gate 1', subtitle: 'GATE1 · SN123', branchId: 'b1', status: 'online' }], branches: [], departments: [] } }) });
+    mockGet({ '/orgs/org-1/search': (q: Record<string, unknown> | undefined) => ({ data: { q: String(q?.['q']), employees: [{ type: 'employee', id: 'e1', title: 'Ali Said', subtitle: '1001', branchId: 'b1', status: 'active' }], devices: [{ type: 'device', id: 'd1', title: 'Gate 1', subtitle: 'GATE1 · SN123', branchId: 'b1', status: 'online' }], branches: [], departments: [] } }) });
     renderWithProviders(<GlobalSearchDialog />, { route: '/' });
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
