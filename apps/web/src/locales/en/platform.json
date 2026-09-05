@@ -1,0 +1,38 @@
+{
+  "title": "Platform admin",
+  "subtitle": "Tenants, plans, support access and platform health. Every action here is audited on the target organisation.",
+  "audited": "Audited",
+  "tabs": { "organizations": "Organisations", "grants": "Access grants", "plans": "Plans", "health": "Health" },
+  "status": { "trial": "Trial", "active": "Active", "suspended": "Suspended", "closed": "Closed" },
+  "subscription": { "trialing": "Trialing", "active": "Active", "past_due": "Past due", "cancelled": "Cancelled", "expired": "Expired" },
+  "orgs": {
+    "create": "New organisation", "createHint": "Creates the tenant, its default roles and the owner. The owner receives an invitation when they have no account yet.",
+    "created": "Organisation created", "createdTitle": "{{name}} created", "invitationHint": "No account exists for {{email}} yet — share this invitation token with the owner (shown once).",
+    "invitationToken": "Invitation token", "invitationExpires": "Expires {{when}}", "ownerLinked": "The owner already had an account and is now a member.",
+    "companyCode": "Company code", "companyCodeHint": "Unique, letters/digits/- _ . (max 32)", "legalName": "Legal name", "displayName": "Display name", "country": "Country", "currency": "Currency",
+    "plan": "Plan", "ownerFullName": "Owner name", "ownerEmail": "Owner email", "ownerEmailHint": "Existing accounts are added as owner; otherwise an invitation is created.",
+    "region": "Region", "searchPlaceholder": "Search name or code…", "allStatuses": "All statuses", "empty": "No organisations yet", "emptyHint": "Create the first tenant to get started.",
+    "changeStatus": "Change status", "changeStatusHint": "Suspending blocks sign-in for every member; closing schedules the tenant for retention purge. The reason is audited and visible to the tenant's owners.",
+    "closeWarning": "Closing an organisation is a retention event: data purge is delayed 7 days and blocked by legal hold.", "reason": "Reason", "reasonHint": "At least 3 characters; recorded in the audit log.",
+    "statusChanged": "Status changed to {{status}}", "legalHold": "Legal hold", "details": "Details", "trialEnds": "Trial ends", "periodEnd": "Current period ends", "id": "Organisation id",
+    "counts": { "employees": "Employees", "devices": "Devices", "branches": "Branches", "users": "Users" }
+  },
+  "grants": {
+    "title": "Support access grants", "hint": "Time-boxed access for platform administrators to this tenant's data. Read grants default to 8 h; write grants need a second approver.",
+    "create": "Grant access", "createHint": "Grant yourself time-boxed access to {{org}}. The tenant's owners can see this grant.", "created": "Access granted", "grant": "Grant",
+    "level": "Access level", "levels": { "read": "Read", "write": "Write" }, "hours": "Duration (hours)", "hoursHint": "1–72 hours; default 8.", "reason": "Reason", "reasonHint": "At least 10 characters — what you need to look at and why.",
+    "ticket": "Ticket reference", "approvedBy": "Approved by (platform admin id)", "approvedByHint": "Write grants require a second platform administrator's approval.",
+    "organization": "Organisation", "admin": "Administrator", "window": "Window", "active": "Active", "expired": "Expired", "revoked": "Revoked", "activeOnly": "Active only",
+    "revoke": "Revoke", "revokeTitle": "Revoke this grant?", "revokeHint": "Access ends immediately. The grant stays in the audit trail.",
+    "empty": "No access grants", "emptyHint": "Grants appear here when a platform administrator requests access to a tenant."
+  },
+  "flags": {
+    "title": "Feature flags", "hint": "Per-organisation overrides of the platform defaults. Resetting removes the override.", "empty": "No feature flags defined.",
+    "override": "Override", "defaultOn": "Default: on", "defaultOff": "Default: off", "reset": "Reset {{key}} to default", "resetShort": "Reset", "toggle": "Toggle {{key}}", "saved": "Feature flags saved"
+  },
+  "plans": { "active": "Active", "inactive": "Inactive", "limits": "Limits", "prices": "Prices" },
+  "health": {
+    "organizations": "Organisations", "admins": "Platform admins", "activeGrants": "Active grants", "queue": "Job queue", "queueEmpty": "The queue is empty.", "asOf": "As of {{when}}",
+    "queueName": "Queue", "jobStatus": "Status", "count": "Count", "oldest": "Oldest"
+  }
+}

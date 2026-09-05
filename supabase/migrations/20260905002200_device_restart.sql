@@ -1,0 +1,11 @@
+-- Device restart as a first-class sync operation.
+--
+-- Restart is the one device action the product promised (`capabilities.remoteRestart`) without a job type to carry it, so the
+-- UI could only show a disabled button. It is modelled like every other device operation: one sync job with one item per
+-- device, executed by the worker either through the provider's `restart()` (cloud/LAN providers) or as a protocol command the
+-- terminal fetches on its next poll (push providers).
+--
+-- `alter type ... add value` is allowed inside a transaction on PostgreSQL 12+ as long as the new label is not *used* in the
+-- same transaction; this migration only adds it (the first use is a later INSERT from the API), so the runner's per-file
+-- transaction is fine.
+alter type public.sync_job_type add value if not exists 'RESTART_DEVICE';

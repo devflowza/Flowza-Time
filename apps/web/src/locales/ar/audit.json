@@ -1,0 +1,10 @@
+{
+  "title": "سجل التدقيق",
+  "subtitle": "كل عمليات الإنشاء والتحديث والحذف والقراءة الحساسة في هذه المنظمة. السجلات غير قابلة للتغيير.",
+  "empty": "لا توجد سجلات تدقيق", "emptyHint": "تظهر هنا الإجراءات المنفذة في المنظمة.",
+  "system": "النظام", "viewDiff": "عرض التغييرات", "copyRequestId": "نسخ رقم الطلب",
+  "columns": { "time": "الوقت", "actor": "المنفّذ", "action": "الإجراء", "entityType": "الكيان", "entityId": "معرّف الكيان", "requestId": "رقم الطلب", "changes": "التغييرات" },
+  "actorTypes": { "USER": "مستخدم", "PLATFORM_ADMIN": "مسؤول المنصة", "SYSTEM": "النظام", "DEVICE": "جهاز" },
+  "filters": { "allEntities": "كل الكيانات", "actionPlaceholder": "الإجراء، مثل employee.", "anyActor": "أي منفّذ" },
+  "detail": { "oldValue": "قبل", "newValue": "بعد", "noPayload": "لا يحمل هذا السجل بيانات قبل/بعد.", "empty": "فارغ", "copyJson": "نسخ JSON", "jobId": "معرّف المهمة", "ip": "عنوان IP", "branch": "معرّف الفرع", "reason": "السبب" }
+}

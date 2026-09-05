@@ -1,0 +1,238 @@
+import { DateTime } from 'luxon';
+import { rawTransactionSchema, type RawTransaction } from '@flowza/contracts';
+import { redactForAudit, withContext, type Trx } from '@flowza/database';
+import { ProviderError, type DeviceInfo, type DeviceStatus } from '@flowza/device-providers';
+import { AppError, event } from '@flowza/shared';
+import type { JobContext } from '../types.js';
+import { checkCircuit } from './circuit.js';
+import { capabilitiesOf, handleProviderFailure, handleProviderSuccess, isProviderCode, loadDeviceOrThrow } from './common.js';
+import { buildProviderContext, loadDevice } from './context.js';
+import { applyHealth, type HealthObservation } from './health.js';
+import { ingestRawTransactions } from './ingest.js';
+import { runItem } from './items.js';
+import type { DeviceRow } from './types.js';
+
+/**
+ * Clock skew (device − server, seconds) from the time string a device reports. Devices frequently report *local* time
+ * without an offset ("2026-09-05T12:00:00", "2026-09-05 12:00:00"); such strings are interpreted in the device's IANA
+ * zone (AGENTS.md: convert with Luxon, never hand-compute offsets) — `Date.parse` would read them in the server zone and
+ * invent an offset-sized skew that quarantines every punch of the device. Strings carrying an offset/Z keep it.
+ */
+export function deviceClockSkewSeconds(deviceTime: string | undefined | null, timezone: string, now: Date): number | null {
+  if (!deviceTime) return null;
+  const text = deviceTime.trim();
+  const opts = { zone: timezone, setZone: true } as const;
+  let dt = DateTime.fromISO(text, opts);
+  if (!dt.isValid) dt = DateTime.fromSQL(text, opts);
+  if (!dt.isValid) dt = DateTime.fromRFC2822(text);
+  if (!dt.isValid) return null;
+  return Math.round((dt.toMillis() - now.getTime()) / 1000);
+}
+
+function heartbeatObservation(device: DeviceRow, now: Date): HealthObservation {
+  const seen = device.lastHeartbeatAt ? new Date(device.lastHeartbeatAt) : null;
+  const online = !!seen && now.getTime() - seen.getTime() <= device.offlineThresholdMinutes * 60_000;
+  return { online, lastSeenAt: seen, errorCode: online ? null : 'DEVICE_OFFLINE', error: online ? null : `no heartbeat for more than ${device.offlineThresholdMinutes} min`, details: { mode: 'push', lastHeartbeatAt: seen?.toISOString() ?? null } };
+}
+
+/**
+ * DEVICE_HEALTH_CHECK: `getDeviceStatus` (+ `getDeviceInfo` when reachable) → connection status with hysteresis, heartbeat,
+ * firmware, clock skew, device_logs and `device.offline` / `device.online` on transitions only. Push devices are judged by
+ * their last heartbeat instead of a provider call. An unreachable device is a *successful* check (the observation is the result).
+ */
+export async function deviceHealthCheck(ctx: JobContext) {
+  const { deps, log } = ctx;
+  return runItem(ctx, async (item, payload) => {
+    const now = deps.now();
+    const prep = await withContext(deps.db, { kind: 'system', organizationId: payload.organizationId, jobId: ctx.job.id }, async (trx) => {
+      const device = await loadDeviceOrThrow(trx, payload.deviceId);
+      if (device.integrationType === 'DEVICE_PUSH') return { device, push: true as const };
+      const provider = deps.providers.get(device.providerKey);
+      const built = await buildProviderContext(trx, deps, device, ctx.job.id, ctx.signal, { log, provider, timeoutMs: 60_000 });
+      const circuit = await checkCircuit(trx, { organizationId: device.organizationId, providerKey: device.providerKey, accountKey: built.accountKey }, now);
+      return { device, push: false as const, built, circuit, caps: capabilitiesOf(device, provider) };
+    });
+    const { device } = prep;
+    let obs: HealthObservation;
+    if (prep.push) obs = heartbeatObservation(device, now);
+    else {
+      const { built } = prep;
+      if (!prep.circuit.allow) { built.dispose(); return { result: { skipped: 'circuit_open', connectionStatus: device.connectionStatus, halfOpenAt: prep.circuit.halfOpenAt?.toISOString() ?? null } }; }
+      try {
+        let status: DeviceStatus;
+        let info: DeviceInfo | undefined;
+        try {
+          status = await built.provider.getDeviceStatus(built.ctx);
+          if (status.online) info = await built.provider.getDeviceInfo(built.ctx).catch(() => undefined);
+        } catch (err) {
+          if (!isProviderCode(err, 'DEVICE_OFFLINE', 'TIMEOUT')) throw err;
+          status = { online: false, details: { code: (err as ProviderError).code, reason: (err as Error).message } };
+        }
+        const deviceTime = status.deviceTime ?? info?.deviceTime;
+        obs = {
+          online: status.online, lastSeenAt: status.lastSeenAt ? new Date(status.lastSeenAt) : status.online ? now : null,
+          clockSkewSeconds: status.clockSkewSeconds ?? deviceClockSkewSeconds(deviceTime, device.timezone, now), firmwareVersion: info?.firmwareVersion ?? null,
+          errorCode: status.online ? null : String(status.details?.['code'] ?? 'DEVICE_OFFLINE'), error: status.online ? null : String(status.details?.['reason'] ?? 'device reported offline'),
+          details: { ...(status.details ?? {}), ...(info ? { model: info.model ?? null, userCount: info.userCount ?? null, transactionCount: info.transactionCount ?? null } : {}) },
+        };
+      } catch (err) {
+        await handleProviderFailure(ctx, device, built.accountKey, err);
+        throw err;
+      } finally {
+        built.dispose();
+      }
+    }
+    const outcome = await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
+      const o = await applyHealth(trx, device, { ...obs, event: 'health_check', jobId: item.syncJobId }, now);
+      // the provider answered (online or "device offline"): the vendor account is reachable → a half-open circuit closes
+      if (!prep.push) await handleProviderSuccess(trx, device, prep.built.accountKey);
+      return o;
+    });
+    return { result: { online: obs.online, connectionStatus: outcome.current, previous: outcome.previous, transition: outcome.transition, consecutiveFailures: outcome.consecutiveFailures, clockSkewSeconds: obs.clockSkewSeconds ?? null, firmwareVersion: obs.firmwareVersion ?? null } };
+  });
+}
+
+/**
+ * RESTART_DEVICE: reboots one terminal. Cloud/LAN providers are asked directly through `provider.restart()`; push devices
+ * cannot be called, so the protocol's REBOOT command is persisted and the terminal executes it on its next poll (the item
+ * succeeds as "queued to the device", which is all the cloud can honestly claim). A provider that declares `remoteRestart`
+ * but implements no `restart()` yields an UNSUPPORTED item rather than a silent success.
+ */
+export async function restartDevice(ctx: JobContext) {
+  const { deps, log } = ctx;
+  return runItem(ctx, async (item, payload) => {
+    const now = deps.now();
+    const prep = await withContext(deps.db, { kind: 'system', organizationId: payload.organizationId, jobId: ctx.job.id }, async (trx) => {
+      const device = await loadDeviceOrThrow(trx, payload.deviceId);
+      const provider = deps.providers.get(device.providerKey);
+      if (!capabilitiesOf(device, provider).remoteRestart) throw new AppError('DEVICE_UNSUPPORTED_OPERATION', `provider ${device.providerKey} cannot restart devices`, { retryable: false });
+      if (device.integrationType === 'DEVICE_PUSH') return { device, provider, push: true as const };
+      const built = await buildProviderContext(trx, deps, device, ctx.job.id, ctx.signal, { log, provider, timeoutMs: 60_000 });
+      const circuit = await checkCircuit(trx, { organizationId: device.organizationId, providerKey: device.providerKey, accountKey: built.accountKey }, now);
+      return { device, provider, push: false as const, built, circuit };
+    });
+    const { device } = prep;
+
+    if (prep.push) {
+      const protocol = prep.provider.pushProtocol;
+      if (!protocol) throw new AppError('DEVICE_UNSUPPORTED_OPERATION', `provider ${device.providerKey} has no push protocol`, { retryable: false });
+      const commands = protocol.buildCommands({ type: 'RESTART' });
+      return withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
+        await trx.insertInto('deviceCommands').values(commands.map((c) => ({ organizationId: device.organizationId, deviceId: device.id, commandType: c.commandType, payload: JSON.stringify(c.payload ?? {}), syncJobItemId: item.id }))).execute();
+        await trx.insertInto('deviceLogs').values({ organizationId: device.organizationId, deviceId: device.id, level: 'info', event: 'restart.queued', jobId: item.syncJobId, message: 'restart command queued for the next device poll', details: JSON.stringify({ commands: commands.map((c) => c.commandType) }) }).execute();
+        return { result: { mode: 'push', queuedCommands: commands.length, executed: false } };
+      });
+    }
+
+    const { built } = prep;
+    if (!prep.circuit.allow) { built.dispose(); return { result: { skipped: 'circuit_open', halfOpenAt: prep.circuit.halfOpenAt?.toISOString() ?? null } }; }
+    try {
+      if (!built.provider.restart) throw new AppError('DEVICE_UNSUPPORTED_OPERATION', `provider ${device.providerKey} declares remoteRestart but implements no restart()`, { retryable: false });
+      const res = await built.provider.restart(built.ctx);
+      if (!res.ok) throw new AppError('PROVIDER_ERROR', res.message ?? 'the device refused the restart', { retryable: true, details: redactForAudit(res.details ?? {}) });
+      await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
+        await handleProviderSuccess(trx, device, built.accountKey);
+        await trx.insertInto('deviceLogs').values({ organizationId: device.organizationId, deviceId: device.id, level: 'warn', event: 'restart', jobId: item.syncJobId, message: 'device restart requested', details: JSON.stringify(redactForAudit(res.details ?? {})) }).execute();
+        // the terminal is rebooting: it is not reachable until it reports back, and the next health check decides its status
+        await trx.updateTable('devices').set({ lastSuccessfulCommunicationAt: now }).where('id', '=', device.id).execute();
+      });
+      return { result: { mode: 'provider', executed: !res.async, message: res.message ?? null, details: redactForAudit(res.details ?? {}) } };
+    } catch (err) {
+      await handleProviderFailure(ctx, device, built.accountKey, err);
+      throw err;
+    } finally {
+      built.dispose();
+    }
+  });
+}
+
+/**
+ * TEST_CONNECTION: uses the credentials stored for the device (never credentials from the payload); the sanitised
+ * ConnectionResult is the item result. A negative answer is a terminal FAILED item with the result kept.
+ */
+export async function testConnection(ctx: JobContext) {
+  const { deps, log } = ctx;
+  return runItem(ctx, async (item, payload) => {
+    const now = deps.now();
+    const built = await withContext(deps.db, { kind: 'system', organizationId: payload.organizationId, jobId: ctx.job.id }, async (trx) => {
+      const device = await loadDeviceOrThrow(trx, payload.deviceId);
+      return buildProviderContext(trx, deps, device, ctx.job.id, ctx.signal, { log, timeoutMs: 60_000 });
+    });
+    try {
+      const res = await built.provider.testConnection(built.ctx);
+      const result = redactForAudit({ ok: res.ok, message: res.message, latencyMs: res.latencyMs, deviceInfo: res.deviceInfo ?? null, details: res.details ?? null }) as Record<string, unknown>;
+      await withContext(deps.db, { kind: 'system', organizationId: built.device.organizationId, jobId: ctx.job.id }, async (trx) => {
+        if (res.ok) {
+          await applyHealth(trx, built.device, { online: true, lastSeenAt: now, firmwareVersion: res.deviceInfo?.firmwareVersion ?? null, clockSkewSeconds: deviceClockSkewSeconds(res.deviceInfo?.deviceTime, built.device.timezone, now), event: 'test_connection', jobId: item.syncJobId, details: { latencyMs: res.latencyMs } }, now);
+          await handleProviderSuccess(trx, built.device, built.accountKey);
+        } else {
+          await trx.insertInto('deviceLogs').values({ organizationId: built.device.organizationId, deviceId: built.device.id, level: 'warn', event: 'test_connection', jobId: item.syncJobId, message: res.message.slice(0, 300), details: JSON.stringify(result['details'] ?? {}) }).execute();
+        }
+      });
+      if (!res.ok) return { result, failure: { code: String(res.details?.['code'] ?? 'CONNECTION_FAILED'), message: res.message } };
+      return { result };
+    } catch (err) {
+      await handleProviderFailure(ctx, built.device, built.accountKey, err);
+      throw err;
+    } finally {
+      built.dispose();
+    }
+  });
+}
+
+interface WebhookRow { id: string; organizationId: string | null; providerKey: string; deviceId: string | null; payload: unknown; headers: unknown; status: string }
+
+async function resolveWebhookDevice(trx: Trx, organizationId: string, row: WebhookRow, vendorDeviceId: string | null): Promise<DeviceRow | null> {
+  if (row.deviceId) return loadDevice(trx, row.deviceId);
+  if (!vendorDeviceId) return null;
+  const d = await trx.selectFrom('devices').selectAll().where('organizationId', '=', organizationId).where('status', '=', 'active')
+    .where((eb) => eb.or([eb('serialNumber', '=', vendorDeviceId), eb('vendorDeviceId', '=', vendorDeviceId)])).executeTakeFirst();
+  return d ?? null;
+}
+
+/**
+ * WEBHOOK_EVENT: turns a stored `provider_webhook_events` row into raw transactions (source WEBHOOK). The API verified the
+ * vendor signature over the original raw bytes when it received the call and stored the *normalised* result
+ * `{ vendorDeviceId, eventType?, transactions: RawTransaction[], rawBodySha256, rawBodyBytes, verifiedAt }`; the worker never
+ * re-verifies or re-parses a body (a re-serialised JSON body would not reproduce the signed bytes — docs/sync-engine.md).
+ * A row without `transactions` is marked `failed`. Outcome is written back to the row (processed / failed).
+ */
+export async function webhookEvent(ctx: JobContext) {
+  const { deps, log } = ctx;
+  const webhookEventId = String(ctx.job.payload['webhookEventId'] ?? '');
+  const organizationId = typeof ctx.job.payload['organizationId'] === 'string' ? ctx.job.payload['organizationId'] : ctx.job.organizationId;
+  if (!webhookEventId || !organizationId) throw new AppError('VALIDATION_ERROR', 'WEBHOOK_EVENT requires webhookEventId and organizationId');
+  const markFailed = (error: string, status: 'failed' | 'rejected' = 'failed') => withContext(deps.db, { kind: 'system', organizationId, jobId: ctx.job.id }, async (trx) => {
+    await trx.updateTable('providerWebhookEvents').set({ status, error: error.slice(0, 500), processedAt: deps.now() }).where('id', '=', webhookEventId).execute();
+    log.warn(event('webhook_event_failed', { webhookEventId, error, status }));
+    return { status, error };
+  });
+  try {
+    return await withContext(deps.db, { kind: 'system', organizationId, jobId: ctx.job.id }, async (trx) => {
+      const row = (await trx.selectFrom('providerWebhookEvents').select(['id', 'organizationId', 'providerKey', 'deviceId', 'payload', 'headers', 'status']).where('id', '=', webhookEventId).forUpdate().executeTakeFirst()) as WebhookRow | undefined;
+      if (!row) return { skipped: 'event_missing' };
+      if (row.status === 'processed' || row.status === 'duplicate' || row.status === 'rejected') return { skipped: `already_${row.status}` };
+      const body = row.payload as Record<string, unknown> | null;
+      if (!body || !Array.isArray(body['transactions'])) throw new WebhookFailure('webhook row carries no normalised transactions; the API verifies and normalises payloads at receipt and the worker never re-parses raw bodies');
+      const vendorDeviceId = typeof body['vendorDeviceId'] === 'string' ? body['vendorDeviceId'] : typeof body['deviceSerial'] === 'string' ? body['deviceSerial'] : null;
+      const transactions: RawTransaction[] = (body['transactions'] as unknown[]).flatMap((t) => { const p = rawTransactionSchema.safeParse(t); return p.success ? [p.data] : []; });
+      const device: DeviceRow | null = await resolveWebhookDevice(trx, organizationId, row, vendorDeviceId);
+      if (!device) throw new WebhookFailure(`no active device matches vendor device ${vendorDeviceId ?? '(unknown)'}`);
+      const ingested = await ingestRawTransactions(trx, { organizationId, device, source: 'WEBHOOK', syncJobId: null, transactions, now: deps.now(), queue: deps.queue });
+      await trx.updateTable('providerWebhookEvents').set({ status: 'processed', deviceId: device.id, processedAt: deps.now(), error: null }).where('id', '=', row.id).execute();
+      log.info(event('webhook_event_processed', { webhookEventId, deviceId: device.id, inserted: ingested.inserted, duplicates: ingested.duplicates, quarantined: ingested.quarantined, held: ingested.held }));
+      return { status: 'processed', deviceId: device.id, inserted: ingested.inserted, duplicates: ingested.duplicates, quarantined: ingested.quarantined, held: ingested.held };
+    });
+  } catch (err) {
+    // the processing transaction rolled back; record a *terminal* outcome in a fresh one. Anything else (DB hiccup, enqueue
+    // failure…) is transient: rethrow so the queue retries and the row stays `queued`; only the last delivery gives up.
+    if (err instanceof WebhookFailure) return markFailed(err.message, err.status);
+    if (ProviderError.is(err) || (AppError.is(err) && !err.retryable)) return markFailed(`${(err as { code: string }).code}: ${(err as Error).message}`);
+    if (ctx.job.attempts >= ctx.job.maxAttempts) return markFailed(`gave up after ${ctx.job.attempts} attempts: ${(err as Error).message}`);
+    throw err;
+  }
+}
+
+class WebhookFailure extends Error {
+  constructor(message: string, readonly status: 'failed' | 'rejected' = 'failed') { super(message); this.name = 'WebhookFailure'; }
+}

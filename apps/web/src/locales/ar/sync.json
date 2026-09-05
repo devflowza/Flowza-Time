@@ -1,0 +1,50 @@
+{
+  "title": "مهام المزامنة",
+  "subtitle": "كل تبادل مع جهاز — سحب الحضور ودفع الموظفين وفحوص الحالة والمطابقات.",
+  "jobs": {
+    "view": "عرض المهمة", "empty": "لا توجد مهام مزامنة بعد", "emptyHint": "تظهر المهام هنا عند مزامنة الأجهزة يدوياً أو وفق جدول أو عبر جهاز دفع.",
+    "emptyDeviceHint": "لم تلمس أي مهمة مزامنة هذا الجهاز بعد.", "live": "مباشر — يتم التحديث أثناء تشغيل المهام", "activeCount": "{{count}} قيد التشغيل",
+    "nothingQueued": "لم تتم إضافة أي عنصر جديد إلى الطابور", "nothingQueuedHint": "كل العناصر مشمولة بالفعل بمهمة قيد التشغيل — تابع تلك المهمة بدلاً من ذلك.", "skipped": "{{count}} قيد التنفيذ بالفعل"
+  },
+  "columns": { "type": "النوع", "trigger": "المُشغِّل", "status": "الحالة", "progress": "التقدّم", "records": "السجلات", "requestedBy": "بطلب من", "started": "البدء", "finished": "الانتهاء", "duration": "المدة", "scope": "النطاق" },
+  "status": { "PENDING": "قيد الانتظار", "QUEUED": "في الطابور", "RUNNING": "قيد التشغيل", "SUCCESS": "نجاح", "PARTIAL_SUCCESS": "نجاح جزئي", "FAILED": "فشل", "RETRYING": "إعادة المحاولة", "CANCELLED": "أُلغيت" },
+  "itemStatus": { "PENDING": "قيد الانتظار", "QUEUED": "في الطابور", "RUNNING": "قيد التشغيل", "SUCCESS": "نجاح", "FAILED": "فشل", "RETRYING": "إعادة المحاولة", "OFFLINE": "الجهاز غير متصل", "UNSUPPORTED": "غير مدعوم", "CANCELLED": "أُلغي", "SKIPPED": "تم التخطي" },
+  "jobType": { "PULL_ATTENDANCE": "سحب الحضور", "PULL_EMPLOYEES": "سحب الموظفين", "PUSH_EMPLOYEE": "دفع موظف", "PUSH_EMPLOYEES": "دفع الموظفين", "DEVICE_HEALTH_CHECK": "فحص الحالة", "RECONCILIATION": "مطابقة", "TEST_CONNECTION": "اختبار الاتصال", "DELETE_EMPLOYEE": "حذف موظف" },
+  "trigger": { "MANUAL": "يدوي", "SCHEDULED": "مجدول", "WEBHOOK": "ويب هوك", "SYSTEM": "النظام", "DEVICE_PUSH": "دفع من الجهاز" },
+  "progress": { "label": "{{done}} / {{total}}", "success": "نجحت", "failed": "فشلت", "pending": "معلّقة" },
+  "list": { "allStatuses": "كل الحالات", "allTypes": "كل الأنواع", "device": "الجهاز", "branch": "الفرع", "system": "النظام", "scheduler": "المُجدوِل", "scopeDevices": "{{count}} جهاز", "scopeEmployees": "{{count}} موظف" },
+  "actions": { "syncAttendance": "مزامنة الحضور", "syncEmployees": "مزامنة الموظفين", "retryFailed": "إعادة محاولة الفاشلة", "cancel": "إلغاء المهمة", "queue": "بدء المزامنة", "runReconciliation": "تشغيل المطابقة", "repair": "إصلاح", "runAll": "مطابقة الكل", "repairAll": "إصلاح الكل" },
+  "detail": {
+    "title": "مهمة مزامنة", "notFound": "المهمة غير موجودة", "items": "العناصر", "itemsEmpty": "لا توجد عناصر", "itemsEmptyHint": "لم تُنتج هذه المهمة أي عناصر عمل لكل جهاز أو موظف.",
+    "total": "العناصر", "success": "نجحت", "failed": "فشلت", "pending": "معلّقة", "offline": "غير متصل", "unsupported": "غير مدعوم", "records": "السجلات المستوعبة",
+    "scope": "النطاق", "error": "الخطأ", "correlation": "معرّف الترابط", "parent": "إعادة محاولة للمهمة", "requestedBy": "بطلب من", "queued": "أُضيفت للطابور", "started": "البدء", "finished": "الانتهاء", "duration": "المدة",
+    "summary": "الملخص", "allStatuses": "كل الحالات",
+    "retryTitle": "إعادة محاولة العناصر الفاشلة؟", "retryHint": "تُنشأ مهمة جديدة بالعناصر الفاشلة وغير المتصلة للأجهزة النشطة. تبقى المهمة الأصلية للمراجعة.", "retryQueued": "تمت إضافة إعادة المحاولة إلى الطابور",
+    "cancelTitle": "إلغاء هذه المهمة؟", "cancelHint": "تُلغى العناصر المعلّقة وتلك في الطابور؛ العناصر قيد التشغيل تكتمل من تلقاء نفسها.", "cancelled": "أُلغيت المهمة ({{count}} عنصر)",
+    "attempts": "{{attempts}} / {{max}}", "nextAttempt": "المحاولة التالية {{when}}", "realtime": "التحديثات المباشرة مفعّلة", "polling": "استطلاع كل 3 ثوانٍ"
+  },
+  "itemColumns": { "device": "الجهاز", "employee": "الموظف", "operation": "العملية", "status": "الحالة", "attempts": "المحاولات", "lastError": "آخر خطأ", "duration": "المدة", "records": "السجلات" },
+  "dialog": {
+    "attendanceTitle": "مزامنة الحضور", "attendanceHint": "سحب البصمات الجديدة من الأجهزة المحددة. تُشمل الأجهزة النشطة الداعمة للسحب فقط.",
+    "employeesTitle": "مزامنة الموظفين", "employeesHint": "دفع سجلات الموظفين (الاسم، البطاقة، رمز PIN) إلى الأجهزة. لا تُرسل القوالب البيومترية من السحابة أبداً.",
+    "target": "الهدف", "targets": { "devices": "أجهزة محددة", "branch": "فرع كامل", "all": "كل الأجهزة", "employees": "موظفون محددون" },
+    "selectDevices": "إضافة جهاز…", "selectEmployees": "إضافة موظف…", "selectBranch": "اختر فرعاً…", "noneSelected": "لم يُحدد شيء بعد.", "remove": "إزالة {{name}}",
+    "allDevicesHint": "كل الأجهزة النشطة في المؤسسة (ضمن نطاق فروعك).", "allEmployeesHint": "كل الموظفين النشطين، يُدفعون إلى أجهزة فرعهم.",
+    "devicesForEmployees": "حصر على أجهزة", "devicesForEmployeesHint": "اختياري — وإلا يذهب الموظفون إلى كل جهاز يدعم دفع الموظفين في فرعهم.",
+    "fullResync": "إعادة مزامنة كاملة", "fullResyncHint": "إعادة السحب من أقدم مؤشر. تُتجاهل التكرارات؛ استخدمها بعد إعادة ضبط الجهاز أو عند الشك في فجوة.",
+    "removeStale": "إزالة المستخدمين القدامى", "removeStaleHint": "حذف المستخدمين الذين لم يعد ينبغي وجودهم على الجهاز (موظفون منتهية خدمتهم أو منقولون).",
+    "queued": "أُضيف {{count}} عنصر إلى الطابور على {{devices}} جهاز"
+  },
+  "reconciliation": {
+    "title": "المطابقة", "subtitle": "مقارنة قائمة السحابة بقائمة مستخدمي كل جهاز والبصمات غير المطابقة؛ يدفع الإصلاح الفروقات.",
+    "empty": "لا توجد أجهزة للمطابقة", "emptyHint": "سجّل جهازاً أولاً.", "neverRun": "لم تُجرَ مطابقة", "lastRun": "آخر تشغيل {{when}}",
+    "cloudOnly": "في السحابة فقط", "cloudOnlyHint": "موظفون متوقَّعون على الجهاز لكنهم مفقودون", "deviceOnly": "على الجهاز فقط", "deviceOnlyHint": "مستخدمون على الجهاز بدون موظف مطابق",
+    "differing": "مختلفة", "differingHint": "سجلات تختلف نسختها على الجهاز عن السحابة", "stale": "قديمة", "staleHint": "موظفون على الجهاز كان ينبغي إزالتهم",
+    "unmatched": "بصمات غير مطابقة", "unmatchedHint": "بصمات خام لم يمكن نسبتها إلى موظف", "duplicates": "تكرارات", "duplicatesHint": "معرّفات معاملات مكررة من المزوّد (آخر 7 أيام)",
+    "expected": "{{expected}} متوقَّع · {{onDevice}} على الجهاز", "viewJob": "عرض المهمة", "repairJob": "مهمة الإصلاح",
+    "runAllTitle": "مطابقة كل الأجهزة؟", "runAllHint": "يُضاف عنصر مطابقة لكل جهاز نشط إلى الطابور. لا يتغير شيء على الأجهزة.",
+    "repairAllTitle": "إصلاح كل الأجهزة؟", "repairAllHint": "بعد المقارنة، تدفع مهمة الإصلاح الموظفين المفقودين وتزيل المستخدمين القدامى أو الموجودين على الجهاز فقط في كل جهاز.",
+    "repairTitle": "إصلاح {{name}}؟", "repairHint": "يُدفع الموظفون المفقودون والمختلفون؛ ويُزال المستخدمون القدامى والموجودون على الجهاز فقط.",
+    "inSync": "متزامن", "issues": "{{count}} مشكلة"
+  }
+}

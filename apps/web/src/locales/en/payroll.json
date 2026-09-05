@@ -1,0 +1,15 @@
+{
+  "title": "Payroll",
+  "subtitle": "Locked, versioned period summaries per employee — the hand-over boundary to payroll. FlowZa is not payroll: it produces a clean, explainable feed.",
+  "periods": {
+    "year": "Year", "allBranches": "All branches", "period": "Period", "range": "Dates", "lock": "Lock", "summaries": "Summaries", "current": "Current", "locked": "Locked", "open": "Open",
+    "noSummaries": "Not built yet", "summaryCounts": "{{employees}} employees · {{draft}} draft · {{finalized}} finalised", "empty": "No periods for this year",
+    "build": "Build summaries", "buildQueued": "Summaries are being built for the period.", "lockAction": "Lock period", "finalize": "Finalise", "finalizeNeedsLock": "Lock the period before finalising.",
+    "finalizeTitle": "Finalise {{period}}?", "finalizeHint": "Summaries are rebuilt from the locked records and marked final. Later corrections require unlocking the period and produce a new version.", "finalizeQueued": "Finalisation is running in the background."
+  },
+  "summaries": {
+    "title": "Summaries — {{period}}", "hint": "Days as counts (half days = .5), time as h:mm.", "employee": "Employee", "workingDays": "Working", "presentDays": "Present", "absentDays": "Absent", "leaveDays": "Leave (paid)", "holidayDays": "Holidays", "late": "Late days (h:mm)", "missingPunchDays": "Missing punch", "regular": "Regular h:mm", "overtime": "OT h:mm",
+    "overtimeBreakdown": "Weekly off {{weeklyOff}} · Holiday {{holiday}}", "computedAt": "Computed", "status": { "draft": "Draft", "finalized": "Finalised" }, "allStatuses": "All statuses",
+    "empty": "No summaries for this period", "emptyHint": "Build the summaries once attendance for the period has been reviewed."
+  }
+}

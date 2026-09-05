@@ -1,0 +1,83 @@
+{
+  "title": "Shifts & schedules",
+  "subtitle": "Shifts, rotational patterns, who works which shift, and the attendance rule sets that turn punches into results.",
+  "tabs": { "shifts": "Shifts", "patterns": "Patterns", "assignments": "Assignments", "rules": "Rule sets" },
+  "fields": { "nameAr": "Name (Arabic)" },
+  "filters": { "allStatuses": "All statuses" },
+  "recordStatus": { "active": "Active", "inactive": "Inactive", "archived": "Archived" },
+  "shifts": {
+    "add": "Add shift", "edit": "Edit shift", "dialogHint": "Times are local to the branch of the employee working the shift. Overnight shifts end after midnight; the day boundary decides which date a punch belongs to.",
+    "created": "Shift created", "updated": "Shift updated", "deleted": "Shift deleted", "deleteTitle": "Delete “{{name}}”?", "deleteHint": "Shifts that are assigned or used by a pattern cannot be deleted — end the assignments first.",
+    "empty": "No shifts yet", "emptyHint": "Create a shift to define working hours; then assign it to branches, departments, teams or employees.",
+    "type": "Type", "types": { "FIXED": "Fixed", "FLEXIBLE": "Flexible" },
+    "typeHint": { "FIXED": "Fixed start and end times; lateness and early departure are measured against them.", "FLEXIBLE": "A required number of minutes per day, optionally within core hours." },
+    "timing": "Timing", "startTime": "Start time", "endTime": "End time", "endTimeHint": "Earlier than start = ends the next day.", "dayBoundary": "Day boundary", "dayBoundaryHint": "Punches before this time count for the previous day (default 04:00).",
+    "requiredMinutes": "Required minutes", "requiredMinutesHint": "e.g. 480 for 8 hours.", "coreStart": "Core hours from", "coreEnd": "Core hours to",
+    "breaks": "Breaks", "noBreaks": "No breaks — the whole span counts as worked time.", "breakMode": "Break type", "breakWindow": "Time window", "breakDuration": "Duration", "breakStart": "From", "breakEnd": "To", "breakMinutes": "Minutes", "breakPaid": "Paid", "removeBreak": "Remove break", "addBreak": "Add break", "breakCount": "{{count}} breaks",
+    "windows": "Punch windows & grace", "punchInWindow": "Punch-in window (min before)", "punchInWindowHint": "How early before the shift a punch is accepted.", "punchOutWindow": "Punch-out window (min after)", "punchOutWindowHint": "How late after the shift a punch is accepted.",
+    "graceIn": "Grace in (min)", "graceOut": "Grace out (min)", "graceHint": "Overrides the rule set when set.", "inherit": "Rule set",
+    "color": "Colour", "hours": "Hours", "crossesMidnight": "Ends the next day", "required": "{{value}} required", "assignments": "Assignments"
+  },
+  "patterns": {
+    "hint": "Rotational patterns repeat a cycle of shifts and off days from an anchor date (e.g. 4 days on / 2 off).", "add": "Add pattern", "edit": "Edit pattern", "dialogHint": "Pick a shift or Off for every day of the cycle. Day 1 falls on the anchor date.",
+    "created": "Pattern created", "updated": "Pattern updated", "deleted": "Pattern deleted", "deleteTitle": "Delete “{{name}}”?", "deleteHint": "Patterns in use by assignments cannot be deleted.",
+    "empty": "No patterns yet", "emptyHint": "Patterns are optional — use them for rotating rosters.", "cycleLength": "Cycle length (days)", "cycleLengthHint": "1–366", "anchorDate": "Anchor date", "anchorDateHint": "Day 1 of the cycle.",
+    "sequence": "Cycle", "noShifts": "Create at least one active shift before building a pattern.", "day": "Day {{n}}", "dayShift": "Shift for day {{n}}", "off": "Off", "cycleDays": "{{count}}-day cycle", "anchoredOn": "from {{date}}"
+  },
+  "assignments": {
+    "add": "Assign shift", "dialogHint": "The most specific assignment wins: employee › team › department › branch › organisation. Overlapping ranges for the same target are rejected.", "created": "Assignment created", "recalcHint": "Past dates are being recalculated.",
+    "targetType": "Assign to", "target": "Target", "targets": { "ORGANIZATION": "Organisation", "BRANCH": "Branch", "DEPARTMENT": "Department", "TEAM": "Team", "EMPLOYEE": "Employee" }, "allTargets": "All targets", "wholeOrganisation": "Whole organisation", "selectTarget": "Select…",
+    "mode": "Schedule", "modes": { "shift": "Single shift", "pattern": "Rotational pattern" }, "shift": "Shift", "selectShift": "Select a shift", "pattern": "Pattern", "selectPattern": "Select a pattern", "shiftOrPattern": "Shift / pattern",
+    "effectiveFrom": "Effective from", "effectiveFromHint": "Past dates trigger a recalculation.", "effectiveTo": "Effective to", "assign": "Assign", "effective": "Effective", "openEnded": "open", "active": "Active", "activeOn": "Active on", "allBranches": "All branches",
+    "end": "End assignment", "endTitle": "End this assignment?", "endHint": "The assignment stops applying from the chosen date. Attendance from that date is recalculated.", "ended": "Assignment ended",
+    "deleteTitle": "Delete this assignment?", "deleteHint": "Removes the assignment entirely; affected days are recalculated.", "deleted": "Assignment deleted",
+    "empty": "No shift assignments", "emptyHint": "Employees without an assignment have no shift and are flagged NO_SHIFT."
+  },
+  "resolve": {
+    "title": "Resolve shift", "hint": "Check which shift and rule set apply to an employee on a given date.", "employee": "Employee", "selectEmployee": "Select an employee", "date": "Date", "pickHint": "Pick an employee to see the resolution.",
+    "shift": "Shift", "noShift": "No shift applies", "source": "From", "patternDay": "pattern day {{n}}", "noAssignment": "No assignment", "effective": "Effective", "ruleSet": "Rule set", "defaultRules": "Default rules"
+  },
+  "rules": {
+    "hint": "Rule sets are effective-dated. The branch-specific set in force on a date wins over the organisation-wide one; without any, the platform defaults apply.", "add": "Add rule set", "edit": "Edit rule set", "dialogHint": "Changing a rule set that covers past dates recalculates the affected records.",
+    "created": "Rule set created", "updated": "Rule set updated", "deleted": "Rule set deleted", "recalcHint": "Affected records are being recalculated.", "branchImmutable": "The branch of a rule set cannot change; create a new rule set for another branch.", "deleteTitle": "Delete “{{name}}”?", "deleteHint": "Records computed with this rule set are recalculated with the next applicable one.",
+    "branchHint": "Leave empty for an organisation-wide rule set.", "orgWide": "Organisation-wide", "effectiveFrom": "Effective from", "effectiveTo": "Effective to", "includeExpired": "Show expired", "effective": "Effective", "summary": "Key rules", "version": "Version", "active": "In force",
+    "summaryLine": "Grace {{graceIn}} min · full day {{fullDay}} · {{ot}}", "otAfter": "OT after {{min}} min", "otOff": "OT off", "empty": "No rule sets", "emptyHint": "Platform defaults apply (10 min grace, 7 h full day, OT after 30 min). Add a rule set to customise.",
+    "noRounding": "No rounding", "minutesValue": "{{count}} min", "noLimit": "No limit", "ramadanAll": "All employees", "ramadanFlagged": "Flagged employees only",
+    "sections": {
+      "grace": "Grace & thresholds", "graceHint": "How much lateness is tolerated and what counts as a full or half day.",
+      "overtime": "Overtime", "overtimeHint": "When extra minutes start counting and how they are rounded and capped.",
+      "rounding": "Rounding", "roundingHint": "Round individual punches and/or the worked total.",
+      "punches": "Punch interpretation", "punchesHint": "How raw punches are paired into IN/OUT and de-duplicated.",
+      "missing": "Missing punch", "missingHint": "What happens when only one punch exists for the day.",
+      "ramadan": "Ramadan", "ramadanHint": "Reduced scheduled hours for a date range."
+    },
+    "fields": {
+      "graceInMinutes": "Grace in (min)", "graceOutMinutes": "Grace out (min)", "lateThresholdMinutes": "Late threshold (min)", "earlyDepartureThresholdMinutes": "Early departure threshold (min)", "minFullDayMinutes": "Full day (min)", "halfDayThresholdMinutes": "Half day (min)",
+      "overtimeEnabled": "Overtime enabled", "overtimeStartAfterMinutes": "OT starts after (min)", "overtimeMinBlockMinutes": "Minimum OT block (min)", "overtimeRoundingMinutes": "OT rounding", "overtimeMaxMinutesPerDay": "Max OT per day (min)",
+      "countEarlyInAsOvertime": "Early arrival counts as OT", "weeklyOffWorkCountsAsOvertime": "Weekly-off work is OT", "holidayWorkCountsAsOvertime": "Holiday work is OT",
+      "punchRoundingMinutes": "Punch rounding", "punchRoundingMode": "Punch rounding mode", "workedRoundingMinutes": "Worked-time rounding", "workedRoundingMode": "Worked-time rounding mode",
+      "punchInterpretation": "Interpretation", "duplicatePunchWindowSeconds": "Duplicate window (s)", "missingPunchBehavior": "Behaviour", "autoAbsentWithoutPunches": "Auto-absent without punches",
+      "ramadanEnabled": "Enable Ramadan hours", "ramadanMinutes": "Scheduled minutes", "ramadanAppliesTo": "Applies to"
+    },
+    "hints": {
+      "lateThresholdMinutes": "Lateness beyond this is flagged (0 = any).", "minFullDayMinutes": "Worked minutes needed for a full day.", "halfDayThresholdMinutes": "Below full day but at least this = half day.",
+      "overtimeEnabled": "Turn off to never compute overtime.", "overtimeStartAfterMinutes": "Minutes past the shift end before OT counts.", "overtimeMinBlockMinutes": "OT below this is discarded.", "overtimeMaxMinutesPerDay": "Empty = no cap.",
+      "countEarlyInAsOvertime": "Minutes before the shift start count as OT.", "weeklyOffWorkCountsAsOvertime": "All worked minutes on a weekly off day are OT.", "holidayWorkCountsAsOvertime": "All worked minutes on a holiday are OT.",
+      "punchInterpretation": "FIRST_LAST: first punch IN, last OUT. PAIRED: alternate IN/OUT. DIRECTIONAL: trust the device direction.", "duplicatePunchWindowSeconds": "Punches closer than this are collapsed.",
+      "autoAbsentWithoutPunches": "Mark employees with no punches absent after the shift ends.", "ramadanMinutes": "Scheduled minutes per day during Ramadan (60–600)."
+    },
+    "roundingModes": { "NONE": "None", "NEAREST": "Nearest", "UP": "Up", "DOWN": "Down" },
+    "interpretations": { "FIRST_LAST": "First / last", "PAIRED": "Paired", "DIRECTIONAL": "Directional" },
+    "missingBehaviors": { "FLAG_ONLY": "Flag only", "ASSUME_SHIFT_END": "Assume shift end", "TREAT_AS_ABSENT": "Treat as absent", "TREAT_AS_HALF_DAY": "Treat as half day" }
+  },
+  "holidays": {
+    "title": "Holidays", "subtitle": "Holiday calendars per country or company; branches pick a calendar. Holidays can be limited to selected branches.",
+    "calendars": "Calendars", "addCalendar": "Add calendar", "editCalendar": "Edit calendar", "calendarHint": "A branch uses one calendar; the default calendar applies to branches without one.", "calendarCreated": "Calendar created", "calendarUpdated": "Calendar updated", "calendarDeleted": "Calendar deleted",
+    "deleteCalendarTitle": "Delete “{{name}}”?", "deleteCalendarHint": "Calendars assigned to branches cannot be deleted.", "countryCode": "Country", "countryCodeHint": "ISO 3166-1 alpha-2, e.g. OM", "isDefault": "Default calendar", "isDefaultHint": "Applies to branches without an explicit calendar.", "default": "Default",
+    "count": "{{count}} holidays", "noCalendars": "No calendars yet", "noCalendarsHint": "Create a calendar to start adding holidays.", "endBeforeStart": "Must be on or after the start date", "pickBranch": "Select at least one branch or apply to all branches.", "year": "Year", "selectCalendar": "Select a calendar",
+    "add": "Add holiday", "edit": "Edit holiday", "dialogHint": "Past holidays trigger a recalculation of the affected branches.", "created": "Holiday created", "updated": "Holiday updated", "deleted": "Holiday deleted", "deleteTitle": "Delete “{{name}}”?", "deleteHint": "Affected attendance days are recalculated.",
+    "empty": "No holidays in {{year}}", "emptyHint": "Add public, religious, company or regional holidays for this calendar.", "endDate": "End date", "endDateHint": "For multi-day holidays.", "type": "Type",
+    "types": { "PUBLIC": "Public", "RELIGIOUS": "Religious", "COMPANY": "Company", "REGIONAL": "Regional" }, "halfDay": "Half day", "tentative": "Tentative", "tentativeHint": "(date to be confirmed, e.g. moon sighting)",
+    "allBranches": "All branches", "branchScopeHint": "Turn off to limit this holiday to selected branches.", "addBranch": "Add branch…"
+  }
+}

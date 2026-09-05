@@ -1,0 +1,10 @@
+{
+  "title": "Audit log",
+  "subtitle": "Every create, update, delete and sensitive read in this organisation. Entries are immutable.",
+  "empty": "No audit entries", "emptyHint": "Actions performed in the organisation appear here.",
+  "system": "System", "viewDiff": "View changes", "copyRequestId": "Copy request id",
+  "columns": { "time": "Time", "actor": "Actor", "action": "Action", "entityType": "Entity", "entityId": "Entity id", "requestId": "Request id", "changes": "Changes" },
+  "actorTypes": { "USER": "User", "PLATFORM_ADMIN": "Platform admin", "SYSTEM": "System", "DEVICE": "Device" },
+  "filters": { "allEntities": "All entities", "actionPlaceholder": "Action, e.g. employee.", "anyActor": "Any actor" },
+  "detail": { "oldValue": "Before", "newValue": "After", "noPayload": "This entry carries no before/after payload.", "empty": "empty", "copyJson": "Copy JSON", "jobId": "Job id", "ip": "IP address", "branch": "Branch id", "reason": "Reason" }
+}

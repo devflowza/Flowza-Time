@@ -1,0 +1,50 @@
+{
+  "title": "Sync jobs",
+  "subtitle": "Every exchange with a device — attendance pulls, employee pushes, health checks and reconciliations.",
+  "jobs": {
+    "view": "View job", "empty": "No sync jobs yet", "emptyHint": "Jobs appear here when devices are synced manually, on schedule or by a push terminal.",
+    "emptyDeviceHint": "No sync job has touched this device yet.", "live": "Live — refreshing while jobs are running", "activeCount": "{{count}} running",
+    "nothingQueued": "Nothing new was queued", "nothingQueuedHint": "Every item is already covered by a job that is running — follow that job instead.", "skipped": "{{count}} already in flight"
+  },
+  "columns": { "type": "Type", "trigger": "Trigger", "status": "Status", "progress": "Progress", "records": "Records", "requestedBy": "Requested by", "started": "Started", "finished": "Finished", "duration": "Duration", "scope": "Scope" },
+  "status": { "PENDING": "Pending", "QUEUED": "Queued", "RUNNING": "Running", "SUCCESS": "Success", "PARTIAL_SUCCESS": "Partial success", "FAILED": "Failed", "RETRYING": "Retrying", "CANCELLED": "Cancelled" },
+  "itemStatus": { "PENDING": "Pending", "QUEUED": "Queued", "RUNNING": "Running", "SUCCESS": "Success", "FAILED": "Failed", "RETRYING": "Retrying", "OFFLINE": "Device offline", "UNSUPPORTED": "Unsupported", "CANCELLED": "Cancelled", "SKIPPED": "Skipped" },
+  "jobType": { "PULL_ATTENDANCE": "Pull attendance", "PULL_EMPLOYEES": "Pull employees", "PUSH_EMPLOYEE": "Push employee", "PUSH_EMPLOYEES": "Push employees", "DEVICE_HEALTH_CHECK": "Health check", "RECONCILIATION": "Reconciliation", "TEST_CONNECTION": "Connection test", "DELETE_EMPLOYEE": "Delete employee" },
+  "trigger": { "MANUAL": "Manual", "SCHEDULED": "Scheduled", "WEBHOOK": "Webhook", "SYSTEM": "System", "DEVICE_PUSH": "Device push" },
+  "progress": { "label": "{{done}} / {{total}}", "success": "succeeded", "failed": "failed", "pending": "pending" },
+  "list": { "allStatuses": "All statuses", "allTypes": "All types", "device": "Device", "branch": "Branch", "system": "System", "scheduler": "Scheduler", "scopeDevices": "{{count}} devices", "scopeEmployees": "{{count}} employees" },
+  "actions": { "syncAttendance": "Sync attendance", "syncEmployees": "Sync employees", "retryFailed": "Retry failed", "cancel": "Cancel job", "queue": "Queue sync", "runReconciliation": "Run reconciliation", "repair": "Repair", "runAll": "Reconcile all", "repairAll": "Repair all" },
+  "detail": {
+    "title": "Sync job", "notFound": "Job not found", "items": "Items", "itemsEmpty": "No items", "itemsEmptyHint": "This job did not produce any per-device or per-employee work items.",
+    "total": "Items", "success": "Succeeded", "failed": "Failed", "pending": "Pending", "offline": "Offline", "unsupported": "Unsupported", "records": "Records ingested",
+    "scope": "Scope", "error": "Error", "correlation": "Correlation id", "parent": "Retry of job", "requestedBy": "Requested by", "queued": "Queued", "started": "Started", "finished": "Finished", "duration": "Duration",
+    "summary": "Summary", "allStatuses": "All statuses",
+    "retryTitle": "Retry the failed items?", "retryHint": "A new job is created with the failed and offline items of active devices. The original job is kept for reference.", "retryQueued": "Retry queued",
+    "cancelTitle": "Cancel this job?", "cancelHint": "Pending and queued items are cancelled; items already running finish on their own.", "cancelled": "Job cancelled ({{count}} items)",
+    "attempts": "{{attempts}} / {{max}}", "nextAttempt": "Next attempt {{when}}", "realtime": "Live updates on", "polling": "Polling every 3 s"
+  },
+  "itemColumns": { "device": "Device", "employee": "Employee", "operation": "Operation", "status": "Status", "attempts": "Attempts", "lastError": "Last error", "duration": "Duration", "records": "Records" },
+  "dialog": {
+    "attendanceTitle": "Sync attendance", "attendanceHint": "Pull new punches from the selected devices. Only pull-capable, active devices are included.",
+    "employeesTitle": "Sync employees", "employeesHint": "Push employee records (name, card, PIN) to devices. Biometric templates are never sent from the cloud.",
+    "target": "Target", "targets": { "devices": "Specific devices", "branch": "Whole branch", "all": "All devices", "employees": "Specific employees" },
+    "selectDevices": "Add device…", "selectEmployees": "Add employee…", "selectBranch": "Select a branch…", "noneSelected": "Nothing selected yet.", "remove": "Remove {{name}}",
+    "allDevicesHint": "Every active device of the organisation (within your branch scope).", "allEmployeesHint": "Every active employee, pushed to the devices of their branch.",
+    "devicesForEmployees": "Restrict to devices", "devicesForEmployeesHint": "Optional — otherwise employees go to every employee-push device of their branch.",
+    "fullResync": "Full re-sync", "fullResyncHint": "Re-pull from the earliest cursor. Duplicates are ignored; use it after a device reset or a suspected gap.",
+    "removeStale": "Remove stale users", "removeStaleHint": "Also delete users that should no longer exist on the device (terminated or moved employees).",
+    "queued": "{{count}} items queued on {{devices}} devices"
+  },
+  "reconciliation": {
+    "title": "Reconciliation", "subtitle": "Compare the cloud roster with each device's user list and unmatched punches; repair pushes the differences.",
+    "empty": "No devices to reconcile", "emptyHint": "Register a device first.", "neverRun": "Never reconciled", "lastRun": "Last run {{when}}",
+    "cloudOnly": "Cloud only", "cloudOnlyHint": "Employees expected on the device but missing", "deviceOnly": "Device only", "deviceOnlyHint": "Users on the device with no matching employee",
+    "differing": "Differing", "differingHint": "Records whose device copy differs from the cloud", "stale": "Stale", "staleHint": "Employees on the device that should have been removed",
+    "unmatched": "Unmatched punches", "unmatchedHint": "Raw punches that could not be attributed to an employee", "duplicates": "Duplicates", "duplicatesHint": "Duplicate provider transaction ids (last 7 days)",
+    "expected": "{{expected}} expected · {{onDevice}} on device", "viewJob": "View job", "repairJob": "Repair job",
+    "runAllTitle": "Reconcile every device?", "runAllHint": "One reconciliation item per active device is queued. Nothing is changed on the devices.",
+    "repairAllTitle": "Repair every device?", "repairAllHint": "After comparing, a repair job pushes missing employees and removes device-only or stale users on every device.",
+    "repairTitle": "Repair {{name}}?", "repairHint": "Missing and differing employees are pushed; device-only and stale users are removed from the device.",
+    "inSync": "In sync", "issues": "{{count}} issues"
+  }
+}

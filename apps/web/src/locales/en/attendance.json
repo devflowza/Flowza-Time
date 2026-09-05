@@ -1,0 +1,59 @@
+{
+  "title": "Attendance",
+  "subtitle": "Daily and monthly attendance computed from device punches, shifts and rules. Every figure can be traced back to its punches.",
+  "tabs": { "daily": "Daily", "monthly": "Monthly", "raw": "Raw transactions", "recalc": "Recalculations", "periods": "Period locks" },
+  "status": { "PRESENT": "Present", "ABSENT": "Absent", "LEAVE": "Leave", "HOLIDAY": "Holiday", "WEEKLY_OFF": "Weekly off", "HALF_DAY": "Half day", "MISSING_PUNCH": "Missing punch", "NOT_JOINED": "Not joined", "EXITED": "Exited", "PENDING": "Pending" },
+  "flags": {
+    "LATE": "Late", "EARLY_DEPARTURE": "Early departure", "OVERTIME": "Overtime", "MISSING_IN": "Missing IN", "MISSING_OUT": "Missing OUT", "MANUAL_CORRECTION": "Corrected", "OUT_OF_WINDOW": "Out of window",
+    "WORKED_ON_HOLIDAY": "Worked on holiday", "WORKED_ON_WEEKLY_OFF": "Worked on weekly off", "HALF_DAY_LEAVE": "Half-day leave", "DUPLICATE_PUNCHES_COLLAPSED": "Duplicates collapsed", "RAMADAN_HOURS": "Ramadan hours", "CROSS_MIDNIGHT": "Cross-midnight", "NO_SHIFT": "No shift", "UNDER_HOURS": "Under hours"
+  },
+  "correctionStatus": { "PENDING": "Pending", "APPROVED": "Approved", "APPLIED": "Applied", "REJECTED": "Rejected", "CANCELLED": "Cancelled" },
+  "correctionType": { "ADD_PUNCH": "Add punch", "EDIT_PUNCH": "Edit punch", "REMOVE_PUNCH": "Remove punch", "SET_STATUS": "Set status" },
+  "rawStatus": { "pending": "Pending", "normalized": "Normalised", "unmatched": "Unmatched", "ignored": "Ignored", "error": "Error", "quarantined": "Quarantined", "held": "Held" },
+  "jobStatus": { "QUEUED": "Queued", "RUNNING": "Running", "COMPLETED": "Completed", "FAILED": "Failed", "CANCELLED": "Cancelled", "EXPIRED": "Expired" },
+  "eventType": { "PUNCH": "Punch", "PUNCH_IN": "Punch in", "PUNCH_OUT": "Punch out", "BREAK_START": "Break start", "BREAK_END": "Break end" },
+  "eventSource": { "DEVICE": "Device", "MANUAL": "Manual", "CORRECTION": "Correction", "IMPORT": "Import", "MOBILE": "Mobile" },
+  "overtimeCategory": { "REGULAR": "Regular", "WEEKLY_OFF": "Weekly off", "HOLIDAY": "Holiday" },
+  "columns": { "employee": "Employee", "shift": "Shift", "firstIn": "First in", "lastOut": "Last out", "worked": "Worked", "late": "Late", "early": "Early out", "overtime": "OT", "flags": "Flags" },
+  "filters": { "allStatuses": "All statuses", "anyFlag": "Any flag" },
+  "daily": { "previousDay": "Previous day", "nextDay": "Next day", "searchPlaceholder": "Search name or number…", "empty": "No attendance records for this day", "emptyHint": "Records appear once punches are processed for the selected date. Employees without punches are marked absent after the shift ends." },
+  "monthly": {
+    "employee": "Employee", "month": "Month", "previousMonth": "Previous month", "nextMonth": "Next month", "thisMonth": "This month", "noRecord": "No record", "selectedEmployee": "Selected employee",
+    "totals": { "present": "P", "absent": "A", "leave": "L", "late": "Late", "missing": "Miss", "worked": "Worked", "overtime": "OT" },
+    "pageTotals": "Page totals ({{count}})", "legendMissing": "Missing IN/OUT", "empty": "No employees for this month", "emptyHint": "Employees active during the month appear here with one cell per day.", "employeeCount": "{{count}} employees"
+  },
+  "record": {
+    "title": "Attendance record", "subtitle": "Calculation details for one employee-day.", "shift": "Shift", "noShift": "No shift", "break": "Break {{value}}", "scheduled": "Scheduled", "punches": "Punches", "version": "Version",
+    "tabs": { "trace": "Calculation trace", "events": "Events ({{count}})", "history": "History ({{count}})", "corrections": "Corrections ({{count}})" },
+    "noEvents": "No events", "noEventsHint": "No punches were recorded around this date.", "eventTime": "Time", "eventType": "Type", "source": "Source", "device": "Device", "verification": "Verification", "attributed": "Attributed", "viaCorrection": "via correction", "voided": "Voided", "yes": "Yes", "otherDay": "Other day",
+    "noHistory": "No previous versions", "noHistoryHint": "A snapshot is stored every time the record is recomputed.", "recomputed": "Recomputed", "triggeredBy": "by {{by}}",
+    "noCorrections": "No corrections", "noCorrectionsHint": "Corrections requested for this day appear here with their approval status.", "correctionType": "Type", "change": "Change", "reason": "Reason", "newPunch": "new punch", "removed": "removed",
+    "locked": "Locked", "lockedHint": "This period is locked; unlock it before requesting corrections.", "requestCorrection": "Request correction"
+  },
+  "trace": {
+    "empty": "No calculation trace", "emptyHint": "This record was created without a trace (manual status or legacy engine).", "engine": "Engine {{version}}",
+    "sections": { "inputs": "Inputs", "punches": "Punch timeline ({{count}})", "steps": "Calculation steps ({{count}})" },
+    "inputs": { "timezone": "Timezone", "shift": "Shift", "noShift": "No shift", "ruleSet": "Rule set", "defaultRules": "Default rules", "window": "Punch window", "holiday": "Holiday", "leave": "Leave", "weeklyOff": "Weekly off" },
+    "noInputs": "No inputs recorded.", "noPunches": "No punches inside the window.", "noSteps": "No steps recorded.",
+    "roles": { "IN": "IN", "OUT": "OUT", "BREAK_START": "Break start", "BREAK_END": "Break end", "IGNORED": "Ignored", "DUPLICATE": "Duplicate", "OUT_OF_WINDOW": "Out of window" },
+    "columns": { "step": "Step", "detail": "Detail", "values": "Values" }
+  },
+  "raw": {
+    "hint": "Raw device transactions are immutable. Quarantined (clock skew / future), unmatched (unknown device user) and held (locked period) rows are highlighted and can be re-queued after the cause is fixed.",
+    "device": "Device", "deviceEmployeeId": "Device user id", "punchedAt": "Punched at", "deviceLocal": "Device local time", "direction": "Direction", "source": "Source", "skew": "Clock skew {{seconds}} s", "unmatchedEmployee": "Unmatched",
+    "requeue": "Requeue", "requeued": "Transaction re-queued for processing", "empty": "No raw transactions", "emptyHint": "Transactions appear as devices are polled or push their punches.", "page": "Page {{page}}"
+  },
+  "recalc": {
+    "title": "Recalculate", "hint": "Recompute daily records for a date range. Previous versions are kept in the record history.", "allBranches": "All branches", "allDepartments": "All departments", "oneBranch": "One branch",
+    "employees": "Employees", "employeesHint": "Leave empty to recalculate every employee in scope.", "reason": "Reason", "reasonPlaceholder": "e.g. Rule set corrected for March", "submit": "Queue recalculation", "queuedHint": "Records are recomputed in the background.",
+    "range": "Range", "scope": "Scope", "nEmployees": "{{count}} employees", "recordsUpdated": "{{count}} records updated", "requestedBy": "Requested by", "job": "Job", "viewJob": "View job", "empty": "No recalculations yet", "emptyHint": "Recalculation requests and their progress appear here."
+  },
+  "multi": { "addEmployee": "Add employee…", "selected": "{{count}} selected", "remove": "Remove {{name}}" },
+  "periods": {
+    "hint": "Locked periods reject new punches (held), corrections and recalculations. Payroll finalisation requires a lock.", "year": "Year", "includeUnlocked": "Show unlocked", "period": "Period", "lockedAt": "Locked at", "reason": "Reason", "allBranches": "All branches",
+    "statusLocked": "Locked", "statusUnlocked": "Unlocked", "unlockedAt": "Unlocked {{at}}", "unlockReasonLabel": "Unlock reason", "empty": "No period locks", "emptyHint": "Lock a period once attendance has been reviewed so payroll can be finalised.",
+    "lockTitle": "Lock period", "lockHint": "Pending corrections in the range must be decided first.", "start": "Period start", "end": "Period end", "branchHint": "Leave empty to lock all branches.", "lock": "Lock", "locked": "Period locked",
+    "unlockTitle": "Unlock period", "unlockHint": "Unlock {{from}} → {{to}}? The action is audited.", "unlockReason": "Reason", "unlockReasonHint": "At least 3 characters; stored in the audit log.", "reasonTooShort": "Please enter at least 3 characters.", "unlock": "Unlock", "unlocked": "Period unlocked"
+  },
+  "periodLocked": { "title": "Period is locked", "hint": "Attendance in this range is locked. Unlock the period under Attendance → Period locks before changing it.", "view": "View period locks" }
+}

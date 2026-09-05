@@ -1,0 +1,19 @@
+{
+  "title": "Corrections",
+  "subtitle": "Requested changes to attendance. Originals are never modified: approved corrections add or void events and the day is recomputed.",
+  "dialog": { "title": "Request correction", "hint": "The request is routed through the approval workflow of the employee's branch.", "submit": "Submit request", "submitted": "Correction submitted for approval", "autoApproved": "Correction approved and queued for application" },
+  "fields": {
+    "employee": "Employee", "selectEmployee": "Select an employee", "attendanceDate": "Attendance date", "type": "Correction type",
+    "originalEvent": "Original event", "originalEventHint": "Non-voided events from the day before to the day after the attendance date.", "eventsUnavailable": "Events could not be loaded.", "selectEvent": "Select an event", "selectEmployeeFirst": "Select an employee first", "noEvents": "No events around this date",
+    "punchDate": "Punch date", "punchTime": "Punch time ({{zone}})", "eventType": "Event type", "storedAs": "Stored as {{utc}} (entered in {{zone}})", "enterTime": "Enter the time as shown on the clock in {{zone}}.",
+    "proposedStatus": "New status", "selectStatus": "Select a status", "reason": "Reason", "reasonHint": "At least 3 characters. Shown to approvers and kept in the audit log."
+  },
+  "typeHint": {
+    "ADD_PUNCH": "Adds a punch the device missed (forgotten badge, device offline).",
+    "EDIT_PUNCH": "Voids an existing punch and adds one at the corrected time.",
+    "REMOVE_PUNCH": "Voids an existing punch (accidental or duplicate).",
+    "SET_STATUS": "Overrides the computed status for the day (e.g. mark present on a training day)."
+  },
+  "list": { "new": "Request correction", "change": "Change", "cancel": "Cancel", "empty": "No corrections", "emptyHint": "Requested corrections appear here with their approval status.", "selectedEmployee": "Selected employee" },
+  "cancel": { "title": "Cancel this correction?", "hint": "Only pending corrections can be cancelled. Approvers are notified.", "confirm": "Cancel correction", "done": "Correction cancelled", "reason": "Reason (optional)" }
+}

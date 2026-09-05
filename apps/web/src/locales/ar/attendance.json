@@ -1,0 +1,59 @@
+{
+  "title": "الحضور",
+  "subtitle": "الحضور اليومي والشهري المحسوب من بصمات الأجهزة والورديات والقواعد. يمكن تتبّع كل رقم إلى بصماته.",
+  "tabs": { "daily": "يومي", "monthly": "شهري", "raw": "المعاملات الخام", "recalc": "إعادة الحساب", "periods": "إقفال الفترات" },
+  "status": { "PRESENT": "حاضر", "ABSENT": "غائب", "LEAVE": "إجازة", "HOLIDAY": "عطلة", "WEEKLY_OFF": "راحة أسبوعية", "HALF_DAY": "نصف يوم", "MISSING_PUNCH": "بصمة مفقودة", "NOT_JOINED": "لم يلتحق", "EXITED": "منتهي", "PENDING": "قيد الانتظار" },
+  "flags": {
+    "LATE": "تأخير", "EARLY_DEPARTURE": "خروج مبكر", "OVERTIME": "عمل إضافي", "MISSING_IN": "دخول مفقود", "MISSING_OUT": "خروج مفقود", "MANUAL_CORRECTION": "مُصحَّح", "OUT_OF_WINDOW": "خارج النافذة",
+    "WORKED_ON_HOLIDAY": "عمل في عطلة", "WORKED_ON_WEEKLY_OFF": "عمل في الراحة الأسبوعية", "HALF_DAY_LEAVE": "إجازة نصف يوم", "DUPLICATE_PUNCHES_COLLAPSED": "بصمات مكررة مدمجة", "RAMADAN_HOURS": "ساعات رمضان", "CROSS_MIDNIGHT": "عبر منتصف الليل", "NO_SHIFT": "بدون وردية", "UNDER_HOURS": "ساعات أقل"
+  },
+  "correctionStatus": { "PENDING": "قيد الانتظار", "APPROVED": "معتمد", "APPLIED": "مطبَّق", "REJECTED": "مرفوض", "CANCELLED": "ملغى" },
+  "correctionType": { "ADD_PUNCH": "إضافة بصمة", "EDIT_PUNCH": "تعديل بصمة", "REMOVE_PUNCH": "إزالة بصمة", "SET_STATUS": "تعيين الحالة" },
+  "rawStatus": { "pending": "قيد الانتظار", "normalized": "مُعالَج", "unmatched": "غير مطابق", "ignored": "مُتجاهَل", "error": "خطأ", "quarantined": "محجوز", "held": "معلّق" },
+  "jobStatus": { "QUEUED": "في قائمة الانتظار", "RUNNING": "قيد التنفيذ", "COMPLETED": "مكتمل", "FAILED": "فشل", "CANCELLED": "ملغى", "EXPIRED": "منتهي الصلاحية" },
+  "eventType": { "PUNCH": "بصمة", "PUNCH_IN": "دخول", "PUNCH_OUT": "خروج", "BREAK_START": "بداية الاستراحة", "BREAK_END": "نهاية الاستراحة" },
+  "eventSource": { "DEVICE": "جهاز", "MANUAL": "يدوي", "CORRECTION": "تصحيح", "IMPORT": "استيراد", "MOBILE": "جوال" },
+  "overtimeCategory": { "REGULAR": "عادي", "WEEKLY_OFF": "راحة أسبوعية", "HOLIDAY": "عطلة" },
+  "columns": { "employee": "الموظف", "shift": "الوردية", "firstIn": "أول دخول", "lastOut": "آخر خروج", "worked": "ساعات العمل", "late": "تأخير", "early": "خروج مبكر", "overtime": "إضافي", "flags": "العلامات" },
+  "filters": { "allStatuses": "كل الحالات", "anyFlag": "أي علامة" },
+  "daily": { "previousDay": "اليوم السابق", "nextDay": "اليوم التالي", "searchPlaceholder": "ابحث بالاسم أو الرقم…", "empty": "لا توجد سجلات حضور لهذا اليوم", "emptyHint": "تظهر السجلات بعد معالجة البصمات للتاريخ المحدد. يُعتبر الموظفون بدون بصمات غائبين بعد انتهاء الوردية." },
+  "monthly": {
+    "employee": "الموظف", "month": "الشهر", "previousMonth": "الشهر السابق", "nextMonth": "الشهر التالي", "thisMonth": "هذا الشهر", "noRecord": "لا يوجد سجل", "selectedEmployee": "الموظف المحدد",
+    "totals": { "present": "ح", "absent": "غ", "leave": "إ", "late": "تأخير", "missing": "مفقود", "worked": "العمل", "overtime": "إضافي" },
+    "pageTotals": "مجاميع الصفحة ({{count}})", "legendMissing": "دخول/خروج مفقود", "empty": "لا يوجد موظفون لهذا الشهر", "emptyHint": "يظهر هنا الموظفون النشطون خلال الشهر مع خلية لكل يوم.", "employeeCount": "{{count}} موظف"
+  },
+  "record": {
+    "title": "سجل الحضور", "subtitle": "تفاصيل الحساب ليوم واحد لموظف واحد.", "shift": "الوردية", "noShift": "بدون وردية", "break": "استراحة {{value}}", "scheduled": "المقرر", "punches": "البصمات", "version": "الإصدار",
+    "tabs": { "trace": "مسار الحساب", "events": "الأحداث ({{count}})", "history": "السجل التاريخي ({{count}})", "corrections": "التصحيحات ({{count}})" },
+    "noEvents": "لا توجد أحداث", "noEventsHint": "لم تُسجَّل بصمات حول هذا التاريخ.", "eventTime": "الوقت", "eventType": "النوع", "source": "المصدر", "device": "الجهاز", "verification": "التحقق", "attributed": "مُنسَب", "viaCorrection": "عبر تصحيح", "voided": "ملغى", "yes": "نعم", "otherDay": "يوم آخر",
+    "noHistory": "لا توجد إصدارات سابقة", "noHistoryHint": "تُحفظ لقطة عند كل إعادة حساب للسجل.", "recomputed": "أُعيد حسابه", "triggeredBy": "بواسطة {{by}}",
+    "noCorrections": "لا توجد تصحيحات", "noCorrectionsHint": "تظهر هنا التصحيحات المطلوبة لهذا اليوم مع حالة اعتمادها.", "correctionType": "النوع", "change": "التغيير", "reason": "السبب", "newPunch": "بصمة جديدة", "removed": "أُزيلت",
+    "locked": "مقفل", "lockedHint": "هذه الفترة مقفلة؛ افتحها قبل طلب التصحيحات.", "requestCorrection": "طلب تصحيح"
+  },
+  "trace": {
+    "empty": "لا يوجد مسار حساب", "emptyHint": "أُنشئ هذا السجل بدون مسار (حالة يدوية أو محرك قديم).", "engine": "المحرك {{version}}",
+    "sections": { "inputs": "المدخلات", "punches": "الخط الزمني للبصمات ({{count}})", "steps": "خطوات الحساب ({{count}})" },
+    "inputs": { "timezone": "المنطقة الزمنية", "shift": "الوردية", "noShift": "بدون وردية", "ruleSet": "مجموعة القواعد", "defaultRules": "القواعد الافتراضية", "window": "نافذة البصم", "holiday": "عطلة", "leave": "إجازة", "weeklyOff": "راحة أسبوعية" },
+    "noInputs": "لم تُسجَّل مدخلات.", "noPunches": "لا توجد بصمات داخل النافذة.", "noSteps": "لم تُسجَّل خطوات.",
+    "roles": { "IN": "دخول", "OUT": "خروج", "BREAK_START": "بداية الاستراحة", "BREAK_END": "نهاية الاستراحة", "IGNORED": "مُتجاهَلة", "DUPLICATE": "مكررة", "OUT_OF_WINDOW": "خارج النافذة" },
+    "columns": { "step": "الخطوة", "detail": "التفاصيل", "values": "القيم" }
+  },
+  "raw": {
+    "hint": "المعاملات الخام من الأجهزة غير قابلة للتعديل. تُميَّز الصفوف المحجوزة (انحراف الساعة / وقت مستقبلي) وغير المطابقة (مستخدم جهاز غير معروف) والمعلّقة (فترة مقفلة) ويمكن إعادة إدراجها بعد معالجة السبب.",
+    "device": "الجهاز", "deviceEmployeeId": "معرّف المستخدم على الجهاز", "punchedAt": "وقت البصمة", "deviceLocal": "وقت الجهاز المحلي", "direction": "الاتجاه", "source": "المصدر", "skew": "انحراف الساعة {{seconds}} ث", "unmatchedEmployee": "غير مطابق",
+    "requeue": "إعادة الإدراج", "requeued": "أُعيد إدراج المعاملة للمعالجة", "empty": "لا توجد معاملات خام", "emptyHint": "تظهر المعاملات مع استطلاع الأجهزة أو إرسالها لبصماتها.", "page": "صفحة {{page}}"
+  },
+  "recalc": {
+    "title": "إعادة الحساب", "hint": "أعد حساب السجلات اليومية لنطاق تاريخي. تُحفظ الإصدارات السابقة في سجل التاريخ.", "allBranches": "كل الفروع", "allDepartments": "كل الأقسام", "oneBranch": "فرع واحد",
+    "employees": "الموظفون", "employeesHint": "اتركه فارغاً لإعادة حساب كل الموظفين في النطاق.", "reason": "السبب", "reasonPlaceholder": "مثال: تم تصحيح مجموعة القواعد لشهر مارس", "submit": "إدراج إعادة الحساب", "queuedHint": "تتم إعادة حساب السجلات في الخلفية.",
+    "range": "النطاق", "scope": "المجال", "nEmployees": "{{count}} موظف", "recordsUpdated": "تم تحديث {{count}} سجل", "requestedBy": "بطلب من", "job": "المهمة", "viewJob": "عرض المهمة", "empty": "لا توجد عمليات إعادة حساب بعد", "emptyHint": "تظهر هنا طلبات إعادة الحساب وتقدمها."
+  },
+  "multi": { "addEmployee": "إضافة موظف…", "selected": "تم تحديد {{count}}", "remove": "إزالة {{name}}" },
+  "periods": {
+    "hint": "الفترات المقفلة ترفض البصمات الجديدة (تُعلَّق) والتصحيحات وإعادة الحساب. إنهاء الرواتب يتطلب الإقفال.", "year": "السنة", "includeUnlocked": "إظهار المفتوحة", "period": "الفترة", "lockedAt": "تاريخ الإقفال", "reason": "السبب", "allBranches": "كل الفروع",
+    "statusLocked": "مقفلة", "statusUnlocked": "مفتوحة", "unlockedAt": "فُتحت {{at}}", "unlockReasonLabel": "سبب الفتح", "empty": "لا توجد فترات مقفلة", "emptyHint": "أقفل الفترة بعد مراجعة الحضور ليمكن إنهاء الرواتب.",
+    "lockTitle": "إقفال فترة", "lockHint": "يجب البت في التصحيحات المعلّقة في النطاق أولاً.", "start": "بداية الفترة", "end": "نهاية الفترة", "branchHint": "اتركه فارغاً لإقفال كل الفروع.", "lock": "إقفال", "locked": "تم إقفال الفترة",
+    "unlockTitle": "فتح الفترة", "unlockHint": "فتح {{from}} → {{to}}؟ يتم تسجيل الإجراء في سجل التدقيق.", "unlockReason": "السبب", "unlockReasonHint": "3 أحرف على الأقل؛ يُحفظ في سجل التدقيق.", "reasonTooShort": "يرجى إدخال 3 أحرف على الأقل.", "unlock": "فتح", "unlocked": "تم فتح الفترة"
+  },
+  "periodLocked": { "title": "الفترة مقفلة", "hint": "سجلات الحضور في هذا النطاق مقفلة. افتح الفترة من الحضور ← أقفال الفترات قبل تعديلها.", "view": "عرض أقفال الفترات" }
+}

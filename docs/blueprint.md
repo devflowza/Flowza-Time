@@ -474,12 +474,12 @@ interface DeviceProvider {
 |---|---|---|
 | `mock` | all four modes simulated | **Implemented** — latency, failures, duplicates, missing employees, offline, pagination, large batches, webhook events, push protocol |
 | `zkteco_push` (ADMS/PUSH SDK, "iclock") | DEVICE_PUSH | Implemented as protocol handler **against public protocol descriptions; requires hardware verification** |
-| `zkteco_biotime` (ZKBio Time REST) | VENDOR_CLOUD_PULL | Placeholder + documented auth/endpoints from official docs |
+| `zkteco_biotime` (ZKBio Time REST) | ON_PREM_SERVER_API | Placeholder + documented auth/endpoints from official docs |
 | `hikvision_isapi` (ISAPI AccessControl) | ON_PREM_SERVER_API/LAN | Placeholder + documented |
 | `hikvision_hpp` (Hik-Partner Pro OpenAPI) | VENDOR_CLOUD_PULL + VENDOR_WEBHOOK | Placeholder; requires partner credentials |
 | `suprema_biostar2` | ON_PREM_SERVER_API | Placeholder + documented |
 | `anviz_crosschex_cloud` | VENDOR_CLOUD_PULL | Placeholder + documented |
-| `essl`, `fingertec_ingress`, `matrix_cosec`, `nitgen` | varies | Placeholder; compatibility documented with verification status |
+| `essl_push`, `fingertec_push` (ZKTeco-derived push), `matrix_cosec`, `nitgen` | varies | Placeholder; compatibility documented with verification status in `docs/device-integrations.md` |
 
 "Placeholder" means: registered in `device_providers` with `status='placeholder'`, config schema and
 documented capabilities, and an adapter that returns `UNSUPPORTED`/`NOT_IMPLEMENTED` errors — never a
