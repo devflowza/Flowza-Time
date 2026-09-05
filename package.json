@@ -1,0 +1,47 @@
+{
+  "name": "flowza-time",
+  "private": true,
+  "version": "0.1.0",
+  "description": "FlowZa Time — cloud attendance & workforce time management SaaS (F & Z Capital)",
+  "packageManager": "pnpm@10.33.0",
+  "engines": {
+    "node": ">=22.0.0"
+  },
+  "scripts": {
+    "build": "pnpm -r --filter './packages/*' run build && pnpm -r --filter './apps/*' run build",
+    "typecheck": "pnpm -r run typecheck",
+    "lint": "eslint . --max-warnings 0",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "pnpm -r run test",
+    "test:unit": "pnpm -r --filter './packages/*' run test",
+    "test:db": "pnpm --filter @flowza/database run test:db",
+    "db:local:start": "bash scripts/local-pg.sh start",
+    "db:local:stop": "bash scripts/local-pg.sh stop",
+    "db:local:reset": "bash scripts/local-pg.sh reset",
+    "db:migrate:local": "pnpm --filter @flowza/database run migrate:local",
+    "db:seed:local": "pnpm --filter @flowza/database run seed:local",
+    "db:types": "pnpm --filter @flowza/database run codegen",
+    "dev:api": "pnpm --filter @flowza/api run dev",
+    "dev:worker": "pnpm --filter @flowza/worker run dev",
+    "dev:web": "pnpm --filter @flowza/web run dev",
+    "verify": "pnpm typecheck && pnpm lint && pnpm test:unit && pnpm build"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.0",
+    "@types/node": "^22.19.0",
+    "eslint": "^9.39.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "eslint-plugin-react-refresh": "^0.5.6",
+    "globals": "^17.0.0",
+    "prettier": "^3.9.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.69.0",
+    "vitest": "^4.1.0"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "esbuild"
+    ]
+  }
+}

@@ -1,0 +1,30 @@
+{
+  "name": "@flowza/worker",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@flowza/contracts": "workspace:*",
+    "@flowza/database": "workspace:*",
+    "@flowza/device-providers": "workspace:*",
+    "@flowza/domain": "workspace:*",
+    "@flowza/shared": "workspace:*",
+    "@supabase/supabase-js": "^2.115.0",
+    "exceljs": "^4.4.0",
+    "kysely": "^0.29.5",
+    "luxon": "^3.7.2",
+    "papaparse": "^5.7.0",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "resend": "^6.26.0",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": { "@types/luxon": "^3.7.5", "@types/papaparse": "^5.5.2", "@types/pg": "^8.23.1", "tsx": "^4.23.0" }
+}

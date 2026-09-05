@@ -1,0 +1,31 @@
+{
+  "name": "@flowza/api",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "start": "node dist/index.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@flowza/contracts": "workspace:*",
+    "@flowza/database": "workspace:*",
+    "@flowza/device-providers": "workspace:*",
+    "@flowza/domain": "workspace:*",
+    "@flowza/shared": "workspace:*",
+    "@hono/node-server": "^2.1.1",
+    "@hono/zod-validator": "^0.9.1",
+    "@supabase/supabase-js": "^2.115.0",
+    "hono": "^4.13.7",
+    "jose": "^6.2.11",
+    "kysely": "^0.29.5",
+    "luxon": "^3.7.2",
+    "pg": "^8.23.0",
+    "pino": "^10.3.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": { "@types/luxon": "^3.7.5", "@types/pg": "^8.23.1", "tsx": "^4.23.0" }
+}
