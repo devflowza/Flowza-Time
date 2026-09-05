@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { ORG_STATUSES, SUBSCRIPTION_STATUSES } from '../enums.js';
-import { isoDateTimeSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import { booleanQuerySchema, isoDateTimeSchema, paginationQuerySchema, uuidSchema } from '../common.js';
 import { organizationDtoSchema } from '../organizations.js';
 
 export const platformOrgListQuerySchema = paginationQuerySchema.extend({
@@ -63,7 +63,7 @@ export type AccessGrantDto = z.infer<typeof accessGrantDtoSchema>;
 
 export const accessGrantListQuerySchema = paginationQuerySchema.extend({
   organizationId: uuidSchema.optional(),
-  activeOnly: z.coerce.boolean().default(false),
+  activeOnly: booleanQuerySchema.default(false),
 });
 
 export const planDtoSchema = z.object({

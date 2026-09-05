@@ -13,6 +13,11 @@ export const emailSchema = z.email().max(254);
 export const phoneSchema = z.string().trim().min(5).max(32).regex(/^[+\d][\d\s()-]*$/, 'Invalid phone number');
 export const weeklyOffDaysSchema = z.array(z.number().int().min(0).max(6)).max(7);
 export const jsonObjectSchema = z.record(z.string(), z.unknown());
+/** Boolean from a query string: 'false'/'0'/'no'/'' are false (z.coerce.boolean() would treat any non-empty string as true). */
+export const booleanQuerySchema = z.preprocess((v) => {
+  if (typeof v === 'string') { const t = v.trim().toLowerCase(); if (['true', '1', 'yes', 'on'].includes(t)) return true; if (['false', '0', 'no', 'off', ''].includes(t)) return false; return v; }
+  return v;
+}, z.boolean());
 
 export const paginationQuerySchema = z.object({
   page: z.coerce.number().int().min(1).default(1),

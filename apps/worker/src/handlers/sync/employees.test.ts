@@ -21,7 +21,7 @@ const DEV_ZK = '0c000000-0000-0000-0000-0000000000a3';
 const DEV_OFF = '0c000000-0000-0000-0000-0000000000a4';
 const DEV_AUTH = '0c000000-0000-0000-0000-0000000000a5';
 const EMP = ['0c000000-0000-0000-0000-0000000000e1', '0c000000-0000-0000-0000-0000000000e2', '0c000000-0000-0000-0000-0000000000e3', '0c000000-0000-0000-0000-0000000000e4'] as const;
-let clock = new Date('2026-09-05T08:00:00Z');
+const clock = new Date('2026-09-05T08:00:00Z');
 let h: TestHarness;
 let seq = 500;
 
@@ -170,11 +170,12 @@ describe('DELETE_EMPLOYEE / PULL_EMPLOYEES / RECONCILIATION', () => {
   it('pulls the device user list into device_employee_states with device-only users and out-of-sync flags', async () => {
     const pull = await oneItem(DEV_B, 'PULL_EMPLOYEES');
     const r = await pullEmployees(pull.ctx);
-    // device B simulates 5 users: E001/E002 were pushed by us (in sync), E003 is a terminated employee (known, name differs), E004 belongs to another branch (known), E005 is nobody
-    expect(r).toMatchObject({ status: 'SUCCESS', async: false, listed: 5, known: 4, unknown: 1 });
+    // device B simulates 5 users: E002 was pushed by us (in sync), E001 too but its card changed since (out of sync), E003 is a terminated
+    // employee (known, not desired), E004 belongs to another branch (known, not desired), E005 is nobody (device-only)
+    expect(r).toMatchObject({ status: 'SUCCESS', async: false, listed: 5, known: 4, unknown: 1, inSync: 1, outOfSync: 3 });
     const sb = await states(DEV_B);
     expect(sb.map((s) => [s.deviceUserId, s.employeeId === null, s.syncStatus, s.desired])).toEqual([
-      ['E001', false, 'IN_SYNC', true], ['E002', false, 'IN_SYNC', true], ['E003', false, 'OUT_OF_SYNC', true], ['E004', false, 'OUT_OF_SYNC', true], ['E005', true, 'OUT_OF_SYNC', false],
+      ['E001', false, 'OUT_OF_SYNC', true], ['E002', false, 'IN_SYNC', true], ['E003', false, 'OUT_OF_SYNC', false], ['E004', false, 'OUT_OF_SYNC', false], ['E005', true, 'OUT_OF_SYNC', false],
     ]);
     expect(sb[4]!.deviceRecord).toMatchObject({ deviceUserId: 'E005' });
     expect(sb.every((s) => s.deviceHash !== null)).toBe(true);
@@ -184,15 +185,17 @@ describe('DELETE_EMPLOYEE / PULL_EMPLOYEES / RECONCILIATION', () => {
   it('reconciliation reports device-only, missing, differing and stale users and can create a repair job', async () => {
     const rec = await oneItem(DEV_B, 'RECONCILIATION', { repair: true });
     const r = await reconciliation(rec.ctx);
-    expect(r).toMatchObject({ status: 'SUCCESS', deviceId: DEV_B, expected: 2, deviceOnlyCount: 1, missingOnDeviceCount: 0, differingCount: 0, staleCount: 2, unmatchedRaw: 0, duplicateTransactions: 0 });
+    expect(r).toMatchObject({ status: 'SUCCESS', deviceId: DEV_B, expected: 2, onDevice: 4, deviceOnlyCount: 1, missingOnDeviceCount: 0, differingCount: 1, staleCount: 2, unmatchedRaw: 0, duplicateTransactions: 0 });
     expect(r['deviceOnly']).toEqual([{ deviceUserId: 'E005' }]);
+    expect(r['differing']).toEqual([{ employeeId: EMP[0], deviceUserId: 'E001' }]);
     expect((r['stale'] as unknown[]).length).toBe(2); // E003 (terminated) and E004 (other branch) should not be on this device
     const summary = (await job(rec.syncJobId)).summary as { devices: Record<string, { repairJobId: string; repairItems: number }> };
-    expect(summary.devices[DEV_B]!.repairItems).toBe(3);
+    expect(summary.devices[DEV_B]!.repairItems).toBe(4);
     const repair = await job(summary.devices[DEV_B]!.repairJobId);
-    expect(repair).toMatchObject({ jobType: 'PUSH_EMPLOYEES', trigger: 'SYSTEM', parentJobId: rec.syncJobId, itemsTotal: 3, status: 'QUEUED' });
+    expect(repair).toMatchObject({ jobType: 'PUSH_EMPLOYEES', trigger: 'SYSTEM', parentJobId: rec.syncJobId, itemsTotal: 4, status: 'QUEUED' });
     const ops = await h.tdb.adminDb.selectFrom('syncJobItems').select(['operation', 'employeeId']).where('syncJobId', '=', repair.id).execute();
-    expect(ops.map((o) => o.operation).sort()).toEqual(['DELETE_EMPLOYEE', 'DELETE_EMPLOYEE', 'DELETE_EMPLOYEE']);
+    expect(ops.map((o) => o.operation).sort()).toEqual(['DELETE_EMPLOYEE', 'DELETE_EMPLOYEE', 'DELETE_EMPLOYEE', 'PUSH_EMPLOYEE']);
+    expect(ops.find((o) => o.operation === 'PUSH_EMPLOYEE')!.employeeId).toBe(EMP[0]);
     // device A: E002 was removed → missing on device
     const recA = await oneItem(DEV_A, 'RECONCILIATION');
     const ra = await reconciliation(recA.ctx);
@@ -286,23 +289,27 @@ describe('scheduler ticks', () => {
     const r = await scheduleHealthChecks(h.deps);
     expect(r.organizations).toBe(2);
     const jobA = await h.tdb.adminDb.selectFrom('syncJobs').selectAll().where('organizationId', '=', ORG).where('jobType', '=', 'DEVICE_HEALTH_CHECK').where('trigger', '=', 'SCHEDULED').executeTakeFirstOrThrow();
-    // A/B/AUTH were never seen; OFF and ZK were seen a minute ago by the checks above
-    expect(jobA.itemsTotal).toBe(3);
+    // only AUTH was never reached: A/B answered employee operations, OFF and ZK were seen by the health checks above
+    expect(jobA.itemsTotal).toBe(1);
     expect(jobA.priority).toBe(2);
-    const q = await sql<{ n: string }>`select count(*) as n from jobs.queue where job_type = 'DEVICE_HEALTH_CHECK' and dedupe_key like 'health:%' and status = 'pending'`.execute(h.tdb.adminDb);
-    expect(Number(q.rows[0]!.n)).toBe(3 + POLL_ADMISSION_CAP + 5);
+    const q = await sql<{ n: string }>`select count(*) as n from jobs.queue where job_type = 'DEVICE_HEALTH_CHECK' and dedupe_key like 'health:%' and status = 'pending' and organization_id = ${ORG_B}::uuid`.execute(h.tdb.adminDb);
+    expect(Number(q.rows[0]!.n)).toBe(POLL_ADMISSION_CAP + 5);
     expect(await scheduleHealthChecks(h.deps)).toMatchObject({ devices: 0 });
   });
 
   it('reconciliation runs per org at the configured interval', async () => {
+    // org A reconciled manually minutes ago (tests above) → only org B is due
     const r = await scheduleReconciliation(h.deps);
-    expect(r.jobs).toHaveLength(2);
-    const jobA = await h.tdb.adminDb.selectFrom('syncJobs').selectAll().where('organizationId', '=', ORG).where('jobType', '=', 'RECONCILIATION').where('trigger', '=', 'SCHEDULED').executeTakeFirstOrThrow();
-    expect(jobA.itemsTotal).toBe(5);
+    expect(r).toMatchObject({ organizations: 2 });
+    expect(r.jobs).toHaveLength(1);
+    const jobB = await job(r.jobs[0]!);
+    expect(jobB).toMatchObject({ organizationId: ORG_B, jobType: 'RECONCILIATION', trigger: 'SCHEDULED', itemsTotal: POLL_ADMISSION_CAP + 5, priority: 3 });
     expect(await scheduleReconciliation(h.deps)).toMatchObject({ jobs: [] }); // within the default 24 h
     await h.tdb.adminDb.insertInto('organizationSettings').values({ organizationId: ORG, sync: JSON.stringify({ reconciliationIntervalHours: 1 }) }).execute();
-    clock = new Date(clock.getTime() + 2 * 3_600_000);
+    await sql`update public.sync_jobs set created_at = now() - interval '2 hours' where organization_id = ${ORG}::uuid and job_type = 'RECONCILIATION'`.execute(h.tdb.adminDb);
     const later = await scheduleReconciliation(h.deps);
     expect(later.jobs).toHaveLength(1); // only org A (1 h interval) is due again
+    const jobA = await job(later.jobs[0]!);
+    expect(jobA).toMatchObject({ organizationId: ORG, itemsTotal: 5 });
   });
 });

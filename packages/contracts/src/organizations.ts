@@ -38,7 +38,19 @@ export const createOrganizationSchema = z.object({
   planKey: z.string().default('trial'),
 });
 export type CreateOrganizationInput = z.infer<typeof createOrganizationSchema>;
-export const updateOrganizationSchema = createOrganizationSchema.omit({ ownerEmail: true, ownerFullName: true, planKey: true, companyCode: true }).partial();
+/** PATCH body: no creation defaults (a `.partial()` of the create schema would re-apply them and reset omitted fields). */
+export const updateOrganizationSchema = z.object({
+  legalName: z.string().trim().min(2).max(200).optional(),
+  displayName: z.string().trim().min(2).max(120).optional(),
+  countryCode: countryCodeSchema.optional(),
+  timezone: timezoneSchema.optional(),
+  currencyCode: currencyCodeSchema.optional(),
+  locale: z.enum(['en', 'ar']).optional(),
+  weeklyOffDays: weeklyOffDaysSchema.optional(),
+  contact: contactSchema.optional(),
+  address: addressSchema.optional(),
+});
+export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>;
 
 export const organizationSettingsSchema = z.object({
   general: z.object({
@@ -60,6 +72,10 @@ export const organizationSettingsSchema = z.object({
     offlineThresholdMinutes: z.number().int().min(1).max(1440).default(15),
     autoPushNewEmployees: z.boolean().default(true),
     reconciliationIntervalHours: z.number().int().min(1).max(168).default(24),
+    /** Ceiling for adaptive polling (minutes). */
+    maxIntervalMinutes: z.number().int().min(1).max(1440).default(60),
+    /** Punches whose device clock skew exceeds this are quarantined (minutes). */
+    maxClockSkewMinutes: z.number().int().min(1).max(1440).default(60),
   }).partial().default({}),
   notifications: z.object({
     deviceOffline: z.boolean().default(true),

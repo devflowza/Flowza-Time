@@ -2,6 +2,7 @@ import { HandlerRegistry } from './types.js';
 import { registerMaintenanceHandlers } from './maintenance/index.js';
 import { registerNotificationHandlers } from './notifications/outbox.js';
 import { registerAttendanceHandlers } from './attendance/index.js';
+import { registerSyncHandlers } from './sync/index.js';
 
 /**
  * Registers every job handler. Handler modules live in ./<area>/ and export `register<Area>Handlers(registry)`:
@@ -16,5 +17,6 @@ export function buildHandlerRegistry(): HandlerRegistry {
   registerMaintenanceHandlers(registry);
   registerNotificationHandlers(registry);
   registerAttendanceHandlers(registry);
+  registerSyncHandlers(registry);
   return registry;
 }

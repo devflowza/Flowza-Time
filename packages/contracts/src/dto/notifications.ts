@@ -1,9 +1,9 @@
 import { z } from 'zod';
 import { NOTIFICATION_CATEGORIES } from '../enums.js';
-import { isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import { booleanQuerySchema, isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, uuidSchema } from '../common.js';
 
 export const notificationListQuerySchema = paginationQuerySchema.extend({
-  unreadOnly: z.coerce.boolean().default(false),
+  unreadOnly: booleanQuerySchema.default(false),
   category: z.enum(NOTIFICATION_CATEGORIES).optional(),
   organizationId: uuidSchema.optional(),
 });

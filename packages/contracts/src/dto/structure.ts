@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { RECORD_STATUSES } from '../enums.js';
-import { addressSchema, contactSchema, isoDateTimeSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import { addressSchema, codeSchema, contactSchema, countryCodeSchema, isoDateTimeSchema, paginationQuerySchema, timezoneSchema, uuidSchema, weeklyOffDaysSchema } from '../common.js';
 
 /** Shared list filters for structure entities (branches, departments, designations, teams). */
 export const structureListQuerySchema = paginationQuerySchema.extend({
@@ -86,6 +86,42 @@ export const teamDtoSchema = z.object({
   updatedAt: isoDateTimeSchema,
 });
 export type TeamDto = z.infer<typeof teamDtoSchema>;
+/** PATCH bodies: all optional, no creation defaults (a `.partial()` of the input schema would reset status/timezone/level). */
+export const updateBranchSchema = z.object({
+  code: codeSchema.optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  nameAr: z.string().trim().max(120).nullable().optional(),
+  countryCode: countryCodeSchema.optional(),
+  city: z.string().trim().max(100).nullable().optional(),
+  address: addressSchema.optional(),
+  timezone: timezoneSchema.optional(),
+  latitude: z.number().min(-90).max(90).nullable().optional(),
+  longitude: z.number().min(-180).max(180).nullable().optional(),
+  geofenceRadiusM: z.number().int().min(10).max(5000).nullable().optional(),
+  contact: contactSchema.optional(),
+  weeklyOffDays: weeklyOffDaysSchema.nullable().optional(),
+  holidayCalendarId: uuidSchema.nullable().optional(),
+  status: z.enum(RECORD_STATUSES).optional(),
+});
+export type UpdateBranchInput = z.infer<typeof updateBranchSchema>;
+export const updateDepartmentSchema = z.object({
+  code: codeSchema.optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  nameAr: z.string().trim().max(120).nullable().optional(),
+  branchId: uuidSchema.nullable().optional(),
+  parentId: uuidSchema.nullable().optional(),
+  managerEmployeeId: uuidSchema.nullable().optional(),
+  status: z.enum(RECORD_STATUSES).optional(),
+});
+export type UpdateDepartmentInput = z.infer<typeof updateDepartmentSchema>;
+export const updateDesignationSchema = z.object({
+  code: codeSchema.optional(),
+  name: z.string().trim().min(1).max(120).optional(),
+  nameAr: z.string().trim().max(120).nullable().optional(),
+  level: z.number().int().min(0).max(100).optional(),
+  status: z.enum(RECORD_STATUSES).optional(),
+});
+export type UpdateDesignationInput = z.infer<typeof updateDesignationSchema>;
 export const updateTeamSchema = z.object({
   code: z.string().trim().min(1).max(32).optional(),
   name: z.string().trim().min(1).max(120).optional(),

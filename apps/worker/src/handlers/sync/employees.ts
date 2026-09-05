@@ -130,8 +130,7 @@ export async function pushEmployee(ctx: JobContext) {
       if (!isEligible(employee)) throw new AppError('INVALID_STATE', `employee ${employee.employeeNumber} is ${employee.deletedAt ? 'deleted' : employee.employmentStatus}; not pushed to devices`);
       const device = await loadDeviceOrThrow(trx, payload.deviceId);
       const provider = deps.providers.get(device.providerKey);
-      try { requireCapability(capabilitiesOf(device, provider), 'employeePush', 'upsertEmployee'); }
-      catch (err) { await upsertState(trx, device, employee.deviceUserId, { employeeId: employee.id, syncStatus: 'UNSUPPORTED', lastErrorCode: 'UNSUPPORTED', lastError: (err as Error).message }, now); throw err; }
+      if (!capabilitiesOf(device, provider).employeePush) return { skip: false as const, unsupported: true as const, device, employee };
       const identity = await loadIdentity(trx, payload.organizationId, employee.id, device.providerKey);
       const desired = buildDeviceEmployee(employee, identity, { ascii: deviceWantsAscii(device), pin });
       const cloudHash = hashDeviceEmployee(desired);
@@ -139,16 +138,21 @@ export async function pushEmployee(ctx: JobContext) {
       if (!force && pin === null && state && state.syncStatus === 'IN_SYNC' && state.deviceHash === cloudHash && state.deviceUserId === desired.deviceUserId) return { skip: true as const, device, desired };
       await upsertState(trx, device, desired.deviceUserId, { employeeId: employee.id, cloudHash, syncStatus: 'PENDING', desired: true }, now);
       const built = await prepareDevice(ctx, trx, device.id, 'employeePush', 'upsertEmployee', now);
-      return { skip: false as const, device, desired, cloudHash, built, employee };
+      return { skip: false as const, unsupported: false as const, device, desired, cloudHash, built, employee };
     });
     if (prep.skip) return { result: { skipped: 'in_sync', deviceUserId: prep.desired.deviceUserId } };
+    if (prep.unsupported) {
+      // recorded in its own transaction: the UNSUPPORTED error below is terminal for the item and the state must survive it
+      await withContext(deps.db, { kind: 'system', organizationId: payload.organizationId, jobId: ctx.job.id }, (trx) => upsertState(trx, prep.device, prep.employee.deviceUserId, { employeeId: prep.employee.id, syncStatus: 'UNSUPPORTED', lastErrorCode: 'UNSUPPORTED', lastError: 'device cannot receive employees' }, now));
+      throw new ProviderError('UNSUPPORTED', 'upsertEmployee is not supported by this device (capability employeePush)', { retryable: false, details: { capability: 'employeePush' } });
+    }
     const { built, desired, cloudHash, device } = prep;
     try {
       const res = await built.provider.upsertEmployee(built.ctx, desired);
       if (!res.ok) throw new ProviderError('VENDOR_ERROR', res.message ?? 'device rejected the employee', { retryable: true });
       const out = await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
         await handleProviderSuccess(trx, device, built.accountKey);
-        await trx.updateTable('devices').set({ lastEmployeeSyncAt: deps.now() }).where('id', '=', device.id).execute();
+        await trx.updateTable('devices').set({ lastEmployeeSyncAt: deps.now(), lastSuccessfulCommunicationAt: deps.now() }).where('id', '=', device.id).execute();
         if (res.async) {
           const commands = await queueDeviceCommands(trx, device, item.id, res);
           await upsertState(trx, device, desired.deviceUserId, { employeeId: prep.employee.id, cloudHash, syncStatus: 'PENDING', desired: true }, deps.now());
@@ -200,7 +204,7 @@ export async function deleteEmployee(ctx: JobContext) {
       if (!res.ok) throw new ProviderError('VENDOR_ERROR', res.message ?? 'device rejected the deletion', { retryable: true });
       const out = await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
         await handleProviderSuccess(trx, device, built.accountKey);
-        await trx.updateTable('devices').set({ lastEmployeeSyncAt: deps.now() }).where('id', '=', device.id).execute();
+        await trx.updateTable('devices').set({ lastEmployeeSyncAt: deps.now(), lastSuccessfulCommunicationAt: deps.now() }).where('id', '=', device.id).execute();
         if (res.async) {
           const commands = await queueDeviceCommands(trx, device, item.id, res);
           return { async: true, commands, deviceUserId };
@@ -219,17 +223,17 @@ export async function deleteEmployee(ctx: JobContext) {
   });
 }
 
-interface ResolvedEmployee { id: string; employeeNumber: string; displayName: string; deviceUserId: string; cardNumber: string | null; identity: IdentityRow | null }
+interface ResolvedEmployee { id: string; branchId: string; employeeNumber: string; displayName: string; deviceUserId: string; cardNumber: string | null; employmentStatus: string; deletedAt: Date | null; identity: IdentityRow | null }
 
 /** device user ids → employees via employee_provider_identities first, then employees.device_user_id (§E.4 resolution order). */
 async function resolveDeviceUsers(trx: Trx, organizationId: string, providerKey: string, deviceUserIds: string[]): Promise<Map<string, ResolvedEmployee>> {
   const out = new Map<string, ResolvedEmployee>();
   if (deviceUserIds.length === 0) return out;
-  const cols = ['id', 'employeeNumber', 'displayName', 'deviceUserId', 'cardNumber'] as const;
+  const cols = ['id', 'branchId', 'employeeNumber', 'displayName', 'deviceUserId', 'cardNumber', 'employmentStatus', 'deletedAt'] as const;
   const identities = await trx.selectFrom('employeeProviderIdentities as i').innerJoin('employees as e', 'e.id', 'i.employeeId')
-    .select(['i.deviceUserId as identityUserId', 'i.cardNumber as identityCard', 'e.id', 'e.employeeNumber', 'e.displayName', 'e.deviceUserId', 'e.cardNumber'])
+    .select(['i.deviceUserId as identityUserId', 'i.cardNumber as identityCard', 'e.id', 'e.branchId', 'e.employeeNumber', 'e.displayName', 'e.deviceUserId', 'e.cardNumber', 'e.employmentStatus', 'e.deletedAt'])
     .where('i.organizationId', '=', organizationId).where('i.providerKey', '=', providerKey).where('i.deviceUserId', 'in', deviceUserIds).where('e.deletedAt', 'is', null).execute();
-  for (const r of identities) out.set(r.identityUserId, { id: r.id, employeeNumber: r.employeeNumber, displayName: r.displayName, deviceUserId: r.deviceUserId, cardNumber: r.cardNumber, identity: { deviceUserId: r.identityUserId, cardNumber: r.identityCard } });
+  for (const r of identities) out.set(r.identityUserId, { id: r.id, branchId: r.branchId, employeeNumber: r.employeeNumber, displayName: r.displayName, deviceUserId: r.deviceUserId, cardNumber: r.cardNumber, employmentStatus: r.employmentStatus, deletedAt: r.deletedAt, identity: { deviceUserId: r.identityUserId, cardNumber: r.identityCard } });
   const remaining = deviceUserIds.filter((id) => !out.has(id));
   if (remaining.length > 0) {
     const emps = await trx.selectFrom('employees').select([...cols]).where('organizationId', '=', organizationId).where('deletedAt', 'is', null).where('deviceUserId', 'in', remaining).execute();
@@ -277,7 +281,10 @@ export async function pullEmployees(ctx: JobContext) {
             if (emp) {
               const cloudHash = hashDeviceEmployee(buildDeviceEmployee(emp, emp.identity, { ascii }));
               const inSync = cloudHash === deviceHash;
-              await upsertState(trx, device, de.deviceUserId, { employeeId: emp.id, cloudHash, deviceHash, syncStatus: inSync ? 'IN_SYNC' : 'OUT_OF_SYNC', desired: true, lastSuccessAt: at, deviceRecord: record, ...enrolment }, at);
+              // desired is only defaulted for rows we create (same branch + eligible); existing rows keep the decision made by push/delete
+              const existing = await trx.selectFrom('deviceEmployeeStates').select('id').where('deviceId', '=', device.id).where((eb) => eb.or([eb('deviceUserId', '=', de.deviceUserId), eb('employeeId', '=', emp.id)])).executeTakeFirst();
+              const desired = existing ? undefined : emp.branchId === device.branchId && isEligible(emp);
+              await upsertState(trx, device, de.deviceUserId, { employeeId: emp.id, cloudHash, deviceHash, syncStatus: inSync ? 'IN_SYNC' : 'OUT_OF_SYNC', ...(desired === undefined ? {} : { desired }), lastSuccessAt: at, deviceRecord: record, ...enrolment }, at);
               totals.known++; if (inSync) totals.inSync++; else totals.outOfSync++;
             } else {
               await upsertState(trx, device, de.deviceUserId, { employeeId: null, deviceHash, syncStatus: 'OUT_OF_SYNC', desired: false, deviceRecord: record, ...enrolment }, at);
@@ -384,7 +391,7 @@ export async function reconciliation(ctx: JobContext) {
       const explicit = explicitIds.length > 0 ? await trx.selectFrom('employees').select(['id', 'employeeNumber', 'deviceUserId']).where('id', 'in', explicitIds).where('deletedAt', 'is', null).where('employmentStatus', 'in', [...ELIGIBLE_EMPLOYMENT]).execute() : [];
       const expected = [...branchEmployees, ...explicit];
       const expectedIds = new Set(expected.map((e) => e.id));
-      const deviceOnly = states.filter((s) => !s.employeeId).map((s) => ({ deviceUserId: s.deviceUserId }));
+      const deviceOnly = states.filter((s) => !s.employeeId && s.syncStatus !== 'REMOVED' && s.syncStatus !== 'REMOVING').map((s) => ({ deviceUserId: s.deviceUserId }));
       const notOnDevice = new Set<DeviceEmployeeSyncStatus>(['REMOVED', 'REMOVING', 'PENDING', 'FAILED', 'OFFLINE', 'UNSUPPORTED']);
       const missingOnDevice = expected.filter((e) => { const s = byEmployee.get(e.id); return !s || notOnDevice.has(s.syncStatus); }).map((e) => ({ employeeId: e.id, employeeNumber: e.employeeNumber }));
       const differing = states.filter((s) => s.employeeId && expectedIds.has(s.employeeId) && (s.syncStatus === 'OUT_OF_SYNC' || (s.cloudHash && s.deviceHash && s.cloudHash !== s.deviceHash))).map((s) => ({ employeeId: s.employeeId as string, deviceUserId: s.deviceUserId }));

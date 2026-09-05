@@ -106,7 +106,7 @@ type FetchBody = NonNullable<Parameters<typeof fetch>[1]>['body'];
 export interface TestApi {
   tdb: TestDatabase;
   deps: ApiDeps;
-  request(method: string, path: string, opts?: { user?: string; body?: unknown; headers?: Record<string, string>; raw?: FetchBody }): Promise<{ status: number; json: any; headers: Headers; text: string }>;
+  request(method: string, path: string, opts?: { user?: string; aal?: 'aal1' | 'aal2'; body?: unknown; headers?: Record<string, string>; raw?: FetchBody }): Promise<{ status: number; json: any; headers: Headers; text: string }>;
   close(): Promise<void>;
 }
 
@@ -141,9 +141,10 @@ export async function createTestApi(name: string): Promise<TestApi> {
     credentials: new DeviceCredentialsStore(new SecretsCipher([{ id: 'k1', material: masterKey }])),
     providers: { list: () => [] } as unknown as ProviderRegistry,
     verifyToken: async (token) => {
-      const [kind, sub] = token.split(':');
+      // 'user:<uuid>[:aal1|aal2]' — platform admins default to aal2 (MFA) so the platform suites run; tests override explicitly.
+      const [kind, sub, aal] = token.split(':');
       if (kind !== 'user' || !sub) throw new Error('bad token');
-      return { sub, email: EMAILS[sub], role: 'authenticated', raw: {} };
+      return { sub, email: EMAILS[sub], role: 'authenticated', aal: aal ?? (sub === F.platformAdmin ? 'aal2' : 'aal1'), raw: {} };
     },
     realtime: { async publish() {} },
     storage: { async signedUrl() { return null; } },
@@ -154,7 +155,7 @@ export async function createTestApi(name: string): Promise<TestApi> {
     deps,
     async request(method, path, opts = {}) {
       const headers: Record<string, string> = { ...(opts.headers ?? {}) };
-      if (opts.user) headers['authorization'] = `Bearer user:${opts.user}`;
+      if (opts.user) headers['authorization'] = `Bearer user:${opts.user}${opts.aal ? `:${opts.aal}` : ''}`;
       let body: FetchBody | undefined = opts.raw;
       if (opts.body !== undefined) { headers['content-type'] = 'application/json'; body = JSON.stringify(opts.body); }
       const res = await app.request(`/api/v1${path}`, { method, headers, body });

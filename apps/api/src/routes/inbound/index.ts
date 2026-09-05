@@ -1,8 +1,106 @@
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
+import type { DevicePushRequest, WebhookRequest } from '@flowza/device-providers';
 import type { AppEnv } from '../../middleware/request-context.js';
 import type { ApiDeps } from '../../deps.js';
+import { clientIp } from '../../lib/http.js';
+import { pushTokenMatches } from '../../services/features/devices.service.js';
+import { findPushDevice, findWebhookDevice, handleDevicePush, handleWebhook, INBOUND_MAX_BODY_BYTES, protocolErrorResponse, recordPendingDevice, SerialRateLimiter } from '../../services/features/inbound.service.js';
 
-/** /webhooks/providers/:providerKey and /device-push/:protocol/* — see docs/device-integrations.md. */
+const TEXT = { 'content-type': 'text/plain; charset=utf-8' };
+const HEADER_ALLOWLIST = ['content-type', 'content-length', 'user-agent', 'x-request-id', 'x-mock-signature', 'x-signature', 'x-hub-signature-256', 'x-device-token', 'authorization'];
+/** Optional path-embedded token for terminals that cannot send headers: /device-push/<protocol>/~<token>/... */
+const PATH_TOKEN = /^\/~([A-Za-z0-9_-]{16,128})(?=\/|$)/;
+
+function subsetHeaders(c: Context<AppEnv>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const name of HEADER_ALLOWLIST) { const v = c.req.header(name); if (v !== undefined) out[name] = v; }
+  return out;
+}
+function queryOf(c: Context<AppEnv>): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const [k, v] of Object.entries(c.req.queries())) out[k] = v[0] ?? '';
+  return out;
+}
+async function readBody(c: Context<AppEnv>): Promise<string | null> {
+  const len = Number(c.req.header('content-length') ?? '0');
+  if (len > INBOUND_MAX_BODY_BYTES) return null;
+  if (c.req.method === 'GET' || c.req.method === 'HEAD') return '';
+  const text = await c.req.text().catch(() => '');
+  return Buffer.byteLength(text, 'utf8') > INBOUND_MAX_BODY_BYTES ? null : text;
+}
+
+/**
+ * ANY /device-push/:protocolKey/*   — device push protocols (mock, iclock …); see docs/api.md "Inbound".
+ * POST /webhooks/providers/:providerKey/:deviceId/:token — vendor cloud webhooks.
+ * Responses are protocol text/JSON only; internal errors are never surfaced.
+ */
 export function registerInboundRoutes(app: Hono<AppEnv>, deps: ApiDeps): void {
-  void app; void deps;
+  const serialLimiter = new SerialRateLimiter();
+
+  app.all('/device-push/:protocolKey/*', async (c) => {
+    const protocolKey = c.req.param('protocolKey');
+    const handler = deps.providers.pushProtocol(protocolKey);
+    if (!handler) return c.text('unknown protocol', 404, TEXT);
+    const requestId = c.get('requestId');
+    const log = c.get('log');
+    let rest = c.req.path.slice(`/device-push/${protocolKey}`.length) || '/';
+    let pathToken: string | undefined;
+    const m = PATH_TOKEN.exec(rest);
+    if (m) { pathToken = m[1]; rest = rest.slice(m[0].length) || '/'; }
+    const rawBody = await readBody(c);
+    if (rawBody === null) return c.text('payload too large', 413, TEXT);
+    const req: DevicePushRequest = { method: c.req.method, path: `/${protocolKey}${rest}`, query: queryOf(c), headers: subsetHeaders(c), rawBody, remoteIp: clientIp(c, deps.config.TRUST_PROXY) ?? undefined };
+    let identity: ReturnType<typeof handler.identifyDevice>;
+    try { identity = handler.identifyDevice(req); } catch { identity = null; }
+    if (!identity) return c.text('device not identified', 400, TEXT);
+    const serial = identity.serialNumber;
+    if (!serialLimiter.allow(serial)) { c.header('retry-after', '60'); return c.text('too many requests', 429, TEXT); }
+    try {
+      const device = await findPushDevice(deps.db, serial, requestId);
+      if (!device) {
+        await recordPendingDevice(deps, handler, serial, req, requestId, { ...(identity.extra ?? {}), route: identity.extra?.route ?? null }).catch((err) => log.warn({ event: 'pending_device_upsert_failed', serial, err: (err as Error).message }));
+        // keep the device retrying with the protocol's own acceptance so it registers as soon as an admin claims it
+        let response = { status: 200, body: 'OK', headers: TEXT };
+        try { response = handler.parseInbound(req, { timezone: 'UTC', serialNumber: serial }).response; } catch { /* fall back to OK */ }
+        log.info({ event: 'device_push_unknown_serial', protocolKey, serial });
+        return c.body(response.body, response.status as 200, response.headers ?? TEXT);
+      }
+      if (device.pushTokenHash) {
+        const bearer = c.req.header('authorization')?.replace(/^Bearer\s+/i, '');
+        const token = pathToken ?? c.req.header('x-device-token') ?? c.req.query('token') ?? bearer;
+        if (!pushTokenMatches(token, device.pushTokenHash)) { log.warn({ event: 'device_push_bad_token', protocolKey, serial, organizationId: device.organizationId, deviceId: device.id }); return c.text('unauthorized', 401, TEXT); }
+      }
+      const outcome = await handleDevicePush(deps, device, handler, req, requestId);
+      log.info({ event: 'device_push', protocolKey, serial, organizationId: device.organizationId, deviceId: device.id, kind: outcome.kind, inserted: outcome.inserted, commandsSent: outcome.commandsSent });
+      return c.body(outcome.response.body, outcome.response.status as 200, outcome.response.headers ?? TEXT);
+    } catch (err) {
+      log.error({ event: 'device_push_failed', protocolKey, serial, err: err instanceof Error ? { name: err.name, message: err.message } : err });
+      const r = protocolErrorResponse(err);
+      return c.body(r.body, r.status as 200, r.headers ?? TEXT);
+    }
+  });
+
+  app.post('/webhooks/providers/:providerKey/:deviceId/:token', async (c) => {
+    const { providerKey, deviceId, token } = c.req.param();
+    const requestId = c.get('requestId');
+    const log = c.get('log');
+    const provider = deps.providers.tryGet(providerKey);
+    if (!provider || typeof provider.handleWebhook !== 'function') return c.json({ error: 'unknown_provider' }, 404);
+    if (!/^[0-9a-f-]{36}$/i.test(deviceId)) return c.json({ error: 'unknown_device' }, 404);
+    const rawBody = await readBody(c);
+    if (rawBody === null) return c.json({ error: 'payload_too_large' }, 413);
+    try {
+      const device = await findWebhookDevice(deps.db, deviceId, providerKey, requestId);
+      if (!device) return c.json({ error: 'unknown_device' }, 404);
+      let body: unknown = null;
+      try { body = rawBody ? JSON.parse(rawBody) : null; } catch { body = null; }
+      const req: WebhookRequest = { headers: subsetHeaders(c), rawBody, body, query: queryOf(c), remoteIp: clientIp(c, deps.config.TRUST_PROXY) ?? undefined };
+      const outcome = await handleWebhook(deps, device, token, req, requestId);
+      log.info({ event: 'provider_webhook', providerKey, organizationId: device.organizationId, deviceId, status: outcome.status });
+      return c.json(outcome.body ?? {}, outcome.status as 200, outcome.headers);
+    } catch (err) {
+      log.error({ event: 'provider_webhook_failed', providerKey, deviceId, err: err instanceof Error ? { name: err.name, message: err.message } : err });
+      return c.json({ error: 'internal_error' }, 500);
+    }
+  });
 }

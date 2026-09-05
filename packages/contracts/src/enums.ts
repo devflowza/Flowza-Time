@@ -35,7 +35,7 @@ export type VerificationStatus = (typeof VERIFICATION_STATUSES)[number];
 export const DEVICE_STATUSES = ['active', 'disabled', 'decommissioned'] as const;
 export type DeviceStatus = (typeof DEVICE_STATUSES)[number];
 
-export const CONNECTION_STATUSES = ['unknown', 'online', 'offline', 'degraded', 'error'] as const;
+export const CONNECTION_STATUSES = ['unknown', 'online', 'offline', 'degraded', 'error', 'vendor_degraded'] as const;
 export type ConnectionStatus = (typeof CONNECTION_STATUSES)[number];
 
 export const DEVICE_EMPLOYEE_SYNC_STATUSES = ['PENDING', 'IN_SYNC', 'OUT_OF_SYNC', 'FAILED', 'OFFLINE', 'UNSUPPORTED', 'REMOVING', 'REMOVED'] as const;

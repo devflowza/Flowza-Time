@@ -104,10 +104,10 @@ export async function scheduleHealthChecks(deps: WorkerDeps): Promise<{ organiza
  * (default 24), one job with an item per active device. The org setting is read in the org's own system context.
  */
 export async function scheduleReconciliation(deps: WorkerDeps): Promise<{ organizations: number; jobs: string[] }> {
-  const now = deps.now();
   const orgs = await withContext(deps.db, { kind: 'platform' }, async (trx) => {
-    const res = await sql<{ organizationId: string; lastAt: Date | null }>`
-      select o.id as "organizationId", (select max(j.created_at) from public.sync_jobs j where j.organization_id = o.id and j.job_type = 'RECONCILIATION') as "lastAt"
+    // age measured with the database clock (created_at is set by the database), so the two clocks never disagree
+    const res = await sql<{ organizationId: string; ageSeconds: number | null }>`
+      select o.id as "organizationId", (select extract(epoch from now() - max(j.created_at)) from public.sync_jobs j where j.organization_id = o.id and j.job_type = 'RECONCILIATION')::float8 as "ageSeconds"
       from public.organizations o
       where o.status in ('active', 'trial') and exists (select 1 from public.devices d where d.organization_id = o.id and d.status = 'active')`.execute(trx);
     return res.rows;
@@ -117,7 +117,7 @@ export async function scheduleReconciliation(deps: WorkerDeps): Promise<{ organi
     try {
       const jobId = await withContext(deps.db, { kind: 'system', organizationId: o.organizationId }, async (trx) => {
         const settings = await loadOrgSyncSettings(trx, o.organizationId);
-        if (o.lastAt && now.getTime() - new Date(o.lastAt).getTime() < settings.reconciliationIntervalHours * 3_600_000) return null;
+        if (o.ageSeconds !== null && o.ageSeconds < settings.reconciliationIntervalHours * 3_600) return null;
         const devices = await trx.selectFrom('devices').select(['id', 'branchId']).where('organizationId', '=', o.organizationId).where('status', '=', 'active').execute();
         if (devices.length === 0) return null;
         return (await createSyncJob(trx, deps.queue, {

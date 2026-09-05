@@ -1,24 +1,25 @@
 import { z } from 'zod';
 import { EMPLOYMENT_STATUSES, EMPLOYMENT_TYPES, GENDERS, IDENTITY_DOCUMENT_TYPES } from './enums.js';
-import { codeSchema, countryCodeSchema, emailSchema, isoDateSchema, isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, phoneSchema, uuidSchema, weeklyOffDaysSchema } from './common.js';
+import { booleanQuerySchema, codeSchema, countryCodeSchema, emailSchema, isoDateSchema, isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, phoneSchema, uuidSchema, weeklyOffDaysSchema } from './common.js';
 
 export const deviceUserIdSchema = z.string().trim().regex(/^[A-Za-z0-9_-]{1,32}$/, 'Device user id: letters, digits, - _ (max 32)');
 
-export const createEmployeeSchema = z.object({
+/** Fields without creation defaults; `createEmployeeSchema` adds the defaults, `updateEmployeeSchema` must not (a PATCH would otherwise reset them). */
+const employeeFieldsSchema = z.object({
   employeeNumber: codeSchema,
   firstName: z.string().trim().min(1).max(80),
   middleName: z.string().trim().max(80).optional(),
   lastName: z.string().trim().min(1).max(80),
   displayName: z.string().trim().min(1).max(160).optional(),
   displayNameAr: z.string().trim().max(160).optional(),
-  gender: z.enum(GENDERS).default('unspecified'),
+  gender: z.enum(GENDERS),
   dateOfBirth: isoDateSchema.optional(),
   nationalityCode: countryCodeSchema.optional(),
   email: emailSchema.optional(),
   phone: phoneSchema.optional(),
   joiningDate: isoDateSchema,
-  employmentStatus: z.enum(EMPLOYMENT_STATUSES).default('active'),
-  employmentType: z.enum(EMPLOYMENT_TYPES).default('full_time'),
+  employmentStatus: z.enum(EMPLOYMENT_STATUSES),
+  employmentType: z.enum(EMPLOYMENT_TYPES),
   branchId: uuidSchema,
   departmentId: uuidSchema.optional(),
   designationId: uuidSchema.optional(),
@@ -29,9 +30,15 @@ export const createEmployeeSchema = z.object({
   weeklyOffDays: weeklyOffDaysSchema.optional(),
   customFields: jsonObjectSchema.optional(),
 });
+export const createEmployeeSchema = employeeFieldsSchema.extend({
+  gender: z.enum(GENDERS).default('unspecified'),
+  employmentStatus: z.enum(EMPLOYMENT_STATUSES).default('active'),
+  employmentType: z.enum(EMPLOYMENT_TYPES).default('full_time'),
+});
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;
 
-export const updateEmployeeSchema = createEmployeeSchema.partial().extend({
+/** PATCH body: every field optional and NO defaults, so omitted fields are left untouched. */
+export const updateEmployeeSchema = employeeFieldsSchema.partial().extend({
   exitDate: isoDateSchema.nullable().optional(),
   /** When branch/department/designation/manager/type/status change, the effective date of the change (defaults to today). */
   effectiveFrom: isoDateSchema.optional(),
@@ -47,7 +54,7 @@ export const employeeListQuerySchema = paginationQuerySchema.extend({
   employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional(),
   employmentType: z.enum(EMPLOYMENT_TYPES).optional(),
   managerEmployeeId: uuidSchema.optional(),
-  includeDeleted: z.coerce.boolean().default(false),
+  includeDeleted: booleanQuerySchema.default(false),
 });
 export type EmployeeListQuery = z.infer<typeof employeeListQuerySchema>;
 
