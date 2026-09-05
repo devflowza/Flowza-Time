@@ -1,7 +1,8 @@
 import { type z } from 'zod';
 import { sql } from 'kysely';
-import type { branchInputSchema, departmentInputSchema, designationInputSchema, teamInputSchema, updateTeamSchema, BranchDto, DepartmentDto, DesignationDto, StructureListQuery, TeamDto } from '@flowza/contracts';
+import type { branchInputSchema, departmentInputSchema, designationInputSchema, teamInputSchema, updateTeamSchema, BranchDto, DepartmentDto, DesignationDto, StructureListQuery, TeamDto, UpdateBranchInput, UpdateDepartmentInput, UpdateDesignationInput } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
+import type { MembershipGrant } from '@flowza/domain';
 import { errors, isValidTimezone } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { branchFilter, requireBranchAccess, requirePermission } from '../lib/authorize.js';
@@ -14,6 +15,13 @@ type BranchInput = z.infer<typeof branchInputSchema>;
 type DepartmentInput = z.infer<typeof departmentInputSchema>;
 type DesignationInput = z.infer<typeof designationInputSchema>;
 type TeamInput = z.infer<typeof teamInputSchema>;
+
+/** Branch-scoped callers may only create/move departments and teams inside their own branches — never org-wide (branch null). */
+function requireScopedBranch(grant: MembershipGrant, branchId: string | null | undefined, mustBeSet: boolean): void {
+  if (grant.allBranches) return;
+  if (branchId) { requireBranchAccess(grant, branchId); return; }
+  if (mustBeSet || branchId === null) throw errors.forbidden('Your access is limited to specific branches; choose one of them.');
+}
 
 async function employeeCounts(trx: Trx, orgId: string, column: 'branchId' | 'departmentId', ids: string[]): Promise<Map<string, number>> {
   if (ids.length === 0) return new Map();
@@ -54,7 +62,7 @@ export async function getBranch(deps: ApiDeps, actor: Actor, orgId: string, id: 
   return runUser(deps.db, actor, (trx) => loadBranch(trx, orgId, id));
 }
 
-function branchValues(input: Partial<BranchInput>): Record<string, unknown> {
+function branchValues(input: Partial<BranchInput> | UpdateBranchInput): Record<string, unknown> {
   const v: Record<string, unknown> = {};
   for (const [k, val] of Object.entries(input)) {
     if (val === undefined) continue;
@@ -73,7 +81,7 @@ export async function createBranch(deps: ApiDeps, actor: Actor, orgId: string, i
   });
 }
 
-export async function updateBranch(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<BranchInput>): Promise<BranchDto> {
+export async function updateBranch(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: UpdateBranchInput): Promise<BranchDto> {
   const grant = requirePermission(actor.principal, orgId, 'branch.manage');
   requireBranchAccess(grant, id);
   if (input.timezone !== undefined && !isValidTimezone(input.timezone)) throw errors.validation('Invalid IANA timezone.', { issues: [{ path: 'timezone', message: 'Unknown timezone' }] });
@@ -159,7 +167,7 @@ async function assertManagerInOrg(trx: Trx, orgId: string, managerEmployeeId: st
 
 export async function createDepartment(deps: ApiDeps, actor: Actor, orgId: string, input: DepartmentInput): Promise<DepartmentDto> {
   const grant = requirePermission(actor.principal, orgId, 'department.manage');
-  requireBranchAccess(grant, input.branchId);
+  requireScopedBranch(grant, input.branchId, true);
   return runUser(deps.db, actor, async (trx) => {
     await assertNoDepartmentCycle(trx, orgId, null, input.parentId ?? null);
     await assertManagerInOrg(trx, orgId, input.managerEmployeeId, 'managerEmployeeId');
@@ -169,9 +177,9 @@ export async function createDepartment(deps: ApiDeps, actor: Actor, orgId: strin
   });
 }
 
-export async function updateDepartment(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<DepartmentInput>): Promise<DepartmentDto> {
+export async function updateDepartment(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: UpdateDepartmentInput): Promise<DepartmentDto> {
   const grant = requirePermission(actor.principal, orgId, 'department.manage');
-  requireBranchAccess(grant, input.branchId);
+  requireScopedBranch(grant, input.branchId, false);
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadDepartment(trx, orgId, id);
     if (input.parentId !== undefined) await assertNoDepartmentCycle(trx, orgId, id, input.parentId);
@@ -230,7 +238,7 @@ export async function createDesignation(deps: ApiDeps, actor: Actor, orgId: stri
   });
 }
 
-export async function updateDesignation(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<DesignationInput>): Promise<DesignationDto> {
+export async function updateDesignation(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: UpdateDesignationInput): Promise<DesignationDto> {
   requirePermission(actor.principal, orgId, 'department.manage');
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadDesignation(trx, orgId, id);
@@ -309,7 +317,7 @@ async function replaceTeamMembers(trx: Trx, orgId: string, teamId: string, membe
 
 export async function createTeam(deps: ApiDeps, actor: Actor, orgId: string, input: TeamInput): Promise<TeamDto> {
   const grant = requirePermission(actor.principal, orgId, 'department.manage');
-  requireBranchAccess(grant, input.branchId);
+  requireScopedBranch(grant, input.branchId, true);
   return runUser(deps.db, actor, async (trx) => {
     await assertManagerInOrg(trx, orgId, input.leadEmployeeId, 'leadEmployeeId');
     const row = await trx.insertInto('teams').values({ organizationId: orgId, code: input.code, name: input.name, branchId: input.branchId ?? null, leadEmployeeId: input.leadEmployeeId ?? null }).returning('id').executeTakeFirstOrThrow();
@@ -321,7 +329,7 @@ export async function createTeam(deps: ApiDeps, actor: Actor, orgId: string, inp
 
 export async function updateTeam(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: z.infer<typeof updateTeamSchema>): Promise<TeamDto> {
   const grant = requirePermission(actor.principal, orgId, 'department.manage');
-  requireBranchAccess(grant, input.branchId);
+  requireScopedBranch(grant, input.branchId, false);
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadTeam(trx, orgId, id);
     if (input.leadEmployeeId !== undefined) await assertManagerInOrg(trx, orgId, input.leadEmployeeId, 'leadEmployeeId');

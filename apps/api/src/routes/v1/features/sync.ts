@@ -1,4 +1,4 @@
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import { syncAttendanceRequestSchema, syncEmployeesRequestSchema, syncJobListQuerySchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
@@ -11,7 +11,7 @@ import { reconciliationQuerySchema, syncHealthCheckRequestSchema, syncJobItemsQu
 
 export function registerSyncRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const idem = idempotency();
-  const accepted = (c: Parameters<Parameters<Hono<AppEnv>['post']>[1]>[0], data: unknown) => c.json({ data }, 202);
+  const accepted = (c: Context<AppEnv>, data: unknown) => c.json({ data }, 202);
   v1.post('/orgs/:orgId/sync/attendance', idem, async (c) => accepted(c, await sync.syncAttendance(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, syncAttendanceRequestSchema))));
   v1.post('/orgs/:orgId/sync/employees', idem, async (c) => accepted(c, await sync.syncEmployees(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, syncEmployeesRequestSchema))));
   v1.post('/orgs/:orgId/sync/health-check', idem, async (c) => accepted(c, await sync.healthCheck(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, syncHealthCheckRequestSchema))));

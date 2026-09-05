@@ -6,6 +6,8 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'kysely';
 import { SYSTEM_ROLE_IDS } from '@flowza/contracts';
+import { withContext } from '@flowza/database';
+import { withSystemScope } from '../lib/service.js';
 import { createTestApi, F, EMAILS, type TestApi } from './harness.js';
 
 let api: TestApi;
@@ -106,6 +108,28 @@ describe('branch-scoped callers', () => {
     expect(hr.json.data).toMatchObject({ dateOfBirth: null, phone: null });
     const list = await api.request('GET', `/orgs/${F.orgA}/employees?search=sara`, { user: F.branchManagerA });
     expect(list.json.data[0]).toMatchObject({ employeeNumber: 'E-002', dateOfBirth: null, phone: null });
+  });
+});
+
+describe('withSystemScope', () => {
+  it('sees the whole organisation inside the scope and restores the caller role, claims and RLS afterwards', async () => {
+    await withContext(api.tdb.db, { kind: 'user', userId: scopedHr, requestId: 'req_scope' }, async (trx) => {
+      const before = await trx.selectFrom('employees').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', F.orgA).executeTakeFirstOrThrow();
+      const inside = await withSystemScope(trx, F.orgA, async (t) => {
+        const who = await sql<{ role: string; isSystem: boolean }>`select current_user as role, app.is_system() as is_system`.execute(t);
+        const n = await t.selectFrom('employees').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', F.orgA).executeTakeFirstOrThrow();
+        return { ...who.rows[0]!, n: Number(n.n) };
+      });
+      expect(inside).toMatchObject({ role: 'flowza_system', isSystem: true });
+      expect(inside.n).toBeGreaterThan(Number(before.n));
+      const after = await sql<{ role: string; uid: string | null; isSystem: boolean }>`select current_user as role, app.uid()::text as uid, app.is_system() as is_system`.execute(trx);
+      expect(after.rows[0]).toMatchObject({ role: 'authenticated', uid: scopedHr, isSystem: false });
+      const again = await trx.selectFrom('employees').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', F.orgA).executeTakeFirstOrThrow();
+      expect(Number(again.n)).toBe(Number(before.n));
+      // a failing scoped query still restores the caller scope
+      await expect(withSystemScope(trx, F.orgA, () => Promise.reject(new Error('boom')))).rejects.toThrow('boom');
+      expect((await sql<{ role: string }>`select current_user as role`.execute(trx)).rows[0]?.role).toBe('authenticated');
+    });
   });
 });
 

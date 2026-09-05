@@ -12,6 +12,7 @@ import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
 import { isoDate, isoDateOrNull, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject } from '../../lib/mappers.js';
 import type { UpdateLeaveRecordInput } from '../../routes/v1/features/dto.js';
 import { enqueueRecalculation, orgToday } from './recalc.js';
+import { dv, today } from './sql-helpers.js';
 
 type HolidayCalendarInput = z.infer<typeof holidayCalendarInputSchema>;
 type LeaveTypeInput = z.infer<typeof leaveTypeInputSchema>;
@@ -196,7 +197,7 @@ export async function listAssignments(deps: ApiDeps, actor: Actor, orgId: string
     if (q.targetType) base = base.where('a.targetType', '=', q.targetType as never);
     if (q.targetId) base = base.where('a.targetId', '=', q.targetId);
     if (q.shiftId) base = base.where('a.shiftId', '=', q.shiftId);
-    if (q.activeOn) base = base.where('a.effectiveFrom', '<=', q.activeOn).where((eb) => eb.or([eb('a.effectiveTo', 'is', null), eb('a.effectiveTo', '>', q.activeOn!)]));
+    if (q.activeOn) base = base.where('a.effectiveFrom', '<=', dv(q.activeOn)).where((eb) => eb.or([eb('a.effectiveTo', 'is', null), eb('a.effectiveTo', '>', dv(q.activeOn!))]));
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const page = pageOf(q);
     const rows = (await base.select(ASSIGNMENT_COLUMNS).orderBy('a.effectiveFrom', 'desc').orderBy('a.id').limit(page.pageSize).offset(page.offset).execute()) as AssignmentRow[];
@@ -256,9 +257,9 @@ export async function resolveEmployeeShift(deps: ApiDeps, actor: Actor, orgId: s
     if (!emp) throw errors.notFound('Employee', employeeId);
     requireBranchAccess(grant, emp.branchId);
     // effective branch/department on the date (employment history) with the current row as fallback
-    const hist = await trx.selectFrom('employmentHistory').select(['branchId', 'departmentId']).where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('effectiveFrom', '<=', date).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', date)])).orderBy('effectiveFrom', 'desc').executeTakeFirst();
+    const hist = await trx.selectFrom('employmentHistory').select(['branchId', 'departmentId']).where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('effectiveFrom', '<=', dv(date)).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', dv(date))])).orderBy('effectiveFrom', 'desc').executeTakeFirst();
     const teams = (await trx.selectFrom('teamMembers').select('teamId').where('organizationId', '=', orgId).where('employeeId', '=', employeeId).execute()).map((t) => t.teamId);
-    const assignments: EngineShiftAssignment[] = (await trx.selectFrom('shiftAssignments').selectAll().where('organizationId', '=', orgId).where('effectiveFrom', '<=', date).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', date)])).execute())
+    const assignments: EngineShiftAssignment[] = (await trx.selectFrom('shiftAssignments').selectAll().where('organizationId', '=', orgId).where('effectiveFrom', '<=', dv(date)).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', dv(date))])).execute())
       .map((a) => ({ id: a.id, targetType: a.targetType, targetId: a.targetId, shiftId: a.shiftId, shiftPatternId: a.shiftPatternId, effectiveFrom: isoDate(a.effectiveFrom), effectiveTo: isoDateOrNull(a.effectiveTo) }));
     const patterns: EngineShiftPattern[] = (await trx.selectFrom('shiftPatterns').selectAll().where('organizationId', '=', orgId).execute()).map((p) => ({ id: p.id, cycleLengthDays: p.cycleLengthDays, anchorDate: isoDate(p.anchorDate), sequence: jsonArray(p.sequence) as EngineShiftPattern['sequence'] }));
     const scope = { employeeId, teamIds: teams, departmentId: hist?.departmentId ?? emp.departmentId, branchId: hist?.branchId ?? emp.branchId, organizationId: orgId };
@@ -326,8 +327,8 @@ export async function listHolidays(deps: ApiDeps, actor: Actor, orgId: string, q
     let base = trx.selectFrom('holidays').selectAll().where('organizationId', '=', orgId);
     if (q.calendarId) base = base.where('calendarId', '=', q.calendarId);
     const from = q.from ?? (q.year ? `${q.year}-01-01` : undefined); const to = q.to ?? (q.year ? `${q.year}-12-31` : undefined);
-    if (from) base = base.where((eb) => eb.or([eb('date', '>=', from), eb('endDate', '>=', from)]));
-    if (to) base = base.where('date', '<=', to);
+    if (from) base = base.where((eb) => eb.or([eb('date', '>=', dv(from)), eb('endDate', '>=', dv(from))]));
+    if (to) base = base.where('date', '<=', dv(to));
     return (await base.orderBy('date').limit(2000).execute()).map(toHolidayDto);
   });
 }
@@ -435,8 +436,8 @@ export async function listLeaveRecords(deps: ApiDeps, actor: Actor, orgId: strin
     if (q.employeeId) base = base.where('l.employeeId', '=', q.employeeId);
     if (q.leaveTypeId) base = base.where('l.leaveTypeId', '=', q.leaveTypeId);
     if (q.status) base = base.where('l.status', '=', q.status as never);
-    if (q.from) base = base.where('l.endDate', '>=', q.from);
-    if (q.to) base = base.where('l.startDate', '<=', q.to);
+    if (q.from) base = base.where('l.endDate', '>=', dv(q.from));
+    if (q.to) base = base.where('l.startDate', '<=', dv(q.to));
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const page = pageOf(q);
     const rows = (await base.select(LEAVE_COLUMNS).orderBy('l.startDate', 'desc').orderBy('l.id').limit(page.pageSize).offset(page.offset).execute()) as LeaveRow[];
@@ -444,7 +445,7 @@ export async function listLeaveRecords(deps: ApiDeps, actor: Actor, orgId: strin
   });
 }
 async function assertNoLeaveOverlap(trx: Trx, orgId: string, employeeId: string, start: string, end: string, excludeId?: string): Promise<void> {
-  let q = trx.selectFrom('leaveRecords').select('id').where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('status', 'in', ['PENDING', 'APPROVED']).where('startDate', '<=', end).where('endDate', '>=', start);
+  let q = trx.selectFrom('leaveRecords').select('id').where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('status', 'in', ['PENDING', 'APPROVED']).where('startDate', '<=', dv(end)).where('endDate', '>=', dv(start));
   if (excludeId) q = q.where('id', '!=', excludeId);
   const clash = await q.executeTakeFirst();
   if (clash) throw errors.conflict('The employee already has leave in this range.', { leaveRecordId: clash.id });
@@ -513,8 +514,8 @@ export async function listRuleSets(deps: ApiDeps, actor: Actor, orgId: string, q
   return runUser(deps.db, actor, async (trx) => {
     let base = trx.selectFrom('attendanceRuleSets').selectAll().where('organizationId', '=', orgId);
     if (scope) base = base.where((eb) => eb.or([eb('branchId', 'is', null), eb('branchId', 'in', scope)]));
-    if (q.activeOn) base = base.where('effectiveFrom', '<=', q.activeOn).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', q.activeOn!)]));
-    else if (!q.includeExpired) base = base.where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', sql<string>`current_date`)]));
+    if (q.activeOn) base = base.where('effectiveFrom', '<=', dv(q.activeOn)).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', dv(q.activeOn!))]));
+    else if (!q.includeExpired) base = base.where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', today())]));
     return (await base.orderBy('branchId').orderBy('effectiveFrom', 'desc').execute()).map((r) => toRuleSetDto(r as never));
   });
 }

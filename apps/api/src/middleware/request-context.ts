@@ -6,6 +6,10 @@ export type AppVariables = {
   requestId: string;
   log: Logger;
   principal?: Principal;
+  /** Authenticator assurance level of the session ('aal1' | 'aal2'); undefined before authentication. */
+  aal?: string;
+  /** Organisations (of the caller's memberships) whose security settings require MFA. */
+  mfaRequiredOrgIds?: ReadonlySet<string>;
   startedAt: number;
 };
 export type AppEnv = { Variables: AppVariables };

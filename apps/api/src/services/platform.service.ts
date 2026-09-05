@@ -142,7 +142,7 @@ export async function listGrants(deps: ApiDeps, actor: Actor, q: GrantListQuery)
 export async function createGrant(deps: ApiDeps, actor: Actor, input: CreateAccessGrantInput): Promise<AccessGrantDto> {
   requirePlatformAdmin(actor.principal);
   if (input.accessLevel === 'write' && !input.approvedBy) throw errors.validation('Write grants require a second approver (approvedBy).', { issues: [{ path: 'approvedBy', message: 'Required for write access' }] });
-  if (input.approvedBy && input.approvedBy === (input.platformAdminUserId ?? actor.userId)) throw errors.validation('The approver must be a different platform administrator.', { issues: [{ path: 'approvedBy', message: 'Must differ from the grantee' }] });
+  if (input.approvedBy && (input.approvedBy === (input.platformAdminUserId ?? actor.userId) || input.approvedBy === actor.userId)) throw errors.validation('The approver must be a platform administrator other than the grantee and the granter.', { issues: [{ path: 'approvedBy', message: 'Must differ from the grantee and the granter' }] });
   const adminUserId = input.platformAdminUserId ?? actor.userId;
   const startsAt = new Date();
   const expiresAt = new Date(startsAt.getTime() + input.hours * 3_600_000);

@@ -1,5 +1,5 @@
 import type { Context, Hono } from 'hono';
-import type { DevicePushRequest, WebhookRequest } from '@flowza/device-providers';
+import type { DevicePushRequest, DevicePushResponse, WebhookRequest } from '@flowza/device-providers';
 import type { AppEnv } from '../../middleware/request-context.js';
 import type { ApiDeps } from '../../deps.js';
 import { clientIp } from '../../lib/http.js';
@@ -60,7 +60,7 @@ export function registerInboundRoutes(app: Hono<AppEnv>, deps: ApiDeps): void {
       if (!device) {
         await recordPendingDevice(deps, handler, serial, req, requestId, { ...(identity.extra ?? {}), route: identity.extra?.route ?? null }).catch((err) => log.warn({ event: 'pending_device_upsert_failed', serial, err: (err as Error).message }));
         // keep the device retrying with the protocol's own acceptance so it registers as soon as an admin claims it
-        let response = { status: 200, body: 'OK', headers: TEXT };
+        let response: DevicePushResponse = { status: 200, body: 'OK', headers: TEXT };
         try { response = handler.parseInbound(req, { timezone: 'UTC', serialNumber: serial }).response; } catch { /* fall back to OK */ }
         log.info({ event: 'device_push_unknown_serial', protocolKey, serial });
         return c.body(response.body, response.status as 200, response.headers ?? TEXT);

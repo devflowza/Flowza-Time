@@ -13,6 +13,7 @@ import { isoDate, isoDateTime, isoDateTimeOrNull, jsonObject, numberOrNull } fro
 import { REPORT_TYPE_DEFINITIONS, type PayrollPeriodActionInput, type PayrollPeriodDto, type ReportTypeDefinition } from '../../routes/v1/features/dto.js';
 import { cancelQueueJob, systemStep } from './context.js';
 import { REPORT_COLUMNS, toReportDto, type ReportRow } from './mappers.js';
+import { dv } from './sql-helpers.js';
 
 export const REPORTS_PER_HOUR = 20;
 
@@ -137,8 +138,8 @@ export async function listPayrollPeriods(deps: ApiDeps, actor: Actor, orgId: str
     const today = DateTime.now().setZone(org?.timezone ?? 'UTC').toISODate()!;
     const year = q.year ?? Number(today.slice(0, 4));
     const periods = payrollPeriodsFor(year, settings.attendance.payrollPeriod ?? 'calendar_month', settings.attendance.payrollCutoffDay ?? 25);
-    const locks = await trx.selectFrom('attendancePeriodLocks').selectAll().where('organizationId', '=', orgId).where('unlockedAt', 'is', null).where('periodEnd', '>=', periods[0]!.periodStart).where('periodStart', '<=', periods[periods.length - 1]!.periodEnd).execute();
-    let sq = trx.selectFrom('attendancePeriodSummaries').select(['periodStart', 'periodEnd', 'status', (eb) => eb.fn.countAll().as('n')]).where('organizationId', '=', orgId).where('periodEnd', '>=', periods[0]!.periodStart).where('periodStart', '<=', periods[periods.length - 1]!.periodEnd);
+    const locks = await trx.selectFrom('attendancePeriodLocks').selectAll().where('organizationId', '=', orgId).where('unlockedAt', 'is', null).where('periodEnd', '>=', dv(periods[0]!.periodStart)).where('periodStart', '<=', dv(periods[periods.length - 1]!.periodEnd)).execute();
+    let sq = trx.selectFrom('attendancePeriodSummaries').select(['periodStart', 'periodEnd', 'status', (eb) => eb.fn.countAll().as('n')]).where('organizationId', '=', orgId).where('periodEnd', '>=', dv(periods[0]!.periodStart)).where('periodStart', '<=', dv(periods[periods.length - 1]!.periodEnd));
     if (q.branchId) sq = sq.where('branchId', '=', q.branchId);
     const summaries = await sq.groupBy(['periodStart', 'periodEnd', 'status']).execute();
     return periods.map((p) => {
@@ -151,7 +152,7 @@ export async function listPayrollPeriods(deps: ApiDeps, actor: Actor, orgId: str
 }
 
 async function periodLocked(trx: Trx, orgId: string, branchId: string | null, start: string, end: string): Promise<boolean> {
-  const lock = await trx.selectFrom('attendancePeriodLocks').select('id').where('organizationId', '=', orgId).where('unlockedAt', 'is', null).where('periodStart', '<=', start).where('periodEnd', '>=', end).where((eb) => branchId ? eb.or([eb('branchId', 'is', null), eb('branchId', '=', branchId)]) : eb('branchId', 'is', null)).executeTakeFirst();
+  const lock = await trx.selectFrom('attendancePeriodLocks').select('id').where('organizationId', '=', orgId).where('unlockedAt', 'is', null).where('periodStart', '<=', dv(start)).where('periodEnd', '>=', dv(end)).where((eb) => branchId ? eb.or([eb('branchId', 'is', null), eb('branchId', '=', branchId)]) : eb('branchId', 'is', null)).executeTakeFirst();
   return !!lock;
 }
 
@@ -172,7 +173,7 @@ export async function listSummaries(deps: ApiDeps, actor: Actor, orgId: string, 
   const grant = requirePermission(actor.principal, orgId, 'payroll.view');
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    let base = trx.selectFrom('attendancePeriodSummaries as s').innerJoin('employees as e', 'e.id', 's.employeeId').leftJoin('branches as b', 'b.id', 's.branchId').where('s.organizationId', '=', orgId).where('s.periodStart', '=', q.periodStart).where('s.periodEnd', '=', q.periodEnd);
+    let base = trx.selectFrom('attendancePeriodSummaries as s').innerJoin('employees as e', 'e.id', 's.employeeId').leftJoin('branches as b', 'b.id', 's.branchId').where('s.organizationId', '=', orgId).where('s.periodStart', '=', dv(q.periodStart)).where('s.periodEnd', '=', dv(q.periodEnd));
     if (scope) base = base.where('s.branchId', 'in', scope);
     if (q.status) base = base.where('s.status', '=', q.status as never);
     if (q.search) { const like = likeContains(q.search); base = base.where((eb) => eb.or([eb('e.displayName', 'ilike', like), eb(sql`e.employee_number::text`, 'ilike', like)])); }

@@ -1,7 +1,9 @@
 import { type z } from 'zod';
+import { timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
 import { SYSTEM_ROLE_IDS, type updateMemberSchema, type InviteMemberInput, type InvitationDto, type MemberDto, type MemberListQuery } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
+import type { MembershipGrant } from '@flowza/domain';
 import { errors, randomToken, sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { requireBranchAccess, requirePermission } from '../lib/authorize.js';
@@ -64,6 +66,17 @@ async function assertRoleUsable(trx: Trx, orgId: string, roleId: string): Promis
   if (!role || (!role.isSystem && role.organizationId !== orgId)) throw errors.validation('Unknown role for this organisation.', { issues: [{ path: 'roleId', message: 'Unknown role' }] });
 }
 
+/**
+ * No privilege escalation through role assignment: an actor may only hand out a role whose permissions they hold
+ * themselves (same rule the DB enforces for custom role definitions). Owners hold every permission.
+ */
+async function assertRoleGrantable(trx: Trx, roleId: string, grant: MembershipGrant): Promise<void> {
+  if (grant.roleKey === 'owner') return;
+  const perms = (await trx.selectFrom('rolePermissions').select('permissionKey').where('roleId', '=', roleId).execute()).map((p) => p.permissionKey);
+  const missing = perms.filter((p) => !(grant.permissions as readonly string[]).includes(p));
+  if (missing.length) throw errors.forbidden(`You cannot assign a role with permissions you do not hold: ${missing.join(', ')}.`);
+}
+
 async function assertBranchesInOrg(trx: Trx, orgId: string, branchIds: string[]): Promise<void> {
   if (branchIds.length === 0) return;
   const found = await trx.selectFrom('branches').select('id').where('organizationId', '=', orgId).where('id', 'in', branchIds).execute();
@@ -87,6 +100,11 @@ function parseToken(token: string): { orgId: string; hash: string } | null {
   if (!/^[0-9a-f-]{36}$/i.test(orgId) || secret.length < 16) return null;
   return { orgId, hash: sha256Hex(secret) };
 }
+/** Constant-time comparison of two hex digests (AGENTS.md: invitation hashes are compared with timingSafeEqual). */
+function hashesEqual(a: string, b: string): boolean {
+  const ba = Buffer.from(a, 'hex'); const bb = Buffer.from(b, 'hex');
+  return ba.length > 0 && ba.length === bb.length && timingSafeEqual(ba, bb);
+}
 
 export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, input: InviteMemberInput): Promise<InvitationDto> {
   const grant = requirePermission(actor.principal, orgId, 'user.manage');
@@ -96,11 +114,10 @@ export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, i
   const profile = await runSystem(deps.db, orgId, actor.requestId, (trx) => trx.selectFrom('userProfiles').select('id').where(sql`lower(email::text)`, '=', input.email.toLowerCase()).executeTakeFirst());
   return runUser(deps.db, actor, async (trx) => {
     await assertRoleUsable(trx, orgId, input.roleId);
+    if (input.roleId === SYSTEM_ROLE_IDS.owner && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can invite another owner.');
+    await assertRoleGrantable(trx, input.roleId, grant);
     await assertBranchesInOrg(trx, orgId, input.branchIds);
     if (input.employeeId) await assertEmployeeInOrg(trx, orgId, input.employeeId);
-    if (input.roleId === SYSTEM_ROLE_IDS.owner && actor.principal.memberships.find((m) => m.organizationId === orgId)?.roleKey !== 'owner') {
-      throw errors.forbidden('Only an owner can invite another owner.');
-    }
     const existingMember = await trx.selectFrom('orgMemberships as m').innerJoin('userProfiles as u', 'u.id', 'm.userId').select(['m.id', 'm.status']).where('m.organizationId', '=', orgId).where(sql`lower(u.email::text)`, '=', input.email.toLowerCase()).executeTakeFirst();
     if (existingMember && existingMember.status !== 'suspended') throw errors.conflict('This user is already a member of the organisation.');
     const pending = await trx.selectFrom('invitations').select('id').where('organizationId', '=', orgId).where(sql`lower(email::text)`, '=', input.email.toLowerCase()).where('acceptedAt', 'is', null).where('expiresAt', '>', new Date()).executeTakeFirst();
@@ -159,7 +176,10 @@ export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: strin
   const parsed = parseToken(token);
   if (!parsed) throw errors.notFound('Invitation');
   return runSystem(deps.db, parsed.orgId, actor.requestId, async (trx) => {
-    const inv = await trx.selectFrom('invitations').select(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'expiresAt', 'acceptedAt']).where('tokenHash', '=', parsed.hash).where('organizationId', '=', parsed.orgId).executeTakeFirst();
+    // Never let the database do the secret comparison: load the organisation's open invitations and compare the hashes in constant time.
+    const candidates = await trx.selectFrom('invitations').select(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'expiresAt', 'acceptedAt', 'tokenHash'])
+      .where('organizationId', '=', parsed.orgId).orderBy('createdAt', 'desc').limit(1000).execute(); // accepted ones stay so a re-used token reports 'already accepted'
+    const inv = candidates.find((c) => hashesEqual(c.tokenHash, parsed.hash));
     if (!inv) throw errors.notFound('Invitation');
     if (inv.acceptedAt) throw errors.invalidState('This invitation was already accepted.');
     if (inv.expiresAt.getTime() < Date.now()) throw errors.invalidState('This invitation has expired.');
@@ -194,6 +214,7 @@ export async function updateMember(deps: ApiDeps, actor: Actor, orgId: string, i
     if (input.roleId) {
       await assertRoleUsable(trx, orgId, input.roleId);
       if (input.roleId === SYSTEM_ROLE_IDS.owner && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can grant the owner role.');
+      if (input.roleId !== before.roleId) await assertRoleGrantable(trx, input.roleId, grant);
     }
     if (before.roleKey === 'owner' && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can change another owner.');
     if (input.branchIds) await assertBranchesInOrg(trx, orgId, input.branchIds);

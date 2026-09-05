@@ -1,0 +1,48 @@
+{
+  "title": "Organisation structure",
+  "subtitle": "Branches, departments, designations and teams. Archived rows stay for history and can be reactivated.",
+  "tabs": { "branches": "Branches", "departments": "Departments", "designations": "Designations", "teams": "Teams" },
+  "status": { "active": "Active", "inactive": "Inactive", "archived": "Archived" },
+  "days": { "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat" },
+  "filters": { "allStatuses": "All statuses" },
+  "actions": { "archive": "Archive", "toggleActive": "Toggle active" },
+  "errors": { "archiveFailed": "Could not archive this record." },
+  "fields": {
+    "nameAr": "Name (Arabic)", "city": "City", "countryCode": "Country", "countryCodeHint": "ISO 3166-1 alpha-2, e.g. OM, AE, SA",
+    "addressLine1": "Address", "latitude": "Latitude", "longitude": "Longitude", "geofence": "Geofence radius (m)", "geofenceHint": "10–5000 metres, used by mobile punching",
+    "holidayCalendar": "Holiday calendar", "weeklyOffDays": "Weekly off days", "employees": "Employees",
+    "contactName": "Contact name", "contactEmail": "Contact email", "contactPhone": "Contact phone"
+  },
+  "branches": {
+    "add": "Add branch", "edit": "Edit branch", "dialogHint": "Devices and employees are attached to a branch; its timezone drives attendance dates.",
+    "created": "Branch created", "updated": "Branch updated", "archived": "Branch archived",
+    "archiveTitle": "Archive {{name}}?", "archiveHint": "Archived branches are hidden from pickers. Branches with active employees cannot be archived — move the employees first.",
+    "empty": "No branches yet", "emptyHint": "Create your first branch to start adding employees and devices.",
+    "location": "Location", "calendar": "Calendar", "inherited": "Organisation default",
+    "inheritWeeklyOff": "Use organisation weekly off days", "inheritWeeklyOffHint": "Turn off to set branch-specific off days.",
+    "noCalendars": "No holiday calendars are configured yet. Create one under Holidays to assign it here.",
+    "timezonePlaceholder": "Select a timezone", "gccZones": "GCC", "otherZones": "Other zones"
+  },
+  "departments": {
+    "add": "Add department", "addChild": "Add sub-department", "edit": "Edit department", "dialogHint": "Departments can be nested and optionally limited to one branch.",
+    "created": "Department created", "updated": "Department updated", "archived": "Department archived",
+    "archiveTitle": "Archive {{name}}?", "archiveHint": "Departments with sub-departments or assigned employees cannot be archived.",
+    "empty": "No departments yet", "emptyHint": "Departments group employees for reports and shift assignment.",
+    "allBranches": "All branches", "branchHint": "Leave empty for a department shared across branches.",
+    "parent": "Parent department", "topLevel": "Top level", "manager": "Manager", "noManager": "No manager"
+  },
+  "designations": {
+    "add": "Add designation", "edit": "Edit designation", "created": "Designation created", "updated": "Designation updated", "archived": "Designation archived",
+    "archiveTitle": "Archive {{name}}?", "archiveHint": "Designations assigned to employees cannot be archived.",
+    "empty": "No designations yet", "emptyHint": "Designations are job titles (e.g. Cashier, Supervisor) used in reports.",
+    "level": "Level", "levelHint": "Seniority level 0–100, used for sorting."
+  },
+  "teams": {
+    "add": "Add team", "edit": "Edit team", "dialogHint": "Teams are flexible groups for shift assignment and reporting; a member can be in several teams.",
+    "created": "Team created", "updated": "Team updated", "archived": "Team archived",
+    "archiveTitle": "Archive {{name}}?", "archiveHint": "Archiving a team removes its members from the team. Attendance history is not affected.",
+    "empty": "No teams yet", "emptyHint": "Create teams to assign shifts to a group of employees at once.",
+    "lead": "Team lead", "members": "Members", "membersHint": "Search and pick employees; the list replaces the current membership on save.",
+    "addMember": "Add a member…", "noMembers": "No members selected", "removeMember": "Remove member", "memberCount": "{{count}} members"
+  }
+}

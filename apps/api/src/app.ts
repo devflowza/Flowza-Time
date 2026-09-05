@@ -7,6 +7,7 @@ import { requestContext, type AppEnv } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
 import { rateLimit } from './middleware/rate-limit.js';
+import { orgMfaGate } from './middleware/mfa.js';
 import { clientIp } from './lib/http.js';
 import { healthRoutes } from './routes/health.js';
 import { registerV1Routes } from './routes/v1/index.js';
@@ -35,6 +36,8 @@ export function createApp(deps: ApiDeps) {
   v1.use('*', rateLimit({ name: 'api-ip', windowMs: deps.config.RATE_LIMIT_WINDOW_MS, max: deps.config.RATE_LIMIT_MAX * 2, keyFn: (c) => clientIp(c, deps.config.TRUST_PROXY) ?? 'unknown' }));
   v1.use('*', requireAuth({ verify: deps.verifyToken, db: deps.db }));
   v1.use('*', rateLimit({ name: 'api-user', windowMs: deps.config.RATE_LIMIT_WINDOW_MS, max: deps.config.RATE_LIMIT_MAX, keyFn: (c) => c.get('principal')?.userId ?? 'anon' }));
+  v1.use('/orgs/:orgId', orgMfaGate());
+  v1.use('/orgs/:orgId/*', orgMfaGate());
   registerV1Routes(v1, deps);
   app.route('/api/v1', v1);
   return app;

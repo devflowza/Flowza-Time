@@ -6,8 +6,8 @@ import { emitDomainEvent, type Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
-import { branchFilter, requireBranchAccess, requirePermission } from '../lib/authorize.js';
-import { type Actor, runUser, audit, diffObjects } from '../lib/service.js';
+import { branchFilter, hasPermission, requireBranchAccess, requirePermission } from '../lib/authorize.js';
+import { type Actor, runUser, audit, diffObjects, withSystemScope } from '../lib/service.js';
 import { enqueueJob } from '../lib/jobs.js';
 import { hashPin } from '../lib/hashing.js';
 import { loadSettings } from '../lib/settings.js';
@@ -22,6 +22,15 @@ const EMPLOYEE_SORT = {
   employmentStatus: 'e.employment_status', employmentType: 'e.employment_type', branch: 'b.name', department: 'd.name', designation: 'g.name', deviceUserId: 'e.device_user_id',
   createdAt: 'e.created_at', updatedAt: 'e.updated_at',
 } as const;
+
+/**
+ * Sensitive personal columns (date of birth, phone) are only returned to callers holding `employee.view_sensitive`
+ * (same rule as exports, AGENTS.md); everyone else sees null. Identity documents live behind their own endpoint.
+ */
+function maskSensitive<T extends EmployeeDto>(dto: T, grant: MembershipGrant): T {
+  if (hasPermission(grant, 'employee.view_sensitive')) return dto;
+  return { ...dto, dateOfBirth: null, phone: null };
+}
 
 function employeeQuery(trx: Trx, orgId: string) {
   return trx.selectFrom('employees as e')
@@ -79,7 +88,7 @@ export async function listEmployees(deps: ApiDeps, actor: Actor, orgId: string, 
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const rows = await base.select(EMPLOYEE_COLUMNS).orderBy(sql.raw(sort.column), sort.direction).orderBy('e.id').limit(page.pageSize).offset(page.offset).execute();
     const summaries = await syncSummaries(trx, orgId, rows.map((r) => r.id));
-    return { data: rows.map((r) => toEmployeeDto(r as EmployeeRow, summaries.get(r.id) ?? { ...EMPTY_SYNC_SUMMARY })), total };
+    return { data: rows.map((r) => maskSensitive(toEmployeeDto(r as EmployeeRow, summaries.get(r.id) ?? { ...EMPTY_SYNC_SUMMARY }), grant)), total };
   });
 }
 
@@ -103,9 +112,9 @@ async function historyRows(trx: Trx, orgId: string, employeeId: string, limit?: 
 }
 
 export async function getEmployee(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<EmployeeDto & { currentHistory: EmploymentHistoryDto | null }> {
-  requirePermission(actor.principal, orgId, 'employee.view');
+  const grant = requirePermission(actor.principal, orgId, 'employee.view');
   return runUser(deps.db, actor, async (trx) => {
-    const dto = await loadEmployeeDto(trx, orgId, id);
+    const dto = maskSensitive(await loadEmployeeDto(trx, orgId, id), grant);
     const [current] = await historyRows(trx, orgId, id, 1);
     return { ...dto, currentHistory: current ?? null };
   });
@@ -155,11 +164,37 @@ async function assertReferences(trx: Trx, orgId: string, refs: { branchId?: stri
   }
 }
 
-/** Next numeric device user id for the organisation (serialised with an advisory lock; unique index is the last line). */
+/**
+ * Next numeric device user id for the organisation. Ids must be unique across ALL branches, but a branch-scoped caller
+ * only sees their own employees under RLS, so the maximum is computed in the organisation's system scope (read-only,
+ * returns a number only). Serialised with a transaction-level advisory lock; the unique index is the last line of defence.
+ */
 export async function nextDeviceUserId(trx: Trx, orgId: string): Promise<string> {
   await sql`select pg_advisory_xact_lock(hashtext(${`${orgId}:device_user_id`}))`.execute(trx);
-  const res = await sql<{ next: string }>`select coalesce(max(device_user_id::bigint), 0) + 1 as next from public.employees where organization_id = ${orgId}::uuid and device_user_id ~ '^[0-9]{1,15}$'`.execute(trx);
+  const res = await withSystemScope(trx, orgId, (t) => sql<{ next: string }>`select coalesce(max(device_user_id::bigint), 0) + 1 as next from public.employees where organization_id = ${orgId}::uuid and device_user_id ~ '^[0-9]{1,15}$'`.execute(t));
   return String(res.rows[0]?.next ?? 1);
+}
+
+const DEVICE_USER_ID_CONSTRAINT = 'employees_organization_id_device_user_id_key';
+const isDeviceUserIdClash = (err: unknown) => (err as { code?: string; constraint?: string })?.code === '23505' && (err as { constraint?: string }).constraint === DEVICE_USER_ID_CONSTRAINT;
+
+/**
+ * Insert with an auto-assigned device user id, retrying on a unique violation (ids handed out outside the advisory lock,
+ * e.g. by an import running in the worker). Each attempt runs inside a savepoint so a clash does not abort the transaction.
+ */
+async function insertWithAutoDeviceUserId<T>(trx: Trx, orgId: string, insert: (deviceUserId: string) => Promise<T>): Promise<T> {
+  for (let attempt = 1; ; attempt++) {
+    const deviceUserId = await nextDeviceUserId(trx, orgId);
+    await sql`savepoint employee_insert`.execute(trx);
+    try {
+      const out = await insert(deviceUserId);
+      await sql`release savepoint employee_insert`.execute(trx);
+      return out;
+    } catch (err) {
+      if (!isDeviceUserIdClash(err) || attempt >= 5) throw err;
+      await sql`rollback to savepoint employee_insert`.execute(trx);
+    }
+  }
 }
 
 export interface EmploymentSnapshot { branchId: string; departmentId: string | null; designationId: string | null; managerEmployeeId: string | null; employmentType: EmployeeDto['employmentType']; employmentStatus: EmployeeDto['employmentStatus'] }
@@ -204,22 +239,24 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
   requireBranchAccess(grant, input.branchId);
   return runUser(deps.db, actor, async (trx) => {
     await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId });
-    const deviceUserId = input.deviceUserId ?? (await nextDeviceUserId(trx, orgId));
     const displayName = input.displayName ?? [input.firstName, input.lastName].filter(Boolean).join(' ');
-    const row = await trx.insertInto('employees').values({
+    const pinHash = input.pin ? hashPin(input.pin) : null;
+    const insert = (deviceUserId: string) => trx.insertInto('employees').values({
       organizationId: orgId, employeeNumber: input.employeeNumber, firstName: input.firstName, middleName: input.middleName ?? null, lastName: input.lastName, displayName, displayNameAr: input.displayNameAr ?? null,
       gender: input.gender, dateOfBirth: input.dateOfBirth ?? null, nationalityCode: input.nationalityCode ?? null, email: input.email ?? null, phone: input.phone ?? null,
       joiningDate: input.joiningDate, employmentStatus: input.employmentStatus, employmentType: input.employmentType, branchId: input.branchId, departmentId: input.departmentId ?? null,
-      designationId: input.designationId ?? null, managerEmployeeId: input.managerEmployeeId ?? null, deviceUserId, cardNumber: input.cardNumber ?? null, pinHash: input.pin ? hashPin(input.pin) : null,
+      designationId: input.designationId ?? null, managerEmployeeId: input.managerEmployeeId ?? null, deviceUserId, cardNumber: input.cardNumber ?? null, pinHash,
       weeklyOffDays: input.weeklyOffDays ?? null, customFields: JSON.stringify(input.customFields ?? {}), createdBy: actor.userId, updatedBy: actor.userId,
-    }).returning('id').executeTakeFirstOrThrow();
+    }).returning(['id', 'deviceUserId']).executeTakeFirstOrThrow();
+    const row = input.deviceUserId ? await insert(input.deviceUserId) : await insertWithAutoDeviceUserId(trx, orgId, insert);
+    const deviceUserId = row.deviceUserId;
     await applyHistoryTransition(trx, orgId, row.id, { branchId: input.branchId, departmentId: input.departmentId ?? null, designationId: input.designationId ?? null, managerEmployeeId: input.managerEmployeeId ?? null, employmentType: input.employmentType, employmentStatus: input.employmentStatus }, input.joiningDate, 'Joined', actor.userId, input.joiningDate);
     const dto = await loadEmployeeDto(trx, orgId, row.id);
     const { pin: _pin, ...auditable } = input;
     await audit(trx, actor, orgId, 'employee.created', 'employee', { entityId: row.id, branchId: input.branchId, newValue: { ...auditable, deviceUserId, pinSet: Boolean(input.pin) } });
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.created', aggregateType: 'employee', aggregateId: row.id, payload: { employeeNumber: dto.employeeNumber, branchId: dto.branchId, deviceUserId }, actorUserId: actor.userId, requestId: actor.requestId });
     await maybeEnqueuePush(deps, trx, actor, orgId, [row.id]);
-    return dto;
+    return maskSensitive(dto, grant);
   });
 }
 
@@ -236,7 +273,6 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     for (const [k, v] of Object.entries(rest)) if (v !== undefined) patch[k] = v;
     if (customFields !== undefined) patch['customFields'] = JSON.stringify(customFields);
     if (pin !== undefined) patch['pinHash'] = hashPin(pin);
-    if (input.deviceUserId === undefined && patch['deviceUserId'] !== undefined) delete patch['deviceUserId'];
     const joiningDate = input.joiningDate ?? isoDate(before.joiningDate);
     if (input.exitDate && input.exitDate < joiningDate) throw errors.validation('exitDate cannot be before the joining date.', { issues: [{ path: 'exitDate', message: `Must be on/after ${joiningDate}` }] });
     const nextSnapshot: EmploymentSnapshot = {
@@ -263,7 +299,7 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     // device-relevant changes (name, card, pin, branch, status) are re-pushed when auto push is enabled
     const deviceRelevant = ['displayName', 'firstName', 'lastName', 'cardNumber', 'branchId', 'employmentStatus', 'deviceUserId'].some((k) => k in diff.newValue) || pin !== undefined;
     if (deviceRelevant) await maybeEnqueuePush(deps, trx, actor, orgId, [id]);
-    return after;
+    return maskSensitive(after, grant);
   });
 }
 
@@ -278,11 +314,11 @@ export async function deleteEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     if (exitDate < joiningDate) throw errors.validation('exitDate cannot be before the joining date.', { issues: [{ path: 'exitDate', message: `Must be on/after ${joiningDate}` }] });
     await applyHistoryTransition(trx, orgId, id, { ...snapshotOf(before), employmentStatus: 'terminated' }, exitDate, input.reason ?? 'Deleted', actor.userId, joiningDate);
     await trx.updateTable('employees').set({ deletedAt: new Date(), employmentStatus: 'terminated', exitDate, updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', id).execute();
-    await trx.updateTable('deviceEmployeeStates').set({ desired: false }).where('organizationId', '=', orgId).where('employeeId', '=', id).execute().catch(() => undefined);
+    await trx.updateTable('deviceEmployeeStates').set({ desired: false }).where('organizationId', '=', orgId).where('employeeId', '=', id).execute();
     await audit(trx, actor, orgId, 'employee.deleted', 'employee', { entityId: id, branchId: before.branchId, oldValue: { employmentStatus: before.employmentStatus, exitDate: before.exitDate }, newValue: { employmentStatus: 'terminated', exitDate, deleted: true }, reason: input.reason ?? null });
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.deleted', aggregateType: 'employee', aggregateId: id, payload: { employeeNumber: before.employeeNumber, branchId: before.branchId, exitDate }, actorUserId: actor.userId, requestId: actor.requestId });
     await maybeEnqueuePush(deps, trx, actor, orgId, [id]);
-    return loadEmployeeDto(trx, orgId, id);
+    return maskSensitive(await loadEmployeeDto(trx, orgId, id), grant);
   });
 }
 

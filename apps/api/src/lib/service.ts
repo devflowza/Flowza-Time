@@ -1,4 +1,5 @@
 import type { Context } from 'hono';
+import { sql } from 'kysely';
 import type { Principal } from '@flowza/domain';
 import { withContext, writeAudit, redactForAudit, type Database, type Trx } from '@flowza/database';
 import { errors } from '@flowza/shared';
@@ -56,6 +57,38 @@ export async function runSystem<T>(db: Database, organizationId: string, request
   } catch (err) {
     return translatePgError(err);
   }
+}
+
+/**
+ * Run `fn` inside an existing user transaction with the RLS scope of the organisation's *system* context, then restore
+ * the caller's role and claims. Used for the few org-wide reads a branch-scoped caller legitimately needs (e.g. the next
+ * free device user id, which must be unique across all branches). Keep `fn` tiny and read-only; never return rows to the
+ * caller that their own scope would hide. If `fn` fails the transaction is doomed anyway; if the restore fails we abort.
+ */
+export async function withSystemScope<T>(trx: Trx, organizationId: string, fn: (trx: Trx) => Promise<T>): Promise<T> {
+  const { rows } = await sql<{ role: string | null; claims: string | null }>`select current_setting('role', true) as role, current_setting('request.jwt.claims', true) as claims`.execute(trx);
+  const prevRole = rows[0]?.role ?? null;
+  const prevClaims = rows[0]?.claims ?? '';
+  const restore = async () => {
+    await sql`select set_config('request.jwt.claims', ${prevClaims}, true)`.execute(trx);
+    if (prevRole && prevRole !== 'none') await sql`set local role ${sql.raw(quoteIdent(prevRole))}`.execute(trx);
+  };
+  await sql`set local role flowza_system`.execute(trx);
+  await sql`select set_config('request.jwt.claims', ${JSON.stringify({ role: 'flowza_system', org_id: organizationId })}, true)`.execute(trx);
+  let result: T;
+  try {
+    result = await fn(trx);
+  } catch (err) {
+    await restore().catch(() => undefined);
+    throw err;
+  }
+  await restore();
+  return result;
+}
+
+function quoteIdent(name: string): string {
+  if (!/^[a-z_][a-z0-9_]*$/i.test(name)) throw new Error(`unexpected role name ${name}`);
+  return `"${name}"`;
 }
 
 /** Nil organisation id used as the system-context scope for platform-wide reference data (feature flags, plans). */

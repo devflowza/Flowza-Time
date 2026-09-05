@@ -16,6 +16,7 @@ import type { ApprovalRequestDto, ApprovalStepDto, ApprovalWorkflowInput, DailyA
 import { systemStep } from './context.js';
 import { enqueueRecalculation } from './recalc.js';
 import { DAILY_RECORD_COLUMNS, toDailyRecordDto, type DailyRecordRow } from './mappers.js';
+import { dv } from './sql-helpers.js';
 
 type EventsQuery = z.infer<typeof attendanceEventsQuerySchema>;
 type Decision = z.infer<typeof approvalDecisionSchema>;
@@ -38,7 +39,7 @@ export async function listDaily(deps: ApiDeps, actor: Actor, orgId: string, q: D
   const { grant, ownOnly } = viewGrant(actor, orgId);
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    let base = recordQuery(trx, orgId).where('r.attendanceDate', '=', q.date);
+    let base = recordQuery(trx, orgId).where('r.attendanceDate', '=', dv(q.date));
     if (ownOnly) base = base.where('r.employeeId', '=', ownOnly);
     if (scope) base = base.where('r.branchId', 'in', scope);
     if (q.departmentId) base = base.where('r.departmentId', '=', q.departmentId);
@@ -66,7 +67,7 @@ export async function listMonthly(deps: ApiDeps, actor: Actor, orgId: string, q:
   const from = start.toISODate()!; const to = end.toISODate()!;
   return runUser(deps.db, actor, async (trx) => {
     let eq = trx.selectFrom('employees as e').select(['e.id', 'e.employeeNumber', 'e.displayName', 'e.branchId']).where('e.organizationId', '=', orgId).where('e.deletedAt', 'is', null)
-      .where((eb) => eb.or([eb('e.exitDate', 'is', null), eb('e.exitDate', '>=', from)])).where('e.joiningDate', '<=', to);
+      .where((eb) => eb.or([eb('e.exitDate', 'is', null), eb('e.exitDate', '>=', dv(from))])).where('e.joiningDate', '<=', dv(to));
     if (ownOnly) eq = eq.where('e.id', '=', ownOnly); else if (q.employeeId) eq = eq.where('e.id', '=', q.employeeId);
     if (scope) eq = eq.where('e.branchId', 'in', scope);
     if (q.departmentId) eq = eq.where('e.departmentId', '=', q.departmentId);
@@ -74,7 +75,7 @@ export async function listMonthly(deps: ApiDeps, actor: Actor, orgId: string, q:
     const total = toCount((await eq.clearSelect().select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const employees = await eq.orderBy('e.displayName').orderBy('e.id').limit(q.pageSize).offset((q.page - 1) * q.pageSize).execute();
     const ids = employees.map((e) => e.id);
-    const records = ids.length ? await trx.selectFrom('attendanceDailyRecords').select(['id', 'employeeId', 'attendanceDate', 'status', 'workedMinutes', 'lateMinutes', 'overtimeMinutes', 'flags']).where('organizationId', '=', orgId).where('employeeId', 'in', ids).where('attendanceDate', '>=', from).where('attendanceDate', '<=', to).execute() : [];
+    const records = ids.length ? await trx.selectFrom('attendanceDailyRecords').select(['id', 'employeeId', 'attendanceDate', 'status', 'workedMinutes', 'lateMinutes', 'overtimeMinutes', 'flags']).where('organizationId', '=', orgId).where('employeeId', 'in', ids).where('attendanceDate', '>=', dv(from)).where('attendanceDate', '<=', dv(to)).execute() : [];
     const days: string[] = []; for (let d = start; d <= end; d = d.plus({ days: 1 })) days.push(d.toISODate()!);
     const data: MonthlyRow[] = employees.map((e) => {
       const row: MonthlyRow = { employeeId: e.id, employeeNumber: e.employeeNumber, employeeName: e.displayName, branchId: e.branchId, days: Object.fromEntries(days.map((d) => [d, null])), totals: { present: 0, absent: 0, leave: 0, holiday: 0, weeklyOff: 0, halfDay: 0, late: 0, missingPunch: 0, workedMinutes: 0, overtimeMinutes: 0, lateMinutes: 0 } };
@@ -108,7 +109,7 @@ export async function getRecord(deps: ApiDeps, actor: Actor, orgId: string, id: 
     evq = traceEventIds.length ? evq.where((eb) => eb.or([eb('ev.id', 'in', traceEventIds), eb.and([eb('ev.punchedAt', '>=', dayStart), eb('ev.punchedAt', '<', dayEnd)])])) : evq.where('ev.punchedAt', '>=', dayStart).where('ev.punchedAt', '<', dayEnd);
     const events = await evq.orderBy('ev.punchedAt').execute();
     const history = await trx.selectFrom('attendanceDailyRecordHistory').select(['id', 'calculationVersion', 'reason', 'triggeredBy', 'jobId', 'snapshot', 'createdAt']).where('recordId', '=', id).orderBy('calculationVersion', 'desc').limit(50).execute();
-    const corrections = await trx.selectFrom('attendanceCorrections').selectAll().where('organizationId', '=', orgId).where('employeeId', '=', row.employeeId).where('attendanceDate', '=', date).orderBy('createdAt', 'desc').execute();
+    const corrections = await trx.selectFrom('attendanceCorrections').selectAll().where('organizationId', '=', orgId).where('employeeId', '=', row.employeeId).where('attendanceDate', '=', dv(date)).orderBy('createdAt', 'desc').execute();
     return {
       ...toDailyRecordDto(row), ruleSetId: row.ruleSetId, shiftAssignmentId: row.shiftAssignmentId, engineVersion: row.engineVersion, trace,
       events: events.map((e) => ({ id: e.id, punchedAt: isoDateTime(e.punchedAt), localTime: DateTime.fromJSDate(e.punchedAt).setZone(row.timezone).toISO(), eventType: e.eventType, source: e.source, verificationMethod: e.verificationMethod, deviceId: e.deviceId, deviceName: e.deviceName, voidedAt: isoDateTimeOrNull(e.voidedAt), voidedByCorrectionId: e.voidedByCorrectionId, correctionId: e.correctionId, note: e.note, rawTransactionId: e.rawTransactionId === null ? null : String(e.rawTransactionId), attributed: traceEventIds.length ? traceEventIds.includes(e.id) : null })),
@@ -241,7 +242,7 @@ export async function createCorrection(deps: ApiDeps, actor: Actor, orgId: strin
       if (ev.voidedAt) throw errors.invalidState('The original event has already been voided.');
       originalPunchedAt = ev.punchedAt;
     }
-    const dup = await trx.selectFrom('attendanceCorrections').select('id').where('organizationId', '=', orgId).where('employeeId', '=', input.employeeId).where('attendanceDate', '=', input.attendanceDate).where('status', 'in', ['PENDING', 'APPROVED']).where('type', '=', input.type)
+    const dup = await trx.selectFrom('attendanceCorrections').select('id').where('organizationId', '=', orgId).where('employeeId', '=', input.employeeId).where('attendanceDate', '=', dv(input.attendanceDate)).where('status', 'in', ['PENDING', 'APPROVED']).where('type', '=', input.type)
       .where((eb) => input.originalEventId ? eb('originalEventId', '=', input.originalEventId) : eb.and([eb('originalEventId', 'is', null), ...(input.proposedPunchedAt ? [eb('proposedPunchedAt', '=', new Date(input.proposedPunchedAt))] : [])])).executeTakeFirst();
     if (dup) throw errors.conflict('An equivalent correction is already pending or approved.', { correctionId: dup.id });
     const row = await trx.insertInto('attendanceCorrections').values({
@@ -290,8 +291,8 @@ export async function listCorrections(deps: ApiDeps, actor: Actor, orgId: string
     if (ownOnly) base = base.where('c.employeeId', '=', ownOnly); else if (q.employeeId) base = base.where('c.employeeId', '=', q.employeeId);
     if (scope) base = base.where('c.branchId', 'in', scope);
     if (q.status) base = base.where('c.status', '=', q.status as never);
-    if (q.from) base = base.where('c.attendanceDate', '>=', q.from);
-    if (q.to) base = base.where('c.attendanceDate', '<=', q.to);
+    if (q.from) base = base.where('c.attendanceDate', '>=', dv(q.from));
+    if (q.to) base = base.where('c.attendanceDate', '<=', dv(q.to));
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const page = pageOf(q);
     const rows = await base.selectAll('c').select(['e.employeeNumber', 'e.displayName as employeeName']).orderBy('c.createdAt', 'desc').orderBy('c.id').limit(page.pageSize).offset(page.offset).execute();
@@ -492,7 +493,7 @@ export async function lockPeriod(deps: ApiDeps, actor: Actor, orgId: string, inp
   if (!grant.allBranches && !input.branchId) throw errors.forbidden('Branch-scoped users can only lock their own branches.');
   if (input.periodEnd < input.periodStart) throw errors.validation('periodEnd must be on/after periodStart.', { issues: [{ path: 'periodEnd', message: 'Before periodStart' }] });
   return runUser(deps.db, actor, async (trx) => {
-    const pendingCorrections = toCount((await trx.selectFrom('attendanceCorrections').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', 'in', ['PENDING', 'APPROVED']).where('attendanceDate', '>=', input.periodStart).where('attendanceDate', '<=', input.periodEnd).$if(!!input.branchId, (qb) => qb.where('branchId', '=', input.branchId!)).executeTakeFirst())?.n);
+    const pendingCorrections = toCount((await trx.selectFrom('attendanceCorrections').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', 'in', ['PENDING', 'APPROVED']).where('attendanceDate', '>=', dv(input.periodStart)).where('attendanceDate', '<=', dv(input.periodEnd)).$if(!!input.branchId, (qb) => qb.where('branchId', '=', input.branchId!)).executeTakeFirst())?.n);
     if (pendingCorrections > 0) throw errors.invalidState(`${pendingCorrections} correction(s) are still pending or awaiting application in this period.`, { pendingCorrections });
     const row = await trx.insertInto('attendancePeriodLocks').values({ organizationId: orgId, branchId: input.branchId ?? null, periodStart: input.periodStart, periodEnd: input.periodEnd, lockedBy: actor.userId, reason: input.reason ?? null }).returningAll().executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'attendance.period_locked', 'attendance_period_lock', { entityId: row.id, branchId: input.branchId ?? null, newValue: input, reason: input.reason ?? null });
@@ -520,7 +521,7 @@ export async function listPeriods(deps: ApiDeps, actor: Actor, orgId: string, q:
     let base = trx.selectFrom('attendancePeriodLocks').selectAll().where('organizationId', '=', orgId);
     if (scope) base = base.where((eb) => eb.or([eb('branchId', 'is', null), eb('branchId', 'in', scope)]));
     if (!q.includeUnlocked) base = base.where('unlockedAt', 'is', null);
-    if (q.year) base = base.where('periodEnd', '>=', `${q.year}-01-01`).where('periodStart', '<=', `${q.year}-12-31`);
+    if (q.year) base = base.where('periodEnd', '>=', dv(`${q.year}-01-01`)).where('periodStart', '<=', dv(`${q.year}-12-31`));
     return (await base.orderBy('periodStart', 'desc').execute()).map(toLockDto);
   });
 }

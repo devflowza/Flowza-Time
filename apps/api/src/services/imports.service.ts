@@ -56,6 +56,8 @@ export async function createImport(deps: ApiDeps, actor: Actor, orgId: string, i
   if (lower.endsWith('.xlsx') || lower.endsWith('.xls')) throw errors.validation('XLSX files are not supported by the API yet; export the sheet as CSV (UTF-8).', { issues: [{ path: 'fileName', message: 'Unsupported format' }] });
   const parsed = parseCsv(input.content, { maxRows: MAX_ROWS });
   parsed.header = normaliseHeader(parsed.header);
+  const duplicates = [...new Set(parsed.header.filter((h, i) => h && parsed.header.indexOf(h) !== i))];
+  if (duplicates.length) throw errors.validation(`Duplicate columns: ${duplicates.join(', ')}.`, { issues: duplicates.map((d) => ({ path: d, message: 'Duplicate column' })) });
   const missing = REQUIRED_COLUMNS.filter((c) => !parsed.header.includes(c));
   if (missing.length) throw errors.validation(`Missing required columns: ${missing.join(', ')}.`, { issues: missing.map((m) => ({ path: m, message: 'Missing column' })) });
   if (parsed.rows.length === 0) throw errors.validation('The file has no data rows.');
@@ -83,12 +85,14 @@ export async function createImport(deps: ApiDeps, actor: Actor, orgId: string, i
       const rowNo = idx + 2; // 1-based, header is row 1
       const rowErrors: ImportRowError[] = [];
       const res = employeeImportRowSchema.safeParse(raw);
+      // PINs are never persisted or echoed in clear (valid or invalid rows); the worker asks for them out of band.
       const data: Record<string, unknown> = { ...raw };
+      if (raw['pin'] !== undefined) { data['pin'] = '[REDACTED]'; data['pinProvided'] = true; }
       if (!res.success) {
         for (const issue of res.error.issues) rowErrors.push({ field: issue.path.join('.') || null, message: issue.message });
         return { rowNo, data, errors: rowErrors };
       }
-      const v = res.data;
+      const { pin: _pin, ...v } = res.data;
       Object.assign(data, v);
       const numberKey = v.employeeNumber.toLowerCase();
       const branch = branches.get(v.branchCode.toLowerCase());
@@ -126,7 +130,6 @@ export async function createImport(deps: ApiDeps, actor: Actor, orgId: string, i
         if (dup) rowErrors.push({ field: 'email', message: `Duplicate email in file (also on row ${dup})` }); else seenEmails.set(ek, rowNo);
         if (existingEmails.has(ek) && !data['existingEmployeeId']) rowErrors.push({ field: 'email', message: 'Email already used by another employee' });
       }
-      if (v.pin) { data['pin'] = '[REDACTED]'; data['pinProvided'] = true; }
       return { rowNo, data, errors: rowErrors };
     });
 

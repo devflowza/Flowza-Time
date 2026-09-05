@@ -7,7 +7,9 @@ import { withContext, type Database } from '@flowza/database';
  * Loads the caller's memberships and permissions from the database (never from the JWT) so role changes
  * and suspensions take effect immediately (ADR-002/007). Runs in the user's own RLS context.
  */
-export async function loadPrincipal(db: Database, userId: string, email: string | undefined, requestId: string): Promise<Principal> {
+export interface LoadedPrincipal { principal: Principal; mfaRequiredOrgIds: ReadonlySet<string> }
+
+export async function loadPrincipal(db: Database, userId: string, email: string | undefined, requestId: string): Promise<LoadedPrincipal> {
   return withContext(db, { kind: 'user', userId, email, requestId }, async (trx) => {
     const profile = await trx.selectFrom('userProfiles').select(['id', 'email', 'status']).where('id', '=', userId).executeTakeFirst();
     const isPlatformAdmin = !!(await trx.selectFrom('platformAdmins').select('userId').where('userId', '=', userId).where('status', '=', 'active').executeTakeFirst());
@@ -55,6 +57,16 @@ export async function loadPrincipal(db: Database, userId: string, email: string 
         });
       }
     }
-    return { userId, email: profile?.email ?? email ?? '', isPlatformAdmin, memberships };
+    // organisations that require MFA for every member (organization_settings.security.mfaRequired)
+    const orgIds = [...new Set(memberships.map((m) => m.organizationId))];
+    const mfaRequiredOrgIds = new Set<string>();
+    if (orgIds.length > 0) {
+      const settings = await trx.selectFrom('organizationSettings').select(['organizationId', 'security']).where('organizationId', 'in', orgIds).execute();
+      for (const s of settings) {
+        const sec = (typeof s.security === 'string' ? JSON.parse(s.security) : s.security) as { mfaRequired?: unknown } | null;
+        if (sec?.mfaRequired === true) mfaRequiredOrgIds.add(s.organizationId);
+      }
+    }
+    return { principal: { userId, email: profile?.email ?? email ?? '', isPlatformAdmin, memberships }, mfaRequiredOrgIds };
   });
 }
