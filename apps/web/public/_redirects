@@ -1,0 +1,5 @@
+# Cloudflare Pages / Netlify SPA fallback.
+# React Router owns every path below /, so a deep link (/employees, /devices/:id, /attendance?tab=raw)
+# must return index.html instead of a 404. Static files that exist on disk (assets/*, favicon.svg) are
+# served before this rule is consulted, so hashed bundles are unaffected.
+/*    /index.html   200
