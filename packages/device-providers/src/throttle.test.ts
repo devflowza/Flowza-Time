@@ -43,6 +43,26 @@ describe('createThrottler', () => {
     expect(t.tryAcquire('acc', { deviceKey: 'd2' }).ok).toBe(true);
   });
 
+  it('a release wakes every waiter that can proceed, not only the head of the queue', async () => {
+    const t = createThrottler({ maxConcurrentPerDevice: 1, maxConcurrentPerAccount: 2, requestsPerMinute: 6000 });
+    const h1 = await t.acquire('acc', { deviceKey: 'd1' });
+    const h2 = await t.acquire('acc', { deviceKey: 'd2' });
+    let w1 = false; let w2 = false;
+    const p1 = t.acquire('acc', { deviceKey: 'd1' }).then((l) => { w1 = true; return l; }); // head: blocked by device d1
+    const p2 = t.acquire('acc', { deviceKey: 'd2' }).then((l) => { w2 = true; return l; });
+    await vi.advanceTimersByTimeAsync(0);
+    expect([w1, w2]).toEqual([false, false]);
+    h2.release(); // frees an account slot and device d2: only the second waiter can use it
+    await vi.advanceTimersByTimeAsync(0);
+    expect([w1, w2]).toEqual([false, true]);
+    expect(t.stats('acc').perAccount.acc).toEqual({ inFlight: 2, waiting: 1 });
+    h1.release();
+    await vi.advanceTimersByTimeAsync(0);
+    expect(w1).toBe(true);
+    (await p1).release(); (await p2).release();
+    expect(t.stats()).toMatchObject({ inFlight: 0, waiting: 0 });
+  });
+
   it('rate limits with a token bucket that refills over time', async () => {
     const t = createThrottler({ maxConcurrentPerAccount: 100, requestsPerMinute: 60 }); // 1 token per second
     const leases = [];

@@ -70,6 +70,30 @@ describe('ATTLOG', () => {
     expect(r.transactions[3]).toMatchObject({ verificationMethod: 'unknown', direction: 'unknown', punchedAt: '2026-03-10T08:30:00Z' });
     for (const t of r.transactions) expect(rawTransactionSchema.safeParse(t).success).toBe(true);
   });
+  it('bounds unknown trailing columns so raw_payload cannot be inflated or used to smuggle binary data', () => {
+    const blob = 'Q'.repeat(5000);
+    const many = Array.from({ length: 20 }, (_, i) => `r${i}`);
+    const t = parseAttlogLine([`1`, `2026-03-10 08:30:00`, `0`, `1`, blob, ...many].join(T), 0, 'Asia/Muscat', SN);
+    expect(JSON.stringify(t.rawPayload).length).toBeLessThan(1024);
+    expect(t.rawPayload).toMatchObject({ workCode: 'Q'.repeat(64), reserved: many.slice(0, 8), truncated: true });
+    const plain = parseAttlogLine(`1${T}2026-03-10 08:30:00${T}0${T}1${T}0${T}0`, 0, 'Asia/Muscat', SN);
+    expect(plain.rawPayload).not.toHaveProperty('truncated');
+    expect(plain.deviceLocalTime).toBe('2026-03-10 08:30:00');
+  });
+  it('only lets well-formed stamps through to meta (they are persisted and echoed to the device)', () => {
+    const body = `1${T}2026-03-10 08:30:00${T}0${T}1`;
+    expect(proto.parseInbound(req('POST', '/iclock/cdata', { SN, table: 'ATTLOG', Stamp: 'bad stamp!' }, body), ctx).meta).toMatchObject({ stamp: null });
+    expect(proto.parseInbound(req('POST', '/iclock/cdata', { SN, table: 'ATTLOG', Stamp: 'x'.repeat(33) }, body), ctx).meta).toMatchObject({ stamp: null });
+    expect(proto.parseInbound(req('POST', '/iclock/cdata', { SN, table: 'OPERLOG', OpStamp: '../etc' }, ''), ctx).meta).toMatchObject({ stamp: null });
+  });
+  it('refuses oversize bodies with 413 and reports a bad device timezone as INVALID_CONFIG (not a device error)', () => {
+    const body = `1${T}2026-03-10 08:30:00${T}0${T}1\n`.repeat(50_000); // ~1.3 MB, above the 1 MiB cap
+    const err = (() => { try { proto.parseInbound(req('POST', '/iclock/cdata', { SN, table: 'ATTLOG' }, body), ctx); return undefined; } catch (e) { return e as ProtocolError; } })();
+    expect(err?.httpStatus).toBe(413);
+    const tz = (() => { try { proto.parseInbound(req('POST', '/iclock/cdata', { SN, table: 'ATTLOG' }, `1${T}2026-03-10 08:30:00`), { ...ctx, timezone: 'Nope/Zone' }); return undefined; } catch (e) { return e; } })();
+    expect(ProviderError.is(tz) && tz.code === 'INVALID_CONFIG').toBe(true);
+    expect(ProtocolError.is(tz)).toBe(false);
+  });
   it('maps every documented status and verify code', () => {
     const line = (status: number, verify: number) => parseAttlogLine(`7${T}2026-01-01 00:00:00${T}${status}${T}${verify}`, 0, 'UTC', SN);
     expect([0, 1, 2, 3, 4, 5].map((s) => line(s, 1).direction)).toEqual(['in', 'out', 'break_out', 'break_in', 'overtime_in', 'overtime_out']);
@@ -110,6 +134,10 @@ describe('OPERLOG', () => {
       { deviceUserId: '2', name: '2', cardNumber: null, pin: null, privilege: 'user', enabled: true, photoUrl: null, extra: { protocol: 'iclock', pri: 0, grp: '1', tz: null, verify: null } },
     ]);
     expect(JSON.stringify(r)).not.toContain('QUJDRA==');
+  });
+  it('bounds free-text USER fields kept in extra', () => {
+    const [u] = parseOperlogBody(`USER PIN=9${T}Name=Z${T}Grp=${'7'.repeat(500)}${T}TZ=${'1'.repeat(100)}`).employees;
+    expect(u?.extra).toMatchObject({ grp: '7'.repeat(64), tz: '1'.repeat(64), verify: null });
   });
   it('rejects USER lines without a PIN; unknown tables are acknowledged without storage', () => {
     expect(() => parseOperlogBody(`USER Name=NoPin${T}Pri=0`)).toThrow(ProtocolError);
@@ -200,6 +228,8 @@ describe('ZKTecoPushProvider', () => {
     expect((await provider.testConnection(stale)).ok).toBe(false);
     const wideInterval = createTestProviderContext({ serialNumber: SN, config: { lastSeenAt: '2026-03-15T09:00:00Z', pushInterval: 3600 } });
     expect((await provider.testConnection(wideInterval)).ok).toBe(true);
+    const stringInterval = createTestProviderContext({ serialNumber: SN, config: { lastSeenAt: '2026-03-15T09:00:00Z', pushInterval: '3600' } });
+    expect((await provider.testConnection(stringInterval)).ok).toBe(true); // wizard config values may arrive as strings
     const garbage = createTestProviderContext({ serialNumber: SN, config: { lastSeenAt: 'yesterday' } });
     expect((await provider.getDeviceStatus(garbage)).online).toBe(false);
     expect(await provider.getDeviceInfo(cold)).toMatchObject({ serialNumber: SN });

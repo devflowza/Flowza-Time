@@ -76,7 +76,7 @@ export async function audit(trx: Trx, actor: Actor, organizationId: string | nul
     organizationId,
     actorUserId: actor.userId,
     actorType: opts.actorType ?? 'USER',
-    actorLabel: actor.email || null,
+    actorLabel: actor.email || undefined,
     action,
     entityType,
     entityId: opts.entityId ?? null,

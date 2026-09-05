@@ -5,8 +5,8 @@ import { describeProviderConformance } from '../../conformance.js';
 import { ProtocolError } from '../../errors.js';
 import { createTestProviderContext } from '../../testing.js';
 import { ProviderError, type ProviderContext } from '../../types.js';
-import { createMockProvider, createMockState, LARGE_BATCH_PAGE_SIZE, type MockAttendanceProvider } from './mock-provider.js';
-import { countStream, employeeId, hash32, sliceStream, streamDays, type MockStreamConfig } from './stream.js';
+import { createMockProvider, createMockState, LARGE_BATCH_PAGE_SIZE, parseMockCursor, type MockAttendanceProvider } from './mock-provider.js';
+import { countStream, employeeId, hash32, MAX_STREAM_DAYS, sliceStream, streamDays, type MockStreamConfig } from './stream.js';
 import { canonicalMockPayload, MOCK_SIGNATURE_HEADER, mockWebhookSignature, signMockWebhook, signMockWebhookInline } from './webhook.js';
 
 const NOW = new Date('2026-03-15T10:00:00Z'); // 14:00 in Asia/Muscat
@@ -72,6 +72,13 @@ describe('mock stream (pure)', () => {
     expect(sliceStream(cfg, total - 2, 10).items).toEqual(all.slice(total - 2));
     expect(sliceStream(cfg, total, 10).items).toEqual([]);
   });
+  it('caps very long streams from the start, never by dropping the oldest days (sequence numbers must not shift)', () => {
+    const long = { ...cfg, startDate: '2024-01-01' };
+    const days = streamDays(long);
+    expect(days).toHaveLength(MAX_STREAM_DAYS);
+    expect(days[0]).toBe('2024-01-01');
+    expect(streamDays({ ...long, now: long.now.plus({ days: 30 }) })).toEqual(days);
+  });
   it('honours a fixed punches-per-day', () => {
     const fixed = { ...cfg, punchesPerDay: 6, now: DateTime.fromISO('2026-03-16T00:00:00Z') };
     expect(countStream(fixed)).toBe(15 * 5 * 6);
@@ -92,7 +99,7 @@ describe('MockAttendanceProvider', () => {
       const { provider, ctx } = setup();
       const p1 = await provider.pullAttendance(ctx, null, { pageSize: 10 });
       expect(p1.transactions).toHaveLength(10);
-      expect(p1.nextCursor).toEqual({ lastSeq: 10 });
+      expect(p1.nextCursor).toEqual({ lastSeq: 10, startDate: '2026-03-01' });
       expect(p1.hasMore).toBe(true);
       expect(p1.transactions[0]?.providerTransactionId).toBe('mock-DEV-1-0');
       expect(ctx.acquireCalls.count).toBe(1);
@@ -105,6 +112,55 @@ describe('MockAttendanceProvider', () => {
       expect(all.length).toBe(Number(p1.meta?.total));
       const tail = await provider.pullAttendance(ctx, { lastSeq: all.length });
       expect(tail).toMatchObject({ transactions: [], hasMore: false, nextCursor: { lastSeq: all.length } });
+    });
+    it('keeps the cursor valid when the default startDate window rolls over to the next day', async () => {
+      // No configured startDate: the anchor defaults to "30 days before now". A cursor created on day N must still
+      // address the same punches on day N+1 — otherwise a whole day of punches is silently skipped every day.
+      let now = new Date('2026-03-15T10:00:00Z');
+      const provider = createMockProvider({ clock: () => now });
+      const ctx = createTestProviderContext({ config: { employeeCount: 3, seed: 1 } });
+      const day1: RawTransaction[] = [];
+      let cursor: Record<string, unknown> | null = null;
+      for (;;) { const p = await provider.pullAttendance(ctx, cursor, { pageSize: 1000 }); day1.push(...p.transactions); cursor = p.nextCursor; if (!p.hasMore) break; }
+      expect(cursor).toEqual({ lastSeq: day1.length, startDate: '2026-02-13' });
+      now = new Date('2026-03-16T10:00:00Z');
+      const page = await provider.pullAttendance(ctx, cursor, { pageSize: 1000 });
+      const lastDelivered = day1[day1.length - 1]!.punchedAt;
+      expect(page.transactions.length).toBeGreaterThan(0);
+      for (const t of page.transactions) expect(t.punchedAt > lastDelivered).toBe(true);
+      expect(page.transactions[0]!.punchedAt.slice(0, 10)).toBe('2026-03-15'); // the rest of day 1 after 14:00 local
+      expect(page.transactions.some((t) => t.punchedAt.startsWith('2026-03-16'))).toBe(true);
+      expect(page.nextCursor).toMatchObject({ startDate: '2026-02-13' });
+      // Rewinding to the first cursor of the same anchor replays day 1 exactly (same sequence numbers, same punches).
+      const replay = await provider.pullAttendance(ctx, { lastSeq: 0, startDate: '2026-02-13' }, { pageSize: 1000 });
+      expect(replay.transactions.slice(0, day1.length)).toEqual(day1);
+      // A brand-new cursor on day 2 legitimately anchors on the new default; that is the only way the anchor moves.
+      expect((await provider.pullAttendance(ctx, null)).nextCursor).toMatchObject({ startDate: '2026-02-14' });
+    });
+    it('a cursor\'s own startDate wins over a later config change; malformed cursors are rejected', async () => {
+      const { provider, ctx } = setup();
+      const first = await provider.pullAttendance(ctx, null, { pageSize: 5 });
+      const moved = createTestProviderContext({ config: { ...baseConfig, startDate: '2026-03-10' } });
+      const next = await provider.pullAttendance(moved, first.nextCursor, { pageSize: 5 });
+      expect(next.transactions[0]?.providerTransactionId).toBe('mock-DEV-1-5');
+      expect(next.meta?.startDate).toBe('2026-03-01');
+      expect(next.nextCursor).toEqual({ lastSeq: 10, startDate: '2026-03-01' });
+      expect(parseMockCursor({ lastSeq: 3 })).toEqual({ lastSeq: 3 }); // legacy cursor without anchor is accepted
+      await expect(provider.pullAttendance(ctx, { lastSeq: 1, startDate: '2026-3-1' })).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
+      await expect(provider.pullAttendance(ctx, { lastSeq: 1, startDate: '2026-02-30' })).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
+      await expect(provider.pullAttendance(ctx, { lastSeq: 1, startDate: 42 })).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
+    });
+    it('rejects an invalid device timezone with INVALID_CONFIG instead of an empty stream', async () => {
+      const { provider, ctx } = setup({}, { timezone: 'Mars/Olympus' });
+      await expect(provider.pullAttendance(ctx, null)).rejects.toMatchObject({ code: 'INVALID_CONFIG', retryable: false });
+      await expect(provider.getDeviceInfo(ctx)).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
+    });
+    it('fails with TIMEOUT on an already-aborted signal in every scenario, not only "slow"', async () => {
+      const pre = new AbortController();
+      pre.abort();
+      const { provider, ctx } = setup({ scenario: 'healthy' }, { signal: pre.signal });
+      await expect(provider.pullAttendance(ctx, null)).rejects.toMatchObject({ code: 'TIMEOUT', retryable: true });
+      expect((await provider.testConnection(ctx)).ok).toBe(false);
     });
     it('supports `since` on the first pull', async () => {
       const { provider, ctx } = setup();
@@ -230,7 +286,7 @@ describe('MockAttendanceProvider', () => {
     const p1 = await provider.pullAttendance(ctx, null, { pageSize: 10 });
     expect(p1.transactions).toHaveLength(LARGE_BATCH_PAGE_SIZE);
     expect(p1.hasMore).toBe(true);
-    expect(p1.nextCursor).toEqual({ lastSeq: 5000 });
+    expect(p1.nextCursor).toEqual({ lastSeq: 5000, startDate: '2026-03-01' });
     const p2 = await provider.pullAttendance(ctx, p1.nextCursor);
     expect(p2.transactions[0]?.providerTransactionId).toBe('mock-DEV-1-5000');
     expect(Number(p1.meta?.total)).toBeGreaterThan(10_000);
@@ -277,6 +333,22 @@ describe('mock webhook', () => {
     expect(res.transactions[1]).toMatchObject({ providerTransactionId: 'evt-1:1', verificationMethod: 'unknown', direction: 'unknown' });
     expect(signed.headers[MOCK_SIGNATURE_HEADER]).toBe(mockWebhookSignature(secret, signed.rawBody));
     for (const t of res.transactions) expect(rawTransactionSchema.safeParse(t).success).toBe(true);
+  });
+  it('normalises punchedAt to UTC and keeps the vendor timestamp verbatim as deviceLocalTime', async () => {
+    const signed = signMockWebhook(secret, payload);
+    const res = await provider.handleWebhook(req(signed.rawBody, signed.headers), { webhookSecret: secret });
+    expect(res.transactions[1]).toMatchObject({ punchedAt: '2026-03-15T00:05:00Z', deviceLocalTime: '2026-03-15T04:05:00+04:00' });
+    expect(res.transactions[0]).toMatchObject({ punchedAt: '2026-03-15T04:00:00Z', deviceLocalTime: '2026-03-15T04:00:00Z' });
+  });
+  it('refuses oversize bodies (413) and checks the header signature before parsing anything', async () => {
+    const huge = JSON.stringify({ ...payload, eventId: 'x'.repeat(1_100_000) });
+    const sig = { [MOCK_SIGNATURE_HEADER]: mockWebhookSignature(secret, huge) };
+    expect(await provider.handleWebhook(req(huge, sig), { webhookSecret: secret })).toMatchObject({ accepted: false, response: { status: 413 } });
+    // Garbage with a wrong header signature is a 401 (never reaches the JSON parser), with the right signature a 400.
+    const garbage = { headers: { [MOCK_SIGNATURE_HEADER]: 'a'.repeat(64) }, rawBody: '{nope', body: null, query: {} };
+    expect(await provider.handleWebhook(garbage, { webhookSecret: secret })).toMatchObject({ accepted: false, signatureValid: false, response: { status: 401, body: { error: 'invalid_signature' } } });
+    const signedGarbage = { ...garbage, headers: { [MOCK_SIGNATURE_HEADER]: mockWebhookSignature(secret, '{nope') } };
+    expect(await provider.handleWebhook(signedGarbage, { webhookSecret: secret })).toMatchObject({ accepted: false, signatureValid: true, response: { status: 400, body: { error: 'invalid_json' } } });
   });
   it('accepts an inline (body) signature over the canonical payload', async () => {
     const signed = signMockWebhookInline(secret, payload);
@@ -331,6 +403,12 @@ describe('mock push protocol', () => {
     expect(() => proto.parseInbound(req('GET', '/device-push/mock/OTHER/commands'), ctx)).toThrow(ProtocolError);
     expect(() => proto.parseInbound(req('GET', '/device-push/mock/SIM0001/handshake', '{bad'), ctx)).toThrow(ProtocolError);
     expect(() => proto.parseInbound(req('GET', '/nothing'), ctx)).toThrow(ProtocolError);
+  });
+  it('refuses oversize bodies with a 413 ProtocolError before parsing lines', () => {
+    const body = 'E001,2026-03-15T08:00:00\n'.repeat(50_000);
+    const err = (() => { try { proto.parseInbound(req('POST', '/device-push/mock/SIM0001/attendance', body), ctx); return undefined; } catch (e) { return e as ProtocolError; } })();
+    expect(err).toBeInstanceOf(ProtocolError);
+    expect(err?.httpStatus).toBe(413);
   });
   it('handles commands / handshake / command-results and renders commands as JSON', () => {
     expect(proto.parseInbound(req('GET', '/device-push/mock/SIM0001/commands'), ctx)).toMatchObject({ kind: 'heartbeat', response: { status: 200, body: '[]' } });

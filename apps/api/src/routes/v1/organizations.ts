@@ -1,4 +1,4 @@
-import type { Hono } from 'hono';
+import type { Context, Hono } from 'hono';
 import { updateOrganizationSchema } from '@flowza/contracts';
 import { errors } from '@flowza/shared';
 import type { AppEnv } from '../../middleware/request-context.js';
@@ -9,7 +9,7 @@ import { actorOf } from '../../lib/service.js';
 import { isSettingsGroup } from '../../lib/settings.js';
 import * as orgs from '../../services/organizations.service.js';
 
-function groupParam(c: Parameters<Parameters<Hono<AppEnv>['get']>[1]>[0]): 'general' | 'attendance' | 'sync' | 'notifications' | 'security' | 'integrations' {
+function groupParam(c: Context<AppEnv>): 'general' | 'attendance' | 'sync' | 'notifications' | 'security' | 'integrations' {
   const g = param(c, 'group');
   if (!isSettingsGroup(g)) throw errors.notFound('Settings group', g);
   return g;

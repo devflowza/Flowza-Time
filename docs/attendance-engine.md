@@ -47,6 +47,14 @@ Records inside a locked period are skipped and listed in the recalculation summa
    WORKED_ON_HOLIDAY, WORKED_ON_WEEKLY_OFF, HALF_DAY_LEAVE, DUPLICATE_PUNCHES_COLLAPSED, RAMADAN_HOURS, CROSS_MIDNIGHT,
    NO_SHIFT, UNDER_HOURS`.
 
+## Known design choices (from the adversarial review)
+- Punch rounding is applied to the punch instants **before** late/early evaluation (09:08 with NEAREST-15 → 09:15 → 5 min late
+  despite a 10-min grace). This matches how most payroll-grade systems define "punch rounding"; organisations that want grace
+  evaluated on raw instants should keep `punchRoundingMinutes = 0` and use `workedRoundingMinutes`.
+- Work on holidays/weekly offs credits **all** worked minutes as overtime (cap only) — thresholds/min-blocks apply to regular
+  overtime only.
+- Omitting `now` means "the day is over"; the worker always passes it.
+
 ## Trace (support and payroll disputes, §88)
 `trace.inputs` (shift, rule set, timezone, window, holiday, leave, weekly off), `trace.punches` (every event with its local time
 and role IN/OUT/BREAK_*/IGNORED/DUPLICATE/OUT_OF_WINDOW), `trace.steps` (each rule with intermediate values) and
