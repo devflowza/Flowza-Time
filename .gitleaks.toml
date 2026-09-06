@@ -21,6 +21,10 @@ paths = [
   '''apps/web/\.env\.production$''',
 ]
 regexes = [
+  # Supabase publishable (anon) keys ship inside every browser bundle by design and grant nothing on their own: the
+  # anon role holds zero table privileges and row-level security denies it every row. Allowed by VALUE rather than by
+  # path, so the files carrying one (fly.api.toml, apps/web/.env.production) stay scanned for everything else.
+  '''sb_publishable_[A-Za-z0-9_-]{20,}''',
   # explicit placeholders used across docs and examples
   '''replace-me''',
   '''FlowZa-Demo-2026!''',
