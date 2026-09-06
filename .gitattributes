@@ -1,0 +1,26 @@
+# Everything is authored and executed with LF. Without this, a Git-for-Windows clone with the default
+# core.autocrlf=true checks out CRLF, and the shell scripts under scripts/ and supabase/tests/ then fail in WSL,
+# Git Bash and every container with "bad interpreter: /bin/bash^M" — a failure whose message names nothing useful.
+* text=auto eol=lf
+
+# Executed by a shell: CRLF here is always a bug, on any platform.
+*.sh text eol=lf
+Dockerfile text eol=lf
+*.Dockerfile text eol=lf
+
+# PowerShell is the exception — Windows-native tooling expects CRLF.
+*.ps1 text eol=crlf
+*.psm1 text eol=crlf
+*.cmd text eol=crlf
+*.bat text eol=crlf
+
+# Never transform these.
+*.png binary
+*.jpg binary
+*.jpeg binary
+*.gif binary
+*.ico binary
+*.webp binary
+*.woff binary
+*.woff2 binary
+*.pdf binary
