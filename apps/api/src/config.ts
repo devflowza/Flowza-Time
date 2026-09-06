@@ -18,6 +18,15 @@ const schema = z.object({
   RATE_LIMIT_WINDOW_MS: intFromEnv(60_000),
   RATE_LIMIT_MAX: intFromEnv(600),
   TRUST_PROXY: booleanFromEnv.default(true),
+  // Authoritative client-IP header set by the edge (Cloudflare: cf-connecting-ip). Only trustworthy when the origin
+  // rejects traffic that did not come through that edge — see clientIp() in lib/http.ts.
+  CLIENT_IP_HEADER: z.string().trim().min(1).optional(),
+  // Proxies that append to X-Forwarded-For, counted from the right. Cloudflare -> Fly is 2; a single load balancer 1.
+  TRUSTED_PROXY_HOPS: intFromEnv(1),
+  // Shared secret the CDN edge attaches to every proxied request. When set, requests without it are refused — which is
+  // what makes CLIENT_IP_HEADER and TRUSTED_PROXY_HOPS trustworthy, since both assume the expected proxy chain. Unset
+  // for local development and deployments with no CDN in front.
+  EDGE_SHARED_SECRET: z.string().min(16).optional(),
 });
 
 export type ApiConfig = z.infer<typeof schema> & { webOrigins: string[] };

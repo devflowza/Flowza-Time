@@ -1,0 +1,66 @@
+name: Deploy
+
+# Manual on purpose. There is no staging environment yet, so every deploy from here reaches the production database
+# holding real attendance records. Promoting this to `on: push` after CI passes is a small change — make it once a
+# staging target exists, or once you are content that CI green is sufficient evidence to ship.
+on:
+  workflow_dispatch:
+    inputs:
+      target:
+        description: Which application to deploy
+        required: true
+        default: both
+        type: choice
+        options: [both, api, worker]
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+# Note: GitHub's workflow parser rejects `${{ }}` expressions inside YAML flow mappings, so every `with:` / `env:`
+# carrying an expression is written in block style (same constraint as ci.yml).
+jobs:
+  deploy:
+    name: Deploy to Fly.io
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: superfly/flyctl-actions/setup-flyctl@master
+
+      # Fails loudly with a usable message rather than letting flyctl emit an opaque auth error.
+      - name: Check the deploy token is configured
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          if [ -z "$FLY_API_TOKEN" ]; then
+            echo "::error::FLY_API_TOKEN is not set. Create a deploy token in the Fly dashboard and add it as a repository secret."
+            exit 1
+          fi
+
+      - name: Deploy the API
+        if: inputs.target == 'both' || inputs.target == 'api'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --config fly.api.toml --remote-only --wait-timeout 600
+
+      # Verified against the public hostname, so this also proves Cloudflare is routing to the origin. /api/ready
+      # checks the database and the job queue, so a wrong DATABASE_URL_API surfaces here rather than as a user's 500.
+      - name: Verify the API is ready
+        if: inputs.target == 'both' || inputs.target == 'api'
+        run: |
+          for attempt in $(seq 1 12); do
+            code=$(curl -fsS -o /tmp/ready.json -w '%{http_code}' https://api.flowza.ai/api/ready) && break || code=000
+            echo "attempt $attempt: /api/ready -> $code; retrying in 10s"
+            sleep 10
+          done
+          cat /tmp/ready.json || true
+          echo
+          test "$code" = "200" || { echo "::error::/api/ready did not return 200 (last: $code)"; exit 1; }
+
+      - name: Deploy the worker
+        if: inputs.target == 'both' || inputs.target == 'worker'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: flyctl deploy --config fly.worker.toml --remote-only --wait-timeout 600

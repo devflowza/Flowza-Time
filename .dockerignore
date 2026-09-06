@@ -1,0 +1,29 @@
+# The API and worker images build from the repository root (the workspace is needed to resolve @flowza/*), so without
+# this every deploy uploads ~370 MB of node_modules, git history and web build output to the builder.
+node_modules
+**/node_modules
+.git
+.github
+dist
+**/dist
+**/dist-e2e
+**/.turbo
+**/coverage
+**/playwright-report
+**/test-results
+**/*.tsbuildinfo
+
+# Never bake local environment files or credentials into an image layer.
+.env
+.env.*
+!.env.example
+**/.env
+**/.env.*
+!**/.env.example
+
+# Not needed at build or run time.
+apps/web
+docs
+supabase/tests
+*.md
+!README.md

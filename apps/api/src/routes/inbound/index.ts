@@ -55,7 +55,7 @@ export function registerInboundRoutes(app: Hono<AppEnv>, deps: ApiDeps): void {
     delete query.token;
     const headers = subsetHeaders(c);
     delete headers.authorization; delete headers['x-device-token'];
-    const req: DevicePushRequest = { method: c.req.method, path: `/${protocolKey}${rest}`, query, headers, rawBody, remoteIp: clientIp(c, deps.config.TRUST_PROXY) ?? undefined };
+    const req: DevicePushRequest = { method: c.req.method, path: `/${protocolKey}${rest}`, query, headers, rawBody, remoteIp: clientIp(c, deps.config) ?? undefined };
     let identity: ReturnType<typeof handler.identifyDevice>;
     try { identity = handler.identifyDevice(req); } catch { identity = null; }
     if (!identity) return c.text('device not identified', 400, TEXT);
@@ -109,7 +109,7 @@ export function registerInboundRoutes(app: Hono<AppEnv>, deps: ApiDeps): void {
       if (!device) return c.json({ error: 'unknown_device' }, 404);
       let body: unknown = null;
       try { body = rawBody ? JSON.parse(rawBody) : null; } catch { body = null; }
-      const req: WebhookRequest = { headers: subsetHeaders(c), rawBody, body, query: queryOf(c), remoteIp: clientIp(c, deps.config.TRUST_PROXY) ?? undefined };
+      const req: WebhookRequest = { headers: subsetHeaders(c), rawBody, body, query: queryOf(c), remoteIp: clientIp(c, deps.config) ?? undefined };
       const outcome = await handleWebhook(deps, device, token, req, requestId);
       log.info({ event: 'provider_webhook', providerKey, organizationId: device.organizationId, deviceId, status: outcome.status });
       return c.json(outcome.body ?? {}, outcome.status as 200, outcome.headers);

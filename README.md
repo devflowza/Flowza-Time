@@ -23,7 +23,7 @@ Device / Vendor cloud  →  Provider adapter  →  Sync engine (fair queue)  →
 | [`docs/device-integrations.md`](docs/device-integrations.md) | Vendor due-diligence, compatibility matrix, adding a provider |
 | [`docs/attendance-engine.md`](docs/attendance-engine.md) · [`docs/sync-engine.md`](docs/sync-engine.md) | Calculation rules · synchronisation |
 | [`docs/api.md`](docs/api.md) | REST API reference |
-| [`docs/development.md`](docs/development.md) · [`docs/testing.md`](docs/testing.md) · [`docs/deployment.md`](docs/deployment.md) · [`docs/troubleshooting.md`](docs/troubleshooting.md) | Operate the system |
+| [`docs/development.md`](docs/development.md) · [`docs/testing.md`](docs/testing.md) · [`docs/deployment.md`](docs/deployment.md) · [`docs/go-live.md`](docs/go-live.md) · [`docs/troubleshooting.md`](docs/troubleshooting.md) | Operate the system |
 | [`docs/risks.md`](docs/risks.md) | Risks, compliance notes, challenged assumptions |
 | [`AGENTS.md`](AGENTS.md) | Engineering rules for contributors (human or AI) |
 

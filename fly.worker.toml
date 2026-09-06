@@ -1,0 +1,43 @@
+# FlowZa Time — background worker (apps/worker). Deploy from the repository root:
+#   flyctl deploy --config fly.worker.toml --remote-only
+#
+# No [http_service]: the worker accepts no inbound traffic. It polls the job queue and runs device sync, attendance
+# processing, reports, notifications and maintenance.
+#
+# Secrets are NOT in this file. Set them with `flyctl secrets set --app flowza-time-worker ...`:
+#   DATABASE_URL_WORKER   -- must be the SESSION pooler (port 5432), not the transaction pooler. The scheduler holds a
+#                            session-level advisory lock for leader election (apps/worker/src/scheduler.ts); under
+#                            transaction pooling the connection is handed to another transaction and the lock is lost.
+#   FLOWZA_CREDENTIALS_MASTER_KEYS  -- must be BYTE-IDENTICAL to the API's, or the worker cannot decrypt the device
+#                                     credentials the API encrypted and every sync fails to authenticate.
+#   RESEND_API_KEY        -- only when EMAIL_PROVIDER is switched to "resend".
+
+app = "flowza-time-worker"
+primary_region = "bom"
+
+[build]
+  dockerfile = "apps/worker/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  DATABASE_POOL_MAX = "10"
+  WORKER_CONCURRENCY = "8"
+  WORKER_QUEUES = "sync,processing,reports,notifications,maintenance"
+  WORKER_PER_ORG_CONCURRENCY = "5"
+  # Safe to leave on for every machine: exactly one wins the advisory lock and ticks; the rest stand by and take over
+  # if the leader dies.
+  SCHEDULER_ENABLED = "true"
+  API_PUBLIC_URL = "https://api.flowza.ai"
+  WEB_PUBLIC_URL = "https://time.flowza.ai"
+  # Notifications are written to the outbox either way; "console" logs instead of sending, so invited users receive
+  # nothing until this is switched to "resend" and RESEND_API_KEY is set.
+  EMAIL_PROVIDER = "console"
+  EMAIL_FROM = "FlowZa Time <no-reply@flowza.ai>"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  # One machine to start. Unlike the API this scales out safely — leader election is designed for it — so raise the
+  # count for availability whenever the queue depth or the cost of a stalled worker justifies it.
+  count = 1

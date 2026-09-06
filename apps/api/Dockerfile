@@ -17,7 +17,10 @@ FROM deps AS build
 COPY tsconfig.base.json ./
 COPY packages ./packages
 COPY apps/api ./apps/api
-RUN pnpm -r --filter @flowza/api... run build && pnpm --filter @flowza/api deploy --prod /out
+# --legacy: from pnpm 10, `deploy` refuses a workspace without inject-workspace-packages=true. Enabling that
+# globally would change how every workspace dependency is linked for local development and CI too, so the
+# escape hatch is scoped to this one command instead.
+RUN pnpm -r --filter @flowza/api... run build && pnpm --filter @flowza/api deploy --prod --legacy /out
 
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production

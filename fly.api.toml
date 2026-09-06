@@ -1,0 +1,76 @@
+# FlowZa Time — API (apps/api). Deploy from the repository root:
+#   flyctl deploy --config fly.api.toml --remote-only
+#
+# The build context is the repository root because the image needs the pnpm workspace to resolve @flowza/*.
+# Region bom (Mumbai) is deliberate: the Supabase project is in ap-south-1, and a request makes several database
+# round trips, so every millisecond between the API and the database is paid multiple times per request.
+#
+# Secrets are NOT in this file. Set them once with `flyctl secrets set --app flowza-time-api ...`:
+#   DATABASE_URL_API, FLOWZA_CREDENTIALS_MASTER_KEYS, FLOWZA_DEVICE_PUSH_SECRET
+#   EDGE_SHARED_SECRET  -- required before CLIENT_IP_HEADER above can be trusted; see the note in [env]
+#   SUPABASE_SERVICE_ROLE_KEY  (optional: realtime broadcast + signed storage URLs; omit and both are no-ops)
+
+app = "flowza-time-api"
+primary_region = "bom"
+
+[build]
+  dockerfile = "apps/api/Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  API_PORT = "4000"
+  API_PUBLIC_URL = "https://api.flowza.ai"
+  WEB_ORIGINS = "https://time.flowza.ai"
+  SUPABASE_URL = "https://liyilmbklsextsggflbb.supabase.co"
+  SUPABASE_ANON_KEY = "sb_publishable_SDK8x_KVhjgXxrk-xvJ0Xw__LWSJIQF"
+  DATABASE_POOL_MAX = "10"
+
+  # Client IP for rate limiting and the audit trail. BOTH settings below assume the request actually traversed
+  # Cloudflare -> Fly: CF-Connecting-IP is only authoritative because Cloudflare rewrites it, and the hop count is only
+  # correct because two proxies appended. A request sent straight to the Fly hostname satisfies neither — it carries one
+  # fewer hop, so the count reads a client-supplied entry, and nothing overwrote the header.
+  #
+  # EDGE_SHARED_SECRET (set as a Fly secret, not here) is therefore a PRECONDITION, not hardening: until it is set and
+  # Cloudflare adds the matching header via a Transform Rule, the origin is open and neither setting can be trusted.
+  # Cloudflare Tunnel — no public listener at all — is the stronger end state; Authenticated Origin Pulls is not a
+  # practical option here because the Fly proxy does not validate a client certificate for the application.
+  TRUST_PROXY = "true"
+  CLIENT_IP_HEADER = "cf-connecting-ip"
+  # Cloudflare and Fly each append to X-Forwarded-For, so the client entry sits two from the right. Verify this against
+  # a real request rather than assuming: if Fly's proxy does not append, the correct value is 1.
+  TRUSTED_PROXY_HOPS = "2"
+
+[http_service]
+  internal_port = 4000
+  # Cloudflare terminates the devices' plain HTTP at the edge and speaks HTTPS to this origin, so the origin itself
+  # never needs to serve port 80. The plain-HTTP allowance lives in the Cloudflare configuration rule, not here.
+  force_https = true
+  auto_stop_machines = false
+  auto_start_machines = false
+  # The API holds a database pool and must not cold-start under a user request.
+  min_machines_running = 1
+
+  [http_service.concurrency]
+    type = "requests"
+    soft_limit = 200
+    hard_limit = 250
+
+  # Liveness only. /api/ready additionally checks the database and the queue and returns 503 when either is down —
+  # right for an external uptime monitor, wrong here, where a transient database blip would pull the machine out of
+  # rotation and make the outage worse.
+  [[http_service.checks]]
+    grace_period = "10s"
+    interval = "30s"
+    method = "GET"
+    path = "/api/health"
+    protocol = "http"
+    timeout = "5s"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+  # One machine on purpose: rate limiting (middleware/rate-limit.ts) and Idempotency-Key replay
+  # (middleware/idempotency.ts) are per-process in-memory stores. A second machine halves the effective rate limit and
+  # lets a retried POST execute twice. Scale out only after both are backed by Redis or moved to the edge.
+  count = 1
