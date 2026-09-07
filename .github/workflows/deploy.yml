@@ -17,7 +17,7 @@ on:
       ready_url:
         description: URL to poll for readiness after deploying the API
         required: false
-        default: https://api.flowza.ai/api/ready
+        default: https://time-api.flowza.ai/api/ready
         type: string
 
 concurrency:
