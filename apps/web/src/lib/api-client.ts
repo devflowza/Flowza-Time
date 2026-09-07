@@ -9,6 +9,14 @@ export class ApiError extends Error {
   }
 }
 
+/**
+ * True for the 403 the API returns when the session must step up to `aal2` (apps/api `middleware/mfa.ts`):
+ * either the organisation requires MFA, or the caller is a platform admin, who is gated on every route.
+ */
+export function isMfaRequiredError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403 && error.details?.reason === 'MFA_REQUIRED';
+}
+
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
   body?: unknown;
   query?: Record<string, string | number | boolean | undefined | null>;

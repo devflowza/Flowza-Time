@@ -18,6 +18,7 @@
     "test:db": "vitest run --config vitest.db.config.ts",
     "migrate:local": "tsx src/tools/migrate.ts",
     "seed:local": "tsx src/tools/seed.ts",
+    "seed:platform-admin": "tsx src/tools/seed-platform-admin.ts",
     "codegen": "tsx src/tools/codegen.ts"
   },
   "dependencies": {

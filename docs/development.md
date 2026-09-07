@@ -13,6 +13,8 @@ cp apps/web/.env.example apps/web/.env.local
 bash scripts/local-pg.sh start             # Postgres 16 on 127.0.0.1:54329
 # The cluster lives in $PGROOT (default ~/.flowza-pg); pass PGROOT=/var/lib/flowza-pg when the data directory was created elsewhere, e.g. on a shared CI/agent box.
 bash scripts/db-reset-local.sh --seed      # shim + migrations + deterministic seed
+# platform ("super") admin for tenant management at /api/v1/platform/* — password comes from the environment
+PLATFORM_ADMIN_PASSWORD='<choose one>' pnpm --filter @flowza/database run seed:platform-admin
 pnpm build:packages
 pnpm dev:api                               # http://localhost:4000/api/health
 pnpm dev:worker
@@ -31,6 +33,7 @@ Generate a master key for device credential encryption:
 | `pnpm test:db` | Kysely + RLS integration tests on the local Postgres |
 | `bash supabase/tests/run-rls-tests.sh` | SQL RLS suites on a fresh database |
 | `pnpm db:types` | Regenerate `packages/database/src/generated/db.ts` |
+| `pnpm --filter @flowza/database run seed:platform-admin` | Create/refresh a platform admin (`--email`, `--level`, `--name`; password via `PLATFORM_ADMIN_PASSWORD`) |
 | `pnpm verify` | Everything CI runs, locally |
 
 ## Project layout

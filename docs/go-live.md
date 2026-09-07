@@ -353,24 +353,27 @@ references `user_profiles`, so rows only appear for users that already have a pr
 
 Two facts shape this step: `platform_admins.user_id` → `user_profiles.id` → `auth.users.id`, and the API only creates
 the `user_profiles` row lazily on the first `GET /api/v1/me`. So the auth user comes first, then the profile, then the
-admin row.
+admin row — which is what `seed:platform-admin` does in one idempotent pass:
 
-**a. Create the auth user.** Dashboard → **Authentication → Users → Add user**: email `dev@flowza.ai`, a strong
-password, **auto-confirm enabled**. (Or send an invite and set the password from the email.)
-
-**b. Promote to platform owner**, in the SQL editor:
-
-```sql
-insert into public.user_profiles (id, email, full_name)
-select id, email, 'FlowZa Platform Owner'
-from auth.users where email = 'dev@flowza.ai'
-on conflict (id) do nothing;
-
-insert into public.platform_admins (user_id, level, status)
-select id, 'owner', 'active'
-from public.user_profiles where email = 'dev@flowza.ai'
-on conflict (user_id) do update set level = 'owner', status = 'active';
+```bash
+DATABASE_URL_ADMIN='postgres://postgres:<password>@db.<ref>.supabase.co:5432/postgres' \
+SUPABASE_URL='https://<ref>.supabase.co' \
+SUPABASE_SERVICE_ROLE_KEY='<service role key>' \
+PLATFORM_ADMIN_PASSWORD='<the super admin password>' \
+  pnpm --filter @flowza/database run seed:platform-admin -- --email dev@flowza.ai --level owner
 ```
+
+The password is read from the environment, never from `argv`, because command lines are visible to every process on
+the host — keep it out of your shell history too (a leading space, or `read -rs`). It is checked against the project
+policy in `supabase/config.toml` (≥12 characters, mixed classes) before anything is written, so a password hosted Auth
+would refuse fails here with a clear message instead of a 422. Options: `--email` (default `dev@flowza.ai`),
+`--level` (`support` | `admin` | `owner`, default `owner`), `--name`.
+
+With `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` set, the auth user is created or updated through the Supabase Auth
+admin API — the only supported way to write `auth.users` on a hosted project. Without them the tool writes
+`auth.users` directly and therefore **refuses any non-loopback database**, which is the local-development path
+(§ docs/development.md). Re-running rotates the password and re-asserts the level; it never duplicates rows, and every
+run appends a `platform_admin.seeded` entry to `audit.logs`.
 
 Confirm:
 
@@ -378,6 +381,19 @@ Confirm:
 select p.email, a.level, a.status
 from public.platform_admins a join public.user_profiles p on p.id = a.user_id;
 -- dev@flowza.ai | owner | active
+```
+
+**Then enrol MFA — the account cannot be used before that.** `requireAuth` rejects every request from a platform
+admin whose session is below `aal2` (`apps/api/src/middleware/auth.ts`), so with no verified TOTP factor even
+`GET /api/v1/me` returns `403 FORBIDDEN` / `MFA_REQUIRED`. Sign in to the web app: it answers that response with a
+blocking enrolment screen (scan the QR code, enter the 6-digit code) rather than the normal shell, because there is
+no page a platform admin could reach before the session carries `aal2`. Enrolment talks to Supabase Auth directly,
+so it needs no API call. Verify:
+
+```sql
+select count(*) from auth.mfa_factors f
+join public.platform_admins a on a.user_id = f.user_id
+where f.status = 'verified';
 ```
 
 **What this does and does not grant.** A platform admin can manage organisations, plans, feature flags and access

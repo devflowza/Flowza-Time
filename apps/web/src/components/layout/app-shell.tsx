@@ -5,6 +5,8 @@ import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { Dialog, DialogContent } from '@/components/ui';
 import { useMe } from '@/features/me/use-me';
+import { isMfaRequiredError } from '@/lib/api-client';
+import { MfaRequiredGate } from '@/features/auth/mfa-required-gate';
 import { Skeleton } from '@/components/ui';
 import { ErrorState } from '@/components/ui';
 import { useAuth } from '@/features/auth/auth-provider';
@@ -25,6 +27,8 @@ export function AppShell() {
       </div>
     );
   }
+  // A platform admin is gated at aal2 on every route, so /me itself fails before the shell can render any way out.
+  if (me.isError && isMfaRequiredError(me.error)) return <MfaRequiredGate onVerified={() => void me.refetch()} />;
   if (me.isError) return <div className="p-8"><ErrorState error={me.error} onRetry={() => void me.refetch()} /></div>;
   if (me.data && me.data.memberships.length === 0 && !me.data.user.isPlatformAdmin) {
     return (
