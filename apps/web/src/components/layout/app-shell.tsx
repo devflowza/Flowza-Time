@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Outlet } from 'react-router';
+import { Link, Outlet } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
@@ -19,7 +19,22 @@ export function AppShell() {
   const { signOut } = useAuth();
   const [mobileNav, setMobileNav] = useState(false);
 
-  if (me.isLoading) {
+  // A platform admin is gated at aal2 on every route, so /me itself fails before the shell can render any way out.
+  if (me.isError && isMfaRequiredError(me.error)) return <MfaRequiredGate onVerified={() => void me.refetch()} />;
+  if (me.isError) {
+    return (
+      <div className="flex min-h-screen flex-col items-center justify-center gap-4 p-8">
+        <ErrorState error={me.error} onRetry={() => void me.refetch()} />
+        {/* /me answering is what normally routes a platform admin to the gate. When it cannot answer at all there is
+            no other way in, and enrolment itself only needs Supabase Auth — so offer the door directly. */}
+        <Link to="/auth/mfa" className="text-sm underline underline-offset-4">{t('auth.mfaSetUpLink')}</Link>
+        <Button variant="ghost" size="sm" onClick={() => void signOut()}>{t('nav.signOut')}</Button>
+      </div>
+    );
+  }
+  // Not loading, not errored, but no data yet — the gap between retry attempts, where `isLoading` is false because
+  // nothing is in flight. Falling through here renders the Outlet without a membership and useOrgId() throws.
+  if (!me.data) {
     return (
       <div className="flex min-h-screen">
         <div className="hidden w-60 bg-sidebar md:block" />
@@ -27,10 +42,7 @@ export function AppShell() {
       </div>
     );
   }
-  // A platform admin is gated at aal2 on every route, so /me itself fails before the shell can render any way out.
-  if (me.isError && isMfaRequiredError(me.error)) return <MfaRequiredGate onVerified={() => void me.refetch()} />;
-  if (me.isError) return <div className="p-8"><ErrorState error={me.error} onRetry={() => void me.refetch()} /></div>;
-  if (me.data && me.data.memberships.length === 0 && !me.data.user.isPlatformAdmin) {
+  if (me.data.memberships.length === 0 && !me.data.user.isPlatformAdmin) {
     return (
       <AuthLayout>
         <div className="max-w-sm space-y-4 text-center">

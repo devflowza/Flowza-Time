@@ -9,7 +9,7 @@ import { createSupabasePlatformClients } from './lib/supabase-clients.js';
 
 const config = loadApiConfig();
 const log = createLogger({ name: 'flowza-api', level: config.LOG_LEVEL });
-const { db, pool } = createDatabase({ connectionString: config.DATABASE_URL_API, max: config.DATABASE_POOL_MAX, applicationName: 'flowza-api' });
+const { db, pool } = createDatabase({ connectionString: config.DATABASE_URL_API, max: config.DATABASE_POOL_MAX, applicationName: 'flowza-api', ssl: config.databaseSsl });
 const platform = createSupabasePlatformClients({ url: config.SUPABASE_URL, serviceRoleKey: config.SUPABASE_SERVICE_ROLE_KEY, log });
 
 const app = createApp({

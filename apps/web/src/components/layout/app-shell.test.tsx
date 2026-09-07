@@ -34,4 +34,22 @@ describe('AppShell', () => {
     expect(await screen.findByRole('button', { name: 'Retry' })).toBeInTheDocument();
     expect(screen.queryByText('Two-factor authentication required')).not.toBeInTheDocument();
   });
+
+  it('offers a way to enrol MFA even when /me failed for a reason that cannot say MFA_REQUIRED', async () => {
+    // The API being unreachable is exactly when a platform admin most needs the gate, and exactly when the 403 that
+    // normally opens it can never arrive.
+    h.me = { isLoading: false, isError: true, error: new ApiError(0, 'NETWORK_ERROR', 'Could not reach the API'), refetch: vi.fn() };
+    renderWithProviders(<AppShell />);
+    expect(await screen.findByRole('link', { name: 'Set up two-factor authentication' })).toHaveAttribute('href', '/auth/mfa');
+  });
+
+  it('keeps showing the skeleton when the query has settled with no data, instead of rendering the page', async () => {
+    // Between retry attempts TanStack reports isLoading false, isError false and no data. Falling through renders the
+    // Outlet without a membership, and useOrgId() throws "No active organisation".
+    h.me = { isLoading: false, isError: false, data: undefined, refetch: vi.fn() };
+    const { container } = renderWithProviders(<AppShell />);
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('navigation')).not.toBeInTheDocument();
+    expect(container.querySelectorAll('.animate-pulse').length).toBeGreaterThan(0);
+  });
 });
