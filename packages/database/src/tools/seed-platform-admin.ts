@@ -67,8 +67,8 @@ if (isMain) {
     if (!result.mfaEnrolled) {
       console.warn(
         `\nNext step: ${result.email} must enrol TOTP before the API answers.\n` +
-          'The API rejects any platform-admin session below aal2, so sign in to the web app and complete\n' +
-          'Settings → Security → Multi-factor authentication.',
+          'The API rejects any platform-admin session below aal2, so sign in to the web app —\n' +
+          'it prompts for authenticator enrolment before the shell loads.',
       );
     }
   })().catch((err: unknown) => {

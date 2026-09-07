@@ -18,8 +18,26 @@ import { createDatabase, type Database } from '../client.js';
 import type { PlatformAdminLevel } from '../generated/db.js';
 
 export const PLATFORM_ADMIN_LEVELS: readonly PlatformAdminLevel[] = ['support', 'admin', 'owner'];
-/** Supabase Auth's own floor; the project's password policy may require more. */
-export const MIN_PASSWORD_LENGTH = 8;
+/**
+ * Mirrors `supabase/config.toml` (`minimum_password_length = 12`,
+ * `password_requirements = "lower_upper_letters_digits_symbols"`). Hosted Auth enforces this on every password it
+ * sets, so checking it here keeps the local path honest and turns a confusing 422 from the Auth admin API into a
+ * clear message before anything is written.
+ */
+export const MIN_PASSWORD_LENGTH = 12;
+const PASSWORD_CLASSES: ReadonlyArray<readonly [name: string, pattern: RegExp]> = [
+  ['a lower-case letter', /\p{Ll}/u],
+  ['an upper-case letter', /\p{Lu}/u],
+  ['a digit', /\p{Nd}/u],
+  ['a symbol', /[^\p{L}\p{Nd}]/u],
+];
+
+/** Returns the unmet requirements, empty when the password satisfies the project policy. */
+export function passwordPolicyViolations(password: string): string[] {
+  const missing = password.length < MIN_PASSWORD_LENGTH ? [`at least ${MIN_PASSWORD_LENGTH} characters`] : [];
+  for (const [name, pattern] of PASSWORD_CLASSES) if (!pattern.test(password)) missing.push(name);
+  return missing;
+}
 
 export interface SupabaseAuthAdmin {
   /** Project URL, e.g. https://<ref>.supabase.co */
@@ -78,8 +96,9 @@ export function validateOptions(opts: SeedPlatformAdminOptions): void {
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normaliseEmail(opts.email))) {
     throw new PlatformAdminSeedError(`"${opts.email}" is not a valid email address.`);
   }
-  if (opts.password.length < MIN_PASSWORD_LENGTH) {
-    throw new PlatformAdminSeedError(`Password must be at least ${MIN_PASSWORD_LENGTH} characters.`);
+  const missing = passwordPolicyViolations(opts.password);
+  if (missing.length > 0) {
+    throw new PlatformAdminSeedError(`Password does not meet the project policy (supabase/config.toml): it needs ${missing.join(', ')}.`);
   }
   if (opts.level && !PLATFORM_ADMIN_LEVELS.includes(opts.level)) {
     throw new PlatformAdminSeedError(`Unknown level "${opts.level}" (expected one of ${PLATFORM_ADMIN_LEVELS.join(', ')}).`);

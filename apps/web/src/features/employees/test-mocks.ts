@@ -14,7 +14,8 @@ export class ApiError extends Error {
 }
 export const apiMock = { get: vi.fn(), post: vi.fn(), patch: vi.fn(), put: vi.fn(), delete: vi.fn() };
 export const apiFetchMock = vi.fn();
-export const apiClientModule = { api: apiMock, apiFetch: apiFetchMock, ApiError };
+export const isMfaRequiredError = (error: unknown): boolean => error instanceof ApiError && error.status === 403 && error.details?.reason === 'MFA_REQUIRED';
+export const apiClientModule = { api: apiMock, apiFetch: apiFetchMock, ApiError, isMfaRequiredError };
 export function resetApiMock() { for (const fn of Object.values(apiMock)) fn.mockReset(); apiFetchMock.mockReset(); apiMock.get.mockRejectedValue(new ApiError(404, 'NOT_FOUND', 'not mocked')); }
 
 /** Route a GET mock by path (query params are passed as the second argument by the real client). */
@@ -29,10 +30,17 @@ export function mockGet(routes: Record<string, unknown | ((query: Record<string,
 export const page = <T,>(data: T[], total = data.length, pageNo = 1, pageSize = 25) => ({ data, meta: { page: pageNo, pageSize, total, totalPages: Math.max(1, Math.ceil(total / pageSize)) } });
 
 // ---- supabase / env mocks -------------------------------------------------------------------------------------------
+/** Loose stand-ins for the supabase-js MFA shapes, so tests can resolve factors and errors without importing the SDK types. */
+interface MfaFactor { id: string; status: string; friendly_name?: string; factor_type?: string }
+type MfaListResult = { data: { totp: MfaFactor[]; all: MfaFactor[] } | null; error: { message: string } | null };
 export const supabaseMock = {
   auth: {
     getSession: vi.fn(async () => ({ data: { session: { access_token: 'token' } } })),
-    mfa: { listFactors: vi.fn(async () => ({ data: { totp: [], all: [] }, error: null })), enroll: vi.fn(), challenge: vi.fn(), verify: vi.fn(), unenroll: vi.fn() },
+    signOut: vi.fn(async () => ({ error: null })),
+    mfa: {
+      listFactors: vi.fn<() => Promise<MfaListResult>>(async () => ({ data: { totp: [], all: [] }, error: null })),
+      enroll: vi.fn(), challenge: vi.fn(), verify: vi.fn(), unenroll: vi.fn(),
+    },
   },
 };
 export const supabaseModule = { supabase: supabaseMock };

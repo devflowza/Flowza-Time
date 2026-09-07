@@ -364,8 +364,10 @@ PLATFORM_ADMIN_PASSWORD='<the super admin password>' \
 ```
 
 The password is read from the environment, never from `argv`, because command lines are visible to every process on
-the host — keep it out of your shell history too (a leading space, or `read -rs`). Options: `--email` (default
-`dev@flowza.ai`), `--level` (`support` | `admin` | `owner`, default `owner`), `--name`.
+the host — keep it out of your shell history too (a leading space, or `read -rs`). It is checked against the project
+policy in `supabase/config.toml` (≥12 characters, mixed classes) before anything is written, so a password hosted Auth
+would refuse fails here with a clear message instead of a 422. Options: `--email` (default `dev@flowza.ai`),
+`--level` (`support` | `admin` | `owner`, default `owner`), `--name`.
 
 With `SUPABASE_URL` + `SUPABASE_SERVICE_ROLE_KEY` set, the auth user is created or updated through the Supabase Auth
 admin API — the only supported way to write `auth.users` on a hosted project. Without them the tool writes
@@ -383,8 +385,10 @@ from public.platform_admins a join public.user_profiles p on p.id = a.user_id;
 
 **Then enrol MFA — the account cannot be used before that.** `requireAuth` rejects every request from a platform
 admin whose session is below `aal2` (`apps/api/src/middleware/auth.ts`), so with no verified TOTP factor even
-`GET /api/v1/me` returns `403 FORBIDDEN` / `MFA_REQUIRED`. Sign in to the web app and complete **Settings → Security
-→ Multi-factor authentication**; enrolment talks to Supabase Auth directly, so it does not need the API. Verify:
+`GET /api/v1/me` returns `403 FORBIDDEN` / `MFA_REQUIRED`. Sign in to the web app: it answers that response with a
+blocking enrolment screen (scan the QR code, enter the 6-digit code) rather than the normal shell, because there is
+no page a platform admin could reach before the session carries `aal2`. Enrolment talks to Supabase Auth directly,
+so it needs no API call. Verify:
 
 ```sql
 select count(*) from auth.mfa_factors f
