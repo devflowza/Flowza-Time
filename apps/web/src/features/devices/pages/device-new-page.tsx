@@ -62,7 +62,7 @@ function WizardRail({ current, furthest, summaries, onJump }: { current: Step; f
           const summary = summaries[s];
           return (
             <li key={s} className="relative">
-              {i < STEPS.length - 1 ? <span aria-hidden className={cn('absolute top-9 h-[calc(100%-1.25rem)] w-px start-[1.4375rem]', i < idx ? 'bg-brand-500' : 'bg-border')} /> : null}
+              {i < STEPS.length - 1 ? <span aria-hidden className={cn('absolute top-9 h-[calc(100%-1.25rem)] w-px start-[1.375rem]', i < idx ? 'bg-brand-500' : 'bg-border')} /> : null}
               <button
                 type="button" onClick={() => onJump(s)} disabled={!reachable} aria-current={state === 'current' ? 'step' : undefined}
                 className={cn(
@@ -120,7 +120,7 @@ function WizardNav({ onBack, onNext, nextLabel, nextType = 'button', nextDisable
     <div className="sticky bottom-0 z-10 -mx-5 -mb-5 mt-6 flex items-center justify-between gap-3 rounded-b-lg border-t bg-card/95 px-5 py-3 backdrop-blur supports-[backdrop-filter]:bg-card/75">
       {onBack ? <Button type="button" variant="ghost" onClick={onBack}><ArrowLeft className="rtl:rotate-180" /> {t('common.back')}</Button> : <span />}
       <div className="flex min-w-0 items-center gap-3">
-        {hint ? <p className="hidden truncate text-xs text-muted-foreground sm:block">{hint}</p> : null}
+        {hint ? <p className="truncate text-xs text-muted-foreground">{hint}</p> : null}
         <Button type={nextType} onClick={onNext} disabled={nextDisabled} loading={loading}>{nextLabel ?? t('common.next')} {nextType === 'button' && !nextLabel ? <ArrowRight className="rtl:rotate-180" /> : null}</Button>
       </div>
     </div>
@@ -367,6 +367,30 @@ export default function DeviceNewPage() {
     window.scrollTo({ top: 0 });
   }, []);
 
+  /**
+   * Every route out of the details step, in either direction — Back, the rail, Edit on the review step.
+   *
+   * `details` is a validated snapshot taken on submit, and everything after this step reads that snapshot rather than
+   * the live form. So leaving without re-validating is how the review screen ends up showing, and the API ends up
+   * storing, a value the user has since changed. Forward is refused while the form is invalid; backward is allowed but
+   * drops the snapshot and the progress that depended on it, because there is no longer a valid answer here.
+   */
+  const leaveDetails = useCallback((to: Step) => {
+    void detailsForm.handleSubmit(
+      (d) => { setDetails(d); go(to); },
+      () => {
+        if (STEPS.indexOf(to) > STEPS.indexOf('details')) return;
+        setDetails(null);
+        setFurthest(STEPS.indexOf('details'));
+        setStep(to);
+        stepped.current = true;
+        window.scrollTo({ top: 0 });
+      },
+    )();
+  }, [detailsForm, go]);
+
+  const jump = useCallback((s: Step) => { if (step === 'details' && s !== 'details') leaveDetails(s); else go(s); }, [step, leaveDetails, go]);
+
   // Steps swap the whole panel without a route change, so nothing tells a screen reader that the content moved. Focus
   // the new heading — but only after a real step change, never on first render, where it would steal focus.
   useEffect(() => {
@@ -437,7 +461,7 @@ export default function DeviceNewPage() {
     <div className="page-container max-w-7xl">
       <PageHeader title={t('wizard.title')} description={t('wizard.subtitle')} breadcrumbs={<button type="button" className="hover:underline" onClick={() => navigate('/devices')}>{t('title')}</button>} />
       <div className="grid items-start gap-6 lg:grid-cols-[15rem_minmax(0,1fr)]">
-        <WizardRail current={step} furthest={furthest} summaries={summaries} onJump={go} />
+        <WizardRail current={step} furthest={furthest} summaries={summaries} onJump={jump} />
         <Card className="min-w-0">
           <CardContent className="p-5">
             <CompactProgress current={step} />
@@ -454,7 +478,7 @@ export default function DeviceNewPage() {
             ) : null}
 
             {step === 'details' && provider ? (
-              <DetailsStep form={detailsForm} isPush={isPush} onBack={() => go('device')} onSubmit={(d) => { setDetails(d); go('connection'); }} />
+              <DetailsStep form={detailsForm} isPush={isPush} onBack={() => leaveDetails('device')} onSubmit={(d) => { setDetails(d); go('connection'); }} />
             ) : null}
 
             {step === 'connection' && provider ? (

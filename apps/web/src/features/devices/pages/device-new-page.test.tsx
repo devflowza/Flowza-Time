@@ -141,4 +141,40 @@ describe('DeviceNewPage', () => {
     fireEvent.click(screen.getByRole('button', { name: /Edit — Details/ }));
     await waitFor(() => expect(screen.getByLabelText(/^Code/)).toHaveValue('GATE-1'));
   });
+
+  it('re-validates the details step on the way out, so the rail cannot carry a stale answer to review', async () => {
+    renderPage();
+    await pickZkteco();
+    next();
+
+    fireEvent.change(await screen.findByLabelText(/^Code/), { target: { value: 'GATE-1' } });
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Main gate' } });
+    fireEvent.click(screen.getByRole('combobox', { name: /Branch/ }));
+    const opt = await screen.findByText('Muscat HQ');
+    fireEvent.click(opt.closest('[cmdk-item]') ?? opt);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /Branch/ })).toHaveTextContent('Muscat HQ'));
+    next();
+    fireEvent.change(await screen.findByLabelText(/^Host/), { target: { value: 'https://gate.example.test' } });
+    next();
+    await screen.findByRole('button', { name: /Register device/ });
+
+    // back to details through the rail, edit, then leave through the rail without pressing Next
+    const rail = screen.getByRole('navigation', { name: 'Registration steps' });
+    fireEvent.click(within(rail).getByRole('button', { name: /Details/ }));
+    fireEvent.change(await screen.findByLabelText(/^Code/), { target: { value: 'GATE-2' } });
+
+    // an empty required field must not be carried forward at all
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: '' } });
+    fireEvent.click(within(rail).getByRole('button', { name: /Review/ }));
+    await waitFor(() => expect(screen.getByLabelText(/^Name/)).toBeInTheDocument());
+    expect(screen.queryByRole('button', { name: /Register device/ })).not.toBeInTheDocument();
+
+    // once it is valid again the snapshot is retaken, so review shows the edit rather than what was submitted before
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Side gate' } });
+    fireEvent.click(within(rail).getByRole('button', { name: /Review/ }));
+    await screen.findByRole('button', { name: /Register device/ });
+    expect(screen.getByText('GATE-2')).toBeInTheDocument();
+    expect(screen.getByText('Side gate')).toBeInTheDocument();
+    expect(screen.queryByText('GATE-1')).not.toBeInTheDocument();
+  });
 });
