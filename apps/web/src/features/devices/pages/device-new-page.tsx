@@ -159,8 +159,8 @@ function ProviderGrid({ providers, value, onSelect }: { providers: ProviderDto[]
   const firstEnabled = providers.findIndex((p) => p.status !== 'placeholder');
   const hasSelection = providers.some((p) => p.key === value);
   return (
-    // One grid, not one grid per vendor. Grouping by vendor gave every provider a section of its own — each vendor here
-    // ships exactly one integration — so a three-column layout rendered as four single-column rows.
+    // One grid, not one grid per vendor. Grouping by vendor gave nearly every provider a section of its own — five of
+    // the six vendors ship a single integration — so a three-column layout rendered as six near-single-column rows.
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3" role="radiogroup" aria-label={t('wizard.step.device')}>
       {providers.map((p, i) => {
         const disabled = p.status === 'placeholder';
@@ -187,7 +187,7 @@ function ProviderGrid({ providers, value, onSelect }: { providers: ProviderDto[]
             </span>
             <span className="flex flex-wrap gap-1"><IntegrationBadge type={p.integrationType} /><ProviderStatusBadge status={p.status} /><VerificationBadge status={p.verificationStatus} /></span>
             {p.description ? <span className="line-clamp-2 text-xs text-muted-foreground">{p.description}</span> : null}
-            <CapabilityChips capabilities={p.capabilities} max={4} className="mt-auto pt-1" />
+            <CapabilityChips capabilities={p.capabilities} max={3} className="mt-auto pt-1" />
             {disabled ? <span className="text-xs font-medium text-amber-700 dark:text-amber-300">{t('wizard.placeholderNote')}</span> : null}
           </button>
         );
@@ -290,40 +290,53 @@ function DetailsStep({ form, isPush, onSubmit, onBack }: { form: DetailsForm; is
   const { t: tc } = useTranslation();
   const branches = useBranchOptions();
   const { register, control, formState: { errors }, setValue, getValues } = form;
+
+  /**
+   * Zod's own messages are written for whoever wrote the schema — a blank Branch reported "Invalid GUID", a blank Code
+   * "Too small: expected string to have >=1 characters" — and nothing in the app installs an error map, so they
+   * reached the user verbatim. Empty-and-required is the failure every one of these fields hits first and the one
+   * worth naming; a value that is present but malformed still falls through to Zod, beside the field's own hint.
+   */
+  const err = (name: keyof DetailsValues) => {
+    const message = errors[name]?.message;
+    if (message === undefined) return undefined;
+    const v = getValues(name);
+    return v === undefined || v === null || v === '' ? t('wizard.configErrors.required') : message;
+  };
   return (
     <form onSubmit={form.handleSubmit(onSubmit)} noValidate>
       {/* Three columns of short, independent attributes on a wide screen. One column is the right default for a form
           that is filled in sequence; this is a record of nine mostly one-line facts, and stacking them cost a screen. */}
       <div className="grid gap-x-4 gap-y-4 sm:grid-cols-2 xl:grid-cols-3">
-        <FormField label={tc('common.code')} htmlFor="dev-code" required error={errors.code?.message} hint={t('fields.codeHint')}>
-          <Input id="dev-code" dir="ltr" {...register('code')} aria-invalid={!!errors.code} />
+        <FormField label={tc('common.code')} htmlFor="dev-code" required error={err('code')} hint={t('fields.codeHint')}>
+          <Input id="dev-code" dir="ltr" maxLength={32} {...register('code')} aria-invalid={!!errors.code} />
         </FormField>
-        <FormField label={tc('common.name')} htmlFor="dev-name" required error={errors.name?.message}>
-          <Input id="dev-name" {...register('name')} aria-invalid={!!errors.name} />
+        <FormField label={tc('common.name')} htmlFor="dev-name" required error={err('name')}>
+          <Input id="dev-name" maxLength={120} {...register('name')} aria-invalid={!!errors.name} />
         </FormField>
-        <FormField label={tc('common.branch')} htmlFor="dev-branch" required error={errors.branchId?.message}>
+        <FormField label={tc('common.branch')} htmlFor="dev-branch" required error={err('branchId')}>
           <Controller control={control} name="branchId" render={({ field }) => (
             <Combobox id="dev-branch" value={field.value} options={branches.options} loading={branches.isLoading} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId}
               onChange={(v) => { field.onChange(v ?? ''); const b = v ? branches.byId.get(v) : undefined; if (b && !getValues('timezone')) setValue('timezone', b.timezone); }} />
           )} />
         </FormField>
-        <FormField label={tc('common.timezone')} htmlFor="dev-tz" error={errors.timezone?.message} hint={t('fields.timezoneHint')} optional>
+        <FormField label={tc('common.timezone')} htmlFor="dev-tz" error={err('timezone')} hint={t('fields.timezoneHint')} optional>
           <Controller control={control} name="timezone" render={({ field }) => <TimezoneSelect id="dev-tz" value={field.value ?? undefined} onChange={field.onChange} />} />
         </FormField>
-        <FormField label={t('fields.serialNumber')} htmlFor="dev-serial" required={isPush} optional={!isPush} error={errors.serialNumber?.message} hint={isPush ? t('fields.serialPushHint') : undefined}>
-          <Input id="dev-serial" dir="ltr" className="font-mono" {...register('serialNumber', { setValueAs: blankToUndefined })} aria-invalid={!!errors.serialNumber} />
+        <FormField label={t('fields.serialNumber')} htmlFor="dev-serial" required={isPush} optional={!isPush} error={err('serialNumber')} hint={isPush ? t('fields.serialPushHint') : undefined}>
+          <Input id="dev-serial" dir="ltr" maxLength={120} className="font-mono" {...register('serialNumber', { setValueAs: blankToUndefined })} aria-invalid={!!errors.serialNumber} />
         </FormField>
-        <FormField label={t('fields.manufacturer')} htmlFor="dev-manufacturer" required error={errors.manufacturer?.message}>
-          <Input id="dev-manufacturer" {...register('manufacturer')} aria-invalid={!!errors.manufacturer} />
+        <FormField label={t('fields.manufacturer')} htmlFor="dev-manufacturer" required error={err('manufacturer')}>
+          <Input id="dev-manufacturer" maxLength={80} {...register('manufacturer')} aria-invalid={!!errors.manufacturer} />
         </FormField>
-        <FormField label={t('fields.modelName')} htmlFor="dev-model" optional error={errors.modelName?.message}>
-          <Input id="dev-model" {...register('modelName', { setValueAs: blankToUndefined })} />
+        <FormField label={t('fields.modelName')} htmlFor="dev-model" optional error={err('modelName')}>
+          <Input id="dev-model" maxLength={120} {...register('modelName', { setValueAs: blankToUndefined })} />
         </FormField>
         <FormField label={t('fields.tags')} htmlFor="dev-tags" optional hint={t('fields.tagsHint')} className="xl:col-span-2">
           <Controller control={control} name="tags" render={({ field }) => <TagsInput id="dev-tags" value={field.value ?? []} onChange={field.onChange} />} />
         </FormField>
         <FormField label={t('fields.notes')} htmlFor="dev-notes" optional className="sm:col-span-2 xl:col-span-3">
-          <Textarea id="dev-notes" rows={2} {...register('notes', { setValueAs: blankToUndefined })} />
+          <Textarea id="dev-notes" rows={2} maxLength={2000} {...register('notes', { setValueAs: blankToUndefined })} />
         </FormField>
       </div>
       <WizardNav onBack={onBack} nextType="submit" />
@@ -453,7 +466,7 @@ export default function DeviceNewPage() {
   const summaries: Record<Step, string | null> = {
     device: provider ? `${provider.name}${model ? ` · ${model.model}` : ''}` : null,
     details: details ? `${details.code} · ${details.name}` : null,
-    connection: isPush ? t('integration.DEVICE_PUSH') : testResult ? t(testResult.ok ? 'test.ok' : 'test.failed') : fields.length === 0 ? t('wizard.noConfig') : null,
+    connection: !provider ? null : isPush ? t('integration.DEVICE_PUSH') : testResult ? t(testResult.ok ? 'test.ok' : 'test.failed') : fields.length === 0 ? t('wizard.noConfig') : null,
     review: null,
   };
 

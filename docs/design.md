@@ -65,7 +65,7 @@ The two failure modes are equally bad, and both were real in this codebase:
 
 1. **Stranded width.** A narrow column centred in a wide viewport, with a grid inside it that never fills. The Register
    device page put 490px cards in a 1665px content area — 71% of the horizontal space unused — because its grid was
-   subdivided by vendor and each vendor had one entry.
+   subdivided by vendor, and five of its six vendors have a single entry.
 2. **Wall-to-wall text.** Prose or form labels stretched across 1600px, which nobody can read.
 
 Rules:
@@ -104,6 +104,11 @@ degraded, `info` informational, `neutral`/`outline` unknown. Badges are `<span>`
 
 **FormField** wraps every control: label, required/optional marker, and one of hint *or* error. Errors get
 `role="alert"`; controls get `aria-invalid`.
+
+> **Never show a validator's own words to a user.** Nothing in the app installs a Zod error map, so a raw
+> `error={errors.x?.message}` puts "Invalid GUID" under an empty dropdown and "Too small: expected string to have >=1
+> characters" under an empty text box. Name the failure the user can act on — empty-and-required is the one every field
+> hits first — and cap inputs with `maxLength` at the schema's own limit so the length messages are unreachable.
 
 **Empty, loading, error** are three distinct states and each needs its own treatment. Loading is a `Skeleton` shaped
 like the content it replaces — same grid, same card height — never a spinner in the middle of a blank page.
@@ -158,17 +163,17 @@ Recorded because it is the worked example the rules above were written against.
 |---|---|---|
 | Steps | 6 | 4 |
 | Page height, first step @1920×953 | 2051px (2.2 screens) | ~1 screen |
-| Provider cards per row @1665px content | 1 of 3 possible | 3 |
-| Tab stops to cross the provider grid | 4 | 1 |
+| Rows for the 7 providers @1665px content | 6 | 3 |
+| Tab stops to cross the provider grid | 7 | 1 |
 | Nav clicks to reach Review | 5 | 3 |
 | Answers kept when pressing Back | no | yes |
 | Rail/Edit can carry a stale answer to Review | — | no (revalidated on exit) |
 
 What changed, and why each was wrong before:
 
-- **One grid for all providers.** Each vendor had its own `<section>` with its own grid, and each vendor ships exactly
-  one integration, so `sm:grid-cols-2 xl:grid-cols-3` rendered as four one-column rows. Vendor is now an eyebrow line
-  inside the card. (§4)
+- **One grid for all providers.** Each vendor had its own `<section>` with its own grid, and five of the six vendors
+  ship a single integration, so `sm:grid-cols-2 xl:grid-cols-3` laid seven providers out as six near-one-column rows.
+  Vendor is now an eyebrow line inside the card. (§4)
 - **`max-w-7xl` with a `15rem` rail.** The wizard was `max-w-5xl` centred in a 1665px area with the stepper stacked
   above it. (§4)
 - **Denser cards** — two-line description clamp, capabilities capped at four with a `+n`, selection shown by a check in
@@ -179,6 +184,10 @@ What changed, and why each was wrong before:
 - **A search box appears at seven providers.** Below that it is noise; above it a flat grid stops being scannable.
 - **Focus moves to the step heading** on every step change but the first. (§6)
 - **Sticky action bar**; Next carries "Choose a provider to continue" while disabled, at every screen size. (§7)
+- **Required fields say so.** Submitting the details step blank produced four raw Zod messages, "Invalid GUID" among
+  them. (§5)
+- **The rail no longer answers a step nobody reached** — with no provider chosen there are no config fields either, and
+  `fields.length === 0` was being read as "this provider needs none".
 - **Every exit from the details step revalidates.** The rail and the review screen's Edit made it possible to change a
   field and then leave without re-submitting, so Review — and the create call — used the previous snapshot. (§7)
 

@@ -97,6 +97,16 @@ describe('DeviceNewPage', () => {
     expect(within(rail).queryByRole('button', { name: /^Test/ })).not.toBeInTheDocument();
   });
 
+  it('does not answer a step nobody has reached yet in the rail', async () => {
+    renderPage();
+    await screen.findByRole('radio', { name: /ZKTeco push SDK/ });
+    const rail = screen.getByRole('navigation', { name: 'Registration steps' });
+    // With nothing chosen there are no config fields either, and reading `fields.length === 0` as "this provider needs
+    // none" made the rail claim an answer for a step the user had not reached.
+    expect(within(rail).getByRole('button', { name: /Connection/ })).toHaveTextContent('Not chosen yet');
+    expect(within(rail).getByRole('button', { name: /Connection/ })).not.toHaveTextContent('needs no connection settings');
+  });
+
   it('does not nest the documentation link inside a radio', async () => {
     renderPage();
     await pickZkteco();
@@ -104,6 +114,21 @@ describe('DeviceNewPage', () => {
     // An <a> inside a <button role="radio"> is invalid HTML and unreachable with the arrow keys.
     expect(link.closest('[role="radio"]')).toBeNull();
     expect(link).toHaveAttribute('href', 'https://docs.example.test/zkteco');
+  });
+
+  it('names an empty required field instead of quoting the validator at the user', async () => {
+    renderPage();
+    await pickZkteco();
+    next();
+    await screen.findByLabelText(/^Code/);
+    next(); // submit with everything blank
+
+    const alerts = await screen.findAllByRole('alert');
+    const messages = alerts.map((a) => a.textContent);
+    // Zod's own wording reached the screen: "Invalid GUID" for an unchosen Branch, "Too small: expected string to
+    // have >=1 characters" for a blank Code. Nothing in the app installs an error map.
+    expect(messages.every((m) => m === 'This field is required')).toBe(true);
+    expect(messages.length).toBeGreaterThanOrEqual(3);
   });
 
   it('keeps what was typed on the details step when you step back and return', async () => {
