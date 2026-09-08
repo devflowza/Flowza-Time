@@ -13,6 +13,7 @@ import { useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useEmployeeOptions } from '@/features/employees/api';
 import { CopyButton } from '@/features/audit/components/copy-button';
+import { invitationUrl } from '@/features/auth/invitation-url';
 import { useMemberMutations, useRoles } from '../api';
 
 type FormValues = z.input<typeof inviteMemberSchema>;
@@ -46,11 +47,13 @@ export function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             </DialogHeader>
             {result.token ? (
               <div className="space-y-2">
-                <Label htmlFor="invite-token">{t('invite.token')}</Label>
+                <Label htmlFor="invite-token">{tc('auth.inviteLinkLabel')}</Label>
                 <div className="flex items-center gap-2">
-                  <Input id="invite-token" readOnly value={result.token} dir="ltr" className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
-                  <CopyButton value={result.token} variant="outline" label={t('invite.copyToken')} />
+                  {/* The redeemable link rather than the raw token — see invitationUrl(). */}
+                  <Input id="invite-token" readOnly value={invitationUrl(result.token)} dir="ltr" className="font-mono text-xs" onFocus={(e) => e.currentTarget.select()} />
+                  <CopyButton value={invitationUrl(result.token)} variant="outline" label={tc('auth.inviteCopyLink')} />
                 </div>
+                <p className="text-xs text-muted-foreground">{tc('auth.inviteLinkHint')}</p>
                 <p className="flex items-start gap-1.5 text-xs text-amber-700 dark:text-amber-300"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" /> {t('invite.tokenOnce', { expires: fmtDateTime(result.expiresAt, tz) })}</p>
               </div>
             ) : null}

@@ -7,6 +7,7 @@ import { Check, Copy, MailCheck } from 'lucide-react';
 import { createOrganizationSchema, type CreateOrganizationInput, type CreateOrganizationResult } from '@flowza/contracts';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
 import { fmtDateTime } from '@/lib/format';
+import { invitationUrl } from '@/features/auth/invitation-url';
 import { toast, toastError } from '@/lib/toast';
 import { TimezoneSelect } from '@/features/organization/components/timezone-select';
 import { usePlans, usePlatformMutations } from '../api';
@@ -20,7 +21,9 @@ function InvitationResult({ result, onClose }: { result: CreateOrganizationResul
   const { t: tc } = useTranslation();
   const [copied, setCopied] = useState(false);
   const inv = result.invitation;
-  const copy = async () => { if (!inv) return; try { await navigator.clipboard.writeText(inv.token); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* selectable */ } };
+  // The link, not the bare token: the token alone gives the administrator nothing they can actually send.
+  const link = inv ? invitationUrl(inv.token) : null;
+  const copy = async () => { if (!link) return; try { await navigator.clipboard.writeText(link); setCopied(true); setTimeout(() => setCopied(false), 1500); } catch { /* selectable */ } };
   return (
     <>
       <DialogHeader>
@@ -29,11 +32,12 @@ function InvitationResult({ result, onClose }: { result: CreateOrganizationResul
       </DialogHeader>
       {inv ? (
         <div className="space-y-2">
-          <Label htmlFor="inv-token">{t('orgs.invitationToken')}</Label>
+          <Label htmlFor="inv-token">{tc('auth.inviteLinkLabel')}</Label>
           <div className="flex items-stretch gap-2">
-            <code id="inv-token" dir="ltr" className="flex-1 select-all overflow-x-auto whitespace-nowrap rounded-md border bg-muted px-3 py-2 font-mono text-xs scrollbar-thin">{inv.token}</code>
+            <code id="inv-token" dir="ltr" className="flex-1 select-all overflow-x-auto whitespace-nowrap rounded-md border bg-muted px-3 py-2 font-mono text-xs scrollbar-thin">{link}</code>
             <Button type="button" variant="outline" size="icon" onClick={() => void copy()} aria-label={copied ? tc('common.copied') : tc('common.copy')}>{copied ? <Check className="text-emerald-600" /> : <Copy />}</Button>
           </div>
+          <p className="text-xs text-muted-foreground">{tc('auth.inviteLinkHint')}</p>
           <p className="text-xs text-muted-foreground tnum">{t('orgs.invitationExpires', { when: fmtDateTime(inv.expiresAt, result.organization.timezone) })}</p>
         </div>
       ) : null}

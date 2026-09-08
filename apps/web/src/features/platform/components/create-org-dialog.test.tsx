@@ -26,7 +26,7 @@ describe('CreateOrgDialog', () => {
     expect(apiMock.post).not.toHaveBeenCalled();
   });
 
-  it('creates the organisation and shows the one-time invitation token', async () => {
+  it('creates the organisation and shows a redeemable invitation link', async () => {
     apiMock.post.mockResolvedValue({ data: { organization: { id: 'o1', displayName: 'Acme', timezone: 'Asia/Muscat' }, ownerMembershipId: null, invitation: { id: 'i1', email: 'owner@acme.om', token: 'tok-secret-123', expiresAt: '2030-01-01T00:00:00Z' } } });
     renderWithProviders(<CreateOrgDialog open onOpenChange={vi.fn()} />);
     fireEvent.change(await screen.findByLabelText(/Company code/), { target: { value: 'ACME' } });
@@ -36,7 +36,8 @@ describe('CreateOrgDialog', () => {
     fireEvent.change(screen.getByLabelText(/Owner email/), { target: { value: 'owner@acme.om' } });
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/platform/orgs', expect.objectContaining({ companyCode: 'ACME', displayName: 'Acme', legalName: 'Acme Trading LLC', ownerEmail: 'owner@acme.om', ownerFullName: 'Salim', planKey: 'trial', timezone: 'Asia/Muscat', countryCode: 'OM', currencyCode: 'OMR', weeklyOffDays: [5, 6] }), expect.objectContaining({ idempotencyKey: expect.any(String) })));
-    expect(await screen.findByText('tok-secret-123')).toBeInTheDocument();
+    // The administrator needs something they can send, so the dialog shows the redemption URL, not the bare token.
+    expect(await screen.findByText('http://localhost:3000/auth/invite?token=tok-secret-123')).toBeInTheDocument();
     expect(screen.getByText(/owner@acme.om/)).toBeInTheDocument();
   });
 });
