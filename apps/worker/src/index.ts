@@ -1,5 +1,5 @@
 import { createLogger, event } from '@flowza/shared';
-import { createDatabase, PgJobQueue, DeviceCredentialsStore, SecretsCipher } from '@flowza/database';
+import { createDatabase, PgJobQueue, DeviceCredentialsStore, SecretsCipher, SUPABASE_ROOT_CA_2021 } from '@flowza/database';
 import { defaultRegistry } from '@flowza/device-providers';
 import { loadWorkerConfig, looksLikeTransactionPooler } from './config.js';
 import { Runner } from './runner.js';
@@ -14,7 +14,14 @@ const log = createLogger({ name: 'flowza-worker', level: config.LOG_LEVEL, base:
 if (config.SCHEDULER_ENABLED && looksLikeTransactionPooler(config.DATABASE_URL_WORKER)) {
   log.warn(event('worker_pooler_mode_suspect', { port: 6543 }), 'DATABASE_URL_WORKER looks like the transaction pooler (:6543). Scheduler leader election holds a session-level advisory lock and will not survive it — use the session pooler (:5432).');
 }
-const { db, pool } = createDatabase({ connectionString: config.DATABASE_URL_WORKER, max: config.DATABASE_POOL_MAX, applicationName: 'flowza-worker', statementTimeoutMs: 120_000, ssl: config.databaseSsl });
+const { db, pool } = createDatabase({
+  connectionString: config.DATABASE_URL_WORKER,
+  max: config.DATABASE_POOL_MAX,
+  applicationName: 'flowza-worker',
+  statementTimeoutMs: 120_000,
+  ssl: config.databaseSsl,
+  sslCa: config.databaseSsl ? (config.DATABASE_SSL_CA ?? SUPABASE_ROOT_CA_2021) : undefined,
+});
 const platform = createPlatformClients(config, log);
 
 const deps: WorkerDeps = {

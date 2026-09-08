@@ -10,8 +10,9 @@ const schema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(),
   DATABASE_URL_WORKER: z.string().min(1),
   DATABASE_POOL_MAX: intFromEnv(10),
-  // See the API's DATABASE_SSL — same rule, same reason.
+  // See the API's DATABASE_SSL / DATABASE_SSL_CA — same rules, same reasons.
   DATABASE_SSL: booleanFromEnv.optional(),
+  DATABASE_SSL_CA: z.string().optional(),
   FLOWZA_CREDENTIALS_MASTER_KEYS: masterKeysSchema,
   WORKER_ID: z.string().optional(),
   WORKER_CONCURRENCY: intFromEnv(8),

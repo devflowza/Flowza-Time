@@ -16,6 +16,9 @@ const schema = z.object({
   // TLS for the database connection. Unset means "decide from the URL": on everywhere except loopback, so a managed
   // pooler reached over the internet is never silently in the clear. See databaseSslDefault().
   DATABASE_SSL: booleanFromEnv.optional(),
+  // PEM certificate authority for the database server. Defaults to Supabase's pinned root; set this only to override
+  // it (a rotation, or a non-Supabase Postgres behind a private CA). Never a reason to disable verification.
+  DATABASE_SSL_CA: z.string().optional(),
   FLOWZA_CREDENTIALS_MASTER_KEYS: masterKeysSchema,
   FLOWZA_DEVICE_PUSH_SECRET: z.string().min(8),
   RATE_LIMIT_WINDOW_MS: intFromEnv(60_000),

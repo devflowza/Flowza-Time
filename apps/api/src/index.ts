@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server';
 import { createLogger } from '@flowza/shared';
-import { createDatabase, PgJobQueue, DeviceCredentialsStore, SecretsCipher } from '@flowza/database';
+import { createDatabase, PgJobQueue, DeviceCredentialsStore, SecretsCipher, SUPABASE_ROOT_CA_2021 } from '@flowza/database';
 import { defaultRegistry } from '@flowza/device-providers';
 import { loadApiConfig } from './config.js';
 import { createApp } from './app.js';
@@ -9,7 +9,13 @@ import { createSupabasePlatformClients } from './lib/supabase-clients.js';
 
 const config = loadApiConfig();
 const log = createLogger({ name: 'flowza-api', level: config.LOG_LEVEL });
-const { db, pool } = createDatabase({ connectionString: config.DATABASE_URL_API, max: config.DATABASE_POOL_MAX, applicationName: 'flowza-api', ssl: config.databaseSsl });
+const { db, pool } = createDatabase({
+  connectionString: config.DATABASE_URL_API,
+  max: config.DATABASE_POOL_MAX,
+  applicationName: 'flowza-api',
+  ssl: config.databaseSsl,
+  sslCa: config.databaseSsl ? (config.DATABASE_SSL_CA ?? SUPABASE_ROOT_CA_2021) : undefined,
+});
 const platform = createSupabasePlatformClients({ url: config.SUPABASE_URL, serviceRoleKey: config.SUPABASE_SERVICE_ROLE_KEY, log });
 
 const app = createApp({

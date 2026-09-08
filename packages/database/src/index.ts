@@ -1,4 +1,5 @@
 export * from './client.js';
+export * from './supabase-ca.js';
 export * from './context.js';
 export * from './queue.js';
 export * from './secrets.js';
