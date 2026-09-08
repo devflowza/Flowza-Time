@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Link, Outlet } from 'react-router';
+import { Link, Navigate, Outlet } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
@@ -52,6 +52,11 @@ export function AppShell() {
       </AuthLayout>
     );
   }
+  // A platform admin is let through with no membership on purpose — but the index route is the org-scoped dashboard,
+  // which calls useOrgId() and throws. Send them where they can actually act: the platform console, which is also the
+  // only place the first organisation can be created. Below the guard above so an ordinary member-less user still
+  // gets the sign-out screen rather than a 403 from /platform.
+  if (me.data.memberships.length === 0) return <Navigate to="/platform" replace />;
   return (
     <div className="flex min-h-screen">
       <Sidebar />
