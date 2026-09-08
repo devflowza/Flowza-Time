@@ -54,7 +54,7 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
   const form = useForm<FormValues, unknown, CreateReportRequest>({
     resolver: zodResolver(schema),
     // the catalogue names the format its layout was designed for (the sample reports are print documents → PDF)
-    defaultValues: { reportType: def.key, format: def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: params.has('to') ? today.slice(0, 8) + '01' : today, ...(params.has('to') ? { to: today } : {}) } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}), ...(params.has('employmentStatus') ? { employmentStatus: 'active' as const } : {}) } },
+    defaultValues: { reportType: def.key, format: def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: params.has('to') ? today.slice(0, 8) + '01' : today, ...(params.has('to') ? { to: today } : {}) } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}), ...(params.has('employmentStatus') ? { employmentStatus: 'active' as const } : {}), ...(params.has('scope') ? { scope: 'attendance' as const } : {}) } },
   });
   const { register, control, formState: { errors, isSubmitting } } = form;
   const branchId = useWatch({ control, name: 'parameters.branchId' });
@@ -91,6 +91,14 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
             <Select value={field.value ?? 'active'} onValueChange={field.onChange}>
               <SelectTrigger id="rp-emp-status"><SelectValue /></SelectTrigger>
               <SelectContent>{(['active', 'inactive', 'all'] as const).map((v) => <SelectItem key={v} value={v}>{t(`request.employmentStatuses.${v}`)}</SelectItem>)}</SelectContent>
+            </Select>
+          )} />
+        </FormField> : null}
+        {params.has('scope') ? <FormField label={t('request.scope')} htmlFor="rp-scope" optional error={pErr?.['scope']?.message}>
+          <Controller control={control} name="parameters.scope" render={({ field }) => (
+            <Select value={field.value ?? 'attendance'} onValueChange={field.onChange}>
+              <SelectTrigger id="rp-scope"><SelectValue /></SelectTrigger>
+              <SelectContent>{(['attendance', 'all'] as const).map((v) => <SelectItem key={v} value={v}>{t(`request.scopes.${v}`)}</SelectItem>)}</SelectContent>
             </Select>
           )} />
         </FormField> : null}

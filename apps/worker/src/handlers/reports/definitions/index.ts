@@ -1,4 +1,5 @@
 import type { ReportType } from '@flowza/contracts';
+import { auditReport } from './audit.js';
 import { dailyAttendance } from './daily.js';
 import { absenceReport, lateReport, leaveReport } from './day-lists.js';
 import { employeeAttendance } from './detail.js';
@@ -25,6 +26,7 @@ export const REPORT_DEFINITIONS: Partial<Record<ReportType, ReportDefinition>> =
   weekly_attendance: weeklyAttendance,
   weekly_in_out: weeklyInOut,
   employee_directory: employeeDirectory,
+  audit_report: auditReport,
 };
 
 export type { ReportDefinition } from './types.js';
