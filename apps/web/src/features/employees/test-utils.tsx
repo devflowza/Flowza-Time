@@ -32,6 +32,11 @@ import arSearch from '@/locales/ar/search.json';
 if (typeof globalThis.ResizeObserver === 'undefined') {
   globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} } as unknown as typeof ResizeObserver;
 }
+// jsdom defines window.scrollTo and then throws "Not implemented" from it, so this has to overwrite rather than
+// fill in: without it every wizard step change prints a stack trace over the test output.
+if (typeof window !== 'undefined') {
+  window.scrollTo = () => {};
+}
 if (typeof Element !== 'undefined') {
   Element.prototype.scrollIntoView ??= () => {};
   (Element.prototype as unknown as { hasPointerCapture?: () => boolean }).hasPointerCapture ??= () => false;
