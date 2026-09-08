@@ -79,6 +79,13 @@ jobs:
         run: pnpm test:db
       - name: API tests (Hono app against per-file test databases)
         run: pnpm --filter @flowza/api run test
+      # The web e2e job already installs Playwright's Chromium; the worker's playwright-core drives the same build. When the
+      # binary is where playwright-core expects it, the PDF renderer test runs for real; otherwise it is skipped, not failed.
+      - name: Chromium for the PDF renderer test
+        run: |
+          pnpm --filter @flowza/web exec playwright install --with-deps chromium
+          P=$(cd apps/worker && node --input-type=commonjs -e "console.log(require('playwright-core').chromium.executablePath())")
+          if [ -x "$P" ]; then echo "CHROMIUM_PATH=$P" >> "$GITHUB_ENV"; echo "chromium at $P"; else echo "::warning::no Chromium at $P — PDF smoke test skipped"; fi
       - name: Worker tests (handlers with the mock provider)
         run: pnpm --filter @flowza/worker run test
 
