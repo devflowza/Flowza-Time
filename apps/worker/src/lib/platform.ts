@@ -59,6 +59,14 @@ export function createMailer(config: WorkerConfig, log: Logger): Mailer {
       },
     };
   }
+  // Asking for a provider and silently getting a no-op is the worst of both worlds: deliveries are marked 'sent' with
+  // provider 'console', so nothing retries and nothing looks wrong until someone asks why no mail arrived.
+  if (config.EMAIL_PROVIDER === 'resend') {
+    log.warn(
+      { event: 'email_provider_unconfigured', provider: 'resend' },
+      'EMAIL_PROVIDER=resend but RESEND_API_KEY is not set — falling back to console. No email will be sent.',
+    );
+  }
   return {
     async send(msg) {
       log.info({ event: 'email_console', to: msg.to, subject: msg.subject });

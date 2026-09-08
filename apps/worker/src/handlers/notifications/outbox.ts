@@ -66,7 +66,12 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
             }).returning('id').executeTakeFirstOrThrow();
             created++;
             const pref = await trx.selectFrom('notificationPreferences').select('enabled').where('userId', '=', r.userId).where('organizationId', '=', row.organizationId!).where('category', '=', route.category).where('channel', '=', 'EMAIL').executeTakeFirst();
-            if (pref?.enabled) await trx.insertInto('notificationDeliveries').values({ organizationId: row.organizationId, notificationId: inserted.id, channel: 'EMAIL', status: 'pending' }).execute();
+            // Absent means on. These are operational alerts — a device offline, a sync failure, a report ready — routed
+            // only to users whose role already carries the matching permission, so the audience is staff who need to
+            // act. Requiring a row first made the whole channel unreachable: nothing in the application writes
+            // notification_preferences, so the only way to opt in was by hand in SQL. An explicit row still wins, so a
+            // preferences screen can turn this off per user, per organisation, per category without touching this.
+            if (pref?.enabled ?? true) await trx.insertInto('notificationDeliveries').values({ organizationId: row.organizationId, notificationId: inserted.id, channel: 'EMAIL', status: 'pending' }).execute();
           }
           return created;
         })();
