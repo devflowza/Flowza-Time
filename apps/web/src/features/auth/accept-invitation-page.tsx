@@ -10,6 +10,7 @@ import { supabase } from '@/lib/supabase';
 import { api, ApiError } from '@/lib/api-client';
 import { meQueryKey } from '@/features/me/use-me';
 import { useAuth } from './auth-provider';
+import { invitationUrl } from './invitation-url';
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, FormField, Input } from '@/components/ui';
 import { AuthLayout } from './auth-layout';
 
@@ -107,7 +108,14 @@ export function AcceptInvitationPage() {
       await accept();
       return;
     }
-    const { data, error: err } = await supabase.auth.signUp({ email: values.email, password: values.password });
+    // Send them back to *this* link after they confirm. Without emailRedirectTo Supabase uses the project's Site URL,
+    // which drops a freshly confirmed invitee on the dashboard with no membership — the one screen that cannot help
+    // them. The URL is allow-listed in Auth → URL Configuration.
+    const { data, error: err } = await supabase.auth.signUp({
+      email: values.email,
+      password: values.password,
+      options: { emailRedirectTo: invitationUrl(token) },
+    });
     if (err) { setError(err.message); return; }
     // No session means the project requires email confirmation before the account can be used. Say so plainly instead
     // of leaving the invitee on a form that will never succeed.

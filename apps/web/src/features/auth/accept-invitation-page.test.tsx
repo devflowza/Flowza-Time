@@ -57,6 +57,20 @@ describe('AcceptInvitationPage', () => {
     expect(apiMock.post).not.toHaveBeenCalled();
   });
 
+  it('asks Supabase to send the invitee back to this link after they confirm', async () => {
+    // Otherwise the confirmation link lands on the project's Site URL, where a member-less invitee can do nothing.
+    supabaseMock.auth.signUp.mockResolvedValue({ data: { session: null, user: { id: 'u2' } }, error: null });
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+    fireEvent.change(screen.getByLabelText('Work email'), { target: { value: 'owner@acme.om' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Sup3rSecret!pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account and join' }));
+    await waitFor(() =>
+      expect(supabaseMock.auth.signUp).toHaveBeenCalledWith(
+        expect.objectContaining({ options: expect.objectContaining({ emailRedirectTo: expect.stringContaining('/auth/invite') }) }),
+      ),
+    );
+  });
+
   it('surfaces the API reason when the invitation was issued to a different address', async () => {
     h.session = { access_token: 't' };
     apiMock.post.mockRejectedValue(new ApiError(403, 'FORBIDDEN', 'This invitation was issued to a different email address.'));
