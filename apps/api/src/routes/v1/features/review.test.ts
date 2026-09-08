@@ -156,9 +156,9 @@ describe('leave records respect period locks', () => {
 
 describe('reports: employee scope', () => {
   it('rejects employee ids outside the caller branch scope instead of silently passing them to the worker', async () => {
-    const r = await h.request('POST', `${base()}/reports`, { token: f.branchManagerB, body: { reportType: 'employee_attendance', format: 'csv', parameters: { from: '2026-08-01', to: '2026-08-31', employeeIds: [f.e1] } } });
+    const r = await h.request('POST', `${base()}/reports`, { token: f.branchManagerB, body: { reportType: 'daily_attendance', format: 'csv', parameters: { from: '2026-08-01', employeeIds: [f.e1] } } });
     expect(r.status).toBe(400);
-    const ok = await h.request('POST', `${base()}/reports`, { token: f.branchManagerB, body: { reportType: 'employee_attendance', format: 'csv', parameters: { from: '2026-08-01', to: '2026-08-31', employeeIds: [f.e2] } } });
+    const ok = await h.request('POST', `${base()}/reports`, { token: f.branchManagerB, body: { reportType: 'daily_attendance', format: 'csv', parameters: { from: '2026-08-01', employeeIds: [f.e2] } } });
     expect(ok.status).toBe(202);
   });
 });
