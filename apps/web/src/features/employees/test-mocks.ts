@@ -35,10 +35,16 @@ export const page = <T,>(data: T[], total = data.length, pageNo = 1, pageSize = 
 /** Loose stand-ins for the supabase-js MFA shapes, so tests can resolve factors and errors without importing the SDK types. */
 interface MfaFactor { id: string; status: string; friendly_name?: string; factor_type?: string }
 type MfaListResult = { data: { totp: MfaFactor[]; all: MfaFactor[] } | null; error: { message: string } | null };
+/** Mirrors supabase-js: `session` is null when the project requires email confirmation before the account is usable. */
+type AuthResult = { data: { session: { access_token: string } | null; user: { id: string } | null }; error: { message: string } | null };
 export const supabaseMock = {
   auth: {
     getSession: vi.fn(async () => ({ data: { session: { access_token: 'token' } } })),
     signOut: vi.fn(async () => ({ error: null })),
+    signInWithPassword: vi.fn<() => Promise<AuthResult>>(async () => ({ data: { session: { access_token: 'token' }, user: { id: 'u1' } }, error: null })),
+    // signUp resolves with `session: null` when the project requires email confirmation — the invitation flow has to
+    // handle both shapes, so the double must be able to produce both.
+    signUp: vi.fn<() => Promise<AuthResult>>(async () => ({ data: { session: { access_token: 'token' }, user: { id: 'u2' } }, error: null })),
     mfa: {
       listFactors: vi.fn<() => Promise<MfaListResult>>(async () => ({ data: { totp: [], all: [] }, error: null })),
       enroll: vi.fn(), challenge: vi.fn(), verify: vi.fn(), unenroll: vi.fn(),

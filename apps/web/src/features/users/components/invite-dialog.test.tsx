@@ -32,7 +32,7 @@ describe('InviteDialog', () => {
     await waitFor(() => expect(screen.queryByText('Select at least one branch or grant all branches')).not.toBeInTheDocument());
   });
 
-  it('shows the one-time token with a copy button after a successful invitation', async () => {
+  it('shows a redeemable invitation link with a copy button after a successful invitation', async () => {
     apiMock.post.mockResolvedValue({ data: { id: 'inv1', organizationId: 'org-1', email: 'new@acme.om', roleId: role.id, allBranches: true, branchIds: [], invitedBy: 'u1', expiresAt: '2030-01-08T10:00:00Z', acceptedAt: null, createdAt: '2030-01-01T10:00:00Z', token: 'org-1.secret-token-value' } });
     const writeText = vi.fn(async () => {});
     Object.assign(navigator, { clipboard: { writeText } });
@@ -46,10 +46,10 @@ describe('InviteDialog', () => {
     fireEvent.pointerUp(option); fireEvent.click(option);
     fireEvent.click(screen.getByRole('button', { name: 'Create invitation' }));
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/invitations', expect.objectContaining({ email: 'new@acme.om', roleId: role.id, allBranches: true, branchIds: [] })));
-    const tokenInput = await screen.findByLabelText('Invitation token');
-    expect(tokenInput).toHaveValue('org-1.secret-token-value');
-    fireEvent.click(screen.getByRole('button', { name: 'Copy token' }));
-    await waitFor(() => expect(writeText).toHaveBeenCalledWith('org-1.secret-token-value'));
+    const tokenInput = await screen.findByLabelText('Invitation link');
+    expect(tokenInput).toHaveValue('http://localhost:3000/auth/invite?token=org-1.secret-token-value');
+    fireEvent.click(screen.getByRole('button', { name: 'Copy invitation link' }));
+    await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://localhost:3000/auth/invite?token=org-1.secret-token-value'));
     expect(screen.getByText(/never shown again/)).toBeInTheDocument();
   });
 });
