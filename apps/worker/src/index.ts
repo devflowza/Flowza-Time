@@ -5,6 +5,7 @@ import { loadWorkerConfig, looksLikeTransactionPooler } from './config.js';
 import { Runner } from './runner.js';
 import { Scheduler } from './scheduler.js';
 import { createMailer, createPlatformClients } from './lib/platform.js';
+import { createPdfRenderer } from './lib/pdf.js';
 import { buildHandlerRegistry } from './handlers/index.js';
 import { scheduledTasks } from './tasks/index.js';
 import type { WorkerDeps } from './deps.js';
@@ -34,6 +35,7 @@ const deps: WorkerDeps = {
   realtime: platform.realtime,
   mailer: createMailer(config, log),
   storage: platform.storage,
+  pdf: createPdfRenderer(config, log),
   now: () => new Date(),
 };
 

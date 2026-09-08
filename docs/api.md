@@ -88,7 +88,7 @@ keys and per-operation options are documented in `apps/worker/src/handlers/sync/
 
 | Method & path | Permission | Notes |
 |---|---|---|
-| `GET /report-types?orgId=` | member | Catalogue (`REPORT_TYPE_DEFINITIONS`) with required/optional parameters, permissions, formats and `allowed` for the org. |
+| `GET /report-types?orgId=` | member | Catalogue (`REPORT_TYPE_DEFINITIONS`, `status: 'available'` only — planned types are hidden and refused) with required/optional parameters, permissions, formats, orientation, default format and `allowed` for the org. Generation: `docs/reports.md`. |
 | `POST /orgs/:orgId/reports` | `report.view` + type permissions | `createReportRequestSchema`; branch scope injected for restricted callers (`parameters.branchId` / `branchScope`); quota 20/hour/org via `usage_quotas` → `429 RATE_LIMITED`; `report_requests` QUEUED + `GENERATE_REPORT` (`reports`, `{ organizationId, reportRequestId }`) → 202. |
 | `GET /orgs/:orgId/reports`, `GET …/:id` | `report.view` (own) / `report.manage` (all) | `report.manage` never widens beyond the caller's branch scope: other people's organisation-wide or foreign-branch reports are 404 for branch-scoped managers (list, detail, download, cancel). |
 | `GET /orgs/:orgId/reports/:id/download` | same | COMPLETED only → `{ url, expiresInSeconds: 300, fileName }` via storage signed URL; audit `report.exported` with row count. |

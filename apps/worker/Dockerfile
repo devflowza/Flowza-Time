@@ -24,6 +24,11 @@ RUN pnpm -r --filter @flowza/worker... run build && pnpm --filter @flowza/worker
 
 FROM node:22-alpine AS runtime
 ENV NODE_ENV=production
+# WITH_CHROMIUM=1 (fly.reports.toml) adds the PDF renderer: Alpine's Chromium plus Noto Sans / Noto Sans Arabic so
+# Latin and Arabic reports both shape correctly. The general worker (fly.worker.toml) is built without it and refuses
+# PDF requests with a clear message; CSV/XLSX need nothing extra. playwright-core drives whatever CHROMIUM_PATH names.
+ARG WITH_CHROMIUM=0
+RUN if [ "$WITH_CHROMIUM" = "1" ]; then apk add --no-cache chromium font-noto font-noto-arabic ttf-liberation && fc-cache -f; fi
 RUN addgroup -S flowza && adduser -S flowza -G flowza
 WORKDIR /app
 COPY --from=build --chown=flowza:flowza /out ./

@@ -1,6 +1,6 @@
 import { z } from 'zod';
 import { REPORT_FORMATS, REPORT_STATUSES, REPORT_TYPES } from './enums.js';
-import { isoDateSchema, isoDateTimeSchema, uuidSchema } from './common.js';
+import { codeSchema, isoDateSchema, isoDateTimeSchema, uuidSchema } from './common.js';
 
 export const reportParametersSchema = z.object({
   from: isoDateSchema.optional(),
@@ -15,6 +15,12 @@ export const reportParametersSchema = z.object({
   sort: z.string().max(64).optional(),
   order: z.enum(['asc', 'desc']).optional(),
   locale: z.enum(['en', 'ar']).optional(),
+  /** leave_report: which leave type (by code) the report lists. */
+  leaveTypeCode: codeSchema.optional(),
+  /** employee_directory: Active = active + on_leave; Inactive = suspended, terminated, resigned. */
+  employmentStatus: z.enum(['active', 'inactive', 'all']).optional(),
+  /** audit_report: attendance edits in the samples' layout, or the whole audit log. */
+  scope: z.enum(['attendance', 'all']).optional(),
 });
 export type ReportParameters = z.infer<typeof reportParametersSchema>;
 

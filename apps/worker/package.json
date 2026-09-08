@@ -23,8 +23,14 @@
     "papaparse": "^5.7.0",
     "pg": "^8.23.0",
     "pino": "^10.3.1",
+    "playwright-core": "1.63.0",
     "resend": "^6.26.0",
     "zod": "^4.5.4"
   },
-  "devDependencies": { "@types/luxon": "^3.7.5", "@types/papaparse": "^5.5.2", "@types/pg": "^8.23.1", "tsx": "^4.23.0" }
+  "devDependencies": {
+    "@types/luxon": "^3.7.5",
+    "@types/papaparse": "^5.5.2",
+    "@types/pg": "^8.23.1",
+    "tsx": "^4.23.0"
+  }
 }
