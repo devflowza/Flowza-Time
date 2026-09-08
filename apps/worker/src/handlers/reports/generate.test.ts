@@ -192,3 +192,97 @@ describe('employee_directory and EXPORT_EMPLOYEES', () => {
     expect(r.parameters).toMatchObject({ employeeIds: [E1, E3], employmentStatus: 'all' });
   });
 });
+
+describe('Phase 1 · the five layouts with existing keys', () => {
+  const D2 = '2017-11-02', D3 = '2017-11-03', D4 = '2017-11-04', D5 = '2017-11-05', D6 = '2017-11-06';
+  const on = (date: string, time: string) => DateTime.fromISO(`${date}T${time}`, { zone: MUSCAT }).toJSDate();
+  const csvLines = (path: string) => fileText(path).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
+
+  beforeAll(async () => {
+    const a = h.tdb.adminDb;
+    const rec = (employeeId: string, date: string, values: Record<string, unknown>) => ({ organizationId: ORG, employeeId, attendanceDate: date, branchId: BRANCH, departmentId: DEPT_ELBEIT, timezone: MUSCAT, shiftId: SHIFT, ruleSetId: RULES, scheduledMinutes: 540, engineVersion: 'test', trace: JSON.stringify({ punches: [] }), ...values });
+    await a.insertInto('attendanceDailyRecords').values([
+      // FAISAL: late on the 2nd (8:45 am – 5:52 pm, 8.18 worked → UT 0.42), off 3rd/4th, absent 5th
+      rec(E3, D2, { status: 'PRESENT', flags: ['LATE'], firstInAt: on(D2, '08:45'), lastOutAt: on(D2, '17:52'), workedMinutes: 498, lateMinutes: 15, punchCount: 2, trace: JSON.stringify({ punches: [{ punchedAt: on(D2, '08:45').toISOString(), role: 'IN' }, { punchedAt: on(D2, '17:52').toISOString(), role: 'OUT' }] }) }),
+      rec(E3, D3, { status: 'WEEKLY_OFF', flags: [], firstInAt: null, lastOutAt: null, workedMinutes: 0, scheduledMinutes: 0, punchCount: 0 }),
+      rec(E3, D4, { status: 'WEEKLY_OFF', flags: [], firstInAt: null, lastOutAt: null, workedMinutes: 0, scheduledMinutes: 0, punchCount: 0 }),
+      rec(E3, D5, { status: 'ABSENT', flags: [], firstInAt: null, lastOutAt: null, workedMinutes: 0, punchCount: 0 }),
+      // ABDUL SATTHAR absent twice
+      rec(E1, D2, { departmentId: DEPT_ADMIN, status: 'ABSENT', flags: [], firstInAt: null, lastOutAt: null, workedMinutes: 0, punchCount: 0 }),
+      rec(E1, D6, { departmentId: DEPT_ADMIN, status: 'ABSENT', flags: [], firstInAt: null, lastOutAt: null, workedMinutes: 0, punchCount: 0 }),
+    ]).execute();
+    await a.insertInto('attendanceCorrections').values({ organizationId: ORG, employeeId: E3, branchId: BRANCH, attendanceDate: D2, type: 'ADD_PUNCH', proposedPunchedAt: on(D2, '17:52'), proposedEventType: 'PUNCH_OUT', reason: 'Permission', requestedBy: OWNER, status: 'APPLIED', appliedAt: NOW, appliedBy: OWNER }).execute();
+  });
+
+  it('Detail Report: one section per employee with the identity block, every calendar day, remarks from corrections, and totals', async () => {
+    const id = await request('employee_attendance', 'csv', { from: DATE, to: D5, employeeIds: [E3] });
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    expect(res).toMatchObject({ status: 'COMPLETED', rowCount: 5 });
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toBe('Employee,Dept,Card No,Shift,Designation,Date,Att Code,IN Time,OUT Time,Base Hrs,Work Hrs,Tot Hrs,OT1,OT2,UT,Remarks');
+    expect(lines[1]).toBe('2011  FAISAL,EL BEIT,,STAFF,Carpenter,01-Nov-17 Wed,PR,8:39 am,6:09 pm,540,570,510,0,0,30,');
+    expect(lines[2]).toBe('2011  FAISAL,EL BEIT,,STAFF,Carpenter,02-Nov-17 Thu,PR,8:45 am,5:52 pm,540,547,498,0,0,42,Permission');
+    expect(lines[3]).toBe('2011  FAISAL,EL BEIT,,STAFF,Carpenter,03-Nov-17 Fri,OF,,,,,,,,,');
+    expect(lines[5]).toBe('2011  FAISAL,EL BEIT,,STAFF,Carpenter,05-Nov-17 Sun,AB,,,,,,,,,');
+    const pdfId = await request('employee_attendance', 'pdf', { from: DATE, to: D5, employeeIds: [E3, E1] });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('<span class="k">Employee:</span><span class="v">2011  FAISAL</span>');
+    expect(html).toContain('<span class="k">Shift:</span><span class="v">STAFF</span>');
+    // totals row: 8.30 + 8.18 = 16.48 worked; UT 0.30 + 0.42 = 1.12
+    expect(html).toMatch(/<tr class="total">.*16\.48<\/td>.*0\.00<\/td>.*0\.00<\/td>.*1\.12<\/td>/);
+    expect(html).toContain('From 01-Nov-2017 To 05-Nov-2017');
+    expect((html.match(/class="section break"/g) ?? []).length).toBe(1); // second employee starts a new page
+  });
+
+  it('Monthly Attendance Report: a code per day, absence count, landscape, only employees employed in the month', async () => {
+    const id = await request('monthly_attendance', 'csv', { month: '2017-11' });
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    expect(res.status).toBe('COMPLETED');
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toBe(`Emp ID,Employee Name,${Array.from({ length: 30 }, (_, i) => i + 1).join(',')},Abs`.replace('Employee Name', 'Emp Name'));
+    const faisal = lines.find((l) => l.startsWith('2011,'))!;
+    expect(faisal).toBe(`2011,FAISAL,PR,PR,OF,OF,AB,${','.repeat(24)},1`.replace(',,,,,,,,,,,,,,,,,,,,,,,,,', ','.repeat(25)));
+    expect(lines.find((l) => l.startsWith('2192,'))).toMatch(/^2192,Masoom,AL,/);
+    expect(lines.some((l) => l.startsWith('9001,'))).toBe(false); // exited before the month
+    const pdfId = await request('monthly_attendance', 'pdf', { month: '2017-11' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('Monthly Attendance Report');
+    expect(html).toContain('For the Period : 01-Nov-2017 To 30-Nov-2017');
+    expect(html).toContain('style="color:#1d4ed8;font-weight:700">OF</td>');
+  });
+
+  it('Staff Absents Monthly Report: per department, numbered, day numbers and a count', async () => {
+    const id = await request('absence_report', 'csv', { from: DATE, to: '2017-11-30' });
+    expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }))).rowCount).toBe(3);
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toBe('Department,Sr#,Employee Code & Name Emp Code,Employee Code & Name Emp Name,Date of Month,No of Days');
+    expect(lines.slice(1)).toEqual(['ADMIN,1,2010,ABDUL SATTHAR,02 06,2', 'EL BEIT,1,2011,FAISAL,05,1', 'N/A,1,2328,Chrishantha Rohitha,01,1']);
+    const pdfId = await request('absence_report', 'pdf', { from: DATE, to: '2017-11-30' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('Staff Absents Monthly Report');
+    expect(html).toContain('Date: 01-Nov-2017 To 30-Nov-2017');
+    expect(html).toContain('<th class="group" colspan="2">Employee Code &amp; Name</th>');
+  });
+
+  it('Staff Late Attendance Report lists the LATE-flagged days only', async () => {
+    const id = await request('late_report', 'csv', { from: DATE, to: '2017-11-30' });
+    expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }))).rowCount).toBe(1);
+    expect(csvLines(`${ORG}/${id}.csv`)[1]).toBe('EL BEIT,1,2011,FAISAL,02,1');
+  });
+
+  it('Missed Punch Report: unpaired punches under their date and department, the recorded side filled in', async () => {
+    const id = await request('missing_punch_report', 'csv', { from: DATE, to: '2017-11-30' });
+    expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }))).rowCount).toBe(2);
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toBe('Date,Department,Emp Code,Emp Name,IN Time,OUT Time');
+    expect(lines.slice(1)).toEqual(['01/Nov/2017,ADMIN,2010,ABDUL SATTHAR,2:49 pm,', '01/Nov/2017,ADMIN,2076,SALEH AL AGHBARI,5:32 am,']);
+    const pdfId = await request('missing_punch_report', 'pdf', { from: DATE, to: '2017-11-30' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('<div class="super">01/Nov/2017</div>');
+    expect((html.match(/class="super"/g) ?? []).length).toBe(1);
+  });
+});

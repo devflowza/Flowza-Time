@@ -119,7 +119,7 @@ export type ReportFormat = (typeof REPORT_FORMATS)[number];
 export const REPORT_STATUSES = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'EXPIRED', 'CANCELLED'] as const;
 export type ReportStatus = (typeof REPORT_STATUSES)[number];
 
-export const REPORT_TYPES = ['daily_attendance', 'monthly_attendance', 'employee_attendance', 'branch_attendance', 'department_attendance', 'late_report', 'absence_report', 'overtime_report', 'missing_punch_report', 'device_sync_report', 'device_health_report', 'audit_report', 'payroll_summary', 'employee_directory'] as const;
+export const REPORT_TYPES = ['daily_attendance', 'monthly_attendance', 'employee_attendance', 'branch_attendance', 'department_attendance', 'late_report', 'absence_report', 'overtime_report', 'missing_punch_report', 'device_sync_report', 'device_health_report', 'audit_report', 'payroll_summary', 'employee_directory', 'leave_report'] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
 export const IMPORT_STATUSES = ['UPLOADED', 'VALIDATING', 'VALIDATED', 'IMPORTING', 'COMPLETED', 'FAILED', 'CANCELLED'] as const;

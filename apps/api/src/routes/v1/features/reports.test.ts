@@ -19,7 +19,7 @@ describe('reports', () => {
     expect(asEmployee.body.data.find((t: { key: string }) => t.key === 'daily_attendance').allowed).toBe(false);
     const missing = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'daily_attendance', parameters: {} } });
     expect(missing.status).toBe(400);
-    const planned = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'late_report', parameters: { from: '2026-08-01', to: '2026-08-31' } } });
+    const planned = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'payroll_summary', parameters: { from: '2026-08-01', to: '2026-08-31' } } });
     expect(planned.status).toBe(400);
     const noPerm = await h.request('POST', `${base()}/reports`, { token: f.employeeUser, body: { reportType: 'daily_attendance', parameters: { from: '2026-08-01' } } });
     expect(noPerm.status).toBe(403);

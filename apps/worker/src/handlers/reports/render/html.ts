@@ -34,6 +34,7 @@ const CSS = `
   .heading { font-weight: 700; padding: 4px 4px 2px; }
   .heading .label { margin-inline-end: 6px; }
   .heading .value { color: #1d4ed8; text-decoration: underline; }
+  .super { font-weight: 700; color: #1d4ed8; padding: 8px 4px 0; }
   .fields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2px 24px; padding: 4px; border-top: 2px solid #b91c1c; margin-bottom: 4px; }
   .fields .f { display: grid; grid-template-columns: 9em minmax(0, 1fr); gap: 8px; }
   .fields .k { color: #1d4ed8; font-weight: 700; }
@@ -75,12 +76,13 @@ function renderHeader(columns: ReportColumn[]): string {
   return `<thead><tr>${top.join('')}</tr><tr>${bottom}</tr></thead>`;
 }
 
-function renderSection(doc: ReportDocument, s: ReportSection): string {
+function renderSection(doc: ReportDocument, s: ReportSection, showSuper: boolean): string {
   const columns = s.columns ?? doc.columns;
+  const superHeading = showSuper && s.superHeading ? `<div class="super">${escapeHtml(s.superHeading)}</div>` : '';
   const heading = s.heading ? `<div class="heading">${s.heading.label ? `<span class="label">${escapeHtml(s.heading.label)}</span>` : ''}<span class="value">${escapeHtml(s.heading.value)}</span></div>` : '';
   const fields = s.fields?.length ? `<div class="fields">${s.fields.map((f) => `<div class="f"><span class="k">${escapeHtml(f.label)}</span><span class="v${f.mono ? ' mono' : ''}">${escapeHtml(f.value)}</span></div>`).join('')}</div>` : '';
   const body = s.rows.map((r) => `<tr${r.kind === 'total' ? ' class="total"' : ''}>${r.cells.map((c, i) => renderCell(c, columns[i])).join('')}</tr>`).join('');
-  return `<div class="section${s.pageBreakBefore ? ' break' : ''}">${heading}${fields}<table>${renderHeader(columns)}<tbody>${body}</tbody></table></div>`;
+  return `<div class="section${s.pageBreakBefore ? ' break' : ''}">${superHeading}${heading}${fields}<table>${renderHeader(columns)}<tbody>${body}</tbody></table></div>`;
 }
 
 /** Full HTML document for one report. Header/footer are separate templates (Chromium repeats them per page). */
@@ -91,7 +93,7 @@ export function renderHtml(doc: ReportDocument): string {
   const end = doc.endOfReport ? `<div class="end">${escapeHtml(doc.endOfReportLabel)}</div><div class="end-title">${escapeHtml(doc.title)}</div>` : '';
   return `<!doctype html><html lang="${doc.locale}" dir="${doc.dir}"><head><meta charset="utf-8"><title>${escapeHtml(doc.title)}</title><style>${CSS}</style></head><body>`
     + `<div class="head"><div class="company">${escapeHtml(doc.company)}</div><div class="title">${escapeHtml(doc.title)}</div>${doc.period ? `<div class="period">${escapeHtml(doc.period)}</div>` : ''}</div>`
-    + doc.sections.map((s) => renderSection(doc, s)).join('')
+    + doc.sections.map((s, i) => renderSection(doc, s, i === 0 || doc.sections[i - 1]!.superHeading !== s.superHeading)).join('')
     + legend + end
     + `</body></html>`;
 }
