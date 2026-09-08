@@ -356,3 +356,40 @@ describe('Phase 2 · Summary, Weekly, Weekly In/Out, Leave', () => {
     expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: none }))).rowCount).toBe(0);
   });
 });
+
+describe('Phase 3 · Audit Trail', () => {
+  const csvLines = (path: string) => fileText(path).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
+
+  it('derives attendance edits from record history: one row per changed field with the value before and after', async () => {
+    const a = h.tdb.adminDb;
+    const rec = await a.selectFrom('attendanceDailyRecords').select(['id']).where('organizationId', '=', ORG).where('employeeId', '=', E3).where('attendanceDate', '=', sql<Date>`${'2017-11-02'}::date`).executeTakeFirstOrThrow();
+    // before the correction the day was an absence with no punches; the record now says PRESENT 8:45 am – 5:52 pm
+    await a.insertInto('attendanceDailyRecordHistory').values({ organizationId: ORG, recordId: rec.id, employeeId: E3, branchId: BRANCH, attendanceDate: '2017-11-02', calculationVersion: 1, reason: 'CORRECTION', snapshot: JSON.stringify({ status: 'ABSENT', flags: [], firstInAt: null, lastOutAt: null, timezone: MUSCAT }), triggeredBy: OWNER, createdAt: new Date('2017-11-21T05:00:00Z') }).execute();
+    const id = await request('audit_report', 'csv', { from: DATE, to: '2017-11-30' });
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    expect(res).toMatchObject({ status: 'COMPLETED', rowCount: 3 });
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toBe('Key/Keys,Edited Field,Old Value,New Value,Edited by,Edited On');
+    expect(lines.slice(1)).toEqual([
+      '2011 02/Nov/2017,In Time,,8:45 am,Owner,21-Nov-2017',
+      '2011 02/Nov/2017,Out Time,,5:52 pm,Owner,21-Nov-2017',
+      '2011 02/Nov/2017,Attendance Code,AB,PR,Owner,21-Nov-2017',
+    ]);
+    const pdfId = await request('audit_report', 'pdf', { from: DATE, to: '2017-11-30' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('<div class="title">Audit Trail Report</div>');
+    expect(html).toContain('Period: 01-Nov-2017 To 30-Nov-2017');
+    // an edit made outside the period is not listed
+    const outside = await request('audit_report', 'csv', { from: '2017-12-01', to: '2017-12-31' });
+    expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: outside }))).rowCount).toBe(0);
+  });
+
+  it('exports the whole audit log for the period when scope=all', async () => {
+    await h.tdb.adminDb.insertInto('audit.logs').values({ organizationId: ORG, actorUserId: OWNER, actorType: 'USER', action: 'attendance.correction_applied', entityType: 'attendance_correction', entityId: 'c-1', branchId: BRANCH, oldValue: JSON.stringify({ status: 'APPROVED' }), newValue: JSON.stringify({ status: 'APPLIED' }), createdAt: new Date('2017-11-21T05:10:00Z') }).execute();
+    const id = await request('audit_report', 'csv', { from: DATE, to: '2017-11-30', scope: 'all' });
+    expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }))).status).toBe('COMPLETED');
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines.some((l) => l.startsWith('attendance_correction c-1,attendance.correction_applied,"{""status"":""APPROVED""}","{""status"":""APPLIED""}",Owner,21-Nov-2017 09:10'))).toBe(true);
+  });
+});
