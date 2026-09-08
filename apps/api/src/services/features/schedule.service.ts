@@ -1,4 +1,5 @@
 import { sql } from 'kysely';
+import { seedDefaultLeaveTypes } from './leave-defaults.js';
 import type { z } from 'zod';
 import type { AttendanceRuleSetInput, HolidayInput, LeaveRecordInput, ShiftAssignmentInput, ShiftInput, ShiftPatternInput, UpdateLeaveRecordInput, holidayCalendarInputSchema, leaveTypeInputSchema } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
@@ -390,16 +391,26 @@ export async function deleteHoliday(deps: ApiDeps, actor: Actor, orgId: string, 
 
 // ----- leave -----------------------------------------------------------------------------------------------------------------
 
-export interface LeaveTypeDto { id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; color: string | null; status: string; createdAt: string }
-const toLeaveTypeDto = (t: { id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; color: string | null; status: string; createdAt: Date }): LeaveTypeDto => ({ id: t.id, code: t.code, name: t.name, nameAr: t.nameAr, isPaid: t.isPaid, color: t.color, status: t.status, createdAt: isoDateTime(t.createdAt) });
+export interface LeaveTypeDto { id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; treatAsPresent: boolean; color: string | null; status: string; createdAt: string }
+const toLeaveTypeDto = (t: { id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; treatAsPresent: boolean; color: string | null; status: string; createdAt: Date }): LeaveTypeDto => ({ id: t.id, code: t.code, name: t.name, nameAr: t.nameAr, isPaid: t.isPaid, treatAsPresent: t.treatAsPresent, color: t.color, status: t.status, createdAt: isoDateTime(t.createdAt) });
 export async function listLeaveTypes(deps: ApiDeps, actor: Actor, orgId: string): Promise<LeaveTypeDto[]> {
   requirePermission(actor.principal, orgId, 'leave.view');
   return runUser(deps.db, actor, async (trx) => (await trx.selectFrom('leaveTypes').selectAll().where('organizationId', '=', orgId).orderBy('name').execute()).map(toLeaveTypeDto));
 }
+/** POST /leave-types/seed-defaults — adds the default set's missing codes; never touches existing types. */
+export async function seedLeaveTypes(deps: ApiDeps, actor: Actor, orgId: string): Promise<{ created: string[]; leaveTypes: LeaveTypeDto[] }> {
+  requirePermission(actor.principal, orgId, 'leave.manage');
+  return runUser(deps.db, actor, async (trx) => {
+    const created = await seedDefaultLeaveTypes(trx, orgId);
+    if (created.length) await audit(trx, actor, orgId, 'leave_type.seeded', 'leave_type', { newValue: { created } });
+    const leaveTypes = (await trx.selectFrom('leaveTypes').selectAll().where('organizationId', '=', orgId).orderBy('name').execute()).map(toLeaveTypeDto);
+    return { created, leaveTypes };
+  });
+}
 export async function createLeaveType(deps: ApiDeps, actor: Actor, orgId: string, input: LeaveTypeInput): Promise<LeaveTypeDto> {
   requirePermission(actor.principal, orgId, 'leave.manage');
   return runUser(deps.db, actor, async (trx) => {
-    const row = await trx.insertInto('leaveTypes').values({ organizationId: orgId, code: input.code, name: input.name, nameAr: input.nameAr ?? null, isPaid: input.isPaid, color: input.color ?? null }).returningAll().executeTakeFirstOrThrow();
+    const row = await trx.insertInto('leaveTypes').values({ organizationId: orgId, code: input.code, name: input.name, nameAr: input.nameAr ?? null, isPaid: input.isPaid, treatAsPresent: input.treatAsPresent, color: input.color ?? null }).returningAll().executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'leave_type.created', 'leave_type', { entityId: row.id, newValue: input });
     return toLeaveTypeDto(row);
   });

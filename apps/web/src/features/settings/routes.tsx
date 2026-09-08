@@ -4,7 +4,7 @@ import { RequirePermission } from '@/components/layout/protected-route';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/settings.json';
 import ar from '@/locales/ar/settings.json';
-import { AttendanceSection, GeneralSection, NotificationsSection, PageFallback, RegionalSection, SectionFallback, SecuritySection, SettingsLayout, SubscriptionSection, SyncSection } from './pages/lazy';
+import { AttendanceSection, GeneralSection, NotificationsSection, PageFallback, RegionalSection, ReportsSection, SectionFallback, SecuritySection, SettingsLayout, SubscriptionSection, SyncSection } from './pages/lazy';
 
 registerNamespace('settings', en, ar);
 
@@ -21,6 +21,7 @@ export const settingsRoutes: RouteObject[] = [
       { path: 'regional', element: section(<RegionalSection />) },
       { path: 'attendance', element: section(<AttendanceSection />) },
       { path: 'sync', element: section(<SyncSection />) },
+      { path: 'reports', element: section(<ReportsSection />) },
       { path: 'notifications', element: section(<NotificationsSection />) },
       { path: 'security', element: section(<SecuritySection />) },
       { path: 'subscription', element: section(<SubscriptionSection />) },

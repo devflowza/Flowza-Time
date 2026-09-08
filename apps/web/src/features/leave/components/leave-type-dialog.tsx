@@ -17,7 +17,7 @@ export function LeaveTypeDialog({ open, onOpenChange, leaveType }: { open: boole
   const { t } = useTranslation('leave');
   const { t: tc } = useTranslation();
   const { createType, updateType } = useLeaveMutations();
-  const form = useForm<FormValues, unknown, LeaveTypeInput>({ resolver: zodResolver(leaveTypeInputSchema), defaultValues: leaveType ? { code: leaveType.code, name: leaveType.name, nameAr: leaveType.nameAr ?? undefined, isPaid: leaveType.isPaid, color: leaveType.color ?? undefined } : { code: '', name: '', isPaid: true, color: COLORS[0] } });
+  const form = useForm<FormValues, unknown, LeaveTypeInput>({ resolver: zodResolver(leaveTypeInputSchema), defaultValues: leaveType ? { code: leaveType.code, name: leaveType.name, nameAr: leaveType.nameAr ?? undefined, isPaid: leaveType.isPaid, treatAsPresent: leaveType.treatAsPresent ?? false, color: leaveType.color ?? undefined } : { code: '', name: '', isPaid: true, treatAsPresent: false, color: COLORS[0] } });
   const { register, control, setValue, formState: { errors, isSubmitting } } = form;
   const color = useWatch({ control, name: 'color' });
   const onSubmit = form.handleSubmit(async (v) => {
@@ -39,6 +39,9 @@ export function LeaveTypeDialog({ open, onOpenChange, leaveType }: { open: boole
           <FormField label={t('fields.nameAr')} htmlFor="lt-nameAr" optional error={errors.nameAr?.message}><Input id="lt-nameAr" dir="rtl" {...register('nameAr', { setValueAs: blankToUndefined })} /></FormField>
           <Controller control={control} name="isPaid" render={({ field }) => (
             <div className="flex items-center justify-between gap-4 rounded-md border p-3"><div><Label htmlFor="lt-paid">{t('fields.isPaid')}</Label><p className="text-xs text-muted-foreground">{t('fields.isPaidHint')}</p></div><Switch id="lt-paid" checked={field.value ?? true} onCheckedChange={field.onChange} /></div>
+          )} />
+          <Controller control={control} name="treatAsPresent" render={({ field }) => (
+            <div className="flex items-center justify-between gap-4 rounded-md border p-3"><div><Label htmlFor="lt-present">{t('fields.treatAsPresent')}</Label><p className="text-xs text-muted-foreground">{t('fields.treatAsPresentHint')}</p></div><Switch id="lt-present" checked={field.value ?? false} onCheckedChange={field.onChange} /></div>
           )} />
           <FormField label={t('fields.color')} htmlFor="lt-color" optional error={errors.color?.message}>
             <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label={t('fields.color')}>

@@ -39,6 +39,7 @@ export function registerScheduleRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   // leave
   v1.get('/orgs/:orgId/leave-types', async (c) => ok(c, await s.listLeaveTypes(deps, actorOf(c, deps), param(c, 'orgId'))));
   v1.post('/orgs/:orgId/leave-types', async (c) => created(c, await s.createLeaveType(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, leaveTypeInputSchema))));
+  v1.post('/orgs/:orgId/leave-types/seed-defaults', async (c) => created(c, await s.seedLeaveTypes(deps, actorOf(c, deps), param(c, 'orgId'))));
   v1.patch('/orgs/:orgId/leave-types/:id', async (c) => ok(c, await s.updateLeaveType(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, leaveTypeUpdateSchema))));
   v1.delete('/orgs/:orgId/leave-types/:id', async (c) => { await s.deleteLeaveType(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id')); return noContent(c); });
   v1.get('/orgs/:orgId/leave-records', async (c) => { const q = query(c, leaveRecordListQuerySchema); const r = await s.listLeaveRecords(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
