@@ -297,12 +297,12 @@ describe('Phase 2 · Summary, Weekly, Weekly In/Out, Leave', () => {
     const lines = csvLines(`${ORG}/${id}.csv`);
     // AL is paid leave (middle group); SD counts as present and sits before HP; no unpaid types in this tenant
     expect(lines[0]).toBe('ID,Employee Name,PR,HL,OF,SD,HP,T/PR,AL,T/OL,AB,T/AB,OT1,OT2,UT');
-    // FAISAL: PR on the 1st and 2nd, OF 3rd/4th, AB 5th; UT 0.30 + 0.42 = 72 min
-    expect(lines.find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,,2,,,4,,0,1,1,0,0,72');
+    // FAISAL: PR on the 1st and 2nd, OF 3rd/4th, AB 5th; UT 0.30 + 0.42 = 72 min. Spreadsheets get numeric zeros; the print shows dashes.
+    expect(lines.find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,0,2,0,0,4,0,0,1,1,0,0,72');
     // SALEH: one present day with 5:15 regular overtime
-    expect(lines.find((l) => l.startsWith('2076,'))).toBe('2076,SALEH AL AGHBARI,1,,,,,1,,0,,0,315,0,0');
+    expect(lines.find((l) => l.startsWith('2076,'))).toBe('2076,SALEH AL AGHBARI,1,0,0,0,0,1,0,0,0,0,315,0,0');
     // Masoom: one day of annual leave
-    expect(lines.find((l) => l.startsWith('2192,'))).toBe('2192,Masoom,,,,,,0,1,1,,0,0,0,0');
+    expect(lines.find((l) => l.startsWith('2192,'))).toBe('2192,Masoom,0,0,0,0,0,0,1,1,0,0,0,0,0');
     const pdfId = await request('attendance_summary', 'pdf', { from: DATE, to: '2017-11-30' });
     await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
     const html = fileText(`${ORG}/${pdfId}.pdf`);
