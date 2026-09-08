@@ -68,7 +68,8 @@ export async function createReport(deps: ApiDeps, actor: Actor, orgId: string, i
       parameters.employeeIds = ids;
     }
     if (typeof parameters['leaveTypeCode'] === 'string') {
-      const lt = await trx.selectFrom('leaveTypes').select('code').where('organizationId', '=', orgId).where('code', '=', parameters['leaveTypeCode']).where('status', '=', 'active').executeTakeFirst();
+      // citext against a text-typed bind parameter resolves to text = text (case-sensitive); compare explicitly so 'sl' finds SL
+      const lt = await trx.selectFrom('leaveTypes').select('code').where('organizationId', '=', orgId).where(sql<boolean>`lower(code::text) = lower(${parameters['leaveTypeCode']})`).where('status', '=', 'active').executeTakeFirst();
       if (!lt) throw errors.validation('Unknown leave type.', { issues: [{ path: 'parameters.leaveTypeCode', message: 'Unknown leave type' }] });
       parameters['leaveTypeCode'] = String(lt.code);
     }
