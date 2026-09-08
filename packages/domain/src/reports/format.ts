@@ -108,6 +108,16 @@ export function naturalCompare(a: string, b: string): number {
   return xa.length - xb.length;
 }
 
+/** Every calendar date from `from` to `to` inclusive (both YYYY-MM-DD). */
+export function eachDateInclusive(from: string, to: string): string[] {
+  const out: string[] = [];
+  let d = DateTime.fromISO(from, { zone: 'utc' });
+  const end = DateTime.fromISO(to, { zone: 'utc' });
+  if (!d.isValid || !end.isValid) return out;
+  while (d <= end) { out.push(d.toISODate()!); d = d.plus({ days: 1 }); }
+  return out;
+}
+
 /** Day numbers of a month as the samples list them: `06 13` — two digits, space separated, ascending. */
 export function dayList(isoDates: readonly string[]): string {
   return [...isoDates].sort().map((d) => d.slice(8, 10)).join(' ');

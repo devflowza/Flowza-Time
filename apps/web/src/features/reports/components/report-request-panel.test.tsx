@@ -30,12 +30,12 @@ describe('ReportRequestPanel', () => {
     apiMock.post.mockResolvedValue({ data: { id: 'rep-1', status: 'QUEUED', jobId: 'job-1' } });
     const onQueued = vi.fn();
     renderWithProviders(<ReportRequestPanel onQueued={onQueued} />);
-    expect(await screen.findByRole('radio', { name: /Late arrivals/ })).toBeEnabled();
+    expect(await screen.findByRole('radio', { name: /Staff Late Attendance Report/ })).toBeEnabled();
     expect(screen.getByRole('radio', { name: /Audit log/ })).toBeDisabled();
     expect(screen.getByText('Select a report type to set its parameters.')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByRole('radio', { name: /Late arrivals/ }));
-    expect(await screen.findByText('Parameters — Late arrivals')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('radio', { name: /Staff Late Attendance Report/ }));
+    expect(await screen.findByText('Parameters — Staff Late Attendance Report')).toBeInTheDocument();
     // date range defaults to the current month; clearing the end date makes the required refinement fail
     const to = screen.getByLabelText(/^To/) as HTMLInputElement;
     expect(to.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
@@ -59,7 +59,7 @@ describe('ReportRequestPanel', () => {
 
   it('shows a month picker for month-based reports', async () => {
     renderWithProviders(<ReportRequestPanel onQueued={() => {}} />);
-    fireEvent.click(await screen.findByRole('radio', { name: /Monthly attendance/ }));
+    fireEvent.click(await screen.findByRole('radio', { name: /Monthly Attendance Report/ }));
     expect((await screen.findByLabelText(/Month/) as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}$/);
     expect(screen.queryByLabelText(/^From/)).not.toBeInTheDocument();
   });

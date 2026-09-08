@@ -19,10 +19,11 @@ export const spreadsheetValue = (c: ReportCell): string | number | null => {
 export function flatten(doc: ReportDocument): FlatTable {
   const fieldLabels: string[] = doc.flatten.fieldColumns ? [...new Set(doc.sections.flatMap((s) => (s.fields ?? []).map((f) => f.label.replace(/:$/, ''))))] : [];
   const headingLabel = doc.flatten.headingColumnLabel;
-  const header = [...fieldLabels, ...(headingLabel ? [headingLabel] : []), ...doc.columns.map(columnLabel)];
+  const superLabel = doc.flatten.superHeadingColumnLabel ?? null;
+  const header = [...fieldLabels, ...(superLabel ? [superLabel] : []), ...(headingLabel ? [headingLabel] : []), ...doc.columns.map(columnLabel)];
   const rows: FlatTable['rows'] = [];
   for (const s of doc.sections) {
-    const leading = [...fieldLabels.map((label) => (s.fields ?? []).find((f) => f.label.replace(/:$/, '') === label)?.value ?? ''), ...(headingLabel ? [s.heading?.value ?? ''] : [])];
+    const leading = [...fieldLabels.map((label) => (s.fields ?? []).find((f) => f.label.replace(/:$/, '') === label)?.value ?? ''), ...(superLabel ? [s.superHeading ?? ''] : []), ...(headingLabel ? [s.heading?.value ?? ''] : [])];
     for (const r of s.rows) {
       if ((r.kind ?? 'data') !== 'data') continue;
       rows.push({ leading, cells: r.cells, values: [...leading, ...r.cells.map(spreadsheetValue)] });
