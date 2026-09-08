@@ -67,6 +67,11 @@ export async function createReport(deps: ApiDeps, actor: Actor, orgId: string, i
       for (const e of emps) requireBranchAccess(grant, e.branchId);
       parameters.employeeIds = ids;
     }
+    if (typeof parameters['leaveTypeCode'] === 'string') {
+      const lt = await trx.selectFrom('leaveTypes').select('code').where('organizationId', '=', orgId).where('code', '=', parameters['leaveTypeCode']).where('status', '=', 'active').executeTakeFirst();
+      if (!lt) throw errors.validation('Unknown leave type.', { issues: [{ path: 'parameters.leaveTypeCode', message: 'Unknown leave type' }] });
+      parameters['leaveTypeCode'] = String(lt.code);
+    }
     await systemStep(trx, orgId, (t) => consumeQuota(t, orgId, 'reports', 3600, REPORTS_PER_HOUR));
     const row = await trx.insertInto('reportRequests').values({ organizationId: orgId, reportType: input.reportType, format: input.format, parameters: JSON.stringify(parameters), status: 'QUEUED', requestedBy: actor.userId, branchId }).returning('id').executeTakeFirstOrThrow();
     const jobId = await enqueueJob(deps.queue, trx, { queue: 'reports', jobType: 'GENERATE_REPORT', organizationId: orgId, payload: { organizationId: orgId, reportRequestId: row.id }, correlationId: actor.requestId, priority: 5 });

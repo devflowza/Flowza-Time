@@ -72,6 +72,11 @@ const en = {
   'col.department': 'Department',
   'col.branch': 'Branch',
   'col.employmentStatus': 'Employment status',
+  'col.employeeName': 'Employee Name',
+  'col.halfPresent': 'HP',
+  'col.totalPresent': 'T/PR',
+  'col.totalLeave': 'T/OL',
+  'col.totalAbsent': 'T/AB',
 
   'field.employee': 'Employee:',
   'field.cardNo': 'Card No:',
@@ -171,6 +176,11 @@ const ar: Record<ReportLabelKey, string> = {
   'col.department': 'القسم',
   'col.branch': 'الفرع',
   'col.employmentStatus': 'حالة التوظيف',
+  'col.employeeName': 'اسم الموظف',
+  'col.halfPresent': 'ن/ح',
+  'col.totalPresent': 'مج/حضور',
+  'col.totalLeave': 'مج/إجازة',
+  'col.totalAbsent': 'مج/غياب',
 
   'field.employee': 'الموظف:',
   'field.cardNo': 'رقم البطاقة:',

@@ -19,6 +19,7 @@ import { useBranchOptions, useDepartmentOptions } from '@/features/organization/
 import { blankToUndefined } from '@/features/organization/form-utils';
 import { toastJobQueued } from '@/features/employees/job-toast';
 import { useShiftOptions } from '@/features/schedule/api';
+import { useLeaveTypes } from '@/features/leave/api';
 import { EmployeeMultiSelect } from '@/features/attendance/components/employee-multi-select';
 import { useReportMutations, useReportTypes, type ReportTypeDef } from '../api';
 
@@ -41,6 +42,7 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
   const branches = useBranchOptions();
   const shifts = useShiftOptions(true);
   const devices = useDeviceOptions();
+  const leaveTypes = useLeaveTypes();
   const params = useMemo(() => new Set([...def.requiredParameters, ...def.optionalParameters]), [def]);
   const required = useMemo(() => new Set(def.requiredParameters), [def]);
   // Same contract schema the API validates, plus the catalogue's required parameters for this report type.
@@ -51,7 +53,8 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
   const today = todayIso(tz);
   const form = useForm<FormValues, unknown, CreateReportRequest>({
     resolver: zodResolver(schema),
-    defaultValues: { reportType: def.key, format: def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: today.slice(0, 8) + '01', to: today } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}) } },
+    // the catalogue names the format its layout was designed for (the sample reports are print documents → PDF)
+    defaultValues: { reportType: def.key, format: def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: params.has('to') ? today.slice(0, 8) + '01' : today, ...(params.has('to') ? { to: today } : {}) } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}), ...(params.has('employmentStatus') ? { employmentStatus: 'active' as const } : {}) } },
   });
   const { register, control, formState: { errors, isSubmitting } } = form;
   const branchId = useWatch({ control, name: 'parameters.branchId' });
@@ -79,6 +82,17 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
         </FormField> : null}
         {params.has('departmentId') ? <FormField label={tc('common.department')} htmlFor="rp-dept" optional error={pErr?.['departmentId']?.message}>
           <Controller control={control} name="parameters.departmentId" render={({ field }) => <Combobox id="rp-dept" value={field.value ?? null} onChange={(v) => field.onChange(v ?? undefined)} options={departments.options} loading={departments.isLoading} clearable placeholder={t('request.allDepartments')} />} />
+        </FormField> : null}
+        {params.has('leaveTypeCode') ? <FormField label={t('request.leaveType')} htmlFor="rp-leave-type" required={required.has('leaveTypeCode')} optional={!required.has('leaveTypeCode')} error={pErr?.['leaveTypeCode']?.message}>
+          <Controller control={control} name="parameters.leaveTypeCode" render={({ field }) => <Combobox id="rp-leave-type" value={field.value ?? null} onChange={(v) => field.onChange(v ?? undefined)} options={(leaveTypes.data ?? []).filter((l) => l.status === 'active').map((l) => ({ value: l.code, label: l.name, description: l.code }))} loading={leaveTypes.isLoading} placeholder={t('request.pickLeaveType')} aria-invalid={!!pErr?.['leaveTypeCode']} />} />
+        </FormField> : null}
+        {params.has('employmentStatus') ? <FormField label={t('request.employmentStatus')} htmlFor="rp-emp-status" optional error={pErr?.['employmentStatus']?.message}>
+          <Controller control={control} name="parameters.employmentStatus" render={({ field }) => (
+            <Select value={field.value ?? 'active'} onValueChange={field.onChange}>
+              <SelectTrigger id="rp-emp-status"><SelectValue /></SelectTrigger>
+              <SelectContent>{(['active', 'inactive', 'all'] as const).map((v) => <SelectItem key={v} value={v}>{t(`request.employmentStatuses.${v}`)}</SelectItem>)}</SelectContent>
+            </Select>
+          )} />
         </FormField> : null}
         {params.has('shiftId') ? <FormField label={t('request.shift')} htmlFor="rp-shift" optional error={pErr?.['shiftId']?.message}>
           <Controller control={control} name="parameters.shiftId" render={({ field }) => <Combobox id="rp-shift" value={field.value ?? null} onChange={(v) => field.onChange(v ?? undefined)} options={shifts.options} loading={shifts.isLoading} clearable placeholder={t('request.allShifts')} />} />
