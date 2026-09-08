@@ -30,9 +30,12 @@ primary_region = "sin"
   SCHEDULER_ENABLED = "true"
   API_PUBLIC_URL = "https://time-api.flowza.ai"
   WEB_PUBLIC_URL = "https://time.flowza.ai"
-  # Notifications are written to the outbox either way; "console" logs instead of sending, so invited users receive
-  # nothing until this is switched to "resend" and RESEND_API_KEY is set.
-  EMAIL_PROVIDER = "console"
+  # Sends through Resend on the verified time.flowza.ai domain. Requires RESEND_API_KEY as a Fly secret; without it
+  # createMailer falls back to console and warns loudly at boot rather than failing silently.
+  #
+  # This governs the WORKER's own notifications only (device offline, report ready). Supabase sends confirmation,
+  # password-reset and magic-link mail through its own SMTP settings — a separate path with a separate credential.
+  EMAIL_PROVIDER = "resend"
   EMAIL_FROM = "FlowZa Time <no-reply@time.flowza.ai>"
 
 [[vm]]

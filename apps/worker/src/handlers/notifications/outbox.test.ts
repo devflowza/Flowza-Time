@@ -22,7 +22,9 @@ beforeAll(async () => {
     { organizationId: ORG, userId: OWNER, roleId: '10000000-0000-0000-0000-000000000001', status: 'active', allBranches: true },
     { organizationId: ORG, userId: EMP_USER, roleId: '10000000-0000-0000-0000-000000000008', status: 'active', allBranches: true },
   ]).execute();
-  await a.insertInto('notificationPreferences').values({ userId: OWNER, organizationId: ORG, category: 'DEVICE', channel: 'EMAIL', enabled: true }).execute();
+  // No DEVICE row on purpose: absent must mean enabled, or the channel is unreachable (nothing in the application
+  // writes notification_preferences). ATTENDANCE is explicitly off, to prove a stored row still overrides the default.
+  await a.insertInto('notificationPreferences').values({ userId: OWNER, organizationId: ORG, category: 'ATTENDANCE', channel: 'EMAIL', enabled: false }).execute();
   await a.insertInto('devices').values({ id: DEVICE, organizationId: ORG, branchId: BRANCH, code: 'D1', name: 'Gate', providerKey: 'mock', manufacturer: 'FlowZa', integrationType: 'VENDOR_CLOUD_PULL' }).execute();
 });
 afterAll(async () => { await h?.close(); });
@@ -42,7 +44,9 @@ describe('outbox relay', () => {
     expect(notifs.filter((n) => n.userId === OWNER).map((n) => n.type).sort()).toEqual(['device.offline', 'sync.failed']);
     expect(notifs.filter((n) => n.userId === EMP_USER)).toHaveLength(0);
     const deliveries = await a.selectFrom('notificationDeliveries').select(['channel', 'status']).execute();
-    expect(deliveries).toEqual([{ channel: 'EMAIL', status: 'pending' }]); // only DEVICE category has an email preference
+    // device.offline has no preference row and still queues (absent = enabled); sync.failed has one set to false and
+    // does not — so this single row proves the default and the override at the same time.
+    expect(deliveries).toEqual([{ channel: 'EMAIL', status: 'pending' }]);
     expect(h.published.map((p) => p.channel).sort()).toEqual([`org:${ORG}:devices`, `org:${ORG}:sync`]);
     expect((h.published.find((p) => p.channel.endsWith(':devices'))!.payload as { count: number }).count).toBe(2);
     const unpublished = await a.selectFrom('domainEvents').select('id').where('publishedAt', 'is', null).execute();
