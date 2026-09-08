@@ -31,7 +31,7 @@ describe('ReportRequestPanel', () => {
     const onQueued = vi.fn();
     renderWithProviders(<ReportRequestPanel onQueued={onQueued} />);
     expect(await screen.findByRole('radio', { name: /Staff Late Attendance Report/ })).toBeEnabled();
-    expect(screen.getByRole('radio', { name: /Audit log/ })).toBeDisabled();
+    expect(screen.getByRole('radio', { name: /Audit Trail Report/ })).toBeDisabled();
     expect(screen.getByText('Select a report type to set its parameters.')).toBeInTheDocument();
 
     fireEvent.click(screen.getByRole('radio', { name: /Staff Late Attendance Report/ }));

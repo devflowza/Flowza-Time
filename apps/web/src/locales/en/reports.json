@@ -60,8 +60,8 @@
       "description": "Connection status, heartbeats and offline periods per device."
     },
     "audit_report": {
-      "name": "Audit log",
-      "description": "Audit trail export for a date range."
+      "name": "Audit Trail Report",
+      "description": "Who changed what: attendance edits with old and new values, or the full audit log for the period."
     },
     "payroll_summary": {
       "name": "Payroll summary",
@@ -119,6 +119,11 @@
       "active": "Active employees",
       "inactive": "Inactive employees",
       "all": "All employees"
+    },
+    "scope": "Scope",
+    "scopes": {
+      "attendance": "Attendance edits (In/Out time, attendance code)",
+      "all": "Entire audit log"
     }
   },
   "list": {
