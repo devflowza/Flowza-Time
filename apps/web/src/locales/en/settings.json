@@ -9,7 +9,8 @@
     "sync": "Sync",
     "notifications": "Notifications",
     "security": "Security",
-    "subscription": "Subscription"
+    "subscription": "Subscription",
+    "reports": "Reports"
   },
   "orgStatus": {
     "trial": "Trial",
@@ -168,6 +169,31 @@
       "branches": "Branches",
       "users": "Users",
       "retentionDays": "Retention (days)"
+    }
+  },
+  "reports": {
+    "title": "Reports",
+    "hint": "How generated reports print hours and attendance codes. Applies to every report this organisation produces.",
+    "hoursNotation": "Hours notation",
+    "hoursNotationHint": "Tot Hrs, OT and UT columns. 9.45 means nine hours forty-five minutes.",
+    "notation": {
+      "h.mm": "9.45 = 9 h 45 min (hours.minutes)",
+      "hh:mm": "9:45 (hours:minutes)"
+    },
+    "defaultFormat": "Default format",
+    "defaultFormatHint": "Pre-selected when a report is requested.",
+    "showLegend": "Print the attendance-code legend",
+    "showLegendHint": "The \"NOTE : ATTENDANCE CODE\" footer under attendance reports.",
+    "codes": "Attendance codes",
+    "codesHint": "Leave days print the leave type’s own code; these cover the other statuses. Leave a box blank to keep the default shown.",
+    "code": {
+      "PRESENT": "Present",
+      "ABSENT": "Absent",
+      "WEEKLY_OFF": "Weekly off",
+      "HOLIDAY": "Holiday",
+      "HALF_DAY": "Half day present",
+      "HALF_DAY_LEAVE": "Half day leave",
+      "LEAVE": "Leave (type unknown)"
     }
   }
 }

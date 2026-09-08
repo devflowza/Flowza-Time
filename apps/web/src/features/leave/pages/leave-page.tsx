@@ -94,7 +94,7 @@ function TypesTab() {
   const can = useCan();
   const canManage = can('leave.manage');
   const q = useLeaveTypes();
-  const { updateType, removeType } = useLeaveMutations();
+  const { updateType, removeType, seedDefaults } = useLeaveMutations();
   const [dialog, setDialog] = useState<{ open: boolean; leaveType: LeaveTypeDto | null }>({ open: false, leaveType: null });
   const [deleting, setDeleting] = useState<LeaveTypeDto | null>(null);
   return (
@@ -103,7 +103,7 @@ function TypesTab() {
       <div className="rounded-lg border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
           : q.isLoading ? <TableSkeleton cols={4} rows={3} />
-          : !q.data || q.data.length === 0 ? <div className="p-4"><EmptyState icon={CalendarOff} title={t('types.empty')} description={t('types.emptyHint')} action={canManage ? <Button onClick={() => setDialog({ open: true, leaveType: null })}><Plus /> {t('types.add')}</Button> : undefined} /></div>
+          : !q.data || q.data.length === 0 ? <div className="p-4"><EmptyState icon={CalendarOff} title={t('types.empty')} description={t('types.emptyHint')} action={canManage ? <div className="flex flex-wrap justify-center gap-2"><Button onClick={() => seedDefaults.mutate(undefined, { onSuccess: (r) => toast.success(t('types.seeded', { count: r.created.length })), onError: toastError })} loading={seedDefaults.isPending}>{t('types.seed')}</Button><Button variant="outline" onClick={() => setDialog({ open: true, leaveType: null })}><Plus /> {t('types.add')}</Button></div> : undefined} /></div>
           : (
             <Table>
               <TableHeader><TableRow><TableHead>{tc('common.code')}</TableHead><TableHead>{tc('common.name')}</TableHead><TableHead>{t('fields.isPaid')}</TableHead><TableHead>{tc('common.status')}</TableHead><TableHead className="text-end">{tc('common.actions')}</TableHead></TableRow></TableHeader>

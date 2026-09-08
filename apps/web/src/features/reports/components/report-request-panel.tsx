@@ -73,7 +73,7 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
     <form onSubmit={onSubmit} className="space-y-4" noValidate data-testid="report-form">
       <div className="grid gap-4 sm:grid-cols-2">
         {params.has('from') ? <>
-          <FormField label={tc('common.from')} htmlFor="rp-from" required={required.has('from')} error={pErr?.['from']?.message}><Input id="rp-from" type="date" dir="ltr" {...register('parameters.from', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['from']} /></FormField>
+          <FormField label={params.has('to') ? tc('common.from') : def.key.startsWith('weekly') ? t('request.weekOf') : tc('common.date')} htmlFor="rp-from" required={required.has('from')} error={pErr?.['from']?.message}><Input id="rp-from" type="date" dir="ltr" {...register('parameters.from', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['from']} /></FormField>
           {params.has('to') ? <FormField label={tc('common.to')} htmlFor="rp-to" required={required.has('to')} error={pErr?.['to']?.message}><Input id="rp-to" type="date" dir="ltr" {...register('parameters.to', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['to']} /></FormField> : null}
         </> : null}
         {params.has('month') ? <FormField label={t('request.month')} htmlFor="rp-month" required={required.has('month')} error={pErr?.['month']?.message}><Input id="rp-month" type="month" dir="ltr" {...register('parameters.month', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['month']} /></FormField> : null}

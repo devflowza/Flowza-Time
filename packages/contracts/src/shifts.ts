@@ -73,8 +73,25 @@ export const leaveTypeInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
   nameAr: z.string().trim().max(120).optional(),
   isPaid: z.boolean().default(true),
+  /** A paid day away from the terminal that reports count with present days (Site Duty), not with leave. */
+  treatAsPresent: z.boolean().default(false),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
 });
+
+/**
+ * Default leave types for a new organisation (GCC practice; decision #3 of the reports plan). Codes are what the
+ * attendance reports print in place of a leave day, so they are the two/three-letter codes payroll teams recognise.
+ */
+export const DEFAULT_LEAVE_TYPES: ReadonlyArray<{ code: string; name: string; nameAr: string; isPaid: boolean; treatAsPresent: boolean; color: string }> = [
+  { code: 'AL', name: 'Annual Leave', nameAr: 'إجازة سنوية', isPaid: true, treatAsPresent: false, color: '#175cd3' },
+  { code: 'CL', name: 'Casual Leave', nameAr: 'إجازة عرضية', isPaid: true, treatAsPresent: false, color: '#0e7490' },
+  { code: 'SL', name: 'Sick Leave', nameAr: 'إجازة مرضية', isPaid: true, treatAsPresent: false, color: '#b54708' },
+  { code: 'EL', name: 'Emergency Leave', nameAr: 'إجازة طارئة', isPaid: true, treatAsPresent: false, color: '#b42318' },
+  { code: 'SPL', name: 'Special Leave', nameAr: 'إجازة خاصة', isPaid: true, treatAsPresent: false, color: '#7a2e9d' },
+  { code: 'ML', name: 'Maternity Leave', nameAr: 'إجازة أمومة', isPaid: true, treatAsPresent: false, color: '#c11574' },
+  { code: 'NP', name: 'No Pay Leave', nameAr: 'إجازة بدون راتب', isPaid: false, treatAsPresent: false, color: '#475467' },
+  { code: 'SD', name: 'Site Duty', nameAr: 'مهمة عمل خارجية', isPaid: true, treatAsPresent: true, color: '#0f6e56' },
+];
 
 export const leaveRecordInputSchema = z.object({
   employeeId: uuidSchema,

@@ -100,5 +100,5 @@ each becomes a one-file follow-up on this engine.
 - [x] Phase 1 — `employee_attendance`, `monthly_attendance`, `absence_report`, `late_report`, `missing_punch_report`
 - [x] Phase 2 — `attendance_summary`, `weekly_attendance`, `weekly_in_out`, `leave_report`
 - [x] Phase 3 — `audit_report` attendance scope + PDF
-- [ ] Phase 4 — web parameter forms (week, leave type, status, scope), Settings → Reports, leave-type seeding
+- [x] Phase 4 — web parameter forms (week, leave type, status, scope), Settings → Reports, leave-type seeding
 - [ ] Phase 5 — hardening (streaming, cell cap), golden renders in CI, reports worker deployed, docs and go-live

@@ -94,3 +94,26 @@ describe('payroll', () => {
     expect((await h.request('GET', `${base()}/payroll/summaries?periodStart=2026-07-01&periodEnd=2026-07-31`, { token: f.branchManagerB })).status).toBe(403);
   });
 });
+
+describe('leave type defaults', () => {
+  it('seeds the GCC default set once, marks Site Duty as counting for presence, and leaves existing codes alone', async () => {
+    await h.admin.insertInto('leaveTypes').values({ organizationId: f.orgId, code: 'AL', name: 'Annual (custom)', isPaid: true }).execute();
+    const first = await h.request('POST', `${base()}/leave-types/seed-defaults`, { token: f.hrAdmin });
+    expect(first.status).toBe(201);
+    expect(first.body.data.created.sort()).toEqual(['CL', 'EL', 'ML', 'NP', 'SD', 'SL', 'SPL']);
+    const types = first.body.data.leaveTypes as Array<{ code: string; name: string; isPaid: boolean; treatAsPresent: boolean }>;
+    expect(types.find((t) => t.code === 'AL')?.name).toBe('Annual (custom)'); // untouched
+    expect(types.find((t) => t.code === 'SD')).toMatchObject({ isPaid: true, treatAsPresent: true });
+    expect(types.find((t) => t.code === 'NP')).toMatchObject({ isPaid: false, treatAsPresent: false });
+    const again = await h.request('POST', `${base()}/leave-types/seed-defaults`, { token: f.hrAdmin });
+    expect(again.body.data.created).toEqual([]);
+    expect((await h.request('POST', `${base()}/leave-types/seed-defaults`, { token: f.payrollUser })).status).toBe(403);
+    // a leave report may now be requested for one of them (case-insensitively); an unknown code is refused. The quota test
+    // above spends the organisation's hourly allowance, so it is reset first — this test is about leave types, not quotas.
+    await h.admin.deleteFrom('usageQuotas').where('organizationId', '=', f.orgId).execute();
+    const ok = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'leave_report', parameters: { from: '2026-08-01', to: '2026-08-31', leaveTypeCode: 'sl' } } });
+    expect([ok.status, ok.body.code ?? null, ok.body.message ?? null, ok.body.details ?? null]).toEqual([202, null, null, null]);
+    expect(ok.body.data.parameters.leaveTypeCode).toBe('SL');
+    expect((await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'leave_report', parameters: { from: '2026-08-01', to: '2026-08-31', leaveTypeCode: 'XX' } } })).status).toBe(400);
+  });
+});

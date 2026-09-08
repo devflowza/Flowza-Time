@@ -124,7 +124,8 @@
     "scopes": {
       "attendance": "Attendance edits (In/Out time, attendance code)",
       "all": "Entire audit log"
-    }
+    },
+    "weekOf": "Week containing"
   },
   "list": {
     "title": "My reports",

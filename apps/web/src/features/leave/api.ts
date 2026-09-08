@@ -34,8 +34,9 @@ export function useLeaveMutations() {
   const createType = useMutation({ mutationFn: async (input: LeaveTypeInput) => (await api.post<Envelope<LeaveTypeDto>>(`/orgs/${orgId}/leave-types`, input)).data, onSuccess: invTypes });
   const updateType = useMutation({ mutationFn: async ({ id, input }: { id: string; input: Partial<LeaveTypeInput> & { status?: string } }) => (await api.patch<Envelope<LeaveTypeDto>>(`/orgs/${orgId}/leave-types/${id}`, input)).data, onSuccess: invTypes });
   const removeType = useMutation({ mutationFn: (id: string) => api.delete<void>(`/orgs/${orgId}/leave-types/${id}`), onSuccess: invTypes });
+  const seedDefaults = useMutation({ mutationFn: async () => (await api.post<Envelope<{ created: string[]; leaveTypes: LeaveTypeDto[] }>>(`/orgs/${orgId}/leave-types/seed-defaults`)).data, onSuccess: invTypes });
   const createRecord = useMutation({ mutationFn: async (input: LeaveRecordInput) => (await api.post<Envelope<WithRecalc<LeaveRecordDto>>>(`/orgs/${orgId}/leave-records`, input)).data, onSuccess: invRecords });
   const updateRecord = useMutation({ mutationFn: async ({ id, input }: { id: string; input: UpdateLeaveRecordInput }) => (await api.patch<Envelope<WithRecalc<LeaveRecordDto>>>(`/orgs/${orgId}/leave-records/${id}`, input)).data, onSuccess: invRecords });
   const cancelRecord = useMutation({ mutationFn: async (id: string) => (await api.delete<Envelope<{ recalculationJobId: string | null }>>(`/orgs/${orgId}/leave-records/${id}`)).data, onSuccess: invRecords });
-  return { createType, updateType, removeType, createRecord, updateRecord, cancelRecord };
+  return { createType, updateType, removeType, seedDefaults, createRecord, updateRecord, cancelRecord };
 }
