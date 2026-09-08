@@ -929,6 +929,7 @@ export interface LeaveTypes {
   nameAr: string | null;
   organizationId: string;
   status: Generated<RecordStatus>;
+  treatAsPresent: Generated<boolean>;
 }
 
 export interface LoginHistory {
@@ -1021,6 +1022,7 @@ export interface OrganizationSettings {
   integrations: Generated<Json>;
   notifications: Generated<Json>;
   organizationId: string;
+  reports: Generated<Json>;
   security: Generated<Json>;
   sync: Generated<Json>;
   updatedAt: Generated<Timestamp>;

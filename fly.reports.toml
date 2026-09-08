@@ -1,0 +1,42 @@
+# FlowZa Time — reports worker (apps/worker, reports queue only). Deploy from the repository root:
+#   flyctl apps create flowza-time-reports --org <org>        # once
+#   flyctl secrets set --app flowza-time-reports DATABASE_URL_WORKER=... FLOWZA_CREDENTIALS_MASTER_KEYS=... SUPABASE_URL=... SUPABASE_SERVICE_ROLE_KEY=...
+#   flyctl deploy --config fly.reports.toml --remote-only --ha=false
+#
+# Why a second worker app: PDF reports render in headless Chromium, which adds ~250 MB to the image and 200–400 MB of
+# peak memory per render. The general worker (fly.worker.toml) is a 512 MB machine that must never be starved of
+# memory while it syncs devices, so reports run here, alone, on 1 GB. Same image, same code; this machine simply
+# consumes only the `reports` queue and is built with Chromium and the Noto fonts (Latin + Arabic).
+#
+# Once this app is live, remove `reports` from WORKER_QUEUES in fly.worker.toml so the two never race for the same jobs
+# (they would not corrupt anything — the queue locks each job — but the general worker would fail every PDF with
+# "PDF rendering is not available on this worker").
+#
+# Secrets are NOT in this file. The same secrets as the general worker, except RESEND_API_KEY (this worker sends no mail).
+
+app = "flowza-time-reports"
+primary_region = "sin"
+
+[build]
+  dockerfile = "apps/worker/Dockerfile"
+  [build.args]
+    WITH_CHROMIUM = "1"
+
+[env]
+  NODE_ENV = "production"
+  LOG_LEVEL = "info"
+  DATABASE_POOL_MAX = "4"
+  WORKER_CONCURRENCY = "2"
+  WORKER_QUEUES = "reports"
+  WORKER_PER_ORG_CONCURRENCY = "1"
+  # The general worker is the scheduler; this one only consumes.
+  SCHEDULER_ENABLED = "false"
+  EMAIL_PROVIDER = "console"
+  API_PUBLIC_URL = "https://time-api.flowza.ai"
+  WEB_PUBLIC_URL = "https://time.flowza.ai"
+  CHROMIUM_PATH = "/usr/bin/chromium-browser"
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "1gb"
+  count = 1

@@ -3,6 +3,7 @@ import { registerMaintenanceHandlers } from './maintenance/index.js';
 import { registerNotificationHandlers } from './notifications/outbox.js';
 import { registerAttendanceHandlers } from './attendance/index.js';
 import { registerSyncHandlers } from './sync/index.js';
+import { registerReportHandlers } from './reports/index.js';
 
 /**
  * Registers every job handler. Handler modules live in ./<area>/ and export `register<Area>Handlers(registry)`:
@@ -10,7 +11,7 @@ import { registerSyncHandlers } from './sync/index.js';
  *   notifications (RELAY_OUTBOX, DELIVER_NOTIFICATIONS)
  *   sync (PULL_ATTENDANCE, PUSH_EMPLOYEE(S), PULL_EMPLOYEES, DEVICE_HEALTH_CHECK, RECONCILIATION, TEST_CONNECTION, DELETE_EMPLOYEE, WEBHOOK_EVENT)
  *   attendance (NORMALIZE_RAW, RECOMPUTE_DAILY, RECALCULATE_RANGE, BUILD_PERIOD_SUMMARY)
- *   reports (GENERATE_REPORT, EXPORT_EMPLOYEES), imports (EXECUTE_IMPORT)
+ *   reports (GENERATE_REPORT, EXPORT_EMPLOYEES) — see ./reports and docs/reports.md
  */
 export function buildHandlerRegistry(): HandlerRegistry {
   const registry = new HandlerRegistry();
@@ -18,5 +19,6 @@ export function buildHandlerRegistry(): HandlerRegistry {
   registerNotificationHandlers(registry);
   registerAttendanceHandlers(registry);
   registerSyncHandlers(registry);
+  registerReportHandlers(registry);
   return registry;
 }

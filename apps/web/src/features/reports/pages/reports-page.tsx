@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import { Ban, Download, RefreshCw, X } from 'lucide-react';
-import { REPORT_STATUSES, REPORT_TYPES } from '@flowza/contracts';
+import { REPORT_STATUSES } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
 import { Badge, Button, ConfirmDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
@@ -11,7 +11,7 @@ import { fmtDate, fmtDateTime, fmtNumber } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { JobStatusBadge } from '@/features/attendance/components/badges';
-import { openSignedUrl, useReportMutations, useReports, type ReportDto } from '../api';
+import { openSignedUrl, useReportMutations, useReports, useReportTypes, type ReportDto } from '../api';
 import { ReportRequestPanel } from '../components/report-request-panel';
 
 const ALL = '__all__';
@@ -35,6 +35,7 @@ export default function ReportsPage() {
   const f = table.state.filters;
   const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize, status: f['status'], reportType: f['reportType'] }), [table.state.page, table.state.pageSize, f]);
   const q = useReports(query);
+  const types = useReportTypes();
   const { cancel, download } = useReportMutations();
   const [cancelling, setCancelling] = useState<ReportDto | null>(null);
   const hasFilters = !!f['status'] || !!f['reportType'];
@@ -80,7 +81,7 @@ export default function ReportsPage() {
               </Select>
               <Select value={f['reportType'] ?? ALL} onValueChange={(v) => table.setFilter('reportType', v === ALL ? undefined : v)}>
                 <SelectTrigger className="h-8 w-48" aria-label={t('list.type')}><SelectValue /></SelectTrigger>
-                <SelectContent><SelectItem value={ALL}>{t('list.allTypes')}</SelectItem>{REPORT_TYPES.map((s) => <SelectItem key={s} value={s}>{t(`types.${s}.name`)}</SelectItem>)}</SelectContent>
+                <SelectContent><SelectItem value={ALL}>{t('list.allTypes')}</SelectItem>{(types.data ?? []).map((d) => <SelectItem key={d.key} value={d.key}>{t(`types.${d.key}.name`, { defaultValue: d.name })}</SelectItem>)}</SelectContent>
               </Select>
               {hasFilters ? <Button variant="ghost" size="sm" onClick={table.clearFilters}><X /> {tc('common.clearFilters')}</Button> : null}
             </>

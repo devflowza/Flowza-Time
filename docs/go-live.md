@@ -232,6 +232,24 @@ draining it.
 
 ---
 
+## 3b. Deploy the reports worker (PDF reports)
+
+PDF reports render in headless Chromium, which the general worker is deliberately built without (512 MB, device sync must
+never be starved). A second Fly app runs the same image with Chromium and the Noto fonts, consuming only the `reports`
+queue. Until it exists, CSV/XLSX reports work from the general worker and PDF requests fail with "PDF rendering is not
+available on this worker". See `docs/reports.md` and the comments in `fly.reports.toml`.
+
+```bash
+flyctl apps create flowza-time-reports --org <your fly org>          # once
+# same secrets as the general worker, minus RESEND_API_KEY (this worker sends no mail)
+flyctl secrets set --app flowza-time-reports   DATABASE_URL_WORKER='...' FLOWZA_CREDENTIALS_MASTER_KEYS='...' SUPABASE_URL='...' SUPABASE_SERVICE_ROLE_KEY='...'
+flyctl deploy --config fly.reports.toml --remote-only --ha=false
+flyctl logs --app flowza-time-reports    # expect worker_started with queues: ["reports"]
+```
+
+Then remove `reports` from `WORKER_QUEUES` in `fly.worker.toml` and redeploy the general worker, so the two apps do not
+compete for the same jobs. Verify: request a PDF report from Reports → it reaches COMPLETED and downloads.
+
 ## 4. Point the web app at the API
 
 `VITE_*` values are inlined **at build time**, so this needs a rebuild, not a restart.

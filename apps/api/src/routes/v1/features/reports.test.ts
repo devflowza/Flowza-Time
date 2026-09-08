@@ -11,16 +11,22 @@ describe('reports', () => {
   it('lists report types with permission hints and validates requests', async () => {
     const types = await h.request('GET', `/api/v1/report-types?orgId=${f.orgId}`, { token: f.payrollUser });
     expect(types.status).toBe(200);
-    expect(types.body.data.find((t: { key: string }) => t.key === 'payroll_summary').allowed).toBe(true);
-    expect(types.body.data.find((t: { key: string }) => t.key === 'audit_report').allowed).toBe(false);
-    const missing = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'late_report', parameters: { from: '2026-08-01' } } });
+    expect(types.body.data.find((t: { key: string }) => t.key === 'daily_attendance').allowed).toBe(true);
+    // planned types (no generator yet) are not offered at all — offering them queued jobs that could only dead-letter
+    expect(types.body.data.find((t: { key: string }) => t.key === 'payroll_summary')).toBeUndefined();
+    expect(types.body.data.every((t: { status: string }) => t.status === 'available')).toBe(true);
+    const asEmployee = await h.request('GET', `/api/v1/report-types?orgId=${f.orgId}`, { token: f.employeeUser });
+    expect(asEmployee.body.data.find((t: { key: string }) => t.key === 'daily_attendance').allowed).toBe(false);
+    const missing = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'daily_attendance', parameters: {} } });
     expect(missing.status).toBe(400);
-    const noPerm = await h.request('POST', `${base()}/reports`, { token: f.hrUser, body: { reportType: 'audit_report', parameters: { from: '2026-08-01', to: '2026-08-31' } } });
+    const planned = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'late_report', parameters: { from: '2026-08-01', to: '2026-08-31' } } });
+    expect(planned.status).toBe(400);
+    const noPerm = await h.request('POST', `${base()}/reports`, { token: f.employeeUser, body: { reportType: 'daily_attendance', parameters: { from: '2026-08-01' } } });
     expect(noPerm.status).toBe(403);
   });
 
   it('queues GENERATE_REPORT, injects branch scope for restricted callers and gates download on COMPLETED', async () => {
-    const r = await h.request('POST', `${base()}/reports`, { token: f.branchManagerB, body: { reportType: 'late_report', format: 'csv', parameters: { from: '2026-08-01', to: '2026-08-31' } } });
+    const r = await h.request('POST', `${base()}/reports`, { token: f.branchManagerB, body: { reportType: 'daily_attendance', format: 'csv', parameters: { from: '2026-08-01' } } });
     expect(r.status).toBe(202);
     expect(r.body.data.status).toBe('QUEUED');
     expect(r.body.data.parameters.branchId).toBe(f.branchB);
@@ -28,7 +34,7 @@ describe('reports', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0]!.queueName).toBe('reports');
     expect(jobs[0]!.payload).toEqual({ organizationId: f.orgId, reportRequestId: r.body.data.id });
-    const widen = await h.request('POST', `${base()}/reports`, { token: f.branchManagerB, body: { reportType: 'late_report', parameters: { from: '2026-08-01', to: '2026-08-31', branchId: f.branchA } } });
+    const widen = await h.request('POST', `${base()}/reports`, { token: f.branchManagerB, body: { reportType: 'daily_attendance', parameters: { from: '2026-08-01', branchId: f.branchA } } });
     expect(widen.status).toBe(403);
     const early = await h.request('GET', `${base()}/reports/${r.body.data.id}/download`, { token: f.branchManagerB });
     expect(early.status).toBe(409);

@@ -19,7 +19,8 @@ export const REPORTS_PER_HOUR = 20;
 
 export function listReportTypes(actor: Actor, orgId: string | undefined): (ReportTypeDefinition & { allowed: boolean | null })[] {
   const grant = orgId ? actor.principal.memberships.find((m) => m.organizationId === orgId) : undefined;
-  return REPORT_TYPE_DEFINITIONS.map((d) => ({ ...d, allowed: grant ? d.permissions.every((p) => hasPermission(grant, p)) : null }));
+  // planned types have no generator yet; listing them would invite requests that can only sit at QUEUED
+  return REPORT_TYPE_DEFINITIONS.filter((d) => d.status === 'available').map((d) => ({ ...d, allowed: grant ? d.permissions.every((p) => hasPermission(grant, p)) : null }));
 }
 
 /** Sliding hourly quota per organisation (usage_quotas, system-owned rows) → RATE_LIMITED above REPORTS_PER_HOUR. */
@@ -39,6 +40,7 @@ export async function createReport(deps: ApiDeps, actor: Actor, orgId: string, i
   const grant = requirePermission(actor.principal, orgId, 'report.view');
   const def = REPORT_TYPE_DEFINITIONS.find((d) => d.key === input.reportType);
   if (!def) throw errors.validation('Unknown report type.');
+  if (def.status !== 'available') throw errors.validation('This report type is not available yet.', { reportType: def.key });
   for (const p of def.permissions) if (!hasPermission(grant, p)) throw errors.forbidden(`Missing permission: ${p}.`);
   if (!def.formats.includes(input.format)) throw errors.validation(`Format ${input.format} is not available for ${def.key}.`, { formats: def.formats });
   const missing = def.requiredParameters.filter((p) => (input.parameters as Record<string, unknown>)[p] === undefined);

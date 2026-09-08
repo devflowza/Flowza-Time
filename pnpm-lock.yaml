@@ -274,6 +274,9 @@ importers:
       pino:
         specifier: ^10.3.1
         version: 10.3.1
+      playwright-core:
+        specifier: 1.63.0
+        version: 1.63.0
       resend:
         specifier: ^6.26.0
         version: 6.26.0

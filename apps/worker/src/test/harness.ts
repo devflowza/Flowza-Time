@@ -4,7 +4,7 @@ import type { ProviderRegistry } from '@flowza/device-providers';
 import type { WorkerDeps } from '../deps.js';
 import type { WorkerConfig } from '../config.js';
 
-export interface TestHarness { tdb: TestDatabase; deps: WorkerDeps; published: Array<{ channel: string; event: string; payload: Record<string, unknown> }>; emails: Array<{ to: string; subject: string }>; close(): Promise<void> }
+export interface TestHarness { tdb: TestDatabase; deps: WorkerDeps; files: Map<string, Buffer>; published: Array<{ channel: string; event: string; payload: Record<string, unknown> }>; emails: Array<{ to: string; subject: string }>; close(): Promise<void> }
 
 export async function createHarness(name: string, providers: ProviderRegistry, now = () => new Date()): Promise<TestHarness> {
   const tdb = await createTestDatabase(name);
@@ -26,9 +26,11 @@ export async function createHarness(name: string, providers: ProviderRegistry, n
       async download(bucket, path) { const b = mem.get(`${bucket}/${path}`); if (!b) throw new Error('not found'); return b; },
       async remove(bucket, paths) { for (const p of paths) mem.delete(`${bucket}/${p}`); },
     },
+    // The HTML is the artefact under test; Chromium is exercised by the image smoke test, not here.
+    pdf: { async render(html) { return Buffer.from(html, 'utf8'); } },
     now,
   };
-  return { tdb, deps, published, emails, close: () => tdb.close() };
+  return { tdb, deps, published, emails, files: mem, close: () => tdb.close() };
 }
 
 export function fakeJob(jobType: string, payload: Record<string, unknown> = {}, organizationId: string | null = null) {

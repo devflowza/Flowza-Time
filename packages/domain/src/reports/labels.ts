@@ -1,0 +1,213 @@
+/**
+ * Report vocabulary in both product locales. The worker renders files without the web app's i18next, so the strings a
+ * report prints — titles, column headings, the attendance-code legend, footer text — live here as plain data and are
+ * shared with the web catalogue through the contracts package's report definitions.
+ */
+export type ReportLocale = 'en' | 'ar';
+
+const en = {
+  'report.daily_attendance.title': 'Daily Report',
+  'report.employee_attendance.title': 'Detail Report',
+  'report.monthly_attendance.title': 'Monthly Attendance Report',
+  'report.attendance_summary.title': 'Summary Report',
+  'report.weekly_attendance.title': 'Weekly Report',
+  'report.weekly_in_out.title': 'Weekly In/Out Report',
+  'report.absence_report.title': 'Staff Absents Monthly Report',
+  'report.late_report.title': 'Staff Late Attendance Report',
+  'report.leave_report.title': 'Staff {{leaveType}} Report',
+  'report.missing_punch_report.title': 'Missed Punch Report',
+  'report.employee_directory.title': 'Employees Report',
+  'report.audit_report.title': 'Audit Trail Report',
+
+  'period.fromTo': 'From {{from}} To {{to}}',
+  'period.forPeriod': 'For the period : {{from}} to {{to}}',
+  'period.forThePeriod': 'For the Period : {{from}} To {{to}}',
+  'period.date': 'Date: {{from}} To {{to}}',
+  'period.week': 'For the Week: {{from}} - {{to}}',
+  'period.period': 'Period: {{from}} To {{to}}',
+
+  'group.department': 'Dept:',
+  'group.departmentPlain': 'Department',
+  'group.na': 'N/A',
+  'group.total': 'Total',
+  'group.endOfReport': 'End Of Report',
+
+  'col.sr': 'Sr#',
+  'col.empId': 'Emp ID',
+  'col.id': 'ID',
+  'col.empCode': 'Emp Code',
+  'col.empName': 'Emp Name',
+  'col.employeeCodeName': 'Employee Code & Name',
+  'col.cardNo': 'Card No.',
+  'col.designation': 'Desg',
+  'col.designationFull': 'Designation',
+  'col.attCode': 'Att Code',
+  'col.inTime': 'IN Time',
+  'col.outTime': 'OUT Time',
+  'col.workHrs': 'Wrk Hrs',
+  'col.workHrsFull': 'Work Hrs',
+  'col.totHrs': 'Tot Hrs',
+  'col.baseHrs': 'Base Hrs',
+  'col.ot1': 'OT1',
+  'col.ot2': 'OT2',
+  'col.ut': 'UT',
+  'col.date': 'Date',
+  'col.remarks': 'Remarks',
+  'col.hireDate': 'Hire Date',
+  'col.status': 'Status',
+  'col.shift': 'Shift',
+  'col.policy': 'Policy',
+  'col.dateOfMonth': 'Date of Month',
+  'col.noOfDays': 'No of Days',
+  'col.abs': 'Abs',
+  'col.mornWt': 'MornWT',
+  'col.evenWt': 'EvenWT',
+  'col.name': 'Name',
+  'col.keys': 'Key/Keys',
+  'col.editedField': 'Edited Field',
+  'col.oldValue': 'Old Value',
+  'col.newValue': 'New Value',
+  'col.editedBy': 'Edited by',
+  'col.editedOn': 'Edited On',
+  'col.department': 'Department',
+  'col.branch': 'Branch',
+  'col.employmentStatus': 'Employment status',
+
+  'field.employee': 'Employee:',
+  'field.cardNo': 'Card No:',
+  'field.shift': 'Shift:',
+  'field.dept': 'Dept:',
+  'field.designation': 'Designation:',
+
+  'status.active': 'Active',
+  'status.inactive': 'Inactive',
+
+  'legend.title': 'NOTE : ATTENDANCE CODE',
+  'code.PRESENT': 'Present',
+  'code.ABSENT': 'Absent',
+  'code.WEEKLY_OFF': 'OFF',
+  'code.HOLIDAY': 'Holiday',
+  'code.HALF_DAY': 'Half Day Present',
+  'code.HALF_DAY_LEAVE': 'Half Day Leave',
+
+  'footer.generated': 'Generated',
+  'footer.page': 'Page {{page}} of {{total}}',
+  'footer.rules': 'OT1 = regular overtime; OT2 = overtime on weekly off / holiday; UT = base hours not worked. Hours as {{notation}}.',
+  'notation.h.mm': 'hours.minutes (9.45 = 9 h 45 min)',
+  'notation.hh:mm': 'hours:minutes',
+
+  'field.inTime': 'In Time',
+  'field.outTime': 'Out Time',
+  'field.attendanceCode': 'Attendance Code',
+  'actor.system': 'system',
+} as const;
+
+export type ReportLabelKey = keyof typeof en;
+
+const ar: Record<ReportLabelKey, string> = {
+  'report.daily_attendance.title': 'التقرير اليومي',
+  'report.employee_attendance.title': 'التقرير التفصيلي',
+  'report.monthly_attendance.title': 'تقرير الحضور الشهري',
+  'report.attendance_summary.title': 'التقرير الموجز',
+  'report.weekly_attendance.title': 'التقرير الأسبوعي',
+  'report.weekly_in_out.title': 'تقرير الدخول والخروج الأسبوعي',
+  'report.absence_report.title': 'تقرير غياب الموظفين الشهري',
+  'report.late_report.title': 'تقرير تأخر الموظفين',
+  'report.leave_report.title': 'تقرير {{leaveType}} للموظفين',
+  'report.missing_punch_report.title': 'تقرير البصمات الناقصة',
+  'report.employee_directory.title': 'تقرير الموظفين',
+  'report.audit_report.title': 'تقرير سجل التعديلات',
+
+  'period.fromTo': 'من {{from}} إلى {{to}}',
+  'period.forPeriod': 'للفترة : {{from}} إلى {{to}}',
+  'period.forThePeriod': 'للفترة : {{from}} إلى {{to}}',
+  'period.date': 'التاريخ: {{from}} إلى {{to}}',
+  'period.week': 'للأسبوع: {{from}} - {{to}}',
+  'period.period': 'الفترة: {{from}} إلى {{to}}',
+
+  'group.department': 'القسم:',
+  'group.departmentPlain': 'القسم',
+  'group.na': 'غير محدد',
+  'group.total': 'المجموع',
+  'group.endOfReport': 'نهاية التقرير',
+
+  'col.sr': 'م',
+  'col.empId': 'رقم الموظف',
+  'col.id': 'الرقم',
+  'col.empCode': 'رمز الموظف',
+  'col.empName': 'اسم الموظف',
+  'col.employeeCodeName': 'رمز الموظف واسمه',
+  'col.cardNo': 'رقم البطاقة',
+  'col.designation': 'المسمى',
+  'col.designationFull': 'المسمى الوظيفي',
+  'col.attCode': 'رمز الحضور',
+  'col.inTime': 'وقت الدخول',
+  'col.outTime': 'وقت الخروج',
+  'col.workHrs': 'ساعات العمل',
+  'col.workHrsFull': 'ساعات العمل',
+  'col.totHrs': 'إجمالي الساعات',
+  'col.baseHrs': 'الساعات الأساسية',
+  'col.ot1': 'إضافي 1',
+  'col.ot2': 'إضافي 2',
+  'col.ut': 'نقص',
+  'col.date': 'التاريخ',
+  'col.remarks': 'ملاحظات',
+  'col.hireDate': 'تاريخ التعيين',
+  'col.status': 'الحالة',
+  'col.shift': 'الوردية',
+  'col.policy': 'السياسة',
+  'col.dateOfMonth': 'أيام الشهر',
+  'col.noOfDays': 'عدد الأيام',
+  'col.abs': 'غياب',
+  'col.mornWt': 'الدخول',
+  'col.evenWt': 'الخروج',
+  'col.name': 'الاسم',
+  'col.keys': 'المفتاح',
+  'col.editedField': 'الحقل المعدّل',
+  'col.oldValue': 'القيمة السابقة',
+  'col.newValue': 'القيمة الجديدة',
+  'col.editedBy': 'عدّله',
+  'col.editedOn': 'تاريخ التعديل',
+  'col.department': 'القسم',
+  'col.branch': 'الفرع',
+  'col.employmentStatus': 'حالة التوظيف',
+
+  'field.employee': 'الموظف:',
+  'field.cardNo': 'رقم البطاقة:',
+  'field.shift': 'الوردية:',
+  'field.dept': 'القسم:',
+  'field.designation': 'المسمى الوظيفي:',
+
+  'status.active': 'نشط',
+  'status.inactive': 'غير نشط',
+
+  'legend.title': 'ملاحظة : رموز الحضور',
+  'code.PRESENT': 'حاضر',
+  'code.ABSENT': 'غائب',
+  'code.WEEKLY_OFF': 'عطلة أسبوعية',
+  'code.HOLIDAY': 'عطلة رسمية',
+  'code.HALF_DAY': 'حضور نصف يوم',
+  'code.HALF_DAY_LEAVE': 'إجازة نصف يوم',
+
+  'footer.generated': 'أُنشئ في',
+  'footer.page': 'صفحة {{page}} من {{total}}',
+  'footer.rules': 'إضافي 1 = العمل الإضافي العادي؛ إضافي 2 = العمل الإضافي في العطل؛ نقص = الساعات الأساسية غير المعمولة. الساعات بصيغة {{notation}}.',
+  'notation.h.mm': 'ساعات.دقائق (9.45 = 9 س 45 د)',
+  'notation.hh:mm': 'ساعات:دقائق',
+
+  'field.inTime': 'وقت الدخول',
+  'field.outTime': 'وقت الخروج',
+  'field.attendanceCode': 'رمز الحضور',
+  'actor.system': 'النظام',
+};
+
+const CATALOGUE: Record<ReportLocale, Record<ReportLabelKey, string>> = { en, ar };
+
+/** Resolve a report label; `{{name}}` placeholders are filled from `vars`. Unknown keys return the key itself. */
+export function reportLabel(locale: ReportLocale, key: ReportLabelKey | string, vars: Record<string, string | number> = {}): string {
+  const table = CATALOGUE[locale] ?? en;
+  const raw = (table as Record<string, string>)[key] ?? (en as Record<string, string>)[key] ?? key;
+  return raw.replace(/\{\{(\w+)\}\}/g, (_m, name: string) => (vars[name] === undefined ? '' : String(vars[name])));
+}
+
+export const REPORT_LOCALES: readonly ReportLocale[] = ['en', 'ar'];

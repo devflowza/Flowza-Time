@@ -26,6 +26,11 @@ const schema = z.object({
   EMAIL_FROM: z.string().default('FlowZa Time <no-reply@flowza.example>'),
   API_PUBLIC_URL: z.string().default('http://localhost:4000'),
   WEB_PUBLIC_URL: z.string().default('http://localhost:5173'),
+  /**
+   * Chromium binary for PDF reports (apps/worker/Dockerfile.reports installs Alpine's at /usr/bin/chromium-browser). Unset
+   * means this worker cannot render PDF: a PDF report then fails with a clear message instead of retrying forever.
+   */
+  CHROMIUM_PATH: z.string().optional(),
 });
 
 export type WorkerConfig = z.infer<typeof schema> & { workerId: string; queues: QueueName[]; databaseSsl: boolean };

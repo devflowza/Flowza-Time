@@ -1,5 +1,5 @@
 import type { Context, Hono } from 'hono';
-import { updateOrganizationSchema } from '@flowza/contracts';
+import { updateOrganizationSchema, type SettingsGroup } from '@flowza/contracts';
 import { errors } from '@flowza/shared';
 import type { AppEnv } from '../../middleware/request-context.js';
 import type { ApiDeps } from '../../deps.js';
@@ -9,7 +9,7 @@ import { actorOf } from '../../lib/service.js';
 import { isSettingsGroup } from '../../lib/settings.js';
 import * as orgs from '../../services/organizations.service.js';
 
-function groupParam(c: Context<AppEnv>): 'general' | 'attendance' | 'sync' | 'notifications' | 'security' | 'integrations' {
+function groupParam(c: Context<AppEnv>): SettingsGroup {
   const g = param(c, 'group');
   if (!isSettingsGroup(g)) throw errors.notFound('Settings group', g);
   return g;

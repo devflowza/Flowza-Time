@@ -7,7 +7,7 @@ import type { HandlerRegistry, JobContext } from '../types.js';
 interface OutboxRow { id: string; organizationId: string | null; eventType: string; aggregateType: string; aggregateId: string | null; payload: Record<string, unknown>; actorUserId: string | null; occurredAt: Date }
 
 /** Which users receive an in-app notification for an event type: by permission within the organisation. */
-const ROUTING: Record<string, { category: NotificationCategory; permission: string; title: (p: Record<string, unknown>) => string; body?: (p: Record<string, unknown>) => string; link?: (p: Record<string, unknown>) => string }> = {
+const ROUTING: Record<string, { category: NotificationCategory; permission: string; recipients?: 'permission' | 'user'; title: (p: Record<string, unknown>) => string; body?: (p: Record<string, unknown>) => string; link?: (p: Record<string, unknown>) => string }> = {
   'device.offline': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device offline: ${String(p['deviceName'] ?? p['deviceId'] ?? '')}`, body: (p) => `No successful communication since ${String(p['lastSeenAt'] ?? 'unknown')}.`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'device.online': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device back online: ${String(p['deviceName'] ?? '')}`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'sync.failed': { category: 'ATTENDANCE', permission: 'device.sync', title: (p) => `Sync failed: ${String(p['jobType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: (p) => `/sync/${String(p['syncJobId'] ?? '')}` },
@@ -15,8 +15,10 @@ const ROUTING: Record<string, { category: NotificationCategory; permission: stri
   'approval.pending': { category: 'APPROVAL', permission: 'attendance.approve', title: () => 'Correction awaiting your approval', link: () => '/approvals' },
   'attendance.correction_approved': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction approved', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
   'attendance.correction_rejected': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction rejected', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
-  'report.ready': { category: 'SYSTEM', permission: 'report.view', title: (p) => `Report ready: ${String(p['reportType'] ?? '')}`, link: (p) => `/reports/${String(p['reportId'] ?? '')}` },
-  'report.failed': { category: 'SYSTEM', permission: 'report.view', title: (p) => `Report failed: ${String(p['reportType'] ?? '')}`, body: (p) => String(p['error'] ?? '') },
+  // A report belongs to whoever asked for it. Routing by permission sent every report.view holder a notification (and
+  // the report's title) for every report anyone in the organisation requested.
+  'report.ready': { category: 'SYSTEM', permission: 'report.view', recipients: 'user', title: (p) => `Report ready: ${String(p['reportTitle'] ?? p['reportType'] ?? '')}`, link: () => '/reports' },
+  'report.failed': { category: 'SYSTEM', permission: 'report.view', recipients: 'user', title: (p) => `Report failed: ${String(p['reportTitle'] ?? p['reportType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: () => '/reports' },
   'employee.imported': { category: 'SYSTEM', permission: 'employee.import', title: (p) => `Import finished: ${String(p['imported'] ?? 0)} employees`, link: (p) => `/employees/imports/${String(p['importId'] ?? '')}` },
   'subscription.limit_reached': { category: 'SUBSCRIPTION', permission: 'organization.manage', title: (p) => `Plan limit reached: ${String(p['metric'] ?? '')}`, link: () => '/settings/subscription' },
 };
@@ -49,7 +51,9 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
       if (route && row.organizationId) {
         notifications += await (async () => {
           // recipients: active members whose role holds the permission (+ specific user in payload.userId)
-          const recipients = await sql<{ userId: string }>`
+          const recipients = route.recipients === 'user'
+            ? await sql<{ userId: string }>`select ${String(row.payload['userId'] ?? '00000000-0000-0000-0000-000000000000')}::uuid as "userId" where ${typeof row.payload['userId'] === 'string'}`.execute(trx)
+            : await sql<{ userId: string }>`
             select distinct m.user_id as "userId" from public.org_memberships m
             join public.role_permissions rp on rp.role_id = m.role_id
             where m.organization_id = ${row.organizationId}::uuid and m.status = 'active' and rp.permission_key = ${route.permission}

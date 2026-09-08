@@ -11,6 +11,10 @@ export interface StorageWriter {
   remove(bucket: string, paths: string[]): Promise<void>;
 }
 
+export interface PdfRenderOptions { landscape: boolean; headerHtml?: string; footerHtml?: string; marginMm?: { top: number; right: number; bottom: number; left: number } }
+/** Renders a self-contained HTML document to PDF bytes (headless Chromium in production; a pass-through in tests). */
+export interface PdfRenderer { render(html: string, opts: PdfRenderOptions): Promise<Buffer> }
+
 export interface WorkerDeps {
   config: WorkerConfig;
   log: Logger;
@@ -21,5 +25,6 @@ export interface WorkerDeps {
   realtime: RealtimePublisher;
   mailer: Mailer;
   storage: StorageWriter;
+  pdf: PdfRenderer;
   now: () => Date;
 }

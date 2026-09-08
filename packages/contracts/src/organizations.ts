@@ -91,9 +91,17 @@ export const organizationSettingsSchema = z.object({
     exportRequiresReason: z.boolean().default(false),
   }).partial().default({}),
   integrations: z.object({}).partial().default({}),
+  reports: z.object({
+    /** How hour columns print: 9.45 = 9 h 45 min (the GCC payroll notation the sample reports use) or 9:45. */
+    hoursNotation: z.enum(['h.mm', 'hh:mm']).default('h.mm'),
+    /** Two-letter code per attendance status (keys: PRESENT, ABSENT, WEEKLY_OFF, HOLIDAY, HALF_DAY, HALF_DAY_LEAVE, LEAVE). Leave days use the leave type's own code. */
+    codeOverrides: z.record(z.string(), z.string().trim().min(1).max(6)).default({}),
+    defaultFormat: z.enum(['pdf', 'xlsx', 'csv']).default('pdf'),
+    showLegend: z.boolean().default(true),
+  }).partial().default({}),
 });
 export type OrganizationSettings = z.infer<typeof organizationSettingsSchema>;
-export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations'] as const;
+export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports'] as const;
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
 export const branchInputSchema = z.object({
