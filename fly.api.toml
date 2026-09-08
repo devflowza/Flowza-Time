@@ -2,8 +2,16 @@
 #   flyctl deploy --config fly.api.toml --remote-only
 #
 # The build context is the repository root because the image needs the pnpm workspace to resolve @flowza/*.
-# Region bom (Mumbai) is deliberate: the Supabase project is in ap-south-1, and a request makes several database
-# round trips, so every millisecond between the API and the database is paid multiple times per request.
+#
+# Region: sin (Singapore), NOT co-located with the database. The Supabase project is in ap-south-1 (Mumbai) and the
+# original choice here was bom for exactly that reason — a request makes several database round trips, so every
+# millisecond of that hop is paid several times over. Fly has since **deprecated bom and refuses to provision new
+# resources there** ("Region bom is deprecated and cannot have new resources provisioned"), and it offers no other
+# Indian region. Of what remains, sin is nearest (~55 ms RTT to Mumbai, against ~120 ms for nrt and ~140 ms for syd).
+#
+# This is a real regression, not a neutral swap: budget roughly 55 ms x (round trips per request) of added latency.
+# The two ways out are to move the Supabase project to ap-southeast-1 to restore co-location, or to cut the number of
+# round trips per request. Measure before deciding — see docs/observability.md.
 #
 # Secrets are NOT in this file. Set them once with `flyctl secrets set --app flowza-time-api ...`:
 #   DATABASE_URL_API, FLOWZA_CREDENTIALS_MASTER_KEYS, FLOWZA_DEVICE_PUSH_SECRET
@@ -11,7 +19,7 @@
 #   SUPABASE_SERVICE_ROLE_KEY  (optional: realtime broadcast + signed storage URLs; omit and both are no-ops)
 
 app = "flowza-time-api"
-primary_region = "bom"
+primary_region = "sin"
 
 [build]
   dockerfile = "apps/api/Dockerfile"

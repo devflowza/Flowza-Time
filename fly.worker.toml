@@ -13,7 +13,7 @@
 #   RESEND_API_KEY        -- only when EMAIL_PROVIDER is switched to "resend".
 
 app = "flowza-time-worker"
-primary_region = "bom"
+primary_region = "sin"
 
 [build]
   dockerfile = "apps/worker/Dockerfile"
