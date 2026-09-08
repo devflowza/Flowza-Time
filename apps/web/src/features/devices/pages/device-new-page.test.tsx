@@ -8,6 +8,7 @@ vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-m
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
 import { grantAll, mockGet, page, renderWithProviders, resetApiMock } from '@/features/employees/test-utils';
+import i18n from '@/lib/i18n';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/devices.json';
 import ar from '@/locales/ar/devices.json';
@@ -82,6 +83,22 @@ describe('DeviceNewPage', () => {
     fireEvent.keyDown(radio(/FingerTec TCMS/), { key: 'ArrowRight' });
     expect(radio(/ZKTeco push SDK/)).toHaveAttribute('aria-checked', 'true');
     expect(radio(/FlowZa reference agent/)).toHaveAttribute('aria-checked', 'false');
+  });
+
+  it('follows the reading direction with the horizontal arrow keys in ar', async () => {
+    await i18n.changeLanguage('ar');
+    try {
+      renderPage();
+      await screen.findByRole('radio', { name: /ZKTeco push SDK/ });
+      // In an RTL layout the next card is to the LEFT, so ArrowLeft has to mean "next" — hard-coding ArrowRight
+      // reverses the group for every Arabic user.
+      fireEvent.keyDown(radio(/eSSL cloud/), { key: 'ArrowLeft' });
+      expect(radio(/FingerTec TCMS/)).toHaveAttribute('aria-checked', 'true');
+      fireEvent.keyDown(radio(/FingerTec TCMS/), { key: 'ArrowRight' });
+      expect(radio(/eSSL cloud/)).toHaveAttribute('aria-checked', 'true');
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 
   it('offers the model on the same step as the provider, and no longer spends a step on it', async () => {
