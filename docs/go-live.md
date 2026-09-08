@@ -219,8 +219,13 @@ Run **two or more instances** for availability. Leave `SCHEDULER_ENABLED=true` o
 elected with a Postgres advisory lock, so exactly one instance ticks and the others take over if it dies.
 
 Email stays on `console` (logged, not sent) until you set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` and `EMAIL_FROM`.
-Invitations and notifications are written to the outbox either way, so nothing is lost by starting on `console` — but
-an invited user will not receive their email.
+Notifications are written to the outbox either way, so nothing is lost by starting on `console`.
+
+**This is a separate path from Supabase's auth email** (§5c) and the two are easy to confuse. Supabase sends
+confirmation, password-reset and magic-link mail through its own SMTP settings; this variable only governs the
+worker's own notifications — device offline, report ready, and so on. Invited users receive their *account*
+confirmation via Supabase regardless of what `EMAIL_PROVIDER` is set to, and the invitation link itself is delivered by
+the administrator copying it out of the UI. Nothing writes invitations to the outbox.
 
 Confirm from the API side after a minute: `/api/ready` reports queue depth, and it should not be climbing with nothing
 draining it.
@@ -339,7 +344,12 @@ relies on password recovery.
 | Field | Value |
 |---|---|
 | Site URL | `https://time.flowza.ai` |
-| Redirect URLs | `https://time.flowza.ai/auth/reset`, `https://time.flowza.ai/auth/callback` |
+| Redirect URLs | `https://time.flowza.ai/auth/reset`, `https://time.flowza.ai/auth/callback`, `https://time.flowza.ai/auth/invite**` |
+
+`/auth/invite**` is what makes invited-owner onboarding work: the acceptance page passes
+`emailRedirectTo: invitationUrl(token)` so the confirmation email returns the invitee to the exact link they started
+from. Without it Supabase falls back to the Site URL and drops a freshly confirmed invitee on the dashboard holding no
+membership — the one screen that cannot help them.
 
 Add `http://localhost:5173/**` to the redirect list as well if developers need password reset to work locally.
 
@@ -367,6 +377,63 @@ select event, occurred_at, details from public.login_history order by occurred_a
 
 An empty table after a successful sign-in means the hook is not registered. Note that `login_history.user_id`
 references `user_profiles`, so rows only appear for users that already have a profile row — which step 6 creates.
+
+### 5c. Custom SMTP — required before anyone can be invited
+
+Supabase's built-in email sender is rate-limited to a handful of messages an hour and is not intended for production.
+Until custom SMTP is configured, `signUp` creates the account but the confirmation email never arrives, so an invited
+owner **cannot complete onboarding at all**. Configuring it raises the auth email limit to 30/hour.
+
+Sending is via **Resend on its own subdomain**, `time.flowza.ai`, deliberately not the root domain and not the
+`send.flowza.ai` that other FlowZa applications use:
+
+- The root carries Microsoft 365 business mail — `MX → flowza-ai.mail.protection.outlook.com` and a hard-fail SPF,
+  `v=spf1 include:spf.protection.outlook.com -all`. Adding a sender to that record risks the company's own email.
+  A subdomain needs no change to it at all.
+- A shared sending domain means one application's reputation is every application's reputation.
+
+Add the domain in Resend (Manual setup, **not** Auto configure — the latter asks for OAuth write access to the whole
+Cloudflare zone, which hosts every other FlowZa application). Then add exactly three records:
+
+| Type | Name | Content |
+|---|---|---|
+| TXT | `resend._domainkey.time` | the DKIM public key Resend shows |
+| TXT | `send.time` | `v=spf1 include:amazonses.com ~all` |
+| MX (10) | `send.time` | `feedback-smtp.<region>.amazonses.com` |
+
+Skip the inbound MX Resend offers on `time.flowza.ai` itself: it is for *receiving* mail, which this application does
+not do, and it would collide with the proxied CNAME that serves the web app.
+
+Create a key scoped to **Sending access on `time.flowza.ai` only** (`flowza-time-prd-sending`), so a leak cannot send
+as another application's domain. Resend will not let a key be scoped to a domain until that domain is verified — wait
+for verification rather than creating an all-domains key.
+
+**Dashboard → Authentication → Emails → SMTP Settings:**
+
+| Field | Value |
+|---|---|
+| Host | `smtp.resend.com` |
+| Port | `465` |
+| Username | `resend` — a literal, **not** the sender name |
+| Password | the Resend API key |
+| Sender email | `no-reply@time.flowza.ai` |
+| Sender name | `FlowZa Time` |
+
+The username trips people up: it is always the literal string `resend`. Putting anything else there — the sender name
+is the easy mistake — fails with `535 "Invalid username"`, which reads like a password problem and is not.
+
+Verify by triggering a real send and reading the auth log, rather than trusting the form:
+
+```bash
+curl -i -X POST 'https://<project-ref>.supabase.co/auth/v1/recover' \
+  -H 'apikey: <publishable key>' -H 'Content-Type: application/json' \
+  -d '{"email":"<an existing user>"}'
+# 200 = sent. 500 with x-sb-error-code: unexpected_failure = SMTP refused; the reason is in the auth logs:
+#   select log_attributes['error'] from logs where source='auth_logs' and log_attributes['path']='/recover'
+```
+
+Then confirm **Delivered** in Resend → Emails, and that Resend → API keys shows the *expected* key as recently used.
+A domain-scoped key that sent successfully is itself proof the From domain and DKIM signature were the intended ones.
 
 ---
 
@@ -473,7 +540,14 @@ Sign out and back in so the new membership is in the session, and the workspace 
   commissioning exercise, not a configuration step.
 - **Zero-touch device claiming trusts knowledge of the serial number** (`docs/risks.md` D26) — an open design item, not
   an oversight.
-- **Email is not sending** until `EMAIL_PROVIDER=resend` is configured.
+- **Auth email sends** (§5c): Supabase custom SMTP via Resend on `time.flowza.ai`, verified end to end — confirmation,
+  password reset and magic links reach the inbox. The **worker's own** notification email is still on `console`, so
+  device-offline and report-ready messages are logged and not sent until `EMAIL_PROVIDER=resend` and `RESEND_API_KEY`
+  are set on `flowza-time-worker`.
+- **No invitation email is sent by the application.** The invitation link is delivered by the administrator copying it
+  out of the UI. Automating it needs a dedicated queued job: the outbox relay routes by *permission within an
+  organisation*, which cannot address someone who is not a member yet, and the plaintext token must not be written to
+  `jobs.payload` given only its hash is stored.
 - **Realtime and signed storage URLs are inert** until `SUPABASE_SERVICE_ROLE_KEY` is set on the API and worker.
 - **Nothing is monitored.** `/api/ready` is the intended uptime check; logs are structured JSON ready for a drain
   (`docs/observability.md`).
