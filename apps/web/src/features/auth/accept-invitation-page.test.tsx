@@ -71,6 +71,50 @@ describe('AcceptInvitationPage', () => {
     );
   });
 
+  it('lets an existing account sign in with a password shorter than the new-password minimum', async () => {
+    // The 12-character rule is for CHOOSING a password, not for presenting one. Both live accounts predate the policy
+    // (11 and 9 chars), so gating sign-in on it locked them out of their own invitations.
+    supabaseMock.auth.signInWithPassword.mockResolvedValue({ data: { session: { access_token: 't' }, user: { id: 'u1' } }, error: null });
+    apiMock.post.mockResolvedValue({ data: { membershipId: 'm1', organizationId: 'o1' } });
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+
+    fireEvent.click(screen.getByRole('button', { name: 'I already have an account' }));
+    fireEvent.change(screen.getByLabelText('Work email'), { target: { value: 'dev@flowza.ai' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Flowza@2026' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await waitFor(() => expect(supabaseMock.auth.signInWithPassword).toHaveBeenCalled());
+  });
+
+  it('still demands 12 characters when creating a new account', async () => {
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+    fireEvent.change(screen.getByLabelText('Work email'), { target: { value: 'owner@acme.om' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'short1!A' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account and join' }));
+    expect(await screen.findByText('Use at least 12 characters.')).toBeInTheDocument();
+    expect(supabaseMock.auth.signUp).not.toHaveBeenCalled();
+  });
+
+  it('redeems the single-use token exactly once when sign-in and the auto-redeem effect race', async () => {
+    // supabase-js publishes SIGNED_IN before signInWithPassword resolves, so the effect fires while the manual
+    // accept() is still in flight. Two POSTs of a single-use token means the loser reports "already accepted".
+    h.session = null;
+    supabaseMock.auth.signInWithPassword.mockImplementation(async () => {
+      h.session = { access_token: 't' };
+      return { data: { session: { access_token: 't' }, user: { id: 'u1' } }, error: null };
+    });
+    apiMock.post.mockResolvedValue({ data: { membershipId: 'm1', organizationId: 'o1' } });
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+
+    fireEvent.click(screen.getByRole('button', { name: 'I already have an account' }));
+    fireEvent.change(screen.getByLabelText('Work email'), { target: { value: 'dev@flowza.ai' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Flowza@2026' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalled());
+    expect(apiMock.post.mock.calls.filter((c) => c[0] === '/invitations/accept')).toHaveLength(1);
+  });
+
   it('surfaces the API reason when the invitation was issued to a different address', async () => {
     h.session = { access_token: 't' };
     apiMock.post.mockRejectedValue(new ApiError(403, 'FORBIDDEN', 'This invitation was issued to a different email address.'));

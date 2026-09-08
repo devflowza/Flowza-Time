@@ -29,11 +29,17 @@ import { AuthLayout } from './auth-layout';
 const schema = z
   .object({
     email: z.email(),
-    // Matches the reset form and the documented policy; the server is the real authority.
-    password: z.string().min(12),
+    password: z.string().min(1, 'required'),
     mode: z.enum(['signIn', 'signUp']),
   })
-  .refine((v) => v.mode === 'signUp' || v.password.length > 0, { path: ['password'] });
+  // The 12-character minimum is a rule for choosing a NEW password, so it must not gate signing in with an existing
+  // one — both live accounts predate the policy and would be locked out of their own invitation. A .refine() cannot
+  // express this: it only ever adds issues, so a flat password: z.string().min(12) stays failed in either mode.
+  .superRefine((v, ctx) => {
+    if (v.mode === 'signUp' && v.password.length < 12) {
+      ctx.addIssue({ code: 'custom', path: ['password'], message: 'tooShort' });
+    }
+  });
 type Form = z.infer<typeof schema>;
 
 type Phase = { kind: 'form' } | { kind: 'accepting' } | { kind: 'confirmEmail'; email: string } | { kind: 'done' };
@@ -51,8 +57,15 @@ export function AcceptInvitationPage() {
 
   const form = useForm<Form>({ resolver: zodResolver(schema), defaultValues: { email: '', password: '', mode: 'signUp' } });
 
+  // One latch shared by BOTH entry points. supabase-js resolves signIn/signUp only after notifying its subscribers, so
+  // the auth provider has already published the new session while the manual accept() is still awaiting its POST — the
+  // effect below then sees a signed-in user and fires a second request with the same single-use token, and the loser
+  // reports "already accepted" on an invitation that in fact just succeeded. Released on failure so a genuine retry
+  // (signing in as the right account after a wrong-address 403) still works.
+  const inFlight = useRef(false);
   const accept = useCallback(async () => {
-    if (!token) return;
+    if (!token || inFlight.current) return;
+    inFlight.current = true;
     setPhase({ kind: 'accepting' });
     setError(null);
     try {
@@ -64,16 +77,16 @@ export function AcceptInvitationPage() {
       // The API distinguishes expired / already accepted / wrong email; surface its message rather than a generic one.
       setError(e instanceof ApiError ? e.message : t('auth.inviteFailed'));
       setPhase({ kind: 'form' });
+      inFlight.current = false;
     }
   }, [token, qc, navigate, t]);
 
   // Already signed in (or just signed in): nothing left to collect, redeem straight away. Deferred off the effect body
-  // so the first setState inside accept() is not synchronous, and guarded by a ref so a re-render cannot redeem twice
-  // — the token is single-use, and a second attempt would report "already accepted".
-  const autoRedeemed = useRef(false);
+  // so the first setState inside accept() is not synchronous; accept()'s own latch handles the race with onSubmit.
+  const autoTried = useRef(false);
   useEffect(() => {
-    if (!session || !token || autoRedeemed.current) return;
-    autoRedeemed.current = true;
+    if (!session || !token || autoTried.current) return;
+    autoTried.current = true;
     void Promise.resolve().then(accept);
   }, [session, token, accept]);
 
@@ -100,7 +113,7 @@ export function AcceptInvitationPage() {
     );
   }
 
-  const onSubmit = form.handleSubmit(async (values) => {
+  const submit = async (values: Form) => {
     setError(null);
     if (mode === 'signIn') {
       const { error: err } = await supabase.auth.signInWithPassword({ email: values.email, password: values.password });
@@ -121,7 +134,7 @@ export function AcceptInvitationPage() {
     // of leaving the invitee on a form that will never succeed.
     if (!data.session) { setPhase({ kind: 'confirmEmail', email: values.email }); return; }
     await accept();
-  });
+  };
 
   const busy = phase.kind === 'accepting' || form.formState.isSubmitting;
 
@@ -133,14 +146,16 @@ export function AcceptInvitationPage() {
           <CardDescription>{mode === 'signUp' ? t('auth.inviteHintSignUp') : t('auth.inviteHintSignIn')}</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={onSubmit} className="space-y-4" noValidate>
+          {/* handleSubmit is invoked from the event, not during render: the handler reads a ref (accept()'s latch),
+              and a callback built during render that touches a ref trips react-hooks' refs-during-render rule. */}
+          <form onSubmit={(e) => void form.handleSubmit(submit)(e)} className="space-y-4" noValidate>
             <FormField label={t('auth.email')} htmlFor="invite-email" error={form.formState.errors.email?.message}>
               <Input id="invite-email" type="email" autoComplete="email" dir="ltr" {...form.register('email')} aria-invalid={!!form.formState.errors.email} />
             </FormField>
             <FormField
               label={t('auth.password')}
               htmlFor="invite-password"
-              error={form.formState.errors.password ? t('auth.passwordTooShort') : undefined}
+              error={form.formState.errors.password ? t(form.formState.errors.password.message === 'tooShort' ? 'auth.passwordTooShort' : 'auth.passwordRequired') : undefined}
               hint={mode === 'signUp' ? t('auth.passwordHint') : undefined}
             >
               <Input id="invite-password" type="password" autoComplete={mode === 'signUp' ? 'new-password' : 'current-password'} dir="ltr" {...form.register('password')} aria-invalid={!!form.formState.errors.password} />
