@@ -55,14 +55,24 @@ export function TagChips({ tags, max = 3 }: { tags: string[]; max?: number }) {
   );
 }
 
-/** Capability matrix rendered as chips; only enabled capabilities are shown unless `all` is set. */
-export function CapabilityChips({ capabilities, all = false, className }: { capabilities: Partial<DeviceCapabilities>; all?: boolean; className?: string }) {
+/**
+ * Capability matrix rendered as chips; only enabled capabilities are shown unless `all` is set. `max` truncates the
+ * tail into a "+n" chip, which is what keeps a provider card a fixed height instead of growing with the fourteenth
+ * capability.
+ *
+ * The root is a <span>, not a <div>: these chips sit inside the <button role="radio"> provider cards, and a button may
+ * only contain phrasing content.
+ */
+export function CapabilityChips({ capabilities, all = false, max, className }: { capabilities: Partial<DeviceCapabilities>; all?: boolean; max?: number; className?: string }) {
   const { t } = useTranslation('devices');
   const keys = CAPABILITY_KEYS.filter((k) => all || capabilities[k]);
   if (keys.length === 0) return <span className="text-xs text-muted-foreground">{t('capabilities.none')}</span>;
+  const shown = max ? keys.slice(0, max) : keys;
+  const rest = keys.length - shown.length;
   return (
-    <div className={cn('flex flex-wrap gap-1', className)}>
-      {keys.map((k) => <Badge key={k} variant={capabilities[k] ? 'info' : 'outline'} className={cn('font-normal', !capabilities[k] && 'text-muted-foreground line-through')}>{t(`capabilities.${k}`)}</Badge>)}
-    </div>
+    <span className={cn('flex flex-wrap gap-1', className)}>
+      {shown.map((k) => <Badge key={k} variant={capabilities[k] ? 'info' : 'outline'} className={cn('font-normal', !capabilities[k] && 'text-muted-foreground line-through')}>{t(`capabilities.${k}`)}</Badge>)}
+      {rest > 0 ? <Badge variant="outline" className="font-normal tnum text-muted-foreground" title={keys.slice(shown.length).map((k) => t(`capabilities.${k}`)).join(', ')}>+{rest}</Badge> : null}
+    </span>
   );
 }

@@ -185,7 +185,7 @@
   },
   "wizard": {
     "title": "Register device",
-    "subtitle": "Connect a terminal or vendor cloud account in a few steps.",
+    "subtitle": "Connect a terminal or a vendor cloud account.",
     "steps": "Registration steps",
     "invalid": "Please complete the required fields before registering.",
     "invalidField": "Check \"{{field}}\": {{message}}",
@@ -193,24 +193,8 @@
     "testQueued": "A connection test has been queued for the new device.",
     "register": "Register device",
     "docs": "Documentation",
-    "step": {
-      "provider": "Provider",
-      "model": "Model",
-      "details": "Details",
-      "connection": "Connection",
-      "test": "Test",
-      "review": "Review"
-    },
-    "stepHint": {
-      "provider": "Choose the manufacturer and integration you want to connect.",
-      "model": "Optionally pick the exact model to preload its capabilities.",
-      "details": "Identify the device and place it in a branch.",
-      "connection": "Enter the connection settings the provider needs.",
-      "test": "Check that FlowZa can reach the device before saving.",
-      "review": "Confirm the details and register the device."
-    },
-    "placeholderNote": "Integration not implemented yet — this provider cannot be registered.",
-    "modelHint": "Picking a model preloads the verified capability matrix. You can skip this step.",
+    "placeholderNote": "Not available for registration yet.",
+    "modelHint": "Picking the exact model preloads its verified capability matrix.",
     "noModel": "No specific model",
     "noModelHint": "Use the provider's default capabilities.",
     "noConfig": "This provider needs no connection settings.",
@@ -231,7 +215,25 @@
       "url": "Enter a valid http(s) URL",
       "select": "Pick one of the options",
       "boolean": "Invalid value"
-    }
+    },
+    "step": {
+      "device": "Device",
+      "details": "Details",
+      "connection": "Connection",
+      "review": "Review"
+    },
+    "stepHint": {
+      "device": "Pick the provider that matches your hardware, and the exact model if you know it.",
+      "details": "Name the device and place it in a branch.",
+      "connection": "Enter the settings the provider needs, then check that FlowZa can reach it.",
+      "review": "Check everything, then register."
+    },
+    "stepOf": "Step {{current}} of {{total}}",
+    "notChosen": "Not chosen yet",
+    "chooseProvider": "Choose a provider to continue",
+    "searchProviders": "Search providers",
+    "noProviderMatch": "No provider matches \"{{query}}\".",
+    "modelTitle": "Model"
   },
   "test": {
     "run": "Test connection",
