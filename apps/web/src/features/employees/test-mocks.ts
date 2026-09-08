@@ -49,19 +49,31 @@ export const supabaseModule = { supabase: supabaseMock };
 export const envModule = { env: { supabaseUrl: 'http://localhost', supabaseAnonKey: 'anon', apiUrl: 'http://localhost:4000' } };
 
 // ---- me / permissions mock -----------------------------------------------------------------------------------------
-export const testState = { permissions: new Set<string>(), orgId: 'org-1', timezone: 'Asia/Muscat', membershipId: 'mem-1' };
+/** `orgId: null` models a signed-in user with no organisation — a platform admin before the first one exists. */
+export const testState = { permissions: new Set<string>(), orgId: 'org-1' as string | null, timezone: 'Asia/Muscat', membershipId: 'mem-1' };
 export function grant(...perms: Permission[]) { testState.permissions = new Set(perms); }
 export function grantAll() { testState.permissions = new Set(['*']); }
-const membership = () => ({
-  membershipId: testState.membershipId, roleId: 'role-1', roleKey: 'org_admin', roleName: 'Admin', permissions: [...testState.permissions], allBranches: true, branchIds: [], employeeId: null, featureFlags: {}, settings: {},
-  organization: { id: testState.orgId, companyCode: 'ACME', legalName: 'Acme LLC', displayName: 'Acme', countryCode: 'OM', timezone: testState.timezone, currencyCode: 'OMR', locale: 'en', weeklyOffDays: [5, 6], logoPath: null, contact: {}, address: {}, status: 'active', createdAt: '2024-01-01T00:00:00Z' },
-});
+const membership = () =>
+  testState.orgId === null
+    ? null
+    : {
+        membershipId: testState.membershipId, roleId: 'role-1', roleKey: 'org_admin', roleName: 'Admin', permissions: [...testState.permissions], allBranches: true, branchIds: [], employeeId: null, featureFlags: {}, settings: {},
+        organization: { id: testState.orgId, companyCode: 'ACME', legalName: 'Acme LLC', displayName: 'Acme', countryCode: 'OM', timezone: testState.timezone, currencyCode: 'OMR', locale: 'en', weeklyOffDays: [5, 6], logoPath: null, contact: {}, address: {}, status: 'active', createdAt: '2024-01-01T00:00:00Z' },
+      };
 export const useMeModule = {
   meQueryKey: ['me'] as const,
-  useMe: () => ({ data: { user: { id: 'u1', email: 'dev@flowza.ai', fullName: 'Dev', avatarUrl: null, locale: 'en', mfaEnrolled: false, isPlatformAdmin: false }, memberships: [membership()] }, isLoading: false, isError: false }),
+  useMe: () => {
+    const m = membership();
+    return { data: { user: { id: 'u1', email: 'dev@flowza.ai', fullName: 'Dev', avatarUrl: null, locale: 'en', mfaEnrolled: false, isPlatformAdmin: m === null }, memberships: m ? [m] : [] }, isLoading: false, isError: false };
+  },
   useActiveMembership: () => membership(),
   useCan: () => (...perms: string[]) => testState.permissions.has('*') || perms.every((p) => testState.permissions.has(p)),
-  useOrgId: () => testState.orgId,
+  // Throws exactly as the real hook does. A double that always returns an id hides every "renders without an
+  // organisation" bug, which is precisely the class that broke the platform-admin bootstrap.
+  useOrgId: () => {
+    if (testState.orgId === null) throw new Error('No active organisation');
+    return testState.orgId;
+  },
   useOrgTimezone: () => testState.timezone,
   useFeatureFlag: () => false,
 };
