@@ -108,8 +108,12 @@ describe('leave type defaults', () => {
     const again = await h.request('POST', `${base()}/leave-types/seed-defaults`, { token: f.hrAdmin });
     expect(again.body.data.created).toEqual([]);
     expect((await h.request('POST', `${base()}/leave-types/seed-defaults`, { token: f.payrollUser })).status).toBe(403);
-    // a leave report may now be requested for one of them; an unknown code is refused
-    expect((await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'leave_report', parameters: { from: '2026-08-01', to: '2026-08-31', leaveTypeCode: 'sl' } } })).status).toBe(202);
+    // a leave report may now be requested for one of them (case-insensitively); an unknown code is refused. The quota test
+    // above spends the organisation's hourly allowance, so it is reset first — this test is about leave types, not quotas.
+    await h.admin.deleteFrom('usageQuotas').where('organizationId', '=', f.orgId).execute();
+    const ok = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'leave_report', parameters: { from: '2026-08-01', to: '2026-08-31', leaveTypeCode: 'sl' } } });
+    expect([ok.status, ok.body.code ?? null, ok.body.message ?? null, ok.body.details ?? null]).toEqual([202, null, null, null]);
+    expect(ok.body.data.parameters.leaveTypeCode).toBe('SL');
     expect((await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'leave_report', parameters: { from: '2026-08-01', to: '2026-08-31', leaveTypeCode: 'XX' } } })).status).toBe(400);
   });
 });
