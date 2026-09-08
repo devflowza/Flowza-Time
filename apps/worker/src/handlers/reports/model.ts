@@ -33,6 +33,8 @@ export interface ReportRow { kind?: 'data' | 'total'; cells: ReportCell[] }
 export interface ReportField { label: string; value: string; mono?: boolean }
 
 export interface ReportSection {
+  /** A heading above the group heading, printed once for a run of consecutive sections that share it (Missed Punch: the date above its departments). */
+  superHeading?: string;
   /** Group heading such as `Dept: ADMIN` — `label` is the caption, `value` the group's name. */
   heading?: { label: string; value: string };
   /** Header block above the table (Detail report: Employee, Card No, Shift, Dept, Designation). */
@@ -68,7 +70,7 @@ export interface ReportDocument {
   /** Data rows across all sections — what `report_requests.row_count` records. */
   rowCount: number;
   /** How section headings and header fields flatten into spreadsheet columns. */
-  flatten: { headingColumnLabel: string | null; fieldColumns: boolean };
+  flatten: { headingColumnLabel: string | null; superHeadingColumnLabel?: string | null; fieldColumns: boolean };
   /** Sheet name / file stem (no extension). */
   fileStem: string;
 }

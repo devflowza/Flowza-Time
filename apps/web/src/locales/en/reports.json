@@ -20,12 +20,12 @@
       "description": "Every employee on one day, grouped by department: attendance code, IN/OUT, worked, base and overtime hours."
     },
     "monthly_attendance": {
-      "name": "Monthly attendance",
-      "description": "Per-employee day grid and totals for a month."
+      "name": "Monthly Attendance Report",
+      "description": "Employees by days of the month with the attendance code in every cell and an absence count."
     },
     "employee_attendance": {
-      "name": "Employee attendance",
-      "description": "Detailed attendance history for selected employees."
+      "name": "Detail Report",
+      "description": "One page per employee: every day of the period with times, hours, overtime, under time and remarks."
     },
     "branch_attendance": {
       "name": "Branch attendance",
@@ -36,20 +36,20 @@
       "description": "Attendance totals grouped by department."
     },
     "late_report": {
-      "name": "Late arrivals",
-      "description": "Late arrivals with minutes per employee."
+      "name": "Staff Late Attendance Report",
+      "description": "Per department: each employee’s late days of the period and how many."
     },
     "absence_report": {
-      "name": "Absences",
-      "description": "Absent days per employee."
+      "name": "Staff Absents Monthly Report",
+      "description": "Per department: each employee’s absent days of the period and how many."
     },
     "overtime_report": {
       "name": "Overtime",
       "description": "Overtime minutes by category per employee."
     },
     "missing_punch_report": {
-      "name": "Missing punches",
-      "description": "Days with a missing IN or OUT punch."
+      "name": "Missed Punch Report",
+      "description": "Every unpaired punch of the period, by date and department, with the time that was recorded."
     },
     "device_sync_report": {
       "name": "Device synchronisation",
@@ -70,6 +70,10 @@
     "employee_directory": {
       "name": "Employees Report",
       "description": "Employees by department with card number, hire date, designation, status, shift and attendance policy."
+    },
+    "leave_report": {
+      "name": "Staff Leave Report",
+      "description": "Per department: each employee’s days of one leave type in the period and how many."
     }
   },
   "request": {
