@@ -44,12 +44,17 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
           </DropdownMenuContent>
         </DropdownMenu>
       ) : null}
-      <button type="button" onClick={() => setSearchOpen(true)} className="ms-auto hidden h-9 w-64 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground hover:bg-accent lg:flex">
-        <Search className="size-4" /> {t('common.searchPlaceholder')} <kbd className="ms-auto rounded border px-1.5 text-[10px]">⌘K</kbd>
-      </button>
-      <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+      {/* Search is organisation-scoped, so it has nothing to offer a platform admin who has not selected one. */}
+      {membership ? (
+        <>
+          <button type="button" onClick={() => setSearchOpen(true)} className="ms-auto hidden h-9 w-64 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground hover:bg-accent lg:flex">
+            <Search className="size-4" /> {t('common.searchPlaceholder')} <kbd className="ms-auto rounded border px-1.5 text-[10px]">⌘K</kbd>
+          </button>
+          <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
+        </>
+      ) : null}
       <div className="flex items-center gap-1 ms-auto lg:ms-0">
-        <Button variant="ghost" size="icon" className="lg:hidden" aria-label={t('common.searchPlaceholder')} onClick={() => setSearchOpen(true)}><Search /></Button>
+        {membership ? <Button variant="ghost" size="icon" className="lg:hidden" aria-label={t('common.searchPlaceholder')} onClick={() => setSearchOpen(true)}><Search /></Button> : null}
         <LanguageSwitcher />
         <Button variant="ghost" size="icon" aria-label={t('common.theme')} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun /> : <Moon />}</Button>
         <Button variant="ghost" size="icon" asChild aria-label={t('nav.notifications')}>

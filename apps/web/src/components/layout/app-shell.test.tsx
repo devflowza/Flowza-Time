@@ -13,11 +13,13 @@ vi.mock('@/features/me/use-me', async () => {
 });
 
 import { ApiError, renderWithProviders, supabaseMock } from '@/features/employees/test-utils';
+import { testState } from '@/features/employees/test-mocks';
 import { AppShell } from './app-shell';
 
 describe('AppShell', () => {
   beforeEach(() => {
     h.me = null;
+    testState.orgId = 'org-1';
     supabaseMock.auth.mfa.listFactors.mockResolvedValue({ data: { totp: [], all: [] }, error: null });
   });
 
@@ -41,6 +43,17 @@ describe('AppShell', () => {
     h.me = { isLoading: false, isError: true, error: new ApiError(0, 'NETWORK_ERROR', 'Could not reach the API'), refetch: vi.fn() };
     renderWithProviders(<AppShell />);
     expect(await screen.findByRole('link', { name: 'Set up two-factor authentication' })).toHaveAttribute('href', '/auth/mfa');
+  });
+
+  it('renders the shell for a platform admin who has no organisation yet', async () => {
+    // The bootstrap case: the first admin signs in before any organisation exists. Everything the shell renders on
+    // every route — the Topbar's global search in particular — must tolerate having no active membership, or the
+    // whole shell dies on `useOrgId()` and there is no way to reach /platform to create the first organisation.
+    testState.orgId = null;
+    expect(() => renderWithProviders(<AppShell />)).not.toThrow();
+    expect(screen.queryByText('No active organisation')).not.toBeInTheDocument();
+    // ...and the organisation-scoped affordances are simply absent rather than broken.
+    expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
   });
 
   it('keeps showing the skeleton when the query has settled with no data, instead of rendering the page', async () => {
