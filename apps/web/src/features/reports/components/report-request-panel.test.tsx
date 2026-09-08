@@ -57,6 +57,28 @@ describe('ReportRequestPanel', () => {
     await waitFor(() => expect(onQueued).toHaveBeenCalledWith('rep-1'));
   });
 
+  it('asks for the leave type when the report needs one, sends its code, and pre-selects the layout\'s format', async () => {
+    mockGet({
+      '/report-types': { data: [{ key: 'leave_report', name: 'Staff Leave Report', description: 'One leave type per department.', requiredParameters: ['from', 'to', 'leaveTypeCode'], optionalParameters: ['branchId', 'departmentId'], permissions: ['report.view', 'attendance.view', 'leave.view'], formats: ['csv', 'xlsx', 'pdf'], allowed: true, status: 'available', orientation: 'portrait', defaultFormat: 'pdf' }] },
+      '/orgs/org-1/leave-types': { data: [{ id: 'lt-1', code: 'CL', name: 'Casual Leave', nameAr: null, isPaid: true, color: null, status: 'active', createdAt: '2024-01-01T00:00:00Z' }] },
+      '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]), '/orgs/org-1/employees': page([]), '/orgs/org-1/shifts': page([]), '/orgs/org-1/devices': page([]),
+    });
+    apiMock.post.mockResolvedValue({ data: { id: 'rep-2', status: 'QUEUED', jobId: null } });
+    renderWithProviders(<ReportRequestPanel onQueued={() => {}} />);
+    fireEvent.click(await screen.findByRole('radio', { name: /Staff Leave Report/ }));
+    // a print layout opens on PDF, not on the spreadsheet default
+    expect(await screen.findByRole('combobox', { name: /Format/ })).toHaveTextContent('PDF');
+    fireEvent.click(screen.getByRole('combobox', { name: /Leave type/ }));
+    const opt = await screen.findByText('Casual Leave');
+    fireEvent.click(opt.closest('[cmdk-item]') ?? opt);
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /Leave type/ })).toHaveTextContent('Casual Leave'));
+    fireEvent.click(screen.getByRole('button', { name: 'Queue report' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
+    const body = (apiMock.post.mock.calls[0] as [string, Record<string, unknown>])[1];
+    expect(body).toMatchObject({ reportType: 'leave_report', format: 'pdf' });
+    expect((body.parameters as Record<string, unknown>).leaveTypeCode).toBe('CL');
+  });
+
   it('shows a month picker for month-based reports', async () => {
     renderWithProviders(<ReportRequestPanel onQueued={() => {}} />);
     fireEvent.click(await screen.findByRole('radio', { name: /Monthly Attendance Report/ }));

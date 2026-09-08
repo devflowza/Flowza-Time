@@ -68,16 +68,16 @@ requester only (`payload.userId`), not every holder of `report.view`.
 |---|---|---|---|
 | 1 | Daily Report | `daily_attendance` | available (Phase 0) |
 | 2 | Detail Report | `employee_attendance` | available (Phase 1) |
-| 3 | Summary Report | `attendance_summary` | Phase 2 |
+| 3 | Summary Report | `attendance_summary` | available (Phase 2) |
 | 4 | Monthly Attendance Report | `monthly_attendance` | available (Phase 1) |
-| 5 | Weekly Report | `weekly_attendance` | Phase 2 |
+| 5 | Weekly Report | `weekly_attendance` | available (Phase 2) |
 | 6 | Staff Absents Monthly Report | `absence_report` | available (Phase 1) |
-| 7, 9 | Staff Casual / Sick Leave Report | `leave_report` (`leaveTypeCode`) | Phase 2 |
+| 7, 9 | Staff Casual / Sick Leave Report | `leave_report` (`leaveTypeCode`) | available (Phase 2) |
 | 8 | Staff Late Attendance Report | `late_report` | available (Phase 1) |
 | 10 | Missed Punch Report | `missing_punch_report` | available (Phase 1) |
 | 11, 12 | Employees Report / Inactive employee | `employee_directory` (`employmentStatus`) | available (Phase 0) |
 | 13 | Audit Trail Report | `audit_report` (`scope=attendance`) | Phase 3 |
-| 14 | Weekly In/Out Report | `weekly_in_out` | Phase 2 |
+| 14 | Weekly In/Out Report | `weekly_in_out` | available (Phase 2) |
 
 Types not in the sample set (`branch_attendance`, `department_attendance`, `overtime_report`, `device_sync_report`,
 `device_health_report`, `payroll_summary`) are `planned`: hidden from `/report-types`, refused by `POST /reports`, and
@@ -98,7 +98,7 @@ each becomes a one-file follow-up on this engine.
 
 - [x] Phase 0 — engine, renderers, Chromium worker, `daily_attendance`, `employee_directory`, `EXPORT_EMPLOYEES`, planned types hidden, requester-only notifications
 - [x] Phase 1 — `employee_attendance`, `monthly_attendance`, `absence_report`, `late_report`, `missing_punch_report`
-- [ ] Phase 2 — `attendance_summary`, `weekly_attendance`, `weekly_in_out`, `leave_report`
+- [x] Phase 2 — `attendance_summary`, `weekly_attendance`, `weekly_in_out`, `leave_report`
 - [ ] Phase 3 — `audit_report` attendance scope + PDF
 - [ ] Phase 4 — web parameter forms (week, leave type, status, scope), Settings → Reports, leave-type seeding
 - [ ] Phase 5 — hardening (streaming, cell cap), golden renders in CI, reports worker deployed, docs and go-live
