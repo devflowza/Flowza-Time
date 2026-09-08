@@ -171,7 +171,7 @@ Two options that do work:
 
 Start with the shared secret and treat the tunnel as the end state. Generate the value, set it on the Fly app
 (`flyctl secrets set --app flowza-time-api EDGE_SHARED_SECRET='…'`), then add the matching Cloudflare Transform Rule
-for `api.flowza.ai` and `push.flowza.ai`. `/api/health` stays open so the platform's own health check still reaches
+for `time-api.flowza.ai` and `time-push.flowza.ai`. `/api/health` stays open so the platform's own health check still reaches
 the container; `/api/ready` is gated because it reports database latency and queue depth.
 
 Leave `EDGE_SHARED_SECRET` unset and the gate is inert — correct for local development, and honest about the fact that
@@ -249,14 +249,14 @@ back 200 or 401 — not fail to connect, and not be blocked by CORS.
 ### TLS certificates on Fly — required before Cloudflare can reach the origin
 
 A proxied Cloudflare CNAME does **not** hide the original hostname from the origin. Cloudflare connects sending SNI and
-Host of `api.flowza.ai`, not of the CNAME target, and Fly routes by SNI and only serves certificates for hostnames it
+Host of `time-api.flowza.ai`, not of the CNAME target, and Fly routes by SNI and only serves certificates for hostnames it
 has issued. Without a certificate for the custom hostname the TLS handshake fails outright — a 525/526 at the edge,
 whatever the SSL mode is set to.
 
 ```bash
-flyctl certs add api.flowza.ai  --app flowza-time-api
-flyctl certs add push.flowza.ai --app flowza-time-api
-flyctl certs show api.flowza.ai --app flowza-time-api   # until it reads Ready
+flyctl certs add time-api.flowza.ai  --app flowza-time-api
+flyctl certs add time-push.flowza.ai --app flowza-time-api
+flyctl certs show time-api.flowza.ai --app flowza-time-api   # until it reads Ready
 ```
 
 Because the DNS records are proxied, Fly cannot use HTTP-01 validation — the challenge never reaches the origin. Use
@@ -271,7 +271,7 @@ reader to trip over, so prefer the certificates unless you have a reason not to.
 
 ### Forcing HTTPS when the zone cannot
 
-`push.flowza.ai` must accept plain HTTP, and Cloudflare's "Always Use HTTPS" is zone-wide with no per-hostname
+`time-push.flowza.ai` must accept plain HTTP, and Cloudflare's "Always Use HTTPS" is zone-wide with no per-hostname
 override — so the zone switch stays off and every other hostname in it is served over HTTP too if asked. For the web
 app that means the bundle in the clear; for the API it means bearer tokens in the clear on the browser-to-Cloudflare
 leg.
@@ -279,12 +279,33 @@ leg.
 Close it per hostname instead, which is also how this zone already handles it (there is an existing redirect rule of
 this shape for `finance.flowza.ai`):
 
-- A **Redirect Rule** matching hostname `time.flowza.ai` or `api.flowza.ai` with scheme `http`, to the same URI over
-  `https`, 301. Do not include `push.flowza.ai`.
+- A **Redirect Rule** matching hostname `time.flowza.ai` or `time-api.flowza.ai` with scheme `http`, to the same URI over
+  `https`, 301. Do not include `time-push.flowza.ai`.
 - `apps/web/public/_headers` sends `Strict-Transport-Security` for the web app, so after one HTTPS visit a browser
   will not use HTTP for that host again. It binds only the host that sends it, so it cannot reach the push hostname.
 
 ### Hostnames
+
+> **`flowza.ai` is a shared Cloudflare zone, and the Cloudflare and Supabase accounts host other FlowZa applications**
+> (Finance, PMS, Club, Sign, SpaManager, LogisPro, RentFlow, QR). Two consequences run through this whole runbook:
+>
+> - **Every name this application claims must be `time`-prefixed.** A generic `api.flowza.ai` would take the obvious
+>   name away from eight other applications and make the zone impossible to reason about.
+> - **Some Cloudflare settings are zone-wide, not per-hostname** — SSL/TLS encryption mode and "Always Use HTTPS" both
+>   are. Changing either affects every other application on the zone, so check the current value before touching it and
+>   prefer per-hostname Redirect, Transform and Origin Rules. Where this document names a rule, it is hostname-scoped
+>   on purpose.
+>
+> **On the encryption mode specifically: leave it at `Full`, which is what the zone is set to.** Full already encrypts
+> the Cloudflare→Fly leg, which is all this application needs. Do **not** raise it to `Full (strict)` for this
+> application's benefit: the gap strict would close — proving the origin's identity — is the same gap
+> `EDGE_SHARED_SECRET` closes per-hostname, and the zone carries `cpanel` / `webmail` / `whm` / `autoconfig` A records
+> pointing at a shared cPanel host whose certificate may not survive strict validation. Raising it would risk taking
+> mail and cPanel down to harden one application that does not need it.
+>
+> Supabase is not affected: this application has its own project (`liyilmbklsextsggflbb`), so Auth settings, the
+> password policy, MFA configuration and the database roles are all scoped to it alone. There is no `pg_cron` here
+> either — scheduled work is the worker's own leader-elected scheduler, private to its Fly app.
 
 The web app is served from the custom domain **`https://time.flowza.ai`**. Three other names are worth deciding on
 together rather than one at a time, because two of them appear in configuration that is awkward to change later:
@@ -292,15 +313,15 @@ together rather than one at a time, because two of them appear in configuration 
 | Name | Serves | Notes |
 |---|---|---|
 | `time.flowza.ai` | the web app | live |
-| `api.flowza.ai` (suggested) | `apps/api` | goes in `API_PUBLIC_URL` and `VITE_API_URL` |
-| `push.flowza.ai` (suggested) | device push ingress | **must accept plain HTTP on port 80** — see below |
+| `time-api.flowza.ai` (suggested) | `apps/api` | goes in `API_PUBLIC_URL` and `VITE_API_URL` |
+| `time-push.flowza.ai` (suggested) | device push ingress | **must accept plain HTTP on port 80** — see below |
 
 Device push is the constraint that shapes the choice. Legacy ZKTeco/eSSL/FingerTec firmware speaks plain HTTP to
 `/iclock/*` and cannot do TLS, so that hostname needs an HTTP listener restricted to `/device-push/*` and `/iclock/*`
 and rate-limited per source IP and serial, with everything else redirected to HTTPS
 (`docs/deployment.md` → Device push ingress). Do not put that on the same hostname as the web app or the API.
 
-A device's push URL is written into its firmware during commissioning, so changing `push.flowza.ai` later means
+A device's push URL is written into its firmware during commissioning, so changing `time-push.flowza.ai` later means
 physically revisiting every terminal. Pick it once.
 
 ---

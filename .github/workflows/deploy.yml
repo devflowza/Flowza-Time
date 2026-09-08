@@ -12,6 +12,13 @@ on:
         default: both
         type: choice
         options: [both, api, worker]
+      # Lets a first deploy be verified straight against the Fly hostname, before Cloudflare and the certificate are
+      # in the path. Only works while EDGE_SHARED_SECRET is unset — once it is set the origin refuses non-edge traffic.
+      ready_url:
+        description: URL to poll for readiness after deploying the API
+        required: false
+        default: https://time-api.flowza.ai/api/ready
+        type: string
 
 concurrency:
   group: deploy-production
@@ -45,22 +52,35 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config fly.api.toml --remote-only --wait-timeout 600
 
-      # Verified against the public hostname, so this also proves Cloudflare is routing to the origin. /api/ready
-      # checks the database and the job queue, so a wrong DATABASE_URL_API surfaces here rather than as a user's 500.
-      - name: Verify the API is ready
-        if: inputs.target == 'both' || inputs.target == 'api'
-        run: |
-          for attempt in $(seq 1 12); do
-            code=$(curl -fsS -o /tmp/ready.json -w '%{http_code}' https://api.flowza.ai/api/ready) && break || code=000
-            echo "attempt $attempt: /api/ready -> $code; retrying in 10s"
-            sleep 10
-          done
-          cat /tmp/ready.json || true
-          echo
-          test "$code" = "200" || { echo "::error::/api/ready did not return 200 (last: $code)"; exit 1; }
-
+      # Deployed before the readiness probe on purpose: the probe checks the *public* hostname, which depends on
+      # Cloudflare and the Fly certificate as well as on the app. Those are one-time setup steps, so on a first deploy
+      # the probe can be red while both deploys are perfectly good — and the worker deploy must not be collateral.
       - name: Deploy the worker
         if: inputs.target == 'both' || inputs.target == 'worker'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config fly.worker.toml --remote-only --wait-timeout 600
+
+      # Verified against the public hostname, so this also proves Cloudflare is routing to the origin. /api/ready
+      # checks the database and the job queue, so a wrong DATABASE_URL_API surfaces here rather than as a user's 500.
+      # No -f: it makes curl exit non-zero and write nothing, turning a real "503 degraded" — which names the failing
+      # dependency — into an indistinguishable 000 with an empty body.
+      - name: Verify the API is ready
+        if: inputs.target == 'both' || inputs.target == 'api'
+        env:
+          READY_URL: ${{ inputs.ready_url }}
+        run: |
+          for attempt in $(seq 1 12); do
+            code=$(curl -sS -o /tmp/ready.json -w '%{http_code}' "$READY_URL" || echo 000)
+            [ "$code" = "200" ] && break
+            echo "attempt $attempt: $READY_URL -> $code; retrying in 10s"
+            cat /tmp/ready.json 2>/dev/null || true
+            echo
+            sleep 10
+          done
+          cat /tmp/ready.json || true
+          echo
+          test "$code" = "200" || {
+            echo "::error::$READY_URL did not return 200 (last: $code). The deploys above still succeeded — if this is a first deploy, check the Fly certificate, the Cloudflare DNS record and SSL mode, then re-run this check."
+            exit 1
+          }

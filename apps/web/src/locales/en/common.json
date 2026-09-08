@@ -16,7 +16,7 @@
     "mfaRequiredTitle": "Two-factor authentication required", "mfaRequiredHint": "Your account must be protected with an authenticator app before you can continue.",
     "mfaRequiredChallengeHint": "Enter the code from your authenticator app to continue.", "mfaEnrol": "Set up authenticator",
     "mfaScan": "Scan the QR code with your authenticator app, or enter the secret manually, then type the 6-digit code.", "mfaQrAlt": "QR code for the authenticator app",
-    "mfaCopySecret": "Copy secret", "mfaEnrolError": "Could not start enrolment.", "mfaLoadError": "Could not check your authenticators. Try signing in again.",
+    "mfaCopySecret": "Copy secret", "mfaEnrolError": "Could not start enrolment.", "mfaLoadError": "Could not check your authenticators. Try signing in again.", "mfaSetUpLink": "Set up two-factor authentication",
     "acceptInvite": "Accept invitation", "signingIn": "Signing in…", "sessionExpired": "Your session has expired. Please sign in again."
   },
   "common": {
@@ -27,7 +27,7 @@
     "today": "Today", "refresh": "Refresh", "export": "Export", "import": "Import", "download": "Download", "upload": "Upload", "retry": "Retry",
     "details": "Details", "view": "View", "more": "More", "optional": "Optional", "required": "Required", "unknown": "Unknown", "notAvailable": "—",
     "rowsPerPage": "Rows per page", "pageOf": "Page {{page}} of {{total}}", "selected": "{{count}} selected", "results": "{{count}} results",
-    "noResults": "No results", "noResultsHint": "Try adjusting your search or filters.", "error": "Something went wrong", "errorHint": "Please try again. If the problem persists, contact support with request id {{requestId}}.",
+    "noResults": "No results", "noResultsHint": "Try adjusting your search or filters.", "error": "Something went wrong", "errorHint": "Please try again. If the problem persists, contact support with request id {{requestId}}.", "offlineHint": "The API could not be reached. Check your connection — if it persists, the service may be down.",
     "queued": "Queued successfully", "queuedHint": "Follow progress in Sync jobs.", "copy": "Copy", "copied": "Copied", "timezone": "Timezone",
     "createdAt": "Created", "updatedAt": "Updated", "language": "Language", "theme": "Theme", "light": "Light", "dark": "Dark", "system": "System",
     "switchOrg": "Switch organisation", "comingSoon": "Coming soon", "permissionDenied": "You do not have permission to view this page.", "notFound": "Page not found",

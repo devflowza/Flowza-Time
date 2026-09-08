@@ -28,12 +28,12 @@ primary_region = "bom"
   # Safe to leave on for every machine: exactly one wins the advisory lock and ticks; the rest stand by and take over
   # if the leader dies.
   SCHEDULER_ENABLED = "true"
-  API_PUBLIC_URL = "https://api.flowza.ai"
+  API_PUBLIC_URL = "https://time-api.flowza.ai"
   WEB_PUBLIC_URL = "https://time.flowza.ai"
   # Notifications are written to the outbox either way; "console" logs instead of sending, so invited users receive
   # nothing until this is switched to "resend" and RESEND_API_KEY is set.
   EMAIL_PROVIDER = "console"
-  EMAIL_FROM = "FlowZa Time <no-reply@flowza.ai>"
+  EMAIL_FROM = "FlowZa Time <no-reply@time.flowza.ai>"
 
 [[vm]]
   size = "shared-cpu-1x"

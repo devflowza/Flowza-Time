@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { booleanFromEnv, intFromEnv, loadEnv, masterKeysSchema } from '@flowza/shared';
+import { booleanFromEnv, databaseSslDefault, intFromEnv, loadEnv, masterKeysSchema } from '@flowza/shared';
 
 const schema = z.object({
   NODE_ENV: z.enum(['development', 'test', 'production']).default('development'),
@@ -13,6 +13,9 @@ const schema = z.object({
   SUPABASE_SERVICE_ROLE_KEY: z.string().optional(), // ONLY for realtime broadcast publishing & storage signing, never for data access
   DATABASE_URL_API: z.string().min(1),
   DATABASE_POOL_MAX: intFromEnv(10),
+  // TLS for the database connection. Unset means "decide from the URL": on everywhere except loopback, so a managed
+  // pooler reached over the internet is never silently in the clear. See databaseSslDefault().
+  DATABASE_SSL: booleanFromEnv.optional(),
   FLOWZA_CREDENTIALS_MASTER_KEYS: masterKeysSchema,
   FLOWZA_DEVICE_PUSH_SECRET: z.string().min(8),
   RATE_LIMIT_WINDOW_MS: intFromEnv(60_000),
@@ -29,9 +32,13 @@ const schema = z.object({
   EDGE_SHARED_SECRET: z.string().min(16).optional(),
 });
 
-export type ApiConfig = z.infer<typeof schema> & { webOrigins: string[] };
+export type ApiConfig = z.infer<typeof schema> & { webOrigins: string[]; databaseSsl: boolean };
 
 export function loadApiConfig(env: NodeJS.ProcessEnv = process.env): ApiConfig {
   const parsed = loadEnv(schema, env);
-  return { ...parsed, webOrigins: parsed.WEB_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean) };
+  return {
+    ...parsed,
+    webOrigins: parsed.WEB_ORIGINS.split(',').map((s) => s.trim()).filter(Boolean),
+    databaseSsl: parsed.DATABASE_SSL ?? databaseSslDefault(parsed.DATABASE_URL_API),
+  };
 }
