@@ -88,7 +88,7 @@ describe('GENERATE_REPORT · daily_attendance', () => {
     expect(lines[0]).toBe('Department,Emp ID,Emp Name,Desg,Att Code,IN Time,OUT Time,Wrk Hrs,Tot Hrs,Base Hrs,OT1,OT2,UT');
     // departments alphabetically (ADMIN, EL BEIT, N/A), employees in natural order inside each, hours on the final visit only
     expect(lines.slice(1)).toEqual([
-      'ADMIN,2010,ABDUL SATTHAR,,PR,2:49 pm,,,,540,0,0,540',
+      'ADMIN,2010,ABDUL SATTHAR,,PR,2:49 pm,,,0,540,0,0,540',
       'ADMIN,2076,SALEH AL AGHBARI,,PR,5:32 am,,,,,,,',
       'ADMIN,2076,SALEH AL AGHBARI,,PR,6:00 am,9:16 pm,916,855,540,315,0,0',
       'EL BEIT,2011,FAISAL,Carpenter,PR,8:39 am,6:09 pm,570,510,540,0,0,30',
@@ -135,7 +135,8 @@ describe('GENERATE_REPORT · daily_attendance', () => {
     const html = fileText(`${ORG}/${id}.pdf`);
     expect(html).toContain('dir="rtl"');
     expect(html).toContain('التقرير اليومي');
-    expect(html).toContain('<th>رمز الموظف</th>'.replace('رمز الموظف', 'رقم الموظف'));
+    expect(html).toContain('<th class="mono">رقم الموظف</th>');
+    expect(html).toContain('<span class="label">القسم:</span>');
     expect(html).not.toContain('EL BEIT');
   });
 });

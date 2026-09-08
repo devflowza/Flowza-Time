@@ -1,5 +1,5 @@
 import type { Trx } from '@flowza/database';
-import { DASH, deriveHours, pairPunches, type DerivedHours } from '@flowza/domain';
+import { DASH, deriveHours, minutesBetweenInstants, pairPunches, type DerivedHours } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ReportContext } from '../context.js';
 import { codeInputOf, loadRecords, type DailyRecord } from '../data/records.js';
@@ -35,7 +35,9 @@ export function dailyRowsFor(ctx: ReportContext, e: RosterEmployee, r: DailyReco
   }
   return pairs.map((p, i) => {
     const last = i === pairs.length - 1;
-    return { cells: [...lead, cell(ctx.clock(p.inAt, r.timezone)), cell(ctx.clock(p.outAt, r.timezone)), ...(last ? hourCells(ctx, deriveHours(r)) : hourCells(ctx, null))] };
+    // Wrk Hrs is the span of THIS visit; the record's first_in/last_out would span every visit of the day.
+    const hours = last ? hourCells(ctx, { ...deriveHours(r), span: minutesBetweenInstants(p.inAt, p.outAt) }) : hourCells(ctx, null);
+    return { cells: [...lead, cell(ctx.clock(p.inAt, r.timezone)), cell(ctx.clock(p.outAt, r.timezone)), ...hours] };
   });
 }
 
