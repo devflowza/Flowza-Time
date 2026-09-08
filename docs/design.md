@@ -142,6 +142,10 @@ The Register device wizard is the reference implementation
   stay visible, and doubles as a back link to any completed step.
 - **State belongs to the wizard, not to the step.** A step component that owns its form throws the answers away when
   the user presses Back. Hoist the form; reset it only when an earlier answer invalidates it.
+- **Validate on every exit from a step, not just on Next.** Once a step's answer is a snapshot that later steps read,
+  any route out of it that skips the resolver — Back, a rail link, an Edit button on the review screen — can leave the
+  snapshot describing something the user has since changed. Forward is refused while the step is invalid; backward
+  drops the snapshot and rewinds the progress that depended on it.
 - **The primary action is always reachable** — the step's Back/Next bar is `sticky bottom-0` inside the panel.
 - **Review is editable in place.** Each group on the final step has its own Edit that jumps to the step that owns it.
 - **Never gate forward movement silently.** A disabled Next is paired with a hint saying what is missing.
@@ -158,6 +162,7 @@ Recorded because it is the worked example the rules above were written against.
 | Tab stops to cross the provider grid | 4 | 1 |
 | Nav clicks to reach Review | 5 | 3 |
 | Answers kept when pressing Back | no | yes |
+| Rail/Edit can carry a stale answer to Review | — | no (revalidated on exit) |
 
 What changed, and why each was wrong before:
 
@@ -173,7 +178,9 @@ What changed, and why each was wrong before:
 - **Models as rows, not cards.** The choice is skippable, so it does not deserve the weight of the provider decision.
 - **A search box appears at seven providers.** Below that it is noise; above it a flat grid stops being scannable.
 - **Focus moves to the step heading** on every step change but the first. (§6)
-- **Sticky action bar**; Next carries "Choose a provider to continue" while disabled. (§7)
+- **Sticky action bar**; Next carries "Choose a provider to continue" while disabled, at every screen size. (§7)
+- **Every exit from the details step revalidates.** The rail and the review screen's Edit made it possible to change a
+  field and then leave without re-submitting, so Review — and the create call — used the previous snapshot. (§7)
 
 Regression tests: `apps/web/src/features/devices/pages/device-new-page.test.tsx`. Each one was confirmed to fail
 against the pre-redesign component before the fix landed.
