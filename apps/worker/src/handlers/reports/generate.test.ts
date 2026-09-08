@@ -286,3 +286,73 @@ describe('Phase 1 · the five layouts with existing keys', () => {
     expect((html.match(/class="super"/g) ?? []).length).toBe(1);
   });
 });
+
+describe('Phase 2 · Summary, Weekly, Weekly In/Out, Leave', () => {
+  const csvLines = (path: string) => fileText(path).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
+
+  it('Summary Report: PR/HL/OF/SD/HP/T/PR, the tenant leave types, AB/NP/T/AB, OT1 OT2 as h:mm and UT in notation', async () => {
+    const id = await request('attendance_summary', 'csv', { from: DATE, to: '2017-11-30' });
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    expect(res.status).toBe('COMPLETED');
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    // AL is paid leave (middle group); SD counts as present and sits before HP; no unpaid types in this tenant
+    expect(lines[0]).toBe('ID,Employee Name,PR,HL,OF,SD,HP,T/PR,AL,T/OL,AB,T/AB,OT1,OT2,UT');
+    // FAISAL: PR on the 1st and 2nd, OF 3rd/4th, AB 5th; UT 0.30 + 0.42 = 72 min
+    expect(lines.find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,,2,,,4,,0,1,1,0,0,72');
+    // SALEH: one present day with 5:15 regular overtime
+    expect(lines.find((l) => l.startsWith('2076,'))).toBe('2076,SALEH AL AGHBARI,1,,,,,1,,0,,0,315,0,0');
+    // Masoom: one day of annual leave
+    expect(lines.find((l) => l.startsWith('2192,'))).toBe('2192,Masoom,,,,,,0,1,1,,0,0,0,0');
+    const pdfId = await request('attendance_summary', 'pdf', { from: DATE, to: '2017-11-30' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('Summary Report');
+    expect(html).toContain('For the period : 01-Nov-2017 to 30-Nov-2017');
+    // printed: counts as integers or dashes, totals with one decimal, OT as h:mm, UT as h.mm
+    expect(html).toMatch(/2011<\/td><td>FAISAL<\/td><td class="center">2<\/td><td class="center">-<\/td><td class="center">2<\/td><td class="center">-<\/td><td class="center">-<\/td><td class="center" style="font-weight:700">4\.0<\/td><td class="center">-<\/td><td class="center" style="font-weight:700">0\.0<\/td><td class="center">1<\/td><td class="center" style="font-weight:700">1\.0<\/td><td class="end mono">0:00<\/td><td class="end mono">0:00<\/td><td class="end mono">1\.12<\/td>/);
+    expect(html).toMatch(/2076<\/td>.*<td class="end mono">5:15<\/td>/);
+  });
+
+  it('Weekly Report: the week containing the date, two sub-columns per day, underscores where nothing was recorded', async () => {
+    const id = await request('weekly_attendance', 'csv', { from: '2017-11-02' });
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    expect(res.status).toBe('COMPLETED');
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    // firstDayOfWeek defaults to Sunday: 29 Oct – 4 Nov
+    expect(lines[0]).toBe('ID,Name,Sun 29/Oct/2017 MornWT,Sun 29/Oct/2017 EvenWT,Mon 30/Oct/2017 MornWT,Mon 30/Oct/2017 EvenWT,Tue 31/Oct/2017 MornWT,Tue 31/Oct/2017 EvenWT,Wed 01/Nov/2017 MornWT,Wed 01/Nov/2017 EvenWT,Thu 02/Nov/2017 MornWT,Thu 02/Nov/2017 EvenWT,Fri 03/Nov/2017 MornWT,Fri 03/Nov/2017 EvenWT,Sat 04/Nov/2017 MornWT,Sat 04/Nov/2017 EvenWT');
+    expect(lines.find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,_,_,_,_,_,_,8:39 am,6:09 pm,8:45 am,5:52 pm,_,_,_,_');
+    const pdfId = await request('weekly_attendance', 'pdf', { from: '2017-11-02' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('For the Week: 10/29/2017 - 11/04/2017'); // tenant date format MM/DD/YYYY
+    expect(html).toContain('<th class="group" colspan="2">Wed 01/Nov/2017</th>');
+  });
+
+  it('Weekly In/Out Report: IN over OUT, 00:00 for a missing side, the code on days without punches', async () => {
+    const id = await request('weekly_in_out', 'csv', { from: '2017-11-02' });
+    expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }))).status).toBe('COMPLETED');
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toBe('Emp Code,Emp Name,Sun 29,Mon 30,Tue 31,Wed 01,Thu 02,Fri 03,Sat 04');
+    expect(lines.find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,,,,8:39 am / 6:09 pm,8:45 am / 5:52 pm,OF,OF');
+    expect(lines.find((l) => l.startsWith('2010,'))).toBe('2010,ABDUL SATTHAR,,,,2:49 pm / 00:00,AB,,');
+    const pdfId = await request('weekly_in_out', 'pdf', { from: '2017-11-02' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('<span class="line">8:39 am</span><span class="line">6:09 pm</span>');
+    expect(html).toContain('From 29-Oct-2017 To 04-Nov-2017');
+    expect(html).toContain('NOTE : ATTENDANCE CODE');
+  });
+
+  it('Leave Report: one leave type, per department, with the End Of Report trailer', async () => {
+    const id = await request('leave_report', 'csv', { from: DATE, to: '2017-11-30', leaveTypeCode: 'AL' });
+    expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }))).rowCount).toBe(1);
+    expect(csvLines(`${ORG}/${id}.csv`)[1]).toBe('EL BEIT,1,2192,Masoom,01,1');
+    const pdfId = await request('leave_report', 'pdf', { from: DATE, to: '2017-11-30', leaveTypeCode: 'AL' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('<div class="title">Staff Annual Leave Report</div>');
+    expect(html).toContain('<div class="end">End Of Report</div><div class="end-title">Staff Annual Leave Report</div>');
+    const none = await request('leave_report', 'csv', { from: DATE, to: '2017-11-30', leaveTypeCode: 'SD' });
+    expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: none }))).rowCount).toBe(0);
+  });
+});

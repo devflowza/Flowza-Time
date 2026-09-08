@@ -74,6 +74,18 @@
     "leave_report": {
       "name": "Staff Leave Report",
       "description": "Per department: each employee’s days of one leave type in the period and how many."
+    },
+    "attendance_summary": {
+      "name": "Summary Report",
+      "description": "One row per employee for the period: days per attendance code grouped into present, leave and absent totals, with OT1, OT2 and under time."
+    },
+    "weekly_attendance": {
+      "name": "Weekly Report",
+      "description": "The week containing the chosen date: first IN and last OUT per employee per day."
+    },
+    "weekly_in_out": {
+      "name": "Weekly In/Out Report",
+      "description": "The week containing the chosen date: IN over OUT for each day, or the attendance code when there were no punches."
     }
   },
   "request": {
@@ -99,7 +111,15 @@
     "reasonHint": "Some organisations require a reason for exports; it is stored in the audit log.",
     "submit": "Queue report",
     "queued": "Report queued",
-    "queuedHint": "It appears below and refreshes automatically until it is ready."
+    "queuedHint": "It appears below and refreshes automatically until it is ready.",
+    "leaveType": "Leave type",
+    "pickLeaveType": "Select a leave type…",
+    "employmentStatus": "Employment status",
+    "employmentStatuses": {
+      "active": "Active employees",
+      "inactive": "Inactive employees",
+      "all": "All employees"
+    }
   },
   "list": {
     "title": "My reports",

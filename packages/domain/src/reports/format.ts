@@ -118,6 +118,19 @@ export function eachDateInclusive(from: string, to: string): string[] {
   return out;
 }
 
+/**
+ * The seven days of the week containing `date`, starting on the tenant's first day of the week (0 = Sunday … 6 = Saturday,
+ * as `settings.general.firstDayOfWeek`). A Saturday-first tenant asking for 2017-11-08 gets 04/11 – 10/11, as sample 5 does.
+ */
+export function weekRange(date: string, firstDayOfWeek: number): { from: string; to: string; days: string[] } {
+  const d = DateTime.fromISO(date, { zone: 'utc' });
+  const dow = d.weekday % 7; // luxon: 1 = Monday … 7 = Sunday → 0 = Sunday … 6 = Saturday
+  const first = ((firstDayOfWeek % 7) + 7) % 7;
+  const start = d.minus({ days: (dow - first + 7) % 7 });
+  const days = Array.from({ length: 7 }, (_, i) => start.plus({ days: i }).toISODate()!);
+  return { from: days[0]!, to: days[6]!, days };
+}
+
 /** Day numbers of a month as the samples list them: `06 13` — two digits, space separated, ascending. */
 export function dayList(isoDates: readonly string[]): string {
   return [...isoDates].sort().map((d) => d.slice(8, 10)).join(' ');
