@@ -83,6 +83,20 @@ Types not in the sample set (`branch_attendance`, `department_attendance`, `over
 `device_health_report`, `payroll_summary`) are `planned`: hidden from `/report-types`, refused by `POST /reports`, and
 each becomes a one-file follow-up on this engine.
 
+## Limits and operations
+
+- **Size** — one file holds at most `MAX_REPORT_CELLS` (250 000) rows × columns; a larger request fails at build time with
+  a message that says to narrow the period or split by branch or department. The queue's per-organisation concurrency
+  keeps one tenant's reports from crowding out another's.
+- **Timeout** — 15 minutes per job (the runner's default is 5 for device calls).
+- **Where PDF runs** — the `flowza-time-reports` app (`fly.reports.toml`, deploy workflow target `reports`), 1 GB, built with
+  `WITH_CHROMIUM=1`. The general worker refuses PDF non-retryably. Decision record: `docs/adr/ADR-008-report-rendering.md`.
+- **Renderer test** — `apps/worker/src/lib/pdf.test.ts` proves the refusal everywhere and renders a real PDF where
+  `CHROMIUM_PATH` points at a Chromium (CI installs one for the worker job).
+- **Logs** — `report_generated` (type, format, rows, bytes, ms) and `report_failed` (type, code, retryable).
+- **Retention** — files expire 7 days after completion (`expires_at`); the maintenance sweep removes them and marks the row
+  EXPIRED.
+
 ## Adding a report type
 
 1. Add the key to `REPORT_TYPES` (`packages/contracts/src/enums.ts`) and its entry to `REPORT_TYPE_DEFINITIONS`
@@ -101,4 +115,4 @@ each becomes a one-file follow-up on this engine.
 - [x] Phase 2 — `attendance_summary`, `weekly_attendance`, `weekly_in_out`, `leave_report`
 - [x] Phase 3 — `audit_report` attendance scope + PDF
 - [x] Phase 4 — web parameter forms (week, leave type, status, scope), Settings → Reports, leave-type seeding
-- [ ] Phase 5 — hardening (streaming, cell cap), golden renders in CI, reports worker deployed, docs and go-live
+- [x] Phase 5 — hardening (streaming, cell cap), golden renders in CI, reports worker deployed, docs and go-live

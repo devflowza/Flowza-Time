@@ -11,7 +11,9 @@ on:
         required: true
         default: both
         type: choice
-        options: [both, api, worker]
+        # `reports` is separate on purpose: the flowza-time-reports app needs its secrets set once before its first deploy
+        # (go-live 3b), so it is never swept up by `both`.
+        options: [both, api, worker, reports]
       # Lets a first deploy be verified straight against the Fly hostname, before Cloudflare and the certificate are
       # in the path. Only works while EDGE_SHARED_SECRET is unset — once it is set the origin refuses non-edge traffic.
       ready_url:
@@ -60,6 +62,16 @@ jobs:
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config fly.worker.toml --remote-only --wait-timeout 600
+
+      # PDF reports run on their own machine (docs/adr/ADR-008-report-rendering.md). Created on first use; secrets are a
+      # one-time manual step because they are the same credentials as the general worker.
+      - name: Deploy the reports worker
+        if: inputs.target == 'reports'
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl status --app flowza-time-reports >/dev/null 2>&1 || flyctl apps create flowza-time-reports
+          flyctl deploy --config fly.reports.toml --remote-only --ha=false --wait-timeout 900
 
       # Verified against the public hostname, so this also proves Cloudflare is routing to the origin. /api/ready
       # checks the database and the job queue, so a wrong DATABASE_URL_API surfaces here rather than as a user's 500.

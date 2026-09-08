@@ -21,6 +21,12 @@ export const exportEmployeesPayloadSchema = z.object({
 /** Files live until the retention sweep removes them (RETENTION_FLOORS.report_files); the row says so up front. */
 export const REPORT_FILE_TTL_DAYS = 7;
 export const REPORTS_BUCKET = 'reports';
+/**
+ * Upper bound on rows × columns in one file. A month of a 100k-employee tenant is ~3.1 M cells — past what a browser
+ * renders in the job timeout or a person reads in one document. The failure names the fix (narrow the period, split
+ * by branch or department) instead of timing out.
+ */
+export const MAX_REPORT_CELLS = 250_000;
 
 export interface GenerateResult { reportRequestId: string; status: 'COMPLETED' | 'FAILED' | 'SKIPPED'; rowCount?: number; bytes?: number; reason?: string }
 
@@ -59,6 +65,8 @@ export async function generateReportRequest(deps: WorkerDeps, log: Logger, job: 
       const ctx = await loadReportContext(trx, organizationId, { parameters: row.parameters, format }, now);
       return def.build(trx, ctx);
     });
+    const cells = doc.rowCount * Math.max(1, doc.columns.length);
+    if (cells > MAX_REPORT_CELLS) throw errors.validation(`This report would have ${doc.rowCount.toLocaleString('en')} rows × ${doc.columns.length} columns, more than one file can hold. Narrow the period or split it by branch or department.`, { rows: doc.rowCount, columns: doc.columns.length, cells, max: MAX_REPORT_CELLS });
     const { body, contentType } = await renderDocument(doc, format, deps.pdf);
     const path = `${organizationId}/${row.id}.${format}`;
     const stored = await deps.storage.upload(REPORTS_BUCKET, path, body, contentType);

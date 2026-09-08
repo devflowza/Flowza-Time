@@ -194,6 +194,16 @@ What changed, and why each was wrong before:
 Regression tests: `apps/web/src/features/devices/pages/device-new-page.test.tsx`. Each one was confirmed to fail
 against the pre-redesign component before the fix landed.
 
+## 10. Printed reports
+
+Reports are documents, not screens, and follow the conventions of the fourteen sample layouts (`docs/reports.md`):
+company name and title centred with a rule beneath; the period wording each report uses; table headings that repeat on
+every page; department headings as bars; codes coloured by meaning (OF blue, leave green, AB red); the attendance-code
+legend and `Page X of Y` in the footer; landscape only for the wide grids (Summary, Monthly, Weekly). Hours print in
+the tenant's notation (`9.45` = 9 h 45 min by default), clocks and dates in the tenant's formats, Arabic RTL with the
+`name_ar` of every entity that has one. Templates live in `apps/worker/src/handlers/reports/render/html.ts`; they are
+HTML rendered by Chromium, so the same CSS rules as the app apply — logical properties, tokens, no physical directions.
+
 ## 9. Checklist before shipping a screen
 
 - [ ] No physical direction utilities; checked at `dir="rtl"`

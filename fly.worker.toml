@@ -23,6 +23,8 @@ primary_region = "sin"
   LOG_LEVEL = "info"
   DATABASE_POOL_MAX = "10"
   WORKER_CONCURRENCY = "8"
+  # `reports` stays here until flowza-time-reports (fly.reports.toml) is live; this machine has no Chromium, so it
+  # serves CSV/XLSX and fails PDF requests with a clear message. Remove `reports` once the reports app consumes the queue.
   WORKER_QUEUES = "sync,processing,reports,notifications,maintenance"
   WORKER_PER_ORG_CONCURRENCY = "5"
   # Safe to leave on for every machine: exactly one wins the advisory lock and ticks; the rest stand by and take over
