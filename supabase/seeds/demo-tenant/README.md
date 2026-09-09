@@ -59,5 +59,6 @@ old events through corrections or start from a fresh tenant instead.
 
 - Leave balances and entitlements do not exist in the data model; the Leave page lists records only.
 - Teams have no department column; the team name carries the department where it matters.
-- Devices are push terminals without a live connection: they show the seeded heartbeat until the worker's health sweep
-  marks them offline (30-minute threshold). Nizwa is seeded offline on purpose.
+- Devices are push terminals without a live connection. The seed stamps a fresh heartbeat and a 24-hour offline threshold,
+  so they read "online" for a day after each run and the worker's health sweep marks them offline afterwards — re-run
+  step 01 to refresh. Nizwa is seeded offline on purpose (30-minute threshold, last seen yesterday).
