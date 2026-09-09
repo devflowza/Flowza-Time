@@ -1,5 +1,5 @@
 import { type z } from 'zod';
-import { seedDefaultLeaveTypes } from './features/leave-defaults.js';
+import { provisionTenant } from './tenant-provisioning.js';
 import type { AccessGrantDto, CreateAccessGrantInput, CreateOrganizationInput, CreateOrganizationResult, FeatureFlagDto, OrgFeatureFlagDto, OrgStatus, PlanDto, PlatformHealthDto, PlatformOrganizationDto, accessGrantListQuerySchema, platformOrgListQuerySchema, putFeatureFlagsSchema, putOrgFeatureFlagsSchema, updateOrganizationStatusSchema } from '@flowza/contracts';
 import { SYSTEM_ROLE_IDS } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
@@ -79,15 +79,10 @@ export async function createOrganization(deps: ApiDeps, actor: Actor, input: Cre
   return runSystem(deps.db, orgId, actor.requestId, async (trx) => {
     const clash = await trx.selectFrom('organizations').select('id').where(sql`lower(company_code::text)`, '=', input.companyCode.toLowerCase()).executeTakeFirst();
     if (clash) throw errors.conflict('An organisation with this company code already exists.');
-    const org = await trx.insertInto('organizations').values({
-      id: orgId, companyCode: input.companyCode, legalName: input.legalName, displayName: input.displayName, countryCode: input.countryCode, timezone: input.timezone, currencyCode: input.currencyCode,
-      locale: input.locale, weeklyOffDays: input.weeklyOffDays, contact: JSON.stringify(input.contact), address: JSON.stringify(input.address), status: input.planKey === 'trial' ? 'trial' : 'active', createdBy: actor.userId,
-    }).returning(ORG_COLUMNS).executeTakeFirstOrThrow();
-    await trx.insertInto('organizationSettings').values({ organizationId: orgId, updatedBy: actor.userId }).execute();
-    // attendance reports print a leave day as the leave type's code; without types the Summary report has no leave columns
-    await seedDefaultLeaveTypes(trx, orgId);
-    const trialDays = 14;
-    await trx.insertInto('subscriptions').values({ organizationId: orgId, planId: plan.id, status: input.planKey === 'trial' ? 'trialing' : 'active', trialEndsAt: input.planKey === 'trial' ? new Date(Date.now() + trialDays * 86_400_000) : null }).execute();
+    const org = await provisionTenant(trx, {
+      orgId, companyCode: input.companyCode, legalName: input.legalName, displayName: input.displayName, countryCode: input.countryCode, timezone: input.timezone, currencyCode: input.currencyCode,
+      locale: input.locale, weeklyOffDays: input.weeklyOffDays, contact: input.contact, address: input.address, plan, createdBy: actor.userId,
+    });
     let ownerMembershipId: string | null = null;
     let invitation: CreateOrganizationResult['invitation'] = null;
     if (owner) {

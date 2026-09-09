@@ -22,8 +22,8 @@ import { AuthLayout } from './auth-layout';
  * in, or sign up for someone who has never had an account) and then redeems the token, which is what makes a brand
  * new owner able to onboard at all.
  *
- * Self-service registration lives on /auth/sign-up (sign-up-page.tsx). Creating an account there grants nothing: the
- * user still has no membership until an invitation is redeemed here, which keeps tenant access invitation-only.
+ * Self-service registration lives on /auth/sign-up (sign-up-page.tsx): a new user creates their own organisation and
+ * becomes its owner. Joining an EXISTING organisation still happens only here, by redeeming an invitation.
  */
 const schema = z
   .object({

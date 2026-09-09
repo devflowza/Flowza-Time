@@ -38,6 +38,25 @@ export const createOrganizationSchema = z.object({
   planKey: z.string().default('trial'),
 });
 export type CreateOrganizationInput = z.infer<typeof createOrganizationSchema>;
+
+/**
+ * Self-service tenant creation (`POST /orgs`): the caller becomes the owner of a trial organisation. Deliberately much
+ * smaller than the platform console's schema — no plan, no owner lookup, and the company code is derived from the
+ * display name when omitted, so a sign-up form only has to ask for the company name.
+ */
+export const createOwnOrganizationSchema = z.object({
+  displayName: z.string().trim().min(2).max(120),
+  legalName: z.string().trim().min(2).max(200).optional(),
+  companyCode: codeSchema.optional(),
+  countryCode: countryCodeSchema.default('OM'),
+  timezone: timezoneSchema.default('Asia/Muscat'),
+  currencyCode: currencyCodeSchema.default('OMR'),
+  locale: z.enum(['en', 'ar']).default('en'),
+  ownerFullName: z.string().trim().min(1).max(160).optional(),
+});
+export type CreateOwnOrganizationInput = z.infer<typeof createOwnOrganizationSchema>;
+export const createOwnOrganizationResultSchema = z.object({ organization: organizationDtoSchema, membershipId: uuidSchema });
+export type CreateOwnOrganizationResult = z.infer<typeof createOwnOrganizationResultSchema>;
 /** PATCH body: no creation defaults (a `.partial()` of the create schema would re-apply them and reset omitted fields). */
 export const updateOrganizationSchema = z.object({
   legalName: z.string().trim().min(2).max(200).optional(),

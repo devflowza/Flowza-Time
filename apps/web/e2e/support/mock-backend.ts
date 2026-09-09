@@ -99,6 +99,8 @@ export interface MockBackendOptions {
   me?: MeDto;
   /** GET handlers keyed by `/api/v1`-relative path; a function may inspect the URL */
   get?: Record<string, unknown | ((url: URL) => unknown)>;
+  /** POST handlers keyed by `/api/v1`-relative path; return the status and the JSON body */
+  post?: Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }>;
   /** reject the password grant (wrong credentials) */
   rejectSignIn?: boolean;
   /** reject sign-up (address already registered) */
@@ -181,6 +183,10 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
       state.unmatched.push(path);
       // unknown list endpoints (filter option sources etc.) answer with an empty page so screens render their empty states
       return json(route, 200, page_([]));
+    }
+    if (req.method() === 'POST') {
+      const handler = opts.post?.[path];
+      if (handler) { const r = handler(body, url); return json(route, r.status ?? 200, r.body); }
     }
     return apiError(route, 404, 'NOT_FOUND', `No e2e handler for ${req.method()} ${path}`);
   });
