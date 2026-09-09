@@ -67,6 +67,11 @@
   --radius-xl: 1rem;
 
   --shadow-card: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 3px rgb(16 24 40 / 0.1);
+
+  /* Secondary text (hints, table headings, e-mail lines) is set in `text-xs`; 13px instead of Tailwind's 12px keeps it
+     legible on dense screens without touching the 14px body size. */
+  --text-xs: 0.8125rem;
+  --text-xs--line-height: 1.125rem;
 }
 
 /* ---------------------------------------------------------------------------------------------------------------------
@@ -82,7 +87,7 @@
   --fg: #101828;
   --card: #ffffff;
   --muted: #f2f4f7;
-  --muted-fg: #667085;
+  --muted-fg: #475467; /* Gray-600: 7:1 on white, so hints and headings read as text, not decoration */
   --border: #e4e7ec;
   color-scheme: light;
 }
@@ -125,7 +130,7 @@
   --fg: #e6eaf0;
   --card: #111a2b;
   --muted: #1a2438;
-  --muted-fg: #98a2b3;
+  --muted-fg: #a6b0bf;
   --border: #243046;
   --accent: #10251f;
   --sidebar: #08111d;
@@ -191,7 +196,7 @@
   --brand-800: #1e40af;
   --brand-900: #1e3a8a;
   --sidebar: #ffffff;
-  --sidebar-fg: #475467;
+  --sidebar-fg: #344054; /* Gray-700 on a white sidebar; the dimmed section labels still clear 4.5:1 */
   --sidebar-strong: #101828;
   --sidebar-hover: #f2f4f7;
   --sidebar-active: #2563eb;
@@ -214,7 +219,7 @@
 .dark [data-theme='classic'] {
   --accent: #172554;
   --sidebar: #111a2b;
-  --sidebar-fg: #98a2b3;
+  --sidebar-fg: #a6b0bf;
   --sidebar-strong: #e6eaf0;
   --sidebar-hover: #1a2438;
   --sidebar-border: #243046;

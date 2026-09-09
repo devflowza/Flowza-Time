@@ -78,7 +78,7 @@ export function MonthlyGrid({ rows, days, weeklyOffDays = [], onOpenRecord, onOp
           <tr className="border-b">
             <th scope="col" className="sticky start-0 z-20 bg-muted/50 px-3 py-2 text-start text-xs font-semibold uppercase tracking-wide text-muted-foreground backdrop-blur">{t('monthly.employee')}</th>
             {headers.map((h) => <th key={h.d} scope="col" className={cn('px-0.5 py-1 text-center text-[11px] font-medium leading-tight text-muted-foreground', h.off && 'text-muted-foreground/60')}><span className="block tnum">{h.num}</span><span className="block text-[9px] uppercase">{h.dow}</span></th>)}
-            {(['present', 'absent', 'leave', 'late', 'missing', 'worked', 'overtime'] as const).map((k) => <th key={k} scope="col" className="px-2 py-1 text-center text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">{t(`monthly.totals.${k}`)}</th>)}
+            {(['present', 'absent', 'leave', 'late', 'missing', 'worked', 'overtime'] as const).map((k) => <th key={k} scope="col" className="px-2 py-1 text-center text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">{t(`monthly.totals.${k}`)}</th>)}
           </tr>
         </thead>
         <tbody>
