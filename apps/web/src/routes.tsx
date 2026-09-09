@@ -4,6 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { AppShell } from '@/components/layout/app-shell';
 import { RequireAuth } from '@/components/layout/protected-route';
 import { SignInPage } from '@/features/auth/sign-in-page';
+import { SignUpPage } from '@/features/auth/sign-up-page';
 import { ForgotPasswordPage, ResetPasswordPage } from '@/features/auth/forgot-password-page';
 import { AcceptInvitationPage } from '@/features/auth/accept-invitation-page';
 import { MfaRequiredGate } from '@/features/auth/mfa-required-gate';
@@ -39,6 +40,7 @@ function MfaSetupRoute() {
 
 export const router = createBrowserRouter([
   { path: '/auth/sign-in', element: <SignInPage /> },
+  { path: '/auth/sign-up', element: <SignUpPage /> },
   { path: '/auth/forgot', element: <ForgotPasswordPage /> },
   { path: '/auth/reset', element: <ResetPasswordPage /> },
   // Public on purpose: the invitee has no account yet, so this cannot sit behind RequireAuth.
