@@ -6,7 +6,7 @@ export const ORG_COLUMNS = ['id', 'companyCode', 'legalName', 'displayName', 'co
 export interface OrgRow {
   id: string; companyCode: string; legalName: string; displayName: string; countryCode: string; timezone: string; currencyCode: string;
   locale: string; weeklyOffDays: number[]; logoPath: string | null; contact: unknown; address: unknown; status: OrganizationDto['status'];
-  createdAt: Date; updatedAt: Date; legalHold: boolean; regionCell: string;
+  createdAt: Date | string; updatedAt: Date | string; legalHold: boolean; regionCell: string;
 }
 
 export function toOrganizationDto(row: OrgRow): OrganizationDto {
