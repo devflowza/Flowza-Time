@@ -23,9 +23,10 @@ primary_region = "sin"
   LOG_LEVEL = "info"
   DATABASE_POOL_MAX = "10"
   WORKER_CONCURRENCY = "8"
-  # `reports` stays here until flowza-time-reports (fly.reports.toml) is live; this machine has no Chromium, so it
-  # serves CSV/XLSX and fails PDF requests with a clear message. Remove `reports` once the reports app consumes the queue.
-  WORKER_QUEUES = "sync,processing,reports,notifications,maintenance"
+  # `reports` is served by flowza-time-reports (fly.reports.toml), the 1 GB machine built with Chromium. This machine
+  # has no Chromium: if it also consumed `reports` it would race the reports app for jobs and fail every PDF with
+  # "PDF rendering is not available on this worker". Deploy the reports app before redeploying this config.
+  WORKER_QUEUES = "sync,processing,notifications,maintenance"
   WORKER_PER_ORG_CONCURRENCY = "5"
   # Safe to leave on for every machine: exactly one wins the advisory lock and ticks; the rest stand by and take over
   # if the leader dies.
