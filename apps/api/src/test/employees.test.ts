@@ -308,6 +308,25 @@ describe('search & dashboard', () => {
     expect(denied.status).toBe(403);
   });
 
+  it('lists a day of attendance with the total and the per-status totals of the whole set on every page', async () => {
+    const list = (params: string) => api.request('GET', `/orgs/${F.orgA}/attendance/daily?date=${F.RECORD_DATE}&sort=displayName&order=asc&${params}`, { user: F.ownerA });
+    const p1 = await list('page=1&pageSize=1');
+    expect(p1.status).toBe(200);
+    expect(p1.json.data.map((r: any) => r.employeeName)).toEqual(['Ali Said']);
+    expect(p1.json.meta).toMatchObject({ page: 1, pageSize: 1, total: 2, totalPages: 2, byStatus: { PRESENT: 1, ABSENT: 1 } });
+    const p2 = await list('page=2&pageSize=1');
+    expect(p2.json.data.map((r: any) => r.employeeName)).toEqual(['Sara Nasser']);
+    expect(p2.json.meta).toMatchObject({ total: 2, byStatus: { PRESENT: 1, ABSENT: 1 } });
+    // a page past the end still reports the totals of the set
+    const p3 = await list('page=3&pageSize=1');
+    expect(p3.json.data).toEqual([]);
+    expect(p3.json.meta).toMatchObject({ total: 2, byStatus: { PRESENT: 1, ABSENT: 1 } });
+    // a filter that matches nothing
+    const none = await list('page=1&pageSize=25&status=LEAVE');
+    expect(none.json.data).toEqual([]);
+    expect(none.json.meta).toMatchObject({ total: 0, byStatus: {} });
+  });
+
   it('counts an employee who has clocked in but not yet out as present today', async () => {
     // the engine leaves an open day PENDING until the punch window closes; a first IN is enough for the dashboard
     const date = '2026-09-03';

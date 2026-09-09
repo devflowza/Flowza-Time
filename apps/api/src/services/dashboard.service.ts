@@ -1,5 +1,4 @@
 import { sql } from 'kysely';
-import { DateTime } from 'luxon';
 import type { DashboardBranchRow, DashboardSummary, DashboardTrendPoint } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { errors, eachDate } from '@flowza/shared';
@@ -9,11 +8,6 @@ import { type Actor, runUser } from '../lib/service.js';
 import { toCount } from '../lib/pagination.js';
 
 const MAX_TREND_DAYS = 92;
-
-async function orgToday(trx: Trx, orgId: string): Promise<string> {
-  const org = await trx.selectFrom('organizations').select('timezone').where('id', '=', orgId).executeTakeFirst();
-  return DateTime.now().setZone(org?.timezone ?? 'UTC').toISODate() ?? DateTime.utc().toISODate()!;
-}
 
 interface DayAgg { present: number; absent: number; late: number; onLeave: number; earlyDeparture: number; overtimeMinutes: number; missingPunch: number }
 const emptyAgg = (): DayAgg => ({ present: 0, absent: 0, late: 0, onLeave: 0, earlyDeparture: 0, overtimeMinutes: 0, missingPunch: 0 });
@@ -37,19 +31,6 @@ async function attendanceAgg(trx: Trx, orgId: string, from: string, to: string, 
     sql<string>`count(*) filter (where r.status = 'MISSING_PUNCH')`.as('missingPunch'),
   ]).groupBy(keyExpr).execute();
   return new Map(rows.map((r) => [groupBy ? r.key : 'all', { present: toCount(r.present), absent: toCount(r.absent), late: toCount(r.late), onLeave: toCount(r.onLeave), earlyDeparture: toCount(r.earlyDeparture), overtimeMinutes: toCount(r.overtimeMinutes), missingPunch: toCount(r.missingPunch) }]));
-}
-
-async function deviceCounts(trx: Trx, orgId: string, scope: string[] | null): Promise<Map<string, { online: number; offline: number; unknown: number }>> {
-  let q = trx.selectFrom('devices').where('organizationId', '=', orgId).where('status', '=', 'active');
-  if (scope) q = q.where('branchId', 'in', scope);
-  const rows = await q.select(['branchId', 'connectionStatus', (eb) => eb.fn.countAll().as('n')]).groupBy(['branchId', 'connectionStatus']).execute();
-  const out = new Map<string, { online: number; offline: number; unknown: number }>();
-  for (const r of rows) {
-    const key = r.branchId; const agg = out.get(key) ?? { online: 0, offline: 0, unknown: 0 }; const n = toCount(r.n);
-    if (r.connectionStatus === 'online') agg.online += n; else if (r.connectionStatus === 'unknown') agg.unknown += n; else agg.offline += n; // offline/degraded/error/vendor_degraded count as not online
-    out.set(key, agg);
-  }
-  return out;
 }
 
 export async function summary(deps: ApiDeps, actor: Actor, orgId: string, q: { date?: string; branchId?: string }): Promise<DashboardSummary> {
@@ -116,18 +97,51 @@ export async function branches(deps: ApiDeps, actor: Actor, orgId: string, q: { 
   const grant = requirePermission(actor.principal, orgId, 'dashboard.view');
   const scope = branchFilter(grant);
   return runUser(deps.db, actor, async (trx) => {
-    const date = q.date ?? (await orgToday(trx, orgId));
-    let bq = trx.selectFrom('branches').select(['id', 'code', 'name']).where('organizationId', '=', orgId).where('status', '!=', 'archived');
-    if (scope) bq = bq.where('id', 'in', scope);
-    const branchRows = await bq.orderBy('name').execute();
-    const agg = await attendanceAgg(trx, orgId, date, date, scope, 'branch');
-    const devices = await deviceCounts(trx, orgId, scope);
-    let eq = trx.selectFrom('employees').select(['branchId', (eb) => eb.fn.countAll().as('n')]).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('employmentStatus', '=', 'active');
-    if (scope) eq = eq.where('branchId', 'in', scope);
-    const employees = new Map((await eq.groupBy('branchId').execute()).map((r) => [r.branchId, toCount(r.n)]));
-    return branchRows.map((b) => {
-      const a = agg.get(b.id) ?? emptyAgg(); const d = devices.get(b.id) ?? { online: 0, offline: 0, unknown: 0 };
-      return { branchId: b.id, branchCode: String(b.code), branchName: b.name, employees: employees.get(b.id) ?? 0, present: a.present, absent: a.absent, late: a.late, onLeave: a.onLeave, missingPunch: a.missingPunch, devicesOnline: d.online, devicesOffline: d.offline + d.unknown };
+    // One statement: the branches, the day's attendance per branch (same filters as attendanceAgg), device states
+    // and headcounts — four queries in a row before, five without a date.
+    const scoped = (col: string) => (scope ? sql`and ${sql.ref(col)} = any(${scope}::uuid[])` : sql``);
+    const { rows } = await sql<{ id: string; code: string; name: string; employees: string; present: string; absent: string; late: string; onLeave: string; missingPunch: string; online: string; total: string }>`
+      with day as (
+        select coalesce(${q.date ?? null}::date, (now() at time zone (select o.timezone from public.organizations o where o.id = ${orgId}))::date) as d
+      ),
+      att as (
+        select r.branch_id,
+               count(*) filter (where r.status in ('PRESENT', 'HALF_DAY') or (r.status = 'PENDING' and r.first_in_at is not null)) as present,
+               count(*) filter (where r.status = 'ABSENT') as absent,
+               count(*) filter (where 'LATE' = any(r.flags)) as late,
+               count(*) filter (where r.status = 'LEAVE') as on_leave,
+               count(*) filter (where r.status = 'MISSING_PUNCH') as missing_punch
+        from public.attendance_daily_records r, day
+        where r.organization_id = ${orgId} and r.attendance_date = day.d ${scoped('r.branch_id')}
+        group by r.branch_id
+      ),
+      dev as (
+        select d.branch_id, count(*) filter (where d.connection_status = 'online') as online, count(*) as total
+        from public.devices d
+        where d.organization_id = ${orgId} and d.status = 'active' ${scoped('d.branch_id')}
+        group by d.branch_id
+      ),
+      emp as (
+        select e.branch_id, count(*) as n
+        from public.employees e
+        where e.organization_id = ${orgId} and e.deleted_at is null and e.employment_status = 'active' ${scoped('e.branch_id')}
+        group by e.branch_id
+      )
+      select b.id, b.code, b.name,
+             coalesce(emp.n, 0) as employees,
+             coalesce(att.present, 0) as present, coalesce(att.absent, 0) as absent, coalesce(att.late, 0) as late,
+             coalesce(att.on_leave, 0) as on_leave, coalesce(att.missing_punch, 0) as missing_punch,
+             coalesce(dev.online, 0) as online, coalesce(dev.total, 0) as total
+      from public.branches b
+      left join att on att.branch_id = b.id
+      left join dev on dev.branch_id = b.id
+      left join emp on emp.branch_id = b.id
+      where b.organization_id = ${orgId} and b.status <> 'archived' ${scoped('b.id')}
+      order by b.name`.execute(trx);
+    return rows.map((b) => {
+      const online = toCount(b.online);
+      // offline includes degraded, error, vendor_degraded and unknown — anything that is not online
+      return { branchId: b.id, branchCode: String(b.code), branchName: b.name, employees: toCount(b.employees), present: toCount(b.present), absent: toCount(b.absent), late: toCount(b.late), onLeave: toCount(b.onLeave), missingPunch: toCount(b.missingPunch), devicesOnline: online, devicesOffline: toCount(b.total) - online };
     });
   });
 }
