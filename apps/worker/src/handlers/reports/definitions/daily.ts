@@ -61,7 +61,9 @@ export const dailyAttendance: ReportDefinition = {
   async build(trx: Trx, ctx: ReportContext): Promise<ReportDocument> {
     const date = ctx.params.from;
     if (!date) throw errors.validation('Missing report parameters.', { issues: [{ path: 'parameters.from', message: 'Required' }] });
-    const records = await loadRecords(trx, ctx, { from: date, to: date });
+    // A record whose status is NOT_JOINED or EXITED belongs to someone who was not on the payroll that day (the engine
+    // writes one for every employee a range recalculation touches); the daily sheet lists only the day's staff.
+    const records = (await loadRecords(trx, ctx, { from: date, to: date })).filter((r) => r.status !== 'EXITED' && r.status !== 'NOT_JOINED');
     const roster = await loadRoster(trx, ctx, { employeeIds: [...new Set(records.map((r) => r.employeeId))] });
     const byEmployee = new Map(roster.map((e) => [e.id, e]));
     type Item = { e: RosterEmployee; r: DailyRecord };
