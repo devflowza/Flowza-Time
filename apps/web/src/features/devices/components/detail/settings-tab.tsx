@@ -6,10 +6,9 @@ import type { z } from 'zod';
 import { AlertTriangle, KeyRound, ShieldOff } from 'lucide-react';
 import { updateDeviceSchema, type UpdateDeviceInput } from '@flowza/contracts';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, FormField, Input, Switch, Textarea } from '@/components/ui';
-import { Combobox } from '@/components/forms';
 import { toast, toastError } from '@/lib/toast';
 import { useCan } from '@/features/me/use-me';
-import { useBranchOptions } from '@/features/organization/lookups';
+import { BranchPicker } from '@/features/organization/components/branch-picker';
 import { TimezoneSelect } from '@/features/organization/components/timezone-select';
 import { blankToUndefined, toOptionalNumber } from '@/features/organization/form-utils';
 import { useDeviceMutations, useProviders, type DeviceDetail } from '../../api';
@@ -23,7 +22,6 @@ function GeneralForm({ device, onCredentialsRequired }: { device: DeviceDetail; 
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation();
   const can = useCan();
-  const branches = useBranchOptions();
   const { update } = useDeviceMutations();
   const isPush = device.integrationType === 'DEVICE_PUSH';
   const editable = can('device.update') && device.status !== 'decommissioned';
@@ -61,7 +59,7 @@ function GeneralForm({ device, onCredentialsRequired }: { device: DeviceDetail; 
           <FormField label={tc('common.name')} htmlFor="set-name" required error={errors.name?.message}><Input id="set-name" disabled={!editable} {...register('name')} aria-invalid={!!errors.name} /></FormField>
           <FormField label={tc('common.code')} htmlFor="set-code" required error={errors.code?.message} hint={t('fields.codeHint')}><Input id="set-code" dir="ltr" disabled={!editable} {...register('code')} aria-invalid={!!errors.code} /></FormField>
           <FormField label={tc('common.branch')} htmlFor="set-branch" required error={errors.branchId?.message}>
-            <Controller control={control} name="branchId" render={({ field }) => <Combobox id="set-branch" value={field.value ?? null} onChange={(v) => field.onChange(v ?? '')} options={branches.options} loading={branches.isLoading} disabled={!editable} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId} />} />
+            <Controller control={control} name="branchId" render={({ field }) => <BranchPicker id="set-branch" value={field.value ?? null} onChange={(v) => field.onChange(v ?? '')} disabled={!editable} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId} />} />
           </FormField>
           <FormField label={tc('common.timezone')} htmlFor="set-tz" error={errors.timezone?.message} hint={t('fields.timezoneHint')}>
             <Controller control={control} name="timezone" render={({ field }) => <TimezoneSelect id="set-tz" value={field.value ?? undefined} onChange={field.onChange} disabled={!editable} />} />

@@ -21,7 +21,7 @@ function toDefaults(b: BranchDto | null, orgTimezone: string): FormValues {
   };
 }
 
-export function BranchDialog({ open, onOpenChange, branch, orgTimezone }: { open: boolean; onOpenChange: (o: boolean) => void; branch: BranchDto | null; orgTimezone: string }) {
+export function BranchDialog({ open, onOpenChange, branch, orgTimezone, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; branch: BranchDto | null; orgTimezone: string; onCreated?: (created: BranchDto) => void }) {
   const { t } = useTranslation('organization');
   const { t: tc } = useTranslation();
   const { create, update } = useStructureMutations<BranchDto, BranchInput>('branches');
@@ -34,7 +34,7 @@ export function BranchDialog({ open, onOpenChange, branch, orgTimezone }: { open
   const onSubmit = form.handleSubmit(async (values) => {
     try {
       if (branch) { await update.mutateAsync({ id: branch.id, input: values }); toast.success(t('branches.updated')); }
-      else { await create.mutateAsync(values); toast.success(t('branches.created')); }
+      else { const created = await create.mutateAsync(values); toast.success(t('branches.created')); onCreated?.(created); }
       onOpenChange(false);
     } catch (e) { toastError(e); }
   });
