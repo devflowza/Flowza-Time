@@ -49,7 +49,9 @@ for f in supabase/seeds/demo-tenant/0*.sql; do psql "$DATABASE_URL_ADMIN" -v ON_
 
 or paste each file into the Supabase SQL editor. Every step is idempotent: ids are UUID v5 in the tenant namespace and
 rows are upserted on their natural keys; append-only tables (raw transactions, events, audit) use `on conflict do nothing`.
-Re-running refreshes master data and regenerates the identical punch stream without duplicates. Changing the generator's
+Re-running refreshes master data and regenerates the identical punch stream without duplicates; step 04 also adds the
+punches of the current day up to the current time, so re-running it (any day, any time) keeps the dashboard's "today"
+populated. Changing the generator's
 distributions after a first run would add new punches next to the old ones (raw transactions cannot be deleted); void the
 old events through corrections or start from a fresh tenant instead.
 
