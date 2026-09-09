@@ -3,6 +3,7 @@ import { Skeleton } from '@/components/ui';
 
 export const SettingsLayout = lazy(() => import('./settings-layout'));
 export const GeneralSection = lazy(() => import('../sections/general-section'));
+export const DashboardSection = lazy(() => import('../sections/dashboard-section'));
 export const RegionalSection = lazy(() => import('../sections/regional-section'));
 export const AttendanceSection = lazy(() => import('../sections/attendance-section'));
 export const SyncSection = lazy(() => import('../sections/sync-section'));

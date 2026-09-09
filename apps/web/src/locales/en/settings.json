@@ -1,6 +1,6 @@
 {
   "title": "Settings",
-  "subtitle": "Organisation profile, regional formats, attendance, synchronisation, notifications, security and subscription.",
+  "subtitle": "Organisation profile, dashboard style, regional formats, attendance, synchronisation, reports, notifications, security and subscription.",
   "saved": "Settings saved",
   "nav": {
     "general": "General",
@@ -10,7 +10,8 @@
     "notifications": "Notifications",
     "security": "Security",
     "subscription": "Subscription",
-    "reports": "Reports"
+    "reports": "Reports",
+    "dashboard": "Dashboard"
   },
   "orgStatus": {
     "trial": "Trial",
@@ -194,6 +195,82 @@
       "HALF_DAY": "Half day present",
       "HALF_DAY_LEAVE": "Half day leave",
       "LEAVE": "Leave (type unknown)"
+    }
+  },
+  "dashboard": {
+    "title": "Dashboard style",
+    "hint": "How the dashboard and the app look for everyone in this organisation. Your choice is previewed as you click and applied for all members when you save.",
+    "style": "Style",
+    "styleHint": "Colours of the sidebar, buttons and charts.",
+    "layout": "Layout",
+    "layoutHint": "Which widgets the dashboard shows, and what comes first.",
+    "options": "Options",
+    "trendDays": "Trend range",
+    "trendDaysHint": "Days shown by the attendance trend chart.",
+    "days": "{{count}} days",
+    "showGreeting": "Personal greeting",
+    "showGreetingHint": "“Good morning, Hassan” with the organisation name, instead of the plain page title.",
+    "showQuote": "Quote of the day",
+    "showQuoteHint": "A short quote about time and discipline in the side rail (Overview and Operations layouts).",
+    "showHighlight": "Highlight card",
+    "showHighlightHint": "The headline card with a link to reports, at the top of the side rail (Overview and Operations layouts).",
+    "previewing": "Previewing “{{name}}”. Save to apply it for everyone, or reset to go back to the saved style.",
+    "resetPreview": "Reset preview",
+    "readOnlyHint": "Only administrators with the organisation permission can change the style. Ask them if you would like a different look.",
+    "selected": "Selected",
+    "themes": {
+      "emerald": {
+        "name": "FlowZa Green",
+        "hint": "The signature look: deep green sidebar, emerald accents."
+      },
+      "midnight": {
+        "name": "Midnight Indigo",
+        "hint": "Navy sidebar with indigo and violet accents and gradient bars."
+      },
+      "classic": {
+        "name": "Classic Light",
+        "hint": "White sidebar and blue accents — airy and minimal."
+      },
+      "desert": {
+        "name": "Desert Gold",
+        "hint": "Warm sand and bronze tones with a deep brown sidebar."
+      },
+      "ocean": {
+        "name": "Ocean Teal",
+        "hint": "Deep teal sidebar with turquoise accents."
+      },
+      "graphite": {
+        "name": "Graphite",
+        "hint": "Charcoal and neutral greys; colour is kept for the data."
+      },
+      "crimson": {
+        "name": "Crimson",
+        "hint": "Maroon sidebar and red accents for red-branded companies."
+      }
+    },
+    "layouts": {
+      "overview": {
+        "name": "Overview",
+        "hint": "Balanced: today's numbers, the trend, branches, recent activity, approvals and holidays."
+      },
+      "operations": {
+        "name": "Operations",
+        "hint": "Devices, sync jobs and today's punches first — for attendance and IT teams."
+      },
+      "executive": {
+        "name": "Executive",
+        "hint": "Compact: headline numbers with sparklines, the trend and branches. No side rail."
+      }
+    },
+    "preview": {
+      "dashboard": "Dashboard",
+      "employees": "Employees",
+      "attendance": "Attendance",
+      "devices": "Devices",
+      "present": "Present",
+      "late": "Late",
+      "absent": "Absent",
+      "trend": "Trend"
     }
   }
 }

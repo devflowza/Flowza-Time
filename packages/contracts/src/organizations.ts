@@ -52,6 +52,19 @@ export const updateOrganizationSchema = z.object({
 });
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>;
 
+/**
+ * Dashboard styles a tenant can pick under Settings → Dashboard. Each key has a `[data-theme]` block in the web app's
+ * `globals.css` (sidebar, brand scale, accent, chart palette); the web app's `DASHBOARD_THEME_META` carries the labels.
+ */
+export const DASHBOARD_THEMES = ['emerald', 'midnight', 'classic', 'desert', 'ocean', 'graphite', 'crimson'] as const;
+export type DashboardTheme = (typeof DASHBOARD_THEMES)[number];
+/** Which widgets the dashboard shows and how they are arranged. */
+export const DASHBOARD_LAYOUTS = ['overview', 'operations', 'executive'] as const;
+export type DashboardLayout = (typeof DASHBOARD_LAYOUTS)[number];
+/** Days shown by the attendance trend chart. */
+export const DASHBOARD_TREND_RANGES = [7, 14, 30] as const;
+export type DashboardTrendRange = (typeof DASHBOARD_TREND_RANGES)[number];
+
 export const organizationSettingsSchema = z.object({
   general: z.object({
     dateFormat: z.enum(['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD']).default('DD/MM/YYYY'),
@@ -91,6 +104,20 @@ export const organizationSettingsSchema = z.object({
     exportRequiresReason: z.boolean().default(false),
   }).partial().default({}),
   integrations: z.object({}).partial().default({}),
+  dashboard: z.object({
+    /** Colour style of the app shell and the dashboard: sidebar, accents and chart palette. */
+    theme: z.enum(DASHBOARD_THEMES).default('emerald'),
+    /** Widget set and arrangement of the dashboard page. */
+    layout: z.enum(DASHBOARD_LAYOUTS).default('overview'),
+    /** Days shown by the attendance trend chart (7, 14 or 30). */
+    trendDays: z.union([z.literal(7), z.literal(14), z.literal(30)]).default(14),
+    /** "Good morning, <name>" heading instead of the plain page title. */
+    showGreeting: z.boolean().default(true),
+    /** Quote card in the side rail. */
+    showQuote: z.boolean().default(true),
+    /** Highlight card (headline + link to reports) next to the KPI tiles. */
+    showHighlight: z.boolean().default(true),
+  }).partial().default({}),
   reports: z.object({
     /** How hour columns print: 9.45 = 9 h 45 min (the GCC payroll notation the sample reports use) or 9:45. */
     hoursNotation: z.enum(['h.mm', 'hh:mm']).default('h.mm'),
@@ -101,7 +128,7 @@ export const organizationSettingsSchema = z.object({
   }).partial().default({}),
 });
 export type OrganizationSettings = z.infer<typeof organizationSettingsSchema>;
-export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports'] as const;
+export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard'] as const;
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
 export const branchInputSchema = z.object({

@@ -225,7 +225,7 @@ platform: user_profiles, platform_admins, platform_access_grants, device_provide
   `logo_path`, `contact jsonb`, `address jsonb`, `status org_status` (trial|active|suspended|closed),
   `weekly_off_days smallint[]` (0=Sun…6=Sat; Oman default `{5,6}`), `region_cell text` (residency).
 - `organization_settings` — `organization_id pk`, typed JSON groups `general`, `attendance`, `sync`,
-  `notifications`, `security`, `integrations` (validated by Zod in the service layer; DB `check (jsonb_typeof = 'object')`).
+  `notifications`, `security`, `integrations`, `reports`, `dashboard` (validated by Zod in the service layer; DB `check (jsonb_typeof = 'object')`).
 - `user_profiles` — `id = auth.users.id`, `email citext`, `full_name`, `avatar_path`, `locale`,
   `status`, `last_login_at`, `mfa_enrolled`.
 - `platform_admins` — `user_id pk`, `level` (support|admin|owner), `status`.
@@ -760,8 +760,8 @@ residency (§K).
   Departments/Designations · Devices (table, add wizard, detail: status/logs/employees/actions) ·
   Device groups · Sync jobs (list, progress detail) · Reconciliation · Attendance (daily grid, monthly
   view, record detail with trace) · Corrections & Approvals inbox · Shifts & assignments · Holidays ·
-  Leave · Reports (request + downloads) · Users & roles · Settings (general, regional, attendance rules,
-  sync, notifications, security, subscription) · Notification centre · Audit log · Platform admin
+  Leave · Reports (request + downloads) · Users & roles · Settings (general, dashboard style & layout, regional,
+  attendance rules, sync, reports, notifications, security, subscription) · Notification centre · Audit log · Platform admin
   (orgs, plans, providers, flags, grants).
 - **UX rules**: server-side pagination/filter/sort everywhere; skeletons and empty states; optimistic
   updates only for trivial toggles; long operations return job ids and show progress (Realtime + polling

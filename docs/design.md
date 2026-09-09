@@ -204,6 +204,47 @@ the tenant's notation (`9.45` = 9 h 45 min by default), clocks and dates in the 
 `name_ar` of every entity that has one. Templates live in `apps/worker/src/handlers/reports/render/html.ts`; they are
 HTML rendered by Chromium, so the same CSS rules as the app apply — logical properties, tokens, no physical directions.
 
+## 11. Tenant dashboard styles
+
+An organisation picks how its dashboard and app shell look under **Settings → Dashboard** (`settings.dashboard`, one
+JSON group per organisation, delivered to every member through `/me`). The choice has three parts:
+
+| Part | Values | What it changes |
+|---|---|---|
+| `theme` | `emerald` (FlowZa Green, default) · `midnight` (Midnight Indigo) · `classic` (Classic Light) · `desert` (Desert Gold) · `ocean` (Ocean Teal) · `graphite` · `crimson` | Sidebar surface, the whole `brand-*` scale (so `primary`, `ring`, selection and every `text-brand-*` follow), the accent tint, the chart palette, the highlight gradient |
+| `layout` | `overview` · `operations` · `executive` | Which widgets the dashboard shows and what it leads with |
+| options | `trendDays` (7 · 14 · 30), `showGreeting`, `showQuote`, `showHighlight` | The trend range, the "Good morning, Hassan" heading, the two rail cards |
+
+**Mechanism.** A theme is a block of CSS variables in `globals.css` keyed by `[data-theme='<key>']`; `AppShell` sets the
+attribute on `<html>` (`useApplyDashboardTheme`) from the organisation's settings, or from the style an administrator is
+previewing in Settings. The `@theme` colour tokens reference those variables (`--color-brand-500: var(--brand-500)`),
+so no component knows which style is active — it only ever uses tokens. Dark mode stays a class on `<html>`: each
+theme has a `.dark[data-theme]` variant for the values that depend on the mode (the accent tint, and a light sidebar,
+which turns dark).
+
+**Tokens a component may use.** Shell: `bg-sidebar`, `text-sidebar-foreground`, `text-sidebar-strong`,
+`bg-sidebar-hover`, `bg-sidebar-active`, `text-sidebar-active-foreground`, `text-sidebar-active-icon`,
+`border-sidebar-border`, `bg-sidebar-rail`. Charts: `chart-present`, `chart-absent`, `chart-late`, `chart-leave`,
+`chart-early`, `chart-overtime`, `chart-missing` (as `bg-`/`text-` utilities, or `var(--color-chart-…)` in Recharts).
+Bars: the `.bar-fill` utility (solid in most styles, a gradient in Midnight, Classic, Desert, Ocean and Crimson);
+`.hero-gradient` for the highlight card. **Never write `text-white` or `bg-white/10` in the sidebar** — Classic Light
+has a white sidebar, and the literal vanishes.
+
+**Thumbnails are the real CSS.** The gallery in Settings renders each miniature inside an element that carries
+`data-theme` itself, so the block that styles the real shell styles the preview; there is no second copy of any colour.
+`theme.test.tsx` checks that every style in `DASHBOARD_THEMES` has a block with the same token set as the default and a
+dark variant, so a style cannot ship half-defined.
+
+**Adding a style.** Add the key to `DASHBOARD_THEMES` in `@flowza/contracts`, a light block and a `.dark` block in
+`globals.css` (copy the emerald block and change every value), an icon in `DASHBOARD_THEME_META`, and a name/hint under
+`dashboard.themes.<key>` in the `settings` locale (en + ar). Keep text contrast ≥ 4.5:1 on both the sidebar and the
+card surfaces; "absent" must never share a hue with the style's accent (Crimson moves it to slate).
+
+**Layouts.** All three are built from the same widgets (`features/dashboard/widgets`), each of which hides itself when
+the member lacks the permission behind its data (`attendance.approve` for approvals, `holiday.view`, `attendance.view`,
+`device.view`). Charts stack disjoint series — "on time" is present minus late, and the headcount ring carries an
+"off / no record" slice — so the numbers always add up to the records or the headcount.
+
 ## 9. Checklist before shipping a screen
 
 - [ ] No physical direction utilities; checked at `dir="rtl"`

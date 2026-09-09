@@ -54,6 +54,22 @@ export function meFixture(overrides: Partial<MeDto['memberships'][number]> = {})
 }
 
 export const dashboardFixture: DashboardSummary = { date: new Date().toISOString().slice(0, 10), employees: 512, presentToday: 431, absent: 44, late: 27, onLeave: 10, earlyDeparture: 6, overtimeMinutes: 1830, missingPunch: 9, devicesOnline: 18, devicesOffline: 1, devicesUnknown: 1, syncFailures24h: 2, pendingApprovals: 4 };
+/** One trend point per day of the requested window, so the dashboard's chart and "vs last week" deltas have data. */
+export function trendsFixture(url: URL) {
+  const from = url.searchParams.get('from') ?? dashboardFixture.date;
+  const to = url.searchParams.get('to') ?? dashboardFixture.date;
+  const out = [];
+  for (let d = new Date(`${from}T00:00:00Z`); d.toISOString().slice(0, 10) <= to; d.setUTCDate(d.getUTCDate() + 1)) {
+    const date = d.toISOString().slice(0, 10);
+    const last = date === to;
+    out.push({ date, present: last ? dashboardFixture.presentToday : 400 + d.getUTCDate(), absent: last ? dashboardFixture.absent : 40, late: last ? dashboardFixture.late : 22, onLeave: 10, missingPunch: 5, overtimeMinutes: 120 });
+  }
+  return out;
+}
+export const dashboardBranchesFixture = [
+  { branchId: BRANCH_A, branchCode: 'MCT', branchName: 'Muscat HQ', employees: 300, present: 252, absent: 30, late: 10, onLeave: 8, missingPunch: 4, devicesOnline: 10, devicesOffline: 0 },
+  { branchId: BRANCH_B, branchCode: 'SOH', branchName: 'Sohar Plant', employees: 212, present: 179, absent: 14, late: 17, onLeave: 2, missingPunch: 5, devicesOnline: 8, devicesOffline: 2 },
+];
 
 const employee = (n: number, name: string, branchId: string, branchName: string): EmployeeDto => ({
   id: `77777777-7777-4777-8777-${String(n).padStart(12, '0')}`, organizationId: ORG_ID, employeeNumber: String(1000 + n), firstName: name.split(' ')[0]!, middleName: null, lastName: name.split(' ').slice(1).join(' '), displayName: name, displayNameAr: null,
@@ -107,6 +123,10 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
     '/me/notifications/unread-count': { data: { unread: 0 } },
     '/me/notifications': page_([]),
     [`/orgs/${ORG_ID}/dashboard/summary`]: { data: dashboardFixture },
+    [`/orgs/${ORG_ID}/dashboard/trends`]: (url: URL) => ({ data: trendsFixture(url) }),
+    [`/orgs/${ORG_ID}/dashboard/branches`]: { data: dashboardBranchesFixture },
+    [`/orgs/${ORG_ID}/holidays`]: { data: [] },
+    [`/orgs/${ORG_ID}/settings/dashboard`]: { data: me.memberships[0]?.settings.dashboard ?? {} },
     [`/orgs/${ORG_ID}/employees`]: (url: URL) => { const q = (url.searchParams.get('search') ?? '').toLowerCase(); return page_(employeesFixture.filter((e) => !q || e.displayName.toLowerCase().includes(q))); },
     [`/orgs/${ORG_ID}/branches`]: page_(branchesFixture),
     [`/orgs/${ORG_ID}/departments`]: page_([]),

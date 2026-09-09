@@ -127,6 +127,28 @@ describe('organizations & settings', () => {
     // restore for the other suites' expectations
     await api.request('PUT', `/orgs/${F.orgA}/settings/sync`, { user: F.ownerA, body: {} });
   });
+
+  it('PUT settings/dashboard keeps the tenant style to the known catalogue and /me carries the choice to every member', async () => {
+    const unknownStyle = await api.request('PUT', `/orgs/${F.orgA}/settings/dashboard`, { user: F.ownerA, body: { theme: 'neon' } });
+    expect(unknownStyle.status).toBe(400);
+    expect(unknownStyle.json.details.issues[0].path).toBe('theme');
+    const badRange = await api.request('PUT', `/orgs/${F.orgA}/settings/dashboard`, { user: F.ownerA, body: { trendDays: 9 } });
+    expect(badRange.status).toBe(400);
+    // choosing the look is an organisation.manage decision, not something every member can flip for everyone
+    const denied = await api.request('PUT', `/orgs/${F.orgA}/settings/dashboard`, { user: F.hrUserA, body: { theme: 'classic' } });
+    expect(denied.status).toBe(403);
+
+    const res = await api.request('PUT', `/orgs/${F.orgA}/settings/dashboard`, { user: F.ownerA, body: { theme: 'midnight', layout: 'operations', trendDays: 7, showQuote: false } });
+    expect(res.status).toBe(200);
+    expect(res.json.data).toEqual({ theme: 'midnight', layout: 'operations', trendDays: 7, showGreeting: true, showQuote: false, showHighlight: true });
+    // the shell reads the style from /me, so a member who cannot edit settings still gets the organisation's look
+    const me = await api.request('GET', '/me', { user: F.hrUserA });
+    expect(me.json.data.memberships.find((m: any) => m.organization.id === F.orgA).settings.dashboard).toMatchObject({ theme: 'midnight', layout: 'operations', trendDays: 7 });
+    // ...and organisation B is untouched
+    const other = await api.request('GET', '/me', { user: F.ownerB });
+    expect(other.json.data.memberships[0].settings.dashboard.theme).toBe('emerald');
+    await api.request('PUT', `/orgs/${F.orgA}/settings/dashboard`, { user: F.ownerA, body: {} });
+  });
 });
 
 describe('members, invitations and roles', () => {

@@ -129,5 +129,9 @@ Implement `DeviceProvider`; register in the `ProviderRegistry`; keep `device_pro
   with `.locator('visible=true')`.
 - **Test module mocks live in `features/employees/test-mocks.ts`,** never in `test-utils.tsx`: a `vi.mock` factory that awaits a
   module which imports the mocked module deadlocks the module graph and the test file simply never finishes.
+- **The sidebar and the charts are themed by the tenant** (Settings → Dashboard, `settings.dashboard.theme`; docs/design.md §11).
+  Use the `sidebar-*` and `chart-*` tokens and the `brand-*` scale only — a literal `text-white` in the sidebar disappears on
+  the Classic Light style, and a fixed chart colour ignores the tenant's palette. Adding a style means a `[data-theme]` block
+  in `globals.css` with the full token set (`theme.test.tsx` enforces parity) plus en/ar names.
 - **Vendor chunking follows specifiers, not packages.** `react-dom` and `react-dom/client` are different module ids; a
   `manualChunks` entry must list every specifier the app imports or the runtime lands in the entry chunk.

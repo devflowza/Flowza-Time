@@ -9,6 +9,7 @@ import { createDeviceSchema, type CreateDeviceInput, type DeviceModelDto, type T
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, ErrorState, FormField, Input, Skeleton, Textarea } from '@/components/ui';
 import { Combobox } from '@/components/forms';
+import { useRovingRadios } from '@/hooks/use-roving-radios';
 import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useOrgTimezone } from '@/features/me/use-me';
@@ -125,28 +126,6 @@ function WizardNav({ onBack, onNext, nextLabel, nextType = 'button', nextDisable
       </div>
     </div>
   );
-}
-
-/**
- * Keyboard behaviour for a card `role="radiogroup"` (WAI-ARIA APG): exactly one option sits in the tab order and the
- * arrow keys move between the rest. Without it every card was its own tab stop — four of them to walk past a step that
- * asks for one answer — and the horizontal keys must follow the reading direction, which is not left-to-right in `ar`.
- */
-function useRovingRadios(count: number, enabledAt: (i: number) => boolean, select: (i: number) => void, rtl: boolean) {
-  const refs = useRef<(HTMLButtonElement | null)[]>([]);
-  const setRef = useCallback((i: number) => (el: HTMLButtonElement | null) => { refs.current[i] = el; }, []);
-  const onKeyDown = useCallback((i: number) => (e: React.KeyboardEvent) => {
-    const forward = e.key === 'ArrowDown' || e.key === (rtl ? 'ArrowLeft' : 'ArrowRight');
-    const back = e.key === 'ArrowUp' || e.key === (rtl ? 'ArrowRight' : 'ArrowLeft');
-    if (!forward && !back) return;
-    e.preventDefault();
-    const dir = forward ? 1 : -1;
-    for (let s = 1; s <= count; s++) {
-      const j = (((i + dir * s) % count) + count) % count;
-      if (enabledAt(j)) { select(j); refs.current[j]?.focus(); return; }
-    }
-  }, [count, enabledAt, select, rtl]);
-  return { setRef, onKeyDown };
 }
 
 // ---- step 1: device (provider + model) --------------------------------------------------------------------------------------

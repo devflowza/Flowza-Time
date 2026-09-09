@@ -7,7 +7,6 @@ import { SignInPage } from '@/features/auth/sign-in-page';
 import { ForgotPasswordPage, ResetPasswordPage } from '@/features/auth/forgot-password-page';
 import { AcceptInvitationPage } from '@/features/auth/accept-invitation-page';
 import { MfaRequiredGate } from '@/features/auth/mfa-required-gate';
-import { DashboardPage } from '@/features/dashboard/dashboard-page';
 import { NotificationsPage } from '@/features/notifications/notifications-page';
 import { EmptyState, Skeleton } from '@/components/ui';
 import { FileQuestion } from 'lucide-react';
@@ -23,6 +22,8 @@ function ComingSoonPage() {
   return <div className="page-container"><EmptyState title={t('common.comingSoon')} /></div>;
 }
 const ComingSoon = lazy(async () => ({ default: ComingSoonPage }));
+// Lazy like every other page: the dashboard carries the charts vendor chunk, which the shell itself never needs.
+const DashboardPage = lazy(() => import('@/features/dashboard/dashboard-page'));
 
 /**
  * Enrolment reachable on a valid session alone, without the shell and without `/me`.
@@ -50,7 +51,7 @@ export const router = createBrowserRouter([
       {
         element: <AppShell />,
         children: [
-          { index: true, element: <DashboardPage /> },
+          { index: true, element: <Suspense fallback={<PageFallback />}><DashboardPage /></Suspense> },
           { path: 'notifications', element: <NotificationsPage /> },
           ...featureRoutes,
           { path: '*', element: <Suspense fallback={<PageFallback />}><Outlet /><NotFound /></Suspense> },
