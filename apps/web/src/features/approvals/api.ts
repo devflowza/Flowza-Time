@@ -15,9 +15,9 @@ export interface WorkflowStep { order: number; approverType: 'MANAGER' | 'ROLE' 
 export interface WorkflowDto { id: string; organizationId: string; entityType: string; name: string; branchId: string | null; steps: WorkflowStep[]; isDefault: boolean; status: string; createdAt: string; updatedAt: string }
 export type DecisionResult = ApprovalRequestDto & { correction: CorrectionDto | null };
 
-export function useApprovalInbox(query: ListQuery) {
+export function useApprovalInbox(query: ListQuery, enabled = true) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, 'approvals-inbox', query), queryFn: () => api.get<PageEnvelope<InboxItem>>(`/orgs/${orgId}/approvals/inbox`, query), placeholderData: keepPreviousData, refetchInterval: 60_000 });
+  return useQuery({ queryKey: qk.list(orgId, 'approvals-inbox', query), queryFn: () => api.get<PageEnvelope<InboxItem>>(`/orgs/${orgId}/approvals/inbox`, query), placeholderData: keepPreviousData, refetchInterval: 60_000, enabled });
 }
 export function useApprovalMutations() {
   const orgId = useOrgId();

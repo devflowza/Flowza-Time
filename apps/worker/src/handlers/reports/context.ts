@@ -79,7 +79,7 @@ export function resolveScope(params: Record<string, unknown>): ReportScope {
 export async function loadReportContext(trx: Trx, organizationId: string, request: { parameters: unknown; format: ReportFormat }, now: Date): Promise<ReportContext> {
   const org = await trx.selectFrom('organizations').select(['displayName', 'timezone', 'locale']).where('id', '=', organizationId).executeTakeFirst();
   if (!org) throw errors.notFound('Organization', organizationId);
-  const settingsRow = await trx.selectFrom('organizationSettings').select(['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports']).where('organizationId', '=', organizationId).executeTakeFirst();
+  const settingsRow = await trx.selectFrom('organizationSettings').select(['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard']).where('organizationId', '=', organizationId).executeTakeFirst();
   const settings = parseSettings(settingsRow as Record<string, unknown> | undefined);
   const rawParams = asObject(request.parameters);
   const parsed = reportParametersSchema.safeParse(rawParams);

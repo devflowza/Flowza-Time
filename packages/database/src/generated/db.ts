@@ -1018,6 +1018,7 @@ export interface Organizations {
 
 export interface OrganizationSettings {
   attendance: Generated<Json>;
+  dashboard: Generated<Json>;
   general: Generated<Json>;
   integrations: Generated<Json>;
   notifications: Generated<Json>;

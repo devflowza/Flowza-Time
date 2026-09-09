@@ -1,0 +1,148 @@
+{
+  "title": "Dashboard",
+  "greeting": {
+    "morning": "Good morning, {{name}}!",
+    "afternoon": "Good afternoon, {{name}}!",
+    "evening": "Good evening, {{name}}!",
+    "morningAnon": "Good morning!",
+    "afternoonAnon": "Good afternoon!",
+    "eveningAnon": "Good evening!",
+    "subtitle": "Here's what's happening at {{org}} today.",
+    "subtitlePast": "Here's how {{org}} did on {{date}}."
+  },
+  "date": {
+    "previous": "Previous day",
+    "next": "Next day",
+    "today": "Today",
+    "live": "Live",
+    "updated": "Updated {{when}}",
+    "loading": "Refreshing…"
+  },
+  "kpi": {
+    "employees": "Total employees",
+    "present": "Present today",
+    "absent": "Absent",
+    "onLeave": "On leave",
+    "late": "Late",
+    "earlyDeparture": "Early departure",
+    "overtime": "Overtime",
+    "missingPunch": "Missing punches",
+    "devicesOnline": "Devices online",
+    "devicesOffline": "Devices offline",
+    "syncFailures": "Sync failures (24h)",
+    "pendingApprovals": "Pending approvals",
+    "attendanceRate": "Attendance rate",
+    "ofEmployees": "of employees",
+    "ofDevices": "of devices",
+    "vsLastWeek": "vs last week",
+    "sameAsLastWeek": "Same as last week",
+    "activeEmployees": "active employees",
+    "lastDays": "Last {{count}} days"
+  },
+  "trend": {
+    "title": "Attendance trend",
+    "subtitle": "Daily attendance for the last {{count}} days",
+    "range": "Range",
+    "days": "Last {{count}} days",
+    "onTime": "On time",
+    "late": "Late",
+    "absent": "Absent",
+    "onLeave": "On leave",
+    "total": "Total",
+    "empty": "No attendance records in this range yet",
+    "emptyHint": "Records appear once devices sync punches and the engine calculates the day."
+  },
+  "today": {
+    "title": "Today's attendance",
+    "employees": "Employees",
+    "onTime": "Present · on time",
+    "late": "Late",
+    "absent": "Absent",
+    "onLeave": "On leave",
+    "unrecorded": "Off / no record",
+    "earlyDeparture": "Early departure",
+    "empty": "Nothing recorded for this day yet",
+    "emptyHint": "The chart fills in as punches arrive."
+  },
+  "branches": {
+    "title": "Attendance by branch",
+    "subtitle": "Present out of active employees, per branch",
+    "branch": "Branch",
+    "presentTotal": "Present / Total",
+    "rate": "Attendance %",
+    "empty": "No branches yet",
+    "emptyHint": "Add a branch under Organisation to see it here."
+  },
+  "approvals": {
+    "title": "Pending approvals",
+    "viewAll": "View all",
+    "empty": "Nothing to approve",
+    "emptyHint": "Requests assigned to you, your role or your branches appear here.",
+    "requestedBy": "Requested by {{name}}"
+  },
+  "holidays": {
+    "title": "Upcoming holidays",
+    "viewAll": "View all",
+    "inDays": "In {{count}} days",
+    "tomorrow": "Tomorrow",
+    "today": "Today",
+    "halfDay": "Half day",
+    "tentative": "Tentative",
+    "empty": "No upcoming holidays",
+    "emptyHint": "Holidays in the next 90 days appear here."
+  },
+  "activity": {
+    "title": "Recent activity",
+    "viewAll": "View all",
+    "checkedIn": "Checked in",
+    "checkedOut": "Checked out",
+    "lateCheckIn": "Late check-in",
+    "empty": "No punches yet",
+    "emptyHint": "Check-ins appear here as devices sync."
+  },
+  "recent": {
+    "title": "Recent attendance",
+    "employee": "Employee",
+    "time": "Time",
+    "status": "Status",
+    "location": "Location"
+  },
+  "devices": {
+    "title": "Device status",
+    "devices": "Devices",
+    "online": "Online",
+    "offline": "Offline",
+    "unknown": "Unknown",
+    "allOnline": "All devices are reporting",
+    "someOffline": "{{count}} not reporting",
+    "syncFailures": "{{count}} sync failures in the last 24 h",
+    "syncNow": "Sync now",
+    "viewAll": "View all",
+    "empty": "No devices yet",
+    "emptyHint": "Register a device to start collecting punches."
+  },
+  "sync": {
+    "title": "Recent sync jobs",
+    "viewAll": "View all",
+    "empty": "No sync jobs yet",
+    "emptyHint": "Scheduled pulls and pushes appear here.",
+    "items": "{{done}} / {{total}} items"
+  },
+  "highlight": {
+    "title": "People on time. Business on track.",
+    "body": "Accurate attendance. Smarter teams. A stronger tomorrow.",
+    "cta": "Explore reports"
+  },
+  "quote": {
+    "label": "Quote of the day",
+    "items": [
+      { "text": "Time is what we want most, but what we use worst.", "by": "William Penn" },
+      { "text": "Lost time is never found again.", "by": "Benjamin Franklin" },
+      { "text": "Discipline is the bridge between goals and accomplishment.", "by": "Jim Rohn" },
+      { "text": "Punctuality is the soul of business.", "by": "Thomas Chandler Haliburton" },
+      { "text": "Either you run the day, or the day runs you.", "by": "Jim Rohn" },
+      { "text": "Take care of the minutes and the hours will take care of themselves.", "by": "Lord Chesterfield" },
+      { "text": "The key is in not spending time, but in investing it.", "by": "Stephen R. Covey" }
+    ]
+  }
+}

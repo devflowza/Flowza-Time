@@ -5,16 +5,18 @@
   --font-sans: 'Inter', 'IBM Plex Sans Arabic', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Arabic', sans-serif;
   --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
 
-  --color-brand-50: #eefaf5;
-  --color-brand-100: #d5f2e5;
-  --color-brand-200: #aee4cd;
-  --color-brand-300: #78cfaf;
-  --color-brand-400: #43b48d;
-  --color-brand-500: #1f9873;
-  --color-brand-600: #137a5d;
-  --color-brand-700: #0f6e56;
-  --color-brand-800: #0e4e3f;
-  --color-brand-900: #0c4035;
+  /* The brand scale is a set of variables, not literals, so a tenant style ([data-theme] below) can swap the whole
+     scale and every `brand-*` utility, `primary`, `ring` and the selection colour follow it. */
+  --color-brand-50: var(--brand-50);
+  --color-brand-100: var(--brand-100);
+  --color-brand-200: var(--brand-200);
+  --color-brand-300: var(--brand-300);
+  --color-brand-400: var(--brand-400);
+  --color-brand-500: var(--brand-500);
+  --color-brand-600: var(--brand-600);
+  --color-brand-700: var(--brand-700);
+  --color-brand-800: var(--brand-800);
+  --color-brand-900: var(--brand-900);
 
   --color-background: var(--bg);
   --color-foreground: var(--fg);
@@ -36,8 +38,28 @@
   --color-success: #067647;
   --color-warning: #b54708;
   --color-info: #175cd3;
+
+  /* App shell: the sidebar is a themed surface of its own (dark in most styles, white in Classic). */
   --color-sidebar: var(--sidebar);
   --color-sidebar-foreground: var(--sidebar-fg);
+  --color-sidebar-strong: var(--sidebar-strong);
+  --color-sidebar-hover: var(--sidebar-hover);
+  --color-sidebar-active: var(--sidebar-active);
+  --color-sidebar-active-foreground: var(--sidebar-active-fg);
+  --color-sidebar-active-icon: var(--sidebar-active-icon);
+  --color-sidebar-border: var(--sidebar-border);
+  --color-sidebar-rail: var(--sidebar-rail);
+
+  /* Dashboard charts: one colour per attendance series, chosen per style so "present" carries the tenant's hue. */
+  --color-chart-present: var(--chart-present);
+  --color-chart-absent: var(--chart-absent);
+  --color-chart-late: var(--chart-late);
+  --color-chart-leave: var(--chart-leave);
+  --color-chart-early: var(--chart-early);
+  --color-chart-overtime: var(--chart-overtime);
+  --color-chart-missing: var(--chart-missing);
+  --color-hero-from: var(--hero-from);
+  --color-hero-to: var(--hero-to);
 
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
@@ -47,6 +69,14 @@
   --shadow-card: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 3px rgb(16 24 40 / 0.1);
 }
 
+/* ---------------------------------------------------------------------------------------------------------------------
+   Tenant dashboard styles (Settings → Dashboard). Each style is a block of variables keyed by `data-theme`, set on
+   <html> by the app shell from the organisation's settings. The same blocks also style any element that carries the
+   attribute itself — that is how the settings gallery renders live thumbnails from one source of truth.
+   Order matters: `.dark` sits before the styles so a style's sidebar wins in both modes, and each style has an
+   explicit `.dark` variant for the values that must change with the mode (accent tint; a light sidebar).
+   Every rule keeps text contrast ≥ 4.5:1 (docs/design.md §6).
+   ------------------------------------------------------------------------------------------------------------------ */
 :root {
   --bg: #f7f8fa;
   --fg: #101828;
@@ -54,10 +84,41 @@
   --muted: #f2f4f7;
   --muted-fg: #667085;
   --border: #e4e7ec;
+  color-scheme: light;
+}
+/* FlowZa Green — the signature look (reference mockup 1) and the default for every organisation. */
+:root,
+[data-theme='emerald'] {
   --accent: #eefaf5;
+  --brand-50: #eefaf5;
+  --brand-100: #d5f2e5;
+  --brand-200: #aee4cd;
+  --brand-300: #78cfaf;
+  --brand-400: #43b48d;
+  --brand-500: #1f9873;
+  --brand-600: #137a5d;
+  --brand-700: #0f6e56;
+  --brand-800: #0e4e3f;
+  --brand-900: #0c4035;
   --sidebar: #0e2b25;
   --sidebar-fg: #d7e5e0;
-  color-scheme: light;
+  --sidebar-strong: #ffffff;
+  --sidebar-hover: rgb(255 255 255 / 0.07);
+  --sidebar-active: rgb(255 255 255 / 0.09);
+  --sidebar-active-fg: #ffffff;
+  --sidebar-active-icon: #78cfaf;
+  --sidebar-border: rgb(255 255 255 / 0.07);
+  --sidebar-rail: #43b48d;
+  --chart-present: #1f9873;
+  --chart-absent: #ef4444;
+  --chart-late: #f59e0b;
+  --chart-leave: #3b82f6;
+  --chart-early: #eab308;
+  --chart-overtime: #8b5cf6;
+  --chart-missing: #f97316;
+  --hero-from: #0f6e56;
+  --hero-to: #1f9873;
+  --bar-fill: var(--chart-present);
 }
 .dark {
   --bg: #0b1220;
@@ -70,6 +131,245 @@
   --sidebar: #08111d;
   --sidebar-fg: #c7d1dc;
   color-scheme: dark;
+}
+.dark[data-theme='emerald'],
+.dark [data-theme='emerald'] {
+  --accent: #10251f;
+  --sidebar: #08111d;
+  --sidebar-fg: #c7d1dc;
+}
+
+/* Midnight Indigo — navy sidebar, indigo/violet accents, gradient bars (reference mockup 2). */
+[data-theme='midnight'] {
+  --accent: #eef2ff;
+  --brand-50: #eef2ff;
+  --brand-100: #e0e7ff;
+  --brand-200: #c7d2fe;
+  --brand-300: #a5b4fc;
+  --brand-400: #818cf8;
+  --brand-500: #6366f1;
+  --brand-600: #4f46e5;
+  --brand-700: #4338ca;
+  --brand-800: #3730a3;
+  --brand-900: #312e81;
+  --sidebar: #161a3f;
+  --sidebar-fg: #c9cde8;
+  --sidebar-strong: #ffffff;
+  --sidebar-hover: rgb(255 255 255 / 0.06);
+  --sidebar-active: rgb(99 102 241 / 0.35);
+  --sidebar-active-fg: #ffffff;
+  --sidebar-active-icon: #c7d2fe;
+  --sidebar-border: rgb(255 255 255 / 0.07);
+  --sidebar-rail: #818cf8;
+  --chart-present: #3b82f6;
+  --chart-absent: #ef4444;
+  --chart-late: #f97316;
+  --chart-leave: #8b5cf6;
+  --chart-early: #f59e0b;
+  --chart-overtime: #06b6d4;
+  --chart-missing: #ec4899;
+  --hero-from: #4338ca;
+  --hero-to: #7c3aed;
+  --bar-fill: linear-gradient(90deg, #3b82f6, #8b5cf6);
+}
+.dark[data-theme='midnight'],
+.dark [data-theme='midnight'] {
+  --accent: #1f1d4d;
+}
+
+/* Classic Light — white sidebar with a filled blue active item, airy and minimal (reference mockup 3). */
+[data-theme='classic'] {
+  --accent: #eff6ff;
+  --brand-50: #eff6ff;
+  --brand-100: #dbeafe;
+  --brand-200: #bfdbfe;
+  --brand-300: #93c5fd;
+  --brand-400: #60a5fa;
+  --brand-500: #3b82f6;
+  --brand-600: #2563eb;
+  --brand-700: #1d4ed8;
+  --brand-800: #1e40af;
+  --brand-900: #1e3a8a;
+  --sidebar: #ffffff;
+  --sidebar-fg: #475467;
+  --sidebar-strong: #101828;
+  --sidebar-hover: #f2f4f7;
+  --sidebar-active: #2563eb;
+  --sidebar-active-fg: #ffffff;
+  --sidebar-active-icon: #ffffff;
+  --sidebar-border: #e4e7ec;
+  --sidebar-rail: transparent;
+  --chart-present: #3b82f6;
+  --chart-absent: #ef4444;
+  --chart-late: #f97316;
+  --chart-leave: #8b5cf6;
+  --chart-early: #f59e0b;
+  --chart-overtime: #14b8a6;
+  --chart-missing: #ec4899;
+  --hero-from: #2563eb;
+  --hero-to: #7c3aed;
+  --bar-fill: linear-gradient(90deg, #2563eb, #60a5fa);
+}
+.dark[data-theme='classic'],
+.dark [data-theme='classic'] {
+  --accent: #172554;
+  --sidebar: #111a2b;
+  --sidebar-fg: #98a2b3;
+  --sidebar-strong: #e6eaf0;
+  --sidebar-hover: #1a2438;
+  --sidebar-border: #243046;
+}
+
+/* Desert Gold — warm sand and bronze, a deep brown sidebar. */
+[data-theme='desert'] {
+  --accent: #fdf6e9;
+  --brand-50: #fffbeb;
+  --brand-100: #fef3c7;
+  --brand-200: #fde68a;
+  --brand-300: #fcd34d;
+  --brand-400: #fbbf24;
+  --brand-500: #f59e0b;
+  --brand-600: #d97706;
+  --brand-700: #b45309;
+  --brand-800: #92400e;
+  --brand-900: #78350f;
+  --sidebar: #2a1a10;
+  --sidebar-fg: #e7d6c4;
+  --sidebar-strong: #fff7ed;
+  --sidebar-hover: rgb(255 255 255 / 0.06);
+  --sidebar-active: rgb(251 191 36 / 0.18);
+  --sidebar-active-fg: #fff7ed;
+  --sidebar-active-icon: #fcd34d;
+  --sidebar-border: rgb(255 255 255 / 0.07);
+  --sidebar-rail: #fbbf24;
+  --chart-present: #b45309;
+  --chart-absent: #dc2626;
+  --chart-late: #eab308;
+  --chart-leave: #0f766e;
+  --chart-early: #f97316;
+  --chart-overtime: #7c3aed;
+  --chart-missing: #db2777;
+  --hero-from: #92400e;
+  --hero-to: #d97706;
+  --bar-fill: linear-gradient(90deg, #b45309, #f59e0b);
+}
+.dark[data-theme='desert'],
+.dark [data-theme='desert'] {
+  --accent: #3b2a16;
+}
+
+/* Ocean Teal — deep teal sidebar, turquoise accents. */
+[data-theme='ocean'] {
+  --accent: #e6f7f6;
+  --brand-50: #f0fdfa;
+  --brand-100: #ccfbf1;
+  --brand-200: #99f6e4;
+  --brand-300: #5eead4;
+  --brand-400: #2dd4bf;
+  --brand-500: #14b8a6;
+  --brand-600: #0d9488;
+  --brand-700: #0f766e;
+  --brand-800: #115e59;
+  --brand-900: #134e4a;
+  --sidebar: #052e36;
+  --sidebar-fg: #cde6e9;
+  --sidebar-strong: #ffffff;
+  --sidebar-hover: rgb(255 255 255 / 0.06);
+  --sidebar-active: rgb(45 212 191 / 0.16);
+  --sidebar-active-fg: #ffffff;
+  --sidebar-active-icon: #5eead4;
+  --sidebar-border: rgb(255 255 255 / 0.07);
+  --sidebar-rail: #2dd4bf;
+  --chart-present: #0d9488;
+  --chart-absent: #ef4444;
+  --chart-late: #f59e0b;
+  --chart-leave: #0ea5e9;
+  --chart-early: #eab308;
+  --chart-overtime: #8b5cf6;
+  --chart-missing: #f97316;
+  --hero-from: #0f766e;
+  --hero-to: #0369a1;
+  --bar-fill: linear-gradient(90deg, #0d9488, #0ea5e9);
+}
+.dark[data-theme='ocean'],
+.dark [data-theme='ocean'] {
+  --accent: #0f2f33;
+}
+
+/* Graphite — charcoal and neutral greys; colour is reserved for the data. */
+[data-theme='graphite'] {
+  --accent: #f4f4f5;
+  --brand-50: #fafafa;
+  --brand-100: #f4f4f5;
+  --brand-200: #e4e4e7;
+  --brand-300: #d4d4d8;
+  --brand-400: #a1a1aa;
+  --brand-500: #71717a;
+  --brand-600: #52525b;
+  --brand-700: #3f3f46;
+  --brand-800: #27272a;
+  --brand-900: #18181b;
+  --sidebar: #18181b;
+  --sidebar-fg: #a1a1aa;
+  --sidebar-strong: #fafafa;
+  --sidebar-hover: rgb(255 255 255 / 0.06);
+  --sidebar-active: rgb(255 255 255 / 0.1);
+  --sidebar-active-fg: #fafafa;
+  --sidebar-active-icon: #fafafa;
+  --sidebar-border: rgb(255 255 255 / 0.08);
+  --sidebar-rail: #e4e4e7;
+  --chart-present: #2563eb;
+  --chart-absent: #dc2626;
+  --chart-late: #d97706;
+  --chart-leave: #7c3aed;
+  --chart-early: #0891b2;
+  --chart-overtime: #059669;
+  --chart-missing: #db2777;
+  --hero-from: #18181b;
+  --hero-to: #3f3f46;
+  --bar-fill: var(--chart-present);
+}
+.dark[data-theme='graphite'],
+.dark [data-theme='graphite'] {
+  --accent: #27272a;
+}
+
+/* Crimson — maroon sidebar and red accents for red-branded companies; "absent" moves to slate so it never clashes. */
+[data-theme='crimson'] {
+  --accent: #fff1f2;
+  --brand-50: #fff1f2;
+  --brand-100: #ffe4e6;
+  --brand-200: #fecdd3;
+  --brand-300: #fda4af;
+  --brand-400: #fb7185;
+  --brand-500: #f43f5e;
+  --brand-600: #e11d48;
+  --brand-700: #be123c;
+  --brand-800: #9f1239;
+  --brand-900: #881337;
+  --sidebar: #2b0b12;
+  --sidebar-fg: #ecd3d8;
+  --sidebar-strong: #ffffff;
+  --sidebar-hover: rgb(255 255 255 / 0.06);
+  --sidebar-active: rgb(244 63 94 / 0.22);
+  --sidebar-active-fg: #ffffff;
+  --sidebar-active-icon: #fda4af;
+  --sidebar-border: rgb(255 255 255 / 0.07);
+  --sidebar-rail: #fb7185;
+  --chart-present: #be123c;
+  --chart-absent: #475569;
+  --chart-late: #f59e0b;
+  --chart-leave: #0ea5e9;
+  --chart-early: #eab308;
+  --chart-overtime: #8b5cf6;
+  --chart-missing: #f97316;
+  --hero-from: #9f1239;
+  --hero-to: #e11d48;
+  --bar-fill: linear-gradient(90deg, #be123c, #fb7185);
+}
+.dark[data-theme='crimson'],
+.dark [data-theme='crimson'] {
+  --accent: #3b0f18;
 }
 
 @layer base {
@@ -87,4 +387,7 @@
 @layer utilities {
   .scrollbar-thin { scrollbar-width: thin; }
   .page-container { @apply mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8; }
+  /* Progress bars in the dashboard: a solid colour or a gradient, decided by the tenant style. */
+  .bar-fill { background: var(--bar-fill); }
+  .hero-gradient { background-image: linear-gradient(135deg, var(--hero-from), var(--hero-to)); }
 }

@@ -27,7 +27,7 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
     const profile = await ensureProfile(trx, actor);
     const orgIds = [...new Set(actor.principal.memberships.map((m) => m.organizationId))];
     const orgs = orgIds.length ? await trx.selectFrom('organizations').select(ORG_COLUMNS).where('id', 'in', orgIds).execute() : [];
-    const settings = orgIds.length ? await trx.selectFrom('organizationSettings').select(['organizationId', 'general', 'attendance', 'sync', 'notifications', 'security', 'integrations']).where('organizationId', 'in', orgIds).execute() : [];
+    const settings = orgIds.length ? await trx.selectFrom('organizationSettings').select(['organizationId', 'general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard']).where('organizationId', 'in', orgIds).execute() : [];
     const roleIds = [...new Set(actor.principal.memberships.map((m) => m.roleId).filter((r) => /^[0-9a-f-]{36}$/i.test(r)))];
     const roles = roleIds.length ? await trx.selectFrom('roles').select(['id', 'name']).where('id', 'in', roleIds).execute() : [];
     const flags = await loadFeatureFlags(trx, orgIds);

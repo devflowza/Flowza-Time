@@ -35,6 +35,8 @@ recreates the Supabase-provided pieces (auth/storage/realtime schemas, roles). N
 | `1600_reference_data` | permissions vocabulary, system roles + permission matrix, device providers/models, plans, feature flags |
 | `1700_secrets_functions` | `secrets.get/put/delete/masked_device_credentials` |
 | `1800_auth_hooks` | Supabase Auth password-verification hook → login_history |
+| `20260909000100_reports_settings_leave_present` | `organization_settings.reports` group; `leave_types.treat_as_present` |
+| `20260909000200_dashboard_settings` | `organization_settings.dashboard` group (tenant dashboard style, layout and options) |
 
 ## Conventions
 

@@ -12,12 +12,15 @@ import { ErrorState } from '@/components/ui';
 import { useAuth } from '@/features/auth/auth-provider';
 import { AuthLayout } from '@/features/auth/auth-layout';
 import { Button } from '@/components/ui';
+import { useApplyDashboardTheme } from '@/features/dashboard/theme';
 
 export function AppShell() {
   const { t } = useTranslation();
   const me = useMe();
   const { signOut } = useAuth();
   const [mobileNav, setMobileNav] = useState(false);
+  // Before any early return: the tenant's style must be on <html> for every state the shell can render.
+  useApplyDashboardTheme();
 
   // A platform admin is gated at aal2 on every route, so /me itself fails before the shell can render any way out.
   if (me.isError && isMfaRequiredError(me.error)) return <MfaRequiredGate onVerified={() => void me.refetch()} />;

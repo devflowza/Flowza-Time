@@ -1,7 +1,7 @@
 import { organizationSettingsSchema, SETTINGS_GROUPS, type OrganizationSettings, type SettingsGroup } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 
-export type RawSettingsRow = { general: unknown; attendance: unknown; sync: unknown; notifications: unknown; security: unknown; integrations: unknown; reports?: unknown } | undefined | null;
+export type RawSettingsRow = { general: unknown; attendance: unknown; sync: unknown; notifications: unknown; security: unknown; integrations: unknown; reports?: unknown; dashboard?: unknown } | undefined | null;
 
 /** Parse a settings row through the shared schema so defaults are always filled in. */
 export function parseSettings(row: RawSettingsRow): OrganizationSettings {
@@ -16,7 +16,7 @@ export function isSettingsGroup(value: string): value is SettingsGroup {
 }
 
 export async function loadSettings(trx: Trx, organizationId: string): Promise<OrganizationSettings> {
-  const row = await trx.selectFrom('organizationSettings').select(['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports']).where('organizationId', '=', organizationId).executeTakeFirst();
+  const row = await trx.selectFrom('organizationSettings').select(['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard']).where('organizationId', '=', organizationId).executeTakeFirst();
   return parseSettings(row);
 }
 
