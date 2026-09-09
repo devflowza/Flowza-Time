@@ -25,16 +25,18 @@ function claimsFor(ctx: ExecutionContext): Record<string, string> {
   }
 }
 
-/** Apply the context to the current transaction (SET LOCAL ROLE + request.jwt.claims). */
+/**
+ * Apply the context to the current transaction: the role, the JWT claims and the request id. One statement, not three:
+ * `role` is an ordinary GUC, so `set_config('role', …, true)` is exactly SET LOCAL ROLE, and every statement here is a
+ * round trip between the API's region and the database's.
+ */
 export async function applyContext(trx: Trx, ctx: ExecutionContext): Promise<void> {
-  if (ctx.kind === 'user') {
-    await sql`set local role authenticated`.execute(trx);
-  } else {
-    await sql`set local role flowza_system`.execute(trx);
-  }
-  await sql`select set_config('request.jwt.claims', ${JSON.stringify(claimsFor(ctx))}, true)`.execute(trx);
+  const role = ctx.kind === 'user' ? 'authenticated' : 'flowza_system';
+  const claims = JSON.stringify(claimsFor(ctx));
   if (ctx.requestId) {
-    await sql`select set_config('flowza.request_id', ${ctx.requestId}, true)`.execute(trx);
+    await sql`select set_config('role', ${role}, true), set_config('request.jwt.claims', ${claims}, true), set_config('flowza.request_id', ${ctx.requestId}, true)`.execute(trx);
+  } else {
+    await sql`select set_config('role', ${role}, true), set_config('request.jwt.claims', ${claims}, true)`.execute(trx);
   }
 }
 

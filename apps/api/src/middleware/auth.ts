@@ -15,7 +15,7 @@ export function requireAuth(deps: AuthDeps): MiddlewareHandler<AppEnv> {
     const [scheme, token] = header.split(' ');
     if (scheme?.toLowerCase() !== 'bearer' || !token) throw errors.unauthenticated();
     const verified = await deps.verify(token);
-    const { principal, mfaRequiredOrgIds } = await loadPrincipal(deps.db, verified.sub, verified.email, c.get('requestId'));
+    const { principal, mfaRequiredOrgIds } = await loadPrincipal(deps.db, verified.sub, verified.email);
     const aal = verified.aal ?? 'aal1';
     if (principal.isPlatformAdmin && aal !== 'aal2') throw mfaRequiredError('Platform administrators must sign in with multi-factor authentication.');
     c.set('principal', principal);
