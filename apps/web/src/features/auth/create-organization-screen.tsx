@@ -23,6 +23,12 @@ export function CreateOrganizationScreen() {
     await create.mutateAsync({ displayName, timezone: pending?.timezone ?? browserTimezone() }).catch(() => undefined);
   });
   const nameError = form.formState.errors.displayName?.message;
+  // A 404 here is not "your organisation was not found": it is an API that does not serve POST /orgs yet (a web
+  // deploy ahead of the API deploy). Say so, rather than echoing the router's "Route not found.".
+  const describeError = (err: unknown) => {
+    if (err instanceof ApiError && err.status === 404) return t('auth.createOrgUnavailable');
+    return err instanceof ApiError ? err.message : t('auth.createOrgFailed');
+  };
   return (
     <AuthLayout>
       <Card className="w-full max-w-sm">
@@ -35,7 +41,7 @@ export function CreateOrganizationScreen() {
             <FormField label={t('auth.companyName')} htmlFor="org-name" hint={t('auth.companyNameHint')} error={nameError ? t(nameError === 'tooLong' ? 'auth.companyNameTooLong' : 'auth.companyNameTooShort') : undefined}>
               <Input id="org-name" autoComplete="organization" {...form.register('displayName')} aria-invalid={!!nameError} />
             </FormField>
-            {create.error ? <p role="alert" className="text-sm text-destructive">{create.error instanceof ApiError ? create.error.message : t('auth.createOrgFailed')}</p> : null}
+            {create.error ? <p role="alert" className="text-sm text-destructive">{describeError(create.error)}</p> : null}
             <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>{t('auth.createOrg')}</Button>
             <div className="text-center">
               <Button type="button" variant="ghost" size="sm" onClick={() => void signOut()}>{t('nav.signOut')}</Button>

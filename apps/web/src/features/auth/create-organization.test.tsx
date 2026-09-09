@@ -51,6 +51,15 @@ describe('CreateOrganizationScreen', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('already belongs to an organisation');
   });
 
+  it('explains a 404 as an API that does not serve the route yet, not as a missing organisation', async () => {
+    apiMock.post.mockRejectedValue(new ApiError(404, 'NOT_FOUND', 'Route not found.'));
+    renderWithProviders(<CreateOrganizationScreen />);
+    fireEvent.change(screen.getByLabelText('Company name'), { target: { value: 'Manchi Group' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create organisation' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('not available on this server yet');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Route not found');
+  });
+
   it('ignores a corrupt parked value', () => {
     window.localStorage.setItem(PENDING_ORGANIZATION_KEY, '{not json');
     expect(readPendingOrganization()).toBeNull();
