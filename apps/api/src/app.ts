@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
+import { compress } from 'hono/compress';
 import type { ApiDeps } from './deps.js';
 import { requestContext, type AppEnv } from './middleware/request-context.js';
 import { errorHandler } from './middleware/error-handler.js';
@@ -21,6 +22,9 @@ export function createApp(deps: ApiDeps) {
   app.use('*', secureHeaders());
   app.use('*', bodyLimit({ maxSize: 25 * 1024 * 1024 }));
   app.use('/api/*', cors({ origin: deps.config.webOrigins, allowHeaders: ['Authorization', 'Content-Type', 'X-Request-Id', 'Idempotency-Key'], exposeHeaders: ['X-Request-Id', 'Retry-After'], maxAge: 600, credentials: false }));
+  // JSON lists (a day of attendance, an org's employees) are 20–60 KB; gzip keeps them inside the first congestion
+  // windows of a connection that already pays a long round trip.
+  app.use('/api/*', compress());
   app.onError(errorHandler);
   app.notFound((c) => c.json({ code: 'NOT_FOUND', message: 'Route not found.', requestId: c.get('requestId') }, 404));
 

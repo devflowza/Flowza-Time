@@ -2,11 +2,20 @@ import { useQuery } from '@tanstack/react-query';
 import type { MeDto, Permission } from '@flowza/contracts';
 import { api, type Envelope } from '@/lib/api-client';
 import { useUiStore } from '@/stores/ui-store';
+import { readCachedMe, writeCachedMe } from './me-cache';
 
 export const meQueryKey = ['me'] as const;
 
 export function useMe() {
-  return useQuery({ queryKey: meQueryKey, queryFn: async () => (await api.get<Envelope<MeDto>>('/me')).data, staleTime: 60_000 });
+  // The cached copy is handed to the query as initial data stamped with its age, so the shell renders at once and the
+  // query still refetches on mount whenever the copy is older than staleTime.
+  const cached = readCachedMe();
+  return useQuery({
+    queryKey: meQueryKey,
+    queryFn: async () => { const data = (await api.get<Envelope<MeDto>>('/me')).data; writeCachedMe(data); return data; },
+    staleTime: 60_000,
+    ...(cached ? { initialData: cached.data, initialDataUpdatedAt: cached.at } : {}),
+  });
 }
 
 export type ActiveMembership = MeDto['memberships'][number];

@@ -55,6 +55,14 @@ recreates the Supabase-provided pieces (auth/storage/realtime schemas, roles). N
 - Period lock trigger: `attendance_daily_records` inside a locked period reject changes unless the session set
   `flowza.bypass_period_lock = on` (only the unlock/recalculation jobs do).
 
+## Request principal
+
+`app.principal_snapshot(user_id)` (migration 20260909000300) returns the caller's profile, memberships, permissions,
+branch scope, platform grants and MFA-required organisations as one jsonb document. The API calls it once per
+request, outside any transaction, instead of assembling the same data with up to ten statements under RLS — each of
+which is a round trip between the API's region and the database's. It is SECURITY DEFINER and executable only by
+`flowza_api`; the argument is always the subject of a verified JWT.
+
 ## Job queue (`jobs` schema)
 
 `jobs.dequeue(worker, queues[], limit, per_org_cap)` selects pending jobs ordered by *running jobs of that organisation
