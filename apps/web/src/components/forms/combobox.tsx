@@ -1,6 +1,6 @@
 import * as React from 'react';
 import { Command } from 'cmdk';
-import { Check, ChevronsUpDown, Loader2, X } from 'lucide-react';
+import { Check, ChevronsUpDown, Loader2, Plus, X } from 'lucide-react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';

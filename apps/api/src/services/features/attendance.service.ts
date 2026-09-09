@@ -1,4 +1,5 @@
 import { sql } from 'kysely';
+import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { DateTime } from 'luxon';
 import { SYSTEM_ROLE_IDS, type ApprovalRequestDto, type ApprovalStepDto, type ApprovalWorkflowInput, type AttendanceDailyRecordDto, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
@@ -45,13 +46,25 @@ export async function listDaily(deps: ApiDeps, actor: Actor, orgId: string, q: D
     if (q.status) base = base.where('r.status', '=', q.status);
     if (q.flag) base = base.where(sql<boolean>`${sql.val(q.flag)} = any (r.flags)`);
     if (q.search) { const like = likeContains(q.search); const tsq = prefixTsQuery(q.search); base = base.where((eb) => eb.or([...(tsq ? [sql<boolean>`e.search @@ to_tsquery('simple', ${tsq})`] : []), eb('e.displayName', 'ilike', like), eb(sql`e.employee_number::text`, 'ilike', like)])); }
-    const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const page = pageOf(q);
     const sortCol = q.sort === 'status' ? 'r.status' : q.sort === 'firstInAt' ? 'r.first_in_at' : q.sort === 'lateMinutes' ? 'r.late_minutes' : q.sort === 'workedMinutes' ? 'r.worked_minutes' : 'e.display_name';
-    // records without a punch (null first_in_at) sort after those with one, whichever direction is asked for
-    const rows = (await base.select(DAILY_RECORD_COLUMNS).orderBy(sql.raw(`${sortCol} ${q.order} nulls last`)).orderBy('r.id').limit(page.pageSize).offset(page.offset).execute()) as DailyRecordRow[];
-    const totals = await base.select([(eb) => eb.fn.countAll().as('n'), 'r.status']).groupBy('r.status').execute();
-    return { data: rows.map(toDailyRecordDto), total, meta: { byStatus: Object.fromEntries(totals.map((t) => [t.status, toCount(t.n)])) } };
+    // One statement: the page, the total (a window over the filtered set) and the per-status totals (a subquery over
+    // the same set, evaluated once). Each separate query is a round trip between the API's region and the database's.
+    // Records without a punch (null first_in_at) sort after those with one, whichever direction is asked for.
+    const byStatusQuery = base.select(['r.status', (eb) => eb.fn.countAll().as('n')]).groupBy('r.status');
+    const rows = await base
+      .select([...DAILY_RECORD_COLUMNS, sql<string>`count(*) over ()`.as('total'), jsonArrayFrom(byStatusQuery).as('byStatus')])
+      .orderBy(sql.raw(`${sortCol} ${q.order} nulls last`)).orderBy('r.id').limit(page.pageSize).offset(page.offset).execute();
+    const first = rows[0];
+    let total = first ? toCount(first.total) : 0;
+    let byStatus: Record<string, number> = first ? Object.fromEntries(first.byStatus.map((t) => [t.status, toCount(t.n)])) : {};
+    if (!first && page.offset > 0) {
+      // a page past the end: the totals still describe the whole set
+      const totals = await byStatusQuery.execute();
+      byStatus = Object.fromEntries(totals.map((t) => [t.status, toCount(t.n)]));
+      total = Object.values(byStatus).reduce((a, n) => a + n, 0);
+    }
+    return { data: rows.map(({ total: _t, byStatus: _s, ...r }) => toDailyRecordDto(r as DailyRecordRow)), total, meta: { byStatus } };
   });
 }
 
