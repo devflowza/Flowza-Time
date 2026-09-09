@@ -32,7 +32,8 @@ const CSS = `
   thead th.group { text-align: center; border-bottom: 1px solid #999; }
   th.end, td.end { text-align: end; }
   th.center, td.center { text-align: center; }
-  td.mono, th.mono { font-variant-numeric: tabular-nums; }
+  td.mono, th.mono { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  td.mono.wrap { white-space: normal; }
   td .line { display: block; }
   tbody tr.total td { font-weight: 700; border-top: 1px solid #111; }
   .section { margin-top: 6px; }
@@ -63,7 +64,7 @@ function renderCell(c: ReportCell, col: ReportColumn | undefined): string {
   const colour = c.tone && c.tone !== 'default' ? ` style="color:${TONE_COLOUR[c.tone]}${c.bold ? ';font-weight:700' : ''}"` : c.bold ? ' style="font-weight:700"' : '';
   const span = c.colSpan && c.colSpan > 1 ? ` colspan="${c.colSpan}"` : '';
   const body = c.lines ? c.lines.map((l) => `<span class="line">${escapeHtml(l)}</span>`).join('') : escapeHtml(c.text);
-  return `<td${cls([align, mono && 'mono'])}${colour}${span}>${body}</td>`;
+  return `<td${cls([align, mono && 'mono', mono && c.wrap && 'wrap'])}${colour}${span}>${body}</td>`;
 }
 
 function renderHeader(columns: ReportColumn[]): string {

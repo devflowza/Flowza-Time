@@ -36,7 +36,7 @@ export function dayListReport(spec: DayListSpec): ReportDefinition {
         heading: { label: ctx.t('group.departmentPlain'), value: g.label },
         rows: sortByEmployeeNumber(g.items).map((e, i) => {
           const dates = hits.get(e.id) ?? [];
-          return { cells: [num(i + 1, String(i + 1), { align: 'end' }), cell(e.employeeNumber, { mono: true }), cell(e.displayName), cell(dayList(dates), { mono: true }), num(dates.length, String(dates.length))] };
+          return { cells: [num(i + 1, String(i + 1), { align: 'end' }), cell(e.employeeNumber, { mono: true }), cell(e.displayName), cell(dayList(dates), { mono: true, wrap: true }), num(dates.length, String(dates.length))] };
         }),
       }));
       const employeeGroup = ctx.t('col.employeeCodeName');
