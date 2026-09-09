@@ -130,8 +130,9 @@ Non-negotiable, checked in review:
 - **Announce content that swaps without a route change.** A wizard step, a tab panel: move focus to the new heading
   (`tabIndex={-1}` + `.focus()`), but never on first render, where it steals focus from the page.
 - **Target size** ≥ 24px for a control, ≥ 36px for anything in a primary flow.
-- **Contrast** ≥ 4.5:1 for text. `text-muted-foreground` on `bg-muted` is the tightest pair in the system and passes;
-  do not invent a lighter grey.
+- **Contrast** ≥ 4.5:1 for text. `text-muted-foreground` is Gray-600 (`#475467`, about 7:1 on white) so hints, e-mail
+  lines and table headings read as text; on `bg-muted` it is the tightest pair in the system and passes. Do not invent a
+  lighter grey. `text-xs` is 13px, not Tailwind's 12px, for the same reason.
 - **Reduced motion** is honoured globally in `globals.css`. Do not add an animation that ignores it.
 
 ## 7. Multi-step flows

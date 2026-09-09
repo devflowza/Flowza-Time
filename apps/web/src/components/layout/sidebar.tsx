@@ -22,7 +22,7 @@ interface NavSection { label?: string; items: NavItem[] }
  */
 const itemClass = (collapsed: boolean) =>
   cn(
-    'group relative flex h-9 items-center rounded-md text-[13px] text-sidebar-foreground/85 transition-colors',
+    'group relative flex h-9 items-center rounded-md text-[13px] text-sidebar-foreground transition-colors',
     'hover:bg-sidebar-hover hover:text-sidebar-strong',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     'aria-[current=page]:bg-sidebar-active aria-[current=page]:font-medium aria-[current=page]:text-sidebar-active-foreground',
@@ -31,7 +31,7 @@ const itemClass = (collapsed: boolean) =>
     collapsed ? 'justify-center px-0' : 'gap-2.5 ps-3 pe-2.5',
   );
 
-const iconClass = 'size-[18px] shrink-0 text-sidebar-foreground/70 transition-colors group-hover:text-sidebar-strong group-aria-[current=page]:text-sidebar-active-icon';
+const iconClass = 'size-[18px] shrink-0 text-sidebar-foreground/85 transition-colors group-hover:text-sidebar-strong group-aria-[current=page]:text-sidebar-active-icon';
 
 export function Sidebar() {
   const { t } = useTranslation();
@@ -86,7 +86,7 @@ export function Sidebar() {
           return (
             <div key={i} className={i === 0 ? undefined : 'mt-3'}>
               {section.label && !collapsed ? (
-                <p className="mb-1 px-3 text-[10px] font-semibold uppercase tracking-[0.09em] text-sidebar-foreground/60">{section.label}</p>
+                <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-[0.09em] text-sidebar-foreground/80">{section.label}</p>
               ) : null}
               {/* A hairline stands in for the heading when collapsed, so the grouping survives without the text. */}
               {section.label && collapsed ? <div className="mx-3 mb-1 border-t border-sidebar-border" /> : null}
@@ -122,7 +122,7 @@ export function Sidebar() {
           type="button"
           onClick={toggle}
           className={cn(
-            'flex h-9 w-full items-center gap-2.5 rounded-md text-[13px] text-sidebar-foreground/75 transition-colors hover:bg-sidebar-hover hover:text-sidebar-strong',
+            'flex h-9 w-full items-center gap-2.5 rounded-md text-[13px] text-sidebar-foreground/90 transition-colors hover:bg-sidebar-hover hover:text-sidebar-strong',
             collapsed ? 'justify-center px-0' : 'ps-3 pe-2.5',
           )}
           aria-label={collapsed ? t('nav.expand') : t('nav.collapse')}
