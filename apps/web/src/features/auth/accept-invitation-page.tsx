@@ -22,9 +22,8 @@ import { AuthLayout } from './auth-layout';
  * in, or sign up for someone who has never had an account) and then redeems the token, which is what makes a brand
  * new owner able to onboard at all.
  *
- * It is deliberately the only route that can create an account. Signup is otherwise not exposed anywhere in the app,
- * so gating it behind a token keeps registration invitation-only even while the Supabase project still allows public
- * signup.
+ * Self-service registration lives on /auth/sign-up (sign-up-page.tsx). Creating an account there grants nothing: the
+ * user still has no membership until an invitation is redeemed here, which keeps tenant access invitation-only.
  */
 const schema = z
   .object({

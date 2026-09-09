@@ -101,6 +101,10 @@ export interface MockBackendOptions {
   get?: Record<string, unknown | ((url: URL) => unknown)>;
   /** reject the password grant (wrong credentials) */
   rejectSignIn?: boolean;
+  /** reject sign-up (address already registered) */
+  rejectSignUp?: boolean;
+  /** sign-up creates the user but withholds the session, as a project that requires email confirmation does */
+  confirmEmailOnSignUp?: boolean;
 }
 
 export interface MockBackend {
@@ -148,6 +152,11 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
       const grant = url.searchParams.get('grant_type');
       if (grant === 'password' && opts.rejectSignIn) return json(route, 400, { error: 'invalid_grant', error_description: 'Invalid login credentials', code: 'invalid_credentials', msg: 'Invalid login credentials' });
       return json(route, 200, sessionBody());
+    }
+    if (url.pathname.endsWith('/signup')) {
+      if (opts.rejectSignUp) return json(route, 422, { code: 422, error_code: 'user_already_exists', msg: 'User already registered' });
+      // GoTrue answers with a bare user (no tokens) while the address is unconfirmed, and with a full session otherwise
+      return json(route, 200, opts.confirmEmailOnSignUp ? { ...sessionBody().user, email_confirmed_at: null } : sessionBody());
     }
     if (url.pathname.endsWith('/user')) return json(route, 200, sessionBody().user);
     if (url.pathname.endsWith('/logout')) return route.fulfill({ status: 204, headers: CORS });

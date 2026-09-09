@@ -55,6 +55,9 @@ export function SignInPage() {
             {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
             <Button type="submit" className="w-full" loading={form.formState.isSubmitting}>{t('auth.signIn')}</Button>
             <div className="text-center text-sm"><Link to="/auth/forgot" className="text-primary hover:underline">{t('auth.forgot')}</Link></div>
+            <div className="text-center text-sm">
+              {t('auth.noAccount')} <Link to="/auth/sign-up" className="text-primary hover:underline">{t('auth.signUp')}</Link>
+            </div>
           </form>
         </CardContent>
       </Card>
