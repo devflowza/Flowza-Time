@@ -1,12 +1,23 @@
 import { createClient } from '@supabase/supabase-js';
 import { Resend } from 'resend';
-import type { Logger } from '@flowza/shared';
+import { AppError, type Logger } from '@flowza/shared';
 import type { WorkerConfig } from '../config.js';
 import type { Mailer, RealtimePublisher, StorageWriter } from '../deps.js';
 
-/** Realtime broadcast + Storage through the Supabase platform client (service key needed by Supabase for these two APIs only). */
+const STORAGE_UNCONFIGURED = 'Report storage is not configured on this worker: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (go-live §3).';
+
+/**
+ * Realtime broadcast + Storage through the Supabase platform client (service key needed by Supabase for these two APIs
+ * only). Without the two variables, development and tests get an in-memory stand-in; production gets a storage that
+ * refuses, so a report is recorded FAILED with the reason instead of COMPLETED with a file that exists only in RAM.
+ */
 export function createPlatformClients(config: WorkerConfig, log: Logger): { realtime: RealtimePublisher; storage: StorageWriter } {
   if (!config.SUPABASE_URL || !config.SUPABASE_SERVICE_ROLE_KEY) {
+    if (config.NODE_ENV === 'production') {
+      log.error({ event: 'platform_clients_unconfigured', reason: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set; storage operations will fail until they are' });
+      const refuse = async (): Promise<never> => { throw new AppError('DEPENDENCY_UNAVAILABLE', STORAGE_UNCONFIGURED, { retryable: false }); };
+      return { realtime: { async publish() {} }, storage: { upload: refuse, download: refuse, remove: refuse } };
+    }
     log.warn({ event: 'platform_clients_disabled', reason: 'SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY not set; realtime and storage are in-memory no-ops' });
     const mem = new Map<string, Buffer>();
     return {
