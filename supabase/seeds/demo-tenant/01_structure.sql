@@ -167,9 +167,9 @@ begin
     punch_interpretation, duplicate_punch_window_seconds, missing_punch_behavior, auto_absent_without_punches, weekly_off_work_counts_as_overtime, holiday_work_counts_as_overtime, ramadan_mode, created_by, created_at)
   values
     (pg_temp.sid('rules:company'), org, null, 'Company standard', '2025-01-01', 10, 5, 0, 0, 420, 240, true, 30, 30, 15, 240, false, 0, 'NONE', 0, 'NONE', 'FIRST_LAST', 60, 'FLAG_ONLY', true, true, true,
-      jsonb_build_object('enabled', true, 'from', '2026-02-18', 'to', '2026-03-19', 'scheduledMinutes', 360, 'appliesTo', 'flagged_employees'), owner_id, t0),
+      jsonb_build_object('enabled', true, 'from', '2026-02-18', 'to', '2026-03-19', 'scheduledMinutes', 300, 'appliesTo', 'flagged_employees'), owner_id, t0),
     (pg_temp.sid('rules:duqm'), org, pg_temp.sid('branch:DQM'), 'Duqm site rules', '2025-01-01', 15, 5, 0, 0, 480, 240, true, 15, 30, 15, 300, true, 0, 'NONE', 0, 'NONE', 'FIRST_LAST', 60, 'ASSUME_SHIFT_END', true, true, true,
-      jsonb_build_object('enabled', true, 'from', '2026-02-18', 'to', '2026-03-19', 'scheduledMinutes', 360, 'appliesTo', 'flagged_employees'), owner_id, t0)
+      jsonb_build_object('enabled', true, 'from', '2026-02-18', 'to', '2026-03-19', 'scheduledMinutes', 300, 'appliesTo', 'flagged_employees'), owner_id, t0)
   on conflict (id) do update set name = excluded.name, grace_in_minutes = excluded.grace_in_minutes, grace_out_minutes = excluded.grace_out_minutes, min_full_day_minutes = excluded.min_full_day_minutes,
     overtime_start_after_minutes = excluded.overtime_start_after_minutes, overtime_max_minutes_per_day = excluded.overtime_max_minutes_per_day, count_early_in_as_overtime = excluded.count_early_in_as_overtime,
     missing_punch_behavior = excluded.missing_punch_behavior, ramadan_mode = excluded.ramadan_mode, updated_at = now();
