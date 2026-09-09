@@ -92,7 +92,7 @@ export default function DeviceDetailPage() {
             <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
               <TabsList className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`detail.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
               <TabsContent value="overview"><OverviewTab device={d} tz={tz} /></TabsContent>
-              <TabsContent value="employees">{tab === 'employees' ? <EmployeesTab deviceId={d.id} tz={tz} canPush={d.capabilities.employeePush && d.status === 'active'} /> : null}</TabsContent>
+              <TabsContent value="employees">{tab === 'employees' ? <EmployeesTab deviceId={d.id} tz={tz} canPush={d.capabilities.employeePush && d.status === 'active'} deviceName={d.name} providerKey={d.providerKey} /> : null}</TabsContent>
               <TabsContent value="logs">{tab === 'logs' ? <LogsTab deviceId={d.id} tz={tz} /> : null}</TabsContent>
               {isPush ? <TabsContent value="commands">{tab === 'commands' ? <CommandsTab deviceId={d.id} tz={tz} /> : null}</TabsContent> : null}
               <TabsContent value="sync">{tab === 'sync' ? <SyncHistoryTab deviceId={d.id} tz={tz} /> : null}</TabsContent>

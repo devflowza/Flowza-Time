@@ -1,13 +1,14 @@
 import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
 import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCredentialsInput, DeviceGroupDto, DeviceGroupInput, DeviceListQuery, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
-import type { DeviceSummaryDto, DeviceSummaryQuery } from '@flowza/contracts';
+import type { DeviceSummaryDto, DeviceSummaryQuery, DeviceUserLinkResult, DeviceUserLinkScope, LinkDeviceUserInput, Permission, UnlinkDeviceUserInput, UnmappedDeviceUserDto, UnmappedDeviceUsersQuery } from '@flowza/contracts';
 import { emitDomainEvent, maskCredentials, type Trx } from '@flowza/database';
 import { createThrottler, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
 import { AppError, errors, sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
 import { type Actor, audit, diffObjects, runSystem, runUser } from '../../lib/service.js';
+import { enqueueJob } from '../../lib/jobs.js';
 import { loadFeatureFlags, loadSettings } from '../../lib/settings.js';
 import { likeContains, pageOf, resolveSort, toCount } from '../../lib/pagination.js';
 import { jsonObject } from '../../lib/mappers.js';
@@ -612,4 +613,198 @@ export async function claimPending(deps: ApiDeps, actor: Actor, orgId: string, p
   });
   const device = await runUser(deps.db, actor, async (trx) => { await audit(trx, actor, orgId, 'device.claimed', 'device', { entityId: created.id, branchId: input.branchId, newValue: { pendingId, serialNumber: pending.serialNumber, providerKey: def.key } }); return loadDeviceRow(trx, orgId, created.id); });
   return { device: toDeviceDto(device, { employeeCount: 0 }), pushToken: token?.token ?? null, ...pushUrls(deps, provider, created.id, token?.token ?? null), credentialsStored: false, credentialsError: null, testConnectionJobId: created.testJob?.id ?? null };
+}
+
+// ----- device user (PIN) ↔ employee mapping ------------------------------------------------------------------------------
+// A punch carries the PIN the person typed on the keypad (`device_employee_id`), not an employee id. The normaliser resolves
+// it per-device (device_employee_states) → per-provider (employee_provider_identities) → organisation-wide
+// (employees.device_user_id); punches that resolve to nothing become `unmatched` and never reach attendance. These three
+// functions surface those PINs and let an operator attach one to an employee, then replay the punches already collected.
+
+/** Upper bound on rows one link replays, so a PIN with years of backlog cannot lock the raw partitions in a request. */
+export const MAX_LINK_REQUEUE = 5000;
+
+/**
+ * PINs on the caller's devices with no employee behind them: seen in `unmatched` punches, enrolled on the device with no
+ * cloud match, or both. `unmatchedPunches` counts only what the caller may read — RLS hides raw transactions from members
+ * without `attendance.view_raw`, so such a caller sees the enrolled-but-unlinked PINs with a zero punch count.
+ */
+export async function listUnmappedDeviceUsers(deps: ApiDeps, actor: Actor, orgId: string, q: UnmappedDeviceUsersQuery): Promise<{ data: UnmappedDeviceUserDto[]; total: number }> {
+  const grant = requirePermission(actor.principal, orgId, 'device.view');
+  const scope = branchFilter(grant, q.branchId);
+  const page = pageOf(q);
+  return runUser(deps.db, actor, async (trx) => {
+    if (q.deviceId) requireBranchAccess(grant, (await loadDeviceRow(trx, orgId, q.deviceId)).branchId);
+    const search = q.search ? likeContains(q.search) : null;
+    const rows = await sql<UnmappedRow>`
+      with scoped_devices as (
+        select d.id, d.name, d.code, d.branch_id, d.provider_key
+        from public.devices d
+        where d.organization_id = ${orgId}::uuid and d.status <> 'decommissioned'
+          and (${q.deviceId ?? null}::uuid is null or d.id = ${q.deviceId ?? null}::uuid)
+          and (${scope}::uuid[] is null or d.branch_id = any(${scope}::uuid[]))
+      ),
+      unmatched as (
+        select t.device_id, t.device_employee_id as device_user_id, count(*)::int as punches, min(t.punched_at) as first_at, max(t.punched_at) as last_at
+        from public.attendance_raw_transactions t
+        where t.organization_id = ${orgId}::uuid and t.processing_status = 'unmatched'
+          and t.device_id in (select id from scoped_devices)
+        group by 1, 2
+      ),
+      device_only as (
+        select s.device_id, s.device_user_id, s.device_record ->> 'name' as device_user_name
+        from public.device_employee_states s
+        where s.organization_id = ${orgId}::uuid and s.employee_id is null
+          and s.device_id in (select id from scoped_devices)
+      ),
+      keys as (
+        select device_id, device_user_id from unmatched
+        union
+        select device_id, device_user_id from device_only
+      )
+      select d.id as device_id, d.name as device_name, d.code::text as device_code, d.branch_id, d.provider_key, k.device_user_id,
+             o.device_user_name, (o.device_id is not null) as enrolled_on_device,
+             coalesce(u.punches, 0) as unmatched_punches, u.first_at, u.last_at, (count(*) over ())::int as total_count
+      from keys k
+      join scoped_devices d on d.id = k.device_id
+      left join unmatched u on u.device_id = k.device_id and u.device_user_id = k.device_user_id
+      left join device_only o on o.device_id = k.device_id and o.device_user_id = k.device_user_id
+      where (${q.origin} <> 'punches' or u.device_id is not null)
+        and (${q.origin} <> 'enrolled' or o.device_id is not null)
+        and (${search}::text is null or k.device_user_id ilike ${search} or d.name ilike ${search} or o.device_user_name ilike ${search})
+      order by u.last_at desc nulls last, d.name, k.device_user_id
+      limit ${page.pageSize} offset ${page.offset}
+    `.execute(trx);
+    return {
+      data: rows.rows.map((r) => ({
+        deviceId: r.deviceId, deviceName: r.deviceName, deviceCode: r.deviceCode, branchId: r.branchId, providerKey: r.providerKey,
+        deviceUserId: r.deviceUserId, deviceUserName: r.deviceUserName, enrolledOnDevice: r.enrolledOnDevice,
+        unmatchedPunches: r.unmatchedPunches, firstPunchAt: r.firstAt?.toISOString() ?? null, lastPunchAt: r.lastAt?.toISOString() ?? null,
+      })),
+      total: rows.rows[0]?.totalCount ?? 0,
+    };
+  });
+}
+/** Result keys arrive camel-cased: the Kysely CamelCasePlugin maps raw-query rows too, not just builder rows. */
+interface UnmappedRow { deviceId: string; deviceName: string; deviceCode: string; branchId: string; providerKey: string; deviceUserId: string; deviceUserName: string | null; enrolledOnDevice: boolean; unmatchedPunches: number; firstAt: Date | null; lastAt: Date | null; totalCount: number }
+
+/** Devices a link at `scope` reaches: the one device, or every non-decommissioned device of the same vendor in branch scope. */
+async function linkedDeviceIds(trx: Trx, orgId: string, device: DeviceRow, scope: DeviceUserLinkScope, branchScope: string[] | null): Promise<string[]> {
+  if (scope === 'DEVICE') return [device.id];
+  let q = trx.selectFrom('devices').select('id').where('organizationId', '=', orgId).where('providerKey', '=', device.providerKey).where('status', '!=', 'decommissioned');
+  if (branchScope) q = q.where('branchId', 'in', branchScope);
+  return (await q.execute()).map((r) => r.id);
+}
+
+/** Move a PIN's `unmatched` punches back to `pending` and wake the normaliser. Raw rows are user-read-only, hence systemStep. */
+async function requeueUnmatchedFor(deps: ApiDeps, trx: Trx, orgId: string, deviceIds: string[], deviceUserId: string, correlationId: string | undefined): Promise<number> {
+  if (deviceIds.length === 0) return 0;
+  return systemStep(trx, orgId, async (t) => {
+    const res = await sql<{ n: string }>`
+      with target as (
+        select id, punched_at from public.attendance_raw_transactions
+        where organization_id = ${orgId}::uuid and device_id = any(${deviceIds}::uuid[])
+          and device_employee_id = ${deviceUserId} and processing_status = 'unmatched'
+        order by punched_at limit ${MAX_LINK_REQUEUE}
+      ), updated as (
+        update public.attendance_raw_transactions t
+        set processing_status = 'pending', processing_error = null, processed_at = null
+        from target where t.id = target.id and t.punched_at = target.punched_at
+        returning 1
+      )
+      select count(*)::text as n from updated
+    `.execute(t);
+    const requeued = Number(res.rows[0]?.n ?? 0);
+    if (requeued > 0) {
+      await enqueueJob(deps.queue, t, {
+        queue: 'processing', jobType: 'NORMALIZE_RAW', organizationId: orgId, payload: { organizationId: orgId },
+        dedupeKey: `normalize:${orgId}`, correlationId, priority: 6,
+      });
+    }
+    return requeued;
+  });
+}
+
+/**
+ * Attach a device PIN to an employee so the punches it produces become that employee's attendance (§34, §G.1).
+ * `DEVICE` writes the per-device mapping, `PROVIDER` the vendor-wide identity used by every device of that vendor.
+ * Punches already logged under the PIN are replayed unless the caller opts out.
+ */
+export async function linkDeviceUser(deps: ApiDeps, actor: Actor, orgId: string, deviceId: string, input: LinkDeviceUserInput): Promise<DeviceUserLinkResult> {
+  const perms: Permission[] = ['device.sync'];
+  if (input.scope === 'PROVIDER') perms.push('employee.update');
+  // replaying raw punches is the same privilege as re-queuing one by hand (attendance.raw_requeued)
+  if (input.requeueUnmatched) perms.push('attendance.view_raw');
+  const grant = requirePermission(actor.principal, orgId, ...perms);
+  return runUser(deps.db, actor, async (trx) => {
+    const device = await loadDeviceRow(trx, orgId, deviceId);
+    requireBranchAccess(grant, device.branchId);
+    const employee = await trx.selectFrom('employees').select(['id', 'branchId', 'displayName', 'deviceUserId', 'employmentStatus'])
+      .where('organizationId', '=', orgId).where('id', '=', input.employeeId).where('deletedAt', 'is', null).executeTakeFirst();
+    if (!employee) throw errors.notFound('Employee', input.employeeId);
+    requireBranchAccess(grant, employee.branchId);
+
+    // what the audit trail replaces: the employee this PIN pointed at (DEVICE) or the PIN this employee held (PROVIDER)
+    let previous: Record<string, unknown> = {};
+    if (input.scope === 'DEVICE') {
+      const clash = await trx.selectFrom('deviceEmployeeStates').select(['deviceUserId']).where('organizationId', '=', orgId)
+        .where('deviceId', '=', deviceId).where('employeeId', '=', employee.id).where('deviceUserId', '!=', input.deviceUserId).executeTakeFirst();
+      if (clash) throw errors.conflict(`${employee.displayName} is already mapped to device user id ${clash.deviceUserId} on this device. Unlink that mapping first.`, { deviceUserId: clash.deviceUserId });
+      const existing = await trx.selectFrom('deviceEmployeeStates').select(['id', 'employeeId']).where('organizationId', '=', orgId)
+        .where('deviceId', '=', deviceId).where('deviceUserId', '=', input.deviceUserId).executeTakeFirst();
+      previous = { employeeId: existing?.employeeId ?? null };
+      if (existing) {
+        await trx.updateTable('deviceEmployeeStates').set({ employeeId: employee.id, syncStatus: 'OUT_OF_SYNC', desired: true, updatedAt: new Date() }).where('id', '=', existing.id).execute();
+      } else {
+        await trx.insertInto('deviceEmployeeStates').values({ organizationId: orgId, deviceId, branchId: device.branchId, employeeId: employee.id, deviceUserId: input.deviceUserId, syncStatus: 'OUT_OF_SYNC', desired: true }).execute();
+      }
+    } else {
+      const taken = await trx.selectFrom('employeeProviderIdentities as i').innerJoin('employees as e', 'e.id', 'i.employeeId').select(['i.employeeId', 'e.displayName'])
+        .where('i.organizationId', '=', orgId).where('i.providerKey', '=', device.providerKey).where('i.deviceUserId', '=', input.deviceUserId).executeTakeFirst();
+      if (taken && taken.employeeId !== employee.id) throw errors.conflict(`Device user id ${input.deviceUserId} is already mapped to ${taken.displayName} for ${device.providerKey}.`, { employeeId: taken.employeeId });
+      const current = await trx.selectFrom('employeeProviderIdentities').select(['id', 'deviceUserId']).where('organizationId', '=', orgId)
+        .where('providerKey', '=', device.providerKey).where('employeeId', '=', employee.id).executeTakeFirst();
+      previous = { deviceUserId: current?.deviceUserId ?? null };
+      if (current) await trx.updateTable('employeeProviderIdentities').set({ deviceUserId: input.deviceUserId, updatedAt: new Date() }).where('id', '=', current.id).execute();
+      else await trx.insertInto('employeeProviderIdentities').values({ organizationId: orgId, employeeId: employee.id, providerKey: device.providerKey, deviceUserId: input.deviceUserId }).execute();
+    }
+
+    const deviceIds = await linkedDeviceIds(trx, orgId, device, input.scope, branchFilter(grant, null));
+    const requeued = input.requeueUnmatched ? await requeueUnmatchedFor(deps, trx, orgId, deviceIds, input.deviceUserId, actor.requestId) : 0;
+    await audit(trx, actor, orgId, 'device.user_linked', 'device_employee_state', {
+      entityId: `${deviceId}:${input.deviceUserId}`, branchId: device.branchId,
+      oldValue: previous, newValue: { employeeId: employee.id, scope: input.scope, deviceUserId: input.deviceUserId, requeued },
+    });
+    return { deviceId, deviceUserId: input.deviceUserId, employeeId: employee.id, scope: input.scope, requeued };
+  });
+}
+
+/** Detach a PIN from its employee. Punches already normalised are untouched; new punches under the PIN become `unmatched` again. */
+export async function unlinkDeviceUser(deps: ApiDeps, actor: Actor, orgId: string, deviceId: string, input: UnlinkDeviceUserInput): Promise<DeviceUserLinkResult> {
+  const perms: Permission[] = input.scope === 'PROVIDER' ? ['device.sync', 'employee.update'] : ['device.sync'];
+  const grant = requirePermission(actor.principal, orgId, ...perms);
+  return runUser(deps.db, actor, async (trx) => {
+    const device = await loadDeviceRow(trx, orgId, deviceId);
+    requireBranchAccess(grant, device.branchId);
+    let previousEmployeeId: string | null = null;
+
+    if (input.scope === 'DEVICE') {
+      const existing = await trx.selectFrom('deviceEmployeeStates').select(['id', 'employeeId']).where('organizationId', '=', orgId)
+        .where('deviceId', '=', deviceId).where('deviceUserId', '=', input.deviceUserId).executeTakeFirst();
+      if (!existing || existing.employeeId === null) throw errors.notFound('Device user mapping', input.deviceUserId);
+      previousEmployeeId = existing.employeeId;
+      await trx.updateTable('deviceEmployeeStates').set({ employeeId: null, desired: false, syncStatus: 'OUT_OF_SYNC', updatedAt: new Date() }).where('id', '=', existing.id).execute();
+    } else {
+      const existing = await trx.selectFrom('employeeProviderIdentities').select(['id', 'employeeId']).where('organizationId', '=', orgId)
+        .where('providerKey', '=', device.providerKey).where('deviceUserId', '=', input.deviceUserId).executeTakeFirst();
+      if (!existing) throw errors.notFound('Device user mapping', input.deviceUserId);
+      previousEmployeeId = existing.employeeId;
+      await trx.deleteFrom('employeeProviderIdentities').where('id', '=', existing.id).execute();
+    }
+    await audit(trx, actor, orgId, 'device.user_unlinked', 'device_employee_state', {
+      entityId: `${deviceId}:${input.deviceUserId}`, branchId: device.branchId,
+      oldValue: { employeeId: previousEmployeeId }, newValue: { employeeId: null, scope: input.scope, deviceUserId: input.deviceUserId },
+    });
+    return { deviceId, deviceUserId: input.deviceUserId, employeeId: null, scope: input.scope, requeued: 0 };
+  });
 }

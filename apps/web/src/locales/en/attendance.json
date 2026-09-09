@@ -41,7 +41,7 @@
   "raw": {
     "hint": "Raw device transactions are immutable. Quarantined (clock skew / future), unmatched (unknown device user) and held (locked period) rows are highlighted and can be re-queued after the cause is fixed.",
     "device": "Device", "deviceEmployeeId": "Device user id", "punchedAt": "Punched at", "deviceLocal": "Device local time", "direction": "Direction", "source": "Source", "skew": "Clock skew {{seconds}} s", "unmatchedEmployee": "Unmatched",
-    "requeue": "Requeue", "requeued": "Transaction re-queued for processing", "empty": "No raw transactions", "emptyHint": "Transactions appear as devices are polled or push their punches.", "page": "Page {{page}}"
+    "link": "Link", "requeue": "Requeue", "requeued": "Transaction re-queued for processing", "empty": "No raw transactions", "emptyHint": "Transactions appear as devices are polled or push their punches.", "page": "Page {{page}}"
   },
   "recalc": {
     "title": "Recalculate", "hint": "Recompute daily records for a date range. Previous versions are kept in the record history.", "allBranches": "All branches", "allDepartments": "All departments", "oneBranch": "One branch",
