@@ -12,16 +12,25 @@ import { ViewAllLink, WidgetCard, WidgetEmpty, WidgetRowsSkeleton } from './widg
 interface Punch { record: DailyRecord; kind: 'in' | 'out'; at: string }
 
 /**
- * Today's most recent punches, derived from the daily records of employees who are present (every one of them has a
- * first check-in, so "newest first" is well defined). The latest event of a record wins: a check-out replaces its
- * check-in in the feed.
+ * Today's most recent punches, derived from the daily records of employees who are present or still clocked in (every
+ * one of them has a first check-in, so "newest first" is well defined). The latest event of a record wins: a check-out
+ * replaces its check-in in the feed.
  */
 function useRecentPunches(date: string, enabled: boolean, limit: number) {
-  const q = useDailyAttendance({ date, status: 'PRESENT', sort: 'firstInAt', order: 'desc', page: 1, pageSize: limit }, enabled);
-  const punches = useMemo<Punch[]>(() => (q.data?.data ?? [])
-    .map((r): Punch | null => (r.lastOutAt ? { record: r, kind: 'out', at: r.lastOutAt } : r.firstInAt ? { record: r, kind: 'in', at: r.firstInAt } : null))
-    .filter((p): p is Punch => p !== null)
-    .sort((a, b) => b.at.localeCompare(a.at)), [q.data]);
+  const query = { date, sort: 'firstInAt' as const, order: 'desc' as const, page: 1, pageSize: limit };
+  const present = useDailyAttendance({ ...query, status: 'PRESENT' }, enabled);
+  // Someone who has clocked in but not yet out stays PENDING until their punch window closes; they belong in the feed too.
+  const working = useDailyAttendance({ ...query, status: 'PENDING' }, enabled);
+  const punches = useMemo<Punch[]>(() => {
+    const seen = new Set<string>();
+    return [...(present.data?.data ?? []), ...(working.data?.data ?? [])]
+      .filter((r) => { if (seen.has(r.id)) return false; seen.add(r.id); return true; })
+      .map((r): Punch | null => (r.lastOutAt ? { record: r, kind: 'out', at: r.lastOutAt } : r.firstInAt ? { record: r, kind: 'in', at: r.firstInAt } : null))
+      .filter((p): p is Punch => p !== null)
+      .sort((a, b) => b.at.localeCompare(a.at))
+      .slice(0, limit);
+  }, [present.data, working.data, limit]);
+  const q = { isLoading: present.isLoading || working.isLoading, isError: present.isError || working.isError, error: present.error ?? working.error, refetch: () => { void present.refetch(); void working.refetch(); } };
   return { q, punches };
 }
 

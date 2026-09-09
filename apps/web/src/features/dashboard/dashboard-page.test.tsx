@@ -40,7 +40,7 @@ const record = {
   status: 'PRESENT', flags: [], punchCount: 1, hasCorrection: false, calculationVersion: 1, computedAt: `${today}T04:05:00.000Z`, lockedAt: null,
 };
 
-function mockDashboard() {
+function mockDashboard(overrides: Record<string, unknown> = {}) {
   mockGet({
     '/orgs/org-1/dashboard/summary': { data: summary },
     '/orgs/org-1/dashboard/trends': { data: trends },
@@ -49,6 +49,7 @@ function mockDashboard() {
     '/orgs/org-1/holidays': { data: [holiday] },
     '/orgs/org-1/attendance/daily': page([record]),
     '/orgs/org-1/sync/jobs': page([]),
+    ...overrides,
   });
 }
 
@@ -78,6 +79,16 @@ describe('DashboardPage', () => {
     // the trend query always reaches back at least eight days so "vs last week" has its comparison day
     const trendCall = apiMock.get.mock.calls.find((c) => c[0] === '/orgs/org-1/dashboard/trends');
     expect(trendCall?.[1]).toEqual({ from: shiftDate(today, -13), to: today });
+  });
+
+  it('lists employees who are clocked in and still working in the activity feed', async () => {
+    // an open day stays PENDING until the punch window closes; the feed asks for those records as well as PRESENT ones
+    const working = { ...record, id: 'r2', employeeId: 'e2', employeeNumber: '1002', employeeName: 'Maryam Al Siyabi', status: 'PENDING', firstInAt: `${today}T04:20:00.000Z` };
+    mockDashboard({ '/orgs/org-1/attendance/daily': (q: Record<string, unknown> | undefined) => page(q?.status === 'PENDING' ? [working] : [record]) });
+    renderWithProviders(<DashboardPage />);
+    expect(await screen.findByText('Maryam Al Siyabi')).toBeInTheDocument();
+    expect(await screen.findByText('Salim Al Harthy')).toBeInTheDocument();
+    expect(screen.getAllByText(/Checked in · Muscat HQ/)).toHaveLength(2);
   });
 
   it('follows the tenant\'s layout and greeting choice from /me', async () => {
