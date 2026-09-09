@@ -62,9 +62,9 @@ supabase/migrations · supabase/tests · supabase/functions · scripts · docs
 | Device provider framework, registry, conformance suite, deterministic mock provider | **Working** — 140 tests |
 | ZKTeco PUSH/ADMS protocol (handshake, ATTLOG, commands, OPERLOG) | **Beta, never run against hardware** — `verification_status = REPORTED`; see the checklist in `docs/device-integrations.md` §6 |
 | Hikvision, Suprema, Anviz, eSSL, FingerTec, Matrix, NITGEN | **Placeholders that fail with `NOT_IMPLEMENTED`** — never presented as working |
-| API — 178 authenticated endpoints plus device-push and webhook ingress | **Working** — 114 tests incl. an adversarial security suite |
+| API — 181 authenticated endpoints plus device-push and webhook ingress | **Working** — 118 tests incl. an adversarial security suite |
 | Worker — sync, attendance processing, notifications, maintenance | **Working** — 74 tests |
-| Web — 36 routes across dashboard (tenant-selectable styles and layouts), employees, organisation, users, settings, audit, search, devices, sync, attendance, corrections, approvals, schedule, leave, reports, payroll, platform (en + ar, RTL) | **Working** — 125 component tests, 22 UI end-to-end runs (11 scenarios × desktop + tablet) |
+| Web — 37 routes across dashboard (tenant-selectable styles and layouts), employees, organisation, users, settings, audit, search, devices (incl. unmapped device users), sync, attendance, corrections, approvals, schedule, leave, reports, payroll, platform (en + ar, RTL) | **Working** — 129 component tests, 22 UI end-to-end runs (11 scenarios × desktop + tablet) |
 | Seed — 1 organisation, 5 branches, 20 departments, 500 employees, 20 devices, 30 days (~22k punches through the real engine) | **Working** |
 | Supabase hosted project, Auth stack, Storage, Realtime authorisation policies | **Not provisioned** — everything runs against local Postgres with a Supabase-compatibility shim (`supabase/tests/00_local_supabase_shim.sql`) |
 | Platform-wide feature-flag defaults, full-stack E2E against a seeded Supabase stack | **Not implemented** — tracked in `docs/risks.md` and `docs/device-integrations.md` §8 |

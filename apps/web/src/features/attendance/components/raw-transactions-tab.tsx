@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
-import { RotateCcw, X } from 'lucide-react';
+import { Link2, RotateCcw, X } from 'lucide-react';
 import { RAW_PROCESSING_STATUSES } from '@flowza/contracts';
 import { Button, EmptyState, ErrorState, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton } from '@/components/ui';
 import { Combobox, DateRange } from '@/components/forms';
@@ -14,6 +14,7 @@ import { cn } from '@/lib/utils';
 import { useCan, useOrgId, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useTabTable } from '@/features/organization/use-tab-table';
+import { LinkDeviceUserDialog, type LinkTarget } from '@/features/devices/components/link-device-user-dialog';
 import { useAttendanceMutations, useRawTransactions } from '../api';
 import { RAW_ROW_CLASS, REQUEUEABLE } from '../status';
 import type { RawTransactionDto } from '../types';
@@ -52,6 +53,9 @@ export function RawTransactionsTab() {
   const setFilter = (k: string, v: string | undefined) => { setCursors([]); table.setFilter(k, v); };
   const [deviceEmployeeId, setDeviceEmployeeId] = useState(f['deviceEmployeeId'] ?? '');
   const requeue = (r: RawTransactionDto) => requeueRaw.mutate(r.id, { onSuccess: () => toast.success(t('raw.requeued')), onError: toastError });
+  // an unmatched punch has a PIN but no employee: linking it is the fix, re-queuing alone would only fail again
+  const canLink = can('device.sync');
+  const [linkTarget, setLinkTarget] = useState<LinkTarget | null>(null);
   const rows = q.data?.data;
 
   return (
@@ -88,7 +92,14 @@ export function RawTransactionsTab() {
                     <TableCell className="text-xs">{r.direction ?? '—'}{r.verificationMethod ? <span className="text-muted-foreground"> · {r.verificationMethod}</span> : null}</TableCell>
                     <TableCell className="text-xs">{r.source}</TableCell>
                     <TableCell><div className="flex flex-col gap-0.5"><RawStatusBadge status={r.processingStatus} />{r.processingError ? <span className="max-w-[200px] truncate text-[11px] text-destructive" title={r.processingError}>{r.processingError}</span> : null}</div></TableCell>
-                    <TableCell className="text-end">{canRequeue && REQUEUEABLE.has(r.processingStatus) ? <Button size="sm" variant="outline" loading={requeueRaw.isPending && requeueRaw.variables === r.id} onClick={() => requeue(r)}><RotateCcw /> {t('raw.requeue')}</Button> : null}</TableCell>
+                    <TableCell className="text-end">
+                      <div className="flex items-center justify-end gap-1">
+                        {canLink && r.processingStatus === 'unmatched' && r.deviceId && r.deviceEmployeeId ? (
+                          <Button size="sm" onClick={() => setLinkTarget({ deviceId: r.deviceId as string, deviceUserId: r.deviceEmployeeId as string, deviceName: r.deviceName ?? null })}><Link2 /> {t('raw.link')}</Button>
+                        ) : null}
+                        {canRequeue && REQUEUEABLE.has(r.processingStatus) ? <Button size="sm" variant="outline" loading={requeueRaw.isPending && requeueRaw.variables === r.id} onClick={() => requeue(r)}><RotateCcw /> {t('raw.requeue')}</Button> : null}
+                      </div>
+                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>
@@ -109,6 +120,7 @@ export function RawTransactionsTab() {
           <Button variant="outline" size="sm" disabled={!q.data?.meta.nextCursor} onClick={() => { const n = q.data?.meta.nextCursor; if (n) setCursors((c) => [...c, n]); }}>{tc('common.next')}</Button>
         </div>
       </div>
+      {linkTarget ? <LinkDeviceUserDialog target={linkTarget} onClose={() => setLinkTarget(null)} /> : null}
     </div>
   );
 }

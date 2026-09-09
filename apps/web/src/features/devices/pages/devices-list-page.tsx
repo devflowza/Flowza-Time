@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, Cpu, FolderKanban, HeartPulse, Plus, RefreshCw, Users, WifiOff, X, CircleHelp, AlertTriangle } from 'lucide-react';
+import { Activity, Cpu, FolderKanban, HeartPulse, Plus, RefreshCw, ScanLine, Users, WifiOff, X, CircleHelp, AlertTriangle } from 'lucide-react';
 import { CONNECTION_STATUSES, DEVICE_STATUSES, type SyncJobAcceptedDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
@@ -102,6 +102,7 @@ export default function DevicesListPage() {
     <div className="page-container space-y-4">
       <PageHeader title={t('title')} description={q.data ? t('list.subtitle', { count: q.data.meta.total }) : undefined} actions={
         <>
+          <Button variant="outline" size="sm" onClick={() => navigate('/devices/unmapped-users')}><ScanLine /> {t('unmapped.title')}</Button>
           <Button variant="outline" size="sm" onClick={() => navigate('/devices/groups')}><FolderKanban /> {t('groups.title')}</Button>
           {can('device.create') ? <Button size="sm" onClick={() => navigate('/devices/new')}><Plus /> {t('list.register')}</Button> : null}
         </>

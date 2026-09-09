@@ -70,6 +70,11 @@ rotating schedules pass `adjacentShifts` (D−1/D+1) so neighbouring windows are
 - Normaliser resolves `device_employee_id` → employee via `device_employee_states` → `employee_provider_identities` →
   `employees.device_user_id` (unmatched rows stay `unmatched`), attaches the **effective branch on that date**, and enqueues a
   debounced `RECOMPUTE_DAILY` per (employee, date) — for cross-midnight shifts also for D−1.
+- `unmatched` is a mapping problem, not a data error: the punch is real, the id on it answers to nobody. Operators clear it
+  from **Devices → Unmapped device users** (or the Link action on the raw-transactions tab), which writes one of the first two
+  resolution steps and re-queues that id's `unmatched` rows so the days they cover are recalculated — see `docs/api.md`
+  "Devices" (`/devices/unmapped-users`, `/devices/:id/user-links`). Editing the employee's `deviceUserId` fixes the third
+  step organisation-wide instead.
 - The recompute job loads events in `[date − 1, date + 2)` (branch timezone), resolves shift and rule set, holidays
   (branch calendar), weekly-off (employee → branch → org), approved leave, passes `now`, writes the record with
   `calculation_version + 1`, a history snapshot when anything changed, and emits `attendance.created`/`attendance.updated`.

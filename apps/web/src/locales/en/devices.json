@@ -277,7 +277,10 @@
     "allStatuses": "All statuses",
     "searchPlaceholder": "Search employee…",
     "empty": "No employees on this device",
-    "emptyHint": "Push employees to the device or run a reconciliation to load its user list."
+    "emptyHint": "Push employees to the device or run a reconciliation to load its user list.",
+    "link": "Link",
+    "unlink": "Unlink from employee",
+    "unlinked": "Device user unlinked"
   },
   "logs": {
     "time": "Time",
@@ -368,5 +371,42 @@
     "danger": "Danger zone",
     "dangerHint": "Disabling keeps the device; decommissioning is permanent.",
     "readOnly": "You do not have permission to change device settings."
+  },
+  "link": {
+    "title": "Link device user {{deviceUserId}}",
+    "description": "Choose the employee this device user id belongs to on {{device}}.",
+    "employee": "Employee",
+    "employeePlaceholder": "Search by name or number…",
+    "employeeHint": "Punches carrying this id will be counted as this employee’s attendance from now on.",
+    "scope": "Applies to",
+    "scopeDevice": "This device only",
+    "scopeProvider": "Every device of this make",
+    "scopeDeviceHint": "The mapping is stored for this device. Other devices keep resolving the id their own way.",
+    "scopeProviderHint": "The id is stored as the employee’s identity for {{provider}}, so every device of that make resolves it to them.",
+    "replay": "Replay the punches already collected",
+    "replayHint": "The {{count}} unmatched punches under this id go back through the attendance engine.",
+    "replayNone": "There are no unmatched punches under this id to replay.",
+    "submit": "Link",
+    "linked": "Device user linked",
+    "linkedWithReplay": "Device user linked — {{count}} punches queued for reprocessing"
+  },
+  "unmapped": {
+    "title": "Unmapped device users",
+    "subtitle": "Device user ids that are punching, or enrolled on a device, with no employee behind them.",
+    "deviceUserId": "Device user id",
+    "device": "Device",
+    "origin": "Seen as",
+    "originAll": "Punches or enrolment",
+    "originPunches": "Unmatched punches only",
+    "originEnrolled": "On the device only",
+    "punches": "{{count}} unmatched punches",
+    "enrolled": "Enrolled on device",
+    "firstSeen": "First punch",
+    "lastSeen": "Last punch",
+    "link": "Link to employee",
+    "waiting": "{{punches}} punches waiting",
+    "searchPlaceholder": "Search id, device or name…",
+    "empty": "Every device user is mapped",
+    "emptyHint": "Ids appear here when a device reports a punch, or an enrolled user, that no employee answers for."
   }
 }

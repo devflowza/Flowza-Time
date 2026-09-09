@@ -5,7 +5,7 @@ import { RequirePermission } from '@/components/layout/protected-route';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/devices.json';
 import ar from '@/locales/ar/devices.json';
-import { DeviceDetailPage, DeviceGroupsPage, DeviceNewPage, DevicesListPage, PageFallback } from './pages/lazy';
+import { DeviceDetailPage, DeviceGroupsPage, DeviceNewPage, DevicesListPage, PageFallback, UnmappedUsersPage } from './pages/lazy';
 
 registerNamespace('devices', en, ar);
 
@@ -16,5 +16,6 @@ export const devicesRoutes: RouteObject[] = [
   { path: 'devices', element: wrap(['device.view'], <DevicesListPage />) },
   { path: 'devices/new', element: wrap(['device.create'], <DeviceNewPage />) },
   { path: 'devices/groups', element: wrap(['device.view'], <DeviceGroupsPage />) },
+  { path: 'devices/unmapped-users', element: wrap(['device.view'], <UnmappedUsersPage />) },
   { path: 'devices/:id', element: wrap(['device.view'], <DeviceDetailPage />) },
 ];

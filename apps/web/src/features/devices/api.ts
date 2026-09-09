@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCommandDto, DeviceCredentialsInput, DeviceDto, DeviceEmployeeSyncStatus, DeviceGroupDto, DeviceGroupInput, DeviceLogDto, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, DeviceSummaryDto, EmploymentStatus, PendingDeviceDto, ProviderThrottling, SyncJobAcceptedDto, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
+import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCommandDto, DeviceCredentialsInput, DeviceDto, DeviceEmployeeSyncStatus, DeviceGroupDto, DeviceGroupInput, DeviceLogDto, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, DeviceSummaryDto, DeviceUserLinkResult, DeviceUserLinkScope, EmploymentStatus, LinkDeviceUserInput, PendingDeviceDto, ProviderThrottling, SyncJobAcceptedDto, TestConnectionInput, TestConnectionResultDto, UnmappedDeviceUserDto, UpdateDeviceInput } from '@flowza/contracts';
 import type { ComboboxOption } from '@/components/forms';
 import { api, apiFetch, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
@@ -65,6 +65,35 @@ export function useDeviceEmployees(id: string, query: ListQuery) {
 export function useDeviceCommands(id: string, query: ListQuery) {
   const orgId = useOrgId();
   return useQuery({ queryKey: [...qk.detail(orgId, ENTITY, id), 'commands', query], queryFn: () => api.get<PageEnvelope<DeviceCommandDto>>(`/orgs/${orgId}/devices/${id}/commands`, query), placeholderData: keepPreviousData, refetchInterval: 15_000 });
+}
+
+// ---- device user (PIN) ↔ employee mapping -------------------------------------------------------------------------------
+
+const UNMAPPED = 'unmapped-device-users';
+/** PINs punching (or enrolled) with no employee behind them — the queue behind "unmatched" raw transactions. */
+export function useUnmappedDeviceUsers(query: ListQuery, enabled = true) {
+  const orgId = useOrgId();
+  return useQuery({ queryKey: qk.list(orgId, UNMAPPED, query), queryFn: () => api.get<PageEnvelope<UnmappedDeviceUserDto>>(`/orgs/${orgId}/devices/unmapped-users`, query), placeholderData: keepPreviousData, enabled, refetchInterval: 30_000 });
+}
+
+export function useDeviceUserLinkMutations() {
+  const orgId = useOrgId();
+  const qc = useQueryClient();
+  // a link changes device state, the unmapped queue and (after the replay) attendance itself
+  const invalidate = () => {
+    void qc.invalidateQueries({ queryKey: qk.entity(orgId, ENTITY) });
+    void qc.invalidateQueries({ queryKey: qk.entity(orgId, UNMAPPED) });
+    for (const e of ['attendance-raw', 'attendance-daily', 'attendance-monthly']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) });
+  };
+  const link = useMutation({
+    mutationFn: async ({ deviceId, input }: { deviceId: string; input: LinkDeviceUserInput }) => (await api.post<Envelope<DeviceUserLinkResult>>(`/orgs/${orgId}/devices/${deviceId}/user-links`, input, { idempotencyKey: crypto.randomUUID() })).data,
+    onSuccess: invalidate,
+  });
+  const unlink = useMutation({
+    mutationFn: async ({ deviceId, deviceUserId, scope }: { deviceId: string; deviceUserId: string; scope: DeviceUserLinkScope }) => (await apiFetch<Envelope<DeviceUserLinkResult>>(`/orgs/${orgId}/devices/${deviceId}/user-links/${encodeURIComponent(deviceUserId)}`, { method: 'DELETE', query: { scope } })).data,
+    onSuccess: invalidate,
+  });
+  return { link, unlink };
 }
 
 export function useDeviceMutations() {

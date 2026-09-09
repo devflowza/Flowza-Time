@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { claimPendingDeviceSchema, createDeviceSchema, deleteDeviceQuerySchema, deviceCommandQuerySchema, deviceCredentialsInputSchema, deviceEmployeeQuerySchema, deviceGroupInputSchema, deviceGroupMembersSchema, deviceListQuerySchema, deviceLogQuerySchema, deviceModelsQuerySchema, deviceProvidersQuerySchema, deviceSummaryQuerySchema, pendingDevicesQuerySchema, testConnectionSchema, updateDeviceSchema } from '@flowza/contracts';
+import { claimPendingDeviceSchema, createDeviceSchema, deleteDeviceQuerySchema, deviceCommandQuerySchema, deviceCredentialsInputSchema, deviceEmployeeQuerySchema, deviceGroupInputSchema, deviceGroupMembersSchema, deviceListQuerySchema, deviceLogQuerySchema, deviceModelsQuerySchema, deviceProvidersQuerySchema, deviceSummaryQuerySchema, linkDeviceUserSchema, pendingDevicesQuerySchema, testConnectionSchema, unlinkDeviceUserSchema, unmappedDeviceUsersQuerySchema, updateDeviceSchema } from '@flowza/contracts';
 import { z } from 'zod';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
@@ -21,6 +21,9 @@ export function registerDeviceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.post('/orgs/:orgId/devices/test-connection', async (c) => ok(c, await devices.testConnection(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, testConnectionSchema))));
   v1.get('/orgs/:orgId/devices/summary', async (c) => ok(c, await devices.summarizeDevices(deps, actorOf(c, deps), param(c, 'orgId'), query(c, deviceSummaryQuerySchema))));
   // pending (zero-touch) devices — registered before /:id so "pending" is never parsed as an id
+  // Device user ids (PINs) punching or enrolled with no employee behind them. Registered before `/devices/:id` so the
+  // literal segment wins over the uuid parameter.
+  v1.get('/orgs/:orgId/devices/unmapped-users', async (c) => { const q = query(c, unmappedDeviceUsersQuerySchema); const r = await devices.listUnmappedDeviceUsers(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.get('/orgs/:orgId/devices/pending', async (c) => ok(c, await devices.listPending(deps, actorOf(c, deps), param(c, 'orgId'), query(c, pendingDevicesQuerySchema).serialNumber)));
   v1.post('/orgs/:orgId/devices/pending/:id/claim', idem, async (c) => created(c, await devices.claimPending(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, claimPendingDeviceSchema))));
 
@@ -31,6 +34,8 @@ export function registerDeviceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.post('/orgs/:orgId/devices/:id/push-token/rotate', async (c) => ok(c, await devices.rotatePushToken(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
   v1.get('/orgs/:orgId/devices/:id/logs', async (c) => { const q = query(c, deviceLogQuerySchema); const r = await devices.listDeviceLogs(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.get('/orgs/:orgId/devices/:id/employees', async (c) => { const q = query(c, deviceEmployeeQuerySchema); const r = await devices.listDeviceEmployees(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
+  v1.post('/orgs/:orgId/devices/:id/user-links', idem, async (c) => ok(c, await devices.linkDeviceUser(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, linkDeviceUserSchema))));
+  v1.delete('/orgs/:orgId/devices/:id/user-links/:deviceUserId', async (c) => ok(c, await devices.unlinkDeviceUser(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), unlinkDeviceUserSchema.parse({ deviceUserId: decodeURIComponent(param(c, 'deviceUserId')), scope: c.req.query('scope') ?? undefined }))));
   v1.get('/orgs/:orgId/devices/:id/commands', async (c) => { const q = query(c, deviceCommandQuerySchema); const r = await devices.listDeviceCommands(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.post('/orgs/:orgId/devices/:id/actions/:action', idem, async (c) => {
     const action = z.enum(ACTIONS).parse(param(c, 'action'));

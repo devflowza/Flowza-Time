@@ -151,3 +151,64 @@ export interface TestConnectionResultDto {
   details: Record<string, unknown> | null;
   usedStoredCredentials: boolean;
 }
+
+// ----- device user (PIN) ↔ employee mapping -----------------------------------------------------------------------------
+// The normaliser resolves a punch's `device_employee_id` in three steps (docs/attendance-engine.md): per-device state →
+// per-provider identity → the employee's organisation-wide `device_user_id`. Punches whose PIN matches none of them land
+// in `unmatched` and never become attendance. These shapes drive the screen that lists those PINs and links them.
+
+/** How far a link reaches. DEVICE = this device only; PROVIDER = every device of the same vendor in the organisation. */
+export const DEVICE_USER_LINK_SCOPES = ['DEVICE', 'PROVIDER'] as const;
+export type DeviceUserLinkScope = (typeof DEVICE_USER_LINK_SCOPES)[number];
+
+export const unmappedDeviceUsersQuerySchema = paginationQuerySchema.extend({
+  branchId: uuidSchema.optional(),
+  deviceId: uuidSchema.optional(),
+  /** `punches` = only PINs seen in unmatched raw transactions, `enrolled` = only PINs enrolled on a device with no employee. */
+  origin: z.enum(['all', 'punches', 'enrolled']).default('all'),
+  search: z.string().trim().max(100).optional(),
+});
+export type UnmappedDeviceUsersQuery = z.infer<typeof unmappedDeviceUsersQuerySchema>;
+
+/** One unknown PIN on one device: what the device reports about it and how much attendance is waiting behind it. */
+export const unmappedDeviceUserDtoSchema = z.object({
+  deviceId: uuidSchema,
+  deviceName: z.string(),
+  deviceCode: z.string(),
+  branchId: uuidSchema.nullable(),
+  providerKey: z.string(),
+  deviceUserId: z.string(),
+  /** Name the device holds for the PIN, when the employee list was pulled from it (never a biometric template). */
+  deviceUserName: z.string().nullable(),
+  /** true when a `device_employee_states` row exists for the PIN with no employee (enrolled on the device, unknown here). */
+  enrolledOnDevice: z.boolean(),
+  unmatchedPunches: z.number().int(),
+  firstPunchAt: isoDateTimeSchema.nullable(),
+  lastPunchAt: isoDateTimeSchema.nullable(),
+});
+export type UnmappedDeviceUserDto = z.infer<typeof unmappedDeviceUserDtoSchema>;
+
+export const linkDeviceUserSchema = z.object({
+  deviceUserId: z.string().trim().min(1).max(64),
+  employeeId: uuidSchema,
+  scope: z.enum(DEVICE_USER_LINK_SCOPES).default('DEVICE'),
+  /** Re-queue the PIN's `unmatched` punches so the engine replays them into attendance (default true). */
+  requeueUnmatched: z.boolean().default(true),
+});
+export type LinkDeviceUserInput = z.infer<typeof linkDeviceUserSchema>;
+
+export const unlinkDeviceUserSchema = z.object({
+  deviceUserId: z.string().trim().min(1).max(64),
+  scope: z.enum(DEVICE_USER_LINK_SCOPES).default('DEVICE'),
+});
+export type UnlinkDeviceUserInput = z.infer<typeof unlinkDeviceUserSchema>;
+
+export const deviceUserLinkResultSchema = z.object({
+  deviceId: uuidSchema,
+  deviceUserId: z.string(),
+  employeeId: uuidSchema.nullable(),
+  scope: z.enum(DEVICE_USER_LINK_SCOPES),
+  /** raw punches moved back to `pending` for the normaliser. */
+  requeued: z.number().int(),
+});
+export type DeviceUserLinkResult = z.infer<typeof deviceUserLinkResultSchema>;

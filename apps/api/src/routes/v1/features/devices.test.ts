@@ -237,3 +237,101 @@ describe('device restart', () => {
     expect(noPermission.status).toBe(403);
   });
 });
+
+describe('device user (PIN) ↔ employee mapping', () => {
+  const rawRow = (deviceId: string, branchId: string, pin: string, at: string, hash: string, status = 'unmatched') =>
+    sql`insert into public.attendance_raw_transactions (organization_id, device_id, branch_id, provider_key, device_employee_id, punched_at, dedupe_hash, source, processing_status)
+      values (${f.orgId}::uuid, ${deviceId}::uuid, ${branchId}::uuid, 'mock', ${pin}, ${at}::timestamptz, ${hash}, 'POLL', ${status})`.execute(h.admin);
+
+  it('lists PINs with no employee behind them — from unmatched punches and from device-only enrolments', async () => {
+    const device = await seedDevice(h.admin, f.orgId, f.branchA, { code: 'MAP-1' });
+    await rawRow(device, f.branchA, '7788', '2026-08-10T04:00:00Z', 'map-h1');
+    await rawRow(device, f.branchA, '7788', '2026-08-10T13:00:00Z', 'map-h2');
+    await rawRow(device, f.branchA, '1001', '2026-08-10T04:05:00Z', 'map-h3', 'normalized'); // resolved → not listed
+    await h.admin.insertInto('deviceEmployeeStates').values({ organizationId: f.orgId, deviceId: device, branchId: f.branchA, employeeId: null, deviceUserId: '9001', syncStatus: 'OUT_OF_SYNC', desired: false, deviceRecord: JSON.stringify({ deviceUserId: '9001', name: 'Ali on device' }) }).execute();
+
+    const r = await h.request('GET', `${base()}/devices/unmapped-users?deviceId=${device}`, { token: f.owner });
+    expect(r.status).toBe(200);
+    const byPin = Object.fromEntries((r.body.data as Array<Record<string, unknown>>).map((x) => [x['deviceUserId'], x]));
+    expect(Object.keys(byPin).sort()).toEqual(['7788', '9001']);
+    expect(byPin['7788']).toMatchObject({ unmatchedPunches: 2, enrolledOnDevice: false, deviceUserName: null, providerKey: 'mock' });
+    expect(byPin['7788']!['firstPunchAt']).toBe('2026-08-10T04:00:00.000Z');
+    expect(byPin['9001']).toMatchObject({ unmatchedPunches: 0, enrolledOnDevice: true, deviceUserName: 'Ali on device' });
+    expect(r.body.meta.total).toBe(2);
+
+    expect((await h.request('GET', `${base()}/devices/unmapped-users?deviceId=${device}&origin=punches`, { token: f.owner })).body.data.map((x: { deviceUserId: string }) => x.deviceUserId)).toEqual(['7788']);
+    expect((await h.request('GET', `${base()}/devices/unmapped-users?deviceId=${device}&origin=enrolled`, { token: f.owner })).body.data.map((x: { deviceUserId: string }) => x.deviceUserId)).toEqual(['9001']);
+    expect((await h.request('GET', `${base()}/devices/unmapped-users?deviceId=${device}&search=Ali`, { token: f.owner })).body.data.map((x: { deviceUserId: string }) => x.deviceUserId)).toEqual(['9001']);
+    // a branch manager scoped to B sees nothing from a branch A device, and cannot ask for it by id
+    expect((await h.request('GET', `${base()}/devices/unmapped-users`, { token: f.branchManagerB })).body.data.filter((x: { deviceId: string }) => x.deviceId === device)).toHaveLength(0);
+    expect((await h.request('GET', `${base()}/devices/unmapped-users?deviceId=${device}`, { token: f.branchManagerB })).status).toBe(404);
+  });
+
+  it('links a PIN to an employee, replays the punches it already collected and audits the change', async () => {
+    const device = await seedDevice(h.admin, f.orgId, f.branchA, { code: 'MAP-2' });
+    await rawRow(device, f.branchA, '4242', '2026-08-11T04:00:00Z', 'map-h4');
+    await rawRow(device, f.branchA, '4242', '2026-08-11T13:00:00Z', 'map-h5');
+
+    const r = await h.request('POST', `${base()}/devices/${device}/user-links`, { token: f.owner, body: { deviceUserId: '4242', employeeId: f.e1 } });
+    expect(r.status).toBe(200);
+    expect(r.body.data).toMatchObject({ deviceUserId: '4242', employeeId: f.e1, scope: 'DEVICE', requeued: 2 });
+    const state = await h.admin.selectFrom('deviceEmployeeStates').select(['employeeId', 'syncStatus', 'desired']).where('deviceId', '=', device).where('deviceUserId', '=', '4242').executeTakeFirstOrThrow();
+    expect(state).toMatchObject({ employeeId: f.e1, syncStatus: 'OUT_OF_SYNC', desired: true });
+    const statuses = await sql<{ processingStatus: string }>`select processing_status from public.attendance_raw_transactions where device_id = ${device}::uuid and device_employee_id = '4242'`.execute(h.admin);
+    expect(statuses.rows.every((x) => x.processingStatus === 'pending')).toBe(true);
+    expect((await queueJobs(h.admin, 'NORMALIZE_RAW')).some((j) => j.dedupeKey === `normalize:${f.orgId}`)).toBe(true);
+    expect(await auditRows(h.admin, 'device.user_linked')).toHaveLength(1);
+    // the PIN has left the unmapped list
+    expect((await h.request('GET', `${base()}/devices/unmapped-users?deviceId=${device}`, { token: f.owner })).body.data).toHaveLength(0);
+
+    // one employee cannot hold two PINs on the same device
+    const second = await h.request('POST', `${base()}/devices/${device}/user-links`, { token: f.owner, body: { deviceUserId: '4243', employeeId: f.e1 } });
+    expect(second.status).toBe(409);
+    expect(second.body.code).toBe('CONFLICT');
+
+    const unlink = await h.request('DELETE', `${base()}/devices/${device}/user-links/4242`, { token: f.owner });
+    expect(unlink.status).toBe(200);
+    expect((await h.admin.selectFrom('deviceEmployeeStates').select(['employeeId']).where('deviceId', '=', device).where('deviceUserId', '=', '4242').executeTakeFirstOrThrow()).employeeId).toBeNull();
+    expect(await auditRows(h.admin, 'device.user_unlinked')).toHaveLength(1);
+    expect((await h.request('DELETE', `${base()}/devices/${device}/user-links/4242`, { token: f.owner })).status).toBe(404);
+  });
+
+  it('links vendor-wide with PROVIDER scope and refuses a PIN another employee already owns', async () => {
+    const d1 = await seedDevice(h.admin, f.orgId, f.branchA, { code: 'MAP-3' });
+    const d2 = await seedDevice(h.admin, f.orgId, f.branchA, { code: 'MAP-4' });
+    await rawRow(d1, f.branchA, '5150', '2026-08-12T04:00:00Z', 'map-h6');
+    await rawRow(d2, f.branchA, '5150', '2026-08-12T13:00:00Z', 'map-h7');
+
+    const r = await h.request('POST', `${base()}/devices/${d1}/user-links`, { token: f.owner, body: { deviceUserId: '5150', employeeId: f.e3, scope: 'PROVIDER' } });
+    expect(r.status).toBe(200);
+    expect(r.body.data.requeued).toBe(2); // both mock devices, not just the one addressed
+    const identity = await h.admin.selectFrom('employeeProviderIdentities').select(['employeeId', 'deviceUserId']).where('organizationId', '=', f.orgId).where('providerKey', '=', 'mock').executeTakeFirstOrThrow();
+    expect(identity).toMatchObject({ employeeId: f.e3, deviceUserId: '5150' });
+
+    const taken = await h.request('POST', `${base()}/devices/${d2}/user-links`, { token: f.owner, body: { deviceUserId: '5150', employeeId: f.e1, scope: 'PROVIDER' } });
+    expect(taken.status).toBe(409);
+    // re-linking the same employee moves their vendor identity instead of adding a second row
+    const moved = await h.request('POST', `${base()}/devices/${d2}/user-links`, { token: f.owner, body: { deviceUserId: '5151', employeeId: f.e3, scope: 'PROVIDER', requeueUnmatched: false } });
+    expect(moved.status).toBe(200);
+    expect(await h.admin.selectFrom('employeeProviderIdentities').select(['deviceUserId']).where('employeeId', '=', f.e3).execute()).toEqual([{ deviceUserId: '5151' }]);
+
+    const unlink = await h.request('DELETE', `${base()}/devices/${d2}/user-links/5151?scope=PROVIDER`, { token: f.owner });
+    expect(unlink.status).toBe(200);
+    expect(await h.admin.selectFrom('employeeProviderIdentities').select(['id']).where('employeeId', '=', f.e3).execute()).toEqual([]);
+  });
+
+  it('enforces permissions and branch scope on linking', async () => {
+    const device = await seedDevice(h.admin, f.orgId, f.branchA, { code: 'MAP-5' });
+    // employee role holds neither device.sync nor employee.update
+    expect((await h.request('POST', `${base()}/devices/${device}/user-links`, { token: f.employeeUser, body: { deviceUserId: '6001', employeeId: f.e1 } })).status).toBe(403);
+    // hr_user has device.sync but not attendance.view_raw → may link, but not replay raw punches
+    expect((await h.request('POST', `${base()}/devices/${device}/user-links`, { token: f.hrUser, body: { deviceUserId: '6001', employeeId: f.e1 } })).status).toBe(403);
+    const noReplay = await h.request('POST', `${base()}/devices/${device}/user-links`, { token: f.hrUser, body: { deviceUserId: '6001', employeeId: f.e1, requeueUnmatched: false } });
+    expect(noReplay.status).toBe(200);
+    expect(noReplay.body.data.requeued).toBe(0);
+    // a branch manager of B cannot touch a branch A device — RLS hides it, so the device does not even exist for them
+    expect((await h.request('POST', `${base()}/devices/${device}/user-links`, { token: f.branchManagerB, body: { deviceUserId: '6002', employeeId: f.e2, requeueUnmatched: false } })).status).toBe(404);
+    // an employee id that is not in this organisation is not linkable
+    expect((await h.request('POST', `${base()}/devices/${device}/user-links`, { token: f.owner, body: { deviceUserId: '6003', employeeId: '00000000-0000-4000-8000-00000000dead', requeueUnmatched: false } })).status).toBe(404);
+  });
+});
