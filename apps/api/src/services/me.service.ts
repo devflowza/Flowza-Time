@@ -1,39 +1,56 @@
 import type { MeDto, NotificationDto, NotificationListQuery, UpdateMeInput, UserProfileDto } from '@flowza/contracts';
+import { jsonArrayFrom, jsonObjectFrom } from 'kysely/helpers/postgres';
 import type { Trx } from '@flowza/database';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { type Actor, runUser, audit } from '../lib/service.js';
-import { loadFeatureFlags, parseSettings } from '../lib/settings.js';
+import { parseSettings } from '../lib/settings.js';
 import { pageOf, toCount } from '../lib/pagination.js';
 import { isoDateTime, isoDateTimeOrNull, jsonObject } from '../lib/mappers.js';
 import { ORG_COLUMNS, toOrganizationDto } from './organizations.mappers.js';
 
+const PROFILE_COLUMNS = ['id', 'email', 'fullName', 'avatarPath', 'locale', 'mfaEnrolled', 'status', 'lastLoginAt'] as const;
+/** Stands in for an empty id list: `in ()` is not valid SQL, and no row carries the nil uuid. */
+const NIL_UUID = '00000000-0000-0000-0000-000000000000';
+
 /** Create the profile row for a first-time user (id = JWT sub, RLS allows self-insert only). */
 export async function ensureProfile(trx: Trx, actor: Actor): Promise<UserProfileDto> {
-  const existing = await trx.selectFrom('userProfiles').select(['id', 'email', 'fullName', 'avatarPath', 'locale', 'mfaEnrolled', 'status', 'lastLoginAt']).where('id', '=', actor.userId).executeTakeFirst();
+  const existing = await trx.selectFrom('userProfiles').select(PROFILE_COLUMNS).where('id', '=', actor.userId).executeTakeFirst();
   if (existing) return toProfileDto(existing);
   const email = actor.email || `${actor.userId}@users.flowza.invalid`;
   await trx.insertInto('userProfiles').values({ id: actor.userId, email, fullName: '' }).onConflict((oc) => oc.column('id').doNothing()).execute();
-  const created = await trx.selectFrom('userProfiles').select(['id', 'email', 'fullName', 'avatarPath', 'locale', 'mfaEnrolled', 'status', 'lastLoginAt']).where('id', '=', actor.userId).executeTakeFirstOrThrow();
+  const created = await trx.selectFrom('userProfiles').select(PROFILE_COLUMNS).where('id', '=', actor.userId).executeTakeFirstOrThrow();
   return toProfileDto(created);
 }
 
-function toProfileDto(row: { id: string; email: string; fullName: string; avatarPath: string | null; locale: string; mfaEnrolled: boolean; status: string; lastLoginAt: Date | null }): UserProfileDto {
+function toProfileDto(row: { id: string; email: string; fullName: string; avatarPath: string | null; locale: string; mfaEnrolled: boolean; status: string; lastLoginAt: Date | string | null }): UserProfileDto {
   return { id: row.id, email: row.email, fullName: row.fullName, avatarPath: row.avatarPath, locale: row.locale, mfaEnrolled: row.mfaEnrolled, status: row.status, lastLoginAt: isoDateTimeOrNull(row.lastLoginAt) };
 }
 
 export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
   return runUser(deps.db, actor, async (trx) => {
-    const profile = await ensureProfile(trx, actor);
     const orgIds = [...new Set(actor.principal.memberships.map((m) => m.organizationId))];
-    const orgs = orgIds.length ? await trx.selectFrom('organizations').select(ORG_COLUMNS).where('id', 'in', orgIds).execute() : [];
-    const settings = orgIds.length ? await trx.selectFrom('organizationSettings').select(['organizationId', 'general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard']).where('organizationId', 'in', orgIds).execute() : [];
     const roleIds = [...new Set(actor.principal.memberships.map((m) => m.roleId).filter((r) => /^[0-9a-f-]{36}$/i.test(r)))];
-    const roles = roleIds.length ? await trx.selectFrom('roles').select(['id', 'name']).where('id', 'in', roleIds).execute() : [];
-    const flags = await loadFeatureFlags(trx, orgIds);
-    const orgById = new Map(orgs.map((o) => [o.id, o]));
-    const settingsById = new Map(settings.map((s) => [s.organizationId, s]));
-    const roleName = new Map(roles.map((r) => [r.id, r.name]));
+    const orgKeys = orgIds.length ? orgIds : [NIL_UUID];
+    const roleKeys = roleIds.length ? roleIds : [NIL_UUID];
+    // Everything /me needs in one statement (each query is a round trip between the API's region and the database's).
+    // Dates arrive as ISO strings inside the JSON; the mappers accept both.
+    const bundle = await trx.selectNoFrom((eb) => [
+      jsonObjectFrom(eb.selectFrom('userProfiles').select(PROFILE_COLUMNS).where('id', '=', actor.userId)).as('profile'),
+      jsonArrayFrom(eb.selectFrom('organizations').select(ORG_COLUMNS).where('id', 'in', orgKeys)).as('orgs'),
+      jsonArrayFrom(eb.selectFrom('organizationSettings').select(['organizationId', 'general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard']).where('organizationId', 'in', orgKeys)).as('settings'),
+      jsonArrayFrom(eb.selectFrom('roles').select(['id', 'name']).where('id', 'in', roleKeys)).as('roles'),
+      jsonArrayFrom(eb.selectFrom('featureFlags').select(['key', 'defaultEnabled'])).as('flags'),
+      jsonArrayFrom(eb.selectFrom('organizationFeatureFlags').select(['organizationId', 'flagKey', 'enabled']).where('organizationId', 'in', orgKeys)).as('overrides'),
+    ]).executeTakeFirstOrThrow();
+    // a first-time user has no profile row yet: the rare slow path creates it
+    const profile = bundle.profile ? toProfileDto(bundle.profile) : await ensureProfile(trx, actor);
+    const flags = new Map<string, Record<string, boolean>>();
+    for (const orgId of orgIds) flags.set(orgId, Object.fromEntries(bundle.flags.map((f) => [f.key, f.defaultEnabled])));
+    for (const o of bundle.overrides) { const m = flags.get(o.organizationId); if (m) m[o.flagKey] = o.enabled; }
+    const orgById = new Map(bundle.orgs.map((o) => [o.id, o]));
+    const settingsById = new Map(bundle.settings.map((s) => [s.organizationId, s]));
+    const roleName = new Map(bundle.roles.map((r) => [r.id, r.name]));
     const memberships: MeDto['memberships'] = [];
     for (const m of actor.principal.memberships) {
       const org = orgById.get(m.organizationId);
