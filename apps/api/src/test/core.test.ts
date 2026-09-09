@@ -346,3 +346,71 @@ describe('platform administration', () => {
     expect(global.json.data.find((f: any) => f.key === 'mobile_attendance').defaultEnabled).toBe(true);
   });
 });
+
+describe('self-service organisation creation (POST /orgs)', () => {
+  const newUser = 'e0000000-0000-0000-0000-000000000002';
+  beforeAll(async () => { await sql`insert into auth.users (id, email) values (${newUser}::uuid, 'founder@test.local')`.execute(api.tdb.adminDb); });
+
+  it('rejects anonymous callers', async () => {
+    const res = await api.request('POST', '/orgs', { body: { displayName: 'Nope' } });
+    expect(res.status).toBe(401);
+  });
+
+  it('validates the body and the timezone', async () => {
+    const short = await api.request('POST', '/orgs', { user: newUser, body: { displayName: 'A' } });
+    expect(short.status).toBe(400);
+    expect(short.json.code).toBe('VALIDATION_ERROR');
+    const badTz = await api.request('POST', '/orgs', { user: newUser, body: { displayName: 'Al Bahja Trading', timezone: 'Mars/Olympus' } });
+    expect(badTz.status).toBe(400);
+    expect(badTz.json.details.issues[0].path).toBe('timezone');
+  });
+
+  it('makes a member-less user the owner of a new trial organisation, with a derived company code', async () => {
+    const res = await api.request('POST', '/orgs', { user: newUser, body: { displayName: 'Al Bahja Trading LLC', timezone: 'Asia/Dubai', ownerFullName: 'Aisha' } });
+    expect(res.status).toBe(201);
+    const { organization, membershipId } = res.json.data;
+    expect(organization).toMatchObject({ displayName: 'Al Bahja Trading LLC', legalName: 'Al Bahja Trading LLC', companyCode: 'AL-BAHJA-TRADING-LLC', timezone: 'Asia/Dubai', countryCode: 'OM', currencyCode: 'OMR', status: 'trial' });
+    expect(membershipId).toBeTruthy();
+
+    // the caller now sees the organisation as its owner, with the full permission set and the default settings
+    const me = await api.request('GET', '/me', { user: newUser });
+    expect(me.status).toBe(200);
+    expect(me.json.data.user.fullName).toBe('Aisha');
+    expect(me.json.data.memberships).toHaveLength(1);
+    expect(me.json.data.memberships[0]).toMatchObject({ membershipId, roleKey: 'owner', allBranches: true });
+    expect(me.json.data.memberships[0].organization.id).toBe(organization.id);
+    expect(me.json.data.memberships[0].permissions).toContain('organization.manage');
+    expect(me.json.data.memberships[0].settings.general.dateFormat).toBe('DD/MM/YYYY');
+
+    // provisioned like a console-created tenant: trial subscription, default leave types, an audit trail
+    const sub = await api.tdb.adminDb.selectFrom('subscriptions').select(['status', 'trialEndsAt']).where('organizationId', '=', organization.id).executeTakeFirst();
+    expect(sub?.status).toBe('trialing');
+    expect(sub?.trialEndsAt).toBeTruthy();
+    const leaveTypes = await api.tdb.adminDb.selectFrom('leaveTypes').select('id').where('organizationId', '=', organization.id).execute();
+    expect(leaveTypes.length).toBeGreaterThan(0);
+    const audit = await api.tdb.adminDb.selectFrom('audit.logs').select(['actorType', 'actorUserId', 'newValue']).where('organizationId', '=', organization.id).where('action', '=', 'organization.created').executeTakeFirst();
+    expect(audit).toMatchObject({ actorType: 'USER', actorUserId: newUser });
+    expect((audit!.newValue as any).source).toBe('self_serve');
+  });
+
+  it('refuses a caller who already belongs to an organisation', async () => {
+    const again = await api.request('POST', '/orgs', { user: newUser, body: { displayName: 'Second Company' } });
+    expect(again.status).toBe(409);
+    expect(again.json.code).toBe('INVALID_STATE');
+    const owner = await api.request('POST', '/orgs', { user: F.ownerA, body: { displayName: 'Org A Again' } });
+    expect(owner.status).toBe(409);
+  });
+
+  it('picks the next free code when the derived one is taken, and rejects an explicit clash', async () => {
+    const u1 = 'e0000000-0000-0000-0000-000000000003';
+    const u2 = 'e0000000-0000-0000-0000-000000000004';
+    await sql`insert into auth.users (id, email) values (${u1}::uuid, 'u1@test.local'), (${u2}::uuid, 'u2@test.local')`.execute(api.tdb.adminDb);
+    // "TEST-A" is org A's code
+    const derived = await api.request('POST', '/orgs', { user: u1, body: { displayName: 'Test A' } });
+    expect(derived.status).toBe(201);
+    expect(derived.json.data.organization.companyCode).toBe('TEST-A-2');
+    const explicit = await api.request('POST', '/orgs', { user: u2, body: { displayName: 'Whatever', companyCode: 'test-a' } });
+    expect(explicit.status).toBe(409);
+    expect(explicit.json.code).toBe('CONFLICT');
+  });
+});

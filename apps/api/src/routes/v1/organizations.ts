@@ -1,12 +1,13 @@
 import type { Context, Hono } from 'hono';
-import { updateOrganizationSchema, type SettingsGroup } from '@flowza/contracts';
+import { createOwnOrganizationSchema, updateOrganizationSchema, type SettingsGroup } from '@flowza/contracts';
 import { errors } from '@flowza/shared';
 import type { AppEnv } from '../../middleware/request-context.js';
 import type { ApiDeps } from '../../deps.js';
-import { ok } from '../../lib/http.js';
+import { created, ok } from '../../lib/http.js';
 import { body, param } from '../../lib/validate.js';
 import { actorOf } from '../../lib/service.js';
 import { isSettingsGroup } from '../../lib/settings.js';
+import { idempotency } from '../../middleware/idempotency.js';
 import * as orgs from '../../services/organizations.service.js';
 
 function groupParam(c: Context<AppEnv>): SettingsGroup {
@@ -16,6 +17,8 @@ function groupParam(c: Context<AppEnv>): SettingsGroup {
 }
 
 export function registerOrganizationRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
+  // Self-service: any signed-in user without a membership creates their own (trial) organisation and becomes its owner.
+  v1.post('/orgs', idempotency(), async (c) => created(c, await orgs.createOwnOrganization(deps, actorOf(c, deps), await body(c, createOwnOrganizationSchema))));
   v1.get('/orgs/:orgId', async (c) => ok(c, await orgs.getOrganization(deps, actorOf(c, deps), param(c, 'orgId'))));
   v1.patch('/orgs/:orgId', async (c) => ok(c, await orgs.updateOrganization(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, updateOrganizationSchema))));
   v1.get('/orgs/:orgId/settings', async (c) => ok(c, await orgs.getSettings(deps, actorOf(c, deps), param(c, 'orgId'))));

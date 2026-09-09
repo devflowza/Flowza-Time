@@ -10,7 +10,7 @@ import { MfaRequiredGate } from '@/features/auth/mfa-required-gate';
 import { Skeleton } from '@/components/ui';
 import { ErrorState } from '@/components/ui';
 import { useAuth } from '@/features/auth/auth-provider';
-import { AuthLayout } from '@/features/auth/auth-layout';
+import { CreateOrganizationScreen } from '@/features/auth/create-organization-screen';
 import { Button } from '@/components/ui';
 import { useApplyDashboardTheme } from '@/features/dashboard/theme';
 
@@ -45,20 +45,12 @@ export function AppShell() {
       </div>
     );
   }
-  if (me.data.memberships.length === 0 && !me.data.user.isPlatformAdmin) {
-    return (
-      <AuthLayout>
-        <div className="max-w-sm space-y-4 text-center">
-          <p className="text-sm">{t('auth.noOrg')}</p>
-          <Button variant="outline" onClick={() => void signOut()}>{t('nav.signOut')}</Button>
-        </div>
-      </AuthLayout>
-    );
-  }
+  // No membership yet: self-service onboarding (create the organisation and become its owner), or sign out and wait
+  // for an invitation. This is where a sign-up that needed email confirmation finishes.
+  if (me.data.memberships.length === 0 && !me.data.user.isPlatformAdmin) return <CreateOrganizationScreen />;
   // A platform admin is let through with no membership on purpose — but the index route is the org-scoped dashboard,
-  // which calls useOrgId() and throws. Send them where they can actually act: the platform console, which is also the
-  // only place the first organisation can be created. Below the guard above so an ordinary member-less user still
-  // gets the sign-out screen rather than a 403 from /platform.
+  // which calls useOrgId() and throws. Send them where they can actually act: the platform console. Below the guard
+  // above so an ordinary member-less user still gets the onboarding screen rather than a 403 from /platform.
   if (me.data.memberships.length === 0) return <Navigate to="/platform" replace />;
   return (
     <div className="flex min-h-screen">

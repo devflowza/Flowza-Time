@@ -45,6 +45,14 @@ describe('AppShell', () => {
     expect(await screen.findByRole('link', { name: 'Set up two-factor authentication' })).toHaveAttribute('href', '/auth/mfa');
   });
 
+  it('offers self-service organisation creation to an ordinary user with no membership', async () => {
+    h.me = { isLoading: false, isError: false, data: { user: { id: 'u9', email: 'new@acme.om', fullName: '', avatarUrl: null, locale: 'en', mfaEnrolled: false, isPlatformAdmin: false }, memberships: [] }, refetch: vi.fn() };
+    renderWithProviders(<AppShell />);
+    expect(await screen.findByRole('heading', { name: 'Create your organisation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Create organisation' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+  });
+
   it('renders the shell for a platform admin who has no organisation yet', async () => {
     // The bootstrap case: the first admin signs in before any organisation exists. Everything the shell renders on
     // every route — the Topbar's global search in particular — must tolerate having no active membership, or the
