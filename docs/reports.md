@@ -56,7 +56,7 @@ requester only (`payload.userId`), not every holder of `report.view`.
   natural order (`2001 < 2010 < 2076`, `334 < 1171 < OM190`), then time.
 - **Header/footer** — company `display_name`, title, period wording per report (`Wednesday, 1 November, 2017`,
   `From 01-Nov-2017 To 30-Nov-2017`, …); footer with generation stamp and `Page X of Y`; landscape for Summary,
-  Monthly and Weekly.
+  Monthly, Weekly and the Employees Report (its Shift and Policy columns wrap in portrait).
 - **Locale** — `parameters.locale` (`en`/`ar`, default the organisation's); Arabic renders RTL with Arabic labels and
   the `name_ar` of departments, designations, shifts and leave types where present.
 - **Dates** — tabular dates use `settings.general.dateFormat`; period headers use `dd-MMM-yyyy`; clocks use

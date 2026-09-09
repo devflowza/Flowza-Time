@@ -40,7 +40,7 @@ export const employeeDirectory: ReportDefinition = {
       { key: 'policy', label: ctx.t('col.policy'), width: 12 },
     ];
     return {
-      key: 'employee_directory', title: ctx.t('report.employee_directory.title'), company: ctx.company, period: null, orientation: 'portrait', columns, sections,
+      key: 'employee_directory', title: ctx.t('report.employee_directory.title'), company: ctx.company, period: null, orientation: 'landscape', columns, sections,
       legend: null, legendTitle: ctx.t('legend.title'), notes: [], endOfReport: false, endOfReportLabel: ctx.t('group.endOfReport'),
       generatedAt: ctx.now, generatedLabel: ctx.generatedLabel(), pageLabel: ctx.pageLabel, timezone: ctx.timezone, locale: ctx.locale, dir: ctx.dir,
       rowCount: countRows(sections), flatten: { headingColumnLabel: ctx.t('col.department'), fieldColumns: false }, fileStem: `employees-${which}-${ctx.today}`,
