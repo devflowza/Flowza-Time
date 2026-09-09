@@ -57,6 +57,10 @@ old events through corrections or start from a fresh tenant instead.
 
 ## Known limits
 
+- The eight logins have e-mail notifications switched off for the attendance and system categories (in-app stays on):
+  the seeded addresses are test accounts, and a worker built before the `sync.completed` routing fix e-mails every
+  scheduled health check to every sync-permission holder.
+
 - Leave balances and entitlements do not exist in the data model; the Leave page lists records only.
 - Teams have no department column; the team name carries the department where it matters.
 - Devices are push terminals without a live connection. The seed stamps a fresh heartbeat and a 24-hour offline threshold,
