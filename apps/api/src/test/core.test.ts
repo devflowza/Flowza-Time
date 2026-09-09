@@ -388,6 +388,13 @@ describe('self-service organisation creation (POST /orgs)', () => {
     expect(sub?.trialEndsAt).toBeTruthy();
     const leaveTypes = await api.tdb.adminDb.selectFrom('leaveTypes').select('id').where('organizationId', '=', organization.id).execute();
     expect(leaveTypes.length).toBeGreaterThan(0);
+
+    // …and a branch: employees and devices both require one, so a tenant without any cannot be set up at all.
+    const branches = await api.request('GET', `/orgs/${organization.id}/branches`, { user: newUser });
+    expect(branches.status).toBe(200);
+    expect(branches.json.data).toHaveLength(1);
+    expect(branches.json.data[0]).toMatchObject({ code: 'HQ', name: 'Head Office', timezone: 'Asia/Dubai', status: 'active' });
+    expect(branches.json.data[0].weeklyOffDays).toBeNull(); // inherits the organisation's
     const audit = await api.tdb.adminDb.selectFrom('audit.logs').select(['actorType', 'actorUserId', 'newValue']).where('organizationId', '=', organization.id).where('action', '=', 'organization.created').executeTakeFirst();
     expect(audit).toMatchObject({ actorType: 'USER', actorUserId: newUser });
     expect((audit!.newValue as any).source).toBe('self_serve');

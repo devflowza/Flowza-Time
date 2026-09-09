@@ -8,12 +8,11 @@ import { ArrowLeft, ArrowRight, Check, ExternalLink, Pencil, Plug, Radio, Search
 import { createDeviceSchema, type CreateDeviceInput, type DeviceModelDto, type TestConnectionResultDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, ErrorState, FormField, Input, Skeleton, Textarea } from '@/components/ui';
-import { Combobox } from '@/components/forms';
 import { useRovingRadios } from '@/hooks/use-roving-radios';
 import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useOrgTimezone } from '@/features/me/use-me';
-import { useBranchOptions } from '@/features/organization/lookups';
+import { BranchPicker } from '@/features/organization/components/branch-picker';
 import { TimezoneSelect } from '@/features/organization/components/timezone-select';
 import { blankToUndefined } from '@/features/organization/form-utils';
 import { toastJobQueued } from '@/features/sync/job-toast';
@@ -267,7 +266,6 @@ function DeviceStep({ provider, model, onProvider, onModel }: { provider: Provid
 function DetailsStep({ form, isPush, onSubmit, onBack }: { form: DetailsForm; isPush: boolean; onSubmit: (d: Details) => void; onBack: () => void }) {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation();
-  const branches = useBranchOptions();
   const { register, control, formState: { errors }, setValue, getValues } = form;
 
   /**
@@ -295,8 +293,8 @@ function DetailsStep({ form, isPush, onSubmit, onBack }: { form: DetailsForm; is
         </FormField>
         <FormField label={tc('common.branch')} htmlFor="dev-branch" required error={err('branchId')}>
           <Controller control={control} name="branchId" render={({ field }) => (
-            <Combobox id="dev-branch" value={field.value} options={branches.options} loading={branches.isLoading} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId}
-              onChange={(v) => { field.onChange(v ?? ''); const b = v ? branches.byId.get(v) : undefined; if (b && !getValues('timezone')) setValue('timezone', b.timezone); }} />
+            <BranchPicker id="dev-branch" value={field.value} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId}
+              onChange={(v, b) => { field.onChange(v ?? ''); if (b && !getValues('timezone')) setValue('timezone', b.timezone); }} />
           )} />
         </FormField>
         <FormField label={tc('common.timezone')} htmlFor="dev-tz" error={err('timezone')} hint={t('fields.timezoneHint')} optional>

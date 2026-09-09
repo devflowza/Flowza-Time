@@ -133,6 +133,24 @@ describe('DeviceNewPage', () => {
     expect(link).toHaveAttribute('href', 'https://docs.example.test/zkteco');
   });
 
+  /** A tenant registering its first terminal has no branches yet, and Branch is required to get past this step. */
+  it('offers to create a branch when the organisation has none', async () => {
+    mockGet({
+      '/device-providers': { data: PROVIDERS },
+      '/device-models': { data: MODELS },
+      '/orgs/org-1/branches': page([], 0),
+    });
+    renderPage();
+    await pickZkteco();
+    next();
+
+    fireEvent.click(await screen.findByRole('combobox', { name: /Branch/ }));
+    // It used to say "No results" and stop there — with no hint that branches are created under Organisation.
+    expect(await screen.findByText('No branches yet')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Add branch/ }));
+    expect(await screen.findByRole('heading', { name: 'Add branch' })).toBeInTheDocument();
+  });
+
   it('names an empty required field instead of quoting the validator at the user', async () => {
     renderPage();
     await pickZkteco();

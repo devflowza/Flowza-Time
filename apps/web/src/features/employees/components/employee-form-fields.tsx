@@ -4,7 +4,8 @@ import type { z } from 'zod';
 import { EMPLOYMENT_STATUSES, EMPLOYMENT_TYPES, GENDERS, type createEmployeeSchema } from '@flowza/contracts';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
 import { Combobox } from '@/components/forms';
-import { useBranchOptions, useDepartmentOptions, useDesignationOptions } from '@/features/organization/lookups';
+import { useDepartmentOptions, useDesignationOptions } from '@/features/organization/lookups';
+import { BranchPicker } from '@/features/organization/components/branch-picker';
 import { blankToUndefined } from '@/features/organization/form-utils';
 import { WeeklyOffToggles } from '@/features/organization/components/weekly-off-toggles';
 import { useEmployeeOptions } from '../api';
@@ -17,7 +18,6 @@ export function EmployeeFormFields({ form, mode, excludeEmployeeId }: { form: Us
   const { t: tc } = useTranslation();
   const { register, control, formState: { errors } } = form;
   const branchId = useWatch({ control, name: 'branchId' });
-  const branches = useBranchOptions();
   const departments = useDepartmentOptions(branchId || undefined);
   const designations = useDesignationOptions();
   const managers = useEmployeeOptions();
@@ -97,7 +97,7 @@ export function EmployeeFormFields({ form, mode, excludeEmployeeId }: { form: Us
             )} />
           </FormField>
           <FormField label={tc('common.branch')} htmlFor="emp-branch" required error={errors.branchId?.message}>
-            <Controller control={control} name="branchId" render={({ field }) => <Combobox id="emp-branch" value={field.value} onChange={(v) => field.onChange(v ?? '')} options={branches.options} loading={branches.isLoading} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId} />} />
+            <Controller control={control} name="branchId" render={({ field }) => <BranchPicker id="emp-branch" value={field.value} onChange={(v) => field.onChange(v ?? '')} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId} />} />
           </FormField>
           <FormField label={tc('common.department')} htmlFor="emp-dept" optional error={errors.departmentId?.message}>
             <Controller control={control} name="departmentId" render={({ field }) => <Combobox id="emp-dept" value={field.value} onChange={(v) => field.onChange(v ?? undefined)} options={departments.options} loading={departments.isLoading} clearable placeholder={tc('common.none')} />} />

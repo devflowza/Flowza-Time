@@ -7,11 +7,10 @@ import type { z } from 'zod';
 import { Radio, Search } from 'lucide-react';
 import { claimPendingDeviceSchema, type ClaimPendingDeviceInput, type PendingDeviceDto } from '@flowza/contracts';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, ErrorState, FormField, Input, Skeleton } from '@/components/ui';
-import { Combobox } from '@/components/forms';
 import { fmtRelative } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useDebounced } from '@/hooks/use-debounced';
-import { useBranchOptions } from '@/features/organization/lookups';
+import { BranchPicker } from '@/features/organization/components/branch-picker';
 import { TimezoneSelect } from '@/features/organization/components/timezone-select';
 import { toastJobQueued } from '@/features/sync/job-toast';
 import { useDeviceMutations, usePendingDevices, type DeviceCreatedDto } from '../api';
@@ -24,7 +23,6 @@ function ClaimDialog({ pending, onClose }: { pending: PendingDeviceDto | null; o
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation();
   const navigate = useNavigate();
-  const branches = useBranchOptions();
   const { claim } = useDeviceMutations();
   const [created, setCreated] = useState<DeviceCreatedDto | null>(null);
   const form = useForm<ClaimValues, unknown, ClaimPendingDeviceInput>({ resolver: zodResolver(claimPendingDeviceSchema), defaultValues: { branchId: '', name: '', code: pending?.serialNumber.slice(-8).toUpperCase() ?? '', tags: [] } });
@@ -56,7 +54,7 @@ function ClaimDialog({ pending, onClose }: { pending: PendingDeviceDto | null; o
           </div>
           <form onSubmit={submit} className="space-y-4" noValidate>
             <FormField label={tc('common.branch')} htmlFor="claim-branch" required error={errors.branchId?.message}>
-              <Controller control={control} name="branchId" render={({ field }) => <Combobox id="claim-branch" value={field.value} options={branches.options} loading={branches.isLoading} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId} onChange={(v) => { field.onChange(v ?? ''); const b = v ? branches.byId.get(v) : undefined; if (b && !getValues('timezone')) setValue('timezone', b.timezone); }} />} />
+              <Controller control={control} name="branchId" render={({ field }) => <BranchPicker id="claim-branch" value={field.value} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId} onChange={(v, b) => { field.onChange(v ?? ''); if (b && !getValues('timezone')) setValue('timezone', b.timezone); }} />} />
             </FormField>
             <div className="grid gap-4 sm:grid-cols-2">
               <FormField label={tc('common.name')} htmlFor="claim-name" required error={errors.name?.message}><Input id="claim-name" {...register('name')} aria-invalid={!!errors.name} /></FormField>
