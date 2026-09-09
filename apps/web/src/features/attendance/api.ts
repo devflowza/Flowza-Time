@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { PeriodLockInput, RecalculateInput } from '@flowza/contracts';
+import type { AttendanceActivityDto, AttendanceActivityQuery, PeriodLockInput, RecalculateInput } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { useOrgId } from '@/features/me/use-me';
@@ -10,6 +10,7 @@ export type DailyPage = PageEnvelope<DailyRecord> & { meta: { byStatus?: Record<
 export type MonthlyPage = PageEnvelope<MonthlyRow> & { meta: { month?: string; days?: string[] } };
 
 const RECORDS = 'attendance-records';
+const ACTIVITY = 'attendance-activity';
 
 export function useDailyAttendance(query: ListQuery, enabled = true) {
   const orgId = useOrgId();
@@ -28,6 +29,17 @@ export function useAttendanceEvents(params: { employeeId?: string | null; from?:
   const orgId = useOrgId();
   const ok = !!params.employeeId && !!params.from && !!params.to;
   return useQuery({ queryKey: qk.list(orgId, 'attendance-events', params), queryFn: async () => (await api.get<Envelope<AttendanceEventDto[]>>(`/orgs/${orgId}/attendance/events`, { employeeId: params.employeeId ?? undefined, from: params.from, to: params.to })).data, enabled: enabled && ok, staleTime: 10_000 });
+}
+/** One employee's day shape (in-office vs. field spans and the productive totals) over a calendar period. */
+export function useEmployeeActivity(params: AttendanceActivityQuery, enabled = true) {
+  const orgId = useOrgId();
+  return useQuery({
+    queryKey: qk.list(orgId, ACTIVITY, params),
+    queryFn: async () => (await api.get<Envelope<AttendanceActivityDto>>(`/orgs/${orgId}/attendance/activity`, { ...params })).data,
+    enabled: enabled && !!params.employeeId,
+    placeholderData: keepPreviousData,
+    staleTime: 30_000,
+  });
 }
 export function useRawTransactions(query: ListQuery, enabled = true) {
   const orgId = useOrgId();
@@ -63,5 +75,5 @@ export function useAttendanceMutations() {
 export function useInvalidateAttendance() {
   const orgId = useOrgId();
   const qc = useQueryClient();
-  return () => { for (const e of ['attendance-daily', 'attendance-monthly', RECORDS, 'attendance-events']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
+  return () => { for (const e of ['attendance-daily', 'attendance-monthly', RECORDS, 'attendance-events', ACTIVITY]) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
 }

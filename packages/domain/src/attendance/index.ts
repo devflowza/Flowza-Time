@@ -6,3 +6,4 @@ export * from './rounding.js';
 export * from './calculate.js';
 export * from './resolve-shift.js';
 export * from './period.js';
+export * from './activity.js';

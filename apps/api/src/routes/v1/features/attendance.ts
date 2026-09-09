@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { approvalDecisionSchema, approvalInboxQuerySchema, approvalWorkflowInputSchema, approvalWorkflowUpdateSchema, attendanceEventsQuerySchema, correctionCancelSchema, correctionListQuerySchema, createCorrectionSchema, dailyAttendanceListQuerySchema, monthlyAttendanceListQuerySchema, periodLockListQuerySchema, periodLockSchema, periodUnlockSchema, rawTransactionsQuerySchema, recalculateSchema, recalculationListQuerySchema } from '@flowza/contracts';
+import { approvalDecisionSchema, approvalInboxQuerySchema, approvalWorkflowInputSchema, approvalWorkflowUpdateSchema, attendanceActivityQuerySchema, attendanceEventsQuerySchema, correctionCancelSchema, correctionListQuerySchema, createCorrectionSchema, dailyAttendanceListQuerySchema, monthlyAttendanceListQuerySchema, periodLockListQuerySchema, periodLockSchema, periodUnlockSchema, rawTransactionsQuerySchema, recalculateSchema, recalculationListQuerySchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { idempotency } from '../../../middleware/idempotency.js';
@@ -14,6 +14,7 @@ export function registerAttendanceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void 
   v1.get('/orgs/:orgId/attendance/monthly', async (c) => { const q = query(c, monthlyAttendanceListQuerySchema); const r = await att.listMonthly(deps, actorOf(c, deps), param(c, 'orgId'), q); return c.json({ data: r.data, meta: { page: q.page, pageSize: q.pageSize, total: r.total, totalPages: Math.max(1, Math.ceil(r.total / q.pageSize)), ...r.meta } }); });
   v1.get('/orgs/:orgId/attendance/records/:id', async (c) => ok(c, await att.getRecord(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
   v1.get('/orgs/:orgId/attendance/events', async (c) => ok(c, await att.listEvents(deps, actorOf(c, deps), param(c, 'orgId'), query(c, attendanceEventsQuerySchema))));
+  v1.get('/orgs/:orgId/attendance/activity', async (c) => ok(c, await att.listActivity(deps, actorOf(c, deps), param(c, 'orgId'), query(c, attendanceActivityQuerySchema))));
   v1.get('/orgs/:orgId/attendance/raw', async (c) => { const q = query(c, rawTransactionsQuerySchema); const r = await att.listRaw(deps, actorOf(c, deps), param(c, 'orgId'), q); return c.json({ data: r.data, meta: { nextCursor: r.nextCursor, limit: q.limit } }); });
   v1.post('/orgs/:orgId/attendance/raw/:id/requeue', async (c) => ok(c, await att.requeueRaw(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
 
