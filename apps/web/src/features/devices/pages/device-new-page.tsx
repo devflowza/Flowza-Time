@@ -342,7 +342,17 @@ export default function DeviceNewPage() {
   const stepped = useRef(false);
 
   const isPush = provider?.integrationType === 'DEVICE_PUSH';
-  const fields = provider?.configSchema.fields ?? [];
+  const fields = useMemo(() => provider?.configSchema.fields ?? [], [provider]);
+
+  /**
+   * A push provider declares `serialNumber` in its config schema *and* the details step asks for it, so the connection
+   * step hides the field — but it used to be neither shown nor filled in: Next validated the provider's whole schema
+   * against a config with no serial, the required-but-hidden field failed, its error had nowhere to render, and the
+   * button did nothing at all. The serial answered on the details step is the one the config wants, so it is carried
+   * across here — the API re-checks the same schema, so registration would have failed on it too.
+   */
+  const visibleFields = useMemo(() => fields.filter((f) => !(isPush && f.key === 'serialNumber')), [fields, isPush]);
+  const effectiveConfig = useMemo<ConfigValues>(() => (isPush && details?.serialNumber ? { ...config, serialNumber: details.serialNumber } : config), [config, details, isPush]);
 
   // The details form lives here, not inside the step, so stepping back and forward again does not discard what was
   // typed. The resolver widens with the provider: a push terminal is identified by its serial number, so that field is
@@ -408,7 +418,7 @@ export default function DeviceNewPage() {
 
   const buildInput = (): CreateDeviceInput | { issue: { field: string; message: string } } | null => {
     if (!provider || !details) return null;
-    const cfg = normalizeProviderConfig(fields, config);
+    const cfg = normalizeProviderConfig(fields, effectiveConfig);
     const urlField = fields.find((f) => f.type === 'url');
     const endpointUrl = urlField && typeof cfg[urlField.key] === 'string' ? String(cfg[urlField.key]) : undefined;
     const parsed = createDeviceSchema.safeParse({ ...details, providerKey: provider.key, modelId: model?.id, config: cfg, endpointUrl, serialNumber: details.serialNumber ?? (typeof cfg.serialNumber === 'string' ? cfg.serialNumber : undefined) });
@@ -417,12 +427,20 @@ export default function DeviceNewPage() {
     return { issue: { field: first?.path.join('.') || '—', message: first?.message ?? '' } };
   };
 
-  const validateConnection = () => { const errs = validateProviderConfig(fields, config); setConfigErrors(errs); return Object.keys(errs).length === 0; };
+  const validateConnection = () => {
+    const errs = validateProviderConfig(fields, effectiveConfig);
+    setConfigErrors(errs);
+    // A step that refuses to advance has to say why. An error on a field this step does not render cannot be shown
+    // beside one, so name it instead of leaving Next looking broken.
+    const orphan = Object.keys(errs).find((k) => !visibleFields.some((f) => f.key === k));
+    if (orphan) toast.error(t('wizard.invalid'), { description: t('wizard.invalidField', { field: orphan, message: t(`wizard.configErrors.${errs[orphan]}`) }) });
+    return Object.keys(errs).length === 0;
+  };
 
   const runTest = () => {
     if (!provider) return;
     setTestResult(null);
-    testConnection.mutate({ providerKey: provider.key, config: normalizeProviderConfig(fields, config) }, { onSuccess: setTestResult, onError: toastError });
+    testConnection.mutate({ providerKey: provider.key, config: normalizeProviderConfig(fields, effectiveConfig) }, { onSuccess: setTestResult, onError: toastError });
   };
 
   const register = () => {
@@ -481,7 +499,7 @@ export default function DeviceNewPage() {
                     </ol>
                   </div>
                 ) : null}
-                <ProviderConfigForm fields={fields.filter((f) => !(isPush && f.key === 'serialNumber'))} values={config} onChange={(v) => { setConfig(v); setTestResult(null); }} errors={configErrors} />
+                <ProviderConfigForm fields={visibleFields} values={config} onChange={(v) => { setConfig(v); setTestResult(null); }} errors={configErrors} />
                 {provider.throttling ? <p className="text-xs text-muted-foreground">{t('wizard.throttling', { perMinute: provider.throttling.requestsPerMinute ?? '—', perDevice: provider.throttling.maxConcurrentPerDevice ?? '—' })}</p> : null}
 
                 {/* The test used to be a step of its own holding a single button. It tests the settings directly above
@@ -520,7 +538,7 @@ export default function DeviceNewPage() {
                 </ReviewGroup>
                 <ReviewGroup title={t('wizard.step.connection')} onEdit={() => go('connection')}>
                   <Row label={t('wizard.configSummary')} wide>
-                    {fields.length ? fields.map((f) => <span key={f.key} className="me-2 inline-block font-mono text-xs" dir="ltr">{f.key}={f.secret || f.type === 'password' ? (config[f.key] !== undefined ? '••••' : '—') : String(config[f.key] ?? f.default ?? '—')}</span>) : '—'}
+                    {fields.length ? fields.map((f) => <span key={f.key} className="me-2 inline-block font-mono text-xs" dir="ltr">{f.key}={f.secret || f.type === 'password' ? (effectiveConfig[f.key] !== undefined ? '••••' : '—') : String(effectiveConfig[f.key] ?? f.default ?? '—')}</span>) : '—'}
                   </Row>
                 </ReviewGroup>
                 {testResult ? <TestConnectionResult result={testResult} /> : null}

@@ -7,7 +7,7 @@ vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import { grantAll, mockGet, page, renderWithProviders, resetApiMock } from '@/features/employees/test-utils';
+import { apiMock, grantAll, mockGet, page, renderWithProviders, resetApiMock } from '@/features/employees/test-utils';
 import i18n from '@/lib/i18n';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/devices.json';
@@ -29,6 +29,16 @@ const provider = (key: string, vendor: string, name: string, extra: Partial<Devi
   key, vendor, name, description: `Connect ${name} terminals over the local network.`, integrationType: 'ON_PREM_SERVER_API', status: 'available',
   capabilities: caps, configSchema: { fields: [{ key: 'host', label: 'Host', type: 'text', required: true, secret: false }] }, verificationStatus: 'VERIFIED',
   docsUrl: `https://docs.example.test/${key}`, ...extra,
+});
+
+/** ZKTeco's real PUSH schema: the serial is a *required config field*, and the wizard asks for it on the details step. */
+const PUSH_PROVIDER = provider('zkteco_push', 'ZKTeco', 'ZKTeco PUSH / ADMS protocol', {
+  integrationType: 'DEVICE_PUSH',
+  configSchema: { fields: [
+    { key: 'serialNumber', label: 'Device serial number', type: 'text', required: true, secret: false },
+    { key: 'commKey', label: 'Comm key (device menu)', type: 'password', required: false, secret: true },
+    { key: 'pushInterval', label: 'Push interval (s)', type: 'number', required: false, secret: false, default: 30 },
+  ] },
 });
 
 const PROVIDERS = [
@@ -200,6 +210,45 @@ describe('DeviceNewPage', () => {
     expect(screen.getAllByRole('button', { name: /Edit —/ })).toHaveLength(3);
     fireEvent.click(screen.getByRole('button', { name: /Edit — Details/ }));
     await waitFor(() => expect(screen.getByLabelText(/^Code/)).toHaveValue('GATE-1'));
+  });
+
+  /**
+   * The connection step hides `serialNumber` for a push provider because the details step already asked for it — but
+   * the step's Next validated the provider's *whole* schema against the config, so the hidden required field failed,
+   * the error had nowhere to render, and the button did nothing at all. The serial typed on the details step is the
+   * one the provider config wants, so it is carried across.
+   */
+  it('moves past the connection step for a push device and submits the serial as provider config', async () => {
+    mockGet({
+      '/device-providers': { data: [...PROVIDERS, PUSH_PROVIDER] },
+      '/device-models': { data: MODELS },
+      '/orgs/org-1/branches': page([{ id: '33333333-3333-4333-a333-333333333333', organizationId: 'org-1', code: 'HQ', name: 'Muscat HQ', timezone: 'Asia/Muscat', status: 'active' }], 1),
+    });
+    apiMock.post.mockResolvedValue({ data: { device: { id: 'd9', name: 'Lobby terminal' }, pushToken: null, webhookUrl: null, credentialsStored: [], credentialsError: null, testConnectionJobId: null } });
+    renderPage();
+    fireEvent.click(await screen.findByRole('radio', { name: /ZKTeco PUSH \/ ADMS protocol/ }));
+    next();
+
+    fireEvent.change(await screen.findByLabelText(/^Code/), { target: { value: 'LOBBY-1' } });
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Lobby terminal' } });
+    fireEvent.change(screen.getByLabelText(/Serial number/), { target: { value: 'ZK-99887766' } });
+    fireEvent.click(screen.getByRole('combobox', { name: /Branch/ }));
+    fireEvent.click((await screen.findByText('Muscat HQ')).closest('[cmdk-item]') ?? screen.getByText('Muscat HQ'));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /Branch/ })).toHaveTextContent('Muscat HQ'));
+    next();
+
+    // Connection step: nothing here is required — the serial is not even shown, because it was answered already.
+    expect(await screen.findByLabelText(/Comm key/)).toBeInTheDocument();
+    expect(screen.queryByLabelText(/Device serial number/)).not.toBeInTheDocument();
+    next();
+
+    fireEvent.click(await screen.findByRole('button', { name: /Register device/ }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalled());
+    const [path, body] = apiMock.post.mock.calls[0] as [string, { serialNumber?: string; config: Record<string, unknown> }];
+    expect(path).toBe('/orgs/org-1/devices');
+    expect(body.serialNumber).toBe('ZK-99887766');
+    // The API re-checks the provider schema, so a config without the required serial is a 400 on registration.
+    expect(body.config).toMatchObject({ serialNumber: 'ZK-99887766' });
   });
 
   it('re-validates the details step on the way out, so the rail cannot carry a stale answer to review', async () => {
