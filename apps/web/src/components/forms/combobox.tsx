@@ -6,6 +6,8 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
 export interface ComboboxOption { value: string; label: string; description?: string; disabled?: boolean }
+/** A row pinned under the list — "Add branch", "Edit Muscat HQ" — rather than one of the values to pick from. */
+export interface ComboboxAction { key: string; label: string; icon?: React.ReactNode; onSelect: () => void }
 
 interface ComboboxProps {
   value: string | null | undefined;
@@ -20,15 +22,13 @@ interface ComboboxProps {
   id?: string;
   className?: string;
   emptyText?: string;
-  /** Label of an action row pinned under the list (e.g. "Add branch"); needs `onCreate` to render. */
-  createLabel?: string;
-  /** Called when that row is picked, after the popover closes — open a create dialog from here. */
-  onCreate?: () => void;
+  /** Rows under the list that act on the option set itself; each closes the popover before it runs. */
+  actions?: ComboboxAction[];
   'aria-invalid'?: boolean;
 }
 
 /** Accessible searchable select (branches, departments, employees…). Options are provided by the caller (server-side search supported). */
-export function Combobox({ value, onChange, options, placeholder, onSearch, loading, clearable, disabled, id, className, emptyText, createLabel, onCreate, ...rest }: ComboboxProps) {
+export function Combobox({ value, onChange, options, placeholder, onSearch, loading, clearable, disabled, id, className, emptyText, actions, ...rest }: ComboboxProps) {
   const { t } = useTranslation();
   const [open, setOpen] = React.useState(false);
   const selected = options.find((o) => o.value === value);
@@ -60,13 +60,15 @@ export function Combobox({ value, onChange, options, placeholder, onSearch, load
                 </Command.Item>
               ))}
             </Command.List>
-            {onCreate && createLabel ? (
-              /* Outside Command.List so the search text never filters it away: an empty picker must still offer a way out. */
+            {actions?.length ? (
+              /* Outside Command.List so the search text never filters them away: an empty picker must still offer a way out. */
               <div className="border-t p-1">
-                <button type="button" onClick={() => { setOpen(false); onCreate(); }} className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm font-medium text-primary outline-none hover:bg-accent focus-visible:bg-accent">
-                  <Plus className="size-4 shrink-0" />
-                  <span className="truncate">{createLabel}</span>
-                </button>
+                {actions.map((a) => (
+                  <button key={a.key} type="button" onClick={() => { setOpen(false); a.onSelect(); }} className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm font-medium text-primary outline-none hover:bg-accent focus-visible:bg-accent">
+                    <span className="flex size-4 shrink-0 items-center justify-center">{a.icon}</span>
+                    <span className="truncate">{a.label}</span>
+                  </button>
+                ))}
               </div>
             ) : null}
           </Command>

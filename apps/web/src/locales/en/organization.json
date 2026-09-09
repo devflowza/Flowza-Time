@@ -19,6 +19,7 @@
     "archiveTitle": "Archive {{name}}?", "archiveHint": "Archived branches are hidden from pickers. Branches with active employees cannot be archived — move the employees first.",
     "empty": "No branches yet", "emptyHint": "Create your first branch to start adding employees and devices.",
     "select": "Select a branch…", "emptyNoPermission": "No branches yet. Ask an administrator to add one under Organisation → Branches.",
+    "editNamed": "Edit {{name}}",
     "location": "Location", "calendar": "Calendar", "inherited": "Organisation default",
     "inheritWeeklyOff": "Use organisation weekly off days", "inheritWeeklyOffHint": "Turn off to set branch-specific off days.",
     "noCalendars": "No holiday calendars are configured yet. Create one under Holidays to assign it here.",

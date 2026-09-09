@@ -10,7 +10,7 @@ vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks'
 import { apiMock, grant, grantAll, mockGet, page, renderWithProviders, resetApiMock } from '@/features/employees/test-utils';
 import { BranchPicker } from './branch-picker';
 
-const MUSCAT = { id: 'b1', organizationId: 'org-1', code: 'MCT', name: 'Muscat HQ', timezone: 'Asia/Muscat', status: 'active' };
+const MUSCAT = { id: 'b1', organizationId: 'org-1', code: 'MCT', name: 'Muscat HQ', countryCode: 'OM', timezone: 'Asia/Muscat', status: 'active' };
 const onChange = vi.fn();
 
 function Harness() {
@@ -54,6 +54,29 @@ describe('BranchPicker', () => {
 
     open();
     expect(await screen.findByRole('button', { name: /Add branch/ })).toBeInTheDocument();
+  });
+
+  /** Creating a branch in a hurry means typos; leaving the form to fix one costs everything typed so far. */
+  it('edits the selected branch in place, and only offers that once one is chosen', async () => {
+    mockGet({ '/orgs/org-1/branches': page([MUSCAT]) });
+    apiMock.patch.mockResolvedValue({ data: { ...MUSCAT, name: 'Muscat head office' } });
+    renderWithProviders(<Harness />);
+
+    open();
+    // Nothing is selected yet, so there is nothing to edit.
+    expect(await screen.findByRole('button', { name: /Add branch/ })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Edit Muscat HQ/ })).toBeNull();
+
+    fireEvent.click((await screen.findByText('Muscat HQ')).closest('[cmdk-item]') ?? screen.getByText('Muscat HQ'));
+    open();
+    fireEvent.click(await screen.findByRole('button', { name: /Edit Muscat HQ/ }));
+
+    expect(await screen.findByRole('heading', { name: 'Edit branch' })).toBeInTheDocument();
+    expect(screen.getByLabelText(/^Code/)).toHaveValue('MCT'); // opens on the branch, not a blank form
+    fireEvent.change(screen.getByLabelText(/^Name\*?$/), { target: { value: 'Muscat head office' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+
+    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/orgs/org-1/branches/b1', expect.objectContaining({ name: 'Muscat head office' })));
   });
 
   it('tells a member who cannot manage branches where they come from, without offering the dialog', async () => {
