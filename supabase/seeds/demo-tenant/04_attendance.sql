@@ -25,7 +25,7 @@ declare
   attadmin_id uuid := pg_temp.sid('user:attadmin@flowza.ai');
   tz text := 'Asia/Muscat';
   d_from date := '2026-03-01';
-  d_to date := (now() at time zone 'Asia/Muscat')::date - 1;
+  d_to date := (now() at time zone 'Asia/Muscat')::date;   -- today's punches are kept only up to the current time
   org_off smallint[] := '{5,6}';
   default_cal uuid := pg_temp.sid('holiday-calendar:default');
   hq uuid := pg_temp.sid('branch:MCT-HQ');
@@ -146,6 +146,7 @@ begin
   from seed_punch p
   join public.devices dv on dv.id = p.dev
   cross join lateral (select case when p.verify = 'face' and dv.model_name in ('F22', 'K40', 'F18') then 'fingerprint' else p.verify end as verify) v
+  where p.at <= now()
   on conflict (organization_id, device_id, dedupe_hash, punched_at) do nothing;
 
   ---------------------------------------------------------------------------------------------------------------------
@@ -160,7 +161,7 @@ begin
     select m.*, row_number() over (order by m.d, m.num) as rn, ee.manager_employee_id,
            (select om.user_id from public.employees mg join public.org_memberships om on om.employee_id = mg.id and om.status = 'active' where mg.id = ee.manager_employee_id limit 1) as manager_user
     from seed_missing m join public.employees ee on ee.id = m.emp
-    where m.d <= d_to - 3
+    where m.d <= d_to - 4
     order by m.d, m.num limit 6
   loop
     n_corr := n_corr + 1;
