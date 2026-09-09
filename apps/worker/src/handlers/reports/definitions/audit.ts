@@ -116,7 +116,7 @@ async function attendanceEditRows(trx: Trx, ctx: ReportContext, start: Date, end
       const oldText = show(f.key, before);
       const newText = show(f.key, after);
       if (oldText === newText) continue;
-      rows.push({ cells: [cell(key, { mono: true }), cell(ctx.t(f.labelKey)), cell(oldText, { mono: true }), cell(newText, { mono: true }), cell(by), cell(on, { mono: true })] });
+      rows.push({ cells: [cell(key, { mono: true }), cell(ctx.t(f.labelKey)), cell(oldText, { mono: true, wrap: true }), cell(newText, { mono: true, wrap: true }), cell(by), cell(on, { mono: true })] });
     }
   }
   return rows;
@@ -131,7 +131,7 @@ async function auditLogRows(trx: Trx, ctx: ReportContext, start: Date, end: Date
   if (ctx.scope.branchIds) { const ids = ctx.scope.branchIds.length ? ctx.scope.branchIds : ['00000000-0000-0000-0000-000000000000']; q = q.where((eb) => eb.or([eb('a.branchId', 'is', null), eb('a.branchId', 'in', ids)])); }
   const rows = await q.orderBy('a.createdAt', 'asc').orderBy('a.id', 'asc').execute();
   return rows.map((a) => ({ cells: [
-    cell(`${a.entityType} ${a.entityId ?? ''}`.trim(), { mono: true }), cell(a.action, { mono: true }), cell(compact(a.oldValue), { mono: true }), cell(compact(a.newValue), { mono: true }),
+    cell(`${a.entityType} ${a.entityId ?? ''}`.trim(), { mono: true, wrap: true }), cell(a.action, { mono: true }), cell(compact(a.oldValue), { mono: true, wrap: true }), cell(compact(a.newValue), { mono: true, wrap: true }),
     cell(a.fullName ?? a.actorLabel ?? String(a.actorType).toLowerCase()), cell(DateTime.fromJSDate(toDate(a.createdAt)).setZone(ctx.timezone).setLocale(ctx.locale).toFormat('dd-MMM-yyyy HH:mm'), { mono: true }),
   ] }));
 }

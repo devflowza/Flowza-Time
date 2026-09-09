@@ -12,6 +12,8 @@ export interface ReportCell {
   tone?: CellTone;
   align?: CellAlign;
   mono?: boolean;
+  /** Mono cells never wrap (an employee number must not split at its hyphen, a clock at its space); a long mono value such as a day list or a JSON diff opts back in. */
+  wrap?: boolean;
   bold?: boolean;
   /** Typed value for spreadsheets; `text` remains what a printed page shows. */
   number?: number | null;
