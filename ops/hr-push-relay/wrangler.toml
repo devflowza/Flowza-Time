@@ -1,0 +1,22 @@
+# Cloudflare Worker that relays the terminals' ADMS traffic from the existing HR system to FlowZa Time.
+# Deployed separately from the web app (repository-root wrangler.toml is Cloudflare Pages):
+#   cd ops/hr-push-relay && npx wrangler deploy
+#   npx wrangler secret put DEVICE_TOKENS     # {"<serial>":"<push token>", …}
+#   npx wrangler tail                          # watch what the terminals are doing
+name = "flowza-hr-push-relay"
+main = "worker.js"
+compatibility_date = "2026-09-05"
+
+# Only the ADMS paths. Everything else on hr.flowza.ai continues to reach the HR system untouched.
+routes = [{ pattern = "hr.flowza.ai/iclock/*", zone_name = "flowza.ai" }]
+
+[vars]
+FLOWZA_API = "https://time-api.flowza.ai"
+# The HR system's own origin hostname — NOT hr.flowza.ai, which this Worker serves: a subrequest to its own route can
+# loop back into the Worker. Point a separate record (grey-clouded, or with no Worker route) at the same server.
+HR_UPSTREAM = "https://hr-origin.flowza.ai"
+# "hr" = the HR system answers the terminals and FlowZa observes (safe default while both run).
+# "flowza" = FlowZa answers and drives the devices; only takes effect for serials present in DEVICE_TOKENS.
+PRIMARY = "hr"
+MIRROR_UNKNOWN = "true"
+MIRROR_TO_HR = "true"

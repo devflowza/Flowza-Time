@@ -38,4 +38,10 @@ export default tseslint.config(
     files: ['**/*.test.{ts,tsx}', '**/test/**/*.{ts,tsx}', 'apps/worker/**/*.ts', 'apps/api/src/index.ts'],
     rules: { 'no-console': 'off', '@typescript-eslint/no-explicit-any': 'off' },
   },
+  {
+    // ops/ holds edge scripts deployed on their own (Cloudflare Workers): workerd runtime, not Node — fetch, Response
+    // and URL are ambient, and `console` is how a Worker reports anything at all (`wrangler tail`).
+    files: ['ops/**/*.js'],
+    languageOptions: { globals: { ...globals.browser }, sourceType: 'module', ecmaVersion: 2023 },
+  },
 );
