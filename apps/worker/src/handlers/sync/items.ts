@@ -121,7 +121,7 @@ export async function finalizeItem(trx: Trx, input: FinalizeInput, now: Date): P
   const o = input.status === 'OFFLINE' ? 1 : 0;
   const u = input.status === 'UNSUPPORTED' ? 1 : 0;
   const n = input.recordsIngested ?? 0;
-  const rolled = await sql<{ status: SyncStatus; itemsPending: number; itemsSuccess: number; itemsFailed: number; itemsOffline: number; itemsUnsupported: number; jobType: string }>`
+  const rolled = await sql<{ status: SyncStatus; itemsPending: number; itemsSuccess: number; itemsFailed: number; itemsOffline: number; itemsUnsupported: number; jobType: string; trigger: string }>`
     update public.sync_jobs set
       items_success = items_success + ${s}, items_failed = items_failed + ${f}, items_offline = items_offline + ${o}, items_unsupported = items_unsupported + ${u},
       items_pending = greatest(0, items_pending - 1), records_ingested = records_ingested + ${n},
@@ -134,14 +134,15 @@ export async function finalizeItem(trx: Trx, input: FinalizeInput, now: Date): P
       error_code = case when items_pending - 1 <= 0 and items_success + ${s} = 0 then ${input.error?.code ?? null} else error_code end,
       error = case when items_pending - 1 <= 0 and items_success + ${s} = 0 then ${input.error?.message.slice(0, 500) ?? null} else error end
     where id = ${item.syncJobId}::uuid and items_pending > 0 and status not in ('CANCELLED')
-    returning status, items_pending as "itemsPending", items_success as "itemsSuccess", items_failed as "itemsFailed", items_offline as "itemsOffline", items_unsupported as "itemsUnsupported", job_type as "jobType"`.execute(trx);
+    returning status, items_pending as "itemsPending", items_success as "itemsSuccess", items_failed as "itemsFailed", items_offline as "itemsOffline", items_unsupported as "itemsUnsupported", job_type as "jobType", trigger`.execute(trx);
   const job = rolled.rows[0];
   if (!job) return { jobStatus: null, jobFinished: false };
   if (job.itemsPending === 0) {
     const failed = job.status === 'FAILED';
     await emitDomainEvent(trx, {
       organizationId: item.organizationId, eventType: failed ? 'sync.failed' : 'sync.completed', aggregateType: 'sync_job', aggregateId: item.syncJobId,
-      payload: { syncJobId: item.syncJobId, jobType: job.jobType, status: job.status, itemsSuccess: job.itemsSuccess, itemsFailed: job.itemsFailed + job.itemsOffline, itemsUnsupported: job.itemsUnsupported, ...(failed && input.error ? { error: `${input.error.code}: ${input.error.message.slice(0, 300)}` } : {}) },
+      // `trigger` lets the notification router tell a sync someone asked for from the scheduler's own runs.
+      payload: { syncJobId: item.syncJobId, jobType: job.jobType, trigger: job.trigger, status: job.status, itemsSuccess: job.itemsSuccess, itemsFailed: job.itemsFailed + job.itemsOffline, itemsUnsupported: job.itemsUnsupported, ...(failed && input.error ? { error: `${input.error.code}: ${input.error.message.slice(0, 300)}` } : {}) },
     });
     return { jobStatus: job.status, jobFinished: true };
   }

@@ -255,7 +255,8 @@ begin
 
   insert into public.notification_preferences (user_id, organization_id, category, channel, enabled)
   select m.user_id, org, c.cat::public.notification_category, ch.ch::public.notification_channel,
-         case when ch.ch = 'EMAIL' and c.cat = 'SYSTEM' then false else true end
+         -- e-mail stays off for ATTENDANCE (sync chatter) and SYSTEM; in-app notifications are on for everything
+         case when ch.ch = 'EMAIL' and c.cat in ('SYSTEM', 'ATTENDANCE') then false else true end
   from public.org_memberships m
   cross join (values ('DEVICE'), ('ATTENDANCE'), ('APPROVAL'), ('SYSTEM'), ('SUBSCRIPTION')) as c(cat)
   cross join (values ('IN_APP'), ('EMAIL')) as ch(ch)

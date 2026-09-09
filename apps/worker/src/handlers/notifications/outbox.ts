@@ -6,12 +6,18 @@ import type { HandlerRegistry, JobContext } from '../types.js';
 
 interface OutboxRow { id: string; organizationId: string | null; eventType: string; aggregateType: string; aggregateId: string | null; payload: Record<string, unknown>; actorUserId: string | null; occurredAt: Date }
 
-/** Which users receive an in-app notification for an event type: by permission within the organisation. */
-const ROUTING: Record<string, { category: NotificationCategory; permission: string; recipients?: 'permission' | 'user'; title: (p: Record<string, unknown>) => string; body?: (p: Record<string, unknown>) => string; link?: (p: Record<string, unknown>) => string }> = {
+/**
+ * Which users receive an in-app notification for an event type: by permission within the organisation. `when` filters
+ * events that are published (realtime, webhooks) but must not become notifications.
+ */
+const ROUTING: Record<string, { category: NotificationCategory; permission: string; recipients?: 'permission' | 'user'; when?: (p: Record<string, unknown>) => boolean; title: (p: Record<string, unknown>) => string; body?: (p: Record<string, unknown>) => string; link?: (p: Record<string, unknown>) => string }> = {
   'device.offline': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device offline: ${String(p['deviceName'] ?? p['deviceId'] ?? '')}`, body: (p) => `No successful communication since ${String(p['lastSeenAt'] ?? 'unknown')}.`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'device.online': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device back online: ${String(p['deviceName'] ?? '')}`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'sync.failed': { category: 'ATTENDANCE', permission: 'device.sync', title: (p) => `Sync failed: ${String(p['jobType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: (p) => `/sync/${String(p['syncJobId'] ?? '')}` },
-  'sync.completed': { category: 'ATTENDANCE', permission: 'device.sync', title: (p) => `Sync completed: ${String(p['jobType'] ?? '')}`, body: (p) => `${String(p['itemsSuccess'] ?? 0)} succeeded, ${String(p['itemsFailed'] ?? 0)} failed`, link: (p) => `/sync/${String(p['syncJobId'] ?? '')}` },
+  // Only a sync somebody asked for is worth a notification. The scheduler completes a health check per device every few
+  // minutes and a poll per device per interval; routing those to every device.sync holder produced a notification (and an
+  // e-mail) each time, hundreds a day per tenant. Failures keep notifying regardless of who started the sync.
+  'sync.completed': { category: 'ATTENDANCE', permission: 'device.sync', when: (p) => p['trigger'] === 'MANUAL' && p['jobType'] !== 'DEVICE_HEALTH_CHECK', title: (p) => `Sync completed: ${String(p['jobType'] ?? '')}`, body: (p) => `${String(p['itemsSuccess'] ?? 0)} succeeded, ${String(p['itemsFailed'] ?? 0)} failed`, link: (p) => `/sync/${String(p['syncJobId'] ?? '')}` },
   'approval.pending': { category: 'APPROVAL', permission: 'attendance.approve', title: () => 'Correction awaiting your approval', link: () => '/approvals' },
   'attendance.correction_approved': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction approved', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
   'attendance.correction_rejected': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction rejected', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
@@ -48,7 +54,7 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
   for (const row of rows.rows) {
     try {
       const route = ROUTING[row.eventType];
-      if (route && row.organizationId) {
+      if (route && row.organizationId && (route.when?.(row.payload) ?? true)) {
         notifications += await (async () => {
           // recipients: active members whose role holds the permission (+ specific user in payload.userId)
           const recipients = route.recipients === 'user'

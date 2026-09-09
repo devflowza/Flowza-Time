@@ -56,6 +56,24 @@ describe('outbox relay', () => {
     expect(d.sent).toBe(1);
     expect(h.emails[0]!.to).toBe('owner@t.local');
   });
+
+  it('notifies a completed sync only when somebody asked for it — never the scheduler\'s health checks and polls', async () => {
+    const a = h.tdb.adminDb;
+    const manual = '22222222-2222-4222-a222-222222222222';
+    await a.insertInto('domainEvents').values([
+      { organizationId: ORG, eventType: 'sync.completed', aggregateType: 'sync_job', aggregateId: '33333333-3333-4333-a333-333333333333', payload: JSON.stringify({ jobType: 'DEVICE_HEALTH_CHECK', trigger: 'SCHEDULED', status: 'SUCCESS', itemsSuccess: 1, itemsFailed: 0, syncJobId: '33333333-3333-4333-a333-333333333333' }) },
+      { organizationId: ORG, eventType: 'sync.completed', aggregateType: 'sync_job', aggregateId: '44444444-4444-4444-a444-444444444444', payload: JSON.stringify({ jobType: 'PULL_ATTENDANCE', trigger: 'SCHEDULED', status: 'SUCCESS', itemsSuccess: 1, itemsFailed: 0, syncJobId: '44444444-4444-4444-a444-444444444444' }) },
+      { organizationId: ORG, eventType: 'sync.completed', aggregateType: 'sync_job', aggregateId: manual, payload: JSON.stringify({ jobType: 'PULL_ATTENDANCE', trigger: 'MANUAL', status: 'SUCCESS', itemsSuccess: 1, itemsFailed: 0, syncJobId: manual }) },
+    ]).execute();
+    const res = await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
+    expect(res.relayed).toBe(3);
+    // all three events still reach the realtime channel; only the manual sync becomes a notification
+    const completed = await a.selectFrom('notifications').select(['userId', 'data']).where('type', '=', 'sync.completed').execute();
+    expect(completed).toHaveLength(1);
+    expect(completed[0]!.userId).toBe(OWNER);
+    expect((completed[0]!.data as { aggregateId: string }).aggregateId).toBe(manual);
+    expect(await a.selectFrom('domainEvents').select('id').where('publishedAt', 'is', null).execute()).toHaveLength(0);
+  });
 });
 
 describe('maintenance handlers', () => {
