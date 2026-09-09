@@ -48,7 +48,8 @@ export async function listDaily(deps: ApiDeps, actor: Actor, orgId: string, q: D
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const page = pageOf(q);
     const sortCol = q.sort === 'status' ? 'r.status' : q.sort === 'firstInAt' ? 'r.first_in_at' : q.sort === 'lateMinutes' ? 'r.late_minutes' : q.sort === 'workedMinutes' ? 'r.worked_minutes' : 'e.display_name';
-    const rows = (await base.select(DAILY_RECORD_COLUMNS).orderBy(sql.raw(sortCol), q.order).orderBy('r.id').limit(page.pageSize).offset(page.offset).execute()) as DailyRecordRow[];
+    // records without a punch (null first_in_at) sort after those with one, whichever direction is asked for
+    const rows = (await base.select(DAILY_RECORD_COLUMNS).orderBy(sql.raw(`${sortCol} ${q.order} nulls last`)).orderBy('r.id').limit(page.pageSize).offset(page.offset).execute()) as DailyRecordRow[];
     const totals = await base.select([(eb) => eb.fn.countAll().as('n'), 'r.status']).groupBy('r.status').execute();
     return { data: rows.map(toDailyRecordDto), total, meta: { byStatus: Object.fromEntries(totals.map((t) => [t.status, toCount(t.n)])) } };
   });

@@ -26,7 +26,9 @@ async function attendanceAgg(trx: Trx, orgId: string, from: string, to: string, 
   const keyExpr = groupBy === 'date' ? sql<string>`to_char(r.attendance_date, 'YYYY-MM-DD')` : groupBy === 'branch' ? sql<string>`r.branch_id::text` : sql<string>`r.organization_id::text`;
   const rows = await q.select([
     keyExpr.as('key'),
-    sql<string>`count(*) filter (where r.status in ('PRESENT', 'HALF_DAY'))`.as('present'),
+    // An employee who has clocked in but not yet out stays PENDING until the punch window closes (the engine cannot
+    // judge the day yet), and is present as far as the dashboard is concerned.
+    sql<string>`count(*) filter (where r.status in ('PRESENT', 'HALF_DAY') or (r.status = 'PENDING' and r.first_in_at is not null))`.as('present'),
     sql<string>`count(*) filter (where r.status = 'ABSENT')`.as('absent'),
     sql<string>`count(*) filter (where 'LATE' = any(r.flags))`.as('late'),
     sql<string>`count(*) filter (where r.status = 'LEAVE')`.as('onLeave'),

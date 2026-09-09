@@ -307,4 +307,18 @@ describe('search & dashboard', () => {
     const denied = await api.request('GET', `/orgs/${F.orgB}/dashboard/summary`, { user: F.ownerA });
     expect(denied.status).toBe(403);
   });
+
+  it('counts an employee who has clocked in but not yet out as present today', async () => {
+    // the engine leaves an open day PENDING until the punch window closes; a first IN is enough for the dashboard
+    const date = '2026-09-03';
+    await api.tdb.adminDb.insertInto('attendanceDailyRecords').values([
+      { organizationId: F.orgA, employeeId: F.empE1, attendanceDate: date, branchId: F.branchHQ, timezone: 'Asia/Muscat', engineVersion: 'test', status: 'PENDING', firstInAt: new Date(`${date}T04:05:00Z`), punchCount: 1 },
+      { organizationId: F.orgA, employeeId: F.empE2, attendanceDate: date, branchId: F.branchB2, timezone: 'Asia/Muscat', engineVersion: 'test', status: 'PENDING' },
+    ]).execute();
+    const res = await api.request('GET', `/orgs/${F.orgA}/dashboard/summary?date=${date}`, { user: F.ownerA });
+    expect(res.status).toBe(200);
+    expect(res.json.data).toMatchObject({ date, presentToday: 1, absent: 0, late: 0 });
+    const hq = (await api.request('GET', `/orgs/${F.orgA}/dashboard/branches?date=${date}`, { user: F.ownerA })).json.data.find((b: any) => b.branchId === F.branchHQ);
+    expect(hq).toMatchObject({ present: 1 });
+  });
 });
