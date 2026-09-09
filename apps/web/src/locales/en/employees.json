@@ -49,7 +49,7 @@
     "conn": { "online": "Online", "offline": "Offline", "degraded": "Degraded", "error": "Error", "unknown": "Unknown" }
   },
   "attendance": {
-    "recent": "Recent attendance", "recentHint": "Daily records for {{month}}.", "openFull": "Open attendance", "date": "Date", "status": "Status", "in": "First in", "out": "Last out", "worked": "Worked", "flags": "Flags",
+    "recent": "Recent attendance", "recentHint": "Daily records for {{month}}.", "openFull": "Open attendance", "date": "Date", "status": "Status", "worked": "Worked", "late": "Late", "overtime": "Overtime", "flags": "Flags",
     "empty": "No attendance records this month", "emptyHint": "Records appear once punches are processed.", "unavailable": "Attendance module not available", "unavailableHint": "Open the attendance page for this employee's records."
   },
   "documents": {
