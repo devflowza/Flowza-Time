@@ -213,7 +213,7 @@ begin
          case when d.offline then now() - interval '26 hours' else (((current_date - 1) + time '19:40') at time zone 'Asia/Muscat') end,
          now() - interval '3 days', case when d.offline then now() - interval '26 hours' else now() - (d.hb || ' minutes')::interval end,
          case when d.offline then 'DEVICE_OFFLINE' end, case when d.offline then 'no heartbeat for more than 30 min' end, case when d.offline then now() - interval '25 hours 30 minutes' end,
-         d.fw, d.hb - 3, 30, false, 5, encode(extensions.digest('majan-push:' || d.code, 'sha256'), 'hex'), t0, d.tags::text[], d.notes, attadmin_id, t0
+         d.fw, d.hb - 3, case when d.offline then 30 else 1440 end, false, 5, encode(extensions.digest('majan-push:' || d.code, 'sha256'), 'hex'), t0, d.tags::text[], d.notes, attadmin_id, t0
   from (values
     ('MCT-HQ-D01', 'MCT-HQ', 'HQ Main Entrance',              'SpeedFace-V5L', 'CJDE224760012', 'Ver 8.0.4.2-20250312', 2,  false, '{hq,entrance,face}',   'Main lobby, ground floor. Face + fingerprint. Installed 16 Feb 2026 by Al Madina Security Systems; comm key held by IT.'),
     ('MCT-HQ-D02', 'MCT-HQ', 'HQ Staff Entrance (Basement)',  'uFace 800',     'AEKW192260345', 'Ver 6.60 Jun 12 2024',  4,  false, '{hq,basement,staff}',  'Basement car-park entrance used by staff arriving by car. Fingerprint + card.'),
