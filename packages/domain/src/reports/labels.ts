@@ -17,6 +17,7 @@ const en = {
   'report.leave_report.title': 'Staff {{leaveType}} Report',
   'report.missing_punch_report.title': 'Missed Punch Report',
   'report.employee_directory.title': 'Employees Report',
+  'report.employee_directory.inactiveTitle': 'Inactive Employees Report',
   'report.audit_report.title': 'Audit Trail Report',
 
   'period.fromTo': 'From {{from}} To {{to}}',
@@ -121,6 +122,7 @@ const ar: Record<ReportLabelKey, string> = {
   'report.leave_report.title': 'تقرير {{leaveType}} للموظفين',
   'report.missing_punch_report.title': 'تقرير البصمات الناقصة',
   'report.employee_directory.title': 'تقرير الموظفين',
+  'report.employee_directory.inactiveTitle': 'تقرير الموظفين غير النشطين',
   'report.audit_report.title': 'تقرير سجل التعديلات',
 
   'period.fromTo': 'من {{from}} إلى {{to}}',
