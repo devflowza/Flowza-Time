@@ -6,6 +6,12 @@ export const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, (c) => ({
 const TONE_COLOUR: Record<CellTone, string> = { default: '#111', present: '#111', off: '#1d4ed8', leave: '#15803d', absent: '#b91c1c', holiday: '#6d28d9', muted: '#6b7280', warning: '#b45309', danger: '#b91c1c' };
 
 /**
+ * Print margins in millimetres. Chromium lets an @page margin override the margin passed to printToPDF, so the
+ * stylesheet and the render call must name the same values; the footer template is drawn inside the bottom one.
+ */
+export const PAGE_MARGIN_MM = { top: 12, right: 12, bottom: 16, left: 12 };
+
+/**
  * The print stylesheet the samples describe: company and title centred, a rule under the header, table headings that
  * repeat on every page, group headings as bars, colour-coded codes, a legend and footnotes at the end. Fonts name the
  * families the reports image installs (Noto Sans + Noto Sans Arabic) with system fallbacks.
@@ -46,7 +52,7 @@ const CSS = `
   .notes { font-size: 7pt; color: #444; margin-top: 4px; }
   .end { text-align: center; font-weight: 700; margin-top: 10px; border-top: 1px solid #b91c1c; border-bottom: 1px solid #b91c1c; padding: 3px; }
   .end + .end-title { text-align: center; font-weight: 700; margin-top: 4px; }
-  @page { margin: 0; }
+  @page { margin: ${PAGE_MARGIN_MM.top}mm ${PAGE_MARGIN_MM.right}mm ${PAGE_MARGIN_MM.bottom}mm ${PAGE_MARGIN_MM.left}mm; }
 `;
 
 const cls = (parts: Array<string | false | undefined | null>): string => { const s = parts.filter(Boolean).join(' '); return s ? ` class="${s}"` : ''; };
@@ -106,5 +112,5 @@ export function footerTemplate(doc: ReportDocument): string {
 }
 
 export async function renderPdf(doc: ReportDocument, pdf: PdfRenderer): Promise<Buffer> {
-  return pdf.render(renderHtml(doc), { landscape: doc.orientation === 'landscape', footerHtml: footerTemplate(doc), marginMm: { top: 12, right: 12, bottom: 16, left: 12 } });
+  return pdf.render(renderHtml(doc), { landscape: doc.orientation === 'landscape', footerHtml: footerTemplate(doc), marginMm: PAGE_MARGIN_MM });
 }
