@@ -68,6 +68,8 @@ beforeAll(async () => {
     rec(E3, { departmentId: DEPT_ELBEIT, status: 'PRESENT', flags: [], firstInAt: at('08:39'), lastOutAt: at('18:09'), workedMinutes: 510, punchCount: 2, trace: JSON.stringify({ punches: [punch('08:39', 'IN'), punch('18:09', 'OUT')] }) }),
     rec(E4, { departmentId: DEPT_ELBEIT, status: 'LEAVE', flags: [], firstInAt: null, lastOutAt: null, workedMinutes: 0, punchCount: 0 }),
     rec(E5, { departmentId: null, branchId: BRANCH_B, status: 'ABSENT', flags: [], firstInAt: null, lastOutAt: null, workedMinutes: 0, punchCount: 0 }),
+    // a range recalculation writes a record for everyone it touches; E6 left in June, so this one must not print
+    rec(E6, { status: 'EXITED', flags: [], firstInAt: null, lastOutAt: null, workedMinutes: 0, punchCount: 0, scheduledMinutes: 0 }),
   ]).execute();
 });
 afterAll(async () => { await h?.close(); });
@@ -80,7 +82,7 @@ describe('GENERATE_REPORT · daily_attendance', () => {
     const r = await row(id);
     expect(r.status).toBe('COMPLETED');
     expect(r.filePath).toBe(`${ORG}/${id}.csv`);
-    expect(r.rowCount).toBe(6); // E1 one row, E2 two rows, E3, E4, E5
+    expect(r.rowCount).toBe(6); // E1 one row, E2 two rows, E3, E4, E5 — never E6, whose record says EXITED
     expect(Number(r.fileSizeBytes)).toBeGreaterThan(100);
     expect(r.expiresAt!.getTime() - NOW.getTime()).toBe(7 * 86_400_000);
     const csv = fileText(r.filePath!);
@@ -95,6 +97,7 @@ describe('GENERATE_REPORT · daily_attendance', () => {
       'EL BEIT,2192,Masoom,,AL,,,,,,,,',
       'N/A,2328,Chrishantha Rohitha,,AB,,,,,,,,',
     ]);
+    expect(csv).not.toContain('Left Already');
     const ready = await h.tdb.adminDb.selectFrom('domainEvents').selectAll().where('eventType', '=', 'report.ready').execute();
     expect(ready).toHaveLength(1);
     expect(ready[0]!.payload).toMatchObject({ reportId: id, reportType: 'daily_attendance', userId: OWNER, rowCount: 6 });
