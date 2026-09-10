@@ -1,3 +1,4 @@
+import { Suspense, lazy } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
@@ -16,7 +17,11 @@ import { DocumentsTab } from '../components/profile/documents-tab';
 import { DangerZone } from '../components/profile/danger-zone';
 import { toastJobQueued } from '../job-toast';
 
-const TABS = ['overview', 'history', 'devices', 'attendance', 'documents', 'danger'] as const;
+// The activity view is the only part of the profile that charts, and Recharts is a 118 kB (gzipped) vendor chunk:
+// loading it lazily keeps it off every other visit to a profile.
+const ActivityTab = lazy(() => import('../components/profile/activity-tab').then((m) => ({ default: m.ActivityTab })));
+
+const TABS = ['overview', 'history', 'devices', 'attendance', 'activity', 'documents', 'danger'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function EmployeeProfilePage() {
@@ -29,7 +34,7 @@ export default function EmployeeProfilePage() {
   const q = useEmployee(id);
   const { bulk } = useEmployeeMutations();
   const e = q.data;
-  const tabs = TABS.filter((tb) => (tb === 'documents' ? can('employee.view_sensitive') : tb === 'danger' ? can('employee.delete') : true));
+  const tabs = TABS.filter((tb) => (tb === 'documents' ? can('employee.view_sensitive') : tb === 'danger' ? can('employee.delete') : tb === 'activity' ? can('attendance.view') : true));
 
   return (
     <div className="page-container">
@@ -60,6 +65,7 @@ export default function EmployeeProfilePage() {
               <TabsContent value="history">{tab === 'history' ? <HistoryTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="devices">{tab === 'devices' ? <DevicesTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="attendance">{tab === 'attendance' ? <AttendanceTab employeeId={e.id} /> : null}</TabsContent>
+              <TabsContent value="activity">{tab === 'activity' ? <Suspense fallback={<Skeleton className="h-96 w-full" />}><ActivityTab employeeId={e.id} /></Suspense> : null}</TabsContent>
               <TabsContent value="documents">{tab === 'documents' ? <DocumentsTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="danger">{tab === 'danger' ? <DangerZone employee={e} /> : null}</TabsContent>
             </Tabs>

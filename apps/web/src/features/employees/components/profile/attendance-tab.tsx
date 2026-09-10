@@ -9,8 +9,7 @@ import { fmtDate, fmtMinutes, todayIso } from '@/lib/format';
 import { useOrgId, useOrgTimezone } from '@/features/me/use-me';
 import type { MonthlyRow } from '@/features/attendance/types';
 import { recentDays } from './recent-days';
-
-const STATUS_TONE: Record<string, 'success' | 'danger' | 'info' | 'neutral' | 'warning'> = { PRESENT: 'success', ABSENT: 'danger', LEAVE: 'info', HOLIDAY: 'neutral', WEEKLY_OFF: 'neutral', HALF_DAY: 'warning', MISSING_PUNCH: 'warning', PENDING: 'neutral', NOT_JOINED: 'neutral', EXITED: 'neutral' };
+import { STATUS_TONE } from './activity-status';
 
 /**
  * Compact recent attendance. The attendance module owns `/attendance`; this tab reads the monthly endpoint for the

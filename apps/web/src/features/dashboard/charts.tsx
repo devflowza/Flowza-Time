@@ -1,5 +1,5 @@
 import { useId } from 'react';
-import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from 'recharts';
+import { Area, AreaChart, Bar, BarChart, CartesianGrid, Cell, Pie, PieChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis, type TooltipContentProps } from 'recharts';
 import { cn } from '@/lib/utils';
 import { fmtNumber } from '@/lib/format';
 
@@ -13,7 +13,7 @@ export interface Series { key: string; label: string; color: string }
 
 const axisTick = { fontSize: 11, fill: 'var(--color-muted-foreground)' } as const;
 
-function SeriesTooltip({ active, payload, label, series, totalLabel }: Partial<TooltipContentProps<number, string>> & { series: Series[]; totalLabel?: string }) {
+function SeriesTooltip({ active, payload, label, series, totalLabel, format = fmtNumber }: Partial<TooltipContentProps<number, string>> & { series: Series[]; totalLabel?: string; format?: (value: number) => string }) {
   if (!active || !payload?.length) return null;
   const byKey = new Map(payload.map((p) => [String(p.dataKey), p]));
   const total = payload.reduce((sum, p) => sum + Number(p.value ?? 0), 0);
@@ -26,24 +26,28 @@ function SeriesTooltip({ active, payload, label, series, totalLabel }: Partial<T
         return (
           <div key={s.key} className="flex items-center justify-between gap-4 py-0.5">
             <span className="inline-flex items-center gap-1.5 text-muted-foreground"><span className="size-2 rounded-full" style={{ background: s.color }} aria-hidden />{s.label}</span>
-            <span className="tnum font-medium">{fmtNumber(Number(p.value ?? 0))}</span>
+            <span className="tnum font-medium">{format(Number(p.value ?? 0))}</span>
           </div>
         );
       })}
-      {totalLabel ? <div className="mt-1 flex items-center justify-between gap-4 border-t pt-1"><span className="text-muted-foreground">{totalLabel}</span><span className="tnum font-semibold">{fmtNumber(total)}</span></div> : null}
+      {totalLabel ? <div className="mt-1 flex items-center justify-between gap-4 border-t pt-1"><span className="text-muted-foreground">{totalLabel}</span><span className="tnum font-semibold">{format(total)}</span></div> : null}
     </div>
   );
 }
 
-/** Stacked bars, one category per row of `data`; the last series carries the rounded top. */
-export function StackedBars({ data, series, xKey, rtl, height = 260, totalLabel }: { data: Record<string, string | number>[]; series: Series[]; xKey: string; rtl: boolean; height?: number; totalLabel?: string }) {
+/**
+ * Stacked bars, one category per row of `data`; the last series carries the rounded top. `format` renders the values in
+ * the tooltip (counts by default, hours for the activity view) and `reference` draws the dashed target line behind them.
+ */
+export function StackedBars({ data, series, xKey, rtl, height = 260, totalLabel, format, allowDecimals = false, reference }: { data: Record<string, string | number>[]; series: Series[]; xKey: string; rtl: boolean; height?: number; totalLabel?: string; format?: (value: number) => string; allowDecimals?: boolean; reference?: { value: number; label: string } }) {
   return (
     <ResponsiveContainer width="100%" height={height} initialDimension={{ width: 480, height }}>
       <BarChart data={data} margin={{ top: 8, right: 4, left: 4, bottom: 0 }} barCategoryGap="32%">
         <CartesianGrid vertical={false} stroke="var(--color-border)" strokeDasharray="3 3" />
         <XAxis dataKey={xKey} tickLine={false} axisLine={false} tick={axisTick} reversed={rtl} interval="preserveStartEnd" minTickGap={14} />
-        <YAxis tickLine={false} axisLine={false} tick={axisTick} width={32} allowDecimals={false} orientation={rtl ? 'right' : 'left'} />
-        <Tooltip cursor={{ fill: 'var(--color-muted)', opacity: 0.7 }} content={<SeriesTooltip series={series} totalLabel={totalLabel} />} />
+        <YAxis tickLine={false} axisLine={false} tick={axisTick} width={32} allowDecimals={allowDecimals} orientation={rtl ? 'right' : 'left'} />
+        <Tooltip cursor={{ fill: 'var(--color-muted)', opacity: 0.7 }} content={<SeriesTooltip series={series} totalLabel={totalLabel} format={format} />} />
+        {reference ? <ReferenceLine y={reference.value} stroke="var(--color-muted-foreground)" strokeDasharray="4 4" label={{ value: reference.label, position: rtl ? 'insideLeft' : 'insideRight', fontSize: 11, fill: 'var(--color-muted-foreground)' }} /> : null}
         {series.map((s, i) => (
           <Bar key={s.key} dataKey={s.key} name={s.label} stackId="a" fill={s.color} radius={i === series.length - 1 ? [4, 4, 0, 0] : 0} maxBarSize={28} isAnimationActive={false} />
         ))}

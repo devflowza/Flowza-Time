@@ -100,6 +100,120 @@ export const attendanceEventsQuerySchema = z.object({
   to: isoDateSchema,
 });
 
+// ---- activity (one employee's day shape over a period) ----------------------------------------------------------------
+
+/** Period the activity view covers, always a whole calendar day/week/month/year around an anchor date. */
+export const ACTIVITY_RANGES = ['day', 'week', 'month', 'year'] as const;
+export type ActivityRange = (typeof ACTIVITY_RANGES)[number];
+
+export const attendanceActivityQuerySchema = z.object({
+  employeeId: uuidSchema,
+  range: z.enum(ACTIVITY_RANGES).default('week'),
+  /** Any date inside the period; defaults to today in the employee's branch timezone. */
+  anchor: isoDateSchema.optional(),
+});
+export type AttendanceActivityQuery = z.infer<typeof attendanceActivityQuerySchema>;
+
+/** OFFICE = inside between an IN and its OUT; FIELD = away between two in-office spans (field work or a break). */
+export const attendanceActivitySegmentSchema = z.object({
+  kind: z.enum(['OFFICE', 'FIELD']),
+  startAt: isoDateTimeSchema,
+  endAt: isoDateTimeSchema.nullable(),
+  minutes: z.number().int(),
+});
+export type AttendanceActivitySegmentDto = z.infer<typeof attendanceActivitySegmentSchema>;
+
+export const attendanceActivityPunchSchema = z.object({
+  at: isoDateTimeSchema,
+  role: z.string(),
+  eventId: uuidSchema.nullable(),
+});
+export type AttendanceActivityPunchDto = z.infer<typeof attendanceActivityPunchSchema>;
+
+/**
+ * One recorded day. `officeMinutes` is the engine's worked minutes (the productive time) and `fieldMinutes` is the rest
+ * of the span between the first and the last punch, so the two always add up to `spanMinutes`.
+ */
+export const attendanceActivityDaySchema = z.object({
+  date: isoDateSchema,
+  recordId: uuidSchema,
+  status: z.enum(ATTENDANCE_STATUSES),
+  shiftName: z.string().nullable(),
+  expectedStartAt: isoDateTimeSchema.nullable(),
+  expectedEndAt: isoDateTimeSchema.nullable(),
+  scheduledMinutes: z.number().int(),
+  firstInAt: isoDateTimeSchema.nullable(),
+  lastOutAt: isoDateTimeSchema.nullable(),
+  spanMinutes: z.number().int(),
+  officeMinutes: z.number().int(),
+  fieldMinutes: z.number().int(),
+  breakMinutes: z.number().int(),
+  overtimeMinutes: z.number().int(),
+  overtimeCategory: z.enum(['REGULAR', 'WEEKLY_OFF', 'HOLIDAY']).nullable(),
+  lateMinutes: z.number().int(),
+  earlyDepartureMinutes: z.number().int(),
+  punchCount: z.number().int(),
+  flags: z.array(z.string()),
+  segments: z.array(attendanceActivitySegmentSchema),
+  punches: z.array(attendanceActivityPunchSchema),
+});
+export type AttendanceActivityDayDto = z.infer<typeof attendanceActivityDaySchema>;
+
+/** A calendar month of the year range, where per-day detail would be too much to chart. */
+export const attendanceActivityMonthSchema = z.object({
+  month: z.string().regex(/^\d{4}-\d{2}$/),
+  recordedDays: z.number().int(),
+  presentDays: z.number(),
+  absentDays: z.number(),
+  leaveDays: z.number(),
+  lateDays: z.number(),
+  scheduledMinutes: z.number().int(),
+  officeMinutes: z.number().int(),
+  fieldMinutes: z.number().int(),
+  overtimeMinutes: z.number().int(),
+});
+export type AttendanceActivityMonthDto = z.infer<typeof attendanceActivityMonthSchema>;
+
+export const attendanceActivityTotalsSchema = z.object({
+  recordedDays: z.number().int(),
+  workingDays: z.number(),
+  presentDays: z.number(),
+  absentDays: z.number(),
+  leaveDays: z.number(),
+  holidayDays: z.number(),
+  weeklyOffDays: z.number(),
+  halfDays: z.number(),
+  lateDays: z.number(),
+  missingPunchDays: z.number(),
+  scheduledMinutes: z.number().int(),
+  spanMinutes: z.number().int(),
+  /** Productive (in-office) minutes over the period, and the part of them that is overtime. */
+  officeMinutes: z.number().int(),
+  fieldMinutes: z.number().int(),
+  overtimeMinutes: z.number().int(),
+  regularMinutes: z.number().int(),
+  lateMinutes: z.number().int(),
+  earlyDepartureMinutes: z.number().int(),
+  /** Office minutes per day that recorded any, so a period with days off is not averaged down. */
+  averageOfficeMinutes: z.number().int(),
+});
+export type AttendanceActivityTotalsDto = z.infer<typeof attendanceActivityTotalsSchema>;
+
+export const attendanceActivityDtoSchema = z.object({
+  employeeId: uuidSchema,
+  employeeNumber: z.string(),
+  employeeName: z.string(),
+  range: z.enum(ACTIVITY_RANGES),
+  from: isoDateSchema,
+  to: isoDateSchema,
+  timezone: z.string(),
+  /** Recorded days only, oldest first; empty for the year range, which answers with `months` instead. */
+  days: z.array(attendanceActivityDaySchema),
+  months: z.array(attendanceActivityMonthSchema),
+  totals: attendanceActivityTotalsSchema,
+});
+export type AttendanceActivityDto = z.infer<typeof attendanceActivityDtoSchema>;
+
 export const createCorrectionSchema = z.object({
   employeeId: uuidSchema,
   attendanceDate: isoDateSchema,

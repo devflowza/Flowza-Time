@@ -1,9 +1,9 @@
 import { sql } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { DateTime } from 'luxon';
-import { SYSTEM_ROLE_IDS, type ApprovalRequestDto, type ApprovalStepDto, type ApprovalWorkflowInput, type AttendanceDailyRecordDto, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
+import { SYSTEM_ROLE_IDS, type ActivityRange, type ApprovalRequestDto, type ApprovalStepDto, type ApprovalWorkflowInput, type AttendanceActivityDayDto, type AttendanceActivityDto, type AttendanceActivityMonthDto, type AttendanceActivityQuery, type AttendanceDailyRecordDto, type AttendanceStatus, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
-import type { MembershipGrant } from '@flowza/domain';
+import { activitySegments, summarisePeriod, weekRange, type MembershipGrant, type PeriodRecordLike } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
 import type { ApiDeps } from '../../deps.js';
@@ -147,6 +147,117 @@ export async function listEvents(deps: ApiDeps, actor: Actor, orgId: string, q: 
     const rows = await trx.selectFrom('attendanceEvents as ev').leftJoin('devices as d', 'd.id', 'ev.deviceId').select(['ev.id', 'ev.punchedAt', 'ev.eventType', 'ev.source', 'ev.verificationMethod', 'ev.deviceId', 'd.name as deviceName', 'ev.voidedAt', 'ev.correctionId', 'ev.note'])
       .where('ev.organizationId', '=', orgId).where('ev.employeeId', '=', q.employeeId).where('ev.punchedAt', '>=', start).where('ev.punchedAt', '<=', end).orderBy('ev.punchedAt').limit(5000).execute();
     return rows.map((e) => ({ id: e.id, punchedAt: isoDateTime(e.punchedAt), localDate: DateTime.fromJSDate(e.punchedAt).setZone(tz).toISODate(), eventType: e.eventType, source: e.source, verificationMethod: e.verificationMethod, deviceId: e.deviceId, deviceName: e.deviceName, voidedAt: isoDateTimeOrNull(e.voidedAt), correctionId: e.correctionId, note: e.note }));
+  });
+}
+
+// ---- activity ----------------------------------------------------------------------------------------------------------
+
+/** Whole calendar period around `anchor`. The week honours the tenant's first day of the week (§ report samples). */
+function activityPeriod(range: ActivityRange, anchor: string, firstDayOfWeek: number): { from: string; to: string } {
+  const d = DateTime.fromISO(anchor, { zone: 'utc' });
+  if (!d.isValid) throw errors.validation('Invalid anchor date.');
+  switch (range) {
+    case 'day': return { from: anchor, to: anchor };
+    case 'week': { const w = weekRange(anchor, firstDayOfWeek); return { from: w.from, to: w.to }; }
+    case 'month': return { from: d.startOf('month').toISODate()!, to: d.endOf('month').toISODate()! };
+    case 'year': return { from: d.startOf('year').toISODate()!, to: d.endOf('year').toISODate()! };
+    default: { const exhaustive: never = range; return exhaustive; }
+  }
+}
+
+interface ActivityRow {
+  id: string; attendanceDate: Date | string; status: AttendanceStatus; shiftName: string | null; flags: string[]; expectedStartAt: Date | null; expectedEndAt: Date | null; scheduledMinutes: number;
+  firstInAt: Date | null; lastOutAt: Date | null; workedMinutes: number; breakMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; overtimeMinutes: number; overtimeCategory: string | null; punchCount: number; tracePunches: unknown;
+}
+
+/** `summarisePeriod` switches exhaustively on the category, so an unexpected value from the column has to become null. */
+function overtimeCategoryOf(value: string | null): AttendanceActivityDayDto['overtimeCategory'] {
+  return value === 'REGULAR' || value === 'WEEKLY_OFF' || value === 'HOLIDAY' ? value : null;
+}
+
+function toActivityDay(r: ActivityRow, withDetail: boolean): AttendanceActivityDayDto {
+  const firstInAt = isoDateTimeOrNull(r.firstInAt);
+  const lastOutAt = isoDateTimeOrNull(r.lastOutAt);
+  // The span between the first and the last punch splits into the engine's worked minutes and the rest: the time the
+  // employee spent away from the office in the middle of the day (field work, a client visit or an unpaid break).
+  const spanMinutes = firstInAt && lastOutAt ? Math.max(0, Math.round((Date.parse(lastOutAt) - Date.parse(firstInAt)) / 60_000)) : 0;
+  const officeMinutes = Math.max(0, r.workedMinutes);
+  const punches = withDetail ? jsonArray<{ punchedAt?: string; role?: string; eventId?: string }>(r.tracePunches) : [];
+  return {
+    date: isoDate(r.attendanceDate), recordId: r.id, status: r.status, shiftName: r.shiftName,
+    expectedStartAt: isoDateTimeOrNull(r.expectedStartAt), expectedEndAt: isoDateTimeOrNull(r.expectedEndAt), scheduledMinutes: r.scheduledMinutes,
+    firstInAt, lastOutAt, spanMinutes, officeMinutes, fieldMinutes: Math.max(0, spanMinutes - officeMinutes),
+    breakMinutes: r.breakMinutes, overtimeMinutes: r.overtimeMinutes, overtimeCategory: overtimeCategoryOf(r.overtimeCategory), lateMinutes: r.lateMinutes, earlyDepartureMinutes: r.earlyDepartureMinutes,
+    punchCount: r.punchCount, flags: jsonArray<string>(r.flags),
+    segments: withDetail ? activitySegments(punches, { firstInAt, lastOutAt }) : [],
+    punches: punches.filter((p) => typeof p.punchedAt === 'string').map((p) => ({ at: p.punchedAt!, role: typeof p.role === 'string' ? p.role : 'PUNCH', eventId: typeof p.eventId === 'string' ? p.eventId : null })),
+  };
+}
+
+function monthBuckets(days: readonly AttendanceActivityDayDto[]): AttendanceActivityMonthDto[] {
+  const by = new Map<string, AttendanceActivityMonthDto>();
+  for (const d of days) {
+    const month = d.date.slice(0, 7);
+    const b = by.get(month) ?? { month, recordedDays: 0, presentDays: 0, absentDays: 0, leaveDays: 0, lateDays: 0, scheduledMinutes: 0, officeMinutes: 0, fieldMinutes: 0, overtimeMinutes: 0 };
+    b.recordedDays += 1;
+    if (d.status === 'PRESENT' || d.status === 'MISSING_PUNCH') b.presentDays += 1;
+    else if (d.status === 'HALF_DAY') { b.presentDays += 0.5; b.absentDays += 0.5; }
+    else if (d.status === 'ABSENT') b.absentDays += 1;
+    else if (d.status === 'LEAVE') b.leaveDays += 1;
+    if (d.flags.includes('LATE')) b.lateDays += 1;
+    b.scheduledMinutes += d.scheduledMinutes; b.officeMinutes += d.officeMinutes; b.fieldMinutes += d.fieldMinutes; b.overtimeMinutes += d.overtimeMinutes;
+    by.set(month, b);
+  }
+  return [...by.values()].sort((a, b) => a.month.localeCompare(b.month));
+}
+
+/**
+ * One employee's day shape over a calendar period: when they were inside, when they were out between the first and the
+ * last punch, and the productive totals. Segments and punches come from the engine's own trace, so the picture and the
+ * numbers are the same interpretation; the year range answers with month buckets instead (365 timelines chart nothing).
+ */
+export async function listActivity(deps: ApiDeps, actor: Actor, orgId: string, q: AttendanceActivityQuery): Promise<AttendanceActivityDto> {
+  const { grant, ownOnly } = viewGrant(actor, orgId);
+  if (ownOnly && q.employeeId !== ownOnly) throw errors.forbidden('You may only view your own attendance.');
+  return runUser(deps.db, actor, async (trx) => {
+    const emp = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'displayName', 'branchId']).where('organizationId', '=', orgId).where('id', '=', q.employeeId).executeTakeFirst();
+    if (!emp) throw errors.notFound('Employee', q.employeeId);
+    requireBranchAccess(grant, emp.branchId);
+    const [branch, settings] = await Promise.all([
+      trx.selectFrom('branches').select('timezone').where('id', '=', emp.branchId).executeTakeFirst(),
+      trx.selectFrom('organizationSettings').select('general').where('organizationId', '=', orgId).executeTakeFirst(),
+    ]);
+    const timezone = branch?.timezone ?? 'UTC';
+    const general = jsonObject(settings?.general);
+    const firstDayOfWeek = typeof general.firstDayOfWeek === 'number' ? general.firstDayOfWeek : 0;
+    const anchor = q.anchor ?? DateTime.now().setZone(timezone).toISODate()!;
+    const { from, to } = activityPeriod(q.range, anchor, firstDayOfWeek);
+    const withDetail = q.range !== 'year';
+
+    // `trace -> 'punches'` rather than the whole trace: the calculation steps are the bulk of the column and the
+    // activity view never shows them, which keeps a year of records to a few hundred KB.
+    const rows = (await trx.selectFrom('attendanceDailyRecords as r').leftJoin('shifts as s', 's.id', 'r.shiftId')
+      .select(['r.id', 'r.attendanceDate', 'r.status', 's.name as shiftName', 'r.flags', 'r.expectedStartAt', 'r.expectedEndAt', 'r.scheduledMinutes', 'r.firstInAt', 'r.lastOutAt', 'r.workedMinutes', 'r.breakMinutes', 'r.lateMinutes', 'r.earlyDepartureMinutes', 'r.overtimeMinutes', 'r.overtimeCategory', 'r.punchCount', sql<unknown>`r.trace -> 'punches'`.as('tracePunches')])
+      .where('r.organizationId', '=', orgId).where('r.employeeId', '=', q.employeeId).where('r.attendanceDate', '>=', dv(from)).where('r.attendanceDate', '<=', dv(to))
+      .orderBy('r.attendanceDate').execute()) as ActivityRow[];
+
+    const days = rows.map((r) => toActivityDay(r, withDetail));
+    const period = summarisePeriod(days.map((d): PeriodRecordLike => ({ attendanceDate: d.date, status: d.status, flags: d.flags as PeriodRecordLike['flags'], workedMinutes: d.officeMinutes, overtimeMinutes: d.overtimeMinutes, overtimeCategory: d.overtimeCategory, lateMinutes: d.lateMinutes, earlyDepartureMinutes: d.earlyDepartureMinutes })), { periodStart: from, periodEnd: to });
+    const sum = (pick: (d: AttendanceActivityDayDto) => number): number => days.reduce((n, d) => n + pick(d), 0);
+    const officeMinutes = sum((d) => d.officeMinutes);
+    const workedDays = days.filter((d) => d.officeMinutes > 0).length;
+    return {
+      employeeId: emp.id, employeeNumber: emp.employeeNumber, employeeName: emp.displayName, range: q.range, from, to, timezone,
+      days: withDetail ? days : [],
+      months: withDetail ? [] : monthBuckets(days),
+      totals: {
+        recordedDays: days.length, workingDays: period.workingDays, presentDays: period.presentDays, absentDays: period.absentDays, leaveDays: period.leaveDays, holidayDays: period.holidayDays,
+        weeklyOffDays: period.weeklyOffDays, halfDays: period.halfDays, lateDays: period.lateDays, missingPunchDays: period.missingPunchDays,
+        scheduledMinutes: sum((d) => d.scheduledMinutes), spanMinutes: sum((d) => d.spanMinutes), officeMinutes, fieldMinutes: sum((d) => d.fieldMinutes),
+        overtimeMinutes: period.totalOvertimeMinutes, regularMinutes: period.regularMinutes, lateMinutes: period.lateMinutes, earlyDepartureMinutes: period.earlyDepartureMinutes,
+        averageOfficeMinutes: workedDays === 0 ? 0 : Math.round(officeMinutes / workedDays),
+      },
+    };
   });
 }
 

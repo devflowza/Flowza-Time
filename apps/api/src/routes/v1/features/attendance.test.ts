@@ -52,6 +52,48 @@ describe('attendance reads', () => {
     expect(bmDenied.status).toBe(404); // RLS hides the other branch's record entirely
   });
 
+  it('splits the activity period into in-office and field spans and rolls the year up into months', async () => {
+    // A day the employee left the office in the middle of it: in 04:00–06:00, out in the field until 09:00, in again
+    // until 13:00. Worked minutes and the trace agree, as the engine writes them.
+    const FIELD_DAY = '2026-08-06'; // a date no other test in this file writes to
+    await h.admin.insertInto('attendanceDailyRecords').values({
+      organizationId: f.orgId, employeeId: f.e1, attendanceDate: FIELD_DAY, branchId: f.branchA, timezone: 'Asia/Muscat', engineVersion: 'test', status: 'PRESENT', flags: [],
+      scheduledMinutes: 480, workedMinutes: 360, breakMinutes: 180, punchCount: 4, firstInAt: new Date(`${FIELD_DAY}T04:00:00Z`), lastOutAt: new Date(`${FIELD_DAY}T13:00:00Z`),
+      trace: JSON.stringify({ punches: [
+        { punchedAt: `${FIELD_DAY}T04:00:00.000Z`, role: 'IN' }, { punchedAt: `${FIELD_DAY}T06:00:00.000Z`, role: 'OUT' },
+        { punchedAt: `${FIELD_DAY}T09:00:00.000Z`, role: 'IN' }, { punchedAt: `${FIELD_DAY}T13:00:00.000Z`, role: 'OUT' },
+      ] }),
+    }).execute();
+
+    const week = await h.request('GET', `${base()}/attendance/activity?employeeId=${f.e1}&range=week&anchor=${FIELD_DAY}`, { token: f.hrAdmin });
+    expect(week.status).toBe(200);
+    expect([week.body.data.from, week.body.data.to]).toEqual(['2026-08-02', '2026-08-08']); // firstDayOfWeek defaults to Sunday
+    const day = week.body.data.days.find((d: { date: string }) => d.date === FIELD_DAY);
+    expect(day).toMatchObject({ spanMinutes: 540, officeMinutes: 360, fieldMinutes: 180, punchCount: 4, status: 'PRESENT' });
+    expect(day.segments.map((s: { kind: string; minutes: number }) => `${s.kind}:${s.minutes}`)).toEqual(['OFFICE:120', 'FIELD:180', 'OFFICE:240']);
+    expect(week.body.data.totals).toMatchObject({ recordedDays: 2, presentDays: 2, officeMinutes: 840, fieldMinutes: 180, averageOfficeMinutes: 420 });
+
+    const oneDay = await h.request('GET', `${base()}/attendance/activity?employeeId=${f.e1}&range=day&anchor=${FIELD_DAY}`, { token: f.hrAdmin });
+    expect(oneDay.body.data.days).toHaveLength(1);
+    expect(oneDay.body.data.days[0].punches).toHaveLength(4);
+
+    // A year is answered with month buckets: 365 day timelines chart nothing and cost a payload.
+    const year = await h.request('GET', `${base()}/attendance/activity?employeeId=${f.e1}&range=year&anchor=${FIELD_DAY}`, { token: f.hrAdmin });
+    expect([year.body.data.from, year.body.data.to]).toEqual(['2026-01-01', '2026-12-31']);
+    expect(year.body.data.days).toEqual([]);
+    expect(year.body.data.months).toEqual([{ month: '2026-08', recordedDays: 2, presentDays: 2, absentDays: 0, leaveDays: 0, lateDays: 1, scheduledMinutes: 480, officeMinutes: 840, fieldMinutes: 180, overtimeMinutes: 0 }]);
+
+    const own = await h.request('GET', `${base()}/attendance/activity?employeeId=${f.e1}&range=week&anchor=${FIELD_DAY}`, { token: f.employeeUser });
+    expect(own.status).toBe(200);
+    const other = await h.request('GET', `${base()}/attendance/activity?employeeId=${f.e2}&range=week&anchor=${FIELD_DAY}`, { token: f.employeeUser });
+    expect(other.status).toBe(403);
+    const outsider = await h.request('GET', `${base()}/attendance/activity?employeeId=${f.e1}&range=week&anchor=${FIELD_DAY}`, { token: f.outsider });
+    expect(outsider.status).toBe(403);
+    // Another branch's employee is either hidden by RLS (404) or refused by the branch check (403); never readable.
+    const bm = await h.request('GET', `${base()}/attendance/activity?employeeId=${f.e1}&range=week&anchor=${FIELD_DAY}`, { token: f.branchManagerB });
+    expect([403, 404]).toContain(bm.status);
+  });
+
   it('lists raw transactions with cursor pagination and re-queues unmatched rows', async () => {
     await sql`insert into public.attendance_raw_transactions (organization_id, device_id, branch_id, provider_key, device_employee_id, punched_at, dedupe_hash, source, processing_status)
       values (${f.orgId}::uuid, ${device}::uuid, ${f.branchA}::uuid, 'mock', 'GHOST-1', '2026-08-03T05:00:00Z', 'h1', 'POLL', 'unmatched'), (${f.orgId}::uuid, ${device}::uuid, ${f.branchA}::uuid, 'mock', '1001', '2026-08-03T05:01:00Z', 'h2', 'POLL', 'normalized')`.execute(h.admin);
