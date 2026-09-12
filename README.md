@@ -27,6 +27,7 @@ Device / Vendor cloud  →  Provider adapter  →  Sync engine (fair queue)  →
 | [`docs/design.md`](docs/design.md) | Design system: tokens, RTL rules, density, accessibility floor, multi-step flows |
 | [`docs/development.md`](docs/development.md) · [`docs/testing.md`](docs/testing.md) · [`docs/deployment.md`](docs/deployment.md) · [`docs/go-live.md`](docs/go-live.md) · [`docs/troubleshooting.md`](docs/troubleshooting.md) | Operate the system |
 | [`docs/risks.md`](docs/risks.md) | Risks, compliance notes, challenged assumptions |
+| [`docs/marketing/website-content.md`](docs/marketing/website-content.md) | Public website copy, with a claim ledger tying every marketing claim to what the code actually does |
 | [`AGENTS.md`](AGENTS.md) | Engineering rules for contributors (human or AI) |
 
 ## Stack
