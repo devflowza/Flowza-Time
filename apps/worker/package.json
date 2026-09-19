@@ -16,16 +16,16 @@
     "@flowza/device-providers": "workspace:*",
     "@flowza/domain": "workspace:*",
     "@flowza/shared": "workspace:*",
-    "@supabase/supabase-js": "^2.115.0",
+    "@supabase/supabase-js": "^2.116.0",
     "exceljs": "^4.4.0",
-    "kysely": "^0.29.5",
+    "kysely": "^0.29.6",
     "luxon": "^3.7.2",
     "papaparse": "^5.7.0",
     "pg": "^8.23.0",
     "pino": "^10.3.1",
     "playwright-core": "1.63.0",
-    "resend": "^6.26.0",
-    "zod": "^4.5.4"
+    "resend": "^6.28.1",
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/luxon": "^3.7.5",
