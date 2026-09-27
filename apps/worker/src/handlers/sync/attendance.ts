@@ -8,9 +8,10 @@ import type { JobContext } from '../types.js';
 import { checkCircuit } from './circuit.js';
 import { capabilitiesOf, circuitOpenError, handleProviderFailure, handleProviderSuccess, loadDeviceOrThrow, requireCapability } from './common.js';
 import { buildProviderContext, loadOrgSyncSettings } from './context.js';
+import { isFinanceConnector, recordFinanceFailure, recordFinancePull } from './finance-state.js';
 import { applyHealth } from './health.js';
 import { ingestRawTransactions, type IngestResult } from './ingest.js';
-import { runItem } from './items.js';
+import { runItem, toSyncError } from './items.js';
 import type { DeviceRow } from './types.js';
 
 export const DEFAULT_MAX_PAGES = 20;
@@ -105,16 +106,21 @@ export async function pullAttendance(ctx: JobContext) {
       }
       const adaptive = await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
         const base = Math.max(1, device.syncIntervalMinutes);
-        const max = settings.adaptivePolling ? Math.max(base, settings.maxIntervalMinutes) : base;
+        // the Flowza Finance connector polls at the interval chosen in Settings → Integrations, never stretched by adaptive
+        // back-off (the page promises "every N minutes", and Finance shows the device Stale/Offline from the time of last contact)
+        const max = settings.adaptivePolling && !isFinanceConnector(device) ? Math.max(base, settings.maxIntervalMinutes) : base;
         const next = nextAdaptiveInterval({ baseIntervalMinutes: base, emptyPollCount: device.emptyPollCount, maxIntervalMinutes: max }, totals.inserted > 0);
         const intervalMinutes = hasMore ? 1 : next.intervalMinutes; // more pages waiting → come back right away
         const at = deps.now();
         await trx.updateTable('devices').set({ nextAttendanceSyncAt: new Date(at.getTime() + intervalMinutes * 60_000), adaptiveIntervalMinutes: next.intervalMinutes, emptyPollCount: next.state.emptyPollCount }).where('id', '=', device.id).execute();
         await handleProviderSuccess(trx, device, built.accountKey);
+        // Flowza Finance connector: the pull side of finance_sync_state (closes a failure streak)
+        if (isFinanceConnector(device)) await recordFinancePull(trx, device, totals.inserted, at);
         return { intervalMinutes, emptyPollCount: next.state.emptyPollCount };
       });
       return { recordsIngested: totals.inserted, result: { pages, inserted: totals.inserted, duplicates: totals.duplicates, quarantined: totals.quarantined, held: totals.held, hasMore, cursorResets, fullResync, nextIntervalMinutes: adaptive.intervalMinutes, emptyPollCount: adaptive.emptyPollCount } };
     } catch (err) {
+      if (isFinanceConnector(device)) await recordFinanceFailure(deps, device, 'pull', toSyncError(err), ctx.job.id);
       await handleProviderFailure(ctx, device, key.accountKey, err);
       if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) throw new AppError('PROVIDER_TIMEOUT', err.message, { retryable: true, cause: err });
       throw err;

@@ -132,7 +132,8 @@ export async function scheduleReconciliation(deps: WorkerDeps): Promise<{ organi
       const jobId = await withContext(deps.db, { kind: 'system', organizationId: o.organizationId }, async (trx) => {
         const settings = await loadOrgSyncSettings(trx, o.organizationId);
         if (o.ageSeconds !== null && o.ageSeconds < settings.reconciliationIntervalHours * 3_600) return null;
-        const devices = await trx.selectFrom('devices').select(['id', 'branchId']).where('organizationId', '=', o.organizationId).where('status', '=', 'active').execute();
+        // the Flowza Finance connector holds no device user list, so there is nothing to reconcile on it
+        const devices = await trx.selectFrom('devices').select(['id', 'branchId']).where('organizationId', '=', o.organizationId).where('status', '=', 'active').where('providerKey', '!=', 'flowza_finance').execute();
         if (devices.length === 0) return null;
         return (await createSyncJob(trx, deps.queue, {
           organizationId: o.organizationId, jobType: 'RECONCILIATION', trigger: 'SCHEDULED', priority: 3, scope: { scheduled: true, intervalHours: settings.reconciliationIntervalHours },

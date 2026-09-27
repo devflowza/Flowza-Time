@@ -7,6 +7,7 @@ import { addDays, event, isValidTimezone, localDateOf, timeToMinutes } from '@fl
 import { withContext, type EventSource, type RawSource, type Trx } from '@flowza/database';
 import type { HandlerRegistry, JobContext } from '../types.js';
 import { enqueueNormalizeRaw, enqueueRecompute, isoDate, loadProcessingDelaySeconds, parsePayload, uniq } from './common.js';
+import { buildFinanceIdentityResolver } from './finance-identity.js';
 
 export const NORMALIZE_BATCH_SIZE = 1000;
 export const NORMALIZE_MAX_BATCHES = 20;
@@ -110,7 +111,7 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
       .where('organizationId', '=', organizationId).where('providerKey', 'in', providerKeys).where('deviceUserId', 'in', deviceUserIds).execute(),
     trx.selectFrom('employees').select(['id', 'deviceUserId'])
       .where('organizationId', '=', organizationId).where('deviceUserId', 'in', deviceUserIds).where('deletedAt', 'is', null).execute(),
-    trx.selectFrom('devices').select(['id', 'timezone', 'branchId']).where('organizationId', '=', organizationId).where('id', 'in', deviceIds).execute(),
+    trx.selectFrom('devices').select(['id', 'timezone', 'branchId', 'providerKey', 'config']).where('organizationId', '=', organizationId).where('id', 'in', deviceIds).execute(),
     trx.selectFrom('branches').select(['id', 'timezone']).where('organizationId', '=', organizationId).execute(),
     loadNeighbourReach(trx, organizationId),
   ]);
@@ -119,9 +120,18 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
   const deviceUserMap = new Map(byDeviceUser.map((e) => [e.deviceUserId, e.id]));
   const deviceMap = new Map(devices.map((d) => [d.id, d]));
   const branchTz = new Map(branches.map((b) => [b.id, b.timezone]));
+  // Flowza Finance connector rows carry Finance's employee number (or, when Finance could not map the PIN, the producing device's
+  // PIN). They resolve on the connector's configured employee field FIRST, then fall back to the explicit device identity mappings
+  // (device state / provider identity — what reconciliation writes). They never fall through to the generic
+  // `employees.device_user_id` match: a Finance number or a foreign terminal's PIN is not one of our device user ids, and a
+  // coincidental match would attribute the punch to the wrong person silently, whereas `unmatched` is visible and fixable.
+  const finance = await buildFinanceIdentityResolver(trx, organizationId, devices, rows);
 
-  const resolveEmployee = (r: RawRow): string | null =>
-    stateMap.get(`${r.deviceId}|${r.deviceEmployeeId}`) ?? identityMap.get(`${r.providerKey}|${r.deviceEmployeeId}`) ?? deviceUserMap.get(r.deviceEmployeeId) ?? null;
+  const resolveEmployee = (r: RawRow): string | null => {
+    const mapped = (): string | undefined => stateMap.get(`${r.deviceId}|${r.deviceEmployeeId}`) ?? identityMap.get(`${r.providerKey}|${r.deviceEmployeeId}`);
+    if (finance.deviceIds.has(r.deviceId)) return finance.resolve(r.deviceId, r.deviceEmployeeId) ?? mapped() ?? null;
+    return mapped() ?? deviceUserMap.get(r.deviceEmployeeId) ?? null;
+  };
 
   const candidateIds = uniq(rows.map(resolveEmployee).filter((id): id is string => id !== null));
   const employees = candidateIds.length

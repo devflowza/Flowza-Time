@@ -81,6 +81,10 @@ insert into public.attendance_day_marks (id, organization_id, employee_id, atten
   ('0a000000-0000-0000-0000-0000000002a2', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '2026-09-01', '0a000000-0000-0000-0000-00000000000c', 'LOP', 1, 'SWEEP', 'No paid leave left'),
   ('0a000000-0000-0000-0000-0000000002a3', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '2026-09-01', '0a000000-0000-0000-0000-00000000000c', 'EXCUSED', 0, 'HR', 'Client visit'),
   ('0b000000-0000-0000-0000-0000000002a1', '0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000e1', '2026-09-01', '0b000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'Day close');
+-- Flowza Finance connector state (migration 20260928000400): one row per connector device, system-written
+insert into public.finance_sync_state (device_id, organization_id, last_pull_count, consecutive_failures) values
+  ('0a000000-0000-0000-0000-0000000000d1', '0a000000-0000-0000-0000-000000000000', 3, 0),
+  ('0b000000-0000-0000-0000-0000000000d1', '0b000000-0000-0000-0000-000000000000', 1, 2);
 commit;
 
 -- helper to assert counts
@@ -135,6 +139,12 @@ select pg_temp.assert_raises($q$ delete from public.attendance_day_marks where i
 select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoked_by = 'a0000000-0000-0000-0000-000000000001', revoke_reason = 'Wrong day' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 1, 'owner A may revoke a mark');
 select pg_temp.assert_raises($q$ update public.attendance_day_marks set revoke_reason = 'Changed my mind' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 'a revoked mark is frozen');
 select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'test') $q$, 1, 'after the revocation a new active mark of the same kind may be written');
+-- finance_sync_state: readable with device.view, never writable from a user session (no policy AND no grant → raises, not 0 rows)
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'owner A sees only own connector state');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'owner A cannot see org B connector state');
+select pg_temp.assert_raises($q$ insert into public.finance_sync_state (device_id, organization_id) values ('0a000000-0000-0000-0000-0000000000d1', '0a000000-0000-0000-0000-000000000000') $q$, 'owner A cannot insert connector state');
+select pg_temp.assert_raises($q$ update public.finance_sync_state set consecutive_failures = 0 where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot update connector state');
+select pg_temp.assert_raises($q$ delete from public.finance_sync_state where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot delete connector state');
 rollback;
 
 -- ---------- as Branch Manager A (restricted to branch A-2) ----------
@@ -156,6 +166,7 @@ select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 2, 
 select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'branch manager cannot mark a day outside the branch scope');
 select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '2026-09-02', '0a000000-0000-0000-0000-00000000000c', 'UNEXCUSED', 0, 'HR', 'test') $q$, 1, 'branch manager marks a day in own branch');
 select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 0, 'branch manager cannot revoke a mark outside the branch scope');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'connector state is organisation-level (device.view, not branch scoped)');
 rollback;
 
 -- ---------- as Employee (self-service) ----------
@@ -165,6 +176,7 @@ select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-0000000
 select pg_temp.assert_eq((select count(*) from public.employees), 1, 'employee sees only own employee row');
 select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 1, 'employee sees only own attendance');
 select pg_temp.assert_eq((select count(*) from public.devices), 0, 'employee sees no devices');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 0, 'employee sees no connector state');
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'Hacked' where id = '0a000000-0000-0000-0000-0000000000e3' $q$, 0, 'employee cannot update own master record');
 -- e2 reports to this employee, but the `employee` role holds no team key: the relationship alone opens nothing
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 1, 'employee is somebody''s manager (relationship exists)');
@@ -276,6 +288,8 @@ select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 1, 
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A day marks (cross-tenant zero)');
 select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'owner B cannot mark a day in org A');
 select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'owner B cannot revoke org A marks');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'owner B sees only own connector state');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A connector state');
 rollback;
 
 -- ---------- forged system claim from an authenticated session must NOT work ----------

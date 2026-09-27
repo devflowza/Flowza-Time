@@ -113,6 +113,17 @@ function needsToken(p: DeviceProvider): boolean {
   return p.definition.integrationType === 'DEVICE_PUSH' || p.definition.integrationType === 'VENDOR_WEBHOOK' || typeof p.handleWebhook === 'function';
 }
 
+/**
+ * The Flowza Finance connector (provider `flowza_finance`) is platform plumbing configured in Settings → Integrations behind
+ * `integration.manage`: its row, config and token are written only by the integrations service. The generic device mutations
+ * refuse it so the connector cannot be re-created, re-pointed, re-keyed or removed around that permission (reads, logs, health
+ * checks and attendance pulls keep working like for any device).
+ */
+export const CONNECTOR_PROVIDER_KEY = 'flowza_finance';
+function refuseConnector(providerKey: string): void {
+  if (providerKey === CONNECTOR_PROVIDER_KEY) throw errors.invalidState('The Flowza Finance connector is managed in Settings → Integrations.', { providerKey });
+}
+
 function getProvider(deps: ApiDeps, key: string): DeviceProvider {
   const p = deps.providers.tryGet(key);
   if (!p) throw errors.validation(`Unknown device provider "${key}".`, { issues: [{ path: 'providerKey', message: 'Unknown provider' }] });
@@ -207,7 +218,8 @@ async function insertDevice(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string
     const model = await trx.selectFrom('deviceModels').select(['id', 'providerKey']).where('id', '=', input.modelId).executeTakeFirst();
     if (!model || model.providerKey !== def.key) throw errors.validation('Model does not belong to this provider.', { issues: [{ path: 'modelId', message: 'Unknown model' }] });
   }
-  const activeCount = toCount((await trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned').executeTakeFirst())?.n);
+  // the Flowza Finance connector is plumbing, not a terminal: it does not consume a plan device seat
+  const activeCount = toCount((await trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned').where('providerKey', '!=', CONNECTOR_PROVIDER_KEY).executeTakeFirst())?.n);
   await assertWithinLimit(trx, orgId, 'devices', activeCount);
   const settings = await loadSettings(trx, orgId);
   const row = await trx.insertInto('devices').values({
@@ -241,6 +253,7 @@ async function storeSecrets(deps: ApiDeps, actor: Actor, orgId: string, deviceId
 export async function createDevice(deps: ApiDeps, actor: Actor, orgId: string, input: CreateDeviceInput): Promise<DeviceCreatedDto> {
   const grant = requirePermission(actor.principal, orgId, 'device.create');
   requireBranchAccess(grant, input.branchId);
+  refuseConnector(input.providerKey);
   const provider = getProvider(deps, input.providerKey);
   const def = provider.definition;
   assertEndpointAllowed(def, input.endpointUrl);
@@ -266,6 +279,7 @@ export async function updateDevice(deps: ApiDeps, actor: Actor, orgId: string, i
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadDeviceRow(trx, orgId, id);
     requireBranchAccess(grant, before.branchId);
+    refuseConnector(before.providerKey);
     if (before.status === 'decommissioned') throw errors.invalidState('A decommissioned device cannot be edited.');
     const provider = deps.providers.tryGet(before.providerKey);
     if (input.endpointUrl !== undefined && provider) assertEndpointAllowed(provider.definition, input.endpointUrl);
@@ -297,6 +311,7 @@ export async function putCredentials(deps: ApiDeps, actor: Actor, orgId: string,
   return runUser(deps.db, actor, async (trx) => {
     const device = await loadDeviceRow(trx, orgId, id);
     requireBranchAccess(grant, device.branchId);
+    refuseConnector(device.providerKey);
     if (device.status === 'decommissioned') throw errors.invalidState('A decommissioned device cannot receive credentials.');
     const def = getProvider(deps, device.providerKey).definition;
     const unknown = Object.keys(input).filter((k) => !def.secretFields.includes(k));
@@ -328,6 +343,7 @@ export async function removeDevice(deps: ApiDeps, actor: Actor, orgId: string, i
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadDeviceRow(trx, orgId, id);
     requireBranchAccess(grant, before.branchId);
+    refuseConnector(before.providerKey);
     if (before.status === 'decommissioned') throw errors.invalidState('The device is already decommissioned.');
     const status = decommission ? 'decommissioned' : 'disabled';
     await trx.updateTable('devices').set({ status, autoSyncEnabled: false, nextAttendanceSyncAt: null }).where('organizationId', '=', orgId).where('id', '=', id).execute();
@@ -593,6 +609,7 @@ export async function claimPending(deps: ApiDeps, actor: Actor, orgId: string, p
   const pending = await runSystem(deps.db, orgId, actor.requestId, (trx) => trx.selectFrom('pendingDevices').selectAll().where('id', '=', pendingId).where((eb) => eb.or([eb('organizationId', 'is', null), eb('organizationId', '=', orgId)])).executeTakeFirst());
   if (!pending) throw errors.notFound('Pending device', pendingId);
   if (pending.claimedDeviceId) throw errors.invalidState('This device has already been claimed.');
+  refuseConnector(pending.providerKey);
   const provider = getProvider(deps, pending.providerKey);
   const def = provider.definition;
   const info = jsonObject(pending.deviceInfo);

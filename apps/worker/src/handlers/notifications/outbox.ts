@@ -18,6 +18,8 @@ const ROUTING: Record<string, { category: NotificationCategory; permission: stri
   'device.offline': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device offline: ${String(p['deviceName'] ?? p['deviceId'] ?? '')}`, body: (p) => `No successful communication since ${String(p['lastSeenAt'] ?? 'unknown')}.`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'device.online': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device back online: ${String(p['deviceName'] ?? '')}`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'sync.failed': { category: 'ATTENDANCE', permission: 'device.sync', title: (p) => `Sync failed: ${String(p['jobType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: (p) => `/sync/${String(p['syncJobId'] ?? '')}` },
+  // Flowza Finance connector: emitted once per failure streak (3 consecutive pull/push failures), so it is not a per-attempt alarm.
+  'sync.finance.failed': { category: 'ATTENDANCE', permission: 'device.sync', title: (p) => `Flowza Finance ${String(p['direction'] ?? 'sync')} is failing`, body: (p) => `${String(p['consecutiveFailures'] ?? 0)} consecutive failures · ${String(p['code'] ?? '')}: ${String(p['error'] ?? '')}`, link: () => '/settings/integrations' },
   // Only a sync somebody asked for is worth a notification. The scheduler completes a health check per device every few
   // minutes and a poll per device per interval; routing those to every device.sync holder produced a notification (and an
   // e-mail) each time, hundreds a day per tenant. Failures keep notifying regardless of who started the sync.

@@ -31,7 +31,7 @@ const deps: WorkerDeps = {
   db,
   queue: new PgJobQueue(db),
   credentials: new DeviceCredentialsStore(new SecretsCipher(config.FLOWZA_CREDENTIALS_MASTER_KEYS)),
-  providers: defaultRegistry(),
+  providers: defaultRegistry({ flowzaFinance: { allowPrivateHosts: config.FLOWZA_ALLOW_PRIVATE_EGRESS } }),
   realtime: platform.realtime,
   mailer: createMailer(config, log),
   storage: platform.storage,

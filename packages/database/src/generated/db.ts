@@ -131,7 +131,7 @@ export type SubscriptionStatus = "active" | "cancelled" | "expired" | "past_due"
 
 export type SyncItemStatus = "CANCELLED" | "FAILED" | "OFFLINE" | "PENDING" | "QUEUED" | "RETRYING" | "RUNNING" | "SKIPPED" | "SUCCESS" | "UNSUPPORTED";
 
-export type SyncJobType = "DELETE_EMPLOYEE" | "DEVICE_HEALTH_CHECK" | "PULL_ATTENDANCE" | "PULL_EMPLOYEES" | "PUSH_EMPLOYEE" | "PUSH_EMPLOYEES" | "RECONCILIATION" | "RESTART_DEVICE" | "TEST_CONNECTION";
+export type SyncJobType = "DELETE_EMPLOYEE" | "DEVICE_HEALTH_CHECK" | "PULL_ATTENDANCE" | "PULL_EMPLOYEES" | "PUSH_ATTENDANCE" | "PUSH_EMPLOYEE" | "PUSH_EMPLOYEES" | "RECONCILIATION" | "RESTART_DEVICE" | "TEST_CONNECTION";
 
 export type SyncStatus = "CANCELLED" | "FAILED" | "PARTIAL_SUCCESS" | "PENDING" | "QUEUED" | "RETRYING" | "RUNNING" | "SUCCESS";
 
@@ -802,6 +802,23 @@ export interface FeatureFlags {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface FinanceSyncState {
+  consecutiveFailures: Generated<number>;
+  createdAt: Generated<Timestamp>;
+  deviceId: string;
+  lastError: string | null;
+  lastErrorAt: Timestamp | null;
+  lastPullAt: Timestamp | null;
+  lastPullCount: Generated<number>;
+  lastPushAt: Timestamp | null;
+  lastPushCount: Generated<number>;
+  lastPushedEventAt: Timestamp | null;
+  lastPushedEventId: string | null;
+  nextPushAt: Timestamp | null;
+  organizationId: string;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface HolidayCalendars {
   countryCode: string | null;
   createdAt: Generated<Timestamp>;
@@ -1456,6 +1473,7 @@ export interface DB {
   employmentHistory: EmploymentHistory;
   entitlements: Entitlements;
   featureFlags: FeatureFlags;
+  financeSyncState: FinanceSyncState;
   holidayCalendars: HolidayCalendars;
   holidays: Holidays;
   importJobRows: ImportJobRows;
