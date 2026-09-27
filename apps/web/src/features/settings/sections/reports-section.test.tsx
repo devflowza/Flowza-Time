@@ -28,7 +28,7 @@ describe('ReportsSection', () => {
     fireEvent.click(screen.getByRole('switch', { name: /legend/ }));
     fireEvent.click(save);
     await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1));
-    expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/reports', { hoursNotation: 'h.mm', defaultFormat: 'pdf', showLegend: false, codeOverrides: { PRESENT: 'P' } });
+    expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/reports', { hoursNotation: 'h.mm', defaultFormat: 'pdf', showLegend: false, codeOverrides: { PRESENT: 'P' }, monthlyStatements: { enabled: false, sendDay: 3, linkValidityDays: 45 } });
   });
 
   it('is read-only without organization.manage', async () => {

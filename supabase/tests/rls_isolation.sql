@@ -148,3 +148,60 @@ select pg_temp.assert_eq((select count(*) from public.employees), 3, 'platform a
 select pg_temp.assert_eq((select count(*) from public.employees where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'grant does not extend to org B');
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'x' where id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'read grant cannot write');
 rollback;
+
+-- ---------- monthly statements (docs/statements.md) ----------
+begin;
+insert into public.attendance_statements (id, organization_id, employee_id, branch_id, period_start, period_end, snapshot, status, token_hash, token_expires_at, email_to, submitted_at, signed_name, comment_count, approver_user_id) values
+  -- e1 (branch A-HQ): submitted with a comment, waiting on Branch Manager A as the resolved reporting manager
+  ('5a000000-0000-0000-0000-0000000000a1', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '2026-08-01', '2026-08-31', '{}'::jsonb, 'PENDING_APPROVAL', 'th-a1', now() + interval '30 days', 'ali@a.test', now(), 'Ali Said', 1, 'a0000000-0000-0000-0000-000000000002');
+insert into public.attendance_statements (id, organization_id, employee_id, branch_id, period_start, period_end, snapshot, status, token_hash, token_expires_at) values
+  ('5a000000-0000-0000-0000-0000000000a3', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '2026-08-01', '2026-08-31', '{}'::jsonb, 'ISSUED', 'th-a3', now() + interval '30 days'),
+  ('5b000000-0000-0000-0000-0000000000b1', '0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000e1', '0b000000-0000-0000-0000-00000000000b', '2026-08-01', '2026-08-31', '{}'::jsonb, 'ISSUED', 'th-b1', now() + interval '30 days');
+insert into public.attendance_statement_comments (id, organization_id, statement_id, employee_id, branch_id, attendance_date, comment) values
+  ('5c000000-0000-0000-0000-0000000000c1', '0a000000-0000-0000-0000-000000000000', '5a000000-0000-0000-0000-0000000000a1', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '2026-08-12', 'I signed out at 18:00, not 17:00.');
+insert into public.organization_settings (organization_id) values
+  ('0a000000-0000-0000-0000-000000000000'), ('0b000000-0000-0000-0000-000000000000')
+on conflict (organization_id) do nothing;
+commit;
+
+-- Owner A: full statement.view/issue; the snapshot and the signature are immutable even for them.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from public.attendance_statements), 2, 'owner A sees the two org-A statements');
+select pg_temp.assert_eq((select count(*) from public.attendance_statement_comments), 1, 'owner A sees the comment');
+select pg_temp.assert_raises($q$ update public.attendance_statements set snapshot = '{"tampered":true}'::jsonb where id = '5a000000-0000-0000-0000-0000000000a3' $q$, 'snapshot is immutable once written');
+select pg_temp.assert_raises($q$ update public.attendance_statements set signed_name = 'Someone Else' where id = '5a000000-0000-0000-0000-0000000000a1' $q$, 'a signature can never be rewritten');
+select pg_temp.assert_rows($q$ update public.attendance_statements set status = 'VOID', voided_at = now(), void_reason = 'test' where id = '5a000000-0000-0000-0000-0000000000a3' $q$, 1, 'owner (statement.issue) can void an issued statement');
+select pg_temp.assert_raises($q$ update public.attendance_statement_comments set comment = 'edited' where id = '5c000000-0000-0000-0000-0000000000c1' $q$, 'comments are append-only (no update)');
+select pg_temp.assert_raises($q$ delete from public.attendance_statement_comments where id = '5c000000-0000-0000-0000-0000000000c1' $q$, 'comments are append-only (no delete)');
+select pg_temp.assert_rows($q$ update public.attendance_statements set status = 'FINALIZED', finalized_at = now(), finalized_reason = 'MANAGER_APPROVED', approved_by = 'a0000000-0000-0000-0000-000000000001', approved_at = now() where id = '5a000000-0000-0000-0000-0000000000a1' $q$, 1, 'owner finalises the pending statement');
+select pg_temp.assert_raises($q$ update public.attendance_statements set status = 'VOID', voided_at = now(), void_reason = 'x' where id = '5a000000-0000-0000-0000-0000000000a1' $q$, 'FINALIZED is terminal even for statement.issue holders');
+rollback;
+
+-- Branch Manager A: scoped to branch A-2, but also the ASSIGNED approver of the A-HQ statement.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from public.attendance_statements), 2, 'branch manager sees own-branch statement plus the one assigned to them');
+select pg_temp.assert_eq((select count(*) from public.attendance_statement_comments), 1, 'the assignee reads the comments of their pending statement');
+select pg_temp.assert_rows($q$ update public.attendance_statements set status = 'FINALIZED', finalized_at = now(), finalized_reason = 'MANAGER_APPROVED', approved_by = 'a0000000-0000-0000-0000-000000000002', approved_at = now() where id = '5a000000-0000-0000-0000-0000000000a1' $q$, 1, 'the assigned approver finalises the pending statement');
+select pg_temp.assert_rows($q$ update public.attendance_statements set approval_note = 'second thoughts' where id = '5a000000-0000-0000-0000-0000000000a1' $q$, 0, 'a decided statement is no longer writable by the assignee');
+rollback;
+
+-- Employee (self-service): own statement is visible, never writable from user context.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from public.attendance_statements), 1, 'employee sees only their own statement');
+select pg_temp.assert_rows($q$ update public.attendance_statements set first_viewed_at = now() where employee_id = '0a000000-0000-0000-0000-0000000000e3' $q$, 0, 'an employee cannot write their statement from user context (submission is the tokenized system flow)');
+rollback;
+
+-- Owner B: nothing of org A, and no way to attach a comment to an org-A statement.
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"b0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from public.attendance_statements where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B sees no org-A statements');
+select pg_temp.assert_eq((select count(*) from public.attendance_statements), 1, 'owner B sees only their own statement');
+select pg_temp.assert_raises($q$ insert into public.attendance_statement_comments (organization_id, statement_id, employee_id, branch_id, attendance_date, comment) values ('0b000000-0000-0000-0000-000000000000', '5a000000-0000-0000-0000-0000000000a1', '0b000000-0000-0000-0000-0000000000e1', '0b000000-0000-0000-0000-00000000000b', '2026-08-12', 'x') $q$, 'a comment cannot be attached across organisations');
+rollback;

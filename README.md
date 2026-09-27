@@ -24,6 +24,7 @@ Device / Vendor cloud  →  Provider adapter  →  Sync engine (fair queue)  →
 | [`docs/attendance-engine.md`](docs/attendance-engine.md) · [`docs/sync-engine.md`](docs/sync-engine.md) | Calculation rules · synchronisation |
 | [`docs/api.md`](docs/api.md) | REST API reference |
 | [`docs/reports.md`](docs/reports.md) | Report generation: pipeline, the fourteen sample layouts, notations and codes, adding a report type |
+| [`docs/statements.md`](docs/statements.md) | Monthly attendance statements: emailed review links, comments, manager approval, digital signature |
 | [`docs/design.md`](docs/design.md) | Design system: tokens, RTL rules, density, accessibility floor, multi-step flows |
 | [`docs/development.md`](docs/development.md) · [`docs/testing.md`](docs/testing.md) · [`docs/deployment.md`](docs/deployment.md) · [`docs/go-live.md`](docs/go-live.md) · [`docs/troubleshooting.md`](docs/troubleshooting.md) | Operate the system |
 | [`docs/risks.md`](docs/risks.md) | Risks, compliance notes, challenged assumptions |

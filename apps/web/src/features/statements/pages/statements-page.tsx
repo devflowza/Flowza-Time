@@ -15,15 +15,9 @@ import { cn } from '@/lib/utils';
 import { useCan, useOrgTimezone } from '@/features/me/use-me';
 import { toastJobQueued } from '@/features/employees/job-toast';
 import { useStatementMutations, useStatements } from '../api';
+import { STATUS_BADGE } from '../status';
 
 const ALL = '__all__';
-
-export const STATUS_BADGE: Record<StatementListItemDto['status'], 'secondary' | 'success' | 'warning' | 'danger'> = {
-  ISSUED: 'secondary',
-  PENDING_APPROVAL: 'warning',
-  FINALIZED: 'success',
-  VOID: 'danger',
-};
 
 /** /statements?month=&status=&inbox= — issued monthly statements with the manager's approval inbox as a filter. */
 export default function StatementsPage() {

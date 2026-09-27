@@ -41,12 +41,11 @@ export default function PublicStatementReviewPage() {
     <div dir={dir} lang={locale} className="min-h-screen bg-muted/30 py-6 sm:py-10">
       <div className="mx-auto w-full max-w-4xl space-y-4 px-3 sm:px-6">
         {!token ? (
-          <ErrorCard t={t} title={t('review.invalidTitle')} body={t('review.invalidBody')} />
+          <ErrorCard title={t('review.invalidTitle')} body={t('review.invalidBody')} />
         ) : view.isLoading ? (
           <div className="flex items-center justify-center gap-2 py-24 text-muted-foreground"><Loader2 className="size-5 animate-spin" aria-hidden /> {t('review.loading')}</div>
         ) : view.isError ? (
           <ErrorCard
-            t={t}
             title={view.error instanceof ApiError && view.error.status === 409 ? t('review.expiredTitle') : t('review.invalidTitle')}
             body={view.error instanceof ApiError && view.error.status === 409 ? t('review.expiredBody') : t('review.invalidBody')}
           />
@@ -69,7 +68,7 @@ function Callout({ tone, title, body }: { tone: 'info' | 'error'; title: string;
   );
 }
 
-function ErrorCard({ t, title, body }: { t: FixedT; title: string; body: string }) {
+function ErrorCard({ title, body }: { title: string; body: string }) {
   return (
     <Card className="mx-auto max-w-md">
       <CardHeader>

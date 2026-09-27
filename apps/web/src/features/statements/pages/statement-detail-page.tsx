@@ -9,7 +9,7 @@ import { toast, toastError } from '@/lib/toast';
 import { useCan, useMe, useOrgTimezone } from '@/features/me/use-me';
 import { StatementDocument } from '../components/statement-document';
 import { useStatement, useStatementMutations } from '../api';
-import { STATUS_BADGE } from './statements-page';
+import { STATUS_BADGE } from '../status';
 
 /** /statements/:id — the signed document, the employee's comments, and the approve / resend / void actions. */
 export default function StatementDetailPage() {

@@ -155,8 +155,10 @@ create policy attendance_statements_assignee_update on public.attendance_stateme
   with check (approver_user_id = (select app.uid()));
 create policy attendance_statements_approve_perm_update on public.attendance_statements
   for update to authenticated
-  using (organization_id = any ((select app.org_ids_with_permission('statement.approve'))::uuid[]) and status = 'PENDING_APPROVAL')
-  with check (organization_id = any ((select app.org_ids_with_permission('statement.approve'))::uuid[]));
+  using (organization_id = any ((select app.org_ids_with_permission('statement.approve'))::uuid[]) and status = 'PENDING_APPROVAL'
+    and (organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or branch_id = any ((select app.allowed_branch_ids())::uuid[])))
+  with check (organization_id = any ((select app.org_ids_with_permission('statement.approve'))::uuid[])
+    and (organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or branch_id = any ((select app.allowed_branch_ids())::uuid[])));
 create policy attendance_statement_comments_assignee_select on public.attendance_statement_comments
   for select to authenticated using (exists (
     select 1 from public.attendance_statements s
