@@ -32,7 +32,7 @@ export function ReportsForm({ initial, onSaved }: { initial: OrganizationSetting
   const { t } = useTranslation('settings');
   const readOnly = !useCan()('organization.manage');
   const { putGroup } = useSettingsMutations();
-  const form = useForm<Values, unknown, z.output<typeof schema>>({ resolver: zodResolver(schema), defaultValues: { hoursNotation: 'h.mm', defaultFormat: 'pdf', showLegend: true, ...initial, codeOverrides: initial.codeOverrides ?? {} }, disabled: readOnly });
+  const form = useForm<Values, unknown, z.output<typeof schema>>({ resolver: zodResolver(schema), defaultValues: { hoursNotation: 'h.mm', defaultFormat: 'pdf', showLegend: true, ...initial, codeOverrides: initial.codeOverrides ?? {}, monthlyStatements: { enabled: false, sendDay: 3, linkValidityDays: 45, ...initial.monthlyStatements } }, disabled: readOnly });
   const { register, control, formState: { errors, isSubmitting, isDirty } } = form;
   const onSubmit = form.handleSubmit(async (values) => {
     const codeOverrides = Object.fromEntries(Object.entries(values.codeOverrides ?? {}).filter(([, v]) => typeof v === 'string' && v.trim() !== ''));
@@ -60,6 +60,19 @@ export function ReportsForm({ initial, onSaved }: { initial: OrganizationSetting
         </FormField>
       </div>
       <Controller control={control} name="showLegend" render={({ field }) => <SwitchRow id="rep-legend" label={t('reports.showLegend')} hint={t('reports.showLegendHint')} control={<Switch id="rep-legend" checked={field.value ?? true} onCheckedChange={field.onChange} disabled={readOnly} />} />} />
+      <fieldset className="space-y-3">
+        <legend className="text-sm font-medium">{t('reports.statements.title')}</legend>
+        <p className="text-xs text-muted-foreground">{t('reports.statements.hint')}</p>
+        <Controller control={control} name="monthlyStatements.enabled" render={({ field }) => <SwitchRow id="rep-stmt-enabled" label={t('reports.statements.enabled')} hint={t('reports.statements.enabledHint')} control={<Switch id="rep-stmt-enabled" checked={field.value ?? false} onCheckedChange={field.onChange} disabled={readOnly} />} />} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <FormField label={t('reports.statements.sendDay')} htmlFor="rep-stmt-day" hint={t('reports.statements.sendDayHint')} error={errors.monthlyStatements?.sendDay?.message}>
+            <Input id="rep-stmt-day" type="number" min={1} max={28} inputMode="numeric" dir="ltr" {...register('monthlyStatements.sendDay', { valueAsNumber: true })} />
+          </FormField>
+          <FormField label={t('reports.statements.linkValidityDays')} htmlFor="rep-stmt-validity" hint={t('reports.statements.linkValidityDaysHint')} error={errors.monthlyStatements?.linkValidityDays?.message}>
+            <Input id="rep-stmt-validity" type="number" min={7} max={90} inputMode="numeric" dir="ltr" {...register('monthlyStatements.linkValidityDays', { valueAsNumber: true })} />
+          </FormField>
+        </div>
+      </fieldset>
       <fieldset className="space-y-3">
         <legend className="text-sm font-medium">{t('reports.codes')}</legend>
         <p className="text-xs text-muted-foreground">{t('reports.codesHint')}</p>

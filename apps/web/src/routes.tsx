@@ -25,6 +25,7 @@ function ComingSoonPage() {
 const ComingSoon = lazy(async () => ({ default: ComingSoonPage }));
 // Lazy like every other page: the dashboard carries the charts vendor chunk, which the shell itself never needs.
 const DashboardPage = lazy(() => import('@/features/dashboard/dashboard-page'));
+const PublicStatementReviewPage = lazy(() => import('@/features/statements/public-review-page'));
 
 /**
  * Enrolment reachable on a valid session alone, without the shell and without `/me`.
@@ -45,6 +46,8 @@ export const router = createBrowserRouter([
   { path: '/auth/reset', element: <ResetPasswordPage /> },
   // Public on purpose: the invitee has no account yet, so this cannot sit behind RequireAuth.
   { path: '/auth/invite', element: <AcceptInvitationPage /> },
+  // Employee statement review: reached from the emailed link, no account or sign-in involved (docs/statements.md).
+  { path: '/statements/review', element: <Suspense fallback={<PageFallback />}><PublicStatementReviewPage /></Suspense> },
   { path: '/auth/callback', element: <Navigate to="/" replace /> },
   {
     element: <RequireAuth />,

@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarDays, CalendarOff, CheckSquare, ClipboardList, Cpu, FileText, GitCompare, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Building2, CalendarDays, CalendarOff, CheckSquare, ClipboardList, Cpu, FileText, GitCompare, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Users, Wallet, type LucideIcon, FileSignature } from 'lucide-react';
 import type { Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -59,6 +59,7 @@ export function Sidebar() {
       { to: '/holidays', label: t('nav.holidays'), icon: CalendarOff, permissions: ['holiday.view'] },
       { to: '/reports', label: t('nav.reports'), icon: BarChart3, permissions: ['report.view'] },
       { to: '/payroll', label: t('nav.payroll'), icon: Wallet, permissions: ['payroll.view'] },
+      { to: '/statements', label: t('nav.statements'), icon: FileSignature, permissions: ['statement.view'] },
     ] },
     { label: t('nav.sections.admin'), items: [
       { to: '/organization', label: t('nav.structure'), icon: Building2, permissions: ['branch.view'] },

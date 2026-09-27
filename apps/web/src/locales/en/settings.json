@@ -195,6 +195,16 @@
       "HALF_DAY": "Half day present",
       "HALF_DAY_LEAVE": "Half day leave",
       "LEAVE": "Leave (type unknown)"
+    },
+    "statements": {
+      "title": "Monthly statements",
+      "hint": "Email every employee their sign-in/sign-out statement to review, comment on and digitally sign (Statements page).",
+      "enabled": "Send automatically every month",
+      "enabledHint": "On the send day, the previous month's statements are generated and emailed. Manual issuing from the Statements page always works.",
+      "sendDay": "Send on day of month",
+      "sendDayHint": "1–28, in the organisation's timezone.",
+      "linkValidityDays": "Review link validity (days)",
+      "linkValidityDaysHint": "7–90 days; after that employees need a re-sent link."
     }
   },
   "dashboard": {
