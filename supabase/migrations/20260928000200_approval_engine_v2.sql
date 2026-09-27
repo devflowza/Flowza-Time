@@ -137,6 +137,11 @@ alter table public.approval_requests add column if not exists cancelled_by uuid 
 alter table public.approval_requests add column if not exists cancel_reason text;
 alter table public.approval_requests add column if not exists invalidation_reason text;
 alter table public.approval_requests add column if not exists info_requested_at timestamptz;
+-- the subject's login on requests still in flight (segregation of duties keys on it; v2 snapshots it at submit)
+update public.approval_requests r
+set subject_user_id = (select m.user_id from public.org_memberships m where m.organization_id = r.organization_id and m.employee_id = r.employee_id and m.status = 'active' order by m.created_at limit 1)
+where r.status = 'PENDING' and r.subject_user_id is null and r.employee_id is not null
+  and exists (select 1 from public.org_memberships m where m.organization_id = r.organization_id and m.employee_id = r.employee_id and m.status = 'active');
 
 -- one pending request per document (Finance parity): retire older duplicates, then enforce
 update public.approval_requests r
@@ -257,6 +262,41 @@ create table if not exists public.approval_digest_runs (
 -- leave ↔ engine link (Finance parity: every leave request has a request row)
 alter table public.leave_records add column if not exists approval_request_id uuid references public.approval_requests(id) on delete set null;
 create index if not exists leave_records_approval_request_idx on public.leave_records (approval_request_id) where approval_request_id is not null;
+
+-- 4b. Requests in flight at release time. v1 stored each level's resolved approver on the step (a named user, or a role)
+-- and had no actor rows, so without this the v2 queues (`mine` = a pending actor row) would never show them. Seat, for
+-- every PENDING level of a PENDING request that has no actor yet: the named user; else the active members of the named
+-- role whose branch scope covers the request; never the requester or the subject (segregation of duties); else the
+-- organisation's active owners (the same last resort as the v2 resolver). Idempotent: a level with any actor is left alone.
+insert into public.approval_step_actors (organization_id, step_id, user_id, resolution_path)
+select s.organization_id, s.id, s.approver_user_id, 'legacy'
+from public.approval_steps s
+join public.approval_requests r on r.id = s.request_id
+where r.status = 'PENDING' and s.status = 'PENDING' and s.approver_user_id is not null
+  and not exists (select 1 from public.approval_step_actors a where a.step_id = s.id)
+  and s.approver_user_id is distinct from r.requested_by and s.approver_user_id is distinct from r.subject_user_id
+  and exists (select 1 from public.org_memberships m where m.organization_id = s.organization_id and m.user_id = s.approver_user_id and m.status = 'active')
+on conflict (step_id, user_id) do nothing;
+insert into public.approval_step_actors (organization_id, step_id, user_id, resolution_path)
+select s.organization_id, s.id, m.user_id, 'legacy'
+from public.approval_steps s
+join public.approval_requests r on r.id = s.request_id
+join public.org_memberships m on m.organization_id = s.organization_id and m.role_id = s.approver_role_id and m.status = 'active'
+where r.status = 'PENDING' and s.status = 'PENDING' and s.approver_role_id is not null
+  and not exists (select 1 from public.approval_step_actors a where a.step_id = s.id)
+  and (r.requested_by is null or m.user_id <> r.requested_by)
+  and (r.subject_user_id is null or m.user_id <> r.subject_user_id)
+  and (m.all_branches or r.branch_id is null or exists (select 1 from public.membership_branches mb where mb.membership_id = m.id and mb.branch_id = r.branch_id))
+on conflict (step_id, user_id) do nothing;
+insert into public.approval_step_actors (organization_id, step_id, user_id, resolution_path)
+select s.organization_id, s.id, m.user_id, 'owner'
+from public.approval_steps s
+join public.approval_requests r on r.id = s.request_id
+join public.org_memberships m on m.organization_id = s.organization_id and m.status = 'active'
+join public.roles ro on ro.id = m.role_id and ro.is_system and ro.key = 'owner'
+where r.status = 'PENDING' and s.status = 'PENDING'
+  and not exists (select 1 from public.approval_step_actors a where a.step_id = s.id)
+on conflict (step_id, user_id) do nothing;
 
 -- 5. RLS --------------------------------------------------------------------------------------------------------------------
 -- Requests the caller is assigned to: a step naming them, an actor row for them (a delegate stamped at submit included),

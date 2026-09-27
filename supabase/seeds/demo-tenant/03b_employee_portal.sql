@@ -65,7 +65,7 @@ begin
   ---------------------------------------------------------------------------------------------------------------------
   insert into public.approval_workflows (id, organization_id, entity_type, name, branch_id, steps, is_default, status, created_at)
   values (pg_temp.sid('workflow:corrections'), org, 'ATTENDANCE_CORRECTION', 'Line manager → HR', null,
-          jsonb_build_array(jsonb_build_object('order', 1, 'approverType', 'MANAGER'), jsonb_build_object('order', 2, 'approverType', 'ROLE', 'roleId', hr_role)), true, 'active', '2026-02-16 09:00:00+04')
+          jsonb_build_array(jsonb_build_object('order', 1, 'approverType', 'MANAGER', 'mode', 'ANY'), jsonb_build_object('order', 2, 'approverType', 'ROLE', 'roleId', hr_role, 'mode', 'ANY')), true, 'active', '2026-02-16 09:00:00+04')
   on conflict (id) do nothing;
 
   for c in
