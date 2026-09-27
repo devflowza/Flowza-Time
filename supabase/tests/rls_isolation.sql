@@ -75,6 +75,10 @@ insert into public.leave_records (id, organization_id, employee_id, branch_id, l
   ('0a000000-0000-0000-0000-0000000001b1', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000001a1', '2026-10-04', '2026-10-05', 'PENDING'),
   ('0a000000-0000-0000-0000-0000000001b3', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-10-11', '2026-10-12', 'PENDING'),
   ('0a000000-0000-0000-0000-0000000001b4', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-08-02', '2026-08-03', 'APPROVED');
+-- Flowza Finance connector state (migration 20260928000400): one row per connector device, system-written
+insert into public.finance_sync_state (device_id, organization_id, last_pull_count, consecutive_failures) values
+  ('0a000000-0000-0000-0000-0000000000d1', '0a000000-0000-0000-0000-000000000000', 3, 0),
+  ('0b000000-0000-0000-0000-0000000000d1', '0b000000-0000-0000-0000-000000000000', 1, 2);
 commit;
 
 -- helper to assert counts
@@ -118,6 +122,12 @@ select pg_temp.assert_eq((select count(*) from jsonb_object_keys(secrets.masked_
 select pg_temp.assert_raises($q$ select * from secrets.get_device_credentials('0a000000-0000-0000-0000-0000000000d1') $q$, 'user context cannot decrypt credentials');
 -- an owner is linked to no employee: no team, whatever the permissions
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 0, 'owner A (no employee link) has no team');
+-- finance_sync_state: readable with device.view, never writable from a user session (no policy AND no grant → raises, not 0 rows)
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'owner A sees only own connector state');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'owner A cannot see org B connector state');
+select pg_temp.assert_raises($q$ insert into public.finance_sync_state (device_id, organization_id) values ('0a000000-0000-0000-0000-0000000000d1', '0a000000-0000-0000-0000-000000000000') $q$, 'owner A cannot insert connector state');
+select pg_temp.assert_raises($q$ update public.finance_sync_state set consecutive_failures = 0 where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot update connector state');
+select pg_temp.assert_raises($q$ delete from public.finance_sync_state where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot delete connector state');
 rollback;
 
 -- ---------- as Branch Manager A (restricted to branch A-2) ----------
@@ -135,6 +145,7 @@ select pg_temp.assert_raises($q$ insert into public.employees (organization_id, 
 select pg_temp.assert_eq((select count(*) from public.employee_identity_documents), 0, 'branch manager has no employee.view_sensitive');
 -- branch_manager carries the team keys, but this membership is linked to no employee: team semantics add nothing
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 0, 'branch manager without an employee link has no team');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'connector state is organisation-level (device.view, not branch scoped)');
 rollback;
 
 -- ---------- as Employee (self-service) ----------
@@ -144,6 +155,7 @@ select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-0000000
 select pg_temp.assert_eq((select count(*) from public.employees), 1, 'employee sees only own employee row');
 select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 1, 'employee sees only own attendance');
 select pg_temp.assert_eq((select count(*) from public.devices), 0, 'employee sees no devices');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 0, 'employee sees no connector state');
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'Hacked' where id = '0a000000-0000-0000-0000-0000000000e3' $q$, 0, 'employee cannot update own master record');
 -- e2 reports to this employee, but the `employee` role holds no team key: the relationship alone opens nothing
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 1, 'employee is somebody''s manager (relationship exists)');
@@ -238,6 +250,8 @@ select set_config('request.jwt.claims', '{"sub":"b0000000-0000-0000-0000-0000000
 select pg_temp.assert_eq((select count(*) from public.employees), 1, 'owner B sees 1 employee');
 select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A attendance');
 select pg_temp.assert_eq((select count(*) from public.org_memberships), 1, 'owner B sees only own memberships');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'owner B sees only own connector state');
+select pg_temp.assert_eq((select count(*) from public.finance_sync_state where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A connector state');
 rollback;
 
 -- ---------- forged system claim from an authenticated session must NOT work ----------
