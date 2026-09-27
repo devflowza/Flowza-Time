@@ -13,9 +13,10 @@ import { clientIp } from './lib/http.js';
 import { healthRoutes } from './routes/health.js';
 import { registerV1Routes } from './routes/v1/index.js';
 import { registerInboundRoutes } from './routes/inbound/index.js';
+import { registerPortalStatementRoutes } from './routes/portal/statements.js';
 import { edgeGate } from './middleware/edge-gate.js';
 
-/** Builds the Hono application. Route modules live in routes/v1/* (authenticated) and routes/inbound/* (devices/webhooks). */
+/** Builds the Hono application. Route modules live in routes/v1/* (authenticated), routes/inbound/* (devices/webhooks) and routes/portal/* (tokenized employee self-service). */
 export function createApp(deps: ApiDeps) {
   const app = new Hono<AppEnv>();
   app.use('*', requestContext(deps.log));
@@ -43,6 +44,14 @@ export function createApp(deps: ApiDeps) {
   inbound.use('*', rateLimit({ name: 'inbound', windowMs: 60_000, max: 1200, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
   registerInboundRoutes(inbound, deps);
   app.route('/', inbound);
+
+  // Portal: employee self-service by emailed token (statements review/sign). Unauthenticated — the token is the
+  // credential — so it gets a tighter IP budget than the authenticated API and sits under /api/* for CORS/compress.
+  const portal = new Hono<AppEnv>();
+  portal.use('*', edge);
+  portal.use('*', rateLimit({ name: 'portal', windowMs: 60_000, max: 60, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
+  registerPortalStatementRoutes(portal, deps);
+  app.route('/api/portal', portal);
 
   // Authenticated API
   const v1 = new Hono<AppEnv>();
