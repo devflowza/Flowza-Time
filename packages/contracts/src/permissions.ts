@@ -11,6 +11,7 @@ export const PERMISSIONS = [
   'attendance.manage_rules', 'attendance.recalculate', 'attendance.lock_period',
   'payroll.view', 'payroll.finalize',
   'report.view', 'report.manage', 'report.export',
+  'statement.view', 'statement.issue', 'statement.approve',
   'audit.view', 'notification.manage',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];

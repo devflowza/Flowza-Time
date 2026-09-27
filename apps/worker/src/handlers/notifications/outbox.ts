@@ -25,6 +25,12 @@ const ROUTING: Record<string, { category: NotificationCategory; permission: stri
   // the report's title) for every report anyone in the organisation requested.
   'report.ready': { category: 'SYSTEM', permission: 'report.view', recipients: 'user', title: (p) => `Report ready: ${String(p['reportTitle'] ?? p['reportType'] ?? '')}`, link: () => '/reports' },
   'report.failed': { category: 'SYSTEM', permission: 'report.view', recipients: 'user', title: (p) => `Report failed: ${String(p['reportTitle'] ?? p['reportType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: () => '/reports' },
+  // The approver is a specific user when the reporting manager holds a membership; the role fallback (no manager or
+  // no account) notifies every statement.approve holder instead — that is the hr_admin safety net, not noise.
+  'statement.approval_pending': { category: 'APPROVAL', permission: 'statement.approve', recipients: 'user', title: (p) => `Attendance statement awaiting your approval${p['employeeName'] ? `: ${String(p['employeeName'])}` : ''}`, body: (p) => `${String(p['commentCount'] ?? 0)} comment(s) on ${String(p['periodLabel'] ?? 'the period')}`, link: (p) => `/statements/${String(p['statementId'] ?? '')}` },
+  'statement.approval_pending_role': { category: 'APPROVAL', permission: 'statement.approve', title: (p) => `Attendance statement awaiting approval${p['employeeName'] ? `: ${String(p['employeeName'])}` : ''}`, body: (p) => `No reporting manager could be resolved; ${String(p['commentCount'] ?? 0)} comment(s) on ${String(p['periodLabel'] ?? 'the period')}`, link: (p) => `/statements/${String(p['statementId'] ?? '')}` },
+  // Only a manually issued batch notifies, and only its requester (payload.userId); the scheduler's monthly run stays quiet.
+  'statement.issued': { category: 'SYSTEM', permission: 'statement.issue', recipients: 'user', title: (p) => `Statements issued: ${String(p['created'] ?? 0)} for ${String(p['month'] ?? '')}`, link: () => '/statements' },
   'employee.imported': { category: 'SYSTEM', permission: 'employee.import', title: (p) => `Import finished: ${String(p['imported'] ?? 0)} employees`, link: (p) => `/employees/imports/${String(p['importId'] ?? '')}` },
   'subscription.limit_reached': { category: 'SUBSCRIPTION', permission: 'organization.manage', title: (p) => `Plan limit reached: ${String(p['metric'] ?? '')}`, link: () => '/settings/subscription' },
 };
@@ -35,6 +41,7 @@ function realtimeTarget(row: OutboxRow): { channel: string; event: string } | nu
   if (row.eventType.startsWith('sync.')) return { channel: `org:${row.organizationId}:sync`, event: row.eventType };
   if (row.eventType.startsWith('device.')) return { channel: `org:${row.organizationId}:devices`, event: row.eventType };
   if (row.eventType.startsWith('attendance.') || row.eventType.startsWith('approval.')) return { channel: `org:${row.organizationId}:attendance`, event: row.eventType };
+  if (row.eventType.startsWith('statement.')) return { channel: `org:${row.organizationId}:statements`, event: row.eventType };
   return null;
 }
 

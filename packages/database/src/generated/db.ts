@@ -127,6 +127,8 @@ export type RoundingMode = "DOWN" | "NEAREST" | "NONE" | "UP";
 
 export type ShiftType = "FIXED" | "FLEXIBLE";
 
+export type StatementStatus = "FINALIZED" | "ISSUED" | "PENDING_APPROVAL" | "VOID";
+
 export type SubscriptionStatus = "active" | "cancelled" | "expired" | "past_due" | "trialing";
 
 export type SyncItemStatus = "CANCELLED" | "FAILED" | "OFFLINE" | "PENDING" | "QUEUED" | "RETRYING" | "RUNNING" | "SKIPPED" | "SUCCESS" | "UNSUPPORTED";
@@ -423,6 +425,55 @@ export interface AttendanceRuleSets {
   weeklyOffWorkCountsAsOvertime: Generated<boolean>;
   workedRoundingMinutes: Generated<number>;
   workedRoundingMode: Generated<RoundingMode>;
+}
+
+export interface AttendanceStatementComments {
+  attendanceDate: Timestamp;
+  branchId: string;
+  comment: string;
+  createdAt: Generated<Timestamp>;
+  employeeId: string;
+  id: Generated<string>;
+  organizationId: string;
+  statementId: string;
+}
+
+export interface AttendanceStatements {
+  approvalNote: string | null;
+  approvedAt: Timestamp | null;
+  approvedBy: string | null;
+  approverRoleId: string | null;
+  approverUserId: string | null;
+  branchId: string;
+  commentCount: Generated<number>;
+  createdAt: Generated<Timestamp>;
+  emailAttempts: Generated<number>;
+  emailError: string | null;
+  emailSentAt: Timestamp | null;
+  emailTo: string | null;
+  employeeId: string;
+  finalizedAt: Timestamp | null;
+  finalizedReason: string | null;
+  firstViewedAt: Timestamp | null;
+  id: Generated<string>;
+  issuedAt: Generated<Timestamp>;
+  organizationId: string;
+  periodEnd: Timestamp;
+  periodStart: Timestamp;
+  recordVersions: Json | null;
+  signedIp: string | null;
+  signedName: string | null;
+  signedUserAgent: string | null;
+  snapshot: Json;
+  status: Generated<StatementStatus>;
+  submittedAt: Timestamp | null;
+  supersededByStatementId: string | null;
+  tokenExpiresAt: Timestamp;
+  tokenHash: string;
+  updatedAt: Generated<Timestamp>;
+  voidedAt: Timestamp | null;
+  voidedBy: string | null;
+  voidReason: string | null;
 }
 
 export interface AuditLogs {
@@ -1408,6 +1459,8 @@ export interface DB {
   attendanceRawTransactions: AttendanceRawTransactions;
   attendanceRecalculationRequests: AttendanceRecalculationRequests;
   attendanceRuleSets: AttendanceRuleSets;
+  attendanceStatementComments: AttendanceStatementComments;
+  attendanceStatements: AttendanceStatements;
   "audit.logs": AuditLogs;
   branches: Branches;
   dataRetentionPolicies: DataRetentionPolicies;

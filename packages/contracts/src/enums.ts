@@ -125,6 +125,13 @@ export type ReportType = (typeof REPORT_TYPES)[number];
 export const IMPORT_STATUSES = ['UPLOADED', 'VALIDATING', 'VALIDATED', 'IMPORTING', 'COMPLETED', 'FAILED', 'CANCELLED'] as const;
 export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 
+/** Monthly attendance statement lifecycle (docs/statements.md): a comment-free signature finalises immediately; comments route to the approver first. */
+export const STATEMENT_STATUSES = ['ISSUED', 'PENDING_APPROVAL', 'FINALIZED', 'VOID'] as const;
+export type StatementStatus = (typeof STATEMENT_STATUSES)[number];
+
+export const STATEMENT_FINALIZED_REASONS = ['EMPLOYEE_CONFIRMED', 'MANAGER_APPROVED'] as const;
+export type StatementFinalizedReason = (typeof STATEMENT_FINALIZED_REASONS)[number];
+
 export const NOTIFICATION_CATEGORIES = ['DEVICE', 'ATTENDANCE', 'APPROVAL', 'SYSTEM', 'SUBSCRIPTION'] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 

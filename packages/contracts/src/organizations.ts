@@ -144,6 +144,15 @@ export const organizationSettingsSchema = z.object({
     codeOverrides: z.record(z.string(), z.string().trim().min(1).max(6)).default({}),
     defaultFormat: z.enum(['pdf', 'xlsx', 'csv']).default('pdf'),
     showLegend: z.boolean().default(true),
+    /** Monthly attendance statements (docs/statements.md): emailed review-and-sign links per employee. */
+    monthlyStatements: z.object({
+      /** Master switch for the automatic monthly send; issuing manually from the Statements page always works. */
+      enabled: z.boolean().default(false),
+      /** Day of the month (organisation timezone) the previous month's statements go out. */
+      sendDay: z.number().int().min(1).max(28).default(3),
+      /** How long the emailed review link stays valid. */
+      linkValidityDays: z.number().int().min(7).max(90).default(45),
+    }).partial().default({}),
   }).partial().default({}),
 });
 export type OrganizationSettings = z.infer<typeof organizationSettingsSchema>;
