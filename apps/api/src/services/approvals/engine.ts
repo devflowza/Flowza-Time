@@ -24,6 +24,11 @@ export interface SubmitInput {
   requestedBy: string;
   /** Without a workflow: approve at once (the request row still exists — Finance parity) or route to holders of a permission. */
   noWorkflow: { kind: 'AUTO_APPROVE' } | { kind: 'PERMISSION'; permission: Permission };
+  /**
+   * The document needs no approval at all (leave v2: a leave type with `requires_approval = false`): record an APPROVED
+   * request at once whatever the workflows say; the hook sees `notRequired` (nobody decided).
+   */
+  notRequired?: boolean;
 }
 export interface SubmitResult { requestId: string; status: 'PENDING' | 'APPROVED'; autoApproved: boolean; stepCount: number; firstStepActorIds: string[] }
 
@@ -190,11 +195,11 @@ export async function submit(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
     const base = { organizationId: orgId, workflowId: row?.id ?? null, entityType: input.entityType, entityId: input.entityId, branchId: input.branchId, employeeId: input.employeeId, departmentId: input.departmentId ?? null, units: input.units ?? null, requestedBy: input.requestedBy };
     const subjectUserId = input.employeeId ? (await t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', input.employeeId).where('status', '=', 'active').orderBy('createdAt').executeTakeFirst())?.userId ?? null : null;
 
-    if (!row && input.noWorkflow.kind === 'AUTO_APPROVE') {
+    if (input.notRequired || (!row && input.noWorkflow.kind === 'AUTO_APPROVE')) {
       const now = new Date();
-      const req = await t.insertInto('approvalRequests').values({ ...base, subjectUserId, currentStep: 1, status: 'APPROVED', completedAt: now, decidedBy: actor.userId }).returningAll().executeTakeFirstOrThrow();
-      await recordEvent(t, orgId, req.id, 'auto_approved', actor.userId, { reason: 'no workflow configured for this entity type' });
-      await hookFor(input.entityType)?.onApproved(deps, t, hookCtx(orgId, req, actor, null, true));
+      const req = await t.insertInto('approvalRequests').values({ ...base, workflowId: input.notRequired ? null : base.workflowId, subjectUserId, currentStep: 1, status: 'APPROVED', completedAt: now, decidedBy: input.notRequired ? null : actor.userId }).returningAll().executeTakeFirstOrThrow();
+      await recordEvent(t, orgId, req.id, 'auto_approved', actor.userId, { reason: input.notRequired ? 'no approval required for this item' : 'no workflow configured for this entity type' });
+      await hookFor(input.entityType)?.onApproved(deps, t, { ...hookCtx(orgId, req, actor, null, true), notRequired: input.notRequired ?? false });
       return { requestId: req.id, status: 'APPROVED', autoApproved: true, stepCount: 0, firstStepActorIds: [] };
     }
     const steps: ApprovalStepSpec[] = row ? parseWorkflowSteps(row.steps) : [{ order: 1, approverType: 'ROLE', permission: input.noWorkflow.kind === 'PERMISSION' ? input.noWorkflow.permission : 'attendance.approve', mode: 'ANY' }];
@@ -374,6 +379,8 @@ export async function invalidateForEntity(t: Trx, actor: Actor, orgId: string, e
  * person a request is about but did not file (HR recorded it for them) cannot withdraw it — they can answer questions on it.
  */
 export function canCancel(grant: MembershipGrant, userId: string, req: { entityType: ApprovalEntity; requestedBy: string | null; subjectUserId: string | null; employeeId: string | null; branchId: string | null }): boolean {
+  const entityRule = hookFor(req.entityType)?.mayCancel;
+  if (entityRule) return entityRule(grant, userId, req);
   if (req.requestedBy === userId) return true;
   if (!grant.allBranches && req.branchId && !grant.branchIds.includes(req.branchId)) return false;
   if (grant.roleKey === 'owner' || hasPermission(grant, 'approval.manage')) return true;
@@ -480,6 +487,7 @@ export async function requestInfo(deps: ApiDeps, trx: Trx, actor: Actor, orgId: 
     if (!check.via || check.branchBlocked) throw errors.forbidden('You are not an approver of the current step.');
     await t.updateTable('approvalRequests').set({ infoRequestedAt: new Date() }).where('id', '=', req.id).execute();
     await recordEvent(t, orgId, req.id, 'info_requested', actor.userId, { stepNo: req.currentStep, comment });
+    await hookFor(req.entityType)?.onInfoRequested?.(deps, t, hookCtx(orgId, req, actor, comment));
     const payload = await requestPayload(t, orgId, req);
     await emitTargeted(t, orgId, 'approval.info_requested', req.id, [req.requestedBy, req.subjectUserId].filter((u): u is string => !!u && u !== actor.userId), { ...payload, comment, askedBy: actor.userId }, actor);
     return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: req.status };
@@ -499,6 +507,7 @@ export async function answerInfo(deps: ApiDeps, trx: Trx, actor: Actor, orgId: s
     const step = steps.find((s) => s.stepNo === req.currentStep && s.status === 'PENDING');
     await t.updateTable('approvalRequests').set({ infoRequestedAt: null }).where('id', '=', req.id).execute();
     await recordEvent(t, orgId, req.id, 'info_answered', actor.userId, { stepNo: req.currentStep, comment });
+    await hookFor(req.entityType)?.onInfoAnswered?.(deps, t, hookCtx(orgId, req, actor, comment));
     const payload = await requestPayload(t, orgId, req);
     await emitTargeted(t, orgId, 'approval.info_answered', req.id, (step?.actors ?? []).filter((a) => a.decision === 'PENDING').map((a) => a.userId), { ...payload, comment, answeredBy: actor.userId }, actor);
     return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: req.status };

@@ -1,9 +1,11 @@
 import type { ApprovalContextDto, ApprovalEntity, Permission } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
+import type { MembershipGrant } from '@flowza/domain';
 import type { ApiDeps } from '../../../deps.js';
 import type { Actor } from '../../../lib/service.js';
 import { correctionHook } from './corrections.js';
 import { leaveHook } from './leave.js';
+import { compOffHook } from './comp-off.js';
 
 /** What the engine hands an entity hook when a request reaches a terminal state. Runs inside the engine's system step. */
 export interface HookContext {
@@ -20,6 +22,11 @@ export interface HookContext {
    * caller already owns the side effects it always had (response fields, recalculation), so a hook only applies the outcome.
    */
   auto?: boolean;
+  /**
+   * The document needed no approval at all (leave v2: a leave type with `requires_approval = false`): nobody decided, so
+   * a hook records no approver.
+   */
+  notRequired?: boolean;
 }
 
 /**
@@ -37,6 +44,10 @@ export interface EntityHook {
   onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onRejected(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onCancelled?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
+  /** An approver asked for more information (`ctx.comment` = the question); the request stays pending (leave v2: leave → INFO_REQUESTED). */
+  onInfoRequested?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
+  /** The requester / subject answered (`ctx.comment` = the answer; leave v2: leave → PENDING). */
+  onInfoAnswered?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   /** Inbox / detail context for a page of requests (system scope; ids the caller could already see). */
   loadContexts(trx: Trx, orgId: string, entityIds: string[]): Promise<Map<string, ApprovalContextDto>>;
   /** A one-line description for notifications. */
@@ -46,11 +57,18 @@ export interface EntityHook {
    * engine leaves the subject out of `approval.decided` — one notice per decision, the entity-specific one.
    */
   notifiesSubject?: boolean;
+  /**
+   * Who may withdraw the entity's pending request, when the entity has its own rule. Leave and comp-off (leave v2, Finance
+   * B-98): the requester, the employee themselves, or a `leave.manage` holder within branch scope — never an approver who
+   * is merely seated on it. Without it the engine's generic rule applies.
+   */
+  mayCancel?(grant: MembershipGrant, userId: string, req: { requestedBy: string | null; subjectUserId: string | null; employeeId: string | null; branchId: string | null }): boolean;
 }
 
 export const entityHooks: Partial<Record<ApprovalEntity, EntityHook>> = {
   ATTENDANCE_CORRECTION: correctionHook,
   LEAVE: leaveHook,
+  COMP_OFF: compOffHook,
 };
 
 /** Fallback for entity types without a registered hook: decisions still need a permission — the attendance one, like every other request. */
