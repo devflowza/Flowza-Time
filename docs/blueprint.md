@@ -680,8 +680,15 @@ No application code path uses Supabase `service_role`. Migrations/ops use it via
 - A membership has one role and either `all_branches=true` or an explicit branch list.
 - **Team scope** (migration 20260928000100): a member whose linked employee record (`org_memberships.employee_id`) is
   the `manager_employee_id` or `secondary_manager_employee_id` of other employees has those DIRECT reports as a team.
-  Holders of a team key (`attendance.view_team`, `leave.view_team`) read their team's rows without the organisation-wide
-  key; `app.team_employee_ids()` (direct) / `app.team_employee_ids_deep()` (chain to depth 5, for manager-chain approvals).
+  Holders of a team key (`employee.view_team`, `attendance.view_team`, `leave.view_team`) read their team's rows without
+  the organisation-wide key; `app.team_employee_ids()` (direct) / `app.team_employee_ids_deep()` (chain to depth 5, for
+  manager-chain approvals). The `manager` role holds `employee.view_team`, not `employee.view`: its directory is its own
+  record plus its direct reports (20260928000150). Employees who left (archived, terminated, resigned) belong to no team,
+  and a caller whose own record left has none.
+- **Leavers** (B-75, 20260928000150): terminating, resigning or archiving an employee suspends every membership linked to
+  the record (the link is kept), revokes pending invitations that would link it, ends the user's sessions
+  (`app.revoke_user_sessions`, system context only) and audits each step; re-activating the employee does not re-activate
+  the login. Reporting lines cannot form a loop (`employees_no_manager_cycle` trigger + named 400 in the API).
 - Helper functions (schema `app`, `STABLE`, `SECURITY DEFINER`, `search_path` pinned):
   - `app.uid()`, `app.claims()`, `app.is_system()`, `app.system_org_id()`
   - `app.org_ids_with_permission(perm text) → uuid[]` (memberships ∪ system org ∪ platform grants)

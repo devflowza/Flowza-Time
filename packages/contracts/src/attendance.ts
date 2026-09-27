@@ -74,8 +74,24 @@ export const attendanceDailyRecordDtoSchema = z.object({
   calculationVersion: z.number().int(),
   computedAt: isoDateTimeSchema,
   lockedAt: isoDateTimeSchema.nullable(),
+  /** Loss-of-pay days of this record (0, 0.5 or 1) — derived from the LOP + PAY_EFFECT_* flags, never stored separately. */
+  lopDays: z.number().default(0),
+  /** True when the day carries an unrevoked UNEXCUSED mark. */
+  unexcused: z.boolean().default(false),
 });
 export type AttendanceDailyRecordDto = z.infer<typeof attendanceDailyRecordDtoSchema>;
+
+/**
+ * Loss-of-pay days a record's flags express: `LOP` with `PAY_EFFECT_FULL` = 1, with `PAY_EFFECT_HALF` = 0.5. A pay effect
+ * charged to paid leave carries the PAY_EFFECT_* flag without `LOP` and costs no pay. One rule for the engine, the API
+ * mappers and the reports, so the figure cannot drift between them.
+ */
+export function lopDaysOf(flags: readonly string[]): number {
+  if (!flags.includes('LOP')) return 0;
+  if (flags.includes('PAY_EFFECT_FULL')) return 1;
+  if (flags.includes('PAY_EFFECT_HALF')) return 0.5;
+  return 0;
+}
 
 export const attendanceFlagSchema = z.enum(ATTENDANCE_FLAGS);
 

@@ -45,9 +45,10 @@ export function Sidebar() {
   const can = useCan();
   const { data: me } = useMe();
   const employeeId = useEmployeeId();
-  // Line manager: anyone whose employee record has direct reports (/me: isManager), whatever their role — the team
-  // workspace itself is filled in by a later release; today it lists the reports.
-  const isManager = useActiveMembership()?.isManager ?? false;
+  // Line manager: a member whose employee record has direct reports (/me: isManager) AND whose role may read those
+  // reports' records (employee.view_team, or the organisation-wide employee.view) — a relationship alone opens nothing
+  // (the RLS team predicate is key-gated), so without a key the section would only ever show an empty page.
+  const isManager = (useActiveMembership()?.isManager ?? false) && (can('employee.view_team') || can('employee.view'));
 
   const sections: NavSection[] = [
     { items: [{ to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, permissions: ['dashboard.view'] }] },

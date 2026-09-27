@@ -31,6 +31,7 @@ export function event(punchedAt: string, overrides: Partial<EngineEvent> = {}): 
     verificationMethod: overrides.verificationMethod ?? 'fingerprint',
     deviceId: overrides.deviceId ?? 'device-1',
     voided: overrides.voided ?? false,
+    ...(overrides.payload !== undefined ? { payload: overrides.payload } : {}),
   };
 }
 

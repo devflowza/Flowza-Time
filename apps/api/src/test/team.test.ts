@@ -56,7 +56,9 @@ describe('/me carries line-manager semantics', () => {
     const manager = roles.body.data.find((r: { key: string }) => r.key === 'manager');
     const auditorRole = roles.body.data.find((r: { key: string }) => r.key === 'auditor');
     expect(manager).toMatchObject({ id: ROLE.manager, isSystem: true });
-    expect(manager.permissions).toEqual(expect.arrayContaining(['attendance.view_team', 'leave.view_team', 'leave.approve', 'attendance.checkin', 'attendance.note', 'shift.request_swap', 'approval.delegate', 'employee.view']));
+    expect(manager.permissions).toEqual(expect.arrayContaining(['attendance.view_team', 'leave.view_team', 'leave.approve', 'attendance.checkin', 'attendance.note', 'shift.request_swap', 'approval.delegate', 'employee.view_team']));
+    // review fix (20260928000150): the line manager reads own record + direct reports, not the organisation's directory
+    expect(manager.permissions).not.toContain('employee.view');
     expect(manager.permissions).not.toContain('attendance.view');
     expect(auditorRole).toMatchObject({ id: ROLE.auditor, isSystem: true });
     expect(auditorRole.permissions).toEqual(expect.arrayContaining(['attendance.view', 'attendance.view_raw', 'audit.view', 'payroll.view', 'report.export']));

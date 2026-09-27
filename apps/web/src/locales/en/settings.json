@@ -1,12 +1,13 @@
 {
   "title": "Settings",
-  "subtitle": "Organisation profile, dashboard style, regional formats, attendance, synchronisation, reports, notifications, security and subscription.",
+  "subtitle": "Organisation profile, dashboard style, regional formats, attendance, synchronisation, integrations, reports, notifications, security and subscription.",
   "saved": "Settings saved",
   "nav": {
     "general": "General",
     "regional": "Regional",
     "attendance": "Attendance",
     "sync": "Sync",
+    "integrations": "Integrations",
     "notifications": "Notifications",
     "security": "Security",
     "subscription": "Subscription",
@@ -76,7 +77,91 @@
     "cutoffDay": "Cut-off day",
     "cutoffDayHint": "1–28, used when the period is a custom cut-off.",
     "selfService": "Allow self-service corrections",
-    "selfServiceHint": "Employees with a linked user can request corrections to their own attendance."
+    "selfServiceHint": "Employees with a linked user can request corrections to their own attendance.",
+    "selfServiceCheckIn": {
+      "title": "Self-service check-in",
+      "hint": "Rules for check-ins from the employee portal and the mobile app. Device punches are not affected.",
+      "web": "Web check-in",
+      "mobile": "Mobile check-in",
+      "selfie": "Selfie check-in",
+      "geofence": "Outside the geofence",
+      "geofenceHint": "What happens to a self-service punch taken outside the employee's geofence.",
+      "geofenceOptions": {
+        "off": "Accept",
+        "flag": "Accept and flag",
+        "block": "Refuse the punch"
+      },
+      "outOfWindow": "Outside the time window",
+      "outOfWindowHint": "What happens to a self-service punch outside its check-in / check-out window.",
+      "outOfWindowOptions": {
+        "accept": "Accept",
+        "flag": "Accept and flag",
+        "reject": "Refuse the punch"
+      },
+      "checkInWindow": "Check-in window",
+      "checkOutWindow": "Check-out window",
+      "windowHint": "Local time. Leave both empty for any time of day.",
+      "checkInFrom": "Check-in window start",
+      "checkInTo": "Check-in window end",
+      "checkOutFrom": "Check-out window start",
+      "checkOutTo": "Check-out window end",
+      "ipAllowList": "IP allow-list",
+      "ipAllowListHint": "One address or CIDR block per line. Empty = any network.",
+      "duplicateSeconds": "Duplicate punch guard (seconds)",
+      "duplicateSecondsHint": "A second self-service punch within this many seconds is treated as a duplicate."
+    },
+    "missedPunch": {
+      "title": "Missed punches and day close",
+      "hint": "The day close reviews each working day once the grace period has passed.",
+      "detection": "Detect missed punches",
+      "detectionHint": "Days with a missing check-in or check-out need an explanation like absences and late arrivals.",
+      "graceDays": "Day-close grace (days)",
+      "graceDaysHint": "0–7 days after a day before the day close looks at it.",
+      "splitTime": "Single punch split time",
+      "splitTimeHint": "A lone punch before this time counts as a check-in, after it as a check-out."
+    },
+    "nonWorkingDay": {
+      "title": "Work on weekly offs and holidays",
+      "hint": "How hours worked on a weekly off or a public holiday are counted. With overtime, the rule set's weekly-off / holiday overtime switches still apply.",
+      "action": "Hours worked on a non-working day",
+      "options": {
+        "record": "Record the hours (no overtime)",
+        "overtime": "Count the hours as overtime",
+        "ignore": "Ignore the hours"
+      }
+    },
+    "unexcused": {
+      "title": "Unexcused days",
+      "hint": "An absence, late arrival or missed punch that is still unexplained after the grace period is marked unexcused.",
+      "autoDeduct": "Deduct unexcused days automatically",
+      "autoDeductHint": "The pay effect is charged to paid leave first, then as loss of pay. When off, days are only marked.",
+      "graceDays": "Explanation grace (days)",
+      "graceDaysHint": "0–30 days an employee has to explain a day before it is marked unexcused.",
+      "payEffectAbsent": "Pay effect of an absence",
+      "payEffectLate": "Pay effect of a late arrival",
+      "payEffectMissingPunch": "Pay effect of a missed punch",
+      "payEffect": {
+        "none": "No deduction",
+        "half": "Half a day",
+        "full": "A full day"
+      },
+      "priority": "Charge leave in this order",
+      "priorityHint": "Leave type codes, comma-separated. Then the paid leave type with the most balance left.",
+      "exclude": "Never charge",
+      "excludeHint": "Leave type codes, comma-separated (sick, maternity, paternity and Hajj by default)."
+    },
+    "notes": {
+      "title": "Attendance notes",
+      "hint": "Whether employees must give a reason when they explain a day in the portal.",
+      "requireLate": "Require a reason for a late arrival",
+      "requireAbsent": "Require a reason for an absence"
+    },
+    "stats": {
+      "title": "Statistics",
+      "hint": "Targets behind the employee's own attendance statistics.",
+      "target": "Attendance target (%)",
+      "fullDayHours": "Full day (hours)"
+    }
   },
   "sync": {
     "title": "Device synchronisation",
@@ -95,6 +180,63 @@
     "maxIntervalHint": "Ceiling for adaptive polling.",
     "maxSkew": "Max clock skew (min)",
     "maxSkewHint": "Punches with a larger device clock skew are quarantined."
+  },
+  "integrations": {
+    "noPermission": "You need the integration.manage permission to configure integrations.",
+    "title": "Flowza Finance",
+    "hint": "Two-way attendance sync with Flowza Finance (HR+). One virtual device registered in Finance — its serial and push token — carries both directions: Finance punches are pulled into FlowZa Time and FlowZa Time punches are pushed to Finance. Pulled punches are never pushed back.",
+    "enabled": "Enable the connector",
+    "enabledHint": "When off, nothing is pulled or pushed; the settings and the stored token are kept.",
+    "baseUrl": "Finance functions base URL",
+    "baseUrlHint": "https only. attendance-export and attendance-ingest are called under this address.",
+    "deviceSerial": "Finance device serial",
+    "deviceSerialHint": "The serial of the virtual device registered in Finance, e.g. FLOWZA-TIME-<company code>.",
+    "token": "Finance push token",
+    "tokenHint": "Shown in Finance when the device is registered. Stored encrypted; it is never displayed again.",
+    "tokenStored": "Stored token {{masked}}",
+    "replaceToken": "Replace",
+    "keepToken": "Keep stored token",
+    "direction": "Direction",
+    "directionHint": "Pull brings Finance punches in, push sends FlowZa Time punches out.",
+    "directions": {
+      "pull": "Pull only (Finance → FlowZa Time)",
+      "push": "Push only (FlowZa Time → Finance)",
+      "both": "Both directions"
+    },
+    "pinKey": "Employee identity (PIN)",
+    "pinKeyHint": "The employee field sent to Finance as the PIN and matched when pulling. Finance maps PIN = employee number unless a PIN mapping says otherwise.",
+    "pinKeys": {
+      "employee_number": "Employee number",
+      "device_user_id": "Device user ID",
+      "card_number": "Card number"
+    },
+    "pollMinutes": "Sync every (min)",
+    "pollMinutesHint": "{{min}}–{{max}} minutes between pulls and between pushes.",
+    "test": "Test connection",
+    "testOk": "Connected to Flowza Finance",
+    "testFailed": "Connection failed",
+    "latency": "{{ms}} ms",
+    "usedStored": "Used the stored token",
+    "serverTime": "Finance time {{time}}",
+    "firstPunch": "First punch {{time}}",
+    "noPunches": "No punches in Finance yet",
+    "statusTitle": "Sync status",
+    "statusHint": "Last pull and push, failures and punches that could not be matched to an employee.",
+    "disabled": "Disabled",
+    "syncNow": "Sync now",
+    "syncQueued": "Flowza Finance sync queued",
+    "lastPull": "Last pull",
+    "lastPush": "Last push",
+    "never": "Never",
+    "punches_one": "{{count}} punch",
+    "punches_other": "{{count}} punches",
+    "failures": "Consecutive failures",
+    "unmatched": "Unmatched punches",
+    "unmatchedHint": "Pulled punches with no matching employee — open to triage.",
+    "circuit": "Calls to Finance are paused after repeated failures ({{state}}); next attempt {{at}}.",
+    "recentJobs": "Recent sync jobs",
+    "noJobs": "No sync jobs yet.",
+    "viewJob": "Details"
   },
   "notifications": {
     "title": "Organisation notifications",

@@ -9,12 +9,16 @@ import { EmployeeImportPage, EmployeeNewPage, EmployeeProfilePage, EmployeesList
 
 registerNamespace('employees', en, ar);
 
-const wrap = (perms: Permission[], node: React.ReactNode) => <RequirePermission permissions={perms}><Suspense fallback={<PageFallback />}>{node}</Suspense></RequirePermission>;
+const wrap = (perms: Permission[], node: React.ReactNode, any = false) => <RequirePermission permissions={perms} any={any}><Suspense fallback={<PageFallback />}>{node}</Suspense></RequirePermission>;
 
-/** Routes for the employees feature (lazy pages, permission-gated; the server enforces permissions again). */
+/**
+ * Routes for the employees feature (lazy pages, permission-gated; the server enforces permissions again). The directory
+ * list stays an HR surface (employee.view); a profile also opens for a line manager (employee.view_team) — the API/RLS
+ * answer 404 for anybody who is not their own record or a direct report.
+ */
 export const employeesRoutes: RouteObject[] = [
   { path: 'employees', element: wrap(['employee.view'], <EmployeesListPage />) },
   { path: 'employees/new', element: wrap(['employee.create'], <EmployeeNewPage />) },
   { path: 'employees/import', element: wrap(['employee.import'], <EmployeeImportPage />) },
-  { path: 'employees/:id', element: wrap(['employee.view'], <EmployeeProfilePage />) },
+  { path: 'employees/:id', element: wrap(['employee.view', 'employee.view_team'], <EmployeeProfilePage />, true) },
 ];

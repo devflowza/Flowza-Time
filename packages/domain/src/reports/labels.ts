@@ -78,6 +78,8 @@ const en = {
   'col.totalPresent': 'T/PR',
   'col.totalLeave': 'T/OL',
   'col.totalAbsent': 'T/AB',
+  'col.unexcused': 'UNX',
+  'col.lop': 'LOP',
 
   'field.employee': 'Employee:',
   'field.cardNo': 'Card No:',
@@ -99,6 +101,8 @@ const en = {
   'footer.generated': 'Generated',
   'footer.page': 'Page {{page}} of {{total}}',
   'footer.rules': 'OT1 = regular overtime; OT2 = overtime on weekly off / holiday; UT = base hours not worked. Hours as {{notation}}.',
+  'footer.policy': 'UNX = days marked unexcused; LOP = loss-of-pay days (half days = .5), after paid leave was charged first.',
+  'footer.lop': 'LOP = loss-of-pay days (half days = .5), after paid leave was charged first.',
   'notation.h.mm': 'hours.minutes (9.45 = 9 h 45 min)',
   'notation.hh:mm': 'hours:minutes',
 
@@ -183,6 +187,8 @@ const ar: Record<ReportLabelKey, string> = {
   'col.totalPresent': 'مج/حضور',
   'col.totalLeave': 'مج/إجازة',
   'col.totalAbsent': 'مج/غياب',
+  'col.unexcused': 'غ/مبرر',
+  'col.lop': 'خصم',
 
   'field.employee': 'الموظف:',
   'field.cardNo': 'رقم البطاقة:',
@@ -204,6 +210,8 @@ const ar: Record<ReportLabelKey, string> = {
   'footer.generated': 'أُنشئ في',
   'footer.page': 'صفحة {{page}} من {{total}}',
   'footer.rules': 'إضافي 1 = العمل الإضافي العادي؛ إضافي 2 = العمل الإضافي في العطل؛ نقص = الساعات الأساسية غير المعمولة. الساعات بصيغة {{notation}}.',
+  'footer.policy': 'غ/مبرر = الأيام المعلَّمة غير مبررة؛ خصم = أيام الخصم من الراتب (نصف اليوم = .5) بعد الخصم من الإجازة المدفوعة أولًا.',
+  'footer.lop': 'خصم = أيام الخصم من الراتب (نصف اليوم = .5) بعد الخصم من الإجازة المدفوعة أولًا.',
   'notation.h.mm': 'ساعات.دقائق (9.45 = 9 س 45 د)',
   'notation.hh:mm': 'ساعات:دقائق',
 

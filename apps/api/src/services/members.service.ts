@@ -11,6 +11,8 @@ import { type Actor, runUser, runSystem, audit, diffObjects, withSystemScope } f
 import { likeContains, pageOf, resolveSort, toCount } from '../lib/pagination.js';
 import { groupBy } from '../lib/mappers.js';
 import { toInvitationDto, toMemberDto, type MemberRow } from './members.mappers.js';
+import { revokeSessions } from '../lib/sessions.js';
+import { hasLeft } from './offboarding.js';
 
 export type UpdateMemberInput = z.infer<typeof updateMemberSchema>;
 const INVITATION_TTL_DAYS = 7;
@@ -83,9 +85,28 @@ async function assertBranchesInOrg(trx: Trx, orgId: string, branchIds: string[])
   if (found.length !== new Set(branchIds).size) throw errors.validation('One or more branches do not belong to this organisation.', { issues: [{ path: 'branchIds', message: 'Unknown branch' }] });
 }
 
-async function assertEmployeeInOrg(trx: Trx, orgId: string, employeeId: string): Promise<void> {
-  const e = await trx.selectFrom('employees').select('id').where('organizationId', '=', orgId).where('id', '=', employeeId).where('deletedAt', 'is', null).executeTakeFirst();
+/**
+ * The employee a login is linked to must exist, be live and not have left (B-75: leaving ends every login linked to the
+ * record, so a login is never linked to somebody who left).
+ */
+async function assertEmployeeLinkable(trx: Trx, orgId: string, employeeId: string): Promise<void> {
+  const e = await trx.selectFrom('employees').select(['id', 'employmentStatus']).where('organizationId', '=', orgId).where('id', '=', employeeId).where('deletedAt', 'is', null).executeTakeFirst();
   if (!e) throw errors.validation('Employee not found in this organisation.', { issues: [{ path: 'employeeId', message: 'Unknown employee' }] });
+  if (hasLeft(e.employmentStatus)) throw errors.validation('This employee has left the organisation (terminated or resigned); a login cannot be linked to them.', { issues: [{ path: 'employeeId', message: 'Employee has left' }] });
+}
+
+/** True when the employee record is archived or has left — read in system scope (the caller may not see the record). */
+async function employeeHasLeft(trx: Trx, orgId: string, employeeId: string): Promise<boolean> {
+  const e = await withSystemScope(trx, orgId, (t) => t.selectFrom('employees').select(['employmentStatus', 'deletedAt']).where('organizationId', '=', orgId).where('id', '=', employeeId).executeTakeFirst());
+  return !e || e.deletedAt !== null || hasLeft(e.employmentStatus);
+}
+
+/** True when `nextRoleId` lacks at least one permission `prevRoleId` grants (a downgrade ends the user's sessions). */
+async function isRoleDowngrade(trx: Trx, prevRoleId: string, nextRoleId: string): Promise<boolean> {
+  if (prevRoleId === nextRoleId) return false;
+  const rows = await trx.selectFrom('rolePermissions').select(['roleId', 'permissionKey']).where('roleId', 'in', [prevRoleId, nextRoleId]).execute();
+  const next = new Set(rows.filter((r) => r.roleId === nextRoleId).map((r) => r.permissionKey));
+  return rows.some((r) => r.roleId === prevRoleId && !next.has(r.permissionKey));
 }
 
 /**
@@ -138,7 +159,7 @@ export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, i
     if (input.roleId === SYSTEM_ROLE_IDS.owner && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can invite another owner.');
     await assertRoleGrantable(trx, input.roleId, grant);
     await assertBranchesInOrg(trx, orgId, input.branchIds);
-    if (input.employeeId) { await assertEmployeeInOrg(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId); }
+    if (input.employeeId) { await assertEmployeeLinkable(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId); }
     const existingMember = await trx.selectFrom('orgMemberships as m').innerJoin('userProfiles as u', 'u.id', 'm.userId').select(['m.id', 'm.status']).where('m.organizationId', '=', orgId).where(sql`lower(u.email::text)`, '=', input.email.toLowerCase()).executeTakeFirst();
     if (existingMember && existingMember.status !== 'suspended') throw errors.conflict('This user is already a member of the organisation.');
     const pending = await trx.selectFrom('invitations').select('id').where('organizationId', '=', orgId).where(sql`lower(email::text)`, '=', input.email.toLowerCase()).where('acceptedAt', 'is', null).where('expiresAt', '>', new Date()).executeTakeFirst();
@@ -206,6 +227,11 @@ export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: strin
     if (inv.acceptedAt) throw errors.invalidState('This invitation was already accepted.');
     if (inv.expiresAt.getTime() < Date.now()) throw errors.invalidState('This invitation has expired.');
     if (!actor.email || inv.email.toLowerCase() !== actor.email.toLowerCase()) throw errors.forbidden('This invitation was issued to a different email address.');
+    // B-75: the invitation was issued for an employee who has since left — their login must not come back through it
+    // (leaving revokes pending invitations; this guards invitations that predate that rule)
+    if (inv.employeeId && (await employeeHasLeft(trx, inv.organizationId, inv.employeeId))) {
+      throw errors.invalidState('This invitation is no longer valid: the employee record it was issued for has left the organisation.');
+    }
     const profile = await trx.selectFrom('userProfiles').select('id').where('id', '=', actor.userId).executeTakeFirst();
     if (!profile) await trx.insertInto('userProfiles').values({ id: actor.userId, email: actor.email, fullName: '' }).execute();
     // The employee link chosen at invitation time lands on the membership — unless somebody else took that employee in
@@ -244,12 +270,21 @@ export async function updateMember(deps: ApiDeps, actor: Actor, orgId: string, i
     }
     if (before.roleKey === 'owner' && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can change another owner.');
     if (input.branchIds) await assertBranchesInOrg(trx, orgId, input.branchIds);
-    if (input.employeeId) { await assertEmployeeInOrg(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId, { membershipId: id }); }
+    if (input.employeeId) { await assertEmployeeLinkable(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId, { membershipId: id }); }
     const nextRole = input.roleId ?? before.roleId;
     const nextStatus = input.status ?? before.status;
     const nextAll = input.allBranches ?? (input.branchIds ? false : before.allBranches);
     if (!nextAll && (input.branchIds ?? before.branchIds).length === 0) throw errors.validation('Select at least one branch or grant all branches.', { issues: [{ path: 'branchIds', message: 'Required' }] });
     await assertNotLastOwner(trx, orgId, id, { roleId: nextRole, status: nextStatus });
+    // B-75: a login stays suspended while the employee it is linked to has left — re-activating the employee record
+    // does not bring the login back, and neither does re-activating the login while the employee is still gone
+    const nextEmployeeId = input.employeeId !== undefined ? input.employeeId : before.employeeId;
+    if (nextStatus === 'active' && before.status !== 'active' && nextEmployeeId && input.employeeId === undefined && (await employeeHasLeft(trx, orgId, nextEmployeeId))) {
+      throw errors.invalidState('The employee linked to this login has left the organisation: re-activate the employee record, or remove the link, before re-activating the login.');
+    }
+    // AGENTS.md: suspension / role downgrade → the user's sessions end (decided before the role changes)
+    const endSessions: 'member_suspended' | 'role_downgraded' | null = before.status === 'active' && nextStatus !== 'active' ? 'member_suspended'
+      : before.status === 'active' && (await isRoleDowngrade(trx, before.roleId, nextRole)) ? 'role_downgraded' : null;
     const patch: Record<string, unknown> = { roleId: nextRole, status: nextStatus, allBranches: nextAll };
     if (input.employeeId !== undefined) patch['employeeId'] = input.employeeId;
     if (nextStatus === 'active' && before.status !== 'active') patch['joinedAt'] = new Date();
@@ -259,8 +294,10 @@ export async function updateMember(deps: ApiDeps, actor: Actor, orgId: string, i
       await trx.deleteFrom('membershipBranches').where('membershipId', '=', id).execute();
       await trx.insertInto('membershipBranches').values(input.branchIds.map((b) => ({ membershipId: id, branchId: b }))).execute();
     }
+    const sessionsRevoked = endSessions ? await revokeSessions(deps, trx, { organizationId: orgId, userIds: [before.userId], reason: endSessions, requestId: actor.requestId }) : 0;
     const after = await loadMember(trx, orgId, id);
     const diff = diffObjects(before as unknown as Record<string, unknown>, { roleId: after.roleId, status: after.status, allBranches: after.allBranches, branchIds: after.branchIds, employeeId: after.employeeId });
+    if (endSessions) (diff.newValue as Record<string, unknown>)['sessionsRevoked'] = sessionsRevoked;
     await audit(trx, actor, orgId, 'member.updated', 'org_membership', { entityId: id, ...diff });
     return after;
   });
@@ -275,7 +312,9 @@ export async function suspendMember(deps: ApiDeps, actor: Actor, orgId: string, 
     if (before.status === 'suspended') return before;
     await assertNotLastOwner(trx, orgId, id, { roleId: before.roleId, status: 'suspended' });
     await trx.updateTable('orgMemberships').set({ status: 'suspended' }).where('id', '=', id).where('organizationId', '=', orgId).execute();
-    await audit(trx, actor, orgId, 'member.suspended', 'org_membership', { entityId: id, oldValue: { status: before.status }, newValue: { status: 'suspended' } });
+    // AGENTS.md: suspension → the user's sessions end (inside this transaction: a rollback ends nobody's session)
+    const sessionsRevoked = before.status === 'active' ? await revokeSessions(deps, trx, { organizationId: orgId, userIds: [before.userId], reason: 'member_suspended', requestId: actor.requestId }) : 0;
+    await audit(trx, actor, orgId, 'member.suspended', 'org_membership', { entityId: id, oldValue: { status: before.status }, newValue: { status: 'suspended', sessionsRevoked } });
     return loadMember(trx, orgId, id);
   });
 }

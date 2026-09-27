@@ -30,9 +30,15 @@ const requestLink = (p: Payload) => `/approvals/requests/${String(p['requestId']
 const DECISION_WORDS: Record<string, string> = { APPROVED: 'approved', REJECTED: 'rejected', CANCELLED: 'withdrawn', INVALIDATED: 'invalidated (changed while pending)' };
 
 const ROUTING: Record<string, Route> = {
+  // Day-close sweep (HR portal Prompt 3): one event per (employee, run). `recipients: 'users'` = exactly the logins the
+  // emitter resolved into payload.userIds (the employee + the managers holding attendance.approve), re-checked against
+  // active memberships of the organisation here — never every attendance.approve holder for every employee-day.
+  'attendance.unexcused_marked': { category: 'ATTENDANCE', permission: 'attendance.approve', recipients: 'users', title: (p) => `${Number(p['count'] ?? 0) === 1 ? 'An attendance day' : `${String(p['count'] ?? 0)} attendance days`} marked unexcused`, body: (p) => `${Array.isArray(p['dates']) ? (p['dates'] as string[]).slice(0, 5).join(', ') : ''}${Array.isArray(p['dates']) && (p['dates'] as string[]).length > 5 ? ', …' : ''}${p['autoDeduct'] === true ? ' · pay effect applied per policy' : ''}`, link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
   'device.offline': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device offline: ${String(p['deviceName'] ?? p['deviceId'] ?? '')}`, body: (p) => `No successful communication since ${String(p['lastSeenAt'] ?? 'unknown')}.`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'device.online': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device back online: ${String(p['deviceName'] ?? '')}`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'sync.failed': { category: 'ATTENDANCE', permission: 'device.sync', title: (p) => `Sync failed: ${String(p['jobType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: (p) => `/sync/${String(p['syncJobId'] ?? '')}` },
+  // Flowza Finance connector: emitted once per failure streak (3 consecutive pull/push failures), so it is not a per-attempt alarm.
+  'sync.finance.failed': { category: 'ATTENDANCE', permission: 'device.sync', title: (p) => `Flowza Finance ${String(p['direction'] ?? 'sync')} is failing`, body: (p) => `${String(p['consecutiveFailures'] ?? 0)} consecutive failures · ${String(p['code'] ?? '')}: ${String(p['error'] ?? '')}`, link: () => '/settings/integrations' },
   // Only a sync somebody asked for is worth a notification. The scheduler completes a health check per device every few
   // minutes and a poll per device per interval; routing those to every device.sync holder produced a notification (and an
   // e-mail) each time, hundreds a day per tenant. Failures keep notifying regardless of who started the sync.
@@ -95,10 +101,13 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
       if (route && row.organizationId && (route.when?.(row.payload) ?? true)) {
         notifications += await (async () => {
           // recipients: active members whose role holds the permission (+ specific user in payload.userId), exactly
-          // payload.userId, or exactly payload.userIds (targeted approval notifications; active members only)
-          const targeted = Array.isArray(row.payload['userIds']) ? (row.payload['userIds'] as unknown[]).filter((u): u is string => typeof u === 'string' && /^[0-9a-f-]{36}$/i.test(u)) : [];
+          // payload.userId, or exactly payload.userIds (targeted notifications — approvals, day-close sweep); the explicit
+          // list is kept to active members of the organisation, so a stale id notifies nobody
+          const userIds = Array.isArray(row.payload['userIds']) ? (row.payload['userIds'] as unknown[]).filter((u): u is string => typeof u === 'string' && /^[0-9a-f-]{36}$/i.test(u)) : [];
           const recipients = route.recipients === 'users'
-            ? await sql<{ userId: string }>`select distinct m.user_id as "userId" from public.org_memberships m where m.organization_id = ${row.organizationId}::uuid and m.status = 'active' and m.user_id = any (${targeted}::uuid[])`.execute(trx)
+            ? (userIds.length === 0 ? { rows: [] as Array<{ userId: string }> } : await sql<{ userId: string }>`
+            select distinct m.user_id as "userId" from public.org_memberships m
+            where m.organization_id = ${row.organizationId}::uuid and m.status = 'active' and m.user_id = any(${userIds}::uuid[])`.execute(trx))
             : route.recipients === 'user'
             ? await sql<{ userId: string }>`select ${String(row.payload['userId'] ?? '00000000-0000-0000-0000-000000000000')}::uuid as "userId" where ${typeof row.payload['userId'] === 'string'}`.execute(trx)
             : await sql<{ userId: string }>`

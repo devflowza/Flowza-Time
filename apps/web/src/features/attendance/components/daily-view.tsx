@@ -39,6 +39,8 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
   const hasFilters = Object.keys(f).some((k) => k !== 'date');
   const setDate = (d: string) => table.update({ filters: { date: d === todayIso(tz) ? '' : d } });
   const byStatus = q.data?.meta.byStatus ?? {};
+  // missing punch is a flag-derived count (MISSING_IN / MISSING_OUT); the API filters status=MISSING_PUNCH the same way
+  const statValue = (k: (typeof STAT_KEYS)[number]) => (k === 'MISSING_PUNCH' ? q.data?.meta.missingPunch ?? byStatus[k] ?? 0 : byStatus[k] ?? 0);
 
   const columns = useMemo<ColumnDef<DailyRecord, unknown>[]>(() => [
     { id: 'displayName', header: t('columns.employee'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.employeeName}</p><p className="truncate font-mono text-xs text-muted-foreground" dir="ltr">{row.original.employeeNumber}{row.original.branchName ? ` · ${row.original.branchName}` : ''}</p></div> },
@@ -65,7 +67,7 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
         <p className="text-sm text-muted-foreground">{fmtDate(date, 'EEEE, dd MMMM yyyy')}</p>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {STAT_KEYS.map((k) => <StatCard key={k} label={t(`status.${k}`)} value={fmtNumber(byStatus[k] ?? 0)} tone={STAT_TONE[k]} loading={q.isLoading} onClick={() => table.setFilter('status', f['status'] === k ? undefined : k)} />)}
+        {STAT_KEYS.map((k) => <StatCard key={k} label={t(`status.${k}`)} value={fmtNumber(statValue(k))} tone={STAT_TONE[k]} loading={q.isLoading} onClick={() => table.setFilter('status', f['status'] === k ? undefined : k)} />)}
       </div>
       <DataTable
         columns={columns} data={q.data?.data} total={q.data?.meta.total} page={table.state.page} pageSize={table.state.pageSize}

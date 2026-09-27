@@ -5,7 +5,8 @@
   "status": { "PRESENT": "حاضر", "ABSENT": "غائب", "LEAVE": "إجازة", "HOLIDAY": "عطلة", "WEEKLY_OFF": "راحة أسبوعية", "HALF_DAY": "نصف يوم", "MISSING_PUNCH": "بصمة مفقودة", "NOT_JOINED": "لم يلتحق", "EXITED": "منتهي", "PENDING": "قيد الانتظار" },
   "flags": {
     "LATE": "تأخير", "EARLY_DEPARTURE": "خروج مبكر", "OVERTIME": "عمل إضافي", "MISSING_IN": "دخول مفقود", "MISSING_OUT": "خروج مفقود", "MANUAL_CORRECTION": "مُصحَّح", "OUT_OF_WINDOW": "خارج النافذة",
-    "WORKED_ON_HOLIDAY": "عمل في عطلة", "WORKED_ON_WEEKLY_OFF": "عمل في الراحة الأسبوعية", "HALF_DAY_LEAVE": "إجازة نصف يوم", "DUPLICATE_PUNCHES_COLLAPSED": "بصمات مكررة مدمجة", "RAMADAN_HOURS": "ساعات رمضان", "CROSS_MIDNIGHT": "عبر منتصف الليل", "NO_SHIFT": "بدون وردية", "UNDER_HOURS": "ساعات أقل"
+    "WORKED_ON_HOLIDAY": "عمل في عطلة", "WORKED_ON_WEEKLY_OFF": "عمل في الراحة الأسبوعية", "HALF_DAY_LEAVE": "إجازة نصف يوم", "DUPLICATE_PUNCHES_COLLAPSED": "بصمات مكررة مدمجة", "RAMADAN_HOURS": "ساعات رمضان", "CROSS_MIDNIGHT": "عبر منتصف الليل", "NO_SHIFT": "بدون وردية", "UNDER_HOURS": "ساعات أقل",
+    "UNEXCUSED": "غير مبرر", "EXCUSED": "مبرر", "LOP": "خصم من الراتب", "PAY_EFFECT_HALF": "أثر مالي نصف يوم", "PAY_EFFECT_FULL": "أثر مالي يوم كامل", "OUTSIDE_GEOFENCE": "خارج النطاق الجغرافي", "SELF_SERVICE_PUNCH": "بصمة ذاتية", "NON_WORKING_DAY_WORK": "عمل في يوم غير عمل"
   },
   "correctionStatus": { "PENDING": "قيد الانتظار", "APPROVED": "معتمد", "APPLIED": "مطبَّق", "REJECTED": "مرفوض", "CANCELLED": "ملغى" },
   "correctionType": { "ADD_PUNCH": "إضافة بصمة", "EDIT_PUNCH": "تعديل بصمة", "REMOVE_PUNCH": "إزالة بصمة", "SET_STATUS": "تعيين الحالة" },
@@ -28,7 +29,13 @@
     "noEvents": "لا توجد أحداث", "noEventsHint": "لم تُسجَّل بصمات حول هذا التاريخ.", "eventTime": "الوقت", "eventType": "النوع", "source": "المصدر", "device": "الجهاز", "verification": "التحقق", "attributed": "مُنسَب", "viaCorrection": "عبر تصحيح", "voided": "ملغى", "yes": "نعم", "otherDay": "يوم آخر",
     "noHistory": "لا توجد إصدارات سابقة", "noHistoryHint": "تُحفظ لقطة عند كل إعادة حساب للسجل.", "recomputed": "أُعيد حسابه", "triggeredBy": "بواسطة {{by}}",
     "noCorrections": "لا توجد تصحيحات", "noCorrectionsHint": "تظهر هنا التصحيحات المطلوبة لهذا اليوم مع حالة اعتمادها.", "correctionType": "النوع", "change": "التغيير", "reason": "السبب", "newPunch": "بصمة جديدة", "removed": "أُزيلت",
-    "locked": "مقفل", "lockedHint": "هذه الفترة مقفلة؛ افتحها قبل طلب التصحيحات.", "requestCorrection": "طلب تصحيح"
+    "locked": "مقفل", "lockedHint": "هذه الفترة مقفلة؛ افتحها قبل طلب التصحيحات.", "requestCorrection": "طلب تصحيح",
+    "marks": {
+      "title": "علامات اليوم", "lop": "خصم من الراتب {{days}} يوم", "lopHint": "يُحتسب خصمًا من الراتب في ملخص الرواتب للفترة.",
+      "kinds": { "UNEXCUSED": "غير مبرر", "EXCUSED": "مبرر", "LOP": "خصم من الراتب · {{days}} يوم", "PAY_EFFECT": "مخصوم من الإجازة · {{days}} يوم" },
+      "sources": { "SWEEP": "إقفال اليوم", "NOTE_REVIEW": "مراجعة الملاحظة", "HR": "الموارد البشرية", "SYSTEM": "النظام" },
+      "created": "{{source}} · {{at}}", "revoked": "أُلغيت {{at}}: {{reason}}", "revokedShort": "ملغاة"
+    }
   },
   "trace": {
     "empty": "لا يوجد مسار حساب", "emptyHint": "أُنشئ هذا السجل بدون مسار (حالة يدوية أو محرك قديم).", "engine": "المحرك {{version}}",

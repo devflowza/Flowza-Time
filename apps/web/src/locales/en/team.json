@@ -7,7 +7,7 @@
   "comingSoon": "Team attendance, leave and approvals",
   "comingSoonHint": "The team workspace grows in the next release: today's attendance, pending requests and upcoming leave of your reports will appear here.",
   "members": "Team members",
-  "noDirectory": "Your role cannot open employee profiles, so the list stays hidden. Ask HR for the employee.view permission to see your reports here.",
+  "noDirectory": "Your role cannot open your reports' employee records, so the list stays hidden. Ask HR for a role with the employee.view_team permission (the Line Manager role has it) to see your reports here.",
   "empty": "No direct reports found",
   "emptyHint": "Nobody reports to your employee record yet. HR sets the manager and secondary manager on each employee profile.",
   "notManager": "You have no direct reports",

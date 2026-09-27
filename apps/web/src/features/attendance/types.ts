@@ -1,4 +1,4 @@
-import type { AttendanceDailyRecordDto } from '@flowza/contracts';
+import type { AttendanceDailyRecordDto, DayMarkDto } from '@flowza/contracts';
 
 /** GET /attendance/daily rows carry the joined branch/department names on top of the contract DTO. */
 export type DailyRecord = AttendanceDailyRecordDto & { branchName?: string | null; departmentName?: string | null };
@@ -20,7 +20,8 @@ export interface CorrectionDto {
   reason: string; status: string; requestedBy: string | null; approvalRequestId: string | null; appliedEventId: string | null; appliedAt: string | null; rejectionReason: string | null; createdAt: string; updatedAt: string; employeeNumber?: string; employeeName?: string;
 }
 
-export type RecordDetail = DailyRecord & { ruleSetId: string | null; shiftAssignmentId: string | null; engineVersion: string; trace: CalculationTrace | null; events: RecordEvent[]; history: RecordHistory[]; corrections: CorrectionDto[] };
+/** Record detail; `marks` = every day mark of the employee-day, revoked ones included (HR portal Prompt 3; absent on an older API). */
+export type RecordDetail = DailyRecord & { ruleSetId: string | null; shiftAssignmentId: string | null; engineVersion: string; trace: CalculationTrace | null; events: RecordEvent[]; history: RecordHistory[]; corrections: CorrectionDto[]; marks?: DayMarkDto[] };
 
 // ---- monthly grid -----------------------------------------------------------------------------------------------------
 export interface MonthlyDayCell { status: string; workedMinutes: number; lateMinutes: number; overtimeMinutes: number; flags: string[]; recordId: string }

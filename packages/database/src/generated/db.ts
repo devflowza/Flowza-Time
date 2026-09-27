@@ -139,7 +139,7 @@ export type SubscriptionStatus = "active" | "cancelled" | "expired" | "past_due"
 
 export type SyncItemStatus = "CANCELLED" | "FAILED" | "OFFLINE" | "PENDING" | "QUEUED" | "RETRYING" | "RUNNING" | "SKIPPED" | "SUCCESS" | "UNSUPPORTED";
 
-export type SyncJobType = "DELETE_EMPLOYEE" | "DEVICE_HEALTH_CHECK" | "PULL_ATTENDANCE" | "PULL_EMPLOYEES" | "PUSH_EMPLOYEE" | "PUSH_EMPLOYEES" | "RECONCILIATION" | "RESTART_DEVICE" | "TEST_CONNECTION";
+export type SyncJobType = "DELETE_EMPLOYEE" | "DEVICE_HEALTH_CHECK" | "PULL_ATTENDANCE" | "PULL_EMPLOYEES" | "PUSH_ATTENDANCE" | "PUSH_EMPLOYEE" | "PUSH_EMPLOYEES" | "RECONCILIATION" | "RESTART_DEVICE" | "TEST_CONNECTION";
 
 export type SyncStatus = "CANCELLED" | "FAILED" | "PARTIAL_SUCCESS" | "PENDING" | "QUEUED" | "RETRYING" | "RUNNING" | "SUCCESS";
 
@@ -368,6 +368,24 @@ export interface AttendanceDailyRecords {
   workedMinutes: Generated<number>;
 }
 
+export interface AttendanceDayMarks {
+  attendanceDate: Timestamp;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  employeeId: string;
+  id: Generated<string>;
+  kind: string;
+  organizationId: string;
+  payEffectDays: Generated<Numeric>;
+  reason: string | null;
+  revokedAt: Timestamp | null;
+  revokedBy: string | null;
+  revokeReason: string | null;
+  source: string;
+  sourceId: string | null;
+}
+
 export interface AttendanceEvents {
   branchId: string;
   correctionId: string | null;
@@ -408,6 +426,7 @@ export interface AttendancePeriodSummaries {
   createdAt: Generated<Timestamp>;
   earlyDepartureMinutes: Generated<number>;
   employeeId: string;
+  excusedDays: Generated<number>;
   finalizedAt: Timestamp | null;
   finalizedBy: string | null;
   halfDays: Generated<number>;
@@ -416,7 +435,9 @@ export interface AttendancePeriodSummaries {
   lateDays: Generated<number>;
   lateMinutes: Generated<number>;
   leaveDays: Generated<Numeric>;
+  lopDays: Generated<Numeric>;
   missingPunchDays: Generated<number>;
+  nonWorkingDayWorkMinutes: Generated<number>;
   organizationId: string;
   overtimeHolidayMinutes: Generated<number>;
   overtimeMinutes: Generated<number>;
@@ -428,6 +449,7 @@ export interface AttendancePeriodSummaries {
   recordVersions: Json | null;
   regularMinutes: Generated<number>;
   status: Generated<PeriodSummaryStatus>;
+  unexcusedDays: Generated<number>;
   updatedAt: Generated<Timestamp>;
   version: Generated<number>;
   weeklyOffDays: Generated<number>;
@@ -867,6 +889,23 @@ export interface FeatureFlags {
   description: string;
   key: string;
   rolloutPercentage: Generated<number>;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface FinanceSyncState {
+  consecutiveFailures: Generated<number>;
+  createdAt: Generated<Timestamp>;
+  deviceId: string;
+  lastError: string | null;
+  lastErrorAt: Timestamp | null;
+  lastPullAt: Timestamp | null;
+  lastPullCount: Generated<number>;
+  lastPushAt: Timestamp | null;
+  lastPushCount: Generated<number>;
+  lastPushedEventAt: Timestamp | null;
+  lastPushedEventId: string | null;
+  nextPushAt: Timestamp | null;
+  organizationId: string;
   updatedAt: Generated<Timestamp>;
 }
 
@@ -1502,6 +1541,7 @@ export interface DB {
   attendanceCorrections: AttendanceCorrections;
   attendanceDailyRecordHistory: AttendanceDailyRecordHistory;
   attendanceDailyRecords: AttendanceDailyRecords;
+  attendanceDayMarks: AttendanceDayMarks;
   attendanceEvents: AttendanceEvents;
   attendancePeriodLocks: AttendancePeriodLocks;
   attendancePeriodSummaries: AttendancePeriodSummaries;
@@ -1529,6 +1569,7 @@ export interface DB {
   employmentHistory: EmploymentHistory;
   entitlements: Entitlements;
   featureFlags: FeatureFlags;
+  financeSyncState: FinanceSyncState;
   holidayCalendars: HolidayCalendars;
   holidays: Holidays;
   importJobRows: ImportJobRows;

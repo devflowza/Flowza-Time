@@ -11,3 +11,4 @@ export { createTestDatabase, type TestDatabase } from './testing/index.js';
 export * from './ingest-hash.js';
 export * from './sync-jobs.js';
 export * from './approval-tokens.js';
+export * from './attendance/index.js';

@@ -20,6 +20,17 @@ export function requirePermission(principal: Principal, organizationId: string, 
   return m;
 }
 
+/**
+ * The membership when it holds AT LEAST ONE of the permissions, else FORBIDDEN. For reads whose rows RLS scopes per key:
+ * e.g. the employee directory answers `employee.view` (organisation-wide, branch-scoped) or `employee.view_team` (own
+ * record + direct reports) — the service admits either and the database decides which rows each one reveals.
+ */
+export function requireAnyPermission(principal: Principal, organizationId: string, ...permissions: [Permission, ...Permission[]]): MembershipGrant {
+  const m = requireMembership(principal, organizationId);
+  if (permissions.some((p) => hasPermission(m, p))) return m;
+  throw errors.forbidden(`Missing permission: one of ${permissions.join(', ')}.`);
+}
+
 /** True when the employee is one of the membership's direct reports (primary or secondary manager on the employee record). */
 export function isTeamMember(m: MembershipGrant, employeeId: string): boolean {
   return m.teamEmployeeIds.includes(employeeId);

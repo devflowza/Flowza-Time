@@ -106,10 +106,10 @@ beforeAll(async () => {
 afterAll(async () => { await h?.close(); });
 
 describe('registration and pure helpers', () => {
-  it('registers the five attendance job types', () => {
+  it('registers the six attendance job types', () => {
     const reg = new HandlerRegistry();
     registerAttendanceHandlers(reg);
-    expect(reg.types().sort()).toEqual(['APPLY_CORRECTION', 'BUILD_PERIOD_SUMMARY', 'NORMALIZE_RAW', 'RECALCULATE_RANGE', 'RECOMPUTE_DAILY']);
+    expect(reg.types().sort()).toEqual(['APPLY_CORRECTION', 'ATTENDANCE_DAY_CLOSE', 'BUILD_PERIOD_SUMMARY', 'NORMALIZE_RAW', 'RECALCULATE_RANGE', 'RECOMPUTE_DAILY']);
   });
   it('maps device directions to event types and tolerates snake_case ramadan settings', () => {
     expect(['in', 'out', 'break_out', 'break_in', 'overtime_in', 'unknown'].map((d) => eventTypeForDirection(d as never))).toEqual(['PUNCH_IN', 'PUNCH_OUT', 'BREAK_START', 'BREAK_END', 'PUNCH', 'PUNCH']);

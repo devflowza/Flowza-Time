@@ -8,6 +8,7 @@ export * from './employees.js';
 export * from './organizations.js';
 export * from './sync.js';
 export * from './reports.js';
+export * from './integrations.js';
 export * from './dto/structure.js';
 export * from './dto/members.js';
 export * from './dto/notifications.js';

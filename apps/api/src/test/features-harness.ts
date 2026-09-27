@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
 import pg from 'pg';
 import { createTestDatabase, DeviceCredentialsStore, PgJobQueue, SecretsCipher, type Database, type TestDatabase } from '@flowza/database';
-import { defaultRegistry } from '@flowza/device-providers';
+import { defaultRegistry, type ProviderRegistry } from '@flowza/device-providers';
 import { SYSTEM_ROLE_IDS } from '@flowza/contracts';
 import { createLogger } from '@flowza/shared';
 import type { ApiConfig } from '../config.js';
@@ -44,7 +44,7 @@ async function createDatabaseSerialised(name: string): Promise<TestDatabase> {
   }
 }
 
-export async function createApiHarness(name: string, opts: { config?: Partial<ApiConfig> } = {}): Promise<ApiHarness> {
+export async function createApiHarness(name: string, opts: { config?: Partial<ApiConfig>; providers?: ProviderRegistry } = {}): Promise<ApiHarness> {
   const tdb = await createDatabaseSerialised(name);
   const published: ApiHarness['published'] = [];
   const signedUrls: string[] = [];
@@ -58,7 +58,7 @@ export async function createApiHarness(name: string, opts: { config?: Partial<Ap
     db: tdb.db,
     queue: new PgJobQueue(tdb.db),
     credentials: new DeviceCredentialsStore(new SecretsCipher(TEST_MASTER_KEYS)),
-    providers: defaultRegistry(),
+    providers: opts.providers ?? defaultRegistry(),
     verifyToken: async (token: string) => {
       const m = /^user:([0-9a-f-]{36})(?::(.+))?$/i.exec(token);
       if (!m) throw new Error('bad test token');

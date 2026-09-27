@@ -14,12 +14,12 @@ import { createSyncJob, MAX_SYNC_ITEMS, type CreatedSyncJob } from './sync-jobs.
 import { SYNC_ITEM_COLUMNS, SYNC_JOB_COLUMNS, toSyncItemDto, toSyncJobDto, type SyncItemRow, type SyncJobRow } from './mappers.js';
 
 type SyncJobListQuery = z.infer<typeof syncJobListQuerySchema>;
-interface DeviceTarget { id: string; branchId: string; capabilities: Record<string, boolean>; integrationType: string }
+interface DeviceTarget { id: string; branchId: string; providerKey: string; capabilities: Record<string, boolean>; integrationType: string }
 
 /** Resolve devices by ids / branch / group / all within the caller's branch scope; only active devices are eligible. */
 async function resolveDevices(trx: Trx, orgId: string, grant: MembershipGrant, scope: { deviceIds?: string[]; branchId?: string; groupId?: string; all?: boolean }): Promise<DeviceTarget[]> {
   const branchScope = branchFilter(grant, scope.branchId);
-  let q = trx.selectFrom('devices').select(['id', 'branchId', 'capabilities', 'integrationType']).where('organizationId', '=', orgId).where('status', '=', 'active');
+  let q = trx.selectFrom('devices').select(['id', 'branchId', 'providerKey', 'capabilities', 'integrationType']).where('organizationId', '=', orgId).where('status', '=', 'active');
   if (branchScope) q = q.where('branchId', 'in', branchScope);
   if (scope.deviceIds && scope.deviceIds.length) q = q.where('id', 'in', [...new Set(scope.deviceIds)]);
   if (scope.groupId) q = q.where('id', 'in', trx.selectFrom('deviceGroupMembers').select('deviceId').where('groupId', '=', scope.groupId));
@@ -28,7 +28,7 @@ async function resolveDevices(trx: Trx, orgId: string, grant: MembershipGrant, s
     const missing = [...new Set(scope.deviceIds)].filter((id) => !rows.some((r) => r.id === id));
     if (missing.length) throw errors.validation('One or more devices were not found, are inactive, or are outside your branch scope.', { missing });
   }
-  return rows.map((r) => ({ id: r.id, branchId: r.branchId, capabilities: jsonObject(r.capabilities) as Record<string, boolean>, integrationType: r.integrationType }));
+  return rows.map((r) => ({ id: r.id, branchId: r.branchId, providerKey: r.providerKey, capabilities: jsonObject(r.capabilities) as Record<string, boolean>, integrationType: r.integrationType }));
 }
 
 function accepted(job: CreatedSyncJob, deviceCount: number, message: string): SyncJobAcceptedDto {
@@ -96,7 +96,9 @@ export async function healthCheck(deps: ApiDeps, actor: Actor, orgId: string, in
 export async function reconcile(deps: ApiDeps, actor: Actor, orgId: string, input: SyncReconcileRequest): Promise<SyncJobAcceptedDto> {
   const grant = requirePermission(actor.principal, orgId, 'device.sync');
   return runUser(deps.db, actor, async (trx) => {
-    const devices = await resolveDevices(trx, orgId, grant, input);
+    // the Flowza Finance connector holds no device user list: comparing it with the employee roster would only report every
+    // employee as "missing on device" (its unmatched punches are triaged from Settings → Integrations and the raw tab instead)
+    const devices = (await resolveDevices(trx, orgId, grant, input)).filter((d) => d.providerKey !== 'flowza_finance');
     if (!devices.length) throw errors.validation('No active devices matched the scope.');
     const job = await createSyncJob(deps, trx, { organizationId: orgId, jobType: 'RECONCILIATION', trigger: 'MANUAL', scope: { deviceIds: input.deviceIds ?? null, branchId: input.branchId ?? null, groupId: input.groupId ?? null, all: input.all, repair: input.repair }, branchId: input.branchId ?? null, requestedBy: actor.userId, correlationId: actor.requestId, priority: 4, items: devices.map((d) => ({ deviceId: d.id, branchId: d.branchId })), options: { repair: input.repair } });
     await audit(trx, actor, orgId, 'sync.reconciliation_requested', 'sync_job', { entityId: job.id, branchId: input.branchId ?? null, newValue: { deviceCount: devices.length, repair: input.repair } });
