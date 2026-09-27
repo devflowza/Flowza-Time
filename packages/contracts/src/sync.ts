@@ -112,5 +112,6 @@ export const DOMAIN_EVENT_TYPES = [
   'sync.queued', 'sync.completed', 'sync.failed', 'sync.item_failed',
   'attendance.created', 'attendance.updated', 'attendance.correction_submitted', 'attendance.correction_approved', 'attendance.correction_rejected',
   'approval.pending', 'report.ready', 'report.failed', 'subscription.limit_reached',
+  'leave.requested', 'leave.approved', 'leave.rejected',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];

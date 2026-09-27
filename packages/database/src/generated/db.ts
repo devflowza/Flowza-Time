@@ -904,6 +904,7 @@ export interface LeaveRecords {
   branchId: string | null;
   createdAt: Generated<Timestamp>;
   createdBy: string | null;
+  decisionNote: string | null;
   employeeId: string;
   endDate: Timestamp;
   externalRef: string | null;
@@ -920,6 +921,7 @@ export interface LeaveRecords {
 }
 
 export interface LeaveTypes {
+  annualAllowanceDays: Numeric | null;
   code: string;
   color: string | null;
   createdAt: Generated<Timestamp>;

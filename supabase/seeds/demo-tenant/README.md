@@ -17,6 +17,7 @@ existing owner login.
 | Logins | 8 memberships, password **`Test@1234`** — see table below |
 | Schedule | Shifts OFFICE 08:00–17:00, SITE 07:00–16:00, FLEX 8 h; assignments org → Duqm branch → IT-DEV team → individual drivers/technicians; company rule set + Duqm rule set; Oman public holidays 2026 (+ two company days) |
 | Leave | 10 leave types (product defaults + Hajj + Paternity), 62 records Mar–Oct 2026 across every type and status |
+| Employee portal | Step 3b: yearly allowances on the leave types (AL 30, CL 6, EL 6, PTL 7, HJ 15, ML 98) and a full self-service history for **employee@flowza.ai** (Priya Sharma) — leave approved with HR's notes, rejected, withdrawn and two pending requests HR can approve on the Leave page; correction requests (pending, rejected, withdrawn); her notifications and HR's "new request" notifications |
 | Attendance | ~13 000 raw punches (1 Mar → yesterday) with per-employee habits: punctuality band, overtime appetite, absence rate, lunch punches, duplicate punches, missing punch-outs, half-day leave, Ramadan hours, weekend work on site |
 | Corrections | Approval workflow "Line manager → HR", 6 corrections (3 approved and applied by the worker, 2 pending, 1 rejected) |
 | Extras | Notifications, audit trail entries |
@@ -61,7 +62,10 @@ old events through corrections or start from a fresh tenant instead.
   the seeded addresses are test accounts, and a worker built before the `sync.completed` routing fix e-mails every
   scheduled health check to every sync-permission holder.
 
-- Leave balances and entitlements do not exist in the data model; the Leave page lists records only.
+- Leave balances are a yearly allowance per leave type (`leave_types.annual_allowance_days`, migration 20260927000100);
+  the portal counts used / pending working days against it. There are no per-employee entitlements or carry-over.
+- Step 3b needs migration 20260927000100 (self-service permissions and columns) and must run before step 04: its one
+  new approved leave day (1 Oct 2026) is in the future, so no generated punch ever lands on it.
 - Teams have no department column; the team name carries the department where it matters.
 - Devices are push terminals without a live connection. The seed stamps a fresh heartbeat and a 24-hour offline threshold,
   so they read "online" for a day after each run and the worker's health sweep marks them offline afterwards — re-run

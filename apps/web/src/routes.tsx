@@ -12,6 +12,7 @@ import { NotificationsPage } from '@/features/notifications/notifications-page';
 import { EmptyState, Skeleton } from '@/components/ui';
 import { FileQuestion } from 'lucide-react';
 import { featureRoutes } from '@/features/routes';
+import { useCan, useEmployeeId } from '@/features/me/use-me';
 
 function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }
 function NotFound() {
@@ -38,6 +39,14 @@ function MfaSetupRoute() {
   return <MfaRequiredGate onVerified={() => void navigate('/', { replace: true })} />;
 }
 
+/** `/`: the dashboard, or the self-service overview for a member who has no dashboard but is an employee. */
+function HomeRoute() {
+  const can = useCan();
+  const employeeId = useEmployeeId();
+  if (!can('dashboard.view') && employeeId) return <Navigate to="/my" replace />;
+  return <Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>;
+}
+
 export const router = createBrowserRouter([
   { path: '/auth/sign-in', element: <SignInPage /> },
   { path: '/auth/sign-up', element: <SignUpPage /> },
@@ -53,7 +62,7 @@ export const router = createBrowserRouter([
       {
         element: <AppShell />,
         children: [
-          { index: true, element: <Suspense fallback={<PageFallback />}><DashboardPage /></Suspense> },
+          { index: true, element: <HomeRoute /> },
           { path: 'notifications', element: <NotificationsPage /> },
           ...featureRoutes,
           { path: '*', element: <Suspense fallback={<PageFallback />}><Outlet /><NotFound /></Suspense> },

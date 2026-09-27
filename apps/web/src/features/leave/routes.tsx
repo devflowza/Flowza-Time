@@ -10,5 +10,5 @@ registerNamespace('leave', en, ar);
 
 /** Routes for the leave feature: /leave?tab=records|types */
 export const leaveRoutes: RouteObject[] = [
-  { path: 'leave', element: <RequirePermission permissions={['leave.view']}><Suspense fallback={<PageFallback />}><LeavePage /></Suspense></RequirePermission> },
+  { path: 'leave', element: <RequirePermission permissions={['leave.view']} selfServiceTo="/my/leave"><Suspense fallback={<PageFallback />}><LeavePage /></Suspense></RequirePermission> },
 ];

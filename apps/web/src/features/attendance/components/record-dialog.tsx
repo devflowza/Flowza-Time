@@ -4,7 +4,7 @@ import { ClipboardPlus, Lock } from 'lucide-react';
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, Skeleton, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { fmtDate, fmtDateTime, fmtMinutes, fmtTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { useCan, useOrgTimezone } from '@/features/me/use-me';
+import { useActiveMembership, useCan, useEmployeeId, useOrgTimezone } from '@/features/me/use-me';
 import { useAttendanceRecord } from '../api';
 import type { RecordDetail } from '../types';
 import { AttendanceStatusBadge, CorrectionStatusBadge, CorrectionTypeBadge, FlagChips } from './badges';
@@ -109,6 +109,8 @@ export function RecordDialog({ recordId, onClose, onRequestCorrection }: { recor
   const { t: tc } = useTranslation();
   const orgTz = useOrgTimezone();
   const can = useCan();
+  const ownEmployeeId = useEmployeeId();
+  const selfCorrections = (useActiveMembership()?.settings.attendance as { allowSelfServiceCorrections?: boolean } | undefined)?.allowSelfServiceCorrections === true;
   const q = useAttendanceRecord(recordId);
   const [tab, setTab] = useState('trace');
   const r = q.data;
@@ -144,7 +146,7 @@ export function RecordDialog({ recordId, onClose, onRequestCorrection }: { recor
           )}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>{tc('common.close')}</Button>
-          {r && onRequestCorrection && can('attendance.correct') ? (
+          {r && onRequestCorrection && (can('attendance.correct') || (selfCorrections && can('attendance.request_correction') && r.employeeId === ownEmployeeId)) ? (
             <Button type="button" disabled={!!r.lockedAt} title={r.lockedAt ? t('record.lockedHint') : undefined} onClick={() => onRequestCorrection({ employeeId: r.employeeId, employeeName: r.employeeName, attendanceDate: r.attendanceDate, timezone: r.timezone })}><ClipboardPlus /> {t('record.requestCorrection')}</Button>
           ) : null}
         </DialogFooter>
