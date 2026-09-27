@@ -9,6 +9,7 @@ import { useAttendanceRecord } from '../api';
 import type { RecordDetail } from '../types';
 import { AttendanceStatusBadge, CorrectionStatusBadge, CorrectionTypeBadge, FlagChips } from './badges';
 import { TraceView } from './trace-view';
+import { DayMarks } from './day-marks';
 
 export interface CorrectionPreset { employeeId: string; employeeName?: string; attendanceDate: string; timezone?: string }
 
@@ -103,7 +104,7 @@ function CorrectionsTab({ r }: { r: RecordDetail }) {
   );
 }
 
-/** Daily record detail: summary, calculation trace, events, history and corrections. */
+/** Daily record detail: summary, day marks (verdicts + loss of pay), calculation trace, events, history and corrections. */
 export function RecordDialog({ recordId, onClose, onRequestCorrection }: { recordId: string | null; onClose: () => void; onRequestCorrection?: (preset: CorrectionPreset) => void }) {
   const { t } = useTranslation('attendance');
   const { t: tc } = useTranslation();
@@ -130,6 +131,7 @@ export function RecordDialog({ recordId, onClose, onRequestCorrection }: { recor
           : (
             <div className="space-y-4">
               <Summary r={r} />
+              <DayMarks marks={r.marks} lopDays={r.lopDays} timezone={r.timezone || orgTz} />
               <Tabs value={tab} onValueChange={setTab}>
                 <TabsList aria-label={t('record.title')} className="max-w-full overflow-x-auto">
                   <TabsTrigger value="trace">{t('record.tabs.trace')}</TabsTrigger>

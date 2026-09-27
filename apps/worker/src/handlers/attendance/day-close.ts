@@ -76,10 +76,15 @@ export async function orgLocalDate(trx: Trx, organizationId: string, now: Date):
   return DateTime.fromJSDate(now).setZone(zone).toISODate() ?? now.toISOString().slice(0, 10);
 }
 
-/** Login(s) of the employee plus the managers (primary / secondary) whose role holds `attendance.approve`; when no manager qualifies, every `attendance.approve` holder of the organisation. */
-async function recipientsFor(trx: Trx, organizationId: string, employeeId: string): Promise<string[]> {
-  const rows = await sql<{ userId: string; kind: string }>`
-    with emp as (select id, manager_employee_id, secondary_manager_employee_id from public.employees where organization_id = ${organizationId}::uuid and id = ${employeeId}::uuid),
+/**
+ * Who hears about an employee's unexcused days: the employee's own login(s) plus the line managers (primary / secondary
+ * manager on the employee record) whose role holds `attendance.approve`. When no line manager qualifies, the approvers
+ * who can actually open the employee's records — `attendance.approve` AND `attendance.view`, all branches or the
+ * employee's branch — so a line manager of another team is never told about somebody outside their team.
+ */
+export async function dayCloseRecipients(trx: Trx, organizationId: string, employeeId: string): Promise<string[]> {
+  const rows = await sql<{ userId: string }>`
+    with emp as (select id, branch_id, manager_employee_id, secondary_manager_employee_id from public.employees where organization_id = ${organizationId}::uuid and id = ${employeeId}::uuid),
     own as (select m.user_id from public.org_memberships m where m.organization_id = ${organizationId}::uuid and m.status = 'active' and m.employee_id = ${employeeId}::uuid),
     managers as (
       select distinct m.user_id from public.org_memberships m
@@ -88,14 +93,16 @@ async function recipientsFor(trx: Trx, organizationId: string, employeeId: strin
       where m.organization_id = ${organizationId}::uuid and m.status = 'active' and m.employee_id is not null
     ),
     approvers as (
-      select distinct m.user_id from public.org_memberships m
-      join public.role_permissions rp on rp.role_id = m.role_id and rp.permission_key = 'attendance.approve'
+      select distinct m.user_id from public.org_memberships m cross join emp
       where m.organization_id = ${organizationId}::uuid and m.status = 'active'
+        and exists (select 1 from public.role_permissions rp where rp.role_id = m.role_id and rp.permission_key = 'attendance.approve')
+        and exists (select 1 from public.role_permissions rp where rp.role_id = m.role_id and rp.permission_key = 'attendance.view')
+        and (m.all_branches or exists (select 1 from public.membership_branches mb where mb.membership_id = m.id and mb.branch_id = emp.branch_id))
     )
-    select user_id as "userId", 'own' as kind from own
-    union select user_id, 'manager' from managers
-    union select user_id, 'approver' from approvers where not exists (select 1 from managers)`.execute(trx);
-  return [...new Set(rows.rows.map((r) => r.userId))];
+    select user_id as "userId" from own
+    union select user_id from managers
+    union select user_id from approvers where not exists (select 1 from managers)`.execute(trx);
+  return [...new Set(rows.rows.map((r) => r.userId))].sort();
 }
 
 export async function runDayClose(trx: Trx, p: DayClosePayload, now: Date, jobId: string | null, log?: JobContext['log'], queue?: JobContext['deps']['queue']): Promise<DayCloseSummary> {
@@ -167,7 +174,7 @@ export async function runDayClose(trx: Trx, p: DayClosePayload, now: Date, jobId
 
   summary.employees = markedByEmployee.size;
   for (const [employeeId, dates] of markedByEmployee) {
-    const userIds = await recipientsFor(trx, organizationId, employeeId);
+    const userIds = await dayCloseRecipients(trx, organizationId, employeeId);
     await emitDomainEvent(trx, {
       organizationId, eventType: 'attendance.unexcused_marked', aggregateType: 'employee', aggregateId: employeeId,
       payload: { employeeId, dates: dates.sort(), count: dates.length, autoDeduct: settings.unexcused.autoDeductEnabled, userIds },

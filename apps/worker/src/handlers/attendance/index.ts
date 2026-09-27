@@ -31,5 +31,5 @@ export { recomputeDaily, recomputeDailyHandler, isPeriodLocked, type RecomputeOp
 export { recalculateRange, enqueueRecalculationForScope, recalculationScopeSchema, type RecalculationScope, type RecalculationSummary } from './recalculate.js';
 export { buildPeriodSummaries, buildPeriodSummaryHandler, periodSummaryPayloadSchema, type PeriodSummaryPayload, type PeriodSummaryResult } from './period-summary.js';
 export { applyApprovedCorrection, applyCorrectionHandler, applyCorrectionPayloadSchema, type ApplyCorrectionOptions, type ApplyCorrectionResult } from './corrections.js';
-export { runDayClose, dayCloseHandler, dayClosePayloadSchema, dayCloseDedupeKey, assessDay, DAY_CLOSE_JOB_TYPE, DAY_CLOSE_MAX_DAYS, DAY_CLOSE_LOOKBACK_DAYS, type DayClosePayload, type DayCloseSummary } from './day-close.js';
+export { runDayClose, dayCloseHandler, dayClosePayloadSchema, dayCloseDedupeKey, dayCloseRecipients, assessDay, DAY_CLOSE_JOB_TYPE, DAY_CLOSE_MAX_DAYS, DAY_CLOSE_LOOKBACK_DAYS, type DayClosePayload, type DayCloseSummary } from './day-close.js';
 export { enqueueRecompute, enqueueNormalizeRaw, recomputeDedupeKey, normalizeDedupeKey, recomputePayloadSchema, IMMEDIATE_RECOMPUTE_REASONS, loadAttendanceSettings, type RecomputeReason, type EnqueueRecomputeInput } from './common.js';

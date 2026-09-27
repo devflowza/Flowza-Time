@@ -76,7 +76,91 @@
     "cutoffDay": "Cut-off day",
     "cutoffDayHint": "1–28, used when the period is a custom cut-off.",
     "selfService": "Allow self-service corrections",
-    "selfServiceHint": "Employees with a linked user can request corrections to their own attendance."
+    "selfServiceHint": "Employees with a linked user can request corrections to their own attendance.",
+    "selfServiceCheckIn": {
+      "title": "Self-service check-in",
+      "hint": "Rules for check-ins from the employee portal and the mobile app. Device punches are not affected.",
+      "web": "Web check-in",
+      "mobile": "Mobile check-in",
+      "selfie": "Selfie check-in",
+      "geofence": "Outside the geofence",
+      "geofenceHint": "What happens to a self-service punch taken outside the employee's geofence.",
+      "geofenceOptions": {
+        "off": "Accept",
+        "flag": "Accept and flag",
+        "block": "Refuse the punch"
+      },
+      "outOfWindow": "Outside the time window",
+      "outOfWindowHint": "What happens to a self-service punch outside its check-in / check-out window.",
+      "outOfWindowOptions": {
+        "accept": "Accept",
+        "flag": "Accept and flag",
+        "reject": "Refuse the punch"
+      },
+      "checkInWindow": "Check-in window",
+      "checkOutWindow": "Check-out window",
+      "windowHint": "Local time. Leave both empty for any time of day.",
+      "checkInFrom": "Check-in window start",
+      "checkInTo": "Check-in window end",
+      "checkOutFrom": "Check-out window start",
+      "checkOutTo": "Check-out window end",
+      "ipAllowList": "IP allow-list",
+      "ipAllowListHint": "One address or CIDR block per line. Empty = any network.",
+      "duplicateSeconds": "Duplicate punch guard (seconds)",
+      "duplicateSecondsHint": "A second self-service punch within this many seconds is treated as a duplicate."
+    },
+    "missedPunch": {
+      "title": "Missed punches and day close",
+      "hint": "The day close reviews each working day once the grace period has passed.",
+      "detection": "Detect missed punches",
+      "detectionHint": "Days with a missing check-in or check-out need an explanation like absences and late arrivals.",
+      "graceDays": "Day-close grace (days)",
+      "graceDaysHint": "0–7 days after a day before the day close looks at it.",
+      "splitTime": "Single punch split time",
+      "splitTimeHint": "A lone punch before this time counts as a check-in, after it as a check-out."
+    },
+    "nonWorkingDay": {
+      "title": "Work on weekly offs and holidays",
+      "hint": "How hours worked on a weekly off or a public holiday are counted.",
+      "action": "Hours worked on a non-working day",
+      "options": {
+        "record": "Record the hours (no overtime)",
+        "overtime": "Count the hours as overtime",
+        "ignore": "Ignore the hours"
+      }
+    },
+    "unexcused": {
+      "title": "Unexcused days",
+      "hint": "An absence, late arrival or missed punch that is still unexplained after the grace period is marked unexcused.",
+      "autoDeduct": "Deduct unexcused days automatically",
+      "autoDeductHint": "The pay effect is charged to paid leave first, then as loss of pay. When off, days are only marked.",
+      "graceDays": "Explanation grace (days)",
+      "graceDaysHint": "0–30 days an employee has to explain a day before it is marked unexcused.",
+      "payEffectAbsent": "Pay effect of an absence",
+      "payEffectLate": "Pay effect of a late arrival",
+      "payEffectMissingPunch": "Pay effect of a missed punch",
+      "payEffect": {
+        "none": "No deduction",
+        "half": "Half a day",
+        "full": "A full day"
+      },
+      "priority": "Charge leave in this order",
+      "priorityHint": "Leave type codes, comma-separated. Then the paid leave type with the most balance left.",
+      "exclude": "Never charge",
+      "excludeHint": "Leave type codes, comma-separated (sick, maternity, paternity and Hajj by default)."
+    },
+    "notes": {
+      "title": "Attendance notes",
+      "hint": "Whether employees must give a reason when they explain a day in the portal.",
+      "requireLate": "Require a reason for a late arrival",
+      "requireAbsent": "Require a reason for an absence"
+    },
+    "stats": {
+      "title": "Statistics",
+      "hint": "Targets behind the employee's own attendance statistics.",
+      "target": "Attendance target (%)",
+      "fullDayHours": "Full day (hours)"
+    }
   },
   "sync": {
     "title": "Device synchronisation",

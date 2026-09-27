@@ -53,7 +53,8 @@ create index if not exists attendance_day_marks_employee_date_idx on public.atte
 create index if not exists attendance_day_marks_org_date_idx on public.attendance_day_marks (organization_id, attendance_date, branch_id) where revoked_at is null;
 create index if not exists attendance_day_marks_source_idx on public.attendance_day_marks (source_id) where source_id is not null;
 
--- Append-only with revocation: only the three revocation columns may change, once, from unrevoked to revoked.
+-- Append-only with revocation: only the three revocation columns may change, once, from unrevoked to revoked. Like the
+-- raw transactions and the events, a mark is never deleted (organisations are closed, employees soft-deleted).
 create or replace function app.protect_attendance_day_marks() returns trigger language plpgsql set search_path = '' as $$
 begin
   if tg_op = 'DELETE' then
@@ -65,10 +66,7 @@ begin
   if old.revoked_at is not null then
     raise exception 'a revoked attendance day mark cannot be changed' using errcode = 'P0001';
   end if;
-  if new.revoked_at is null then
-    return new; -- a no-op update (nothing changed); harmless
-  end if;
-  return new;
+  return new; -- revoking (or a no-op update of an active mark)
 end $$;
 drop trigger if exists attendance_day_marks_protect on public.attendance_day_marks;
 create trigger attendance_day_marks_protect before update or delete on public.attendance_day_marks for each row execute function app.protect_attendance_day_marks();

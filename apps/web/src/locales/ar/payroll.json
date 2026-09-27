@@ -9,7 +9,10 @@
   },
   "summaries": {
     "title": "الملخصات — {{period}}", "hint": "الأيام كأعداد (نصف اليوم = .5)، والوقت بصيغة س:دد.", "employee": "الموظف", "workingDays": "أيام العمل", "presentDays": "حضور", "absentDays": "غياب", "leaveDays": "إجازة (مدفوعة)", "holidayDays": "عطلات", "late": "أيام التأخير (س:دد)", "missingPunchDays": "بصمة مفقودة", "regular": "عادي س:دد", "overtime": "إضافي س:دد",
-    "overtimeBreakdown": "راحة أسبوعية {{weeklyOff}} · عطلة {{holiday}}", "computedAt": "تاريخ الحساب", "status": { "draft": "مسودة", "finalized": "نهائي" }, "allStatuses": "كل الحالات",
+    "overtimeBreakdown": "راحة أسبوعية {{weeklyOff}} · عطلة {{holiday}}", "computedAt": "تاريخ الحساب",
+    "unexcusedDays": "غير مبرر (مبرر)", "unexcusedHint": "أيام علّمها إقفال اليوم أو الموارد البشرية غير مبررة؛ {{excused}} يوم مبرر.", "excusedShort": "{{count}} مبرر",
+    "lopDays": "أيام الخصم", "lopHint": "أيام الخصم من الراتب (نصف اليوم = .5): أيام غير مبررة لم يغطّها رصيد إجازة مدفوعة.",
+    "nonWorkingDay": "عمل أيام الراحة س:د", "nonWorkingDayHint": "ساعات العمل في أيام الراحة الأسبوعية والعطلات (تُحتسب عملًا إضافيًا أو لا، حسب إعدادات الحضور).", "status": { "draft": "مسودة", "finalized": "نهائي" }, "allStatuses": "كل الحالات",
     "empty": "لا توجد ملخصات لهذه الفترة", "emptyHint": "ابنِ الملخصات بعد مراجعة حضور الفترة."
   }
 }

@@ -22,7 +22,7 @@ const periods = [
   { periodStart: '2024-02-01', periodEnd: '2024-02-29', label: 'February 2024', locked: true, lockId: 'l1', lockedAt: '2024-03-02T06:00:00Z', summaries: { total: 2, draft: 2, finalized: 0, employees: 2 }, isCurrent: false },
   { periodStart: '2024-03-01', periodEnd: '2024-03-31', label: 'March 2024', locked: false, lockId: null, lockedAt: null, summaries: { total: 0, draft: 0, finalized: 0, employees: 0 }, isCurrent: true },
 ];
-const summary = { id: 's1', employeeId: 'e1', employeeNumber: '1001', employeeName: 'Ali', departmentId: null, branchId: 'b1', branchName: 'Muscat', periodStart: '2024-02-01', periodEnd: '2024-02-29', status: 'draft', version: 1, workingDays: 21, presentDays: 19.5, absentDays: 1, leaveDays: 0.5, paidLeaveDays: 0.5, holidayDays: 1, weeklyOffDays: 8, halfDays: 1, lateDays: 3, lateMinutes: 47, earlyDepartureMinutes: 0, missingPunchDays: 0, regularMinutes: 9360, overtimeMinutes: 125, overtimeWeeklyOffMinutes: 0, overtimeHolidayMinutes: 0, recordVersions: null, computedAt: '2024-03-01T20:00:00Z', finalizedAt: null, finalizedBy: null };
+const summary = { id: 's1', employeeId: 'e1', employeeNumber: '1001', employeeName: 'Ali', departmentId: null, branchId: 'b1', branchName: 'Muscat', periodStart: '2024-02-01', periodEnd: '2024-02-29', status: 'draft', version: 1, workingDays: 21, presentDays: 19.5, absentDays: 1, leaveDays: 0.5, paidLeaveDays: 0.5, holidayDays: 1, weeklyOffDays: 8, halfDays: 1, lateDays: 3, lateMinutes: 47, earlyDepartureMinutes: 0, missingPunchDays: 0, regularMinutes: 9360, overtimeMinutes: 125, overtimeWeeklyOffMinutes: 0, overtimeHolidayMinutes: 0, recordVersions: null, computedAt: '2024-03-01T20:00:00Z', finalizedAt: null, finalizedBy: null, lopDays: 1.5, unexcusedDays: 3, excusedDays: 1, nonWorkingDayWorkMinutes: 245 };
 
 describe('fmtHm / fmtDays', () => {
   it('formats minutes as h:mm and fractional days compactly', () => {
@@ -49,6 +49,11 @@ describe('PayrollPage', () => {
     expect(screen.getAllByText('156:00').length).toBeGreaterThan(0);
     expect(screen.getAllByText('2:05').length).toBeGreaterThan(0);
     expect(screen.getAllByText('19.5').length).toBeGreaterThan(0);
+    // policy parity (HR portal Prompt 3): loss-of-pay days, unexcused (excused) days, hours worked on non-working days
+    expect(screen.getAllByText('LOP days').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('1.5').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('(1 excused)').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('4:05').length).toBeGreaterThan(0);
 
     fireEvent.click(finalizeButtons[0]!);
     fireEvent.click(await screen.findByRole('button', { name: 'Finalise' }));

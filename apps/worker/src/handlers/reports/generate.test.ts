@@ -243,9 +243,10 @@ describe('Phase 1 · the five layouts with existing keys', () => {
     const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
     expect(res.status).toBe('COMPLETED');
     const lines = csvLines(`${ORG}/${id}.csv`);
-    expect(lines[0]).toBe(`Emp ID,Employee Name,${Array.from({ length: 30 }, (_, i) => i + 1).join(',')},Abs`.replace('Employee Name', 'Emp Name'));
+    // the trailing LOP column (HR portal Prompt 3) sits after the sample's own columns
+    expect(lines[0]).toBe(`Emp ID,Employee Name,${Array.from({ length: 30 }, (_, i) => i + 1).join(',')},Abs,LOP`.replace('Employee Name', 'Emp Name'));
     const faisal = lines.find((l) => l.startsWith('2011,'))!;
-    expect(faisal).toBe(`2011,FAISAL,PR,PR,OF,OF,AB,${','.repeat(24)},1`.replace(',,,,,,,,,,,,,,,,,,,,,,,,,', ','.repeat(25)));
+    expect(faisal).toBe(`2011,FAISAL,PR,PR,OF,OF,AB,${','.repeat(24)},1`.replace(',,,,,,,,,,,,,,,,,,,,,,,,,', ','.repeat(25)) + ',0');
     expect(lines.find((l) => l.startsWith('2192,'))).toMatch(/^2192,Masoom,AL,/);
     expect(lines.some((l) => l.startsWith('9001,'))).toBe(false); // exited before the month
     const pdfId = await request('monthly_attendance', 'pdf', { month: '2017-11' });
@@ -299,13 +300,14 @@ describe('Phase 2 · Summary, Weekly, Weekly In/Out, Leave', () => {
     expect(res.status).toBe('COMPLETED');
     const lines = csvLines(`${ORG}/${id}.csv`);
     // AL is paid leave (middle group); SD counts as present and sits before HP; no unpaid types in this tenant
-    expect(lines[0]).toBe('ID,Employee Name,PR,HL,OF,SD,HP,T/PR,AL,T/OL,AB,T/AB,OT1,OT2,UT');
+    // UNX / LOP (HR portal Prompt 3) are appended after the sample's own columns
+    expect(lines[0]).toBe('ID,Employee Name,PR,HL,OF,SD,HP,T/PR,AL,T/OL,AB,T/AB,OT1,OT2,UT,UNX,LOP');
     // FAISAL: PR on the 1st and 2nd, OF 3rd/4th, AB 5th; UT 0.30 + 0.42 = 72 min. Spreadsheets get numeric zeros; the print shows dashes.
-    expect(lines.find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,0,2,0,0,4,0,0,1,1,0,0,72');
+    expect(lines.find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,0,2,0,0,4,0,0,1,1,0,0,72,0,0');
     // SALEH: one present day with 5:15 regular overtime
-    expect(lines.find((l) => l.startsWith('2076,'))).toBe('2076,SALEH AL AGHBARI,1,0,0,0,0,1,0,0,0,0,315,0,0');
+    expect(lines.find((l) => l.startsWith('2076,'))).toBe('2076,SALEH AL AGHBARI,1,0,0,0,0,1,0,0,0,0,315,0,0,0,0');
     // Masoom: one day of annual leave
-    expect(lines.find((l) => l.startsWith('2192,'))).toBe('2192,Masoom,0,0,0,0,0,0,1,1,0,0,0,0,0');
+    expect(lines.find((l) => l.startsWith('2192,'))).toBe('2192,Masoom,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0');
     const pdfId = await request('attendance_summary', 'pdf', { from: DATE, to: '2017-11-30' });
     await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
     const html = fileText(`${ORG}/${pdfId}.pdf`);
@@ -314,6 +316,30 @@ describe('Phase 2 · Summary, Weekly, Weekly In/Out, Leave', () => {
     // printed: counts as integers or dashes, totals with one decimal, OT as h:mm, UT as h.mm
     expect(html).toMatch(/2011<\/td><td>FAISAL<\/td><td class="center">2<\/td><td class="center">-<\/td><td class="center">2<\/td><td class="center">-<\/td><td class="center">-<\/td><td class="center" style="font-weight:700">4\.0<\/td><td class="center">-<\/td><td class="center" style="font-weight:700">0\.0<\/td><td class="center">1<\/td><td class="center" style="font-weight:700">1\.0<\/td><td class="end mono">0:00<\/td><td class="end mono">0:00<\/td><td class="end mono">1\.12<\/td>/);
     expect(html).toMatch(/2076<\/td>.*<td class="end mono">5:15<\/td>/);
+  });
+
+  it('Summary and Monthly reports carry the unexcused and loss-of-pay days from the day marks (HR portal Prompt 3)', async () => {
+    const a = h.tdb.adminDb;
+    const setFlags = (date: string, flags: string[]) => a.updateTable('attendanceDailyRecords').set({ flags }).where('organizationId', '=', ORG).where('employeeId', '=', E3).where('attendanceDate', '=', sql<Date>`${date}::date`).execute();
+    // FAISAL: the late 2nd charged half a day as loss of pay, the absent 5th a full day
+    await setFlags('2017-11-02', ['LATE', 'UNEXCUSED', 'LOP', 'PAY_EFFECT_HALF']);
+    await setFlags('2017-11-05', ['UNEXCUSED', 'LOP', 'PAY_EFFECT_FULL']);
+    try {
+      const id = await request('attendance_summary', 'csv', { from: DATE, to: '2017-11-30' });
+      await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+      expect(csvLines(`${ORG}/${id}.csv`).find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,0,2,0,0,4,0,0,1,1,0,0,72,2,1.5');
+      const monthId = await request('monthly_attendance', 'csv', { month: '2017-11' });
+      await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: monthId }));
+      expect(csvLines(`${ORG}/${monthId}.csv`).find((l) => l.startsWith('2011,'))).toMatch(/,1,1\.5$/);
+      const pdfId = await request('attendance_summary', 'pdf', { from: DATE, to: '2017-11-30' });
+      await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+      const html = fileText(`${ORG}/${pdfId}.pdf`);
+      expect(html).toContain('UNX = days marked unexcused');
+      expect(html).toMatch(/2011<\/td>.*<td class="center">2<\/td><td class="center" style="font-weight:700">1\.5<\/td>/);
+    } finally {
+      await setFlags('2017-11-02', ['LATE']);
+      await setFlags('2017-11-05', []);
+    }
   });
 
   it('Weekly Report: the week containing the date, two sub-columns per day, underscores where nothing was recorded', async () => {
