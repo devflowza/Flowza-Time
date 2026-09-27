@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { DateTime } from 'luxon';
-import { SELF_CORRECTION_TYPES, SYSTEM_ROLE_IDS, type ActivityRange, type ApprovalRequestDto, type ApprovalStepDto, type ApprovalWorkflowInput, type AttendanceActivityDayDto, type AttendanceActivityDto, type AttendanceActivityMonthDto, type AttendanceActivityQuery, type AttendanceDailyRecordDto, type AttendanceStatus, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
+import { SELF_CORRECTION_TYPES, approvalInboxQuerySchema, type ActivityRange, type AttendanceActivityDayDto, type AttendanceActivityDto, type AttendanceActivityMonthDto, type AttendanceActivityQuery, type AttendanceDailyRecordDto, type AttendanceStatus, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import { activitySegments, summarisePeriod, weekRange, type MembershipGrant, type PeriodRecordLike } from '@flowza/domain';
 import { errors } from '@flowza/shared';
@@ -16,6 +16,9 @@ import { systemStep } from './context.js';
 import { enqueueRecalculation } from './recalc.js';
 import { DAILY_RECORD_COLUMNS, toDailyRecordDto, type DailyRecordRow } from './mappers.js';
 import { dv } from './sql-helpers.js';
+import { cancelForEntity, decideWithin, submit } from '../approvals/engine.js';
+import { listInbox, requestDtoWithin } from '../approvals/queries.js';
+import * as approvalWorkflows from '../approvals/workflows.js';
 
 type EventsQuery = z.infer<typeof attendanceEventsQuerySchema>;
 type Decision = z.infer<typeof approvalDecisionSchema>;
@@ -328,64 +331,44 @@ export async function isPeriodLocked(trx: Trx, orgId: string, branchId: string |
   return res.rows[0]?.locked ?? false;
 }
 
-interface WorkflowStep { order: number; approverType: 'MANAGER' | 'ROLE' | 'USER'; roleId?: string; userId?: string }
-function parseWorkflowSteps(raw: unknown): WorkflowStep[] {
-  return jsonArray<Record<string, unknown>>(raw).map((s, i) => ({
-    order: typeof s.order === 'number' ? s.order : i + 1,
-    approverType: String(s.approverType ?? s.approver_type ?? 'ROLE') as WorkflowStep['approverType'],
-    roleId: typeof (s.roleId ?? s.role_id) === 'string' ? String(s.roleId ?? s.role_id) : undefined,
-    userId: typeof (s.userId ?? s.user_id) === 'string' ? String(s.userId ?? s.user_id) : undefined,
-  })).sort((a, b) => a.order - b.order);
-}
+// ----- corrections (filed here; routed and decided by the approval engine — services/approvals) ------------------------------
 
-/** Resolve a workflow step to a concrete approver (user or role) for one employee; MANAGER falls back to hr_admin when unresolvable. */
-async function resolveStep(trx: Trx, orgId: string, step: WorkflowStep, employeeId: string): Promise<{ approverType: WorkflowStep['approverType']; approverUserId: string | null; approverRoleId: string | null }> {
-  if (step.approverType === 'USER' && step.userId) return { approverType: 'USER', approverUserId: step.userId, approverRoleId: null };
-  if (step.approverType === 'ROLE' && step.roleId) return { approverType: 'ROLE', approverUserId: null, approverRoleId: step.roleId };
-  if (step.approverType === 'MANAGER') {
-    const emp = await trx.selectFrom('employees').select('managerEmployeeId').where('organizationId', '=', orgId).where('id', '=', employeeId).executeTakeFirst();
-    if (emp?.managerEmployeeId) {
-      const m = await trx.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', emp.managerEmployeeId).where('status', '=', 'active').executeTakeFirst();
-      if (m) return { approverType: 'MANAGER', approverUserId: m.userId, approverRoleId: null };
-    }
-  }
-  return { approverType: 'ROLE', approverUserId: null, approverRoleId: SYSTEM_ROLE_IDS.hr_admin };
-}
-
-async function approveCorrectionFinal(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, correctionId: string, comment: string | null): Promise<void> {
-  const c = await trx.updateTable('attendanceCorrections').set({ status: 'APPROVED' }).where('organizationId', '=', orgId).where('id', '=', correctionId).returning(['employeeId', 'attendanceDate', 'requestedBy']).executeTakeFirst();
-  await enqueueJob(deps.queue, trx, { queue: 'processing', jobType: 'APPLY_CORRECTION', organizationId: orgId, payload: { organizationId: orgId, correctionId }, correlationId: actor.requestId, priority: 7 });
-  await emitDomainEvent(trx, { organizationId: orgId, eventType: 'attendance.correction_approved', aggregateType: 'attendance_correction', aggregateId: correctionId, payload: { approvedBy: actor.userId, comment, employeeId: c?.employeeId ?? null, attendanceDate: c ? isoDate(c.attendanceDate) : null, ...(c?.requestedBy && c.requestedBy !== actor.userId ? { userId: c.requestedBy } : {}) }, actorUserId: actor.userId, requestId: actor.requestId });
-}
+/** Which door a correction comes through; decides the self-service rules and whether a missing workflow may auto-approve. */
+type CorrectionMode = 'self' | 'team' | 'org';
 
 /**
- * attendance.correct for anyone in scope, or attendance.request_correction for one's own record (self-service; punch
- * changes only, always routed through approval — never auto-approved, even for a requester who holds attendance.approve).
+ * Who may file a correction, and through which door (HR portal Prompt 1 review, P1/P2):
+ *  - the caller's OWN record always goes through the self-service door — attendance.request_correction semantics (punch
+ *    changes only, always routed, never auto-approved) whatever other keys the caller holds. attendance.correct opens the
+ *    same door, and the organisation's "self-service corrections" switch only gates callers without attendance.correct;
+ *  - a direct report (primary or secondary manager on the employee record) is the team door: attendance.correct, and the
+ *    request is always routed — a line manager's correction is never applied without somebody else deciding;
+ *  - anybody else needs attendance.correct AND organisation-wide attendance.view (branch scope applies): the org door, the
+ *    only one where a missing workflow lets an attendance.approve holder's correction apply at once (HR).
  */
-function correctionGrant(actor: Actor, orgId: string, input: CreateCorrectionInput): { grant: MembershipGrant; selfService: boolean } {
+function correctionAccess(actor: Actor, orgId: string, input: CreateCorrectionInput): { grant: MembershipGrant; mode: CorrectionMode } {
   const grant = requireMembership(actor.principal, orgId);
-  if (hasPermission(grant, 'attendance.correct')) return { grant, selfService: false };
-  if (hasPermission(grant, 'attendance.request_correction') && grant.employeeId && grant.employeeId === input.employeeId) {
+  if (grant.employeeId && grant.employeeId === input.employeeId) {
+    if (!hasPermission(grant, 'attendance.request_correction') && !hasPermission(grant, 'attendance.correct')) throw errors.forbidden('Missing permission: attendance.request_correction.');
     if (!(SELF_CORRECTION_TYPES as readonly string[]).includes(input.type)) throw errors.forbidden('Only HR can change the status of a day; request a punch correction instead.');
-    return { grant, selfService: true };
+    return { grant, mode: 'self' };
   }
-  throw errors.forbidden('Missing permission: attendance.correct.');
+  if (!hasPermission(grant, 'attendance.correct')) throw errors.forbidden('Missing permission: attendance.correct.');
+  requireTeamOrPermission(actor.principal, orgId, input.employeeId, 'attendance.view');
+  return { grant, mode: hasPermission(grant, 'attendance.view') ? 'org' : 'team' };
 }
 
 export async function createCorrection(deps: ApiDeps, actor: Actor, orgId: string, input: CreateCorrectionInput): Promise<CorrectionDto & { approval: 'AUTO_APPROVED' | 'PENDING'; approvalRequestId: string | null }> {
-  const { grant, selfService } = correctionGrant(actor, orgId, input);
-  // A line manager (attendance.correct without organisation-wide attendance.view) may only file corrections for their
-  // own direct reports; HR and branch managers hold attendance.view and pass unchanged.
-  if (!selfService) requireTeamOrPermission(actor.principal, orgId, input.employeeId, 'attendance.view');
+  const { grant, mode } = correctionAccess(actor, orgId, input);
   return runUser(deps.db, actor, async (trx) => {
-    if (selfService) {
+    if (mode === 'self' && !hasPermission(grant, 'attendance.correct')) {
       // Settings → Attendance → "Self-service corrections" (off by default) decides whether employees may ask at all.
       const settings = await trx.selectFrom('organizationSettings').select('attendance').where('organizationId', '=', orgId).executeTakeFirst();
       if (jsonObject(settings?.attendance).allowSelfServiceCorrections !== true) throw errors.forbidden('Self-service corrections are turned off for this organisation.');
     }
-    const emp = await trx.selectFrom('employees').select(['id', 'branchId', 'joiningDate', 'deletedAt']).where('organizationId', '=', orgId).where('id', '=', input.employeeId).executeTakeFirst();
+    const emp = await trx.selectFrom('employees').select(['id', 'branchId', 'departmentId', 'joiningDate', 'deletedAt']).where('organizationId', '=', orgId).where('id', '=', input.employeeId).executeTakeFirst();
     if (!emp || emp.deletedAt) throw errors.validation('Employee not found.', { issues: [{ path: 'employeeId', message: 'Unknown employee' }] });
-    requireBranchAccess(grant, emp.branchId);
+    if (mode !== 'self') requireBranchAccess(grant, emp.branchId);
     if (await isPeriodLocked(trx, orgId, emp.branchId, input.attendanceDate)) throw errors.periodLocked('The attendance period for this date is locked; unlock it before submitting corrections.');
     let originalPunchedAt: Date | null = null;
     if (input.originalEventId) {
@@ -402,36 +385,21 @@ export async function createCorrection(deps: ApiDeps, actor: Actor, orgId: strin
       proposedPunchedAt: input.proposedPunchedAt ? new Date(input.proposedPunchedAt) : null, proposedEventType: input.proposedEventType ?? (input.type === 'ADD_PUNCH' || input.type === 'EDIT_PUNCH' ? 'PUNCH' : null), proposedStatus: input.proposedStatus ?? null,
       reason: input.reason, requestedBy: actor.userId, status: 'PENDING',
     }).returning('id').executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'attendance.correction_submitted', 'attendance_correction', { entityId: row.id, branchId: emp.branchId, newValue: { ...input } });
+    await audit(trx, actor, orgId, 'attendance.correction_submitted', 'attendance_correction', { entityId: row.id, branchId: emp.branchId, newValue: { ...input, mode } });
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'attendance.correction_submitted', aggregateType: 'attendance_correction', aggregateId: row.id, payload: { employeeId: input.employeeId, attendanceDate: input.attendanceDate, type: input.type }, actorUserId: actor.userId, requestId: actor.requestId });
 
-    // Approval routing (system step: the requester may not hold attendance.approve, which the approval tables require).
-    const outcome = await systemStep(trx, orgId, async (t) => {
-      const workflows = await t.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).where('entityType', '=', 'ATTENDANCE_CORRECTION').where('status', '=', 'active').where('isDefault', '=', true)
-        .where((eb) => eb.or([eb('branchId', '=', emp.branchId), eb('branchId', 'is', null)])).execute();
-      const workflow = workflows.find((w) => w.branchId === emp.branchId) ?? workflows.find((w) => w.branchId === null) ?? null;
-      let steps: WorkflowStep[];
-      if (workflow) steps = parseWorkflowSteps(workflow.steps);
-      else if (!selfService && hasPermission(grant, 'attendance.approve')) return { kind: 'auto' as const };
-      else steps = [{ order: 1, approverType: 'ROLE', roleId: SYSTEM_ROLE_IDS.hr_admin }];
-      const request = await t.insertInto('approvalRequests').values({ organizationId: orgId, workflowId: workflow?.id ?? null, entityType: 'ATTENDANCE_CORRECTION', entityId: row.id, branchId: emp.branchId, employeeId: input.employeeId, currentStep: 1, status: 'PENDING', requestedBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
-      let stepNo = 0;
-      for (const s of steps) {
-        const resolved = await resolveStep(t, orgId, s, input.employeeId);
-        stepNo += 1;
-        await t.insertInto('approvalSteps').values({ organizationId: orgId, requestId: request.id, stepNo, approverType: resolved.approverType, approverRoleId: resolved.approverRoleId, approverUserId: resolved.approverUserId, status: 'PENDING' }).execute();
-      }
-      await t.updateTable('attendanceCorrections').set({ approvalRequestId: request.id }).where('id', '=', row.id).execute();
-      return { kind: 'pending' as const, requestId: request.id, steps: stepNo };
+    // Routing (engine v2). The configured workflow always wins. Without one, only HR (organisation-wide attendance.view +
+    // attendance.approve) filing for somebody else is applied at once; a line manager's correction for a report and anybody's
+    // own correction go to the attendance.approve holders in reach of the employee, the requester excluded.
+    const autoApprove = mode === 'org' && hasPermission(grant, 'attendance.approve');
+    const submitted = await submit(deps, trx, actor, orgId, {
+      entityType: 'ATTENDANCE_CORRECTION', entityId: row.id, employeeId: input.employeeId, branchId: emp.branchId, departmentId: emp.departmentId, units: null, requestedBy: actor.userId,
+      noWorkflow: autoApprove ? { kind: 'AUTO_APPROVE' } : { kind: 'PERMISSION', permission: 'attendance.approve' },
     });
-    if (outcome.kind === 'auto') {
-      await approveCorrectionFinal(deps, trx, actor, orgId, row.id, 'auto-approved: requester holds attendance.approve and no workflow is configured');
-      await audit(trx, actor, orgId, 'attendance.correction_auto_approved', 'attendance_correction', { entityId: row.id, branchId: emp.branchId });
-    } else {
-      await emitDomainEvent(trx, { organizationId: orgId, eventType: 'approval.pending', aggregateType: 'approval_request', aggregateId: outcome.requestId, payload: { entityType: 'ATTENDANCE_CORRECTION', entityId: row.id, employeeId: input.employeeId, steps: outcome.steps }, actorUserId: actor.userId, requestId: actor.requestId });
-    }
+    await systemStep(trx, orgId, (t) => t.updateTable('attendanceCorrections').set({ approvalRequestId: submitted.requestId }).where('id', '=', row.id).execute());
+    if (submitted.autoApproved) await audit(trx, actor, orgId, 'attendance.correction_auto_approved', 'attendance_correction', { entityId: row.id, branchId: emp.branchId });
     const saved = await trx.selectFrom('attendanceCorrections').selectAll().where('id', '=', row.id).executeTakeFirstOrThrow();
-    return { ...toCorrectionDto(saved), approval: outcome.kind === 'auto' ? 'AUTO_APPROVED' : 'PENDING', approvalRequestId: outcome.kind === 'auto' ? null : outcome.requestId };
+    return { ...toCorrectionDto(saved), approval: submitted.autoApproved ? 'AUTO_APPROVED' : 'PENDING', approvalRequestId: submitted.requestId };
   });
 }
 
@@ -439,7 +407,7 @@ export async function listCorrections(deps: ApiDeps, actor: Actor, orgId: string
   const { grant, ownOnly } = viewGrant(actor, orgId);
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    let base = trx.selectFrom('attendanceCorrections as c').innerJoin('employees as e', 'e.id', 'c.employeeId').where('c.organizationId', '=', orgId);
+    let base = trx.selectFrom('attendanceCorrections as c').where('c.organizationId', '=', orgId);
     if (ownOnly) base = base.where('c.employeeId', '=', ownOnly); else if (q.employeeId) base = base.where('c.employeeId', '=', q.employeeId);
     if (scope) base = base.where('c.branchId', 'in', scope);
     if (q.status) base = base.where('c.status', '=', q.status as never);
@@ -447,11 +415,21 @@ export async function listCorrections(deps: ApiDeps, actor: Actor, orgId: string
     if (q.to) base = base.where('c.attendanceDate', '<=', dv(q.to));
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const page = pageOf(q);
-    const rows = await base.selectAll('c').select(['e.employeeNumber', 'e.displayName as employeeName']).orderBy('c.createdAt', 'desc').orderBy('c.id').limit(page.pageSize).offset(page.offset).execute();
-    return { data: rows.map((r) => toCorrectionDto(r as CorrectionRow)), total };
+    const rows = await base.selectAll('c').orderBy('c.createdAt', 'desc').orderBy('c.id').limit(page.pageSize).offset(page.offset).execute();
+    // names in the organisation's system scope, for the rows RLS already let the caller read (a line manager's role may not
+    // read the employee directory)
+    const employeeIds = [...new Set(rows.map((r) => r.employeeId))];
+    const names = employeeIds.length ? await withSystemScope(trx, orgId, (t) => t.selectFrom('employees').select(['id', 'employeeNumber', 'displayName']).where('organizationId', '=', orgId).where('id', 'in', employeeIds).execute()) : [];
+    const byId = new Map(names.map((n) => [n.id, n]));
+    return { data: rows.map((r) => toCorrectionDto({ ...(r as CorrectionRow), employeeNumber: byId.get(r.employeeId)?.employeeNumber, employeeName: byId.get(r.employeeId)?.displayName })), total };
   });
 }
 
+/**
+ * Withdraw a pending correction: the requester, or an attendance.approve holder who can read it (RLS already scoped the read
+ * to their branch / team). The correction and its approval request close together, in system context (clients cannot
+ * write corrections' status under RLS since the engine v2 migration).
+ */
 export async function cancelCorrection(deps: ApiDeps, actor: Actor, orgId: string, id: string, reason: string | undefined): Promise<CorrectionDto> {
   const grant = requireMembership(actor.principal, orgId);
   return runUser(deps.db, actor, async (trx) => {
@@ -460,153 +438,34 @@ export async function cancelCorrection(deps: ApiDeps, actor: Actor, orgId: strin
     if (c.requestedBy !== actor.userId && !hasPermission(grant, 'attendance.approve')) throw errors.forbidden('Only the requester or an approver can cancel a correction.');
     if (c.status !== 'PENDING') throw errors.invalidState(`Only pending corrections can be cancelled (current: ${c.status}).`);
     await systemStep(trx, orgId, async (t) => {
-      await t.updateTable('attendanceCorrections').set({ status: 'CANCELLED', rejectionReason: reason ?? null }).where('id', '=', id).execute();
-      if (c.approvalRequestId) {
-        await t.updateTable('approvalRequests').set({ status: 'CANCELLED', completedAt: new Date() }).where('id', '=', c.approvalRequestId).execute();
-        await t.updateTable('approvalSteps').set({ status: 'CANCELLED' }).where('requestId', '=', c.approvalRequestId).where('status', '=', 'PENDING').execute();
-      }
+      const res = await t.updateTable('attendanceCorrections').set({ status: 'CANCELLED', rejectionReason: reason ?? null }).where('id', '=', id).where('status', '=', 'PENDING').executeTakeFirst();
+      if (Number(res.numUpdatedRows) !== 1) throw errors.conflict('The correction changed meanwhile. Please refresh.');
+      await cancelForEntity(deps, t, actor, orgId, 'ATTENDANCE_CORRECTION', id, reason ?? null, { source: 'correction_cancel' });
     });
     await audit(trx, actor, orgId, 'attendance.correction_cancelled', 'attendance_correction', { entityId: id, branchId: c.branchId, reason: reason ?? null });
     return toCorrectionDto(await trx.selectFrom('attendanceCorrections').selectAll().where('id', '=', id).executeTakeFirstOrThrow());
   });
 }
 
-function toStepDto(s: { id: string; requestId: string; stepNo: number; approverType: ApprovalStepDto['approverType']; approverRoleId: string | null; approverUserId: string | null; status: ApprovalStepDto['status']; actedBy: string | null; actedAt: Date | null; comment: string | null }): ApprovalStepDto {
-  return { id: s.id, requestId: s.requestId, stepNo: s.stepNo, approverType: s.approverType, approverRoleId: s.approverRoleId, approverUserId: s.approverUserId, status: s.status, actedBy: s.actedBy, actedAt: isoDateTimeOrNull(s.actedAt), comment: s.comment };
-}
+// ----- approvals: thin delegates to services/approvals (engine v2) — kept for existing importers -------------------------------
 
+/** @deprecated use services/approvals `listInbox` (GET /orgs/:orgId/approvals). */
 export async function approvalsInbox(deps: ApiDeps, actor: Actor, orgId: string, q: { page: number; pageSize: number }) {
-  const grant = requireMembership(actor.principal, orgId);
-  const roleIds = [grant.roleId].filter((r) => /^[0-9a-f-]{36}$/i.test(r));
+  return listInbox(deps, actor, orgId, approvalInboxQuerySchema.parse({ page: q.page, pageSize: q.pageSize, scope: 'mine', view: 'pending' }));
+}
+
+/** @deprecated use services/approvals `decideWithin` (POST /orgs/:orgId/approvals/:id/decide). */
+export async function decide(deps: ApiDeps, actor: Actor, orgId: string, requestId: string, decision: 'approve' | 'reject', input: Decision) {
   return runUser(deps.db, actor, async (trx) => {
-    let base = trx.selectFrom('approvalSteps as s').innerJoin('approvalRequests as r', 'r.id', 's.requestId').where('s.organizationId', '=', orgId).where('s.status', '=', 'PENDING').where('r.status', '=', 'PENDING').whereRef('r.currentStep', '=', 's.stepNo')
-      .where((eb) => eb.or([eb('s.approverUserId', '=', actor.userId), ...(roleIds.length ? [eb('s.approverRoleId', 'in', roleIds)] : []), ...(grant.roleKey === 'owner' ? [eb('s.approverType', '=', 'ROLE')] : [])]));
-    if (!grant.allBranches) base = base.where((eb) => eb.or([eb('r.branchId', 'is', null), eb('r.branchId', 'in', grant.branchIds.length ? grant.branchIds : ['00000000-0000-0000-0000-000000000000'])]));
-    const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
-    const page = pageOf(q);
-    const rows = await base.select(['s.id as stepId', 's.stepNo', 's.approverType', 's.approverRoleId', 's.approverUserId', 'r.id as requestId', 'r.entityType', 'r.entityId', 'r.branchId', 'r.employeeId', 'r.currentStep', 'r.requestedBy', 'r.createdAt', 'r.workflowId']).orderBy('r.createdAt').limit(page.pageSize).offset(page.offset).execute();
-    const correctionIds = rows.filter((r) => r.entityType === 'ATTENDANCE_CORRECTION').map((r) => r.entityId);
-    const corrections = correctionIds.length ? await trx.selectFrom('attendanceCorrections as c').innerJoin('employees as e', 'e.id', 'c.employeeId').selectAll('c').select(['e.employeeNumber', 'e.displayName as employeeName']).where('c.id', 'in', correctionIds).execute() : [];
-    const requesters = rows.map((r) => r.requestedBy).filter((x): x is string => !!x);
-    const names = requesters.length ? await trx.selectFrom('userProfiles').select(['id', 'fullName', 'email']).where('id', 'in', [...new Set(requesters)]).execute() : [];
-    const byId = new Map(corrections.map((c) => [c.id, c]));
-    const nameById = new Map(names.map((n) => [n.id, n.fullName || n.email]));
-    return {
-      data: rows.map((r) => ({ stepId: r.stepId, stepNo: r.stepNo, approverType: r.approverType, requestId: r.requestId, entityType: r.entityType, entityId: r.entityId, branchId: r.branchId, employeeId: r.employeeId, currentStep: r.currentStep, requestedBy: r.requestedBy, requestedByName: r.requestedBy ? nameById.get(r.requestedBy) ?? null : null, createdAt: isoDateTime(r.createdAt), correction: byId.has(r.entityId) ? toCorrectionDto(byId.get(r.entityId) as CorrectionRow) : null })),
-      total,
-    };
+    const outcome = await decideWithin(deps, trx, actor, orgId, requestId, { decision: decision === 'approve' ? 'APPROVE' : 'REJECT', comment: input.comment });
+    return { ...(await requestDtoWithin(trx, actor, orgId, requestId, { withEvents: true })), noop: outcome.noop, terminal: outcome.terminal };
   });
 }
 
-async function loadRequest(trx: Trx, orgId: string, id: string, opts: { lock?: boolean } = {}) {
-  // `lock` serialises concurrent decisions on one request (FOR UPDATE): the second approver re-reads the committed status.
-  let q = trx.selectFrom('approvalRequests').selectAll().where('organizationId', '=', orgId).where('id', '=', id);
-  if (opts.lock) q = q.forUpdate();
-  const r = await q.executeTakeFirst();
-  if (!r) throw errors.notFound('Approval request', id);
-  const steps = await trx.selectFrom('approvalSteps').selectAll().where('requestId', '=', id).orderBy('stepNo').execute();
-  return { request: r, steps };
-}
-export function toRequestDto(r: { id: string; organizationId: string; workflowId: string | null; entityType: ApprovalRequestDto['entityType']; entityId: string; branchId: string | null; employeeId: string | null; currentStep: number; status: ApprovalRequestDto['status']; requestedBy: string | null; completedAt: Date | null; createdAt: Date }, steps: Parameters<typeof toStepDto>[0][]): ApprovalRequestDto {
-  return { id: r.id, organizationId: r.organizationId, workflowId: r.workflowId, entityType: r.entityType, entityId: r.entityId, branchId: r.branchId, employeeId: r.employeeId, currentStep: r.currentStep, status: r.status, requestedBy: r.requestedBy, completedAt: isoDateTimeOrNull(r.completedAt), createdAt: isoDateTime(r.createdAt), steps: steps.map(toStepDto) };
-}
-
-function canAct(grant: MembershipGrant, actorUserId: string, step: { approverType: string; approverUserId: string | null; approverRoleId: string | null }): boolean {
-  if (step.approverUserId) return step.approverUserId === actorUserId;
-  if (step.approverRoleId) return step.approverRoleId === grant.roleId || (grant.roleKey === 'owner' && hasPermission(grant, 'attendance.approve'));
-  return false;
-}
-
-export async function decide(deps: ApiDeps, actor: Actor, orgId: string, requestId: string, decision: 'approve' | 'reject', input: Decision): Promise<ApprovalRequestDto & { correction: CorrectionDto | null }> {
-  const grant = requireMembership(actor.principal, orgId);
-  if (decision === 'reject' && !input.comment) throw errors.validation('A comment is required when rejecting.', { issues: [{ path: 'comment', message: 'Required' }] });
-  return runUser(deps.db, actor, async (trx) => {
-    // System step: approvers assigned by user id (managers) do not necessarily hold attendance.approve.
-    const result = await systemStep(trx, orgId, async (t) => {
-      const { request, steps } = await loadRequest(t, orgId, requestId, { lock: true });
-      if (request.status !== 'PENDING') throw errors.invalidState(`The request is already ${request.status}.`);
-      if (!grant.allBranches && request.branchId && !grant.branchIds.includes(request.branchId)) throw errors.forbidden('This request is outside your branch scope.');
-      const step = steps.find((s) => s.stepNo === request.currentStep && s.status === 'PENDING');
-      if (!step) throw errors.invalidState('The request has no pending step.');
-      if (!canAct(grant, actor.userId, step)) throw errors.forbidden('You are not the approver of the current step.');
-      // separation of duties: a workflow exists, so the requester never decides on their own request (they can cancel it instead)
-      if (request.requestedBy === actor.userId) throw errors.forbidden('You cannot approve or reject your own request; cancel it instead.');
-      const now = new Date();
-      const acted = await t.updateTable('approvalSteps').set({ status: decision === 'approve' ? 'APPROVED' : 'REJECTED', actedBy: actor.userId, actedAt: now, comment: input.comment ?? null }).where('id', '=', step.id).where('status', '=', 'PENDING').executeTakeFirst();
-      if (Number(acted.numUpdatedRows) !== 1) throw errors.conflict('The step was decided concurrently. Please refresh.');
-      const correction = request.entityType === 'ATTENDANCE_CORRECTION' ? await t.selectFrom('attendanceCorrections').selectAll().where('id', '=', request.entityId).executeTakeFirst() : undefined;
-      if (decision === 'reject') {
-        await t.updateTable('approvalSteps').set({ status: 'CANCELLED' }).where('requestId', '=', requestId).where('status', '=', 'PENDING').execute();
-        await t.updateTable('approvalRequests').set({ status: 'REJECTED', completedAt: now }).where('id', '=', requestId).execute();
-        if (correction) await t.updateTable('attendanceCorrections').set({ status: 'REJECTED', rejectionReason: input.comment ?? null }).where('id', '=', correction.id).execute();
-        return { final: true as const, rejected: true as const, correction, branchId: request.branchId };
-      }
-      const next = steps.find((s) => s.stepNo > request.currentStep && s.status === 'PENDING');
-      if (next) { await t.updateTable('approvalRequests').set({ currentStep: next.stepNo }).where('id', '=', requestId).execute(); return { final: false as const, rejected: false as const, correction, branchId: request.branchId }; }
-      await t.updateTable('approvalRequests').set({ status: 'APPROVED', completedAt: now }).where('id', '=', requestId).execute();
-      return { final: true as const, rejected: false as const, correction, branchId: request.branchId };
-    });
-    if (result.correction) {
-      if (result.rejected) {
-        await emitDomainEvent(trx, { organizationId: orgId, eventType: 'attendance.correction_rejected', aggregateType: 'attendance_correction', aggregateId: result.correction.id, payload: { rejectedBy: actor.userId, reason: input.comment ?? null, employeeId: result.correction.employeeId, attendanceDate: isoDate(result.correction.attendanceDate), ...(result.correction.requestedBy ? { userId: result.correction.requestedBy } : {}) }, actorUserId: actor.userId, requestId: actor.requestId });
-      } else if (result.final) {
-        await systemStep(trx, orgId, (t) => approveCorrectionFinal(deps, t, actor, orgId, result.correction!.id, input.comment ?? null));
-      }
-    }
-    await audit(trx, actor, orgId, decision === 'approve' ? (result.final ? 'approval.approved' : 'approval.step_approved') : 'approval.rejected', 'approval_request', { entityId: requestId, branchId: result.branchId, newValue: { comment: input.comment ?? null, entityId: result.correction?.id ?? null } });
-    const { request, steps } = await systemStep(trx, orgId, (t) => loadRequest(t, orgId, requestId));
-    const correction = result.correction ? await systemStep(trx, orgId, (t) => t.selectFrom('attendanceCorrections').selectAll().where('id', '=', result.correction!.id).executeTakeFirstOrThrow()) : null;
-    return { ...toRequestDto(request, steps), correction: correction ? toCorrectionDto(correction) : null };
-  });
-}
-
-// ----- workflows -------------------------------------------------------------------------------------------------------------
-
-export interface WorkflowDto { id: string; organizationId: string; entityType: string; name: string; branchId: string | null; steps: WorkflowStep[]; isDefault: boolean; status: string; createdAt: string; updatedAt: string }
-const toWorkflowDto = (w: { id: string; organizationId: string; entityType: string; name: string; branchId: string | null; steps: unknown; isDefault: boolean; status: string; createdAt: Date; updatedAt: Date }): WorkflowDto => ({ id: w.id, organizationId: w.organizationId, entityType: w.entityType, name: w.name, branchId: w.branchId, steps: parseWorkflowSteps(w.steps), isDefault: w.isDefault, status: w.status, createdAt: isoDateTime(w.createdAt), updatedAt: isoDateTime(w.updatedAt) });
-
-export async function listWorkflows(deps: ApiDeps, actor: Actor, orgId: string): Promise<WorkflowDto[]> {
-  requirePermission(actor.principal, orgId, 'attendance.view');
-  return runUser(deps.db, actor, async (trx) => (await trx.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).orderBy('entityType').orderBy('name').execute()).map(toWorkflowDto));
-}
-async function validateWorkflowSteps(trx: Trx, orgId: string, steps: ApprovalWorkflowInput['steps']): Promise<void> {
-  for (const s of steps) {
-    if (s.roleId) { const r = await trx.selectFrom('roles').select('id').where('id', '=', s.roleId).where((eb) => eb.or([eb('isSystem', '=', true), eb('organizationId', '=', orgId)])).executeTakeFirst(); if (!r) throw errors.validation('Unknown role in workflow step.', { roleId: s.roleId }); }
-    if (s.userId) { const m = await trx.selectFrom('orgMemberships').select('id').where('organizationId', '=', orgId).where('userId', '=', s.userId).where('status', '=', 'active').executeTakeFirst(); if (!m) throw errors.validation('Workflow step user is not an active member.', { userId: s.userId }); }
-  }
-}
-export async function createWorkflow(deps: ApiDeps, actor: Actor, orgId: string, input: ApprovalWorkflowInput): Promise<WorkflowDto> {
-  requirePermission(actor.principal, orgId, 'organization.manage');
-  return runUser(deps.db, actor, async (trx) => {
-    await validateWorkflowSteps(trx, orgId, input.steps);
-    const row = await trx.insertInto('approvalWorkflows').values({ organizationId: orgId, entityType: input.entityType, name: input.name, branchId: input.branchId ?? null, steps: JSON.stringify(input.steps), isDefault: input.isDefault, status: input.status }).returningAll().executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'approval_workflow.created', 'approval_workflow', { entityId: row.id, branchId: input.branchId ?? null, newValue: input });
-    return toWorkflowDto(row);
-  });
-}
-export async function updateWorkflow(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<ApprovalWorkflowInput>): Promise<WorkflowDto> {
-  requirePermission(actor.principal, orgId, 'organization.manage');
-  return runUser(deps.db, actor, async (trx) => {
-    const before = await trx.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
-    if (!before) throw errors.notFound('Approval workflow', id);
-    if (input.steps) await validateWorkflowSteps(trx, orgId, input.steps);
-    const patch: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(input)) if (v !== undefined) patch[k] = k === 'steps' ? JSON.stringify(v) : v;
-    if (Object.keys(patch).length) await trx.updateTable('approvalWorkflows').set(patch as never).where('id', '=', id).execute();
-    const after = await trx.selectFrom('approvalWorkflows').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'approval_workflow.updated', 'approval_workflow', { entityId: id, branchId: after.branchId, oldValue: toWorkflowDto(before), newValue: toWorkflowDto(after) });
-    return toWorkflowDto(after);
-  });
-}
-export async function deleteWorkflow(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
-  requirePermission(actor.principal, orgId, 'organization.manage');
-  return runUser(deps.db, actor, async (trx) => {
-    const w = await trx.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
-    if (!w) throw errors.notFound('Approval workflow', id);
-    await trx.deleteFrom('approvalWorkflows').where('id', '=', id).execute();
-    await audit(trx, actor, orgId, 'approval_workflow.deleted', 'approval_workflow', { entityId: id, branchId: w.branchId, oldValue: toWorkflowDto(w) });
-  });
-}
+export const listWorkflows = approvalWorkflows.listWorkflows;
+export const createWorkflow = approvalWorkflows.createWorkflow;
+export const updateWorkflow = approvalWorkflows.updateWorkflow;
+export const deleteWorkflow = approvalWorkflows.deleteWorkflow;
 
 // ----- recalculation & period locks ------------------------------------------------------------------------------------------
 

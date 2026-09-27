@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { isoDateSchema, uuidSchema } from '../common.js';
 import type { AttendanceDailyRecordDto } from '../attendance.js';
-import type { LeaveStatus } from '../enums.js';
+import type { ApprovalRequestStatus, LeaveStatus } from '../enums.js';
 
 // Employee self-service (/orgs/:orgId/me/…). Every endpoint acts on the caller's own employee record in that
 // organisation (the membership's employee link); no endpoint accepts an employee id.
@@ -73,6 +73,13 @@ export interface SelfLeaveRecordDto {
   id: string; leaveTypeId: string; leaveTypeCode: string; leaveTypeName: string; color: string | null; isPaid: boolean;
   startDate: string; endDate: string; isHalfDay: boolean; halfDayPart: string | null; days: number;
   reason: string | null; status: LeaveStatus; decisionNote: string | null; approvedByName: string | null; approvedAt: string | null; createdAt: string; updatedAt: string;
+  /** The engine request behind the leave (null for leave recorded before the approval engine, or by HR directly without a workflow). */
+  approvalRequestId: string | null;
+  /** Its status — PENDING while approvers decide, INVALIDATED after an edit (a new request replaces it), CANCELLED on withdrawal. */
+  approvalStatus: ApprovalRequestStatus | null;
+  /** "Level 1 of 2" style progress for a pending request. */
+  approvalCurrentStep: number | null;
+  approvalStepCount: number | null;
 }
 export interface SelfLeaveDto {
   year: number;

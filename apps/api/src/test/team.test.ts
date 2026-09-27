@@ -169,3 +169,31 @@ describe('secondary manager on the employee record', () => {
     expect((await h.request('POST', `${base()}/attendance/corrections`, { token: lineManager, body: punch(e7, 'Now my report', '14:10') })).status).toBe(201);
   });
 });
+
+describe('corrections by a line manager (Prompt 1 review, P1/P2 — engine v2)', () => {
+  it('a manager requests a correction on their OWN record through the self-service door: routed, never auto-approved', async () => {
+    const own = await h.request('POST', `${base()}/attendance/corrections`, { token: lineManager, body: punch(e4, 'My own forgotten punch', '15:20') });
+    expect(own.status).toBe(201);
+    expect(own.body.data).toMatchObject({ status: 'PENDING', approval: 'PENDING' });
+    const actors = await h.admin.selectFrom('approvalSteps as s').innerJoin('approvalStepActors as a', 'a.stepId', 's.id').select('a.userId').where('s.requestId', '=', own.body.data.approvalRequestId).execute();
+    expect(actors.map((a) => a.userId)).not.toContain(lineManager);
+    // status changes of one's own day stay HR's, whatever keys the caller holds
+    const status = await h.request('POST', `${base()}/attendance/corrections`, { token: lineManager, body: { employeeId: e4, attendanceDate: DAY, type: 'SET_STATUS', proposedStatus: 'PRESENT', reason: 'Mark me present' } });
+    expect(status.status).toBe(403);
+  });
+
+  it('a manager\'s correction for a direct report is a PENDING request to the attendance.approve holders in reach — not applied, not routed back to them', async () => {
+    const r = await h.request('POST', `${base()}/attendance/corrections`, { token: lineManager, body: punch(e5, 'Report forgot to punch', '16:30') });
+    expect(r.status).toBe(201);
+    expect(r.body.data).toMatchObject({ status: 'PENDING', approval: 'PENDING' });
+    const step = await h.admin.selectFrom('approvalSteps').select(['id', 'approverType', 'permissionKey']).where('requestId', '=', r.body.data.approvalRequestId).executeTakeFirstOrThrow();
+    expect(step).toMatchObject({ approverType: 'ROLE', permissionKey: 'attendance.approve' });
+    const actors = (await h.admin.selectFrom('approvalStepActors').select('userId').where('stepId', '=', step.id).execute()).map((a) => a.userId);
+    expect(actors).not.toContain(lineManager); // the requester
+    expect(actors).toEqual(expect.arrayContaining([f.owner, f.hrAdmin])); // organisation-wide attendance.view + approve
+    expect(actors).not.toContain(f.branchManagerB); // branch B does not cover e5
+    // HR (organisation-wide attendance.view + attendance.approve) filing for somebody else is still applied at once
+    const hr = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrAdmin, body: punch(e8, 'HR fixes it', '17:40') });
+    expect(hr.body.data).toMatchObject({ status: 'APPROVED', approval: 'AUTO_APPROVED' });
+  });
+});

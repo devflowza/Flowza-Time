@@ -11,6 +11,8 @@ import { isoDate, isoDateOrNull, isoDateTime, isoDateTimeOrNull, numberOrNull } 
 import { DAILY_RECORD_COLUMNS, toDailyRecordDto, type DailyRecordRow } from './features/mappers.js';
 import { dv } from './features/sql-helpers.js';
 import { assertLeaveRangeUnlocked, assertNoLeaveOverlap } from './features/schedule.service.js';
+import { systemStep } from './features/context.js';
+import { cancelForEntity, submit } from './approvals/engine.js';
 
 /**
  * Employee self-service (/orgs/:orgId/me/…): the caller's own employee record in one organisation.
@@ -157,11 +159,11 @@ export async function getAttendanceMonth(deps: ApiDeps, actor: Actor, orgId: str
 
 // ----- leave -----------------------------------------------------------------------------------------------------------
 
-type OwnLeaveRow = { id: string; leaveTypeId: string; code: string; name: string; color: string | null; isPaid: boolean; startDate: Date | string; endDate: Date | string; isHalfDay: boolean; halfDayPart: string | null; reason: string | null; status: SelfLeaveRecordDto['status']; decisionNote: string | null; approvedBy: string | null; approvedAt: Date | null; createdAt: Date; updatedAt: Date };
+type OwnLeaveRow = { id: string; leaveTypeId: string; code: string; name: string; color: string | null; isPaid: boolean; startDate: Date | string; endDate: Date | string; isHalfDay: boolean; halfDayPart: string | null; reason: string | null; status: SelfLeaveRecordDto['status']; decisionNote: string | null; approvedBy: string | null; approvedAt: Date | null; approvalRequestId: string | null; createdAt: Date; updatedAt: Date };
 
 async function ownLeaveRows(trx: Trx, orgId: string, employeeId: string, filter: { from?: string; to?: string; id?: string } = {}): Promise<OwnLeaveRow[]> {
   let q = trx.selectFrom('leaveRecords as l').innerJoin('leaveTypes as t', 't.id', 'l.leaveTypeId')
-    .select(['l.id', 'l.leaveTypeId', 't.code', 't.name', 't.color', 't.isPaid', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.reason', 'l.status', 'l.decisionNote', 'l.approvedBy', 'l.approvedAt', 'l.createdAt', 'l.updatedAt'])
+    .select(['l.id', 'l.leaveTypeId', 't.code', 't.name', 't.color', 't.isPaid', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.reason', 'l.status', 'l.decisionNote', 'l.approvedBy', 'l.approvedAt', 'l.approvalRequestId', 'l.createdAt', 'l.updatedAt'])
     .where('l.organizationId', '=', orgId).where('l.employeeId', '=', employeeId);
   if (filter.id) q = q.where('l.id', '=', filter.id);
   if (filter.from) q = q.where('l.endDate', '>=', dv(filter.from));
@@ -173,11 +175,21 @@ async function toLeaveDtos(trx: Trx, orgId: string, rows: OwnLeaveRow[], cal: Wo
   const approverIds = [...new Set(rows.map((r) => r.approvedBy).filter((x): x is string => !!x))];
   const approvers = approverIds.length ? await withSystemScope(trx, orgId, (t) => t.selectFrom('userProfiles').select(['id', 'fullName']).where('id', 'in', approverIds).execute()) : [];
   const nameOf = new Map(approvers.map((a) => [a.id, a.fullName]));
+  // the engine request behind each leave (status, level) — read in system scope for the caller's own rows only
+  const requestIds = [...new Set(rows.map((r) => r.approvalRequestId).filter((x): x is string => !!x))];
+  const requests = requestIds.length ? await withSystemScope(trx, orgId, async (t) => {
+    const reqs = await t.selectFrom('approvalRequests').select(['id', 'status', 'currentStep']).where('organizationId', '=', orgId).where('id', 'in', requestIds).execute();
+    const counts = await t.selectFrom('approvalSteps').select(['requestId', (eb) => eb.fn.countAll<string>().as('n')]).where('requestId', 'in', requestIds).groupBy('requestId').execute();
+    return reqs.map((r) => ({ ...r, stepCount: Number(counts.find((c) => c.requestId === r.id)?.n ?? 0) }));
+  }) : [];
+  const requestById = new Map(requests.map((r) => [r.id, r]));
   return rows.map((r) => {
+    const req = r.approvalRequestId ? requestById.get(r.approvalRequestId) : undefined;
     const range = { startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isHalfDay: r.isHalfDay };
     return {
       id: r.id, leaveTypeId: r.leaveTypeId, leaveTypeCode: r.code, leaveTypeName: r.name, color: r.color, isPaid: r.isPaid, ...range, halfDayPart: r.halfDayPart, days: countLeaveDays(range, cal),
       reason: r.reason, status: r.status, decisionNote: r.decisionNote, approvedByName: r.approvedBy ? nameOf.get(r.approvedBy) || null : null, approvedAt: isoDateTimeOrNull(r.approvedAt), createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt),
+      approvalRequestId: r.approvalRequestId, approvalStatus: req ? (req.status as SelfLeaveRecordDto['approvalStatus']) : null, approvalCurrentStep: req ? req.currentStep : null, approvalStepCount: req ? req.stepCount : null,
     };
   });
 }
@@ -227,7 +239,15 @@ export async function applyLeave(deps: ApiDeps, actor: Actor, orgId: string, inp
       isHalfDay, halfDayPart: isHalfDay ? input.halfDayPart ?? 'FIRST_HALF' : null, reason: input.reason, status: 'PENDING', source: 'INTERNAL', createdBy: actor.userId,
     }).returning('id').executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'leave.requested', 'leave_record', { entityId: row.id, branchId: ctx.employee.branchId, newValue: { ...input, isHalfDay } });
-    await emitDomainEvent(trx, { organizationId: orgId, eventType: 'leave.requested', aggregateType: 'leave_record', aggregateId: row.id, payload: { employeeId: scope.employeeId, employeeName: ctx.employee.displayName, leaveTypeName: type.name, startDate: input.startDate, endDate: input.endDate }, actorUserId: actor.userId, requestId: actor.requestId });
+    // the approval engine routes it (the workflow for LEAVE, else the leave.approve holders in reach of the employee —
+    // never auto-approved: somebody other than the employee decides); units = working days for workflow tiers
+    const submitted = await submit(deps, trx, actor, orgId, {
+      entityType: 'LEAVE', entityId: row.id, employeeId: scope.employeeId, branchId: ctx.employee.branchId, departmentId: ctx.employee.departmentId,
+      units: countLeaveDays({ startDate: input.startDate, endDate: input.endDate, isHalfDay }, cal), requestedBy: actor.userId,
+      noWorkflow: { kind: 'PERMISSION', permission: 'leave.approve' },
+    });
+    await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ approvalRequestId: submitted.requestId }).where('id', '=', row.id).execute());
+    await emitDomainEvent(trx, { organizationId: orgId, eventType: 'leave.requested', aggregateType: 'leave_record', aggregateId: row.id, payload: { employeeId: scope.employeeId, employeeName: ctx.employee.displayName, leaveTypeName: type.name, startDate: input.startDate, endDate: input.endDate, approvalRequestId: submitted.requestId }, actorUserId: actor.userId, requestId: actor.requestId });
     const saved = await ownLeaveRows(trx, orgId, scope.employeeId, { id: row.id });
     return (await toLeaveDtos(trx, orgId, saved, cal))[0]!;
   });
@@ -243,6 +263,8 @@ export async function cancelLeave(deps: ApiDeps, actor: Actor, orgId: string, id
     if (before.status !== 'PENDING') throw errors.invalidState(`Only a pending request can be withdrawn (current: ${before.status}). Ask HR to change approved leave.`);
     const res = await trx.updateTable('leaveRecords').set({ status: 'CANCELLED' }).where('organizationId', '=', orgId).where('id', '=', id).where('employeeId', '=', scope.employeeId).where('status', '=', 'PENDING').executeTakeFirst();
     if (Number(res.numUpdatedRows) !== 1) throw errors.conflict('The request changed meanwhile. Please refresh.');
+    // withdrawing the leave withdraws its approval request (the approvers are told; the timeline records it)
+    await systemStep(trx, orgId, (t) => cancelForEntity(deps, t, actor, orgId, 'LEAVE', id, 'Withdrawn by the employee', { source: 'self_service' }));
     await audit(trx, actor, orgId, 'leave.withdrawn', 'leave_record', { entityId: id, oldValue: { status: before.status }, newValue: { status: 'CANCELLED' } });
     const ctx = await loadContext(trx, orgId, scope.employeeId);
     const { cal } = await workingCalendar(trx, orgId, ctx, isoDate(before.startDate), isoDate(before.endDate));

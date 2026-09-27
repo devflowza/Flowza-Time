@@ -12,6 +12,9 @@ import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
 import { isoDate, isoDateOrNull, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
 import { enqueueRecalculation, orgToday } from './recalc.js';
 import { dv, today } from './sql-helpers.js';
+import { systemStep } from './context.js';
+import { cancelForEntity, decideWithin, invalidateForEntity, submit } from '../approvals/engine.js';
+import { leaveUnits } from '../approvals/hooks/leave.js';
 
 type HolidayCalendarInput = z.infer<typeof holidayCalendarInputSchema>;
 type LeaveTypeInput = z.infer<typeof leaveTypeInputSchema>;
@@ -481,27 +484,50 @@ export async function assertNoLeaveOverlap(trx: Trx, orgId: string, employeeId: 
   const clash = await q.executeTakeFirst();
   if (clash) throw errors.conflict('The employee already has leave in this range.', { leaveRecordId: clash.id });
 }
+/**
+ * HR records leave. It goes through the approval engine (entity LEAVE, units = working days): with a workflow for the
+ * employee it is a PENDING request routed like any other; without one it is approved at once, exactly as before the engine
+ * (the request row still exists — Finance parity). HR recording their OWN leave is never self-approved: it is routed to the
+ * leave.approve holders in reach, like a self-service request.
+ */
 export async function createLeaveRecord(deps: ApiDeps, actor: Actor, orgId: string, input: LeaveRecordInput): Promise<LeaveRecordDto & { recalculationJobId: string | null }> {
   const grant = requirePermission(actor.principal, orgId, 'leave.manage');
   if (input.isHalfDay && input.startDate !== input.endDate) throw errors.validation('Half-day leave must be a single day.', { issues: [{ path: 'endDate', message: 'Must equal startDate' }] });
   return runUser(deps.db, actor, async (trx) => {
-    const emp = await trx.selectFrom('employees').select(['id', 'branchId']).where('organizationId', '=', orgId).where('id', '=', input.employeeId).where('deletedAt', 'is', null).executeTakeFirst();
+    const emp = await trx.selectFrom('employees').select(['id', 'branchId', 'departmentId']).where('organizationId', '=', orgId).where('id', '=', input.employeeId).where('deletedAt', 'is', null).executeTakeFirst();
     if (!emp) throw errors.validation('Employee not found.', { issues: [{ path: 'employeeId', message: 'Unknown employee' }] });
     requireBranchAccess(grant, emp.branchId);
     if (!(await trx.selectFrom('leaveTypes').select('id').where('organizationId', '=', orgId).where('id', '=', input.leaveTypeId).where('status', '=', 'active').executeTakeFirst())) throw errors.validation('Leave type not found or archived.', { issues: [{ path: 'leaveTypeId', message: 'Unknown leave type' }] });
     await assertLeaveRangeUnlocked(trx, orgId, emp.branchId, input.startDate, input.endDate);
     await assertNoLeaveOverlap(trx, orgId, input.employeeId, input.startDate, input.endDate);
-    const row = await trx.insertInto('leaveRecords').values({ organizationId: orgId, employeeId: input.employeeId, leaveTypeId: input.leaveTypeId, branchId: emp.branchId, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart: input.isHalfDay ? input.halfDayPart ?? 'FIRST_HALF' : null, reason: input.reason ?? null, status: 'APPROVED', approvedBy: actor.userId, approvedAt: new Date(), createdBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
+    const row = await trx.insertInto('leaveRecords').values({ organizationId: orgId, employeeId: input.employeeId, leaveTypeId: input.leaveTypeId, branchId: emp.branchId, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart: input.isHalfDay ? input.halfDayPart ?? 'FIRST_HALF' : null, reason: input.reason ?? null, status: 'PENDING', createdBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'leave.recorded', 'leave_record', { entityId: row.id, branchId: emp.branchId, newValue: input });
-    const recalc = await recalcIfPast(deps, trx, actor, orgId, input.startDate, input.endDate, { branchId: emp.branchId, employeeIds: [input.employeeId], reason: 'leave recorded' });
+    const own = !!grant.employeeId && grant.employeeId === input.employeeId;
+    const units = await withSystemScope(trx, orgId, (t) => leaveUnits(t, orgId, input.employeeId, { startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay }));
+    const submitted = await submit(deps, trx, actor, orgId, {
+      entityType: 'LEAVE', entityId: row.id, employeeId: input.employeeId, branchId: emp.branchId, departmentId: emp.departmentId, units, requestedBy: actor.userId,
+      noWorkflow: own ? { kind: 'PERMISSION', permission: 'leave.approve' } : { kind: 'AUTO_APPROVE' },
+    });
+    await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ approvalRequestId: submitted.requestId }).where('id', '=', row.id).execute());
+    const recalc = submitted.autoApproved ? await recalcIfPast(deps, trx, actor, orgId, input.startDate, input.endDate, { branchId: emp.branchId, employeeIds: [input.employeeId], reason: 'leave recorded' }) : null;
     const saved = (await leaveQuery(trx, orgId).select(LEAVE_COLUMNS).where('l.id', '=', row.id).executeTakeFirstOrThrow()) as LeaveRow;
     return { ...toLeaveDto(saved), recalculationJobId: recalc?.jobId ?? null };
   });
 }
+
+const LEAVE_CONTENT_KEYS = ['leaveTypeId', 'startDate', 'endDate', 'isHalfDay', 'halfDayPart', 'reason'] as const;
+
+/**
+ * HR changes a leave record. A decision on a PENDING leave (status → APPROVED / REJECTED) is a decision on its approval
+ * request, through the engine (the note is the decision comment; rejecting needs one; segregation of duties, levels and
+ * modes apply — approving one level of a two-level workflow leaves the leave PENDING at the next level). Cancelling closes
+ * the request. Editing the dates / type of a PENDING leave invalidates its request and resubmits it (Finance B-96): the
+ * approvers decide on what the leave now says. Leave recorded before the engine (no request) keeps the direct behaviour.
+ */
 export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: UpdateLeaveRecordInput): Promise<LeaveRecordDto & { recalculationJobId: string | null }> {
   const grant = requirePermission(actor.principal, orgId, 'leave.manage');
   return runUser(deps.db, actor, async (trx) => {
-    const before = (await leaveQuery(trx, orgId).select(LEAVE_COLUMNS).where('l.id', '=', id).executeTakeFirst()) as LeaveRow | undefined;
+    const before = (await leaveQuery(trx, orgId).select([...LEAVE_COLUMNS, 'l.approvalRequestId', 'e.departmentId']).where('l.id', '=', id).executeTakeFirst()) as (LeaveRow & { approvalRequestId: string | null; departmentId: string | null }) | undefined;
     if (!before) throw errors.notFound('Leave record', id);
     requireBranchAccess(grant, before.branchId);
     const start = input.startDate ?? isoDate(before.startDate); const end = input.endDate ?? isoDate(before.endDate);
@@ -510,20 +536,48 @@ export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     await assertLeaveRangeUnlocked(trx, orgId, before.branchId, isoDate(before.startDate), isoDate(before.endDate));
     await assertLeaveRangeUnlocked(trx, orgId, before.branchId, start, end);
     const status = input.status ?? before.status;
-    // separation of duties: nobody decides on their own leave request (the owner decides on HR's own requests)
-    if (before.status === 'PENDING' && (status === 'APPROVED' || status === 'REJECTED') && grant.employeeId === before.employeeId) throw errors.forbidden('You cannot approve or reject your own leave request.');
+    const deciding = before.status === 'PENDING' && (status === 'APPROVED' || status === 'REJECTED');
     if (status === 'APPROVED' || status === 'PENDING') await assertNoLeaveOverlap(trx, orgId, before.employeeId, start, end, id);
-    const patch: Record<string, unknown> = {}; for (const [k, v] of Object.entries(input)) if (v !== undefined) patch[k] = v;
-    if (input.status === 'APPROVED' && before.status !== 'APPROVED') { patch.approvedBy = actor.userId; patch.approvedAt = new Date(); }
-    if (Object.keys(patch).length) await trx.updateTable('leaveRecords').set(patch as never).where('id', '=', id).execute();
+    const pending = await withSystemScope(trx, orgId, (t) => t.selectFrom('approvalRequests').select('id').where('organizationId', '=', orgId).where('entityType', '=', 'LEAVE').where('entityId', '=', id).where('status', '=', 'PENDING').executeTakeFirst());
+    if (deciding && !pending && grant.employeeId === before.employeeId) throw errors.forbidden('You cannot approve or reject your own leave request.');
+    if (deciding && status === 'REJECTED' && !input.decisionNote) throw errors.validation('A note is required when rejecting leave.', { issues: [{ path: 'decisionNote', message: 'Required' }] });
+
+    // 1. content (dates, type, half day, reason) and — outside a decision — the note
+    const content: Record<string, unknown> = {};
+    for (const k of LEAVE_CONTENT_KEYS) if (input[k] !== undefined) content[k] = input[k];
+    if (!deciding && input.decisionNote !== undefined) content['decisionNote'] = input.decisionNote;
+    const isChange = (k: (typeof LEAVE_CONTENT_KEYS)[number]) => input[k] !== undefined && JSON.stringify(input[k]) !== JSON.stringify(k === 'startDate' || k === 'endDate' ? isoDate(before[k]) : before[k]);
+    const contentChanged = LEAVE_CONTENT_KEYS.some(isChange);
+    if (Object.keys(content).length) await trx.updateTable('leaveRecords').set(content as never).where('id', '=', id).execute();
+
+    // 2. status
+    if (deciding && pending) {
+      await decideWithin(deps, trx, actor, orgId, pending.id, { decision: status === 'APPROVED' ? 'APPROVE' : 'REJECT', comment: input.decisionNote ?? undefined });
+    } else if (deciding) {
+      // leave recorded before the engine: HR decides directly, as before
+      const patch: Record<string, unknown> = { status, ...(input.decisionNote !== undefined ? { decisionNote: input.decisionNote } : {}), ...(status === 'APPROVED' ? { approvedBy: actor.userId, approvedAt: new Date() } : {}) };
+      await trx.updateTable('leaveRecords').set(patch as never).where('id', '=', id).execute();
+      const requester = await withSystemScope(trx, orgId, (t) => t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', before.employeeId).where('status', '=', 'active').executeTakeFirst());
+      if (requester) await emitDomainEvent(trx, { organizationId: orgId, eventType: status === 'APPROVED' ? 'leave.approved' : 'leave.rejected', aggregateType: 'leave_record', aggregateId: id, payload: { userId: requester.userId, employeeId: before.employeeId, leaveTypeName: before.leaveTypeName ?? null, startDate: start, endDate: end, decisionNote: input.decisionNote ?? before.decisionNote }, actorUserId: actor.userId, requestId: actor.requestId });
+    } else if (input.status !== undefined && status !== before.status) {
+      if (status === 'APPROVED' && grant.employeeId === before.employeeId) throw errors.forbidden('You cannot approve your own leave.');
+      await trx.updateTable('leaveRecords').set({ status: status as never, ...(status === 'APPROVED' ? { approvedBy: actor.userId, approvedAt: new Date() } : {}) }).where('id', '=', id).execute();
+      if (before.status === 'PENDING' && pending) await systemStep(trx, orgId, (t) => cancelForEntity(deps, t, actor, orgId, 'LEAVE', id, input.decisionNote ?? 'Leave changed by HR', { source: 'leave_update' }));
+    } else if (before.status === 'PENDING' && contentChanged && pending) {
+      // a material edit: the approvers decide on what the leave now says (Finance B-96)
+      const req = await withSystemScope(trx, orgId, (t) => t.selectFrom('approvalRequests').select(['requestedBy']).where('id', '=', pending.id).executeTakeFirstOrThrow());
+      await systemStep(trx, orgId, (t) => invalidateForEntity(t, actor, orgId, 'LEAVE', id, 'Leave edited while pending'));
+      const units = await withSystemScope(trx, orgId, (t) => leaveUnits(t, orgId, before.employeeId, { startDate: start, endDate: end, isHalfDay: input.isHalfDay ?? before.isHalfDay }));
+      const resubmitted = await submit(deps, trx, actor, orgId, { entityType: 'LEAVE', entityId: id, employeeId: before.employeeId, branchId: before.branchId, departmentId: before.departmentId, units, requestedBy: req.requestedBy ?? actor.userId, noWorkflow: { kind: 'PERMISSION', permission: 'leave.approve' } });
+      await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ approvalRequestId: resubmitted.requestId }).where('id', '=', id).execute());
+    }
+
     const after = (await leaveQuery(trx, orgId).select(LEAVE_COLUMNS).where('l.id', '=', id).executeTakeFirstOrThrow()) as LeaveRow;
     await audit(trx, actor, orgId, 'leave.updated', 'leave_record', { entityId: id, branchId: before.branchId, ...diffObjects(toLeaveDto(before) as unknown as Record<string, unknown>, toLeaveDto(after) as unknown as Record<string, unknown>) });
-    // A decision on a request tells the employee (in-app notification to the user linked to the employee record).
-    if (before.status === 'PENDING' && (after.status === 'APPROVED' || after.status === 'REJECTED')) {
-      const requester = await withSystemScope(trx, orgId, (t) => t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', before.employeeId).where('status', '=', 'active').executeTakeFirst());
-      if (requester) await emitDomainEvent(trx, { organizationId: orgId, eventType: after.status === 'APPROVED' ? 'leave.approved' : 'leave.rejected', aggregateType: 'leave_record', aggregateId: id, payload: { userId: requester.userId, employeeId: before.employeeId, leaveTypeName: after.leaveTypeName ?? null, startDate: isoDate(after.startDate), endDate: isoDate(after.endDate), decisionNote: after.decisionNote }, actorUserId: actor.userId, requestId: actor.requestId });
-    }
-    const recalc = await recalcIfPast(deps, trx, actor, orgId, minDate(isoDate(before.startDate), start), [isoDate(before.endDate), end].sort().pop() ?? end, { branchId: before.branchId, employeeIds: [before.employeeId], reason: 'leave changed' });
+    // the engine's leave hook recomputes past days on approval; a direct change (edit of approved leave, cancellation) here
+    const decidedByEngine = deciding && !!pending;
+    const touchesAttendance = !decidedByEngine && (before.status === 'APPROVED' || after.status === 'APPROVED');
+    const recalc = touchesAttendance ? await recalcIfPast(deps, trx, actor, orgId, minDate(isoDate(before.startDate), start), [isoDate(before.endDate), end].sort().pop() ?? end, { branchId: before.branchId, employeeIds: [before.employeeId], reason: 'leave changed' }) : null;
     return { ...toLeaveDto(after), recalculationJobId: recalc?.jobId ?? null };
   });
 }
@@ -536,6 +590,7 @@ export async function deleteLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     if (before.status === 'CANCELLED') throw errors.invalidState('The leave record is already cancelled.');
     await assertLeaveRangeUnlocked(trx, orgId, before.branchId, isoDate(before.startDate), isoDate(before.endDate));
     await trx.updateTable('leaveRecords').set({ status: 'CANCELLED' }).where('id', '=', id).execute();
+    if (before.status === 'PENDING') await systemStep(trx, orgId, (t) => cancelForEntity(deps, t, actor, orgId, 'LEAVE', id, 'Leave cancelled by HR', { source: 'leave_delete' }));
     await audit(trx, actor, orgId, 'leave.cancelled', 'leave_record', { entityId: id, branchId: before.branchId, oldValue: toLeaveDto(before) });
     const recalc = before.status === 'APPROVED' ? await recalcIfPast(deps, trx, actor, orgId, isoDate(before.startDate), isoDate(before.endDate), { branchId: before.branchId, employeeIds: [before.employeeId], reason: 'leave cancelled' }) : null;
     return { recalculationJobId: recalc?.jobId ?? null };

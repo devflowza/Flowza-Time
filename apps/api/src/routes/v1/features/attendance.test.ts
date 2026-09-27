@@ -127,9 +127,11 @@ describe('corrections and approvals', () => {
     expect(steps[0]!.approverType).toBe('ROLE');
     expect((await domainEvents(h.admin, 'approval.pending')).length).toBe(1);
     // inbox: hr_admin sees it, hr_user does not, employee user does not
+    // (engine v2: the inbox returns the unified request DTO — id, employeeId, context — instead of the v1 step rows)
     const inbox = await h.request('GET', `${base()}/approvals/inbox`, { token: f.hrAdmin });
-    expect(inbox.body.data.map((i: { requestId: string }) => i.requestId)).toContain(requestId);
-    expect(inbox.body.data[0].correction.employeeId).toBe(f.e1);
+    expect(inbox.body.data.map((i: { id: string }) => i.id)).toContain(requestId);
+    expect(inbox.body.data[0].employeeId).toBe(f.e1);
+    expect(inbox.body.data[0].context).toMatchObject({ kind: 'ATTENDANCE_CORRECTION', correction: { id: r.body.data.id } });
     expect((await h.request('GET', `${base()}/approvals/inbox`, { token: f.hrUser })).body.data).toHaveLength(0);
     // only the step approver can act
     const wrong = await h.request('POST', `${base()}/approvals/${requestId}/approve`, { token: f.hrUser, body: {} });
@@ -137,7 +139,7 @@ describe('corrections and approvals', () => {
     const ok = await h.request('POST', `${base()}/approvals/${requestId}/approve`, { token: f.hrAdmin, body: { comment: 'Confirmed with supervisor' } });
     expect(ok.status).toBe(200);
     expect(ok.body.data.status).toBe('APPROVED');
-    expect(ok.body.data.correction.status).toBe('APPROVED');
+    expect(ok.body.data.context.correction.status).toBe('APPROVED');
     const apply = await queueJobs(h.admin, 'APPLY_CORRECTION');
     expect(apply).toHaveLength(1);
     expect(apply[0]!.queueName).toBe('processing');
@@ -161,7 +163,8 @@ describe('corrections and approvals', () => {
   it('uses the default workflow: MANAGER step resolves to the manager user, rejection records the reason', async () => {
     const wf = await h.request('POST', `${base()}/approval-workflows`, { token: f.owner, body: { name: 'Manager then HR', steps: [{ order: 1, approverType: 'MANAGER' }, { order: 2, approverType: 'ROLE', roleId: '10000000-0000-0000-0000-000000000003' }] } });
     expect(wf.status).toBe(201);
-    expect((await h.request('POST', `${base()}/approval-workflows`, { token: f.hrAdmin, body: { name: 'x', steps: [{ order: 1, approverType: 'MANAGER' }] } })).status).toBe(403);
+    // engine v2: workflows need approval.manage (or organization.manage) — hr_admin holds approval.manage since Prompt 1, hr_user does not
+    expect((await h.request('POST', `${base()}/approval-workflows`, { token: f.hrUser, body: { name: 'x', steps: [{ order: 1, approverType: 'MANAGER' }] } })).status).toBe(403);
     const r = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: { employeeId: f.e1, attendanceDate: '2026-08-04', type: 'ADD_PUNCH', proposedPunchedAt: '2026-08-04T04:00:00Z', reason: 'Device offline' } });
     expect(r.status).toBe(201);
     const requestId = r.body.data.approvalRequestId as string;
@@ -172,8 +175,10 @@ describe('corrections and approvals', () => {
     expect(steps[1]!.approverRoleId).toBe('10000000-0000-0000-0000-000000000003');
     // manager sees it in the inbox although the hr_user role lacks attendance.approve
     const inbox = await h.request('GET', `${base()}/approvals/inbox`, { token: f.managerUser });
-    expect(inbox.body.data.map((i: { requestId: string }) => i.requestId)).toContain(requestId);
-    expect((await h.request('POST', `${base()}/approvals/${requestId}/approve`, { token: f.hrAdmin, body: {} })).status).toBe(403); // step 1 is the manager's
+    expect(inbox.body.data.map((i: { id: string }) => i.id)).toContain(requestId);
+    // engine v2 (Finance B-91): an attendance.approve holder with organisation-wide attendance.view MAY decide any step (as an
+    // override, logged) — covered in approvals.test.ts; somebody who is neither an actor nor such a holder may not
+    expect((await h.request('POST', `${base()}/approvals/${requestId}/approve`, { token: f.hrUser, body: {} })).status).toBe(403); // step 1 is the manager's
     const step1 = await h.request('POST', `${base()}/approvals/${requestId}/approve`, { token: f.managerUser, body: { comment: 'ok' } });
     expect(step1.status).toBe(200);
     expect(step1.body.data.status).toBe('PENDING');
@@ -182,7 +187,7 @@ describe('corrections and approvals', () => {
     const rejected = await h.request('POST', `${base()}/approvals/${requestId}/reject`, { token: f.hrAdmin, body: { comment: 'No evidence' } });
     expect(rejected.status).toBe(200);
     expect(rejected.body.data.status).toBe('REJECTED');
-    expect(rejected.body.data.correction).toMatchObject({ status: 'REJECTED', rejectionReason: 'No evidence' });
+    expect(rejected.body.data.context.correction).toMatchObject({ status: 'REJECTED', rejectionReason: 'No evidence' });
     expect((await domainEvents(h.admin, 'attendance.correction_rejected')).length).toBe(1);
     expect((await queueJobs(h.admin, 'APPLY_CORRECTION')).length).toBe(2); // unchanged
     // requester can cancel their own pending correction; approvers can cancel others

@@ -5,11 +5,19 @@
 
 import type { ColumnType } from "kysely";
 
-export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "SHIFT_CHANGE";
+export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "ATTENDANCE_NOTE" | "COMP_OFF" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "OVERTIME_CLAIM" | "REGULARISATION" | "SHIFT_CHANGE" | "SHIFT_SWAP";
 
-export type ApprovalStatus = "APPROVED" | "CANCELLED" | "PENDING" | "REJECTED";
+export type ApprovalStatus = "APPROVED" | "CANCELLED" | "INVALIDATED" | "PENDING" | "REJECTED" | "SKIPPED";
 
-export type ApproverType = "MANAGER" | "ROLE" | "USER";
+export type ApproverType = "BRANCH_MANAGER" | "DEPARTMENT_HEAD" | "HR_ADMIN" | "MANAGER" | "MANAGER_CHAIN" | "ROLE" | "SECONDARY_MANAGER" | "USER";
+
+export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
+  ? U[]
+  : ArrayTypeImpl<T>;
+
+export type ArrayTypeImpl<T> = T extends ColumnType<infer S, infer I, infer U>
+  ? ColumnType<S[], I[], U[]>
+  : T[];
 
 export type AssignmentTarget = "BRANCH" | "DEPARTMENT" | "EMPLOYEE" | "ORGANIZATION" | "TEAM";
 
@@ -160,42 +168,124 @@ export interface ApiKeys {
   scopes: Generated<string[]>;
 }
 
+export interface ApprovalDelegations {
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  delegateUserId: string;
+  delegatorUserId: string;
+  endsOn: Timestamp;
+  entityTypes: ArrayType<ApprovalEntity> | null;
+  id: Generated<string>;
+  isActive: Generated<boolean>;
+  organizationId: string;
+  reason: string | null;
+  revokedAt: Timestamp | null;
+  revokedBy: string | null;
+  startsOn: Timestamp;
+}
+
+export interface ApprovalDigestRuns {
+  digestDate: Timestamp;
+  organizationId: string;
+  recipients: Generated<number>;
+  sentAt: Generated<Timestamp>;
+}
+
+export interface ApprovalEmailTokens {
+  action: string;
+  createdAt: Generated<Timestamp>;
+  expiresAt: Timestamp;
+  id: Generated<string>;
+  organizationId: string;
+  requestId: string;
+  stepId: string;
+  tokenHash: string;
+  usedAt: Timestamp | null;
+  userId: string;
+}
+
+export interface ApprovalRequestEvents {
+  actorUserId: string | null;
+  at: Generated<Timestamp>;
+  detail: Generated<Json>;
+  id: Generated<Int8>;
+  kind: string;
+  organizationId: string;
+  requestId: string;
+}
+
 export interface ApprovalRequests {
   branchId: string | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
   completedAt: Timestamp | null;
   createdAt: Generated<Timestamp>;
   currentStep: Generated<number>;
+  decidedBy: string | null;
+  departmentId: string | null;
   employeeId: string | null;
   entityId: string;
   entityType: ApprovalEntity;
   id: Generated<string>;
+  infoRequestedAt: Timestamp | null;
+  invalidationReason: string | null;
   organizationId: string;
   requestedBy: string | null;
   status: Generated<ApprovalStatus>;
+  subjectUserId: string | null;
+  units: Numeric | null;
   updatedAt: Generated<Timestamp>;
   workflowId: string | null;
+}
+
+export interface ApprovalStepActors {
+  comment: string | null;
+  createdAt: Generated<Timestamp>;
+  decidedAt: Timestamp | null;
+  decision: Generated<ApprovalStatus>;
+  id: Generated<string>;
+  organizationId: string;
+  resolutionPath: string | null;
+  stepId: string;
+  userId: string;
+  viaDelegationOf: string | null;
 }
 
 export interface ApprovalSteps {
   actedAt: Timestamp | null;
   actedBy: string | null;
+  activatedAt: Timestamp | null;
   approverRoleId: string | null;
   approverType: ApproverType;
   approverUserId: string | null;
   comment: string | null;
+  delegatedFromUserId: string | null;
+  dueAt: Timestamp | null;
+  escalateAfterHours: number | null;
+  escalatedAt: Timestamp | null;
+  escalateTo: string | null;
   id: Generated<string>;
+  mode: Generated<string>;
   organizationId: string;
+  permissionKey: string | null;
+  remindedAt: Timestamp | null;
   requestId: string;
+  requiredCount: number | null;
+  resolutionPath: string | null;
+  resolutionReason: string | null;
   status: Generated<ApprovalStatus>;
   stepNo: number;
 }
 
 export interface ApprovalWorkflows {
+  allowSelfApproval: Generated<boolean>;
+  appliesTo: Generated<Json>;
   branchId: string | null;
   createdAt: Generated<Timestamp>;
   entityType: ApprovalEntity;
   id: Generated<string>;
   isDefault: Generated<boolean>;
+  minUnits: Numeric | null;
   name: string;
   organizationId: string;
   status: Generated<RecordStatus>;
@@ -901,6 +991,7 @@ export interface JobsQueueArchive {
 }
 
 export interface LeaveRecords {
+  approvalRequestId: string | null;
   approvedAt: Timestamp | null;
   approvedBy: string | null;
   branchId: string | null;
@@ -1400,7 +1491,12 @@ export interface UserProfiles {
 
 export interface DB {
   apiKeys: ApiKeys;
+  approvalDelegations: ApprovalDelegations;
+  approvalDigestRuns: ApprovalDigestRuns;
+  approvalEmailTokens: ApprovalEmailTokens;
+  approvalRequestEvents: ApprovalRequestEvents;
   approvalRequests: ApprovalRequests;
+  approvalStepActors: ApprovalStepActors;
   approvalSteps: ApprovalSteps;
   approvalWorkflows: ApprovalWorkflows;
   attendanceCorrections: AttendanceCorrections;

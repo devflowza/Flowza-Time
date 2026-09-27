@@ -3,3 +3,4 @@ export * from './sync/index.js';
 export * from './authorization/types.js';
 export * from './reports/index.js';
 export * from './leave/days.js';
+export * from './approvals/index.js';

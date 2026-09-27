@@ -104,14 +104,30 @@ export type CorrectionType = (typeof CORRECTION_TYPES)[number];
 export const CORRECTION_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'APPLIED'] as const;
 export type CorrectionStatus = (typeof CORRECTION_STATUSES)[number];
 
-export const APPROVAL_ENTITIES = ['ATTENDANCE_CORRECTION', 'OVERTIME', 'MISSING_PUNCH', 'SHIFT_CHANGE', 'MANUAL_ATTENDANCE', 'LEAVE'] as const;
+export const APPROVAL_ENTITIES = ['ATTENDANCE_CORRECTION', 'OVERTIME', 'MISSING_PUNCH', 'SHIFT_CHANGE', 'MANUAL_ATTENDANCE', 'LEAVE', 'ATTENDANCE_NOTE', 'SHIFT_SWAP', 'COMP_OFF', 'REGULARISATION', 'OVERTIME_CLAIM'] as const;
 export type ApprovalEntity = (typeof APPROVAL_ENTITIES)[number];
 
-export const APPROVAL_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] as const;
+/** Status of a request, a step or an actor row. Requests never carry SKIPPED (a step/actor that never got to decide). */
+export const APPROVAL_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'INVALIDATED', 'SKIPPED'] as const;
 export type ApprovalStatus = (typeof APPROVAL_STATUSES)[number];
+/** Request-level statuses (the History view lists everything but PENDING). */
+export const APPROVAL_REQUEST_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'INVALIDATED'] as const;
+export type ApprovalRequestStatus = (typeof APPROVAL_REQUEST_STATUSES)[number];
 
-export const APPROVER_TYPES = ['MANAGER', 'ROLE', 'USER'] as const;
+export const APPROVER_TYPES = ['MANAGER', 'SECONDARY_MANAGER', 'MANAGER_CHAIN', 'HR_ADMIN', 'DEPARTMENT_HEAD', 'BRANCH_MANAGER', 'ROLE', 'USER'] as const;
 export type ApproverType = (typeof APPROVER_TYPES)[number];
+
+/** How a level with several eligible approvers is satisfied: one of them (ANY), every one (ALL) or `requiredCount` of them (QUORUM). */
+export const APPROVAL_STEP_MODES = ['ANY', 'ALL', 'QUORUM'] as const;
+export type ApprovalStepMode = (typeof APPROVAL_STEP_MODES)[number];
+/** Where an overdue level escalates to: the next level's approvers join the current level, or the HR admins / owners do. */
+export const APPROVAL_ESCALATION_TARGETS = ['NEXT_STEP', 'HR_ADMIN', 'OWNER'] as const;
+export type ApprovalEscalationTarget = (typeof APPROVAL_ESCALATION_TARGETS)[number];
+export const APPROVAL_DECISIONS = ['APPROVE', 'REJECT'] as const;
+export type ApprovalDecision = (typeof APPROVAL_DECISIONS)[number];
+/** Inbox scope: my queue (assignee or delegate), my direct reports' requests, or the whole organisation (org-wide keys). */
+export const APPROVAL_INBOX_SCOPES = ['mine', 'team', 'all'] as const;
+export type ApprovalInboxScope = (typeof APPROVAL_INBOX_SCOPES)[number];
 
 export const REPORT_FORMATS = ['csv', 'xlsx', 'pdf'] as const;
 export type ReportFormat = (typeof REPORT_FORMATS)[number];
