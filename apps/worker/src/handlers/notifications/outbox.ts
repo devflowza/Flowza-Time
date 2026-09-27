@@ -1,16 +1,35 @@
 import { sql } from 'kysely';
 import type { NotificationCategory } from '@flowza/contracts';
 import { event } from '@flowza/shared';
-import { withContext } from '@flowza/database';
+import { applyContext, issueApprovalEmailTokens, withContext } from '@flowza/database';
 import type { HandlerRegistry, JobContext } from '../types.js';
 
 interface OutboxRow { id: string; organizationId: string | null; eventType: string; aggregateType: string; aggregateId: string | null; payload: Record<string, unknown>; actorUserId: string | null; occurredAt: Date }
 
+type Payload = Record<string, unknown>;
 /**
- * Which users receive an in-app notification for an event type: by permission within the organisation. `when` filters
- * events that are published (realtime, webhooks) but must not become notifications.
+ * Who receives an in-app notification for an event type:
+ *  - `permission` (default): active members whose role holds `permission` (+ `payload.userId` when present);
+ *  - `user`: exactly `payload.userId`;
+ *  - `users`: exactly `payload.userIds` — the approval engine's targeted notifications (the resolved approvers of a
+ *    level, the requester and the person concerned), filtered to ACTIVE members of the organisation.
+ * `when` filters events that are published (realtime, webhooks) but must not become notifications.
  */
-const ROUTING: Record<string, { category: NotificationCategory; permission: string; recipients?: 'permission' | 'user'; when?: (p: Record<string, unknown>) => boolean; title: (p: Record<string, unknown>) => string; body?: (p: Record<string, unknown>) => string; link?: (p: Record<string, unknown>) => string }> = {
+interface Route { category: NotificationCategory; permission?: string; recipients?: 'permission' | 'user' | 'users'; when?: (p: Payload) => boolean; title: (p: Payload) => string; body?: (p: Payload) => string; link?: (p: Payload) => string }
+
+const ENTITY_LABELS: Record<string, string> = {
+  ATTENDANCE_CORRECTION: 'Attendance correction', LEAVE: 'Leave request', OVERTIME: 'Overtime', MISSING_PUNCH: 'Missing punch', SHIFT_CHANGE: 'Shift change', MANUAL_ATTENDANCE: 'Manual attendance',
+  ATTENDANCE_NOTE: 'Attendance note', SHIFT_SWAP: 'Shift swap', COMP_OFF: 'Compensatory off', REGULARISATION: 'Regularisation', OVERTIME_CLAIM: 'Overtime claim',
+};
+/** "Leave request — Employee 5" (the entity and who it is about; ids only when no name was resolved). */
+export function approvalLabel(p: Payload): string {
+  const what = ENTITY_LABELS[String(p['entityType'] ?? '')] ?? 'Request';
+  return p['employeeName'] ? `${what} — ${String(p['employeeName'])}` : what;
+}
+const requestLink = (p: Payload) => `/approvals/requests/${String(p['requestId'] ?? '')}`;
+const DECISION_WORDS: Record<string, string> = { APPROVED: 'approved', REJECTED: 'rejected', CANCELLED: 'withdrawn', INVALIDATED: 'invalidated (changed while pending)' };
+
+const ROUTING: Record<string, Route> = {
   'device.offline': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device offline: ${String(p['deviceName'] ?? p['deviceId'] ?? '')}`, body: (p) => `No successful communication since ${String(p['lastSeenAt'] ?? 'unknown')}.`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'device.online': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device back online: ${String(p['deviceName'] ?? '')}`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'sync.failed': { category: 'ATTENDANCE', permission: 'device.sync', title: (p) => `Sync failed: ${String(p['jobType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: (p) => `/sync/${String(p['syncJobId'] ?? '')}` },
@@ -18,12 +37,21 @@ const ROUTING: Record<string, { category: NotificationCategory; permission: stri
   // minutes and a poll per device per interval; routing those to every device.sync holder produced a notification (and an
   // e-mail) each time, hundreds a day per tenant. Failures keep notifying regardless of who started the sync.
   'sync.completed': { category: 'ATTENDANCE', permission: 'device.sync', when: (p) => p['trigger'] === 'MANUAL' && p['jobType'] !== 'DEVICE_HEALTH_CHECK', title: (p) => `Sync completed: ${String(p['jobType'] ?? '')}`, body: (p) => `${String(p['itemsSuccess'] ?? 0)} succeeded, ${String(p['itemsFailed'] ?? 0)} failed`, link: (p) => `/sync/${String(p['syncJobId'] ?? '')}` },
-  'approval.pending': { category: 'APPROVAL', permission: 'attendance.approve', title: () => 'Correction awaiting your approval', link: () => '/approvals' },
+  // Approval engine v2: every approval notification is TARGETED (payload.userIds) — the resolved approvers of the level,
+  // never every holder of a permission. One-click approve / reject links are added to the e-mail of approval.pending /
+  // approval.escalated / a single-request reminder (deliverNotifications).
+  'approval.pending': { category: 'APPROVAL', recipients: 'users', title: (p) => `${approvalLabel(p)} awaiting your approval`, body: (p) => (p['summary'] ? String(p['summary']) : `Level ${String(p['stepNo'] ?? 1)}`), link: requestLink },
+  'approval.reminder': { category: 'APPROVAL', recipients: 'users', title: (p) => (p['kind'] === 'digest' ? `${String(p['total'] ?? 0)} approval${Number(p['total']) === 1 ? '' : 's'} waiting for you` : `Reminder: ${approvalLabel(p)} is waiting for you`), body: (p) => (p['kind'] === 'digest' ? (Array.isArray(p['counts']) ? (p['counts'] as Array<{ entityType?: string; count?: number }>) : []).map((c) => `${ENTITY_LABELS[String(c.entityType)] ?? String(c.entityType)}: ${String(c.count ?? 0)}`).join(' · ') : `Waiting since ${String(p['waitingSince'] ?? '')}`), link: (p) => (p['kind'] === 'digest' ? '/approvals' : requestLink(p)) },
+  'approval.escalated': { category: 'APPROVAL', recipients: 'users', title: (p) => `Escalated to you: ${approvalLabel(p)}`, body: (p) => `Level ${String(p['stepNo'] ?? '')} was not decided in time`, link: requestLink },
+  'approval.decided': { category: 'APPROVAL', recipients: 'users', title: (p) => `${approvalLabel(p)} ${DECISION_WORDS[String(p['decision'] ?? '')] ?? 'decided'}`, body: (p) => (p['comment'] ? String(p['comment']) : ''), link: requestLink },
+  'approval.info_requested': { category: 'APPROVAL', recipients: 'users', title: (p) => `More information requested: ${approvalLabel(p)}`, body: (p) => String(p['comment'] ?? ''), link: requestLink },
+  'approval.info_answered': { category: 'APPROVAL', recipients: 'users', title: (p) => `Information provided: ${approvalLabel(p)}`, body: (p) => String(p['comment'] ?? ''), link: requestLink },
+  'approval.reassigned': { category: 'APPROVAL', recipients: 'users', title: (p) => `${approvalLabel(p)} was reassigned`, body: (p) => String(p['reason'] ?? ''), link: requestLink },
   'attendance.correction_approved': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction approved', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
   'attendance.correction_rejected': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction rejected', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
-  // Self-service leave: HR hears about a request; the employee (payload.userId) hears about the decision. Correction
-  // decisions above also reach the requester through payload.userId; /attendance sends an employee to /my/attendance.
-  'leave.requested': { category: 'APPROVAL', permission: 'leave.manage', title: (p) => `Leave request from ${String(p['employeeName'] ?? 'an employee')}`, body: (p) => `${String(p['leaveTypeName'] ?? 'Leave')} · ${String(p['startDate'] ?? '')} → ${String(p['endDate'] ?? '')}`, link: () => '/leave?status=PENDING' },
+  // Self-service leave: HR hears about a request only when the approval engine did not route it (older rows); the engine's
+  // approval.pending reaches the actual approvers instead. The employee (payload.userId) hears about the decision.
+  'leave.requested': { category: 'APPROVAL', permission: 'leave.manage', when: (p) => !p['approvalRequestId'], title: (p) => `Leave request from ${String(p['employeeName'] ?? 'an employee')}`, body: (p) => `${String(p['leaveTypeName'] ?? 'Leave')} · ${String(p['startDate'] ?? '')} → ${String(p['endDate'] ?? '')}`, link: () => '/leave?status=PENDING' },
   'leave.approved': { category: 'APPROVAL', permission: 'leave.request', recipients: 'user', title: (p) => `Leave approved: ${String(p['leaveTypeName'] ?? '')}`, body: (p) => `${String(p['startDate'] ?? '')} → ${String(p['endDate'] ?? '')}${p['decisionNote'] ? ` · ${String(p['decisionNote'])}` : ''}`, link: () => '/my/leave' },
   'leave.rejected': { category: 'APPROVAL', permission: 'leave.request', recipients: 'user', title: (p) => `Leave not approved: ${String(p['leaveTypeName'] ?? '')}`, body: (p) => `${String(p['startDate'] ?? '')} → ${String(p['endDate'] ?? '')}${p['decisionNote'] ? ` · ${String(p['decisionNote'])}` : ''}`, link: () => '/my/leave' },
   // A report belongs to whoever asked for it. Routing by permission sent every report.view holder a notification (and
@@ -33,6 +61,9 @@ const ROUTING: Record<string, { category: NotificationCategory; permission: stri
   'employee.imported': { category: 'SYSTEM', permission: 'employee.import', title: (p) => `Import finished: ${String(p['imported'] ?? 0)} employees`, link: (p) => `/employees/imports/${String(p['importId'] ?? '')}` },
   'subscription.limit_reached': { category: 'SUBSCRIPTION', permission: 'organization.manage', title: (p) => `Plan limit reached: ${String(p['metric'] ?? '')}`, link: () => '/settings/subscription' },
 };
+
+/** Approval notifications whose e-mail carries one-click approve / reject links for the recipient. */
+const ONE_CLICK_TYPES = new Set(['approval.pending', 'approval.escalated', 'approval.reminder']);
 
 /** Realtime channel + event for invalidation signals (payload = ids only). */
 function realtimeTarget(row: OutboxRow): { channel: string; event: string } | null {
@@ -61,20 +92,27 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
       const route = ROUTING[row.eventType];
       if (route && row.organizationId && (route.when?.(row.payload) ?? true)) {
         notifications += await (async () => {
-          // recipients: active members whose role holds the permission (+ specific user in payload.userId)
-          const recipients = route.recipients === 'user'
+          // recipients: active members whose role holds the permission (+ specific user in payload.userId), exactly
+          // payload.userId, or exactly payload.userIds (targeted approval notifications; active members only)
+          const targeted = Array.isArray(row.payload['userIds']) ? (row.payload['userIds'] as unknown[]).filter((u): u is string => typeof u === 'string' && /^[0-9a-f-]{36}$/i.test(u)) : [];
+          const recipients = route.recipients === 'users'
+            ? await sql<{ userId: string }>`select distinct m.user_id as "userId" from public.org_memberships m where m.organization_id = ${row.organizationId}::uuid and m.status = 'active' and m.user_id = any (${targeted}::uuid[])`.execute(trx)
+            : route.recipients === 'user'
             ? await sql<{ userId: string }>`select ${String(row.payload['userId'] ?? '00000000-0000-0000-0000-000000000000')}::uuid as "userId" where ${typeof row.payload['userId'] === 'string'}`.execute(trx)
             : await sql<{ userId: string }>`
             select distinct m.user_id as "userId" from public.org_memberships m
             join public.role_permissions rp on rp.role_id = m.role_id
-            where m.organization_id = ${row.organizationId}::uuid and m.status = 'active' and rp.permission_key = ${route.permission}
+            where m.organization_id = ${row.organizationId}::uuid and m.status = 'active' and rp.permission_key = ${route.permission ?? ''}
             union select ${String(row.payload['userId'] ?? '00000000-0000-0000-0000-000000000000')}::uuid where ${row.payload['userId'] !== undefined}`.execute(trx);
           let created = 0;
           for (const r of recipients.rows) {
-            // dedupe: same type + aggregate for the same user within 15 minutes (device flapping, repeated failures)
-            const dup = await trx.selectFrom('notifications').select('id').where('userId', '=', r.userId).where('type', '=', row.eventType).where('createdAt', '>', new Date(deps.now().getTime() - 15 * 60_000))
-              .where(sql`data->>'aggregateId'`, '=', row.aggregateId ?? '').executeTakeFirst();
-            if (dup) continue;
+            // dedupe: same type + aggregate for the same user within 15 minutes (device flapping, repeated failures). Targeted
+            // approval events are deliberate, one per transition (level 2 after level 1, a second question), so they are not.
+            if (route.recipients !== 'users') {
+              const dup = await trx.selectFrom('notifications').select('id').where('userId', '=', r.userId).where('type', '=', row.eventType).where('createdAt', '>', new Date(deps.now().getTime() - 15 * 60_000))
+                .where(sql`data->>'aggregateId'`, '=', row.aggregateId ?? '').executeTakeFirst();
+              if (dup) continue;
+            }
             const inserted = await trx.insertInto('notifications').values({
               organizationId: row.organizationId, userId: r.userId, category: route.category, type: row.eventType, title: route.title(row.payload), body: route.body?.(row.payload) ?? null,
               link: route.link?.(row.payload) ?? null, data: JSON.stringify({ aggregateType: row.aggregateType, aggregateId: row.aggregateId, ...row.payload }),
@@ -110,18 +148,45 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
   });
 }
 
+/**
+ * The approve / reject links of an approval e-mail: a fresh token pair for THIS recipient and THIS level, minted in the
+ * organisation's system context (the token table is system-only). Returns null when the level is no longer waiting for
+ * the recipient (decided, withdrawn, reassigned) — the e-mail then only links to the request.
+ */
+async function oneClickLinks(trx: Parameters<typeof applyContext>[0], deps: JobContext['deps'], d: { organizationId: string; userId: string; type: string; data: Record<string, unknown> }): Promise<{ approve: string; reject: string } | null> {
+  if (!ONE_CLICK_TYPES.has(d.type) || d.data['kind'] === 'digest') return null;
+  const requestId = typeof d.data['requestId'] === 'string' ? d.data['requestId'] : typeof d.data['aggregateId'] === 'string' ? d.data['aggregateId'] : null;
+  if (!requestId) return null;
+  await applyContext(trx, { kind: 'system', organizationId: d.organizationId });
+  try {
+    const step = await trx.selectFrom('approvalSteps as s').innerJoin('approvalRequests as r', 'r.id', 's.requestId').innerJoin('approvalStepActors as a', 'a.stepId', 's.id')
+      .select(['s.id as stepId', 'r.id as requestId']).where('r.id', '=', requestId).where('r.status', '=', 'PENDING').where('s.status', '=', 'PENDING').whereRef('s.stepNo', '=', 'r.currentStep')
+      .where('a.userId', '=', d.userId).where('a.decision', '=', 'PENDING').executeTakeFirst();
+    if (!step) return null;
+    const pair = await issueApprovalEmailTokens(trx, { organizationId: d.organizationId, requestId: step.requestId, stepId: step.stepId, userId: d.userId }, { now: deps.now() });
+    const base = `${deps.config.WEB_PUBLIC_URL}/approvals/email-action?org=${encodeURIComponent(d.organizationId)}`;
+    return { approve: `${base}&action=APPROVE&token=${encodeURIComponent(pair.approve)}`, reject: `${base}&action=REJECT&token=${encodeURIComponent(pair.reject)}` };
+  } finally {
+    await applyContext(trx, { kind: 'platform' });
+  }
+}
+
 /** Sends pending email deliveries (worker mailer), one batch per run. */
 export async function deliverNotifications({ deps, log, job }: JobContext) {
   return withContext(deps.db, { kind: 'platform', jobId: job.id }, async (trx) => {
-  const pending = await sql<{ id: string; organizationId: string | null; notificationId: string; title: string; body: string | null; email: string; link: string | null }>`
-    select d.id, d.organization_id as "organizationId", d.notification_id as "notificationId", n.title, n.body, n.link, u.email
+  const pending = await sql<{ id: string; organizationId: string | null; notificationId: string; title: string; body: string | null; email: string; link: string | null; userId: string; type: string; data: unknown }>`
+    select d.id, d.organization_id as "organizationId", d.notification_id as "notificationId", n.title, n.body, n.link, u.email, n.user_id as "userId", n.type, n.data
     from public.notification_deliveries d join public.notifications n on n.id = d.notification_id join public.user_profiles u on u.id = n.user_id
     where d.status = 'pending' and d.channel = 'EMAIL' order by d.created_at limit ${Number(job.payload['batchSize'] ?? 100)} for update of d skip locked`.execute(trx);
   let sent = 0;
   for (const d of pending.rows) {
     try {
       const link = d.link ? `${deps.config.WEB_PUBLIC_URL}${d.link}` : deps.config.WEB_PUBLIC_URL;
-      const res = await deps.mailer.send({ to: d.email, subject: `[FlowZa Time] ${d.title}`, html: `<p>${escapeHtml(d.title)}</p>${d.body ? `<p>${escapeHtml(d.body)}</p>` : ''}<p><a href="${link}">Open FlowZa Time</a></p>`, text: `${d.title}\n${d.body ?? ''}\n${link}` });
+      const data = (d.data && typeof d.data === 'object' ? d.data : {}) as Record<string, unknown>;
+      const oneClick = d.organizationId ? await oneClickLinks(trx, deps, { organizationId: d.organizationId, userId: d.userId, type: d.type, data }) : null;
+      const actionsHtml = oneClick ? `<p><a href="${escapeHtml(oneClick.approve)}">Approve</a> · <a href="${escapeHtml(oneClick.reject)}">Reject</a></p><p style="color:#667085;font-size:12px">You will be asked to confirm in FlowZa Time. The links work once and expire in 7 days.</p>` : '';
+      const actionsText = oneClick ? `\nApprove: ${oneClick.approve}\nReject: ${oneClick.reject}\n` : '';
+      const res = await deps.mailer.send({ to: d.email, subject: `[FlowZa Time] ${d.title}`, html: `<p>${escapeHtml(d.title)}</p>${d.body ? `<p>${escapeHtml(d.body)}</p>` : ''}${actionsHtml}<p><a href="${escapeHtml(link)}">Open FlowZa Time</a></p>`, text: `${d.title}\n${d.body ?? ''}${actionsText}\n${link}` });
       await sql`update public.notification_deliveries set status = 'sent', provider = ${res.provider}, provider_message_id = ${res.id}, sent_at = now(), attempts = attempts + 1 where id = ${d.id}::bigint`.execute(trx);
       sent++;
     } catch (err) {
