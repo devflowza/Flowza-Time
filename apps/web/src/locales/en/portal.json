@@ -120,7 +120,7 @@
   },
   "leave": {
     "title": "My leave",
-    "subtitle": "Your balances, requests and HR's decisions. Requests start as pending until HR approves them.",
+    "subtitle": "Your balances, requests and the decisions on them. A request stays pending until its approvers decide it.",
     "apply": "Apply for leave",
     "year": "Year",
     "balances": "Balances {{year}}",
@@ -141,7 +141,8 @@
       "reason": "Reason",
       "status": "Status",
       "decision": "HR's note",
-      "submitted": "Submitted"
+      "submitted": "Submitted",
+      "approval": "Approval"
     },
     "decidedBy": "by {{name}}",
     "withdraw": "Withdraw",
@@ -149,7 +150,11 @@
     "withdrawHint": "HR will no longer see it. Approved leave can only be changed by HR.",
     "withdrawn": "Leave request withdrawn",
     "unpaid": "Unpaid",
-    "halfDay": "Half day"
+    "halfDay": "Half day",
+    "approvalLevel": "Level {{n}} of {{count}}",
+    "approvalWaiting": "Waiting for approval",
+    "timeline": "Timeline",
+    "infoRequested": "An approver asked you a question"
   },
   "apply": {
     "title": "Apply for leave",

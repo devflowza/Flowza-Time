@@ -12,7 +12,7 @@ import portalAr from '@/locales/ar/portal.json';
 
 registerNamespace('portal', portalEn, portalAr);
 
-interface NavItem { to: string; label: string; icon: LucideIcon; permissions?: Permission[]; any?: boolean }
+interface NavItem { to: string; label: string; icon: LucideIcon; permissions?: Permission[]; any?: boolean; /** Overrides `permissions` when set (e.g. any of several keys, or line-manager status). */ visible?: boolean }
 interface NavSection { label?: string; items: NavItem[] }
 
 /**
@@ -63,7 +63,8 @@ export function Sidebar() {
       { to: '/employees', label: t('nav.employees'), icon: Users, permissions: ['employee.view'] },
       { to: '/attendance', label: t('nav.attendance'), icon: Activity, permissions: ['attendance.view'] },
       { to: '/corrections', label: t('nav.corrections'), icon: ClipboardList, permissions: ['attendance.view'] },
-      { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, permissions: ['attendance.approve'] },
+      // engine v2: approvers of attendance or leave, approval admins and line managers (their team's requests)
+      { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || isManager },
       { to: '/leave', label: t('nav.leave'), icon: CalendarOff, permissions: ['leave.view'] },
     ] },
     { label: t('nav.sections.devices'), items: [
@@ -98,7 +99,7 @@ export function Sidebar() {
 
       <nav className="scrollbar-thin flex-1 overflow-y-auto px-2 py-2">
         {sections.map((section, i) => {
-          const items = section.items.filter((it) => !it.permissions || can(...it.permissions));
+          const items = section.items.filter((it) => (it.visible !== undefined ? it.visible : !it.permissions || can(...it.permissions)));
           if (items.length === 0) return null;
           return (
             <div key={i} className={i === 0 ? undefined : 'mt-3'}>

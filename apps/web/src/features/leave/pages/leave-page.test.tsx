@@ -34,12 +34,15 @@ describe('LeavePage — self-service requests', () => {
     await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/orgs/org-1/leave-records/l1', { status: 'APPROVED', decisionNote: 'Enjoy the festival' }));
   });
 
-  it('rejects without a note (sent as null)', async () => {
+  it('needs a note to reject (the approval engine requires a reason; the employee reads it)', async () => {
     apiMock.patch.mockResolvedValue({ data: { ...pending, status: 'REJECTED', recalculationJobId: null } });
     renderWithProviders(<LeavePage />, { route: '/leave' });
     fireEvent.click((await screen.findAllByRole('button', { name: /Reject/ }))[0]!);
     const dialog = await screen.findByRole('dialog');
-    fireEvent.click(within(dialog).getByRole('button', { name: /Reject/ }));
-    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/orgs/org-1/leave-records/l1', { status: 'REJECTED', decisionNote: null }));
+    const reject = within(dialog).getByRole('button', { name: /Reject/ });
+    expect(reject).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/Note to the employee/), { target: { value: 'Team is short that week' } });
+    fireEvent.click(reject);
+    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/orgs/org-1/leave-records/l1', { status: 'REJECTED', decisionNote: 'Team is short that week' }));
   });
 });

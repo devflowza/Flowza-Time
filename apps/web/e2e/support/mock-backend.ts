@@ -133,6 +133,9 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
     [`/orgs/${ORG_ID}/dashboard/trends`]: (url: URL) => ({ data: trendsFixture(url) }),
     [`/orgs/${ORG_ID}/dashboard/branches`]: { data: dashboardBranchesFixture },
     [`/orgs/${ORG_ID}/holidays`]: { data: [] },
+    // approval engine v2: the dashboard's queue card (scope mine, pending) and the approver's delegations banner
+    [`/orgs/${ORG_ID}/approvals`]: page_([]),
+    [`/orgs/${ORG_ID}/approval-delegations`]: { data: [] },
     [`/orgs/${ORG_ID}/settings/dashboard`]: { data: me.memberships[0]?.settings.dashboard ?? {} },
     [`/orgs/${ORG_ID}/employees`]: (url: URL) => { const q = (url.searchParams.get('search') ?? '').toLowerCase(); return page_(employeesFixture.filter((e) => !q || e.displayName.toLowerCase().includes(q))); },
     [`/orgs/${ORG_ID}/branches`]: page_(branchesFixture),

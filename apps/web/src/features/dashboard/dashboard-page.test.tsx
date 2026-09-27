@@ -45,7 +45,7 @@ function mockDashboard(overrides: Record<string, unknown> = {}) {
     '/orgs/org-1/dashboard/summary': { data: summary },
     '/orgs/org-1/dashboard/trends': { data: trends },
     '/orgs/org-1/dashboard/branches': { data: branches },
-    '/orgs/org-1/approvals/inbox': page([]),
+    '/orgs/org-1/approvals': page([]),
     '/orgs/org-1/holidays': { data: [holiday] },
     '/orgs/org-1/attendance/daily': page([record]),
     '/orgs/org-1/sync/jobs': page([]),
@@ -110,7 +110,7 @@ describe('DashboardPage', () => {
     expect(screen.queryByText('Pending approvals')).not.toBeInTheDocument();
     expect(screen.queryByText('Upcoming holidays')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Explore reports/ })).toHaveAttribute('href', '/attendance');
-    expect(apiMock.get.mock.calls.some((c) => c[0] === '/orgs/org-1/approvals/inbox')).toBe(false);
+    expect(apiMock.get.mock.calls.some((c) => c[0] === '/orgs/org-1/approvals')).toBe(false);
     expect(apiMock.get.mock.calls.some((c) => c[0] === '/orgs/org-1/holidays')).toBe(false);
   });
 

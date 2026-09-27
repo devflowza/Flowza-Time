@@ -91,6 +91,7 @@
     "noteHint": "Shown to the employee with the decision.",
     "noteShort": "HR: {{note}}",
     "approved": "Leave approved",
-    "rejected": "Leave request rejected"
+    "rejected": "Leave request rejected",
+    "noteRequired": "A reason is required when rejecting; the employee sees it."
   }
 }

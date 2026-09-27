@@ -259,13 +259,16 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
     if (mine) {
       if (mine.decision !== 'PENDING') return { requestId: req.id, status: req.status, noop: true, terminal: false, stepNo: step.stepNo, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId };
       await t.updateTable('approvalStepActors').set({ decision, decidedAt: now, comment }).where('id', '=', mine.id).execute();
+      // an approver the worker added because the level was overdue settles it on their own (see the worker's escalate())
+      if (mine.resolutionPath === 'escalated') { override = true; await recordEvent(t, orgId, req.id, 'override', actor.userId, { stepNo: step.stepNo, decision, via: 'escalated' }); }
     } else {
       const viaDelegationOf = check.via === 'delegate' ? check.delegateOf : null;
       override = check.via === 'permission' || check.via === 'owner';
       await t.insertInto('approvalStepActors').values({ organizationId: orgId, stepId: step.id, userId: actor.userId, viaDelegationOf, resolutionPath: override ? (check.via === 'owner' ? 'owner_override' : 'override') : 'delegate', decision, decidedAt: now, comment }).execute();
       if (override) await recordEvent(t, orgId, req.id, 'override', actor.userId, { stepNo: step.stepNo, decision, via: check.via });
     }
-    const rows = await t.selectFrom('approvalStepActors').select(['userId', 'viaDelegationOf', 'decision']).where('stepId', '=', step.id).execute();
+    // escalated approvers are extra hands, not extra seats: counting them would make an ALL / QUORUM level harder to close
+    const rows = (await t.selectFrom('approvalStepActors').select(['userId', 'viaDelegationOf', 'decision', 'resolutionPath']).where('stepId', '=', step.id).execute()).filter((r) => r.resolutionPath !== 'escalated');
     const level = override ? (decision === 'APPROVED' ? 'satisfied' : 'rejected') : evaluateLevel(step.mode as ApprovalStepMode, step.requiredCount, collapseSeats(rows));
     const eventDetail = { stepNo: step.stepNo, decision, comment, via: check.via, delegateOf: check.delegateOf, mode: step.mode, requiredCount: step.requiredCount };
     if (level === 'open') {

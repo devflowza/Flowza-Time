@@ -4,6 +4,7 @@ import type { ApiDeps } from '../../deps.js';
 import { hasPermission, requireMembership } from '../../lib/authorize.js';
 import { enumArrayOrNull, isoDate, isoDateTime, isoDateTimeOrNull } from '../../lib/mappers.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
+import { likeContains } from '../../lib/pagination.js';
 import { systemStep } from '../features/context.js';
 import { dv } from '../features/sql-helpers.js';
 
@@ -66,4 +67,21 @@ export async function revokeDelegation(deps: ApiDeps, actor: Actor, orgId: strin
     await systemStep(trx, orgId, (t) => t.updateTable('approvalDelegations').set({ isActive: false, revokedAt: new Date(), revokedBy: actor.userId }).where('id', '=', id).execute());
     await audit(trx, actor, orgId, 'approval_delegation.revoked', 'approval_delegation', { entityId: id, oldValue: { delegatorUserId: row.delegatorUserId, delegateUserId: row.delegateUserId } });
   });
+}
+
+/**
+ * People a delegation (or a reassignment) can name: active members of the organisation, searched by name or e-mail, 20 at
+ * most. For approval.delegate / approval.manage holders — a line manager has no user.view, yet must be able to pick the
+ * colleague who covers for them. Names and e-mails only, read in the organisation's system scope.
+ */
+export async function listDelegateCandidates(deps: ApiDeps, actor: Actor, orgId: string, search: string | undefined): Promise<Array<{ userId: string; fullName: string | null; email: string }>> {
+  const grant = requireMembership(actor.principal, orgId);
+  if (!hasPermission(grant, 'approval.delegate') && !hasPermission(grant, 'approval.manage') && grant.roleKey !== 'owner') throw errors.forbidden('Missing permission: approval.delegate.');
+  const term = (search ?? '').trim().toLowerCase().slice(0, 100);
+  return runUser(deps.db, actor, (trx) => withSystemScope(trx, orgId, async (t) => {
+    let q = t.selectFrom('orgMemberships as m').innerJoin('userProfiles as u', 'u.id', 'm.userId').select(['m.userId', 'u.fullName', 'u.email'])
+      .where('m.organizationId', '=', orgId).where('m.status', '=', 'active');
+    if (term) { const like = likeContains(term); q = q.where((eb) => eb.or([eb('u.fullName', 'ilike', like), eb('u.email', 'ilike', like)])); }
+    return q.orderBy('u.fullName').limit(20).execute();
+  }));
 }

@@ -30,7 +30,8 @@ export function useLeaveMutations() {
   const orgId = useOrgId();
   const qc = useQueryClient();
   const invTypes = () => qc.invalidateQueries({ queryKey: qk.entity(orgId, 'leave-types') });
-  const invRecords = () => { for (const e of ['leave-records', 'attendance-daily', 'attendance-monthly']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
+  // A leave record now travels through the approval engine: its request (inbox, drawer, portal status) moves with it.
+  const invRecords = () => { for (const e of ['leave-records', 'attendance-daily', 'attendance-monthly', 'approvals-inbox', 'approval-request', 'approvals-mine', 'self-service']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
   const createType = useMutation({ mutationFn: async (input: LeaveTypeInput) => (await api.post<Envelope<LeaveTypeDto>>(`/orgs/${orgId}/leave-types`, input)).data, onSuccess: invTypes });
   const updateType = useMutation({ mutationFn: async ({ id, input }: { id: string; input: Partial<LeaveTypeInput> & { status?: string } }) => (await api.patch<Envelope<LeaveTypeDto>>(`/orgs/${orgId}/leave-types/${id}`, input)).data, onSuccess: invTypes });
   const removeType = useMutation({ mutationFn: (id: string) => api.delete<void>(`/orgs/${orgId}/leave-types/${id}`), onSuccess: invTypes });

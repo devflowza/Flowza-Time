@@ -27,7 +27,7 @@ export function useSelfLeave(year: number) {
 export function useSelfLeaveMutations() {
   const orgId = useOrgId();
   const qc = useQueryClient();
-  const invalidate = () => { for (const e of [SELF, 'leave-records']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
+  const invalidate = () => { for (const e of [SELF, 'leave-records', 'approvals-inbox', 'approval-request', 'approvals-mine']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
   const apply = useMutation({ mutationFn: async (input: SelfLeaveRequestInput) => (await api.post<Envelope<SelfLeaveRecordDto>>(`/orgs/${orgId}/me/leave`, input, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: invalidate });
   const withdraw = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<SelfLeaveRecordDto>>(`/orgs/${orgId}/me/leave/${id}/cancel`)).data, onSuccess: invalidate });
   return { apply, withdraw };

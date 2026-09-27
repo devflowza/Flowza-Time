@@ -58,6 +58,7 @@ export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.delete('/orgs/:orgId/approval-workflows/:id', async (c) => { await approvals.deleteWorkflow(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id')); return noContent(c); });
 
   v1.get('/orgs/:orgId/approval-delegations', async (c) => ok(c, await approvals.listDelegations(deps, actorOf(c, deps), param(c, 'orgId'), query(c, approvalDelegationListQuerySchema))));
+  v1.get('/orgs/:orgId/approval-delegations/candidates', async (c) => ok(c, await approvals.listDelegateCandidates(deps, actorOf(c, deps), param(c, 'orgId'), c.req.query('search'))));
   v1.post('/orgs/:orgId/approval-delegations', async (c) => created(c, await approvals.createDelegation(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, approvalDelegationInputSchema))));
   v1.delete('/orgs/:orgId/approval-delegations/:id', async (c) => { await approvals.revokeDelegation(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id')); return noContent(c); });
 }

@@ -53,6 +53,26 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Devices' })).not.toHaveAttribute('aria-current');
   });
 
+  it('shows Approvals to approvers of attendance or leave, approval admins and line managers — nobody else', () => {
+    const approvalsLink = () => screen.queryByRole('link', { name: 'Approvals' });
+    grant('dashboard.view');
+    const first = renderWithProviders(<Sidebar />);
+    expect(approvalsLink()).not.toBeInTheDocument();
+    first.unmount();
+    for (const key of ['attendance.approve', 'leave.approve', 'approval.manage'] as const) {
+      grant('dashboard.view', key);
+      const r = renderWithProviders(<Sidebar />);
+      expect(approvalsLink()).toHaveAttribute('href', '/approvals');
+      r.unmount();
+    }
+    // a line manager (direct reports) without any approve key still reaches the inbox for their team
+    grant('dashboard.view');
+    testState.employeeId = 'e1';
+    testState.teamSize = 2;
+    renderWithProviders(<Sidebar />);
+    expect(approvalsLink()).toHaveAttribute('href', '/approvals');
+  });
+
   it('hides the platform entry from an ordinary tenant user', () => {
     renderWithProviders(<Sidebar />);
     expect(screen.queryByRole('link', { name: 'Platform admin' })).not.toBeInTheDocument();

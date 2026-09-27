@@ -238,6 +238,25 @@ describe('decisions', () => {
     expect(await eventsOf(oid)).toEqual(expect.arrayContaining(['sod_owner_bypass', 'approved']));
   });
 
+  it('an approver added by escalation settles the level on their own and never counts as an extra seat', async () => {
+    await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ALL' }]);
+    const escalateTo = async (requestId: string) => {
+      const step = await h.admin.selectFrom('approvalSteps').select('id').where('requestId', '=', requestId).executeTakeFirstOrThrow();
+      await h.admin.insertInto('approvalStepActors').values({ organizationId: f.orgId, stepId: step.id, userId: f.payrollUser, resolutionPath: 'escalated' }).execute();
+    };
+    // the original seats still close an ALL level without the escalated approver
+    const a = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
+    await escalateTo(a.body.data.approvalRequestId);
+    expect((await h.request('POST', `${base()}/approvals/${a.body.data.approvalRequestId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE' } })).body.data.status).toBe('PENDING');
+    expect((await h.request('POST', `${base()}/approvals/${a.body.data.approvalRequestId}/decide`, { token: hrLinked, body: { decision: 'APPROVE' } })).body.data.status).toBe('APPROVED');
+    // the escalated approver (no approve permission of their own) settles it alone
+    const b = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
+    await escalateTo(b.body.data.approvalRequestId);
+    const settled = await h.request('POST', `${base()}/approvals/${b.body.data.approvalRequestId}/decide`, { token: f.payrollUser, body: { decision: 'APPROVE' } });
+    expect(settled.body.data).toMatchObject({ status: 'APPROVED', terminal: true });
+    expect(await eventsOf(b.body.data.approvalRequestId)).toEqual(['submitted', 'override', 'step_approved', 'approved']);
+  });
+
   it('concurrent approvals apply once', async () => {
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'USER', userId: f.hrAdmin }]);
     const r = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
@@ -268,6 +287,11 @@ describe('delegations', () => {
     expect(inbox.body.data.map((x: { id: string }) => x.id)).toContain(id);
     const decided = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: delegateUser, body: { decision: 'APPROVE' } });
     expect(decided.body.data.status).toBe('APPROVED');
+    // the picker a line manager uses (no user.view): active members by name or e-mail; approval.delegate / approval.manage only
+    const candidates = await h.request('GET', `${base()}/approval-delegations/candidates?search=Dep`, { token: lineManager });
+    expect(candidates.status).toBe(200);
+    expect(candidates.body.data).toEqual([{ userId: delegateUser, fullName: 'Deputy', email: 'delegate-appr@test.local' }]);
+    expect((await h.request('GET', `${base()}/approval-delegations/candidates`, { token: staff5 })).status).toBe(403);
     // the delegation does not cover corrections
     const mine = await h.request('GET', `${base()}/approval-delegations`, { token: delegateUser });
     expect(mine.body.data).toHaveLength(1);
@@ -408,5 +432,46 @@ describe('inbox', () => {
     const detail = await h.request('GET', `${base()}/approvals/${id}`, { token: staff5 });
     expect(detail.status).toBe(200);
     expect(detail.body.data.events.map((e: { kind: string }) => e.kind)).toEqual(['submitted', 'step_approved', 'approved']);
+  });
+
+  it('resolves every display name in the organisation scope — a team approver who cannot read employees still sees who, who asked and who decides', async () => {
+    // a team-approver role without employee.view (the Prompt 1 review takes that key away from `manager`)
+    const role = await h.request('POST', `${base()}/roles`, { token: f.owner, body: { key: 'team_approver_names', name: 'Team approver', permissions: ['leave.approve', 'leave.view_team', 'attendance.approve', 'attendance.view_team', 'approval.delegate'] } });
+    expect(role.status).toBe(201);
+    const approverUser = uuid('c'); const reportUser = uuid('c');
+    const e8 = await seedEmployee(h.admin, f.orgId, f.branchA, 8);
+    const e9 = await seedEmployee(h.admin, f.orgId, f.branchA, 9, { managerEmployeeId: e8 });
+    await seedUser(h.admin, approverUser, 'team-approver-names@test.local', 'Team Approver');
+    await seedUser(h.admin, reportUser, 'report-names@test.local', 'Report Nine');
+    await seedMembership(h.admin, f.orgId, approverUser, role.body.data.id as string, { employeeId: e8 });
+    await seedMembership(h.admin, f.orgId, reportUser, ROLE.employee, { employeeId: e9 });
+    expect((await h.request('GET', `${base()}/employees/${e9}`, { token: approverUser })).status).toBe(403);
+    await workflow('LEAVE', [{ order: 1, approverType: 'MANAGER' }, { order: 2, approverType: 'HR_ADMIN' }]);
+    const r = await h.request('POST', `${base()}/me/leave`, { token: reportUser, body: { leaveTypeId, ...nextRange(1), reason: 'Names' } });
+    expect(r.status).toBe(201);
+    const id = r.body.data.approvalRequestId as string;
+
+    const inbox = await h.request('GET', `${base()}/approvals?scope=mine`, { token: approverUser });
+    const row = inbox.body.data.find((x: { id: string }) => x.id === id);
+    expect(row).toMatchObject({ employeeName: 'Employee 9', employeeNumber: 'EMP9', requestedByName: 'Report Nine' });
+    expect(row.steps[0].actors).toEqual([expect.objectContaining({ userId: approverUser, userName: 'Team Approver' })]);
+    expect(row.steps[1].actors.length).toBeGreaterThan(0);
+    expect(row.steps[1].actors.every((a: { userName: string | null }) => typeof a.userName === 'string' && a.userName.length > 0)).toBe(true);
+    const team = await h.request('GET', `${base()}/approvals?scope=team&entityType=LEAVE`, { token: approverUser });
+    expect(team.body.data.find((x: { id: string }) => x.id === id)).toMatchObject({ employeeName: 'Employee 9', requestedByName: 'Report Nine' });
+
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: approverUser, body: { decision: 'APPROVE' } })).status).toBe(200);
+    const drawer = await h.request('GET', `${base()}/approvals/${id}`, { token: approverUser });
+    expect(drawer.status).toBe(200);
+    expect(drawer.body.data).toMatchObject({ employeeName: 'Employee 9', requestedByName: 'Report Nine' });
+    expect(drawer.body.data.events.find((e: { kind: string }) => e.kind === 'submitted')).toMatchObject({ actorName: 'Report Nine' });
+    expect(drawer.body.data.events.find((e: { kind: string }) => e.kind === 'step_approved')).toMatchObject({ actorName: 'Team Approver' });
+    expect(drawer.body.data.steps[0]).toMatchObject({ status: 'APPROVED', actedByName: 'Team Approver' });
+    // HR closes level 2; the approver's history (what they took part in) keeps every name
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE' } })).status).toBe(200);
+    const history = await h.request('GET', `${base()}/approvals/history`, { token: approverUser });
+    const done = history.body.data.find((x: { id: string }) => x.id === id);
+    expect(done).toMatchObject({ status: 'APPROVED', employeeName: 'Employee 9', requestedByName: 'Report Nine' });
+    expect(typeof done.decidedByName).toBe('string');
   });
 });

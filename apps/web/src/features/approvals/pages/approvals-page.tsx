@@ -1,123 +1,132 @@
 import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Link, useSearchParams } from 'react-router';
+import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Check, Inbox, Settings2, X } from 'lucide-react';
+import { Check, History, Inbox, Settings2, UserRoundCheck, X } from 'lucide-react';
+import { APPROVAL_ENTITIES, type ApprovalEntity, type ApprovalInboxScope, type ApprovalRequestDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
-import { Badge, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
+import { Badge, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsList, TabsTrigger } from '@/components/ui';
 import { buttonVariants } from '@/components/ui/button';
-import { fmtDate, fmtDateTime } from '@/lib/format';
-import { useCan, useMe, useOrgTimezone } from '@/features/me/use-me';
+import { cn } from '@/lib/utils';
+import { fmtDateTime, todayIso } from '@/lib/format';
+import { useMe, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
-import { useTabTable } from '@/features/organization/use-tab-table';
-import type { CorrectionDto } from '@/features/attendance/types';
-import { CorrectionStatusBadge, CorrectionTypeBadge } from '@/features/attendance/components/badges';
-import { CorrectionSummary } from '@/features/attendance/components/record-dialog';
-import { useCorrections } from '@/features/corrections/api';
-import { useApprovalInbox, type InboxItem } from '../api';
-import { DecisionDialog, type Decision } from '../components/decision-dialog';
+import { useServerTable } from '@/hooks/use-server-table';
+import { useApprovalAccess, useApprovalInbox, useDelegations, type DecisionKind, type InboxView } from '../api';
+import { DecisionDialog } from '../components/decision-dialog';
+import { RequestDialog } from '../components/request-detail';
+import { ApprovalContext, EntityIcon, LevelLabel, RequestStatusBadge } from '../components/parts';
 
-const TABS = ['pending', 'decided'] as const;
-type Tab = (typeof TABS)[number];
-const DECIDED = ['APPROVED', 'APPLIED', 'REJECTED', 'CANCELLED'] as const;
+const VIEWS: readonly InboxView[] = ['pending', 'history'];
+const SCOPES: readonly ApprovalInboxScope[] = ['mine', 'team', 'all'];
+/** Entity types with a live document behind them today; the others appear only once a request of theirs exists. */
+const FILTER_TYPES: readonly ApprovalEntity[] = ['ATTENDANCE_CORRECTION', 'LEAVE'];
 
-function PendingTab() {
+function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
+  return <button type="button" onClick={onClick} aria-pressed={active} className={cn('h-8 rounded-full border px-3 text-xs font-medium transition-colors', active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card hover:bg-muted')}>{children}</button>;
+}
+
+/**
+ * /approvals — the unified inbox (engine v2). Pending | History; scope Mine (my queue: levels waiting for me or for the
+ * approvers I cover for), My team (my direct reports' requests — team keys), Everyone (organisation-wide keys); a type
+ * filter; a request opens in a side panel with its levels and timeline (deep link: ?request=<id>).
+ */
+export default function ApprovalsPage() {
   const { t } = useTranslation('approvals');
   const tz = useOrgTimezone();
-  const branches = useBranchOptions();
-  const table = useTabTable();
-  const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize }), [table.state.page, table.state.pageSize]);
-  const q = useApprovalInbox(query);
+  const access = useApprovalAccess();
   const myId = useMe().data?.user.id;
-  const isOwn = (i: InboxItem) => !!myId && i.requestedBy === myId;
-  const [dialog, setDialog] = useState<{ item: InboxItem | null; decision: Decision }>({ item: null, decision: 'approve' });
-  const byId = branches.byId;
-  const tzOf = useMemo(() => (branchId: string | null) => (branchId ? byId.get(branchId)?.timezone : undefined) ?? tz, [byId, tz]);
+  const branches = useBranchOptions();
+  const table = useServerTable({ pageSize: 25 });
+  const f = table.state.filters;
+  const view: InboxView = (VIEWS as readonly string[]).includes(f['view'] ?? '') ? (f['view'] as InboxView) : 'pending';
+  const allowedScopes = SCOPES.filter((s) => s === 'mine' || (s === 'team' && access.team) || (s === 'all' && access.orgWide));
+  const scope: ApprovalInboxScope = (allowedScopes as readonly string[]).includes(f['scope'] ?? '') ? (f['scope'] as ApprovalInboxScope) : 'mine';
+  const entityType = (APPROVAL_ENTITIES as readonly string[]).includes(f['entityType'] ?? '') ? (f['entityType'] as ApprovalEntity) : undefined;
+  const openId = f['request'] ?? null;
+  const q = useApprovalInbox({ scope, view, entityType, page: table.state.page, pageSize: table.state.pageSize });
+  const delegations = useDelegations('mine');
+  const [decision, setDecision] = useState<{ request: ApprovalRequestDto | null; kind: DecisionKind }>({ request: null, kind: 'APPROVE' });
+  const tzOf = useMemo(() => (branchId: string | null) => (branchId ? branches.byId.get(branchId)?.timezone : undefined) ?? tz, [branches.byId, tz]);
+  const today = todayIso(tz);
+  const covering = (delegations.data ?? []).filter((d) => d.delegateUserId === myId && d.isActive && d.startsOn <= today && d.endsOn >= today).map((d) => d.delegatorName ?? '—');
 
-  const columns = useMemo<ColumnDef<InboxItem, unknown>[]>(() => [
-    { id: 'employee', header: t('columns.employee'), cell: ({ row }) => { const c = row.original.correction; return <div className="min-w-0"><p className="truncate font-medium">{c?.employeeName ?? row.original.employeeId ?? '—'}</p><p className="font-mono text-xs text-muted-foreground" dir="ltr">{c?.employeeNumber}</p></div>; } },
-    { id: 'date', header: t('columns.date'), cell: ({ row }) => <span className="tnum">{row.original.correction ? fmtDate(row.original.correction.attendanceDate) : '—'}</span> },
-    { id: 'type', header: t('columns.type'), cell: ({ row }) => row.original.correction ? <CorrectionTypeBadge type={row.original.correction.type} /> : <Badge variant="secondary">{t(`entity.${row.original.entityType}`, { defaultValue: row.original.entityType })}</Badge> },
-    { id: 'change', header: t('columns.change'), cell: ({ row }) => row.original.correction ? <CorrectionSummary c={row.original.correction} timezone={tzOf(row.original.branchId)} /> : '—' },
-    { id: 'reason', header: t('columns.reason'), cell: ({ row }) => <span className="block max-w-[240px] truncate text-xs" title={row.original.correction?.reason}>{row.original.correction?.reason ?? '—'}</span> },
-    { id: 'requester', header: t('columns.requester'), cell: ({ row }) => <div className="text-xs"><p>{row.original.requestedByName ?? '—'}</p><p className="text-muted-foreground tnum">{fmtDateTime(row.original.createdAt, tz)}</p></div> },
-    { id: 'step', header: t('columns.step'), cell: ({ row }) => <Badge variant="outline" className="tnum">{t('columns.stepN', { n: row.original.stepNo })} · {t(`approverType.${row.original.approverType}`, { defaultValue: row.original.approverType })}</Badge> },
-    { id: 'actions', header: '', cell: ({ row }) => !!myId && row.original.requestedBy === myId ? (
-      // Separation of duties: the requester never decides on their own request (the API rejects it); they can cancel it instead.
-      <div className="flex items-center justify-end gap-2" onClick={(e) => e.stopPropagation()} title={t('inbox.ownRequestHint')}><Badge variant="outline">{t('inbox.ownRequest')}</Badge><Link to="/corrections?status=PENDING" className="text-xs text-muted-foreground underline-offset-2 hover:underline">{t('inbox.cancelInstead')}</Link></div>
-    ) : (
-      <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-        <Button size="sm" variant="outline" onClick={() => setDialog({ item: row.original, decision: 'reject' })}><X /> {t('actions.reject')}</Button>
-        <Button size="sm" onClick={() => setDialog({ item: row.original, decision: 'approve' })}><Check /> {t('actions.approve')}</Button>
+  const columns = useMemo<ColumnDef<ApprovalRequestDto, unknown>[]>(() => [
+    { id: 'request', header: t('columns.request'), cell: ({ row }) => { const r = row.original; return (
+      <div className="flex min-w-0 items-center gap-2.5">
+        <EntityIcon entityType={r.entityType} />
+        <div className="min-w-0"><p className="truncate font-medium">{r.employeeName ?? '—'}</p><p className="truncate text-xs text-muted-foreground">{t(`entity.${r.entityType}`)} <span className="font-mono" dir="ltr">{r.employeeNumber}</span></p></div>
       </div>
-    ) },
-  ], [t, tz, tzOf, myId]);
+    ); } },
+    { id: 'details', header: t('columns.details'), cell: ({ row }) => <ApprovalContext context={row.original.context} timezone={tzOf(row.original.branchId)} compact /> },
+    { id: 'requester', header: t('columns.requester'), cell: ({ row }) => <div className="text-xs"><p>{row.original.requestedByName ?? '—'}</p><p className="text-muted-foreground tnum">{fmtDateTime(row.original.createdAt, tz)}</p></div> },
+    { id: 'level', header: t('columns.level'), cell: ({ row }) => <div className="space-y-1"><LevelLabel request={row.original} />{row.original.infoRequestedAt && row.original.status === 'PENDING' ? <Badge variant="warning">{t('inbox.waitingForAnswer')}</Badge> : null}</div> },
+    ...(view === 'history' ? [
+      { id: 'status', header: t('columns.status'), cell: ({ row }) => <RequestStatusBadge status={row.original.status} /> } as ColumnDef<ApprovalRequestDto, unknown>,
+      { id: 'decided', header: t('columns.decided'), cell: ({ row }) => <span className="whitespace-nowrap text-xs tnum">{row.original.completedAt ? fmtDateTime(row.original.completedAt, tz) : '—'}</span> } as ColumnDef<ApprovalRequestDto, unknown>,
+    ] : []),
+    { id: 'actions', header: '', cell: ({ row }) => { const r = row.original; return (
+      <div className="flex items-center justify-end gap-1.5" onClick={(e) => e.stopPropagation()}>
+        {r.abilities.actingAsDelegateOf ? <Badge variant="info" className="hidden lg:inline-flex">{t('inbox.delegateOf', { name: r.steps.flatMap((s) => s.actors).find((a) => a.userId === r.abilities.actingAsDelegateOf)?.userName ?? '—' })}</Badge> : null}
+        {r.abilities.canDecide ? (
+          <>
+            <Button size="sm" variant="outline" onClick={() => setDecision({ request: r, kind: 'REJECT' })}><X /> {t('actions.reject')}</Button>
+            <Button size="sm" onClick={() => setDecision({ request: r, kind: 'APPROVE' })}><Check /> {t('actions.approve')}</Button>
+          </>
+        ) : r.status === 'PENDING' && r.requestedBy === myId ? <Badge variant="outline" title={t('inbox.ownRequestHint')}>{t('inbox.ownRequest')}</Badge>
+          : r.status === 'PENDING' && r.subjectUserId === myId ? <Badge variant="outline" title={t('inbox.aboutYouHint')}>{t('inbox.aboutYou')}</Badge>
+          : r.status === 'PENDING' && scope !== 'mine' ? <span className="text-xs text-muted-foreground">{t('inbox.notYourTurn')}</span> : null}
+      </div>
+    ); } },
+  ], [t, tz, tzOf, view, scope, myId, setDecision]);
 
+  const emptyTitle = view === 'history' ? t('inbox.historyEmpty') : scope === 'team' ? t('inbox.teamEmpty') : scope === 'all' ? t('inbox.allEmpty') : t('inbox.empty');
   return (
-    <>
+    <div className="page-container space-y-4">
+      <PageHeader title={t('title')} description={t('subtitle')} actions={
+        <div className="flex flex-wrap gap-2">
+          {access.delegate ? <Link to="/approvals/delegations" className={buttonVariants({ variant: 'outline', size: 'sm' })}><UserRoundCheck /> {t('actions.delegations')}</Link> : null}
+          {access.configure ? <Link to="/approvals/workflows" className={buttonVariants({ variant: 'outline', size: 'sm' })}><Settings2 /> {t('actions.workflows')}</Link> : null}
+        </div>
+      } />
+      {covering.length ? <p className="rounded-md border bg-muted/40 p-2 text-sm" role="status">{t('inbox.delegateBanner', { names: covering.join(', ') })}</p> : null}
+      <div className="flex flex-wrap items-center gap-3">
+        <Tabs value={view} onValueChange={(v) => table.setFilter('view', v === 'pending' ? undefined : v)}>
+          <TabsList aria-label={t('title')}>
+            <TabsTrigger value="pending"><Inbox className="me-1.5 size-4" /> {t('view.pending')}</TabsTrigger>
+            <TabsTrigger value="history"><History className="me-1.5 size-4" /> {t('view.history')}</TabsTrigger>
+          </TabsList>
+        </Tabs>
+        {allowedScopes.length > 1 ? (
+          <div className="flex items-center gap-1.5" role="group" aria-label={t('scope.label')}>
+            {allowedScopes.map((s) => <Chip key={s} active={scope === s} onClick={() => table.setFilter('scope', s === 'mine' ? undefined : s)}>{t(`scope.${s}`)}</Chip>)}
+          </div>
+        ) : null}
+        <Select value={entityType ?? 'all'} onValueChange={(v) => table.setFilter('entityType', v === 'all' ? undefined : v)}>
+          <SelectTrigger className="h-8 w-48" aria-label={t('entityFilter.label')}><SelectValue /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t('entityFilter.all')}</SelectItem>
+            {APPROVAL_ENTITIES.filter((e) => FILTER_TYPES.includes(e) || e === entityType).map((e) => <SelectItem key={e} value={e}>{t(`entity.${e}`)}</SelectItem>)}
+          </SelectContent>
+        </Select>
+      </div>
       <DataTable
         columns={columns} data={q.data?.data} total={q.data?.meta.total} page={table.state.page} pageSize={table.state.pageSize}
         onPageChange={table.setPage} onPageSizeChange={table.setPageSize} isLoading={q.isLoading || q.isFetching} error={q.error} onRetry={() => void q.refetch()}
-        emptyTitle={t('inbox.empty')} emptyDescription={t('inbox.emptyHint')}
-        renderCard={(i) => <div className="space-y-2"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{i.correction?.employeeName ?? '—'}</span>{i.correction ? <CorrectionTypeBadge type={i.correction.type} /> : null}</div><p className="text-xs text-muted-foreground">{i.correction ? fmtDate(i.correction.attendanceDate) : ''} · {i.correction?.reason}</p>{isOwn(i) ? <p className="text-xs text-muted-foreground">{t('inbox.ownRequestHint')}</p> : <div className="flex gap-2"><Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setDialog({ item: i, decision: 'reject' }); }}><X /> {t('actions.reject')}</Button><Button size="sm" onClick={(e) => { e.stopPropagation(); setDialog({ item: i, decision: 'approve' }); }}><Check /> {t('actions.approve')}</Button></div>}</div>}
+        onRowClick={(r) => table.update({ filters: { request: r.id } }, false)}
+        emptyTitle={emptyTitle} emptyDescription={view === 'history' ? t('inbox.historyEmptyHint') : t('inbox.emptyHint')}
+        renderCard={(r) => (
+          <div className="space-y-2">
+            <div className="flex items-center justify-between gap-2"><span className="flex min-w-0 items-center gap-2"><EntityIcon entityType={r.entityType} /><span className="truncate font-medium">{r.employeeName ?? '—'}</span></span>{view === 'history' ? <RequestStatusBadge status={r.status} /> : <LevelLabel request={r} />}</div>
+            <ApprovalContext context={r.context} timezone={tzOf(r.branchId)} compact />
+            {r.abilities.canDecide ? <div className="flex gap-2"><Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setDecision({ request: r, kind: 'REJECT' }); }}><X /> {t('actions.reject')}</Button><Button size="sm" onClick={(e) => { e.stopPropagation(); setDecision({ request: r, kind: 'APPROVE' }); }}><Check /> {t('actions.approve')}</Button></div>
+              : r.status === 'PENDING' && r.requestedBy === myId ? <p className="text-xs text-muted-foreground">{t('inbox.ownRequestHint')}</p> : null}
+          </div>
+        )}
       />
-      <DecisionDialog key={`${dialog.item?.stepId ?? ''}-${dialog.decision}`} item={dialog.item} decision={dialog.decision} timezone={tzOf(dialog.item?.branchId ?? null)} onClose={() => setDialog((d) => ({ ...d, item: null }))} />
-    </>
-  );
-}
-
-function DecidedTab() {
-  const { t } = useTranslation('approvals');
-  const { t: ta } = useTranslation('attendance');
-  const { t: tc } = useTranslation();
-  const tz = useOrgTimezone();
-  const branches = useBranchOptions();
-  const table = useTabTable();
-  const status = (DECIDED as readonly string[]).includes(table.state.filters['status'] ?? '') ? table.state.filters['status']! : 'APPROVED';
-  const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize, status }), [table.state.page, table.state.pageSize, status]);
-  const q = useCorrections(query);
-  const columns = useMemo<ColumnDef<CorrectionDto, unknown>[]>(() => [
-    { id: 'employee', header: t('columns.employee'), cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.employeeName ?? '—'}</p><p className="font-mono text-xs text-muted-foreground" dir="ltr">{row.original.employeeNumber}</p></div> },
-    { id: 'date', header: t('columns.date'), cell: ({ row }) => <span className="tnum">{fmtDate(row.original.attendanceDate)}</span> },
-    { id: 'type', header: t('columns.type'), cell: ({ row }) => <CorrectionTypeBadge type={row.original.type} /> },
-    { id: 'change', header: t('columns.change'), cell: ({ row }) => <CorrectionSummary c={row.original} timezone={branches.byId.get(row.original.branchId)?.timezone ?? tz} /> },
-    { id: 'status', header: tc('common.status'), cell: ({ row }) => <div className="flex flex-col gap-0.5"><CorrectionStatusBadge status={row.original.status} />{row.original.rejectionReason ? <span className="max-w-[220px] truncate text-[11px] text-muted-foreground" title={row.original.rejectionReason}>{row.original.rejectionReason}</span> : null}</div> },
-    { id: 'decidedAt', header: t('columns.decidedAt'), cell: ({ row }) => <span className="whitespace-nowrap text-xs tnum">{fmtDateTime(row.original.appliedAt ?? row.original.updatedAt, tz)}</span> },
-  ], [t, tc, tz, branches.byId]);
-  return (
-    <DataTable
-      columns={columns} data={q.data?.data} total={q.data?.meta.total} page={table.state.page} pageSize={table.state.pageSize}
-      onPageChange={table.setPage} onPageSizeChange={table.setPageSize} isLoading={q.isLoading || q.isFetching} error={q.error} onRetry={() => void q.refetch()}
-      emptyTitle={t('decided.empty')} emptyDescription={t('decided.emptyHint')}
-      toolbar={
-        <Select value={status} onValueChange={(v) => table.setFilter('status', v)}>
-          <SelectTrigger className="h-8 w-40" aria-label={tc('common.status')}><SelectValue /></SelectTrigger>
-          <SelectContent>{DECIDED.map((s) => <SelectItem key={s} value={s}>{ta(`correctionStatus.${s}`)}</SelectItem>)}</SelectContent>
-        </Select>
-      }
-      renderCard={(c) => <div className="flex items-center justify-between gap-2"><div className="min-w-0"><p className="truncate font-medium">{c.employeeName}</p><p className="text-xs text-muted-foreground tnum">{fmtDate(c.attendanceDate)}</p></div><CorrectionStatusBadge status={c.status} /></div>}
-    />
-  );
-}
-
-/** /approvals?tab=pending|decided — my pending steps and the decided corrections. */
-export default function ApprovalsPage() {
-  const { t } = useTranslation('approvals');
-  const can = useCan();
-  const [params, setParams] = useSearchParams();
-  const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'pending';
-  return (
-    <div className="page-container">
-      <PageHeader title={t('title')} description={t('subtitle')} actions={can('organization.manage') ? <Link to="/approvals/workflows" className={buttonVariants({ variant: 'outline', size: 'sm' })}><Settings2 /> {t('workflows.title')}</Link> : undefined} />
-      <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
-        <TabsList aria-label={t('title')}>
-          <TabsTrigger value="pending"><Inbox className="me-1.5 size-4" /> {t('tabs.pending')}</TabsTrigger>
-          <TabsTrigger value="decided">{t('tabs.decided')}</TabsTrigger>
-        </TabsList>
-        <TabsContent value="pending">{tab === 'pending' ? <PendingTab /> : null}</TabsContent>
-        <TabsContent value="decided">{tab === 'decided' ? <DecidedTab /> : null}</TabsContent>
-      </Tabs>
+      <DecisionDialog key={`${decision.request?.id ?? ''}-${decision.kind}`} request={decision.request} decision={decision.kind} timezone={tzOf(decision.request?.branchId ?? null)} onClose={() => setDecision((d) => ({ ...d, request: null }))} />
+      <RequestDialog requestId={openId} onClose={() => table.update({ filters: { request: '' } }, false)} />
     </div>
   );
 }

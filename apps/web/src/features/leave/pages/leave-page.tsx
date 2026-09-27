@@ -38,8 +38,10 @@ function DecisionDialog({ decision, onClose }: { decision: Decision | null; onCl
   const [note, setNote] = useState('');
   const r = decision?.record;
   const approve = decision?.status === 'APPROVED';
+  // the approval engine requires a reason for a rejection (the employee reads it)
+  const missing = !approve && note.trim().length === 0;
   const submit = () => {
-    if (!decision || !r) return;
+    if (!decision || !r || missing) return;
     updateRecord.mutate({ id: r.id, input: { status: decision.status, decisionNote: note.trim() || null } }, {
       onSuccess: (res) => { if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('records.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(approve ? t('decision.approved') : t('decision.rejected')); setNote(''); onClose(); },
       onError: (e) => toastMutationError(e, navigate),
@@ -53,12 +55,12 @@ function DecisionDialog({ decision, onClose }: { decision: Decision | null; onCl
           <DialogDescription>{r ? `${r.employeeName ?? ''} · ${r.leaveTypeName ?? ''} · ${r.startDate === r.endDate ? fmtDate(r.startDate) : `${fmtDate(r.startDate)} → ${fmtDate(r.endDate)}`}` : null}</DialogDescription>
         </DialogHeader>
         {r?.reason ? <p className="rounded-md border bg-muted/30 p-3 text-sm"><span className="font-medium">{t('fields.reason')}:</span> {r.reason}</p> : null}
-        <FormField label={t('decision.note')} htmlFor="leave-decision-note" optional hint={t('decision.noteHint')}>
-          <Textarea id="leave-decision-note" rows={3} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} />
+        <FormField label={t('decision.note')} htmlFor="leave-decision-note" optional={approve} required={!approve} hint={approve ? t('decision.noteHint') : t('decision.noteRequired')}>
+          <Textarea id="leave-decision-note" rows={3} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} aria-invalid={missing || undefined} />
         </FormField>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => { setNote(''); onClose(); }}>{tc('common.cancel')}</Button>
-          <Button type="button" variant={approve ? 'default' : 'destructive'} loading={updateRecord.isPending} onClick={submit}>{approve ? <Check /> : <X />} {approve ? t('decision.approve') : t('decision.reject')}</Button>
+          <Button type="button" variant={approve ? 'default' : 'destructive'} disabled={missing} loading={updateRecord.isPending} onClick={submit}>{approve ? <Check /> : <X />} {approve ? t('decision.approve') : t('decision.reject')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

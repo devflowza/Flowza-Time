@@ -12,42 +12,53 @@ import enAtt from '@/locales/en/attendance.json';
 import arAtt from '@/locales/ar/attendance.json';
 import en from '@/locales/en/approvals.json';
 import ar from '@/locales/ar/approvals.json';
+import { decisionToast } from '../labels';
 import { DecisionDialog } from './decision-dialog';
-import type { InboxItem } from '../api';
+import { approvalRequest, leaveContext } from '../test-fixtures';
 
 registerNamespace('attendance', enAtt, arAtt);
 registerNamespace('approvals', en, ar);
 
-const item: InboxItem = {
-  stepId: 's1', stepNo: 1, approverType: 'MANAGER', requestId: 'req-1', entityType: 'ATTENDANCE_CORRECTION', entityId: 'c1', branchId: 'b1', employeeId: 'e1', currentStep: 1, requestedBy: 'u2', requestedByName: 'Sara', createdAt: '2024-03-02T08:00:00Z',
-  correction: { id: 'c1', employeeId: 'e1', branchId: 'b1', attendanceDate: '2024-03-01', type: 'ADD_PUNCH', originalEventId: null, originalPunchedAt: null, proposedPunchedAt: '2024-03-01T04:30:00Z', proposedEventType: 'PUNCH', proposedStatus: null, reason: 'Forgot badge', status: 'PENDING', requestedBy: 'u2', approvalRequestId: 'req-1', appliedEventId: null, appliedAt: null, rejectionReason: null, createdAt: '2024-03-02T08:00:00Z', updatedAt: '2024-03-02T08:00:00Z', employeeName: 'Ali', employeeNumber: '1001' },
-};
-
 describe('DecisionDialog', () => {
   beforeEach(() => { resetApiMock(); grantAll(); mockGet({}); });
 
-  it('requires a comment to reject and posts it to /approvals/:requestId/reject', async () => {
-    apiMock.post.mockResolvedValue({ data: { id: 'req-1', status: 'REJECTED', steps: [], correction: null } });
+  it('requires a comment to reject and posts the decision for the current level to /approvals/:id/decide', async () => {
+    apiMock.post.mockResolvedValue({ data: { ...approvalRequest({ status: 'REJECTED' }), noop: false, terminal: true } });
     const onClose = vi.fn();
-    renderWithProviders(<DecisionDialog item={item} decision="reject" timezone="Asia/Muscat" onClose={onClose} />);
-    expect(screen.getByText('Reject correction')).toBeInTheDocument();
+    renderWithProviders(<DecisionDialog request={approvalRequest({ currentStep: 2, stepCount: 2 })} decision="REJECT" timezone="Asia/Muscat" onClose={onClose} />);
+    expect(screen.getByText('Reject request')).toBeInTheDocument();
     expect(screen.getAllByText('Ali').length).toBeGreaterThan(0);
+    expect(screen.getByText(/Level 2 of 2/)).toBeInTheDocument();
     expect(screen.getByText(/new punch → 01 Mar 08:30/)).toBeInTheDocument(); // proposed vs original in the branch timezone
     const reject = screen.getByRole('button', { name: 'Reject' });
     expect(reject).toBeDisabled();
     fireEvent.change(screen.getByLabelText(/Comment/), { target: { value: 'No evidence' } });
     expect(reject).toBeEnabled();
     fireEvent.click(reject);
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/req-1/reject', { comment: 'No evidence' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/req-1/decide', { stepNo: 2, decision: 'REJECT', comment: 'No evidence' }));
     await waitFor(() => expect(onClose).toHaveBeenCalled());
   });
 
-  it('approves without a comment', async () => {
-    apiMock.post.mockResolvedValue({ data: { id: 'req-1', status: 'APPROVED', steps: [], correction: null } });
-    renderWithProviders(<DecisionDialog item={item} decision="approve" timezone="Asia/Muscat" onClose={() => {}} />);
+  it('approves without a comment and shows the leave context (range, days, balance after)', async () => {
+    apiMock.post.mockResolvedValue({ data: { ...approvalRequest({ status: 'APPROVED' }), noop: false, terminal: true } });
+    renderWithProviders(<DecisionDialog request={approvalRequest({ entityType: 'LEAVE', context: leaveContext() })} decision="APPROVE" timezone="Asia/Muscat" onClose={() => {}} />);
+    expect(screen.getByText('Annual Leave')).toBeInTheDocument();
+    expect(screen.getByText('3 days')).toBeInTheDocument();
+    expect(screen.getByText('17 of 30 days left after this')).toBeInTheDocument();
     const approve = screen.getByRole('button', { name: 'Approve' });
     expect(approve).toBeEnabled();
     fireEvent.click(approve);
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/req-1/approve', { comment: undefined }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/req-1/decide', { stepNo: 1, decision: 'APPROVE', comment: undefined }));
+  });
+
+  it('says what the decision did: the request, the level, or only this vote', () => {
+    const t = (k: string) => k;
+    const base = approvalRequest();
+    expect(decisionToast(t, { ...base, status: 'APPROVED', noop: false, terminal: true }, 'APPROVE', 1)).toBe('decision.approved');
+    expect(decisionToast(t, { ...base, currentStep: 2, stepCount: 2, noop: false, terminal: false }, 'APPROVE', 1)).toBe('decision.stepApproved');
+    expect(decisionToast(t, { ...base, noop: false, terminal: false }, 'APPROVE', 1)).toBe('decision.approvalRecorded');
+    expect(decisionToast(t, { ...base, noop: false, terminal: false }, 'REJECT', 1)).toBe('decision.rejectionRecorded');
+    expect(decisionToast(t, { ...base, status: 'REJECTED', noop: false, terminal: true }, 'REJECT', 1)).toBe('decision.rejected');
+    expect(decisionToast(t, { ...base, noop: true, terminal: false }, 'APPROVE', 1)).toBe('decision.noop');
   });
 });
