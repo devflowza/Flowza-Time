@@ -236,12 +236,14 @@ describe('day-close sweep', () => {
     await setAttendanceSettings({});
   });
 
-  it('the scheduler enqueues one deduplicated day-close job per organisation per local day', async () => {
+  it('the scheduler enqueues one deduplicated day-close job per organisation, in the hour after local midnight', async () => {
     const task = attendanceTasks.find((t) => t.name === 'attendance.day-close')!;
     expect(task.everyMs).toBe(3_600_000);
-    expect(await task.run(h.deps)).toEqual({ organizations: 1, enqueued: 1 });
-    expect(await task.run(h.deps)).toEqual({ organizations: 1, enqueued: 1 });
-    const jobs = await sql<{ n: string; payload: Record<string, unknown> }>`select count(*) over () as n, payload from jobs.queue where job_type = ${DAY_CLOSE_JOB_TYPE} and dedupe_key = ${`day-close:${ORG}:2026-03-12`}`.execute(h.tdb.adminDb);
+    const at = (iso: string) => ({ ...h.deps, now: () => new Date(iso) });
+    expect(await task.run(at('2026-03-12T06:00:00Z'))).toEqual({ organizations: 1, enqueued: 0 }); // 10:00 in Muscat: not the day-close hour
+    expect(await task.run(at('2026-03-11T21:10:00Z'))).toEqual({ organizations: 1, enqueued: 1 }); // 01:10 on 03-12 in Muscat
+    expect(await task.run(at('2026-03-11T21:50:00Z'))).toEqual({ organizations: 1, enqueued: 1 }); // a second tick in the hour: same pending job
+    const jobs = await sql<{ n: string; payload: Record<string, unknown> }>`select count(*) over () as n, payload from jobs.queue where job_type = ${DAY_CLOSE_JOB_TYPE} and organization_id = ${ORG}`.execute(h.tdb.adminDb);
     expect(jobs.rows.map((r) => [r.n, r.payload])).toEqual([['1', { organizationId: ORG, asOf: '2026-03-12' }]]);
   });
 });

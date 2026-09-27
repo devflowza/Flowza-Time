@@ -121,7 +121,7 @@
     },
     "nonWorkingDay": {
       "title": "Work on weekly offs and holidays",
-      "hint": "How hours worked on a weekly off or a public holiday are counted.",
+      "hint": "How hours worked on a weekly off or a public holiday are counted. With overtime, the rule set's weekly-off / holiday overtime switches still apply.",
       "action": "Hours worked on a non-working day",
       "options": {
         "record": "Record the hours (no overtime)",

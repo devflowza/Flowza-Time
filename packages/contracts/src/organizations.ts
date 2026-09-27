@@ -185,12 +185,21 @@ export const DEFAULT_ATTENDANCE_SETTINGS: AttendanceSettings = attendanceSetting
 
 /**
  * The effective attendance settings of an organisation from whatever the settings row holds (`null`, `{}`, a row saved
- * before a key existed, or a full document): every key present, defaults filled in. Never throws — an unparseable
- * stored value falls back to the defaults (the worker and the engine must not stop because a setting is malformed).
+ * before a key existed, or a full document): every key present, defaults filled in. Never throws — the worker and the
+ * engine must not stop because a setting is malformed. A malformed key (only possible through a manual edit: writes are
+ * validated) falls back to its own default and never drags the valid keys down with it.
  */
 export function resolveAttendanceSettings(raw: unknown): AttendanceSettings {
   const parsed = attendanceSettingsSchema.safeParse(raw ?? {});
-  return parsed.success ? parsed.data : DEFAULT_ATTENDANCE_SETTINGS;
+  if (parsed.success) return parsed.data;
+  const stored = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const kept: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(attendanceSettingsSchema.shape)) {
+    const one = (schema as z.ZodType).safeParse(stored[key]);
+    if (one.success && one.data !== undefined) kept[key] = one.data;
+  }
+  const salvaged = attendanceSettingsSchema.safeParse(kept);
+  return salvaged.success ? salvaged.data : DEFAULT_ATTENDANCE_SETTINGS;
 }
 
 export const organizationSettingsSchema = z.object({

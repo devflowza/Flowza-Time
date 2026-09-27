@@ -226,4 +226,15 @@ describe('dashboard missing-punch counters', () => {
     expect(branches.status).toBe(200);
     expect(branches.body.data.find((b: { branchId: string }) => b.branchId === f.branchA)?.missingPunch).toBe(1);
   });
+
+  it('the daily list counts and filters missing punches by the flags', async () => {
+    const all = await h.request('GET', `${base()}/attendance/daily?date=${D3}`, { token: f.hrAdmin });
+    expect(all.status).toBe(200);
+    expect(all.body.meta).toMatchObject({ missingPunch: 1, byStatus: { PRESENT: 1 } });
+    const missing = await h.request('GET', `${base()}/attendance/daily?date=${D3}&status=MISSING_PUNCH`, { token: f.hrAdmin });
+    expect(missing.status).toBe(200);
+    expect(missing.body.data.map((r: { employeeId: string; flags: string[] }) => [r.employeeId, r.flags])).toEqual([[f.e1, ['MISSING_OUT']]]);
+    const none = await h.request('GET', `${base()}/attendance/daily?date=${D1}`, { token: f.hrAdmin });
+    expect(none.body.meta.missingPunch).toBe(0);
+  });
 });

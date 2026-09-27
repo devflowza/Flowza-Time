@@ -67,8 +67,13 @@ describe('attendance settings', () => {
     expect(group.safeParse({ stats: { fullDayHours: 0 } }).success).toBe(false);
   });
 
-  it('falls back to the defaults for an unparseable stored value instead of throwing', () => {
+  it('falls back to the defaults for an unparseable stored value instead of throwing — per key, keeping the valid ones', () => {
     expect(resolveAttendanceSettings({ unexcused: { graceDays: 'many' } })).toEqual(DEFAULT_ATTENDANCE_SETTINGS);
     expect(resolveAttendanceSettings('garbage')).toEqual(DEFAULT_ATTENDANCE_SETTINGS);
+    // a malformed group (manual edit) does not reset the organisation's other choices, e.g. the overtime backfill
+    const salvaged = resolveAttendanceSettings({ nonWorkingDay: { action: 'overtime' }, processingDelaySeconds: 7, unexcused: { graceDays: 'many', autoDeductEnabled: true } });
+    expect(salvaged.nonWorkingDay.action).toBe('overtime');
+    expect(salvaged.processingDelaySeconds).toBe(7);
+    expect(salvaged.unexcused).toEqual(DEFAULT_ATTENDANCE_SETTINGS.unexcused);
   });
 });
