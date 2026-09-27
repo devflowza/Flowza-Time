@@ -33,6 +33,11 @@ const schema = z.object({
   // what makes CLIENT_IP_HEADER and TRUSTED_PROXY_HOPS trustworthy, since both assume the expected proxy chain. Unset
   // for local development and deployments with no CDN in front.
   EDGE_SHARED_SECRET: z.string().min(16).optional(),
+  /**
+   * Local development only: lets the Flowza Finance connector be pointed at an http:// / private-host base URL (a mock Finance
+   * server). Production keeps the default: https and a public host, validated on save and on every test/sync call.
+   */
+  FLOWZA_ALLOW_PRIVATE_EGRESS: booleanFromEnv.default(false),
 });
 
 export type ApiConfig = z.infer<typeof schema> & { webOrigins: string[]; databaseSsl: boolean };
