@@ -45,6 +45,8 @@ export const updateLeaveRecordSchema = z.object({
   halfDayPart: z.enum(['FIRST_HALF', 'SECOND_HALF']).nullable().optional(),
   reason: z.string().max(1000).nullable().optional(),
   status: z.enum(LEAVE_STATUSES).optional(),
+  /** HR's comment on an approval or rejection; the employee sees it in the portal. */
+  decisionNote: z.string().trim().max(1000).nullable().optional(),
 });
 export type UpdateLeaveRecordInput = z.infer<typeof updateLeaveRecordSchema>;
 export const ruleSetListQuerySchema = z.object({ branchId: uuidSchema.optional(), activeOn: isoDateSchema.optional(), includeExpired: booleanQuerySchema.default(true) });

@@ -57,14 +57,14 @@ export const envModule = { env: { supabaseUrl: 'http://localhost', supabaseAnonK
 // ---- me / permissions mock -----------------------------------------------------------------------------------------
 /** `orgId: null` models a signed-in user with no organisation — a platform admin before the first one exists. */
 /** `settings` is the organisation settings object /me carries; tests set e.g. `{ dashboard: { theme: 'midnight' } }`. */
-export const testState = { permissions: new Set<string>(), orgId: 'org-1' as string | null, timezone: 'Asia/Muscat', membershipId: 'mem-1', settings: {} as Record<string, unknown> };
+export const testState = { permissions: new Set<string>(), orgId: 'org-1' as string | null, timezone: 'Asia/Muscat', membershipId: 'mem-1', settings: {} as Record<string, unknown>, employeeId: null as string | null };
 export function grant(...perms: Permission[]) { testState.permissions = new Set(perms); }
 export function grantAll() { testState.permissions = new Set(['*']); }
 const membership = () =>
   testState.orgId === null
     ? null
     : {
-        membershipId: testState.membershipId, roleId: 'role-1', roleKey: 'org_admin', roleName: 'Admin', permissions: [...testState.permissions], allBranches: true, branchIds: [], employeeId: null, featureFlags: {}, settings: testState.settings,
+        membershipId: testState.membershipId, roleId: 'role-1', roleKey: 'org_admin', roleName: 'Admin', permissions: [...testState.permissions], allBranches: true, branchIds: [], employeeId: testState.employeeId, featureFlags: {}, settings: testState.settings,
         organization: { id: testState.orgId, companyCode: 'ACME', legalName: 'Acme LLC', displayName: 'Acme', countryCode: 'OM', timezone: testState.timezone, currencyCode: 'OMR', locale: 'en', weeklyOffDays: [5, 6], logoPath: null, contact: {}, address: {}, status: 'active', createdAt: '2024-01-01T00:00:00Z' },
       };
 export const useMeModule = {
@@ -82,5 +82,6 @@ export const useMeModule = {
     return testState.orgId;
   },
   useOrgTimezone: () => testState.timezone,
+  useEmployeeId: () => (testState.orgId === null ? null : testState.employeeId),
   useFeatureFlag: () => false,
 };

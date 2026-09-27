@@ -76,6 +76,8 @@ export const leaveTypeInputSchema = z.object({
   /** A paid day away from the terminal that reports count with present days (Site Duty), not with leave. */
   treatAsPresent: z.boolean().default(false),
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  /** Days per calendar year shown as the employee's balance in the self-service portal; null = not tracked. Informs, never blocks. */
+  annualAllowanceDays: z.number().min(0).max(366).multipleOf(0.5).nullable().optional(),
 });
 
 /**

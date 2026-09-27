@@ -11,6 +11,7 @@ import { registerOrganizationRoutes } from './organizations.js';
 import { registerPlatformRoutes } from './platform.js';
 import { registerRoleRoutes } from './roles.js';
 import { registerSearchRoutes } from './search.js';
+import { registerSelfServiceRoutes } from './self-service.js';
 import { registerStructureRoutes } from './structure.js';
 import { registerFeatureRoutes } from './features/index.js';
 
@@ -23,6 +24,7 @@ import { registerFeatureRoutes } from './features/index.js';
  */
 export function registerV1Routes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   registerMeRoutes(v1, deps);
+  registerSelfServiceRoutes(v1, deps);
   registerOrganizationRoutes(v1, deps);
   registerMemberRoutes(v1, deps);
   registerRoleRoutes(v1, deps);

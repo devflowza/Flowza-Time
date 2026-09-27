@@ -1,14 +1,14 @@
 import { sql } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { DateTime } from 'luxon';
-import { SYSTEM_ROLE_IDS, type ActivityRange, type ApprovalRequestDto, type ApprovalStepDto, type ApprovalWorkflowInput, type AttendanceActivityDayDto, type AttendanceActivityDto, type AttendanceActivityMonthDto, type AttendanceActivityQuery, type AttendanceDailyRecordDto, type AttendanceStatus, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
+import { SELF_CORRECTION_TYPES, SYSTEM_ROLE_IDS, type ActivityRange, type ApprovalRequestDto, type ApprovalStepDto, type ApprovalWorkflowInput, type AttendanceActivityDayDto, type AttendanceActivityDto, type AttendanceActivityMonthDto, type AttendanceActivityQuery, type AttendanceDailyRecordDto, type AttendanceStatus, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import { activitySegments, summarisePeriod, weekRange, type MembershipGrant, type PeriodRecordLike } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
-import { type Actor, audit, runUser } from '../../lib/service.js';
+import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
 import { enqueueJob } from '../../lib/jobs.js';
 import { likeContains, pageOf, prefixTsQuery, toCount } from '../../lib/pagination.js';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject } from '../../lib/mappers.js';
@@ -26,6 +26,15 @@ function viewGrant(actor: Actor, orgId: string): { grant: MembershipGrant; ownOn
   if (hasPermission(grant, 'attendance.view')) return { grant, ownOnly: null };
   if (hasPermission(grant, 'attendance.view_own') && grant.employeeId) return { grant, ownOnly: grant.employeeId };
   throw errors.forbidden('Missing permission: attendance.view.');
+}
+
+/**
+ * The branch's IANA zone for day windows. Read in the organisation's system scope: an employee viewing their own
+ * attendance (attendance.view_own) holds no branch.view, and under their RLS the branch row — and so its zone — is hidden.
+ */
+async function branchTimezone(trx: Trx, orgId: string, branchId: string): Promise<string> {
+  const row = await withSystemScope(trx, orgId, (t) => t.selectFrom('branches').select('timezone').where('organizationId', '=', orgId).where('id', '=', branchId).executeTakeFirst());
+  return row?.timezone ?? 'UTC';
 }
 
 function recordQuery(trx: Trx, orgId: string) {
@@ -141,8 +150,7 @@ export async function listEvents(deps: ApiDeps, actor: Actor, orgId: string, q: 
     const emp = await trx.selectFrom('employees').select(['id', 'branchId']).where('organizationId', '=', orgId).where('id', '=', q.employeeId).executeTakeFirst();
     if (!emp) throw errors.notFound('Employee', q.employeeId);
     requireBranchAccess(grant, emp.branchId);
-    const branch = await trx.selectFrom('branches').select('timezone').where('id', '=', emp.branchId).executeTakeFirst();
-    const tz = branch?.timezone ?? 'UTC';
+    const tz = await branchTimezone(trx, orgId, emp.branchId);
     const start = DateTime.fromISO(q.from, { zone: tz }).startOf('day').toJSDate(); const end = DateTime.fromISO(q.to, { zone: tz }).endOf('day').toJSDate();
     const rows = await trx.selectFrom('attendanceEvents as ev').leftJoin('devices as d', 'd.id', 'ev.deviceId').select(['ev.id', 'ev.punchedAt', 'ev.eventType', 'ev.source', 'ev.verificationMethod', 'ev.deviceId', 'd.name as deviceName', 'ev.voidedAt', 'ev.correctionId', 'ev.note'])
       .where('ev.organizationId', '=', orgId).where('ev.employeeId', '=', q.employeeId).where('ev.punchedAt', '>=', start).where('ev.punchedAt', '<=', end).orderBy('ev.punchedAt').limit(5000).execute();
@@ -223,11 +231,10 @@ export async function listActivity(deps: ApiDeps, actor: Actor, orgId: string, q
     const emp = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'displayName', 'branchId']).where('organizationId', '=', orgId).where('id', '=', q.employeeId).executeTakeFirst();
     if (!emp) throw errors.notFound('Employee', q.employeeId);
     requireBranchAccess(grant, emp.branchId);
-    const [branch, settings] = await Promise.all([
-      trx.selectFrom('branches').select('timezone').where('id', '=', emp.branchId).executeTakeFirst(),
+    const [timezone, settings] = await Promise.all([
+      branchTimezone(trx, orgId, emp.branchId),
       trx.selectFrom('organizationSettings').select('general').where('organizationId', '=', orgId).executeTakeFirst(),
     ]);
-    const timezone = branch?.timezone ?? 'UTC';
     const general = jsonObject(settings?.general);
     const firstDayOfWeek = typeof general.firstDayOfWeek === 'number' ? general.firstDayOfWeek : 0;
     const anchor = q.anchor ?? DateTime.now().setZone(timezone).toISODate()!;
@@ -346,14 +353,33 @@ async function resolveStep(trx: Trx, orgId: string, step: WorkflowStep, employee
 }
 
 async function approveCorrectionFinal(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, correctionId: string, comment: string | null): Promise<void> {
-  await trx.updateTable('attendanceCorrections').set({ status: 'APPROVED' }).where('organizationId', '=', orgId).where('id', '=', correctionId).execute();
+  const c = await trx.updateTable('attendanceCorrections').set({ status: 'APPROVED' }).where('organizationId', '=', orgId).where('id', '=', correctionId).returning(['employeeId', 'attendanceDate', 'requestedBy']).executeTakeFirst();
   await enqueueJob(deps.queue, trx, { queue: 'processing', jobType: 'APPLY_CORRECTION', organizationId: orgId, payload: { organizationId: orgId, correctionId }, correlationId: actor.requestId, priority: 7 });
-  await emitDomainEvent(trx, { organizationId: orgId, eventType: 'attendance.correction_approved', aggregateType: 'attendance_correction', aggregateId: correctionId, payload: { approvedBy: actor.userId, comment }, actorUserId: actor.userId, requestId: actor.requestId });
+  await emitDomainEvent(trx, { organizationId: orgId, eventType: 'attendance.correction_approved', aggregateType: 'attendance_correction', aggregateId: correctionId, payload: { approvedBy: actor.userId, comment, employeeId: c?.employeeId ?? null, attendanceDate: c ? isoDate(c.attendanceDate) : null, ...(c?.requestedBy && c.requestedBy !== actor.userId ? { userId: c.requestedBy } : {}) }, actorUserId: actor.userId, requestId: actor.requestId });
+}
+
+/**
+ * attendance.correct for anyone in scope, or attendance.request_correction for one's own record (self-service; punch
+ * changes only, always routed through approval — never auto-approved, even for a requester who holds attendance.approve).
+ */
+function correctionGrant(actor: Actor, orgId: string, input: CreateCorrectionInput): { grant: MembershipGrant; selfService: boolean } {
+  const grant = requireMembership(actor.principal, orgId);
+  if (hasPermission(grant, 'attendance.correct')) return { grant, selfService: false };
+  if (hasPermission(grant, 'attendance.request_correction') && grant.employeeId && grant.employeeId === input.employeeId) {
+    if (!(SELF_CORRECTION_TYPES as readonly string[]).includes(input.type)) throw errors.forbidden('Only HR can change the status of a day; request a punch correction instead.');
+    return { grant, selfService: true };
+  }
+  throw errors.forbidden('Missing permission: attendance.correct.');
 }
 
 export async function createCorrection(deps: ApiDeps, actor: Actor, orgId: string, input: CreateCorrectionInput): Promise<CorrectionDto & { approval: 'AUTO_APPROVED' | 'PENDING'; approvalRequestId: string | null }> {
-  const grant = requirePermission(actor.principal, orgId, 'attendance.correct');
+  const { grant, selfService } = correctionGrant(actor, orgId, input);
   return runUser(deps.db, actor, async (trx) => {
+    if (selfService) {
+      // Settings → Attendance → "Self-service corrections" (off by default) decides whether employees may ask at all.
+      const settings = await trx.selectFrom('organizationSettings').select('attendance').where('organizationId', '=', orgId).executeTakeFirst();
+      if (jsonObject(settings?.attendance).allowSelfServiceCorrections !== true) throw errors.forbidden('Self-service corrections are turned off for this organisation.');
+    }
     const emp = await trx.selectFrom('employees').select(['id', 'branchId', 'joiningDate', 'deletedAt']).where('organizationId', '=', orgId).where('id', '=', input.employeeId).executeTakeFirst();
     if (!emp || emp.deletedAt) throw errors.validation('Employee not found.', { issues: [{ path: 'employeeId', message: 'Unknown employee' }] });
     requireBranchAccess(grant, emp.branchId);
@@ -383,7 +409,7 @@ export async function createCorrection(deps: ApiDeps, actor: Actor, orgId: strin
       const workflow = workflows.find((w) => w.branchId === emp.branchId) ?? workflows.find((w) => w.branchId === null) ?? null;
       let steps: WorkflowStep[];
       if (workflow) steps = parseWorkflowSteps(workflow.steps);
-      else if (hasPermission(grant, 'attendance.approve')) return { kind: 'auto' as const };
+      else if (!selfService && hasPermission(grant, 'attendance.approve')) return { kind: 'auto' as const };
       else steps = [{ order: 1, approverType: 'ROLE', roleId: SYSTEM_ROLE_IDS.hr_admin }];
       const request = await t.insertInto('approvalRequests').values({ organizationId: orgId, workflowId: workflow?.id ?? null, entityType: 'ATTENDANCE_CORRECTION', entityId: row.id, branchId: emp.branchId, employeeId: input.employeeId, currentStep: 1, status: 'PENDING', requestedBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
       let stepNo = 0;
@@ -519,7 +545,7 @@ export async function decide(deps: ApiDeps, actor: Actor, orgId: string, request
     });
     if (result.correction) {
       if (result.rejected) {
-        await emitDomainEvent(trx, { organizationId: orgId, eventType: 'attendance.correction_rejected', aggregateType: 'attendance_correction', aggregateId: result.correction.id, payload: { rejectedBy: actor.userId, reason: input.comment ?? null }, actorUserId: actor.userId, requestId: actor.requestId });
+        await emitDomainEvent(trx, { organizationId: orgId, eventType: 'attendance.correction_rejected', aggregateType: 'attendance_correction', aggregateId: result.correction.id, payload: { rejectedBy: actor.userId, reason: input.comment ?? null, employeeId: result.correction.employeeId, attendanceDate: isoDate(result.correction.attendanceDate), ...(result.correction.requestedBy ? { userId: result.correction.requestedBy } : {}) }, actorUserId: actor.userId, requestId: actor.requestId });
       } else if (result.final) {
         await systemStep(trx, orgId, (t) => approveCorrectionFinal(deps, t, actor, orgId, result.correction!.id, input.comment ?? null));
       }

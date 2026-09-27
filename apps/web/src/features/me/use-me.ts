@@ -40,6 +40,11 @@ export function useOrgId(): string {
   return m.organization.id;
 }
 
+/** The caller's own employee record in the active organisation (self-service portal), or null when not linked. */
+export function useEmployeeId(): string | null {
+  return useActiveMembership()?.employeeId ?? null;
+}
+
 export function useOrgTimezone(): string {
   return useActiveMembership()?.organization.timezone ?? 'Asia/Muscat';
 }

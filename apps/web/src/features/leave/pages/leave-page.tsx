@@ -2,11 +2,11 @@ import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useNavigate, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Ban, CalendarOff, Pencil, Plus, Trash2, X } from 'lucide-react';
+import { Ban, CalendarOff, Check, Pencil, Plus, Trash2, X } from 'lucide-react';
 import { LEAVE_STATUSES } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
+import { Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, FormField, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton, Tabs, TabsContent, TabsList, TabsTrigger, Textarea } from '@/components/ui';
 import { Combobox, DateRange } from '@/components/forms';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
@@ -27,6 +27,44 @@ const STATUS_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> 
 const TABS = ['records', 'types'] as const;
 type Tab = (typeof TABS)[number];
 
+type Decision = { record: LeaveRecordDto; status: 'APPROVED' | 'REJECTED' };
+
+/** Approve or reject a PENDING request (self-service applications); the note is shown to the employee. */
+function DecisionDialog({ decision, onClose }: { decision: Decision | null; onClose: () => void }) {
+  const { t } = useTranslation('leave');
+  const { t: tc } = useTranslation();
+  const navigate = useNavigate();
+  const { updateRecord } = useLeaveMutations();
+  const [note, setNote] = useState('');
+  const r = decision?.record;
+  const approve = decision?.status === 'APPROVED';
+  const submit = () => {
+    if (!decision || !r) return;
+    updateRecord.mutate({ id: r.id, input: { status: decision.status, decisionNote: note.trim() || null } }, {
+      onSuccess: (res) => { if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('records.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(approve ? t('decision.approved') : t('decision.rejected')); setNote(''); onClose(); },
+      onError: (e) => toastMutationError(e, navigate),
+    });
+  };
+  return (
+    <Dialog open={!!decision} onOpenChange={(o) => { if (!o) { setNote(''); onClose(); } }}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle>{approve ? t('decision.approveTitle') : t('decision.rejectTitle')}</DialogTitle>
+          <DialogDescription>{r ? `${r.employeeName ?? ''} · ${r.leaveTypeName ?? ''} · ${r.startDate === r.endDate ? fmtDate(r.startDate) : `${fmtDate(r.startDate)} → ${fmtDate(r.endDate)}`}` : null}</DialogDescription>
+        </DialogHeader>
+        {r?.reason ? <p className="rounded-md border bg-muted/30 p-3 text-sm"><span className="font-medium">{t('fields.reason')}:</span> {r.reason}</p> : null}
+        <FormField label={t('decision.note')} htmlFor="leave-decision-note" optional hint={t('decision.noteHint')}>
+          <Textarea id="leave-decision-note" rows={3} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} />
+        </FormField>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => { setNote(''); onClose(); }}>{tc('common.cancel')}</Button>
+          <Button type="button" variant={approve ? 'default' : 'destructive'} loading={updateRecord.isPending} onClick={submit}>{approve ? <Check /> : <X />} {approve ? t('decision.approve') : t('decision.reject')}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function RecordsTab() {
   const { t } = useTranslation('leave');
   const { t: tc } = useTranslation();
@@ -44,6 +82,7 @@ function RecordsTab() {
   const { cancelRecord } = useLeaveMutations();
   const [createOpen, setCreateOpen] = useState(false);
   const [cancelling, setCancelling] = useState<LeaveRecordDto | null>(null);
+  const [decision, setDecision] = useState<Decision | null>(null);
   const hasFilters = ['employeeId', 'branchId', 'leaveTypeId', 'status', 'from', 'to'].some((k) => !!f[k]);
   const employeeOptions = useMemo(() => (f['employeeId'] && !employees.options.some((o) => o.value === f['employeeId']) ? [{ value: f['employeeId'], label: t('records.selectedEmployee') }, ...employees.options] : employees.options), [employees.options, f, t]);
 
@@ -51,11 +90,18 @@ function RecordsTab() {
     { id: 'employee', header: t('fields.employee'), cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.employeeName ?? '—'}</p><p className="font-mono text-xs text-muted-foreground" dir="ltr">{row.original.employeeNumber}</p></div> },
     { id: 'type', header: t('fields.leaveType'), cell: ({ row }) => { const lt = types.byId.get(row.original.leaveTypeId); return <span className="flex items-center gap-2"><span className="size-2.5 rounded-full" style={{ backgroundColor: lt?.color ?? '#94a3b8' }} aria-hidden />{row.original.leaveTypeName ?? lt?.name ?? '—'}{lt && !lt.isPaid ? <Badge variant="outline">{t('types.unpaid')}</Badge> : null}</span>; } },
     { id: 'range', header: t('records.range'), cell: ({ row }) => { const r = row.original; return <span className="whitespace-nowrap text-xs tnum">{r.startDate === r.endDate ? fmtDate(r.startDate) : `${fmtDate(r.startDate)} → ${fmtDate(r.endDate)}`}{r.isHalfDay ? <Badge variant="outline" className="ms-2">{r.halfDayPart ? t(`halfDayParts.${r.halfDayPart}`, { defaultValue: r.halfDayPart }) : t('fields.halfDay')}</Badge> : null}</span>; } },
-    { id: 'reason', header: t('fields.reason'), cell: ({ row }) => <span className="block max-w-[240px] truncate text-xs" title={row.original.reason ?? undefined}>{row.original.reason ?? '—'}</span> },
+    { id: 'reason', header: t('fields.reason'), cell: ({ row }) => <div className="max-w-[240px] text-xs"><span className="block truncate" title={row.original.reason ?? undefined}>{row.original.reason ?? '—'}</span>{row.original.decisionNote ? <span className="block truncate text-muted-foreground" title={row.original.decisionNote}>{t('decision.noteShort', { note: row.original.decisionNote })}</span> : null}</div> },
     { id: 'status', header: tc('common.status'), cell: ({ row }) => <Badge variant={STATUS_TONE[row.original.status] ?? 'neutral'} dot>{t(`status.${row.original.status}`, { defaultValue: row.original.status })}</Badge> },
     { id: 'source', header: t('records.source'), cell: ({ row }) => <span className="text-xs text-muted-foreground">{row.original.source}</span> },
     { id: 'createdAt', header: tc('common.createdAt'), cell: ({ row }) => <span className="whitespace-nowrap text-xs tnum">{fmtDateTime(row.original.createdAt, tz)}</span> },
-    { id: 'actions', header: '', cell: ({ row }) => canManage && row.original.status !== 'CANCELLED' ? <div className="flex justify-end"><Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setCancelling(row.original); }}><Ban /> {t('records.cancel')}</Button></div> : null },
+    { id: 'actions', header: '', cell: ({ row }) => canManage && row.original.status !== 'CANCELLED' ? (
+      <div className="flex justify-end gap-1">
+        {row.original.status === 'PENDING' ? <>
+          <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setDecision({ record: row.original, status: 'APPROVED' }); }}><Check /> {t('decision.approve')}</Button>
+          <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setDecision({ record: row.original, status: 'REJECTED' }); }}><X /> {t('decision.reject')}</Button>
+        </> : <Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setCancelling(row.original); }}><Ban /> {t('records.cancel')}</Button>}
+      </div>
+    ) : null },
   ], [t, tc, tz, types.byId, canManage]);
 
   return (
@@ -82,6 +128,7 @@ function RecordsTab() {
         renderCard={(r) => <div className="space-y-1"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{r.employeeName}</span><Badge variant={STATUS_TONE[r.status] ?? 'neutral'}>{t(`status.${r.status}`)}</Badge></div><p className="text-xs text-muted-foreground tnum">{r.leaveTypeName} · {fmtDate(r.startDate)} → {fmtDate(r.endDate)}</p></div>}
       />
       <LeaveRecordDialog key={String(createOpen)} open={createOpen} onOpenChange={setCreateOpen} />
+      <DecisionDialog decision={decision} onClose={() => setDecision(null)} />
       <ConfirmDialog open={!!cancelling} onOpenChange={(o) => !o && setCancelling(null)} title={t('records.cancelTitle')} description={t('records.cancelHint')} confirmLabel={t('records.cancel')} destructive loading={cancelRecord.isPending}
         onConfirm={() => { if (!cancelling) return; cancelRecord.mutate(cancelling.id, { onSuccess: (r) => { if (r.recalculationJobId) toastJobQueued(r.recalculationJobId, navigate, t('records.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(t('records.cancelled')); setCancelling(null); }, onError: (e) => toastMutationError(e, navigate) }); }} />
     </>
@@ -102,17 +149,18 @@ function TypesTab() {
       <div className="flex items-center justify-between gap-2"><p className="text-sm text-muted-foreground">{t('types.hint')}</p>{canManage ? <Button size="sm" onClick={() => setDialog({ open: true, leaveType: null })}><Plus /> {t('types.add')}</Button> : null}</div>
       <div className="rounded-lg border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
-          : q.isLoading ? <TableSkeleton cols={4} rows={3} />
+          : q.isLoading ? <TableSkeleton cols={5} rows={3} />
           : !q.data || q.data.length === 0 ? <div className="p-4"><EmptyState icon={CalendarOff} title={t('types.empty')} description={t('types.emptyHint')} action={canManage ? <div className="flex flex-wrap justify-center gap-2"><Button onClick={() => seedDefaults.mutate(undefined, { onSuccess: (r) => toast.success(t('types.seeded', { count: r.created.length })), onError: toastError })} loading={seedDefaults.isPending}>{t('types.seed')}</Button><Button variant="outline" onClick={() => setDialog({ open: true, leaveType: null })}><Plus /> {t('types.add')}</Button></div> : undefined} /></div>
           : (
             <Table>
-              <TableHeader><TableRow><TableHead>{tc('common.code')}</TableHead><TableHead>{tc('common.name')}</TableHead><TableHead>{t('fields.isPaid')}</TableHead><TableHead>{tc('common.status')}</TableHead><TableHead className="text-end">{tc('common.actions')}</TableHead></TableRow></TableHeader>
+              <TableHeader><TableRow><TableHead>{tc('common.code')}</TableHead><TableHead>{tc('common.name')}</TableHead><TableHead>{t('fields.isPaid')}</TableHead><TableHead>{t('types.allowance')}</TableHead><TableHead>{tc('common.status')}</TableHead><TableHead className="text-end">{tc('common.actions')}</TableHead></TableRow></TableHeader>
               <TableBody>
                 {q.data.map((lt) => (
                   <TableRow key={lt.id}>
                     <TableCell><span className="flex items-center gap-2 font-mono text-xs" dir="ltr"><span className="size-2.5 rounded-full" style={{ backgroundColor: lt.color ?? '#94a3b8' }} aria-hidden />{lt.code}</span></TableCell>
                     <TableCell><p className="font-medium">{lt.name}</p>{lt.nameAr ? <p className="text-xs text-muted-foreground" dir="rtl">{lt.nameAr}</p> : null}</TableCell>
                     <TableCell>{lt.isPaid ? <Badge variant="success">{t('types.paid')}</Badge> : <Badge variant="outline">{t('types.unpaid')}</Badge>}</TableCell>
+                    <TableCell className="tnum text-sm">{lt.annualAllowanceDays === null ? <span className="text-muted-foreground">{t('types.notTracked')}</span> : t('types.daysPerYear', { count: lt.annualAllowanceDays })}</TableCell>
                     <TableCell><Badge variant={lt.status === 'active' ? 'success' : 'neutral'} dot>{t(`recordStatus.${lt.status}`, { defaultValue: lt.status })}</Badge></TableCell>
                     <TableCell>{canManage ? <RowActions actions={[{ key: 'edit', label: tc('common.edit'), icon: <Pencil />, onSelect: () => setDialog({ open: true, leaveType: lt }) }, { key: 'toggle', label: lt.status === 'active' ? t('types.deactivate') : t('types.activate'), onSelect: () => updateType.mutate({ id: lt.id, input: { status: lt.status === 'active' ? 'inactive' : 'active' } }, { onSuccess: () => toast.success(t('types.updated')), onError: toastError }) }, { key: 'delete', label: tc('common.delete'), icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(lt) }]} /> : null}</TableCell>
                   </TableRow>

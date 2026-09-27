@@ -1,11 +1,16 @@
 import { NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarDays, CalendarOff, CheckSquare, ClipboardList, Cpu, FileText, GitCompare, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Building2, CalendarCheck, CalendarDays, CalendarOff, CheckSquare, ClipboardList, Cpu, FileText, GitCompare, House, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, Palmtree, RefreshCw, Settings, ShieldCheck, UserRound, Users, Wallet, type LucideIcon } from 'lucide-react';
 import type { Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
-import { useCan, useMe } from '@/features/me/use-me';
+import { useCan, useEmployeeId, useMe } from '@/features/me/use-me';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui';
+import { registerNamespace } from '@/lib/i18n-namespace';
+import portalEn from '@/locales/en/portal.json';
+import portalAr from '@/locales/ar/portal.json';
+
+registerNamespace('portal', portalEn, portalAr);
 
 interface NavItem { to: string; label: string; icon: LucideIcon; permissions?: Permission[]; any?: boolean }
 interface NavSection { label?: string; items: NavItem[] }
@@ -39,9 +44,17 @@ export function Sidebar() {
   const toggle = useUiStore((s) => s.toggleSidebar);
   const can = useCan();
   const { data: me } = useMe();
+  const employeeId = useEmployeeId();
 
   const sections: NavSection[] = [
     { items: [{ to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, permissions: ['dashboard.view'] }] },
+    // Self-service: every member linked to an employee record (the API scopes each call to that record).
+    ...(employeeId ? [{ label: t('portal:nav.section'), items: [
+      { to: '/my', label: t('portal:nav.home'), icon: House },
+      { to: '/my/attendance', label: t('portal:nav.attendance'), icon: CalendarCheck },
+      { to: '/my/leave', label: t('portal:nav.leave'), icon: Palmtree },
+      { to: '/my/profile', label: t('portal:nav.profile'), icon: UserRound },
+    ] }] : []),
     { label: t('nav.sections.workforce'), items: [
       { to: '/employees', label: t('nav.employees'), icon: Users, permissions: ['employee.view'] },
       { to: '/attendance', label: t('nav.attendance'), icon: Activity, permissions: ['attendance.view'] },
@@ -93,7 +106,7 @@ export function Sidebar() {
               <ul className="space-y-px">
                 {items.map((item) => {
                   const link = (
-                    <NavLink to={item.to} end={item.to === '/'} className={itemClass(collapsed)}>
+                    <NavLink to={item.to} end={item.to === '/' || item.to === '/my'} className={itemClass(collapsed)}>
                       <item.icon className={iconClass} aria-hidden />
                       {collapsed ? <span className="sr-only">{item.label}</span> : <span className="truncate">{item.label}</span>}
                     </NavLink>

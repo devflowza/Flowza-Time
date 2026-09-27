@@ -39,7 +39,9 @@
     "isPaidHint": "Paid days count towards the payroll summary.",
     "color": "Colour",
     "treatAsPresent": "Counts as present",
-    "treatAsPresentHint": "A paid day away from the terminal (site duty). Reports count it with present days, not with leave."
+    "treatAsPresentHint": "A paid day away from the terminal (site duty). Reports count it with present days, not with leave.",
+    "annualAllowance": "Days per year",
+    "annualAllowanceHint": "Shown to employees as their balance in the self-service portal. Leave blank not to track a balance."
   },
   "records": {
     "add": "Record leave",
@@ -74,6 +76,21 @@
     "empty": "No leave types",
     "emptyHint": "Create annual, sick or unpaid leave types to start recording leave.",
     "seed": "Add the default leave types",
-    "seeded": "{{count}} leave types added"
+    "seeded": "{{count}} leave types added",
+    "allowance": "Allowance",
+    "notTracked": "Not tracked",
+    "daysPerYear_one": "{{count}} day / year",
+    "daysPerYear_other": "{{count}} days / year"
+  },
+  "decision": {
+    "approve": "Approve",
+    "reject": "Reject",
+    "approveTitle": "Approve leave request",
+    "rejectTitle": "Reject leave request",
+    "note": "Note to the employee",
+    "noteHint": "Shown to the employee with the decision.",
+    "noteShort": "HR: {{note}}",
+    "approved": "Leave approved",
+    "rejected": "Leave request rejected"
   }
 }

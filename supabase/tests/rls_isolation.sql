@@ -46,6 +46,13 @@ insert into public.attendance_daily_records (organization_id, employee_id, atten
   ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '2026-09-01', '0a000000-0000-0000-0000-00000000000c', 'Asia/Muscat', 'test', 'PRESENT'),
   ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '2026-09-01', '0a000000-0000-0000-0000-00000000000c', 'Asia/Muscat', 'test', 'PRESENT'),
   ('0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000e1', '2026-09-01', '0b000000-0000-0000-0000-00000000000b', 'Asia/Muscat', 'test', 'PRESENT');
+insert into public.leave_types (id, organization_id, code, name, status) values
+  ('0a000000-0000-0000-0000-0000000001a1', '0a000000-0000-0000-0000-000000000000', 'AL', 'Annual Leave', 'active'),
+  ('0a000000-0000-0000-0000-0000000001a2', '0a000000-0000-0000-0000-000000000000', 'OLD', 'Archived type', 'archived');
+insert into public.leave_records (id, organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status) values
+  ('0a000000-0000-0000-0000-0000000001b1', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000001a1', '2026-10-04', '2026-10-05', 'PENDING'),
+  ('0a000000-0000-0000-0000-0000000001b3', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-10-11', '2026-10-12', 'PENDING'),
+  ('0a000000-0000-0000-0000-0000000001b4', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-08-02', '2026-08-03', 'APPROVED');
 commit;
 
 -- helper to assert counts
@@ -112,6 +119,28 @@ select pg_temp.assert_eq((select count(*) from public.employees), 1, 'employee s
 select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 1, 'employee sees only own attendance');
 select pg_temp.assert_eq((select count(*) from public.devices), 0, 'employee sees no devices');
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'Hacked' where id = '0a000000-0000-0000-0000-0000000000e3' $q$, 0, 'employee cannot update own master record');
+-- self-service leave (migration 20260927000100)
+select pg_temp.assert_eq((select count(*) from public.leave_types), 1, 'employee sees active leave types only');
+select pg_temp.assert_eq((select count(*) from public.leave_records), 2, 'employee sees only own leave');
+select pg_temp.assert_rows($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by, reason)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-11-01', '2026-11-02', 'PENDING', 'a0000000-0000-0000-0000-000000000003', 'Trip') $q$, 1, 'employee may request own leave (PENDING)');
+select pg_temp.assert_raises($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-11-08', '2026-11-08', 'APPROVED', 'a0000000-0000-0000-0000-000000000003') $q$, 'employee cannot insert approved leave');
+select pg_temp.assert_raises($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000001a1', '2026-11-08', '2026-11-08', 'PENDING', 'a0000000-0000-0000-0000-000000000003') $q$, 'employee cannot request leave for someone else');
+select pg_temp.assert_raises($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000001a1', '2026-11-08', '2026-11-08', 'PENDING', 'a0000000-0000-0000-0000-000000000003') $q$, 'employee cannot file leave on another branch');
+select pg_temp.assert_raises($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'employee cannot approve own request');
+select pg_temp.assert_raises($q$ update public.leave_records set status = 'CANCELLED', end_date = '2026-10-30' where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'self-cancel cannot change other columns');
+select pg_temp.assert_rows($q$ update public.leave_records set status = 'CANCELLED' where id = '0a000000-0000-0000-0000-0000000001b4' $q$, 0, 'employee cannot cancel approved leave');
+select pg_temp.assert_rows($q$ update public.leave_records set status = 'CANCELLED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 0, 'employee cannot cancel someone else''s request');
+select pg_temp.assert_rows($q$ update public.leave_records set status = 'CANCELLED' where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 1, 'employee may withdraw own pending request');
+select pg_temp.assert_rows($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '2026-09-01', 'ADD_PUNCH', '2026-09-01 04:00+00', 'Forgot to punch', 'a0000000-0000-0000-0000-000000000003', 'PENDING') $q$, 1, 'employee may request a correction for own day');
+select pg_temp.assert_raises($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '2026-09-01', 'ADD_PUNCH', '2026-09-01 04:00+00', 'Not mine', 'a0000000-0000-0000-0000-000000000003', 'PENDING') $q$, 'employee cannot request a correction for someone else');
+select pg_temp.assert_raises($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '2026-09-01', 'ADD_PUNCH', '2026-09-01 05:00+00', 'Pre-approved', 'a0000000-0000-0000-0000-000000000003', 'APPROVED') $q$, 'employee cannot insert an approved correction');
 rollback;
 
 -- ---------- as Owner B ----------

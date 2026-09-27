@@ -17,7 +17,7 @@ export function LeaveTypeDialog({ open, onOpenChange, leaveType }: { open: boole
   const { t } = useTranslation('leave');
   const { t: tc } = useTranslation();
   const { createType, updateType } = useLeaveMutations();
-  const form = useForm<FormValues, unknown, LeaveTypeInput>({ resolver: zodResolver(leaveTypeInputSchema), defaultValues: leaveType ? { code: leaveType.code, name: leaveType.name, nameAr: leaveType.nameAr ?? undefined, isPaid: leaveType.isPaid, treatAsPresent: leaveType.treatAsPresent ?? false, color: leaveType.color ?? undefined } : { code: '', name: '', isPaid: true, treatAsPresent: false, color: COLORS[0] } });
+  const form = useForm<FormValues, unknown, LeaveTypeInput>({ resolver: zodResolver(leaveTypeInputSchema), defaultValues: leaveType ? { code: leaveType.code, name: leaveType.name, nameAr: leaveType.nameAr ?? undefined, isPaid: leaveType.isPaid, treatAsPresent: leaveType.treatAsPresent ?? false, color: leaveType.color ?? undefined, annualAllowanceDays: leaveType.annualAllowanceDays ?? null } : { code: '', name: '', isPaid: true, treatAsPresent: false, color: COLORS[0], annualAllowanceDays: null } });
   const { register, control, setValue, formState: { errors, isSubmitting } } = form;
   const color = useWatch({ control, name: 'color' });
   const onSubmit = form.handleSubmit(async (v) => {
@@ -43,6 +43,9 @@ export function LeaveTypeDialog({ open, onOpenChange, leaveType }: { open: boole
           <Controller control={control} name="treatAsPresent" render={({ field }) => (
             <div className="flex items-center justify-between gap-4 rounded-md border p-3"><div><Label htmlFor="lt-present">{t('fields.treatAsPresent')}</Label><p className="text-xs text-muted-foreground">{t('fields.treatAsPresentHint')}</p></div><Switch id="lt-present" checked={field.value ?? false} onCheckedChange={field.onChange} /></div>
           )} />
+          <FormField label={t('fields.annualAllowance')} htmlFor="lt-allowance" optional hint={t('fields.annualAllowanceHint')} error={errors.annualAllowanceDays?.message}>
+            <Input id="lt-allowance" type="number" inputMode="decimal" min={0} max={366} step={0.5} dir="ltr" className="w-32 tnum" {...register('annualAllowanceDays', { setValueAs: (v: unknown) => (v === '' || v === null || v === undefined ? null : Number(v)) })} aria-invalid={!!errors.annualAllowanceDays} />
+          </FormField>
           <FormField label={t('fields.color')} htmlFor="lt-color" optional error={errors.color?.message}>
             <div className="flex flex-wrap items-center gap-1.5" role="radiogroup" aria-label={t('fields.color')}>
               {COLORS.map((c) => <button key={c} type="button" role="radio" aria-checked={color === c} aria-label={c} className={cn('size-7 rounded-full border-2 focus-visible:ring-2 focus-visible:ring-ring', color === c ? 'scale-110 border-foreground' : 'border-transparent')} style={{ backgroundColor: c }} onClick={() => setValue('color', c, { shouldDirty: true })} />)}

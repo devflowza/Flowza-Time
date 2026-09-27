@@ -21,6 +21,11 @@ const ROUTING: Record<string, { category: NotificationCategory; permission: stri
   'approval.pending': { category: 'APPROVAL', permission: 'attendance.approve', title: () => 'Correction awaiting your approval', link: () => '/approvals' },
   'attendance.correction_approved': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction approved', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
   'attendance.correction_rejected': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction rejected', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
+  // Self-service leave: HR hears about a request; the employee (payload.userId) hears about the decision. Correction
+  // decisions above also reach the requester through payload.userId; /attendance sends an employee to /my/attendance.
+  'leave.requested': { category: 'APPROVAL', permission: 'leave.manage', title: (p) => `Leave request from ${String(p['employeeName'] ?? 'an employee')}`, body: (p) => `${String(p['leaveTypeName'] ?? 'Leave')} · ${String(p['startDate'] ?? '')} → ${String(p['endDate'] ?? '')}`, link: () => '/leave?status=PENDING' },
+  'leave.approved': { category: 'APPROVAL', permission: 'leave.request', recipients: 'user', title: (p) => `Leave approved: ${String(p['leaveTypeName'] ?? '')}`, body: (p) => `${String(p['startDate'] ?? '')} → ${String(p['endDate'] ?? '')}${p['decisionNote'] ? ` · ${String(p['decisionNote'])}` : ''}`, link: () => '/my/leave' },
+  'leave.rejected': { category: 'APPROVAL', permission: 'leave.request', recipients: 'user', title: (p) => `Leave not approved: ${String(p['leaveTypeName'] ?? '')}`, body: (p) => `${String(p['startDate'] ?? '')} → ${String(p['endDate'] ?? '')}${p['decisionNote'] ? ` · ${String(p['decisionNote'])}` : ''}`, link: () => '/my/leave' },
   // A report belongs to whoever asked for it. Routing by permission sent every report.view holder a notification (and
   // the report's title) for every report anyone in the organisation requested.
   'report.ready': { category: 'SYSTEM', permission: 'report.view', recipients: 'user', title: (p) => `Report ready: ${String(p['reportTitle'] ?? p['reportType'] ?? '')}`, link: () => '/reports' },
