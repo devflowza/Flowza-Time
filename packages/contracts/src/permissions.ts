@@ -4,7 +4,7 @@ export const PERMISSIONS = [
   'organization.view', 'organization.manage', 'integration.manage',
   'user.view', 'user.manage', 'role.manage',
   'branch.view', 'branch.manage', 'department.view', 'department.manage',
-  'employee.view', 'employee.view_sensitive', 'employee.create', 'employee.update', 'employee.delete', 'employee.import', 'employee.export',
+  'employee.view', 'employee.view_team', 'employee.view_sensitive', 'employee.create', 'employee.update', 'employee.delete', 'employee.import', 'employee.export',
   'device.view', 'device.create', 'device.update', 'device.manage', 'device.sync',
   'shift.view', 'shift.manage', 'shift.assign', 'shift.request_swap', 'holiday.view', 'holiday.manage',
   'leave.view', 'leave.manage', 'leave.request', 'leave.approve', 'leave.view_team',
@@ -38,8 +38,9 @@ export const SYSTEM_ROLE_IDS: Record<SystemRoleKey, string> = {
 /**
  * Team-scoped read keys: a holder sees the rows of their DIRECT reports (employees whose primary or secondary manager is
  * one of the holder's own employee records) through the RLS team predicate, without holding the organisation-wide key.
+ * `employee.view_team` opens the employee records themselves (the directory shows own record + direct reports).
  */
-export const TEAM_PERMISSIONS = ['attendance.view_team', 'leave.view_team'] as const satisfies readonly Permission[];
+export const TEAM_PERMISSIONS = ['employee.view_team', 'attendance.view_team', 'leave.view_team'] as const satisfies readonly Permission[];
 
 export function isPermission(value: string): value is Permission {
   return (PERMISSIONS as readonly string[]).includes(value);

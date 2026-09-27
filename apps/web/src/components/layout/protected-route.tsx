@@ -17,12 +17,15 @@ export function RequireAuth() {
 /**
  * `selfServiceTo`: where a member without the permission but linked to an employee record goes instead — the
  * self-service page for the same thing (e.g. /attendance → /my/attendance), so links in notifications keep working.
+ * `any`: one of the permissions is enough (e.g. an employee profile opens with `employee.view` or `employee.view_team`;
+ * the API and RLS decide which records each key reveals). Default: every permission is required.
  */
-export function RequirePermission({ permissions, children, selfServiceTo }: { permissions: Permission[]; children: React.ReactNode; selfServiceTo?: string }) {
+export function RequirePermission({ permissions, children, selfServiceTo, any = false }: { permissions: Permission[]; children: React.ReactNode; selfServiceTo?: string; any?: boolean }) {
   const { t } = useTranslation();
   const can = useCan();
   const employeeId = useEmployeeId();
-  if (!can(...permissions) && selfServiceTo && employeeId) return <Navigate to={selfServiceTo} replace />;
-  if (!can(...permissions)) return <div className="page-container"><EmptyState icon={ShieldOff} title={t('common.permissionDenied')} /></div>;
+  const allowed = any ? permissions.some((p) => can(p)) : can(...permissions);
+  if (!allowed && selfServiceTo && employeeId) return <Navigate to={selfServiceTo} replace />;
+  if (!allowed) return <div className="page-container"><EmptyState icon={ShieldOff} title={t('common.permissionDenied')} /></div>;
   return <>{children}</>;
 }

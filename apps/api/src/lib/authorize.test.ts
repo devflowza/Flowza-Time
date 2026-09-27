@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { MembershipGrant, Principal } from '@flowza/domain';
 import { AppError } from '@flowza/shared';
-import { isTeamMember, requireTeamOrPermission } from './authorize.js';
+import { isTeamMember, requireAnyPermission, requireTeamOrPermission } from './authorize.js';
 
 const ORG = '0a000000-0000-0000-0000-000000000000';
 const OTHER_ORG = '0b000000-0000-0000-0000-000000000000';
@@ -41,5 +41,16 @@ describe('requireTeamOrPermission', () => {
     const m = principal({ teamEmployeeIds: [REPORT] }).memberships[0]!;
     expect(isTeamMember(m, REPORT)).toBe(true);
     expect(isTeamMember(m, own)).toBe(false);
+  });
+});
+
+describe('requireAnyPermission', () => {
+  it('admits a holder of any one of the keys (the directory: employee.view OR employee.view_team)', () => {
+    expect(requireAnyPermission(principal({ permissions: ['employee.view_team'] }), ORG, 'employee.view', 'employee.view_team').membershipId).toBe('m1');
+    expect(requireAnyPermission(principal({ permissions: ['employee.view'] }), ORG, 'employee.view', 'employee.view_team').membershipId).toBe('m1');
+  });
+  it('refuses a member holding none of them, and a non-member whatever they hold elsewhere', () => {
+    expect(code(() => requireAnyPermission(principal({ permissions: ['attendance.view_own'] }), ORG, 'employee.view', 'employee.view_team'))).toBe('FORBIDDEN');
+    expect(code(() => requireAnyPermission(principal({ permissions: ['employee.view'] }), OTHER_ORG, 'employee.view', 'employee.view_team'))).toBe('FORBIDDEN');
   });
 });

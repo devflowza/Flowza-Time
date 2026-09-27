@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen } from '@testing-library/react';
+import { fireEvent, screen, within } from '@testing-library/react';
 import type { PermissionDto } from '@flowza/contracts';
+import i18n from '@/lib/i18n';
 import { renderWithProviders } from '@/features/employees/test-utils';
 import { PermissionMatrix } from './permission-matrix';
 
@@ -48,6 +49,34 @@ describe('PermissionMatrix', () => {
     expect(screen.getByRole('checkbox', { name: 'approval.manage' })).toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'leave.view_team' })).not.toBeChecked();
     expect(screen.getByRole('checkbox', { name: 'Toggle all approval permissions' })).toBeDisabled();
+  });
+  it('lists employee.view_team (line-manager directory scope) in the Employees group, grantable on its own, in en and ar', async () => {
+    const withTeam: PermissionDto[] = [
+      { key: 'employee.view', category: 'employees', description: 'View employees', sortOrder: 50 },
+      { key: 'employee.update', category: 'employees', description: 'Update employees and employment history', sortOrder: 53 },
+      { key: 'employee.view_team', category: 'employees', description: 'View the employee records of direct reports (line manager scope)', sortOrder: 57 },
+      { key: 'audit.view', category: 'audit', description: 'View audit log', sortOrder: 110 },
+    ];
+    const onChange = vi.fn();
+    const { rerender } = renderWithProviders(<PermissionMatrix permissions={withTeam} value={[]} onChange={onChange} grantable={new Set(['employee.view_team', 'audit.view'])} />);
+    const group = screen.getByRole('group', { name: 'Employees' });
+    // ordered by sort order inside the category, with the description the database carries
+    expect(within(group).getAllByRole('checkbox').map((c) => c.id)).toEqual(['grp-employees', 'perm-employee.view', 'perm-employee.update', 'perm-employee.view_team']);
+    expect(group).toHaveTextContent('View the employee records of direct reports');
+    expect(group).toHaveTextContent('0/3');
+    // an actor may hand out the team scope without holding the organisation-wide employee.view
+    expect(screen.getByRole('checkbox', { name: /^employee\.view\b/ })).toBeDisabled();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'employee.view_team' }));
+    expect(onChange).toHaveBeenCalledWith(['employee.view_team']);
+    await i18n.changeLanguage('ar');
+    try {
+      rerender(<PermissionMatrix permissions={withTeam} value={['employee.view_team']} readOnly />);
+      const ar = screen.getByRole('group', { name: 'الموظفون' });
+      expect(ar).toHaveTextContent('employee.view_team');
+      expect(ar).toHaveTextContent('1/3');
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
   it('unchecks a single permission and is inert when read-only', () => {
     const onChange = vi.fn();
