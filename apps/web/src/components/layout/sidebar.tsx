@@ -45,10 +45,13 @@ export function Sidebar() {
   const can = useCan();
   const { data: me } = useMe();
   const employeeId = useEmployeeId();
-  // Line manager: a member whose employee record has direct reports (/me: isManager) AND whose role may read those
-  // reports' records (employee.view_team, or the organisation-wide employee.view) — a relationship alone opens nothing
-  // (the RLS team predicate is key-gated), so without a key the section would only ever show an empty page.
-  const isManager = (useActiveMembership()?.isManager ?? false) && (can('employee.view_team') || can('employee.view'));
+  // Direct reports (/me: isManager) is a reporting RELATIONSHIP. The approval engine routes MANAGER steps to it whatever
+  // the manager's role, and the inbox is actor-scoped (membership only), so it alone opens Approvals.
+  const hasDirectReports = useActiveMembership()?.isManager ?? false;
+  // The "My team" workspace additionally needs a key that can read those reports' records (employee.view_team, or the
+  // organisation-wide employee.view) — the RLS team predicate is key-gated, so without one it would only ever show an
+  // empty page.
+  const isManager = hasDirectReports && (can('employee.view_team') || can('employee.view'));
 
   const sections: NavSection[] = [
     { items: [{ to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, permissions: ['dashboard.view'] }] },
@@ -65,7 +68,7 @@ export function Sidebar() {
       { to: '/attendance', label: t('nav.attendance'), icon: Activity, permissions: ['attendance.view'] },
       { to: '/corrections', label: t('nav.corrections'), icon: ClipboardList, permissions: ['attendance.view'] },
       // engine v2: approvers of attendance or leave, approval admins and line managers (their team's requests)
-      { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || isManager },
+      { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || hasDirectReports },
       { to: '/leave', label: t('nav.leave'), icon: CalendarOff, permissions: ['leave.view'] },
     ] },
     { label: t('nav.sections.devices'), items: [
