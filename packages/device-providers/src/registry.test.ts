@@ -7,8 +7,10 @@ import { defineProvider } from './definition.js';
 import { createMockProvider } from './providers/mock/mock-provider.js';
 import { ProviderError } from './types.js';
 
-const EXPECTED_KEYS = ['mock', 'zkteco_push', 'zkteco_biotime', 'hikvision_isapi', 'hikvision_hpp', 'suprema_biostar2', 'anviz_crosschex_cloud', 'essl_push', 'fingertec_push', 'matrix_cosec', 'nitgen'];
-const SQL_PATH = resolve(import.meta.dirname, '../../../supabase/migrations/20260905001600_reference_data.sql');
+const EXPECTED_KEYS = ['mock', 'flowza_finance', 'zkteco_push', 'zkteco_biotime', 'hikvision_isapi', 'hikvision_hpp', 'suprema_biostar2', 'anviz_crosschex_cloud', 'essl_push', 'fingertec_push', 'matrix_cosec', 'nitgen'];
+// Reference rows live in the original reference-data migration plus every later migration that seeds a provider (the Flowza
+// Finance connector arrived with its own migration); each file carries at most one `insert into public.device_providers` block.
+const SQL_PATHS = ['20260905001600_reference_data.sql', '20260928000400_finance_connector.sql'].map((f) => resolve(import.meta.dirname, '../../../supabase/migrations', f));
 
 type SqlValue = string | number | null;
 /** Minimal tokenizer for the `insert into … values (…),(…)` block of the reference-data migration. */
@@ -40,7 +42,7 @@ function parseInsertRows(sql: string, table: string): SqlValue[][] {
 }
 const COLS = ['key', 'vendor', 'name', 'description', 'integration_type', 'status', 'capabilities', 'config_schema', 'throttling', 'verification_status', 'docs_url', 'sort_order'] as const;
 function referenceRows(): Map<string, Record<(typeof COLS)[number], SqlValue>> {
-  const rows = parseInsertRows(readFileSync(SQL_PATH, 'utf8'), 'device_providers');
+  const rows = SQL_PATHS.flatMap((p) => parseInsertRows(readFileSync(p, 'utf8'), 'device_providers'));
   const out = new Map<string, Record<(typeof COLS)[number], SqlValue>>();
   for (const r of rows) {
     expect(r).toHaveLength(COLS.length);
@@ -86,7 +88,7 @@ describe('secretFieldsOf', () => {
   });
 });
 
-describe('definitionToRow ⇄ reference data (supabase/migrations/*_reference_data.sql)', () => {
+describe('definitionToRow ⇄ reference data (the provider-seeding migrations)', () => {
   const ref = referenceRows();
   const reg = defaultRegistry();
 
