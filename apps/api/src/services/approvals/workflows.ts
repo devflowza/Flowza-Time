@@ -45,7 +45,8 @@ const stepsJson = (steps: ApprovalWorkflowInput['steps']) => JSON.stringify(step
 export async function listWorkflows(deps: ApiDeps, actor: Actor, orgId: string): Promise<ApprovalWorkflowDto[]> {
   const grant = requireMembership(actor.principal, orgId);
   if (!['attendance.view', 'leave.view', 'approval.manage', 'organization.manage'].some((p) => hasPermission(grant, p as never))) throw errors.forbidden('Missing permission: approval.manage.');
-  return runUser(deps.db, actor, async (trx) => (await trx.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).orderBy('entityType').orderBy('name').execute()).map((w) => toWorkflowDto(w as WorkflowRow)));
+  // archived (deleted) workflows stay in the table so the requests they governed keep their name; they are not listed
+  return runUser(deps.db, actor, async (trx) => (await trx.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).where('status', '!=', 'archived').orderBy('entityType').orderBy('name').execute()).map((w) => toWorkflowDto(w as WorkflowRow)));
 }
 
 export async function createWorkflow(deps: ApiDeps, actor: Actor, orgId: string, input: ApprovalWorkflowInput): Promise<ApprovalWorkflowDto> {
@@ -63,7 +64,7 @@ export async function createWorkflow(deps: ApiDeps, actor: Actor, orgId: string,
 export async function updateWorkflow(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<ApprovalWorkflowInput>): Promise<ApprovalWorkflowDto> {
   const grant = requireConfigure(actor, orgId);
   return runUser(deps.db, actor, async (trx) => {
-    const before = await trx.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
+    const before = await trx.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).where('id', '=', id).where('status', '!=', 'archived').executeTakeFirst();
     if (!before) throw errors.notFound('Approval workflow', id);
     requireBranchAccess(grant, before.branchId);
     if (input.branchId !== undefined) requireBranchAccess(grant, input.branchId);
@@ -84,10 +85,12 @@ export async function updateWorkflow(deps: ApiDeps, actor: Actor, orgId: string,
 export async function deleteWorkflow(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
   const grant = requireConfigure(actor, orgId);
   return runUser(deps.db, actor, async (trx) => {
-    const w = await trx.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
+    const w = await trx.selectFrom('approvalWorkflows').selectAll().where('organizationId', '=', orgId).where('id', '=', id).where('status', '!=', 'archived').executeTakeFirst();
     if (!w) throw errors.notFound('Approval workflow', id);
     requireBranchAccess(grant, w.branchId);
-    await trx.deleteFrom('approvalWorkflows').where('id', '=', id).execute();
+    // soft delete (Finance B-83): the row stays, archived, so every request it governed keeps its workflow; pending requests
+    // keep the levels they were given at submit — only new submissions stop using it
+    await trx.updateTable('approvalWorkflows').set({ status: 'archived', isDefault: false, updatedAt: new Date() }).where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'approval_workflow.deleted', 'approval_workflow', { entityId: id, branchId: w.branchId, oldValue: toWorkflowDto(w as WorkflowRow) });
   });
 }

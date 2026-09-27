@@ -5,7 +5,7 @@
  */
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { issueApprovalEmailTokens } from '@flowza/database';
-import { createApiHarness, domainEvents, isoToday, queueJobs, ROLE, seedEmployee, seedMembership, seedOrg, seedUser, uuid, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
+import { auditRows, createApiHarness, domainEvents, isoToday, queueJobs, ROLE, seedEmployee, seedMembership, seedOrg, seedUser, uuid, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
 let h: ApiHarness; let f: OrgFixture;
@@ -97,6 +97,12 @@ describe('workflows v2', () => {
     expect(patched.body.data.steps).toHaveLength(2);
     expect((await h.request('GET', `${base()}/approval-workflows`, { token: lineManager })).status).toBe(403);
     expect((await h.request('DELETE', `${base()}/approval-workflows/${created.body.data.id}`, { token: f.hrAdmin })).status).toBe(204);
+    // soft delete (B-83): archived, no longer listed, no longer editable, the row stays for the requests it governed
+    const row = await h.admin.selectFrom('approvalWorkflows').select(['status', 'isDefault']).where('id', '=', created.body.data.id).executeTakeFirstOrThrow();
+    expect(row).toEqual({ status: 'archived', isDefault: false });
+    expect((await h.request('GET', `${base()}/approval-workflows`, { token: f.hrAdmin })).body.data.map((w: { id: string }) => w.id)).not.toContain(created.body.data.id);
+    expect((await h.request('PATCH', `${base()}/approval-workflows/${created.body.data.id}`, { token: f.hrAdmin, body: { name: 'revived' } })).status).toBe(404);
+    expect((await h.request('DELETE', `${base()}/approval-workflows/${created.body.data.id}`, { token: f.hrAdmin })).status).toBe(404);
   });
 });
 
@@ -206,8 +212,10 @@ describe('decisions', () => {
     expect(done.body.data.status).toBe('APPROVED');
     const leave = await h.admin.selectFrom('leaveRecords').select(['status', 'approvedBy', 'decisionNote']).where('id', '=', r.body.data.id).executeTakeFirstOrThrow();
     expect(leave).toEqual({ status: 'APPROVED', approvedBy: f.hrAdmin, decisionNote: 'Approved' });
-    const decided = (await domainEvents(h.admin, 'approval.decided')).find((e) => e.aggregateId === id);
-    expect((decided?.payload as Record<string, unknown>)['userIds']).toEqual([staff5]);
+    // the employee hears once, through the leave-specific notice (the engine leaves the subject out of approval.decided)
+    expect((await domainEvents(h.admin, 'approval.decided')).find((e) => e.aggregateId === id)).toBeUndefined();
+    const announced = (await domainEvents(h.admin, 'leave.approved')).filter((e) => e.aggregateId === r.body.data.id);
+    expect(announced.map((e) => (e.payload as Record<string, unknown>)['userId'])).toEqual([staff5]);
   });
 
   it('an attendance.approve holder with organisation-wide view may decide any step (logged override); a line manager only for their team', async () => {
@@ -377,6 +385,68 @@ describe('reassign, ask for info, cancel', () => {
   });
 });
 
+describe('bulk decisions (ATT-95)', () => {
+  it('decides each request through the engine in its own transaction and reports one line per request', async () => {
+    await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'HR_ADMIN' }]);
+    const a = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
+    const b = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
+    // a correction about hrLinked's own record: segregation of duties refuses it to them, and only to them
+    const own = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrAdmin, body: correction(e6) });
+    const ids = [a, b, own].map((x) => x.body.data.approvalRequestId as string);
+    expect(ids.every((x) => typeof x === 'string')).toBe(true);
+    expect((await h.request('POST', `${base()}/approvals/bulk-decide`, { token: hrLinked, body: { requestIds: ids, decision: 'REJECT' } })).status).toBe(400);
+    const res = await h.request('POST', `${base()}/approvals/bulk-decide`, { token: hrLinked, body: { requestIds: ids, decision: 'APPROVE', comment: 'Checked the logs' } });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ succeeded: 2, failed: 1 });
+    expect(res.body.data.results.slice(0, 2)).toEqual(ids.slice(0, 2).map((requestId) => ({ requestId, ok: true, status: 'APPROVED', noop: false, code: null, message: null })));
+    expect(res.body.data.results[2]).toMatchObject({ requestId: ids[2], ok: false, status: null, code: 'FORBIDDEN' });
+    const statuses = await h.admin.selectFrom('approvalRequests').select(['id', 'status']).where('id', 'in', ids).execute();
+    expect(Object.fromEntries(statuses.map((x) => [x.id, x.status]))).toEqual({ [ids[0]!]: 'APPROVED', [ids[1]!]: 'APPROVED', [ids[2]!]: 'PENDING' });
+    expect(await eventsOf(ids[0]!)).toEqual(['submitted', 'step_approved', 'approved']);
+    // a closed request is refused per line, the rest of the batch is unaffected
+    const again = await h.request('POST', `${base()}/approvals/bulk-decide`, { token: hrLinked, body: { requestIds: [ids[0]], decision: 'APPROVE' } });
+    expect(again.body.data).toMatchObject({ succeeded: 0, failed: 1, results: [{ requestId: ids[0], ok: false, code: 'INVALID_STATE' }] });
+    expect((await h.request('POST', `${base()}/approvals/bulk-decide`, { token: f.employeeUser, body: { requestIds: [ids[2]], decision: 'APPROVE' } })).body.data.results[0]).toMatchObject({ ok: false, code: 'FORBIDDEN' });
+  });
+});
+
+describe('approve as an exception (B-99)', () => {
+  it('approval.manage approves with a mandatory reason: open levels skipped, the document approved, the waiting approvers told — never on their own request', async () => {
+    await workflow('LEAVE', [{ order: 1, approverType: 'MANAGER' }, { order: 2, approverType: 'HR_ADMIN' }]);
+    const r = await h.request('POST', `${base()}/me/leave`, { token: staff5, body: { leaveTypeId, ...nextRange(2), reason: 'Exception' } });
+    expect(r.status).toBe(201);
+    const id = r.body.data.approvalRequestId as string;
+    expect((await h.request('POST', `${base()}/approvals/${id}/bypass`, { token: f.hrAdmin, body: {} })).status).toBe(400);
+    expect((await h.request('POST', `${base()}/approvals/${id}/bypass`, { token: f.hrUser, body: { reason: 'Urgent travel' } })).status).toBe(403);
+    expect((await h.request('POST', `${base()}/approvals/${id}/bypass`, { token: lineManager, body: { reason: 'Urgent travel' } })).status).toBe(403);
+    expect((await h.request('GET', `${base()}/approvals/${id}`, { token: f.hrAdmin })).body.data.abilities.canBypass).toBe(true);
+    expect((await h.request('GET', `${base()}/approvals/${id}`, { token: lineManager })).body.data.abilities.canBypass).toBe(false);
+    expect((await h.request('GET', `${base()}/approvals/${id}`, { token: staff5 })).body.data.abilities.canBypass).toBe(false);
+
+    const res = await h.request('POST', `${base()}/approvals/${id}/bypass`, { token: f.hrAdmin, body: { reason: 'Family emergency, confirmed by phone' } });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toMatchObject({ status: 'APPROVED', decidedBy: f.hrAdmin });
+    expect(res.body.data.steps.map((st: { status: string }) => st.status)).toEqual(['SKIPPED', 'SKIPPED']);
+    expect(await eventsOf(id)).toEqual(['submitted', 'bypassed']);
+    const leave = await h.admin.selectFrom('leaveRecords').select('status').where('id', '=', r.body.data.id).executeTakeFirstOrThrow();
+    expect(leave.status).toBe('APPROVED');
+    const notice = (await domainEvents(h.admin, 'approval.bypassed')).find((e) => e.aggregateId === id);
+    expect((notice?.payload as Record<string, unknown>)['userIds']).toEqual([lineManager]);
+    expect((await domainEvents(h.admin, 'approval.decided')).find((e) => e.aggregateId === id)).toBeUndefined();
+    expect((await domainEvents(h.admin, 'leave.approved')).filter((e) => e.aggregateId === r.body.data.id).map((e) => (e.payload as Record<string, unknown>)['userId'])).toEqual([staff5]);
+    expect((await auditRows(h.admin, 'approval.bypassed')).some((a) => (a as { entityId?: string }).entityId === id)).toBe(true);
+    expect((await h.request('POST', `${base()}/approvals/${id}/bypass`, { token: f.hrAdmin, body: { reason: 'Once more' } })).status).toBe(409);
+
+    // an HR admin cannot push their own request through
+    const own = await h.request('POST', `${base()}/leave-records`, { token: hrLinked, body: { employeeId: e6, leaveTypeId, ...nextRange(1) } });
+    const ownId = (await h.admin.selectFrom('leaveRecords').select('approvalRequestId').where('id', '=', own.body.data.id).executeTakeFirstOrThrow()).approvalRequestId!;
+    expect((await h.request('GET', `${base()}/approvals/${ownId}`, { token: hrLinked })).body.data.abilities.canBypass).toBe(false);
+    const self = await h.request('POST', `${base()}/approvals/${ownId}/bypass`, { token: hrLinked, body: { reason: 'I need it' } });
+    expect(self.status).toBe(403);
+    expect(self.body.message).toMatch(/your own request/);
+  });
+});
+
 describe('one-click e-mail tokens', () => {
   it('are single-use, bound to the recipient, expire, and still obey every decision rule', async () => {
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'USER', userId: f.hrAdmin }]);
@@ -432,6 +502,39 @@ describe('inbox', () => {
     const detail = await h.request('GET', `${base()}/approvals/${id}`, { token: staff5 });
     expect(detail.status).toBe(200);
     expect(detail.body.data.events.map((e: { kind: string }) => e.kind)).toEqual(['submitted', 'step_approved', 'approved']);
+  });
+
+  it('searches by employee name or number, and exports History as CSV — report.export only, audited, formula-escaped, per-level audit lines', async () => {
+    await workflow('LEAVE', [{ order: 1, approverType: 'HR_ADMIN' }]);
+    const e10 = await seedEmployee(h.admin, f.orgId, f.branchA, 10);
+    await h.admin.updateTable('employees').set({ displayName: '=cmd|calc' }).where('id', '=', e10).execute();
+    const staff10 = uuid('c');
+    await seedUser(h.admin, staff10, 'staff10-appr@test.local', 'Staff Ten');
+    await seedMembership(h.admin, f.orgId, staff10, ROLE.employee, { employeeId: e10 });
+    const r = await h.request('POST', `${base()}/me/leave`, { token: staff10, body: { leaveTypeId, ...nextRange(1), reason: 'Search me' } });
+    const id = r.body.data.approvalRequestId as string;
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', comment: 'ok' } })).status).toBe(200);
+
+    const found = await h.request('GET', `${base()}/approvals?view=history&scope=all&search=EMP10`, { token: f.hrAdmin });
+    expect(found.status).toBe(200);
+    expect(found.body.data.map((x: { id: string }) => x.id)).toEqual([id]);
+    expect((await h.request('GET', `${base()}/approvals?view=history&scope=all&search=calc`, { token: f.hrAdmin })).body.data.map((x: { id: string }) => x.id)).toEqual([id]);
+    expect((await h.request('GET', `${base()}/approvals?view=history&scope=all&search=nobody-by-that-name`, { token: f.hrAdmin })).body.data).toEqual([]);
+
+    const csv = await h.request('GET', `${base()}/approvals/history/export?scope=all&entityType=LEAVE&search=EMP10`, { token: f.hrAdmin });
+    expect(csv.status).toBe(200);
+    expect(csv.headers.get('content-type')).toMatch(/text\/csv/);
+    expect(csv.headers.get('content-disposition')).toMatch(/attachment; filename="approvals-history-/);
+    const lines = csv.text.replace(/^\uFEFF/, '').trim().split('\r\n');
+    expect(lines[0]).toBe('Request,Type,Employee,Employee number,Requested by,Submitted,Outcome,Decided by,Closed,Workflow,Levels,Reason');
+    expect(lines).toHaveLength(2);
+    expect(lines[1]).toContain(`${id},LEAVE,'=cmd|calc,EMP10,Staff Ten,`);
+    expect(lines[1]).toContain('Approved');
+    expect(lines[1]).toMatch(/L1 HR_ADMIN ANY: Approved — .*: Approved .*"+ok"+/);
+    const audited = (await auditRows(h.admin, 'approval.history_exported'))[0] as { newValue: Record<string, unknown> } | undefined;
+    expect(audited?.newValue).toMatchObject({ rowCount: 1, scope: 'all', entityType: 'LEAVE' });
+    expect((await h.request('GET', `${base()}/approvals/history/export`, { token: lineManager })).status).toBe(403);
+    expect((await h.request('GET', `${base()}/approvals/history/export?scope=all`, { token: staff10 })).status).toBe(403);
   });
 
   it('resolves every display name in the organisation scope — a team approver who cannot read employees still sees who, who asked and who decides', async () => {

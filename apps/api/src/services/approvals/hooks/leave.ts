@@ -47,6 +47,7 @@ export const leaveHook: EntityHook = {
   entityType: 'LEAVE',
   approvePermission: 'leave.approve',
   viewPermission: 'leave.view',
+  notifiesSubject: true,
   async onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext) {
     const l = await trx.updateTable('leaveRecords').set({ status: 'APPROVED', approvedBy: ctx.actor.userId, approvedAt: new Date(), ...(ctx.comment ? { decisionNote: ctx.comment } : {}) })
       .where('organizationId', '=', ctx.orgId).where('id', '=', ctx.entityId).where('status', '=', 'PENDING')

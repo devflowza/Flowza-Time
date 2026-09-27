@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Check, HelpCircle, MessageSquareReply, Undo2, UserRoundCog, X } from 'lucide-react';
+import { Check, CheckCheck, HelpCircle, MessageSquareReply, Undo2, UserRoundCog, X } from 'lucide-react';
 import type { ApprovalRequestDto, ApprovalStepDto, ApprovalTimelineEventDto } from '@flowza/contracts';
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, FormField, Skeleton, Textarea } from '@/components/ui';
 import { Combobox } from '@/components/forms';
@@ -14,10 +14,10 @@ import { modeText, pathText } from '../labels';
 import { ApprovalContext, EntityIcon, LevelLabel, RequestStatusBadge } from './parts';
 
 /** A small text prompt (ask for information, answer, withdraw reason). */
-function TextPrompt({ open, title, hint, label, placeholder, required, loading, confirmLabel, destructive, onSubmit, onClose }: { open: boolean; title: string; hint: string; label: string; placeholder?: string; required: boolean; loading: boolean; confirmLabel: string; destructive?: boolean; onSubmit: (text: string) => void; onClose: () => void }) {
+function TextPrompt({ open, title, hint, label, placeholder, required, minLength = 1, loading, confirmLabel, destructive, onSubmit, onClose }: { open: boolean; title: string; hint: string; label: string; placeholder?: string; required: boolean; minLength?: number; loading: boolean; confirmLabel: string; destructive?: boolean; onSubmit: (text: string) => void; onClose: () => void }) {
   const { t: tc } = useTranslation();
   const [text, setText] = useState('');
-  const missing = required && text.trim().length === 0;
+  const missing = required && text.trim().length < minLength;
   return (
     <Dialog open={open} onOpenChange={(o) => !o && onClose()}>
       <DialogContent size="sm">
@@ -125,9 +125,9 @@ export function RequestDetail({ requestId }: { requestId: string }) {
   const { t } = useTranslation('approvals');
   const tz = useOrgTimezone();
   const q = useApprovalRequest(requestId);
-  const { cancel, requestInfo, answerInfo } = useApprovalMutations();
+  const { cancel, requestInfo, answerInfo, bypass } = useApprovalMutations();
   const [decision, setDecision] = useState<DecisionKind | null>(null);
-  const [prompt, setPrompt] = useState<'ask' | 'answer' | 'withdraw' | null>(null);
+  const [prompt, setPrompt] = useState<'ask' | 'answer' | 'withdraw' | 'bypass' | null>(null);
   const [reassigning, setReassigning] = useState(false);
   if (q.isLoading) return <div className="space-y-3"><Skeleton className="h-16 w-full" /><Skeleton className="h-40 w-full" /></div>;
   if (q.isError) return (q.error as { status?: number }).status === 404 ? <EmptyState title={t('detail.notFound')} /> : <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
@@ -155,12 +155,13 @@ export function RequestDetail({ requestId }: { requestId: string }) {
 
       <div className="rounded-md border bg-muted/30 p-3"><ApprovalContext context={r.context} timezone={tz} /></div>
 
-      {pending && (a.canDecide || a.canRequestInfo || a.canAnswerInfo || a.canReassign || a.canCancel) ? (
+      {pending && (a.canDecide || a.canRequestInfo || a.canAnswerInfo || a.canReassign || a.canBypass || a.canCancel) ? (
         <div className="flex flex-wrap gap-2">
           {a.canDecide ? <><Button size="sm" onClick={() => setDecision('APPROVE')}><Check /> {t('actions.approve')}</Button><Button size="sm" variant="outline" onClick={() => setDecision('REJECT')}><X /> {t('actions.reject')}</Button></> : null}
           {a.canRequestInfo ? <Button size="sm" variant="outline" onClick={() => setPrompt('ask')}><HelpCircle /> {t('actions.askInfo')}</Button> : null}
           {a.canAnswerInfo && r.infoRequestedAt ? <Button size="sm" variant="outline" onClick={() => setPrompt('answer')}><MessageSquareReply /> {t('actions.answer')}</Button> : null}
           {a.canReassign ? <Button size="sm" variant="outline" onClick={() => setReassigning(true)}><UserRoundCog /> {t('actions.reassign')}</Button> : null}
+          {a.canBypass ? <Button size="sm" variant="outline" onClick={() => setPrompt('bypass')}><CheckCheck /> {t('actions.bypass')}</Button> : null}
           {a.canCancel ? <Button size="sm" variant="ghost" className="text-destructive" onClick={() => setPrompt('withdraw')}><Undo2 /> {t('actions.withdraw')}</Button> : null}
         </div>
       ) : null}
@@ -180,6 +181,8 @@ export function RequestDetail({ requestId }: { requestId: string }) {
         onSubmit={(comment) => requestInfo.mutate({ requestId: r.id, comment }, { onSuccess: () => { toast.success(t('info.asked')); closePrompt(); }, onError: toastError })} />
       <TextPrompt key={`answer-${prompt}`} open={prompt === 'answer'} title={t('info.answerTitle')} hint={t('info.answerHint')} label={t('decision.comment')} placeholder={t('info.placeholder')} required loading={answerInfo.isPending} confirmLabel={t('actions.answer')} onClose={closePrompt}
         onSubmit={(comment) => answerInfo.mutate({ requestId: r.id, comment }, { onSuccess: () => { toast.success(t('info.answered')); closePrompt(); }, onError: toastError })} />
+      <TextPrompt key={`bypass-${prompt}`} open={prompt === 'bypass'} title={t('bypass.title')} hint={t('bypass.hint')} label={t('bypass.reason')} placeholder={t('bypass.placeholder')} required minLength={3} loading={bypass.isPending} confirmLabel={t('actions.bypass')} onClose={closePrompt}
+        onSubmit={(reason) => bypass.mutate({ requestId: r.id, reason }, { onSuccess: () => { toast.success(t('bypass.done')); closePrompt(); }, onError: toastError })} />
       <TextPrompt key={`withdraw-${prompt}`} open={prompt === 'withdraw'} title={t('withdraw.title')} hint={t('withdraw.hint')} label={t('withdraw.reason')} required={false} loading={cancel.isPending} confirmLabel={t('actions.withdraw')} destructive onClose={closePrompt}
         onSubmit={(reason) => cancel.mutate({ requestId: r.id, reason }, { onSuccess: () => { toast.success(t('withdraw.done')); closePrompt(); }, onError: toastError })} />
     </div>

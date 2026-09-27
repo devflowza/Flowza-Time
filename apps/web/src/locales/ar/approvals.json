@@ -33,7 +33,9 @@
     "answer": "رد",
     "reassign": "إعادة إسناد",
     "delegations": "التفويضات",
-    "workflows": "مسارات الموافقة"
+    "workflows": "مسارات الموافقة",
+    "bypass": "اعتماد استثنائي",
+    "exportCsv": "تصدير CSV"
   },
   "inbox": {
     "empty": "لا شيء ينتظرك",
@@ -49,7 +51,8 @@
     "delegateOf": "نيابةً عن {{name}}",
     "waitingForAnswer": "بانتظار رد",
     "delegateBanner": "أنت تغطي موافقات {{names}} اليوم.",
-    "notYourTurn": "ليس بانتظارك"
+    "notYourTurn": "ليس بانتظارك",
+    "searchPlaceholder": "ابحث باسم الموظف أو رقمه"
   },
   "entity": {
     "ATTENDANCE_CORRECTION": "تصحيح حضور",
@@ -69,7 +72,7 @@
     "APPROVED": "موافق عليه",
     "REJECTED": "مرفوض",
     "CANCELLED": "مسحوب",
-    "INVALIDATED": "ملغى الصلاحية",
+    "INVALIDATED": "مُستبدَل",
     "SKIPPED": "متخطى"
   },
   "level": "المستوى {{n}} من {{count}}",
@@ -149,7 +152,7 @@
     "waiting": "بالانتظار",
     "infoRequested": "طلب أحد المعتمدين معلومات إضافية.",
     "cancelReason": "سُحب: {{reason}}",
-    "invalidationReason": "أُلغيت صلاحيته: {{reason}}",
+    "invalidationReason": "مُستبدَل: {{reason}}",
     "system": "النظام",
     "nobody": "—",
     "noEvents": "لا توجد أحداث بعد"
@@ -165,7 +168,7 @@
     "approved": "تمت الموافقة",
     "rejected": "رُفض",
     "cancelled": "سُحب",
-    "invalidated": "أُلغيت صلاحيته — تغيّر المستند أثناء الانتظار",
+    "invalidated": "مُستبدَل — تغيّر المستند أثناء انتظار الاعتماد",
     "reassigned": "أعيد إسناده",
     "info_requested": "طُلبت معلومات",
     "info_answered": "تم الرد",
@@ -173,7 +176,8 @@
     "sod_owner_bypass": "قرّر المالك طلبًا يخصّه",
     "escalated": "صُعّد — تأخر البت في المستوى",
     "reminded": "أُرسل تذكير",
-    "unknown": "تحديث"
+    "unknown": "تحديث",
+    "bypassed": "اعتُمد استثنائيًا — تم تجاوز المستويات المفتوحة"
   },
   "info": {
     "askTitle": "طلب معلومات",
@@ -321,5 +325,27 @@
     "active": "نشط",
     "inactive": "غير نشط",
     "archived": "مؤرشف"
+  },
+  "bypass": {
+    "title": "اعتماد الطلب استثنائيًا",
+    "hint": "يعتمد الطلب الآن ويتجاوز كل المستويات التي لم تُحسم بعد. يُبلَّغ المعتمدون الذين كانوا بانتظاره، ويُحفظ السبب في السجل الزمني وسجل التدقيق.",
+    "reason": "السبب",
+    "placeholder": "لماذا لا يمكن انتظار المعتمدين في هذا الطلب",
+    "done": "تم الاعتماد استثنائيًا"
+  },
+  "bulk": {
+    "approveSelected": "اعتماد المحدد",
+    "approved_zero": "لم يُعتمد أي طلب",
+    "approved_one": "اعتُمد طلب واحد",
+    "approved_two": "اعتُمد طلبان",
+    "approved_few": "اعتُمدت {{count}} طلبات",
+    "approved_many": "اعتُمد {{count}} طلبًا",
+    "approved_other": "اعتُمد {{count}} طلب",
+    "refused_zero": "لا طلبات مرفوضة",
+    "refused_one": "تعذّر اعتماد طلب واحد",
+    "refused_two": "تعذّر اعتماد طلبين",
+    "refused_few": "تعذّر اعتماد {{count}} طلبات",
+    "refused_many": "تعذّر اعتماد {{count}} طلبًا",
+    "refused_other": "تعذّر اعتماد {{count}} طلب"
   }
 }

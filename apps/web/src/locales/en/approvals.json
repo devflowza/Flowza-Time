@@ -33,7 +33,9 @@
     "answer": "Answer",
     "reassign": "Reassign",
     "delegations": "Delegations",
-    "workflows": "Workflows"
+    "workflows": "Workflows",
+    "bypass": "Approve as exception",
+    "exportCsv": "Export CSV"
   },
   "inbox": {
     "empty": "Nothing waiting for you",
@@ -49,7 +51,8 @@
     "delegateOf": "On behalf of {{name}}",
     "waitingForAnswer": "Waiting for an answer",
     "delegateBanner": "You are covering approvals for {{names}} today.",
-    "notYourTurn": "Not waiting for you"
+    "notYourTurn": "Not waiting for you",
+    "searchPlaceholder": "Search employee name or number"
   },
   "entity": {
     "ATTENDANCE_CORRECTION": "Attendance correction",
@@ -69,7 +72,7 @@
     "APPROVED": "Approved",
     "REJECTED": "Rejected",
     "CANCELLED": "Withdrawn",
-    "INVALIDATED": "Invalidated",
+    "INVALIDATED": "Superseded",
     "SKIPPED": "Skipped"
   },
   "level": "Level {{n}} of {{count}}",
@@ -145,7 +148,7 @@
     "waiting": "Waiting",
     "infoRequested": "An approver asked for more information.",
     "cancelReason": "Withdrawn: {{reason}}",
-    "invalidationReason": "Invalidated: {{reason}}",
+    "invalidationReason": "Superseded: {{reason}}",
     "system": "System",
     "nobody": "—",
     "noEvents": "No events yet"
@@ -161,7 +164,7 @@
     "approved": "Approved",
     "rejected": "Rejected",
     "cancelled": "Withdrawn",
-    "invalidated": "Invalidated — the document changed while pending",
+    "invalidated": "Superseded — the document changed while pending",
     "reassigned": "Reassigned",
     "info_requested": "Asked for information",
     "info_answered": "Answered",
@@ -169,7 +172,8 @@
     "sod_owner_bypass": "The owner decided a request about themselves",
     "escalated": "Escalated — the level was overdue",
     "reminded": "Reminder sent",
-    "unknown": "Updated"
+    "unknown": "Updated",
+    "bypassed": "Approved as an exception — the open levels were skipped"
   },
   "info": {
     "askTitle": "Ask for information",
@@ -317,5 +321,19 @@
     "active": "Active",
     "inactive": "Inactive",
     "archived": "Archived"
+  },
+  "bypass": {
+    "title": "Approve as an exception",
+    "hint": "Approves the request now and skips every level still open. The approvers who were waiting are told, and the reason is kept in the timeline and the audit log.",
+    "reason": "Reason",
+    "placeholder": "Why this request cannot wait for its approvers",
+    "done": "Approved as an exception"
+  },
+  "bulk": {
+    "approveSelected": "Approve selected",
+    "approved_one": "{{count}} request approved",
+    "approved_other": "{{count}} requests approved",
+    "refused_one": "{{count}} request could not be approved",
+    "refused_other": "{{count}} requests could not be approved"
   }
 }

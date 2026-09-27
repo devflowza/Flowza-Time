@@ -104,7 +104,7 @@ describe('MyLeavePage — approval engine', () => {
     const req = approvalRequest({
       id: 'req-9', entityType: 'LEAVE', employeeName: 'Priya Sharma', requestedBy: 'u1', requestedByName: 'Priya Sharma', subjectUserId: 'u1', currentStep: 2, stepCount: 2, context: leaveContext(),
       steps: [approvalStep({ requestId: 'req-9', status: 'APPROVED', actors: [{ userId: 'u5', userName: 'Mansoor', viaDelegationOf: null, viaDelegationOfName: null, resolutionPath: 'primary', decision: 'APPROVED', decidedAt: '2026-09-21T06:00:00Z', comment: 'Fine' }] }), approvalStep({ id: 'step-2', requestId: 'req-9', stepNo: 2, approverType: 'HR_ADMIN', resolutionPath: 'hr_admin', actors: [{ userId: 'u6', userName: 'Fatma', viaDelegationOf: null, viaDelegationOfName: null, resolutionPath: 'hr_admin', decision: 'PENDING', decidedAt: null, comment: null }] })],
-      abilities: { canDecide: false, canCancel: true, canReassign: false, canRequestInfo: false, canAnswerInfo: false, actingAsDelegateOf: null },
+      abilities: { canDecide: false, canCancel: true, canReassign: false, canBypass: false, canRequestInfo: false, canAnswerInfo: false, actingAsDelegateOf: null },
       events: [{ id: '1', at: '2026-09-20T06:00:00Z', actorUserId: 'u1', actorName: 'Priya Sharma', kind: 'submitted', detail: {} }, { id: '2', at: '2026-09-21T06:00:00Z', actorUserId: 'u5', actorName: 'Mansoor', kind: 'step_approved', detail: { stepNo: 1, comment: 'Fine' } }],
     });
     mockGet({ '/orgs/org-1/me/leave': { data: leaveData([pendingTwoLevels]) }, '/orgs/org-1/approvals/req-9': { data: req } });

@@ -1,7 +1,9 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ApprovalDecideResultDto, ApprovalDelegationDto, ApprovalDelegationInput, ApprovalEntity, ApprovalInboxScope, ApprovalRequestDto, ApprovalWorkflowDto, ApprovalWorkflowInput } from '@flowza/contracts';
+import type { ApprovalBulkDecideResultDto, ApprovalDecideResultDto, ApprovalDelegationDto, ApprovalDelegationInput, ApprovalEntity, ApprovalInboxScope, ApprovalRequestDto, ApprovalWorkflowDto, ApprovalWorkflowInput } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
+import { env } from '@/lib/env';
 import { qk } from '@/lib/query-keys';
+import { supabase } from '@/lib/supabase';
 import { useActiveMembership, useCan, useOrgId } from '@/features/me/use-me';
 
 export type ListQuery = Record<string, string | number | boolean | undefined>;
@@ -20,11 +22,11 @@ export function invalidateApprovalViews(qc: ReturnType<typeof useQueryClient>, o
   void qc.invalidateQueries({ queryKey: ['dashboard', orgId] });
 }
 
-export interface InboxQuery { scope: ApprovalInboxScope; view: InboxView; entityType?: ApprovalEntity | undefined; page: number; pageSize: number }
+export interface InboxQuery { scope: ApprovalInboxScope; view: InboxView; entityType?: ApprovalEntity | undefined; search?: string | undefined; page: number; pageSize: number }
 
 export function useApprovalInbox(query: InboxQuery, enabled = true) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, INBOX, query), queryFn: () => api.get<PageEnvelope<ApprovalRequestDto>>(`/orgs/${orgId}/approvals`, { ...query, entityType: query.entityType || undefined }), placeholderData: keepPreviousData, refetchInterval: 60_000, enabled });
+  return useQuery({ queryKey: qk.list(orgId, INBOX, query), queryFn: () => api.get<PageEnvelope<ApprovalRequestDto>>(`/orgs/${orgId}/approvals`, { ...query, entityType: query.entityType || undefined, search: query.search || undefined }), placeholderData: keepPreviousData, refetchInterval: 60_000, enabled });
 }
 export function useApprovalRequest(id: string | null) {
   const orgId = useOrgId();
@@ -46,7 +48,29 @@ export function useApprovalMutations() {
   const reassign = useMutation({ mutationFn: ({ requestId, userId, reason, stepNo }: { requestId: string; userId: string; reason: string; stepNo?: number }) => post<ApprovalRequestDto>(`${requestId}/reassign`, { userId, reason, stepNo }), onSuccess: invalidate });
   const requestInfo = useMutation({ mutationFn: ({ requestId, comment }: { requestId: string; comment: string }) => post<ApprovalRequestDto>(`${requestId}/request-info`, { comment }), onSuccess: invalidate });
   const answerInfo = useMutation({ mutationFn: ({ requestId, comment }: { requestId: string; comment: string }) => post<ApprovalRequestDto>(`${requestId}/answer-info`, { comment }), onSuccess: invalidate });
-  return { decide, cancel, reassign, requestInfo, answerInfo };
+  /** approval.manage: approve as an exception (every open level skipped), the reason is mandatory. */
+  const bypass = useMutation({ mutationFn: ({ requestId, reason }: { requestId: string; reason: string }) => post<ApprovalRequestDto>(`${requestId}/bypass`, { reason }), onSuccess: invalidate });
+  /** The same decision on several requests; the API decides each one through the engine and reports one line per request. */
+  const bulkDecide = useMutation({ mutationFn: async ({ requestIds, decision, comment }: { requestIds: string[]; decision: DecisionKind; comment?: string }) => (await api.post<Envelope<ApprovalBulkDecideResultDto>>(`/orgs/${orgId}/approvals/bulk-decide`, { requestIds, decision, comment: comment || undefined })).data, onSuccess: invalidate });
+  return { decide, cancel, reassign, bypass, requestInfo, answerInfo, bulkDecide };
+}
+
+/**
+ * The History view as CSV (report.export; the API audits every export). Served as text/csv behind auth, so it is fetched
+ * with the bearer token and saved as a Blob — the same way as the employee import template.
+ */
+export async function downloadApprovalHistory(orgId: string, query: Omit<InboxQuery, 'view' | 'page' | 'pageSize'>): Promise<void> {
+  const { data } = await supabase.auth.getSession();
+  const token = data.session?.access_token;
+  const params = new URLSearchParams({ scope: query.scope, ...(query.entityType ? { entityType: query.entityType } : {}), ...(query.search ? { search: query.search } : {}) });
+  const res = await fetch(`${env.apiUrl}/api/v1/orgs/${orgId}/approvals/history/export?${params.toString()}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  if (!res.ok) throw new Error(`Export failed (${res.status})`);
+  const name = /filename="([^"]+)"/.exec(res.headers.get('content-disposition') ?? '')?.[1] ?? 'approvals-history.csv';
+  const url = URL.createObjectURL(await res.blob());
+  const a = document.createElement('a');
+  a.href = url; a.download = name; a.rel = 'noopener';
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
 }
 
 /** The one-click e-mail action. The organisation comes from the link (it may not be the active one). */

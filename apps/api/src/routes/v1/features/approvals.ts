@@ -1,5 +1,5 @@
 import type { Context, Hono } from 'hono';
-import { approvalCancelSchema, approvalDecideSchema, approvalDelegationInputSchema, approvalDelegationListQuerySchema, approvalEmailActionSchema, approvalInboxQuerySchema, approvalInfoSchema, approvalLegacyDecisionSchema, approvalReassignSchema, approvalWorkflowInputSchema, approvalWorkflowUpdateSchema, myApprovalsQuerySchema } from '@flowza/contracts';
+import { approvalBulkDecideSchema, approvalBypassSchema, approvalCancelSchema, approvalDecideSchema, approvalDelegationInputSchema, approvalDelegationListQuerySchema, approvalEmailActionSchema, approvalInboxQuerySchema, approvalInfoSchema, approvalLegacyDecisionSchema, approvalReassignSchema, approvalWorkflowInputSchema, approvalWorkflowUpdateSchema, myApprovalsQuerySchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { created, noContent, ok, paginated } from '../../../lib/http.js';
@@ -9,7 +9,8 @@ import * as approvals from '../../../services/approvals/index.js';
 
 /**
  * Approval engine v2 routes. The inbox, one request, decisions (plus the `/approve` and `/reject` aliases the first
- * inbox used), cancel / reassign / ask-for-info, the e-mail one-click action, workflows and delegations.
+ * inbox used), cancel / reassign / approve as an exception (bypass) / ask-for-info, the e-mail one-click action, workflows
+ * and delegations.
  */
 export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const decideAndReturn = async (c: Context<AppEnv>, input: { stepNo?: number | undefined; decision: 'APPROVE' | 'REJECT'; comment?: string | undefined }) => {
@@ -25,12 +26,21 @@ export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.get('/orgs/:orgId/approvals', async (c) => { const q = query(c, approvalInboxQuerySchema); const r = await approvals.listInbox(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.get('/orgs/:orgId/approvals/inbox', async (c) => { const q = query(c, approvalInboxQuerySchema); const r = await approvals.listInbox(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.get('/orgs/:orgId/approvals/history', async (c) => { const q = { ...query(c, approvalInboxQuerySchema), view: 'history' as const }; const r = await approvals.listInbox(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
+  v1.get('/orgs/:orgId/approvals/history/export', async (c) => {
+    const q = query(c, approvalInboxQuerySchema);
+    const out = await approvals.exportHistoryCsv(deps, actorOf(c, deps), param(c, 'orgId'), q);
+    c.header('content-type', 'text/csv; charset=utf-8');
+    c.header('content-disposition', `attachment; filename="${out.fileName}"`);
+    c.header('x-row-count', String(out.rows));
+    return c.body(out.csv);
+  });
   v1.get('/orgs/:orgId/approvals/mine', async (c) => { const q = query(c, myApprovalsQuerySchema); const r = await approvals.listMine(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.post('/orgs/:orgId/approvals/email-action', async (c) => {
     const input = await body(c, approvalEmailActionSchema); const actor = actorOf(c, deps); const orgId = param(c, 'orgId');
     const outcome = await approvals.redeemEmailToken(deps, actor, orgId, input);
     return ok(c, await approvals.getRequest(deps, actor, orgId, outcome.requestId).then((r) => ({ ...r, noop: outcome.noop, terminal: outcome.terminal })));
   });
+  v1.post('/orgs/:orgId/approvals/bulk-decide', async (c) => ok(c, await approvals.bulkDecide(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, approvalBulkDecideSchema))));
   v1.get('/orgs/:orgId/approvals/:requestId', async (c) => ok(c, await approvals.getRequest(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'requestId'))));
   v1.post('/orgs/:orgId/approvals/:requestId/decide', async (c) => decideAndReturn(c, await body(c, approvalDecideSchema)));
   v1.post('/orgs/:orgId/approvals/:requestId/approve', async (c) => decideAndReturn(c, { decision: 'APPROVE', comment: (await body(c, approvalLegacyDecisionSchema)).comment }));
@@ -42,6 +52,10 @@ export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.post('/orgs/:orgId/approvals/:requestId/reassign', async (c) => {
     const actor = actorOf(c, deps); const orgId = param(c, 'orgId'); const id = param(c, 'requestId'); const input = await body(c, approvalReassignSchema);
     return ok(c, await runUser(deps.db, actor, async (trx) => { await approvals.reassignRequest(deps, trx, actor, orgId, id, input); return approvals.requestDtoWithin(trx, actor, orgId, id, { withEvents: true }); }));
+  });
+  v1.post('/orgs/:orgId/approvals/:requestId/bypass', async (c) => {
+    const actor = actorOf(c, deps); const orgId = param(c, 'orgId'); const id = param(c, 'requestId'); const input = await body(c, approvalBypassSchema);
+    return ok(c, await runUser(deps.db, actor, async (trx) => { await approvals.bypassRequest(deps, trx, actor, orgId, id, input.reason); return approvals.requestDtoWithin(trx, actor, orgId, id, { withEvents: true }); }));
   });
   v1.post('/orgs/:orgId/approvals/:requestId/request-info', async (c) => {
     const actor = actorOf(c, deps); const orgId = param(c, 'orgId'); const id = param(c, 'requestId'); const input = await body(c, approvalInfoSchema);

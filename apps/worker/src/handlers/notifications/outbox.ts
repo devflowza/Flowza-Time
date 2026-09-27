@@ -47,6 +47,8 @@ const ROUTING: Record<string, Route> = {
   'approval.info_requested': { category: 'APPROVAL', recipients: 'users', title: (p) => `More information requested: ${approvalLabel(p)}`, body: (p) => String(p['comment'] ?? ''), link: requestLink },
   'approval.info_answered': { category: 'APPROVAL', recipients: 'users', title: (p) => `Information provided: ${approvalLabel(p)}`, body: (p) => String(p['comment'] ?? ''), link: requestLink },
   'approval.reassigned': { category: 'APPROVAL', recipients: 'users', title: (p) => `${approvalLabel(p)} was reassigned`, body: (p) => String(p['reason'] ?? ''), link: requestLink },
+  // an approval.manage holder approved the request as an exception: the approvers who were waiting are told it no longer needs them
+  'approval.bypassed': { category: 'APPROVAL', recipients: 'users', title: (p) => `${approvalLabel(p)} approved as an exception`, body: (p) => `No action needed from you. Reason: ${String(p['reason'] ?? '')}`, link: requestLink },
   'attendance.correction_approved': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction approved', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
   'attendance.correction_rejected': { category: 'APPROVAL', permission: 'attendance.correct', title: () => 'Correction rejected', link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
   // Self-service leave: HR hears about a request only when the approval engine did not route it (older rows); the engine's

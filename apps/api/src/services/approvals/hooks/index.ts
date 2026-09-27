@@ -41,6 +41,11 @@ export interface EntityHook {
   loadContexts(trx: Trx, orgId: string, entityIds: string[]): Promise<Map<string, ApprovalContextDto>>;
   /** A one-line description for notifications. */
   summary?(context: ApprovalContextDto): string | null;
+  /**
+   * The hook announces the decision to the person the request is about itself (leave.approved / leave.rejected), so the
+   * engine leaves the subject out of `approval.decided` — one notice per decision, the entity-specific one.
+   */
+  notifiesSubject?: boolean;
 }
 
 export const entityHooks: Partial<Record<ApprovalEntity, EntityHook>> = {

@@ -18,7 +18,7 @@ export function approvalRequest(over: Partial<ApprovalRequestDto> = {}): Approva
     createdAt: '2024-03-02T08:00:00Z', updatedAt: '2024-03-02T08:00:00Z',
     steps: [approvalStep({ requestId: id })],
     context: { kind: 'ATTENDANCE_CORRECTION', correction: { id: `ent-${id}`, attendanceDate: '2024-03-01', type: 'ADD_PUNCH', originalPunchedAt: null, proposedPunchedAt: '2024-03-01T04:30:00Z', proposedEventType: 'PUNCH', proposedStatus: null, reason: 'Forgot badge', status: 'PENDING', requestedBy: 'u2', rejectionReason: null } },
-    abilities: { canDecide: true, canCancel: false, canReassign: false, canRequestInfo: true, canAnswerInfo: false, actingAsDelegateOf: null },
+    abilities: { canDecide: true, canCancel: false, canReassign: false, canBypass: false, canRequestInfo: true, canAnswerInfo: false, actingAsDelegateOf: null },
     ...over,
   };
 }

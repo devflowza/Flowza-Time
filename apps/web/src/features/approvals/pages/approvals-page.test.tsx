@@ -20,8 +20,8 @@ registerNamespace('approvals', en, ar);
 
 const decidable = approvalRequest({ id: 'r1', employeeName: 'Ali', requestedBy: 'u2', requestedByName: 'Sara' });
 // the test harness signs in as `u1`: this one is the caller's own request (not decidable, withdraw instead)
-const own = approvalRequest({ id: 'r2', employeeName: 'Mona', requestedBy: 'u1', requestedByName: 'Dev', abilities: { canDecide: false, canCancel: true, canReassign: false, canRequestInfo: false, canAnswerInfo: false, actingAsDelegateOf: null } });
-const decided = approvalRequest({ id: 'r3', entityType: 'LEAVE', employeeName: 'Omar', status: 'APPROVED', completedAt: '2024-03-03T09:00:00Z', context: leaveContext(), steps: [approvalStep({ requestId: 'r3', status: 'APPROVED' })], abilities: { canDecide: false, canCancel: false, canReassign: false, canRequestInfo: false, canAnswerInfo: false, actingAsDelegateOf: null } });
+const own = approvalRequest({ id: 'r2', employeeName: 'Mona', requestedBy: 'u1', requestedByName: 'Dev', abilities: { canDecide: false, canCancel: true, canReassign: false, canBypass: false, canRequestInfo: false, canAnswerInfo: false, actingAsDelegateOf: null } });
+const decided = approvalRequest({ id: 'r3', entityType: 'LEAVE', employeeName: 'Omar', status: 'APPROVED', completedAt: '2024-03-03T09:00:00Z', context: leaveContext(), steps: [approvalStep({ requestId: 'r3', status: 'APPROVED' })], abilities: { canDecide: false, canCancel: false, canReassign: false, canBypass: false, canRequestInfo: false, canAnswerInfo: false, actingAsDelegateOf: null } });
 
 describe('ApprovalsPage — unified inbox', () => {
   beforeEach(() => {
@@ -69,5 +69,59 @@ describe('ApprovalsPage — unified inbox', () => {
     renderWithProviders(<ApprovalsPage />, { route: '/approvals' });
     await screen.findAllByText('Ali');
     expect(screen.getByRole('button', { name: 'Everyone' })).toBeInTheDocument();
+  });
+
+  it('approves several selected requests in one call — the API decides each one and reports refusals', async () => {
+    apiMock.post.mockResolvedValue({ data: { results: [{ requestId: 'r1', ok: true, status: 'APPROVED', noop: false, code: null, message: null }, { requestId: 'r2', ok: false, status: null, noop: false, code: 'FORBIDDEN', message: 'You cannot approve or reject your own request; cancel it instead.' }], succeeded: 1, failed: 1 } });
+    renderWithProviders(<ApprovalsPage />, { route: '/approvals' });
+    await screen.findAllByText('Ali');
+    const boxes = screen.getAllByRole('checkbox', { name: 'Select row' });
+    fireEvent.click(boxes[0]!);
+    fireEvent.click(boxes[1]!);
+    fireEvent.click(await screen.findByRole('button', { name: /Approve selected/ }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/bulk-decide', { requestIds: ['r1', 'r2'], decision: 'APPROVE', comment: undefined }));
+    await waitFor(() => expect(screen.queryByRole('button', { name: /Approve selected/ })).toBeNull());
+  });
+
+  it('filters by request type with chips and searches by employee name or number', async () => {
+    renderWithProviders(<ApprovalsPage />, { route: '/approvals' });
+    await screen.findAllByText('Ali');
+    expect(screen.getByRole('button', { name: 'All types' })).toHaveAttribute('aria-pressed', 'true');
+    fireEvent.click(screen.getByRole('button', { name: 'Leave' }));
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/approvals', expect.objectContaining({ entityType: 'LEAVE' })));
+    fireEvent.change(screen.getByPlaceholderText('Search employee name or number'), { target: { value: 'EMP10' } });
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/approvals', expect.objectContaining({ search: 'EMP10', entityType: 'LEAVE' })), { timeout: 2000 });
+  });
+
+  it('exports History as CSV for report.export holders only', async () => {
+    const fetchMock = vi.fn(async () => ({ ok: true, headers: new Headers({ 'content-disposition': 'attachment; filename="approvals-history-2024-03-03.csv"' }), blob: async () => new Blob(['csv']) }));
+    vi.stubGlobal('fetch', fetchMock);
+    const createObjectURL = vi.fn(() => 'blob:x');
+    Object.assign(URL, { createObjectURL, revokeObjectURL: vi.fn() });
+    const saved: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(function (this: HTMLAnchorElement) { saved.push(this.download); });
+    try {
+      renderWithProviders(<ApprovalsPage />, { route: '/approvals?view=history' });
+      await screen.findAllByText('Omar');
+      fireEvent.click(screen.getByRole('button', { name: /Export CSV/ }));
+      await waitFor(() => expect(fetchMock).toHaveBeenCalled());
+      const [url, init] = fetchMock.mock.calls[0] as unknown as [string, { headers: Record<string, string> }];
+      expect(url).toBe('http://localhost:4000/api/v1/orgs/org-1/approvals/history/export?scope=mine');
+      expect(init.headers['Authorization']).toBe('Bearer token');
+      await waitFor(() => expect(saved).toEqual(['approvals-history-2024-03-03.csv']));
+      expect(createObjectURL).toHaveBeenCalled();
+    } finally { vi.unstubAllGlobals(); click.mockRestore(); }
+  });
+
+  it('shows no export without report.export, and none on the Pending view', async () => {
+    grant('attendance.approve', 'attendance.view');
+    const first = renderWithProviders(<ApprovalsPage />, { route: '/approvals?view=history' });
+    await screen.findAllByText('Omar');
+    expect(screen.queryByRole('button', { name: /Export CSV/ })).toBeNull();
+    first.unmount();
+    grantAll();
+    renderWithProviders(<ApprovalsPage />, { route: '/approvals' });
+    await screen.findAllByText('Ali');
+    expect(screen.queryByRole('button', { name: /Export CSV/ })).toBeNull();
   });
 });

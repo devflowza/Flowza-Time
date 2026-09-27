@@ -1,19 +1,21 @@
 import { useMemo, useState } from 'react';
-import type { ColumnDef } from '@tanstack/react-table';
+import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Check, History, Inbox, Settings2, UserRoundCheck, X } from 'lucide-react';
+import { Check, Download, History, Inbox, Settings2, UserRoundCheck, X } from 'lucide-react';
 import { APPROVAL_ENTITIES, type ApprovalEntity, type ApprovalInboxScope, type ApprovalRequestDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
-import { Badge, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tabs, TabsList, TabsTrigger } from '@/components/ui';
+import { Badge, Button, Tabs, TabsList, TabsTrigger } from '@/components/ui';
 import { buttonVariants } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 import { fmtDateTime, todayIso } from '@/lib/format';
-import { useMe, useOrgTimezone } from '@/features/me/use-me';
+import { toast, toastError } from '@/lib/toast';
+import { useCan, useMe, useOrgId, useOrgTimezone } from '@/features/me/use-me';
+import { SearchBox } from '@/features/organization/components/search-box';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useServerTable } from '@/hooks/use-server-table';
-import { useApprovalAccess, useApprovalInbox, useDelegations, type DecisionKind, type InboxView } from '../api';
+import { downloadApprovalHistory, useApprovalAccess, useApprovalInbox, useApprovalMutations, useDelegations, type DecisionKind, type InboxView } from '../api';
 import { DecisionDialog } from '../components/decision-dialog';
 import { RequestDialog } from '../components/request-detail';
 import { ApprovalContext, EntityIcon, LevelLabel, RequestStatusBadge } from '../components/parts';
@@ -44,10 +46,31 @@ export default function ApprovalsPage() {
   const allowedScopes = SCOPES.filter((s) => s === 'mine' || (s === 'team' && access.team) || (s === 'all' && access.orgWide));
   const scope: ApprovalInboxScope = (allowedScopes as readonly string[]).includes(f['scope'] ?? '') ? (f['scope'] as ApprovalInboxScope) : 'mine';
   const entityType = (APPROVAL_ENTITIES as readonly string[]).includes(f['entityType'] ?? '') ? (f['entityType'] as ApprovalEntity) : undefined;
+  const search = f['search'] || undefined;
   const openId = f['request'] ?? null;
-  const q = useApprovalInbox({ scope, view, entityType, page: table.state.page, pageSize: table.state.pageSize });
+  const q = useApprovalInbox({ scope, view, entityType, search, page: table.state.page, pageSize: table.state.pageSize });
+  const orgId = useOrgId();
+  const can = useCan();
+  const [exporting, setExporting] = useState(false);
+  const exportCsv = () => { setExporting(true); downloadApprovalHistory(orgId, { scope, entityType, search }).catch(toastError).finally(() => setExporting(false)); };
   const delegations = useDelegations('mine');
   const [decision, setDecision] = useState<{ request: ApprovalRequestDto | null; kind: DecisionKind }>({ request: null, kind: 'APPROVE' });
+  // bulk approval (Finance ATT-95): the API decides each selected request through the engine and reports what it refused
+  const [selection, setSelection] = useState<RowSelectionState>({});
+  // a selection belongs to the page it was made on: a new view, scope, filter or page starts empty
+  const selectionKey = `${view}|${scope}|${entityType ?? ''}|${search ?? ''}|${table.state.page}|${table.state.pageSize}`;
+  const [selectionFor, setSelectionFor] = useState(selectionKey);
+  if (selectionFor !== selectionKey) { setSelectionFor(selectionKey); setSelection({}); }
+  const { bulkDecide } = useApprovalMutations();
+  const approveSelected = (ids: string[]) => bulkDecide.mutate({ requestIds: ids, decision: 'APPROVE' }, {
+    onSuccess: (res) => {
+      setSelection({});
+      if (res.succeeded) toast.success(t('bulk.approved', { count: res.succeeded }));
+      const firstRefusal = res.results.find((x) => !x.ok);
+      if (firstRefusal) toast.error(t('bulk.refused', { count: res.failed }), { description: firstRefusal.message ?? undefined });
+    },
+    onError: toastError,
+  });
   const tzOf = useMemo(() => (branchId: string | null) => (branchId ? branches.byId.get(branchId)?.timezone : undefined) ?? tz, [branches.byId, tz]);
   const today = todayIso(tz);
   const covering = (delegations.data ?? []).filter((d) => d.delegateUserId === myId && d.isActive && d.startsOn <= today && d.endsOn >= today).map((d) => d.delegatorName ?? '—');
@@ -103,18 +126,19 @@ export default function ApprovalsPage() {
             {allowedScopes.map((s) => <Chip key={s} active={scope === s} onClick={() => table.setFilter('scope', s === 'mine' ? undefined : s)}>{t(`scope.${s}`)}</Chip>)}
           </div>
         ) : null}
-        <Select value={entityType ?? 'all'} onValueChange={(v) => table.setFilter('entityType', v === 'all' ? undefined : v)}>
-          <SelectTrigger className="h-8 w-48" aria-label={t('entityFilter.label')}><SelectValue /></SelectTrigger>
-          <SelectContent>
-            <SelectItem value="all">{t('entityFilter.all')}</SelectItem>
-            {APPROVAL_ENTITIES.filter((e) => FILTER_TYPES.includes(e) || e === entityType).map((e) => <SelectItem key={e} value={e}>{t(`entity.${e}`)}</SelectItem>)}
-          </SelectContent>
-        </Select>
+        <div className="flex flex-wrap items-center gap-1.5" role="group" aria-label={t('entityFilter.label')}>
+          <Chip active={!entityType} onClick={() => table.setFilter('entityType', undefined)}>{t('entityFilter.all')}</Chip>
+          {APPROVAL_ENTITIES.filter((e) => FILTER_TYPES.includes(e) || e === entityType).map((e) => <Chip key={e} active={entityType === e} onClick={() => table.setFilter('entityType', e)}>{t(`entity.${e}`)}</Chip>)}
+        </div>
+        <SearchBox id="approvals-search" value={f['search']} onChange={(v) => table.setFilter('search', v)} placeholder={t('inbox.searchPlaceholder')} className="relative w-full sm:ms-auto sm:w-64" />
+        {view === 'history' && can('report.export') ? <Button size="sm" variant="outline" loading={exporting} onClick={exportCsv}><Download /> {t('actions.exportCsv')}</Button> : null}
       </div>
       <DataTable
         columns={columns} data={q.data?.data} total={q.data?.meta.total} page={table.state.page} pageSize={table.state.pageSize}
         onPageChange={table.setPage} onPageSizeChange={table.setPageSize} isLoading={q.isLoading || q.isFetching} error={q.error} onRetry={() => void q.refetch()}
         onRowClick={(r) => table.update({ filters: { request: r.id } }, false)}
+        getRowId={(r) => r.id}
+        {...(view === 'pending' ? { selection, onSelectionChange: setSelection, bulkActions: (ids: string[]) => <Button size="sm" loading={bulkDecide.isPending} onClick={() => approveSelected(ids)}><Check /> {t('bulk.approveSelected')}</Button> } : {})}
         emptyTitle={emptyTitle} emptyDescription={view === 'history' ? t('inbox.historyEmptyHint') : t('inbox.emptyHint')}
         renderCard={(r) => (
           <div className="space-y-2">

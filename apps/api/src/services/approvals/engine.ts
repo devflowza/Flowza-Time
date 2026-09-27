@@ -1,10 +1,10 @@
-import type { ApprovalDecision, ApprovalEntity, ApprovalEscalationTarget, ApprovalStepMode, ApproverType, DomainEventType, Permission } from '@flowza/contracts';
+import type { ApprovalBulkDecideItemDto, ApprovalBulkDecideResultDto, ApprovalDecision, ApprovalEntity, ApprovalEscalationTarget, ApprovalRequestStatus, ApprovalStepMode, ApproverType, DomainEventType, Permission } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import { collapseSeats, escalationDueAt, evaluateLevel, resolveStepActors, selectWorkflow, type ApprovalStepSpec, type MembershipGrant, type ResolvedActor } from '@flowza/domain';
-import { errors } from '@flowza/shared';
+import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { hasPermission, isTeamMember, requireMembership } from '../../lib/authorize.js';
-import { type Actor, audit } from '../../lib/service.js';
+import { type Actor, audit, runUser } from '../../lib/service.js';
 import { jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
 import { systemStep } from '../features/context.js';
 import { orgToday } from '../features/recalc.js';
@@ -135,13 +135,19 @@ async function skipPending(t: Trx, stepIds: string[], comment: string | null): P
   await t.updateTable('approvalSteps').set({ status: 'SKIPPED' }).where('id', 'in', stepIds).where('status', '=', 'PENDING').execute();
 }
 
+/** Who hears about a final decision: the requester and the subject, never the decider, and not the subject when the entity's hook tells them itself. */
+function decisionRecipients(req: { entityType: ApprovalEntity; requestedBy: string | null; subjectUserId: string | null }, actorUserId: string): string[] {
+  const informedByHook = hookFor(req.entityType)?.notifiesSubject ? req.subjectUserId : null;
+  return [req.requestedBy, req.subjectUserId].filter((u): u is string => !!u && u !== actorUserId && u !== informedByHook);
+}
+
 async function completeApproved(deps: ApiDeps, t: Trx, actor: Actor, orgId: string, req: RequestRow, comment: string | null, detail: Record<string, unknown>): Promise<void> {
   const now = new Date();
   await t.updateTable('approvalRequests').set({ status: 'APPROVED', completedAt: now, decidedBy: actor.userId, infoRequestedAt: null }).where('id', '=', req.id).execute();
   await recordEvent(t, orgId, req.id, 'approved', actor.userId, { ...detail, comment });
   await hookFor(req.entityType)?.onApproved(deps, t, hookCtx(orgId, req, actor, comment));
   const payload = await requestPayload(t, orgId, req);
-  await emitTargeted(t, orgId, 'approval.decided', req.id, [req.requestedBy, req.subjectUserId].filter((u): u is string => !!u && u !== actor.userId), { ...payload, decision: 'APPROVED', comment, decidedBy: actor.userId }, actor);
+  await emitTargeted(t, orgId, 'approval.decided', req.id, decisionRecipients(req, actor.userId), { ...payload, decision: 'APPROVED', comment, decidedBy: actor.userId }, actor);
 }
 
 async function completeRejected(deps: ApiDeps, t: Trx, actor: Actor, orgId: string, req: RequestRow, steps: LoadedStep[], comment: string | null, detail: Record<string, unknown>): Promise<void> {
@@ -151,7 +157,7 @@ async function completeRejected(deps: ApiDeps, t: Trx, actor: Actor, orgId: stri
   await recordEvent(t, orgId, req.id, 'rejected', actor.userId, { ...detail, comment });
   await hookFor(req.entityType)?.onRejected(deps, t, hookCtx(orgId, req, actor, comment));
   const payload = await requestPayload(t, orgId, req);
-  await emitTargeted(t, orgId, 'approval.decided', req.id, [req.requestedBy, req.subjectUserId].filter((u): u is string => !!u && u !== actor.userId), { ...payload, decision: 'REJECTED', comment, decidedBy: actor.userId }, actor);
+  await emitTargeted(t, orgId, 'approval.decided', req.id, decisionRecipients(req, actor.userId), { ...payload, decision: 'REJECTED', comment, decidedBy: actor.userId }, actor);
 }
 
 /** Make `next` the current step: activation time, escalation deadline, notification of its approvers. */
@@ -298,6 +304,27 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
   return outcome;
 }
 
+/**
+ * The same decision on several requests (Finance ATT-95 — bulk approval goes through the engine). Each request is decided in
+ * its own transaction with every rule of a single decision (actor / delegate / permission, segregation of duties, modes,
+ * hooks, notifications, audit), so one refusal never undoes the others; the caller gets one line per request.
+ */
+export async function bulkDecide(deps: ApiDeps, actor: Actor, orgId: string, input: { requestIds: readonly string[]; decision: ApprovalDecision; comment?: string | undefined }): Promise<ApprovalBulkDecideResultDto> {
+  requireMembership(actor.principal, orgId);
+  const results: ApprovalBulkDecideItemDto[] = [];
+  for (const requestId of [...new Set(input.requestIds)]) {
+    try {
+      const out = await runUser(deps.db, actor, (trx) => decideWithin(deps, trx, actor, orgId, requestId, { decision: input.decision, comment: input.comment }));
+      results.push({ requestId, ok: true, status: out.status as ApprovalRequestStatus, noop: out.noop, code: null, message: null });
+    } catch (err) {
+      if (!(err instanceof AppError)) throw err;
+      results.push({ requestId, ok: false, status: null, noop: false, code: err.code, message: err.message });
+    }
+  }
+  const succeeded = results.filter((r) => r.ok).length;
+  return { results, succeeded, failed: results.length - succeeded };
+}
+
 // ----- cancel / invalidate / reassign / info ------------------------------------------------------------------------------------
 
 export interface CloseOutcome { requestId: string; entityType: ApprovalEntity; entityId: string; branchId: string | null; status: string }
@@ -394,6 +421,47 @@ export async function reassignRequest(deps: ApiDeps, trx: Trx, actor: Actor, org
     return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: req.status };
   });
   await audit(trx, actor, orgId, 'approval.reassigned', 'approval_request', { entityId: requestId, branchId: out.branchId, reason: input.reason, newValue: { userId: input.userId, stepNo: input.stepNo ?? null } });
+  return out;
+}
+
+/** Who may approve a pending request as an exception: approval.manage (or the owner) within their branch scope, never on a request they filed or that is about them — except the owner, which is logged. */
+export function canBypass(grant: MembershipGrant, userId: string, req: { requestedBy: string | null; subjectUserId: string | null; branchId: string | null }): boolean {
+  const isOwner = grant.roleKey === 'owner';
+  if (!isOwner && !hasPermission(grant, 'approval.manage')) return false;
+  if (!grant.allBranches && req.branchId && !grant.branchIds.includes(req.branchId)) return false;
+  return isOwner || (req.subjectUserId !== userId && req.requestedBy !== userId);
+}
+
+/**
+ * Finance B-99: approve a pending request as an exception, with a mandatory reason. Every open level is skipped, the
+ * entity's hook runs (the correction is applied, the leave approved), the approvers who were waiting at the current level
+ * are told it no longer needs them, the requester and the subject get the decision, and the timeline and the audit keep
+ * the reason.
+ */
+export async function bypassRequest(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, requestId: string, reason: string): Promise<CloseOutcome> {
+  const grant = requireMembership(actor.principal, orgId);
+  if (!hasPermission(grant, 'approval.manage') && grant.roleKey !== 'owner') throw errors.forbidden('Missing permission: approval.manage.');
+  const out = await systemStep(trx, orgId, async (t) => {
+    const req = await lockRequest(t, orgId, requestId);
+    if (!grant.allBranches && req.branchId && !grant.branchIds.includes(req.branchId)) throw errors.forbidden('This request is outside your branch scope.');
+    if (req.status !== 'PENDING') throw errors.invalidState(`The request is already ${req.status}.`);
+    if (req.subjectUserId === actor.userId || req.requestedBy === actor.userId) {
+      if (grant.roleKey !== 'owner') throw errors.forbidden('You cannot approve your own request as an exception; ask another approver.');
+      await recordEvent(t, orgId, req.id, 'sod_owner_bypass', actor.userId, { stepNo: req.currentStep, decision: 'APPROVED', exception: true });
+    }
+    const steps = await loadSteps(t, req.id);
+    const open = steps.filter((s) => s.status === 'PENDING');
+    const waiting = [...new Set(open.filter((s) => s.stepNo === req.currentStep).flatMap((s) => s.actors.filter((a) => a.decision === 'PENDING').map((a) => a.userId)))];
+    await skipPending(t, open.map((s) => s.id), `approved as an exception: ${reason}`);
+    await t.updateTable('approvalRequests').set({ status: 'APPROVED', completedAt: new Date(), decidedBy: actor.userId, infoRequestedAt: null }).where('id', '=', req.id).execute();
+    await recordEvent(t, orgId, req.id, 'bypassed', actor.userId, { stepNo: req.currentStep, reason, skippedSteps: open.map((s) => s.stepNo) });
+    await hookFor(req.entityType)?.onApproved(deps, t, hookCtx(orgId, req, actor, reason));
+    const payload = await requestPayload(t, orgId, req);
+    await emitTargeted(t, orgId, 'approval.bypassed', req.id, waiting.filter((u) => u !== actor.userId), { ...payload, reason, bypassedBy: actor.userId }, actor);
+    await emitTargeted(t, orgId, 'approval.decided', req.id, decisionRecipients(req, actor.userId), { ...payload, decision: 'APPROVED', comment: reason, decidedBy: actor.userId, exception: true }, actor);
+    return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: 'APPROVED' };
+  });
+  await audit(trx, actor, orgId, 'approval.bypassed', 'approval_request', { entityId: requestId, branchId: out.branchId, reason, newValue: { entityType: out.entityType, entityId: out.entityId } });
   return out;
 }
 

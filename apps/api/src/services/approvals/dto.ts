@@ -7,7 +7,7 @@ import type { Actor } from '../../lib/service.js';
 import { withSystemScope } from '../../lib/service.js';
 import { orgToday } from '../features/recalc.js';
 import { loadDelegationMap } from './context.js';
-import { approvePermissionFor, assessDecider, canCancel, hookFor, viewPermissionFor } from './engine.js';
+import { approvePermissionFor, assessDecider, canBypass, canCancel, hookFor, viewPermissionFor } from './engine.js';
 
 type RequestRow = {
   id: string; organizationId: string; workflowId: string | null; entityType: ApprovalEntity; entityId: string; branchId: string | null; departmentId: string | null; employeeId: string | null; units: string | number | null;
@@ -79,6 +79,7 @@ export async function hydrateRequests(trx: Trx, actor: Actor, grant: MembershipG
         canDecide: pending && check.ok && current?.status === 'PENDING',
         canCancel: pending && canCancel(grant, actor.userId, r),
         canReassign: pending && (hasPermission(grant, 'approval.manage') || grant.roleKey === 'owner') && !check.branchBlocked,
+        canBypass: pending && canBypass(grant, actor.userId, r),
         canRequestInfo: pending && !!check.via && !check.branchBlocked,
         canAnswerInfo: pending && (r.requestedBy === actor.userId || (r.subjectUserId !== null && r.subjectUserId === actor.userId)),
         actingAsDelegateOf: check.via === 'delegate' ? check.delegateOf : null,

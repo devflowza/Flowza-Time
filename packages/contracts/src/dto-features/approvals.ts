@@ -83,8 +83,12 @@ export const approvalInboxQuerySchema = paginationQuerySchema.extend({
   branchId: uuidSchema.optional(),
   from: isoDateSchema.optional(),
   to: isoDateSchema.optional(),
+  /** The employee's name or number (matched in the organisation's scope; the rows stay the caller's RLS view). */
+  search: z.string().trim().max(100).optional(),
 });
 export type ApprovalInboxQuery = z.infer<typeof approvalInboxQuerySchema>;
+/** GET /orgs/:orgId/approvals/history/export — the History view as CSV (report.export), at most this many rows. */
+export const APPROVAL_HISTORY_EXPORT_MAX_ROWS = 5000;
 
 /** GET /orgs/:orgId/approvals/mine — requests I filed or that are about me. */
 export const myApprovalsQuerySchema = paginationQuerySchema.extend({
@@ -100,6 +104,14 @@ export const approvalDecideSchema = z.object({
   comment: z.string().trim().max(1000).optional(),
 });
 export type ApprovalDecideInput = z.infer<typeof approvalDecideSchema>;
+/** POST /orgs/:orgId/approvals/bulk-decide — the same decision on several requests' current levels (Finance ATT-95: through the engine, one request at a time, never client-side). */
+export const APPROVAL_BULK_DECIDE_MAX = 100;
+export const approvalBulkDecideSchema = z.object({
+  requestIds: z.array(uuidSchema).min(1).max(APPROVAL_BULK_DECIDE_MAX),
+  decision: z.enum(APPROVAL_DECISIONS),
+  comment: z.string().trim().max(1000).optional(),
+}).refine((v) => v.decision !== 'REJECT' || !!v.comment, { message: 'A comment is required when rejecting.', path: ['comment'] });
+export type ApprovalBulkDecideInput = z.infer<typeof approvalBulkDecideSchema>;
 export const approvalCancelSchema = z.object({ reason: z.string().trim().max(500).optional() });
 export const approvalReassignSchema = z.object({
   stepNo: z.number().int().min(1).max(5).optional(),
@@ -108,6 +120,9 @@ export const approvalReassignSchema = z.object({
 });
 export type ApprovalReassignInput = z.infer<typeof approvalReassignSchema>;
 export const approvalInfoSchema = z.object({ comment: z.string().trim().min(1).max(1000) });
+/** POST /orgs/:orgId/approvals/:id/bypass — approval.manage approves a pending request as an exception (Finance B-99); the reason is mandatory. */
+export const approvalBypassSchema = z.object({ reason: z.string().trim().min(3).max(1000) });
+export type ApprovalBypassInput = z.infer<typeof approvalBypassSchema>;
 /** POST /orgs/:orgId/approvals/email-action — the one-click token from an "awaiting your approval" e-mail. Never acts on GET. */
 export const approvalEmailActionSchema = z.object({
   token: z.string().min(16).max(256),
@@ -154,7 +169,7 @@ export type ApprovalContextDto =
   | { kind: 'GENERIC'; entityType: ApprovalEntity; summary: string | null };
 
 /** What the caller may do with the request right now (the API enforces every one of these again). */
-export interface ApprovalAbilitiesDto { canDecide: boolean; canCancel: boolean; canReassign: boolean; canRequestInfo: boolean; canAnswerInfo: boolean; actingAsDelegateOf: string | null }
+export interface ApprovalAbilitiesDto { canDecide: boolean; canCancel: boolean; canReassign: boolean; canBypass: boolean; canRequestInfo: boolean; canAnswerInfo: boolean; actingAsDelegateOf: string | null }
 
 export interface ApprovalRequestDto {
   id: string; organizationId: string; workflowId: string | null; workflowName: string | null; entityType: ApprovalEntity; entityId: string;
@@ -180,6 +195,10 @@ export interface ApprovalDecideResultDto extends ApprovalRequestDto {
   /** For a rejection under ANY/QUORUM: false while the level can still be satisfied by the remaining approvers. */
   terminal: boolean;
 }
+
+/** One line per request of a bulk decision: decided (or a harmless no-op), or refused with the API's own error code and message. */
+export interface ApprovalBulkDecideItemDto { requestId: string; ok: boolean; status: ApprovalRequestStatus | null; noop: boolean; code: string | null; message: string | null }
+export interface ApprovalBulkDecideResultDto { results: ApprovalBulkDecideItemDto[]; succeeded: number; failed: number }
 
 /** Legacy alias kept for the attendance service: v1 decision body ({ comment }) on /approve and /reject. */
 export const approvalLegacyDecisionSchema = z.object({ comment: z.string().max(1000).optional() });

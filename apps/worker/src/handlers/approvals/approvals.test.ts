@@ -123,4 +123,15 @@ describe('approvals.reminders', () => {
     expect(tokens.some((t) => t.userId === U.subject)).toBe(false);
     expect(h.emails.some((e) => e.to === `${U.hr}@t.local` && e.subject.includes('Escalated to you'))).toBe(true);
   });
+
+  it('an exception approval (B-99) tells the approvers who were waiting, with no one-click token', async () => {
+    await h.tdb.adminDb.insertInto('domainEvents').values({ organizationId: ORG, eventType: 'approval.bypassed', aggregateType: 'approval_request', aggregateId: req2, payload: JSON.stringify({ userIds: [U.b], requestId: req2, entityType: 'ATTENDANCE_CORRECTION', employeeName: 'Subject One', reason: 'Payroll cut-off today' }), actorUserId: U.hr }).execute();
+    const tokensBefore = (await h.tdb.adminDb.selectFrom('approvalEmailTokens').select('id').where('userId', '=', U.b).execute()).length;
+    await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
+    const notice = await h.tdb.adminDb.selectFrom('notifications').select(['title', 'body', 'link']).where('userId', '=', U.b).where('type', '=', 'approval.bypassed').executeTakeFirstOrThrow();
+    expect(notice).toEqual({ title: 'Attendance correction — Subject One approved as an exception', body: 'No action needed from you. Reason: Payroll cut-off today', link: `/approvals/requests/${req2}` });
+    await deliverNotifications({ job: fakeJob('DELIVER_NOTIFICATIONS'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
+    expect((await h.tdb.adminDb.selectFrom('approvalEmailTokens').select('id').where('userId', '=', U.b).execute()).length).toBe(tokensBefore);
+    expect(h.emails.some((e) => e.to === `${U.b}@t.local` && e.subject.includes('approved as an exception'))).toBe(true);
+  });
 });

@@ -111,7 +111,7 @@ export const DOMAIN_EVENT_TYPES = [
   'device.created', 'device.updated', 'device.online', 'device.offline', 'device.credentials_changed',
   'sync.queued', 'sync.completed', 'sync.failed', 'sync.item_failed',
   'attendance.created', 'attendance.updated', 'attendance.correction_submitted', 'attendance.correction_approved', 'attendance.correction_rejected',
-  'approval.pending', 'approval.reminder', 'approval.escalated', 'approval.decided', 'approval.info_requested', 'approval.info_answered', 'approval.reassigned',
+  'approval.pending', 'approval.reminder', 'approval.escalated', 'approval.decided', 'approval.info_requested', 'approval.info_answered', 'approval.reassigned', 'approval.bypassed',
   'report.ready', 'report.failed', 'subscription.limit_reached',
   'leave.requested', 'leave.approved', 'leave.rejected',
 ] as const;
