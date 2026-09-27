@@ -34,7 +34,8 @@ One worker holds `pg_try_advisory_lock(7242026)` on a dedicated session connecti
 |---|---|---|
 | poll-due-devices | 15 s | `PULL_ATTENDANCE` per device with `auto_sync_enabled` and `next_attendance_sync_at <= now()`; dedupe key `pull:<device>`; adaptive interval (double after 3 empty polls, reset on data; max = org setting) |
 | health-check | 5 min | `DEVICE_HEALTH_CHECK` per active device not seen within its `offline_threshold_minutes` (hysteresis: `consecutive_failures`) |
-| reconciliation | per org setting (default 24 h) | `RECONCILIATION` per device |
+| reconciliation | per org setting (default 24 h) | `RECONCILIATION` per device (the Flowza Finance connector is excluded: it has no device user list) |
+| finance-push | 30 s | `PUSH_ATTENDANCE` per active Flowza Finance connector with direction `push`/`both` whose `finance_sync_state.next_push_at <= now()` and no push in flight; dedupe key `finance-push:<device>`; `next_push_at` moved forward by the connector's `pollMinutes` at admission (see `docs/integrations/flowza-finance.md`) |
 | relay-outbox | 5 s | `RELAY_OUTBOX` (notifications + realtime) |
 | deliver-notifications | 15 s | `DELIVER_NOTIFICATIONS` |
 | reap-stale | 60 s | `REAP_STALE` |
@@ -48,6 +49,7 @@ jobs only: enqueueing a key that is currently *running* creates the next run, so
 |---|---|---|
 | `VENDOR_CLOUD_PULL` / `ON_PREM_SERVER_API` / `LAN` | scheduler poll or manual | `PULL_ATTENDANCE` (cursor from `sync_cursors`, page loop, `ingestRawTransactions`, advance cursor after commit), `PULL_EMPLOYEES`, `PUSH_EMPLOYEE(S)`, `DELETE_EMPLOYEE`, `DEVICE_HEALTH_CHECK`, `TEST_CONNECTION`, `RESTART_DEVICE` (provider `restart()`) |
 | `VENDOR_WEBHOOK` | API `/webhooks/providers/:key/:deviceId/:token` | API verifies the vendor signature **once, over the original raw bytes**, stores the verified *normalised* result in `provider_webhook_events` (replay protection), enqueues `WEBHOOK_EVENT` → handler ingests the stored transactions without re-parsing or re-verifying; slow reconciliation poll still runs |
+| Flowza Finance connector (`flowza_finance`, a `VENDOR_CLOUD_PULL` virtual device) | scheduler poll / finance-push tick / Settings → Integrations "Sync now" | `PULL_ATTENDANCE` (Finance `attendance-export`, cursor = Finance's `next_cursor`) and `PUSH_ATTENDANCE` (FlowZa Time `attendance_events` → Finance `attendance-ingest`, keyset `(created_at, id)` in `finance_sync_state`, never the events of the connector device itself) |
 | `DEVICE_PUSH` | API `/device-push/:protocol/*` | API identifies the device by serial (+ push token), ingests raw rows synchronously (idempotent, cheap), updates heartbeat, returns pending `device_commands`; employee push = command rows created by `PUSH_EMPLOYEE`, acknowledged via the protocol's result endpoint; `RESTART_DEVICE` stores the protocol's REBOOT command the same way, so the item succeeds as *queued to the device*, never as *rebooted* |
 
 ## Webhook verification happens exactly once (decision)
