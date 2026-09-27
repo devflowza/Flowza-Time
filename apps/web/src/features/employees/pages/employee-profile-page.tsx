@@ -57,7 +57,15 @@ export default function EmployeeProfilePage() {
             />
             <div className="mb-4 flex items-center gap-3">
               <Avatar name={e.displayName} src={e.photoUrl} className="size-12 text-base" />
-              <div className="text-sm text-muted-foreground"><p dir="ltr">{e.email ?? '—'}</p><p dir="ltr">{e.phone ?? '—'}</p></div>
+              <div className="text-sm text-muted-foreground">
+                <p dir="ltr">{e.email ?? '—'}</p><p dir="ltr">{e.phone ?? '—'}</p>
+                {/* Reporting line: the primary manager drives team visibility and approvals, the secondary is the dotted line / backup. */}
+                <p data-testid="reports-to">
+                  <span>{t('profile.reportsTo')}: </span>
+                  {e.managerEmployeeId ? <Link to={`/employees/${e.managerEmployeeId}`} className="font-medium text-foreground hover:underline">{e.managerName ?? '—'}</Link> : <span>{t('profile.noManager')}</span>}
+                  {e.secondaryManagerEmployeeId ? <> · <span>{t('profile.alsoReportsTo')} </span><Link to={`/employees/${e.secondaryManagerEmployeeId}`} className="font-medium text-foreground hover:underline">{e.secondaryManagerName ?? '—'}</Link></> : null}
+                </p>
+              </div>
             </div>
             <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
               <TabsList className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb} className={tb === 'danger' ? 'data-[state=active]:text-destructive' : undefined}>{t(`profile.tabs.${tb}`)}</TabsTrigger>)}</TabsList>

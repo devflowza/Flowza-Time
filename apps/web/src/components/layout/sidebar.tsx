@@ -1,10 +1,10 @@
 import { NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarCheck, CalendarDays, CalendarOff, CheckSquare, ClipboardList, Cpu, FileText, GitCompare, House, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, Palmtree, RefreshCw, Settings, ShieldCheck, UserRound, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Building2, CalendarCheck, CalendarDays, CalendarOff, CheckSquare, ClipboardList, ContactRound, Cpu, FileText, GitCompare, House, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, Palmtree, RefreshCw, Settings, ShieldCheck, UserRound, Users, Wallet, type LucideIcon } from 'lucide-react';
 import type { Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
-import { useCan, useEmployeeId, useMe } from '@/features/me/use-me';
+import { useActiveMembership, useCan, useEmployeeId, useMe } from '@/features/me/use-me';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import portalEn from '@/locales/en/portal.json';
@@ -45,6 +45,9 @@ export function Sidebar() {
   const can = useCan();
   const { data: me } = useMe();
   const employeeId = useEmployeeId();
+  // Line manager: anyone whose employee record has direct reports (/me: isManager), whatever their role — the team
+  // workspace itself is filled in by a later release; today it lists the reports.
+  const isManager = useActiveMembership()?.isManager ?? false;
 
   const sections: NavSection[] = [
     { items: [{ to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, permissions: ['dashboard.view'] }] },
@@ -55,6 +58,7 @@ export function Sidebar() {
       { to: '/my/leave', label: t('portal:nav.leave'), icon: Palmtree },
       { to: '/my/profile', label: t('portal:nav.profile'), icon: UserRound },
     ] }] : []),
+    ...(isManager ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound }] }] : []),
     { label: t('nav.sections.workforce'), items: [
       { to: '/employees', label: t('nav.employees'), icon: Users, permissions: ['employee.view'] },
       { to: '/attendance', label: t('nav.attendance'), icon: Activity, permissions: ['attendance.view'] },

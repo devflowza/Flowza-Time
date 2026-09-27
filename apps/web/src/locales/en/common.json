@@ -5,8 +5,8 @@
     "reconciliation": "Reconciliation", "shifts": "Shifts", "holidays": "Holidays", "leave": "Leave", "corrections": "Corrections",
     "approvals": "Approvals", "reports": "Reports", "payroll": "Payroll", "structure": "Organisation", "branches": "Branches",
     "departments": "Departments", "users": "Users & roles", "settings": "Settings", "audit": "Audit log", "notifications": "Notifications",
-    "platform": "Platform admin", "help": "Help", "signOut": "Sign out", "collapse": "Collapse sidebar", "expand": "Expand sidebar",
-    "sections": { "workforce": "Workforce", "devices": "Devices & sync", "time": "Time", "admin": "Administration" }
+    "platform": "Platform admin", "help": "Help", "signOut": "Sign out", "collapse": "Collapse sidebar", "expand": "Expand sidebar", "team": "Team overview",
+    "sections": { "workforce": "Workforce", "devices": "Devices & sync", "time": "Time", "admin": "Administration", "team": "My team" }
   },
   "auth": {
     "signIn": "Sign in", "signInTitle": "Sign in to FlowZa Time", "email": "Work email", "password": "Password",

@@ -7,13 +7,28 @@ vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks'
 vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/test-mocks')).useMeModule);
 
 import { renderWithProviders } from '@/features/employees/test-utils';
-import { grantAll, testState } from '@/features/employees/test-mocks';
+import { grant, grantAll, testState } from '@/features/employees/test-mocks';
 import { Sidebar } from './sidebar';
 
 describe('Sidebar', () => {
   beforeEach(() => {
     testState.orgId = 'org-1';
+    testState.employeeId = null;
+    testState.teamSize = 0;
     grantAll();
+  });
+
+  it('shows the "My team" section only to members with direct reports, whatever their permissions', () => {
+    testState.employeeId = 'e1';
+    testState.teamSize = 3;
+    grant('dashboard.view');
+    const { unmount } = renderWithProviders(<Sidebar />);
+    expect(screen.getByText('My team')).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Team overview' })).toHaveAttribute('href', '/team');
+    unmount();
+    testState.teamSize = 0;
+    renderWithProviders(<Sidebar />);
+    expect(screen.queryByRole('link', { name: 'Team overview' })).not.toBeInTheDocument();
   });
 
   it('renders navigation links with real utility classes, not a stringified className function', () => {

@@ -16,7 +16,8 @@
     "displayName": "اسم العرض", "displayNameHint": "افتراضياً الاسم الأول + اسم العائلة", "displayNameAr": "اسم العرض (بالعربية)", "gender": "الجنس", "dateOfBirth": "تاريخ الميلاد",
     "nationality": "الجنسية", "nationalityHint": "رمز الدولة ISO، مثل OM", "email": "البريد الإلكتروني", "phone": "الهاتف", "joiningDate": "تاريخ الالتحاق", "exitDate": "تاريخ انتهاء الخدمة",
     "employmentStatus": "حالة التوظيف", "employmentType": "نوع التوظيف", "branchId": "الفرع", "departmentId": "القسم", "designationId": "المسمى الوظيفي", "managerEmployeeId": "المدير",
-    "designation": "المسمى الوظيفي", "manager": "المدير", "selectBranch": "اختر فرعاً", "weeklyOffDays": "أيام العطلة الأسبوعية", "weeklyOffDaysHint": "اتركها فارغة لتُورَث من الفرع / المنظمة.",
+    "designation": "المسمى الوظيفي", "manager": "المدير", "managerHint": "المدير المباشر: يرى حضور هذا الموظف وإجازاته كأحد مرؤوسيه المباشرين ويعتمد طلباته.",
+    "secondaryManager": "المدير الثانوي", "secondaryManagerHint": "مدير بخط منقّط: يرى هذا الموظف أيضاً كأحد مرؤوسيه المباشرين ويكون المعتمد البديل عند غياب المدير.", "selectBranch": "اختر فرعاً", "weeklyOffDays": "أيام العطلة الأسبوعية", "weeklyOffDaysHint": "اتركها فارغة لتُورَث من الفرع / المنظمة.",
     "deviceUserId": "معرّف المستخدم على الجهاز", "deviceUserIdAuto": "اتركه فارغاً لتعيين المعرّف الرقمي التالي المتاح في المنظمة تلقائياً.", "deviceUserIdEditHint": "تغيير المعرّف يعيد إرسال الموظف إلى جميع الأجهزة.",
     "autoAssigned": "يُعيَّن تلقائياً", "cardNumber": "رقم البطاقة", "pin": "رمز PIN للجهاز", "pinHint": "من 4 إلى 8 أرقام؛ يُخزَّن مشفّراً ولا يُعرض مرة أخرى."
   },
@@ -40,7 +41,7 @@
     "set_status": { "title": "تغيير الحالة ({{count}})", "hint": "يغيّر حالة التوظيف. إنهاء الخدمة يزيل الموظفين من الأجهزة." },
     "export": { "title": "تصدير الموظفين", "hint": "يُنشأ الملف في الخلفية؛ تُحجب الأعمدة الحساسة ما لم تكن لديك صلاحية عرضها.", "format": "الصيغة" }
   },
-  "profile": { "archived": "مؤرشف", "joined": "التحق في {{date}}", "tabs": { "overview": "نظرة عامة", "history": "سجل التوظيف", "devices": "الأجهزة", "attendance": "الحضور", "activity": "النشاط", "documents": "المستندات", "danger": "منطقة الخطر" } },
+  "profile": { "archived": "مؤرشف", "joined": "التحق في {{date}}", "reportsTo": "يرفع تقاريره إلى", "alsoReportsTo": "وأيضاً", "noManager": "لا يوجد مدير معيّن", "tabs": { "overview": "نظرة عامة", "history": "سجل التوظيف", "devices": "الأجهزة", "attendance": "الحضور", "activity": "النشاط", "documents": "المستندات", "danger": "منطقة الخطر" } },
   "history": { "empty": "لا يوجد سجل توظيف", "emptyHint": "تُنشأ سجلات التاريخ تلقائياً عند تغيير بيانات التوظيف.", "current": "الحالي", "reason": "السبب", "recorded": "سُجّل في {{at}}" },
   "devices": {
     "device": "الجهاز", "connection": "الاتصال", "syncStatus": "حالة المزامنة", "enrolment": "التسجيل", "lastSync": "آخر مزامنة", "lastSuccess": "آخر نجاح {{at}}", "removing": "قيد الإزالة", "error": "خطأ",

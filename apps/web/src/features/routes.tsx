@@ -16,10 +16,11 @@ import { payrollRoutes } from './payroll/routes';
 import { platformRoutes } from './platform/routes';
 import { leaveRoutes } from './leave/routes';
 import { portalRoutes } from './portal/routes';
+import { teamRoutes } from './team/routes';
 
 /** Every feature exports its RouteObject[] from features/<name>/routes.tsx (lazy pages). */
 export const featureRoutes: RouteObject[] = [
   ...employeesRoutes, ...organizationRoutes, ...usersRoutes, ...settingsRoutes, ...auditRoutes, ...searchRoutes,
   ...devicesRoutes, ...syncRoutes, ...attendanceRoutes, ...correctionsRoutes, ...approvalsRoutes, ...scheduleRoutes,
-  ...reportsRoutes, ...payrollRoutes, ...platformRoutes, ...leaveRoutes, ...portalRoutes,
+  ...reportsRoutes, ...payrollRoutes, ...platformRoutes, ...leaveRoutes, ...portalRoutes, ...teamRoutes,
 ];

@@ -1,0 +1,17 @@
+{
+  "title": "My team",
+  "subtitle_one": "{{count}} direct report",
+  "subtitle_other": "{{count}} direct reports",
+  "directReports": "Direct reports",
+  "directReportsHint": "Employees whose manager or secondary manager is you.",
+  "comingSoon": "Team attendance, leave and approvals",
+  "comingSoonHint": "The team workspace grows in the next release: today's attendance, pending requests and upcoming leave of your reports will appear here.",
+  "members": "Team members",
+  "noDirectory": "Your role cannot open employee profiles, so the list stays hidden. Ask HR for the employee.view permission to see your reports here.",
+  "empty": "No direct reports found",
+  "emptyHint": "Nobody reports to your employee record yet. HR sets the manager and secondary manager on each employee profile.",
+  "notManager": "You have no direct reports",
+  "notManagerHint": "This page opens for members whose employee record is the manager or secondary manager of other employees.",
+  "columns": { "name": "Name", "designation": "Designation", "department": "Department", "branch": "Branch", "relation": "Reports to you as" },
+  "relation": { "primary": "Manager", "secondary": "Secondary manager" }
+}

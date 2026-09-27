@@ -4,7 +4,7 @@
   "tabs": { "members": "Members", "invitations": "Invitations", "roles": "Roles" },
   "status": { "active": "Active", "invited": "Invited", "suspended": "Suspended" },
   "filters": { "allStatuses": "All statuses", "allRoles": "All roles" },
-  "categories": { "dashboard": "Dashboard", "organization": "Organisation", "users": "Users & roles", "structure": "Structure", "employees": "Employees", "devices": "Devices & sync", "shifts": "Shifts", "calendar": "Holidays", "leave": "Leave", "attendance": "Attendance", "payroll": "Payroll", "reports": "Reports", "audit": "Audit", "notifications": "Notifications" },
+  "categories": { "dashboard": "Dashboard", "organization": "Organisation", "users": "Users & roles", "structure": "Structure", "employees": "Employees", "devices": "Devices & sync", "shifts": "Shifts", "calendar": "Holidays", "leave": "Leave", "attendance": "Attendance", "payroll": "Payroll", "reports": "Reports", "approval": "Approvals", "audit": "Audit", "notifications": "Notifications", "integrations": "Integrations" },
   "fields": {
     "email": "Email", "role": "Role", "selectRole": "Select a role", "branchScope": "Branch scope", "allBranches": "All branches", "allBranchesHint": "Turn off to limit access to selected branches.",
     "branches": "Branches", "branchesRequired": "Select at least one branch or grant all branches", "noBranches": "No active branches", "lastLogin": "Last sign-in",

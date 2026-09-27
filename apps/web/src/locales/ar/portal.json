@@ -198,6 +198,7 @@
     "department": "القسم",
     "branch": "الفرع",
     "manager": "المدير المباشر",
+    "secondaryManager": "ويرفع أيضاً إلى",
     "teams": "الفرق",
     "joined": "تاريخ الالتحاق",
     "tenure": "مدة الخدمة",

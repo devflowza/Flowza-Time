@@ -50,6 +50,7 @@ export default function MyProfilePage() {
           <Field label={t('profile.designation')}>{p.designation?.name ?? none}</Field>
           <Field label={t('profile.department')}>{p.department?.name ?? none}</Field>
           <Field label={t('profile.manager')}>{p.manager ? <>{p.manager.name} <span className="font-mono text-xs text-muted-foreground" dir="ltr">{p.manager.employeeNumber}</span></> : none}</Field>
+          {p.secondaryManager ? <Field label={t('profile.secondaryManager')}>{p.secondaryManager.name} <span className="font-mono text-xs text-muted-foreground" dir="ltr">{p.secondaryManager.employeeNumber}</span></Field> : null}
           <Field label={t('profile.teams')}>{p.teams.length ? p.teams.map((x) => x.name).join(', ') : none}</Field>
           <Field label={t('profile.joined')}><span className="tnum">{fmtDate(p.joiningDate)}</span></Field>
           <Field label={t('profile.tenure')}><span className="tnum">{t('profile.tenureValue', service)}</span></Field>

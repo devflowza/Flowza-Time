@@ -2,7 +2,10 @@ import type { UpdateEmployeeInput } from '@flowza/contracts';
 import type { EmployeeDetail } from './api';
 import type { EmployeeFormValues } from './components/employee-form-fields';
 
-/** Fields whose change closes the current employment_history row and opens a new one (API contract). */
+/**
+ * Fields whose change closes the current employment_history row and opens a new one (API contract). The secondary
+ * (dotted-line) manager is deliberately not one of them: it is a current-state pointer, not part of the employment record.
+ */
 export const EFFECTIVE_DATED_FIELDS = ['branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'employmentType', 'employmentStatus'] as const;
 
 export function toFormValues(e: EmployeeDetail): EmployeeFormValues {
@@ -11,6 +14,7 @@ export function toFormValues(e: EmployeeDetail): EmployeeFormValues {
     gender: e.gender, dateOfBirth: e.dateOfBirth ?? undefined, nationalityCode: e.nationalityCode ?? undefined, email: e.email ?? undefined, phone: e.phone ?? undefined,
     joiningDate: e.joiningDate, exitDate: e.exitDate, employmentStatus: e.employmentStatus, employmentType: e.employmentType,
     branchId: e.branchId, departmentId: e.departmentId ?? undefined, designationId: e.designationId ?? undefined, managerEmployeeId: e.managerEmployeeId ?? undefined,
+    secondaryManagerEmployeeId: e.secondaryManagerEmployeeId ?? undefined,
     deviceUserId: e.deviceUserId, cardNumber: e.cardNumber ?? undefined, pin: undefined, weeklyOffDays: e.weeklyOffDays ?? undefined,
   };
 }

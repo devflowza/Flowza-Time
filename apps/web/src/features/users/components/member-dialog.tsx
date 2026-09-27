@@ -17,7 +17,8 @@ export function MemberDialog({ member, onClose }: { member: MemberDto; onClose: 
   const { t: tc } = useTranslation();
   const roles = useRoles();
   const branches = useBranchOptions();
-  const employees = useEmployeeOptions();
+  // only employees without a login are offered (the member's own current link is kept in the list below)
+  const employees = useEmployeeOptions('', { unlinked: true });
   const { update } = useMemberMutations();
   const form = useForm<FormValues, unknown, UpdateMemberInput>({ resolver: zodResolver(updateMemberSchema), defaultValues: { roleId: member.roleId, status: member.status, allBranches: member.allBranches, branchIds: member.branchIds, employeeId: member.employeeId } });
   const { control, formState: { errors, isSubmitting }, setValue } = form;

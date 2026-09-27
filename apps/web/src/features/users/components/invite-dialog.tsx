@@ -24,7 +24,8 @@ export function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const tz = useOrgTimezone();
   const roles = useRoles();
   const branches = useBranchOptions();
-  const employees = useEmployeeOptions();
+  // one login per employee record: employees already linked (or reserved by a pending invitation) are not offered
+  const employees = useEmployeeOptions('', { unlinked: true });
   const { invite } = useMemberMutations();
   const [result, setResult] = useState<InvitationDto | null>(null);
   const form = useForm<FormValues, unknown, InviteMemberInput>({ resolver: zodResolver(inviteMemberSchema), defaultValues: { email: '', roleId: '', allBranches: true, branchIds: [] } });

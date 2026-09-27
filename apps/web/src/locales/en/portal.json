@@ -182,6 +182,7 @@
     "department": "Department",
     "branch": "Branch",
     "manager": "Reports to",
+    "secondaryManager": "Also reports to",
     "teams": "Teams",
     "joined": "Joined",
     "tenure": "Service",

@@ -31,4 +31,12 @@ describe('employee-diff', () => {
     const effective = EFFECTIVE_DATED_FIELDS.filter((f) => f in patch);
     expect(effective).toEqual(['designationId']);
   });
+  it('round-trips the secondary manager and treats it as a plain (not effective-dated) change; clearing sends null', () => {
+    const withSecondary = toFormValues({ ...employee, managerEmployeeId: 'm1', secondaryManagerEmployeeId: 'm2' });
+    expect(withSecondary.secondaryManagerEmployeeId).toBe('m2');
+    const patch = diffEmployee(withSecondary, { ...withSecondary, secondaryManagerEmployeeId: 'm3' } as never);
+    expect(patch).toEqual({ secondaryManagerEmployeeId: 'm3' });
+    expect(EFFECTIVE_DATED_FIELDS.filter((f) => f in patch)).toEqual([]);
+    expect(diffEmployee(withSecondary, { ...withSecondary, secondaryManagerEmployeeId: undefined, managerEmployeeId: undefined } as never)).toEqual({ managerEmployeeId: null, secondaryManagerEmployeeId: null });
+  });
 });

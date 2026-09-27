@@ -4,7 +4,7 @@
   "tabs": { "members": "الأعضاء", "invitations": "الدعوات", "roles": "الأدوار" },
   "status": { "active": "نشط", "invited": "مدعو", "suspended": "موقوف" },
   "filters": { "allStatuses": "كل الحالات", "allRoles": "كل الأدوار" },
-  "categories": { "dashboard": "لوحة التحكم", "organization": "المنظمة", "users": "المستخدمون والأدوار", "structure": "الهيكل", "employees": "الموظفون", "devices": "الأجهزة والمزامنة", "shifts": "الورديات", "calendar": "العطلات", "leave": "الإجازات", "attendance": "الحضور", "payroll": "الرواتب", "reports": "التقارير", "audit": "التدقيق", "notifications": "الإشعارات" },
+  "categories": { "dashboard": "لوحة التحكم", "organization": "المنظمة", "users": "المستخدمون والأدوار", "structure": "الهيكل", "employees": "الموظفون", "devices": "الأجهزة والمزامنة", "shifts": "الورديات", "calendar": "العطلات", "leave": "الإجازات", "attendance": "الحضور", "payroll": "الرواتب", "reports": "التقارير", "approval": "الموافقات", "audit": "التدقيق", "notifications": "الإشعارات", "integrations": "التكاملات" },
   "fields": {
     "email": "البريد الإلكتروني", "role": "الدور", "selectRole": "اختر دوراً", "branchScope": "نطاق الفروع", "allBranches": "كل الفروع", "allBranchesHint": "أوقف الخيار لتقييد الوصول بفروع محددة.",
     "branches": "الفروع", "branchesRequired": "اختر فرعاً واحداً على الأقل أو امنح كل الفروع", "noBranches": "لا توجد فروع نشطة", "lastLogin": "آخر تسجيل دخول",

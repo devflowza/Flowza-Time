@@ -19,7 +19,8 @@ export const BRANCH_B = '33333333-3333-4333-8333-333333333333';
 export const USER_ID = '44444444-4444-4444-8444-444444444444';
 export const OWNER = { email: 'owner@albahja.example', password: 'FlowZa-E2E-2026!' };
 /** Every permission key (mirrors PERMISSIONS in @flowza/contracts; copied so this file has no runtime dependency on the package build). */
-export const ALL_PERMISSIONS: Permission[] = ['dashboard.view', 'organization.view', 'organization.manage', 'user.view', 'user.manage', 'role.manage', 'branch.view', 'branch.manage', 'department.view', 'department.manage', 'employee.view', 'employee.view_sensitive', 'employee.create', 'employee.update', 'employee.delete', 'employee.import', 'employee.export', 'device.view', 'device.create', 'device.update', 'device.manage', 'device.sync', 'shift.view', 'shift.manage', 'shift.assign', 'holiday.view', 'holiday.manage', 'leave.view', 'leave.manage', 'leave.request', 'attendance.view', 'attendance.view_own', 'attendance.view_raw', 'attendance.correct', 'attendance.approve', 'attendance.manage_rules', 'attendance.recalculate', 'attendance.lock_period', 'attendance.request_correction', 'payroll.view', 'payroll.finalize', 'report.view', 'report.manage', 'report.export', 'audit.view', 'notification.manage'];
+export const ALL_PERMISSIONS: Permission[] = ['dashboard.view', 'organization.view', 'organization.manage', 'user.view', 'user.manage', 'role.manage', 'branch.view', 'branch.manage', 'department.view', 'department.manage', 'employee.view', 'employee.view_sensitive', 'employee.create', 'employee.update', 'employee.delete', 'employee.import', 'employee.export', 'device.view', 'device.create', 'device.update', 'device.manage', 'device.sync', 'shift.view', 'shift.manage', 'shift.assign', 'holiday.view', 'holiday.manage', 'leave.view', 'leave.manage', 'leave.request', 'attendance.view', 'attendance.view_own', 'attendance.view_raw', 'attendance.correct', 'attendance.approve', 'attendance.manage_rules', 'attendance.recalculate', 'attendance.lock_period', 'attendance.request_correction', 'payroll.view', 'payroll.finalize', 'report.view', 'report.manage', 'report.export', 'audit.view', 'notification.manage',
+  'integration.manage', 'shift.request_swap', 'leave.approve', 'leave.view_team', 'attendance.view_team', 'attendance.checkin', 'attendance.note', 'attendance.review_notes', 'attendance.manage_geofences', 'attendance.manage_overtime', 'report.schedule', 'approval.manage', 'approval.delegate'];
 
 const nowIso = () => new Date().toISOString();
 
@@ -46,7 +47,7 @@ export function meFixture(overrides: Partial<MeDto['memberships'][number]> = {})
     user: { id: USER_ID, email: OWNER.email, fullName: 'Aisha Al Balushi', avatarUrl: null, locale: 'en', mfaEnrolled: false, isPlatformAdmin: false },
     memberships: [{
       membershipId: '66666666-6666-4666-8666-666666666666', organization: organization as MeDto['memberships'][number]['organization'], roleId: '10000000-0000-0000-0000-000000000001', roleKey: 'owner', roleName: 'Owner',
-      permissions: [...ALL_PERMISSIONS], allBranches: true, branchIds: [], employeeId: null, featureFlags: {},
+      permissions: [...ALL_PERMISSIONS], allBranches: true, branchIds: [], employeeId: null, isManager: false, teamSize: 0, featureFlags: {},
       settings: { general: {}, attendance: {}, sync: {}, notifications: {}, security: {}, integrations: {} } as MeDto['memberships'][number]['settings'],
       ...overrides,
     }],
