@@ -103,6 +103,14 @@ describe('DashboardPage', () => {
     expect(screen.getByRole('combobox', { name: 'Range' })).toHaveTextContent('Last 7 days');
   });
 
+  it('shows the approval queue to a leave approver who cannot approve attendance (engine v2)', async () => {
+    grant('dashboard.view', 'attendance.view', 'leave.approve');
+    renderWithProviders(<DashboardPage />);
+    await screen.findByText('431');
+    expect(screen.getByText('Pending approvals')).toBeInTheDocument();
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/approvals', expect.objectContaining({ scope: 'mine', view: 'pending' })));
+  });
+
   it('hides widgets the member may not see, and the highlight card links to attendance without report access', async () => {
     grant('dashboard.view', 'attendance.view');
     renderWithProviders(<DashboardPage />);

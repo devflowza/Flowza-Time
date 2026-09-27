@@ -356,8 +356,12 @@ platform: user_profiles, platform_admins, platform_access_grants, device_provide
   `proposed_punched_at`, `proposed_event_type`, `proposed_status`, `reason`, `attachment_path`,
   `requested_by`, `status` (PENDING|APPROVED|REJECTED|CANCELLED|APPLIED), `approval_request_id`,
   `applied_event_id`, `applied_at`.
-- `approval_workflows` (`entity_type`, `steps jsonb`, `is_default`, `branch_id null`),
-  `approval_requests`, `approval_steps` (`approver_type` MANAGER|ROLE|USER, `status`, `acted_by`, `comment`).
+- `approval_workflows` (`entity_type`, `steps jsonb` — v2 levels with approver type, mode, quorum, escalation —,
+  `applies_to`, `min_units` tiers, `allow_self_approval`, `is_default`, `branch_id null`), `approval_requests` (one PENDING
+  per document; subject, units, cancel / invalidation reasons), `approval_steps` (mode, quorum, resolution trail,
+  escalation, reminder stamp), `approval_step_actors` (the people of a level), `approval_delegations`,
+  `approval_request_events` (append-only timeline), `approval_email_tokens` (sha256 only), `approval_digest_runs`
+  (engine v2, migration 20260928000200; report `docs/hr-portal/reports/02-approval-engine-v2.md`).
 - `attendance_recalculation_requests` — range + scope + reason + job + summary.
 - `attendance_period_locks` — `(organization_id, branch_id null, period_start, period_end)`; locked
   records refuse recompute/correction unless unlocked with reason (audited).

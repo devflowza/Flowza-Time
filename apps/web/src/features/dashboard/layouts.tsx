@@ -80,18 +80,21 @@ function TileGrid({ tiles, keys, spark, size, className, rtl }: { tiles: Record<
   );
 }
 
+/** The approval queue card: whoever can decide something (engine v2 routes corrections and leave to their approvers). */
+const approves = (d: DashboardData) => d.can('attendance.approve') || d.can('leave.approve') || d.can('approval.manage');
+
 function Rail({ d, className }: { d: DashboardData; className?: string }) {
   const { settings, can, summary } = d;
   const items = [
     settings.showHighlight ? <HighlightCard key="highlight" to={can('report.view') ? '/reports' : '/attendance'} /> : null,
-    can('attendance.approve') ? <ApprovalsCard key="approvals" pending={summary?.pendingApprovals} enabled /> : null,
+    approves(d) ? <ApprovalsCard key="approvals" pending={summary?.pendingApprovals} enabled /> : null,
     can('holiday.view') ? <HolidaysCard key="holidays" date={d.date} enabled /> : null,
     settings.showQuote ? <QuoteCard key="quote" date={d.date} /> : null,
   ].filter(Boolean);
   if (items.length === 0) return null;
   return <aside className={cn('min-w-0 space-y-4', className)}>{items}</aside>;
 }
-const railIsEmpty = (d: DashboardData) => !d.settings.showHighlight && !d.settings.showQuote && !d.can('attendance.approve') && !d.can('holiday.view');
+const railIsEmpty = (d: DashboardData) => !d.settings.showHighlight && !d.settings.showQuote && !approves(d) && !d.can('holiday.view');
 
 /** Balanced: today's numbers, the trend, who is where, branches and recent activity, with approvals and holidays on the side. */
 export function OverviewLayout({ d }: { d: DashboardData }) {
