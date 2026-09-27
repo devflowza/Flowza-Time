@@ -347,7 +347,9 @@
     "notActiveHint": "This device is {{status}}. Sync actions are unavailable until it is active again.",
     "restartTitle": "Restart {{name}}?",
     "restartHint": "The terminal reboots and is unreachable for a minute or two. Punches already stored on the device are kept.",
-    "restartHintPush": "The reboot command is stored and the terminal runs it the next time it contacts FlowZa, so it may take until its next poll."
+    "restartHintPush": "The reboot command is stored and the terminal runs it the next time it contacts FlowZa, so it may take until its next poll.",
+    "managedByIntegration": "This is the Flowza Finance connector: its address, token and direction are managed in Settings → Integrations, not here.",
+    "openIntegrations": "Open Integrations"
   },
   "settings": {
     "general": "General",

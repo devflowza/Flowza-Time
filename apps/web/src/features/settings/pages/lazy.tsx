@@ -7,6 +7,7 @@ export const DashboardSection = lazy(() => import('../sections/dashboard-section
 export const RegionalSection = lazy(() => import('../sections/regional-section'));
 export const AttendanceSection = lazy(() => import('../sections/attendance-section'));
 export const SyncSection = lazy(() => import('../sections/sync-section'));
+export const IntegrationsSection = lazy(() => import('../sections/integrations-section'));
 export const ReportsSection = lazy(() => import('../sections/reports-section'));
 export const NotificationsSection = lazy(() => import('../sections/notifications-section'));
 export const SecuritySection = lazy(() => import('../sections/security-section'));

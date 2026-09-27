@@ -89,6 +89,11 @@ export default function DeviceDetailPage() {
               {d.serialNumber ? <Badge variant="outline" className="font-mono" dir="ltr">SN {d.serialNumber}</Badge> : null}
               {d.status !== 'active' ? <span className="text-xs text-muted-foreground">{t('detail.notActiveHint', { status: t(`deviceStatus.${d.status}`) })}</span> : null}
             </div>
+            {d.providerKey === 'flowza_finance' ? (
+              <p className="mb-4 rounded-md border border-blue-300/60 bg-blue-50/60 p-3 text-sm dark:bg-blue-950/30" data-testid="connector-notice">
+                {t('detail.managedByIntegration')} <Link to="/settings/integrations" className="font-medium underline">{t('detail.openIntegrations')}</Link>
+              </p>
+            ) : null}
             <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
               <TabsList className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`detail.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
               <TabsContent value="overview"><OverviewTab device={d} tz={tz} /></TabsContent>
