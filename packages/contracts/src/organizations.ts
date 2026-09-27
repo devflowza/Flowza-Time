@@ -202,6 +202,27 @@ export function resolveAttendanceSettings(raw: unknown): AttendanceSettings {
   return salvaged.success ? salvaged.data : DEFAULT_ATTENDANCE_SETTINGS;
 }
 
+/**
+ * `organization_settings.leave` — leave v2 settings (HR portal Prompt 7). Comp-off credits expire this many days after the
+ * worked day (Finance parity: 90). The comp-off day thresholds reuse `attendance.stats.fullDayHours` (half a day from half
+ * of it). The stored group is `leaveSettingsSchema.partial()`; read it through `resolveLeaveSettings`.
+ */
+export const leaveSettingsSchema = z.object({
+  compOffExpiryDays: z.number().int().min(1).max(365).default(90),
+});
+export type LeaveSettings = z.output<typeof leaveSettingsSchema>;
+export const DEFAULT_LEAVE_SETTINGS: LeaveSettings = leaveSettingsSchema.parse({});
+/** Effective leave settings from whatever the row holds; a malformed key falls back to its default (never throws). */
+export function resolveLeaveSettings(raw: unknown): LeaveSettings {
+  const stored = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const kept: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(leaveSettingsSchema.shape)) {
+    const one = (schema as z.ZodType).safeParse(stored[key]);
+    if (one.success && one.data !== undefined) kept[key] = one.data;
+  }
+  return leaveSettingsSchema.parse(kept);
+}
+
 export const organizationSettingsSchema = z.object({
   general: z.object({
     dateFormat: z.enum(['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD']).default('DD/MM/YYYY'),
@@ -257,9 +278,10 @@ export const organizationSettingsSchema = z.object({
     defaultFormat: z.enum(['pdf', 'xlsx', 'csv']).default('pdf'),
     showLegend: z.boolean().default(true),
   }).partial().default({}),
+  leave: leaveSettingsSchema.partial().default({}),
 });
 export type OrganizationSettings = z.infer<typeof organizationSettingsSchema>;
-export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard'] as const;
+export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard', 'leave'] as const;
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
 export const branchInputSchema = z.object({

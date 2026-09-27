@@ -92,6 +92,8 @@ async function seedTenant(db: Database, rng: Prng): Promise<Ids> {
     leaveTypes.push(id);
     await db.insertInto('leaveTypes').values({ id, organizationId: ORG.id, code, name, nameAr, isPaid, status: 'active' }).execute();
   }
+  // leave v2: the organisation's comp-off type (credits are redeemed through it; hidden from the ordinary apply form)
+  await db.insertInto('leaveTypes').values({ organizationId: ORG.id, code: 'CO', name: 'Compensatory Off', nameAr: 'إجازة تعويضية', isPaid: true, color: '#6941c6', status: 'active', isSpecial: true, portalVisible: false, systemKey: 'COMP_OFF' }).execute();
   const ruleSetId = rng.uuid();
   await db.insertInto('attendanceRuleSets').values({ id: ruleSetId, organizationId: ORG.id, name: 'Company default', effectiveFrom: '2025-01-01', graceInMinutes: 10, graceOutMinutes: 5, lateThresholdMinutes: 0, minFullDayMinutes: 420, halfDayThresholdMinutes: 240, overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 15, punchInterpretation: 'FIRST_LAST', missingPunchBehavior: 'FLAG_ONLY' }).execute();
 
@@ -288,6 +290,9 @@ async function seedAttendance(db: Database, rng: Prng, ids: Ids, employees: Seed
     const half = len === 1 && rng.chance(0.3);
     const typeIdx = rng.int(0, 2);
     const id = rng.uuid();
+    // leave v2: an employee's active leave never overlaps (exclusion constraint) — a colliding pick is skipped, after the
+    // random draws so the rest of the seed stays the same
+    if (Array.from({ length: len }, (_, k) => `${e.id}|${start.plus({ days: k }).toISODate()}`).some((key) => leaves.has(key))) continue;
     await db.insertInto('leaveRecords').values({ id, organizationId: ORG.id, employeeId: e.id, branchId: e.branchId, leaveTypeId: ids.leaveTypes[typeIdx]!, startDate: start.toISODate()!, endDate: start.plus({ days: len - 1 }).toISODate()!, isHalfDay: half, halfDayPart: half ? 'SECOND_HALF' : null, status: 'APPROVED', source: 'INTERNAL', approvedBy: ids.users['hr@albahja.example']!, approvedAt: new Date(), reason: 'Seeded leave' }).execute();
     for (let k = 0; k < len; k++) leaves.set(`${e.id}|${start.plus({ days: k }).toISODate()}`, { id, code: LEAVE_TYPES[typeIdx]![0], isPaid: LEAVE_TYPES[typeIdx]![3], isHalfDay: half, halfDayPart: half ? 'SECOND_HALF' : null });
   }

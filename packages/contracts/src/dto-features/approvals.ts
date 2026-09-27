@@ -166,7 +166,9 @@ export interface ApprovalTimelineEventDto { id: string; at: string; actorUserId:
 export type ApprovalContextDto =
   | { kind: 'ATTENDANCE_CORRECTION'; correction: { id: string; attendanceDate: string; type: string; originalPunchedAt: string | null; proposedPunchedAt: string | null; proposedEventType: string | null; proposedStatus: string | null; reason: string; status: string; requestedBy: string | null; rejectionReason: string | null } }
   | { kind: 'LEAVE'; leave: { id: string; leaveTypeId: string; leaveTypeName: string; startDate: string; endDate: string; isHalfDay: boolean; halfDayPart: string | null; days: number | null; reason: string | null; status: string; balanceRemainingDays: number | null; allowanceDays: number | null } }
-  | { kind: 'GENERIC'; entityType: ApprovalEntity; summary: string | null };
+  | { kind: 'GENERIC'; entityType: ApprovalEntity; summary: string | null }
+  // leave v2 (Prompt 7): a comp-off credit request — the worked day, its type, the minutes and the days it earns
+  | { kind: 'COMP_OFF'; compOff: { id: string; workedOn: string; workedOnType: string; workedMinutes: number; recordedMinutes: number | null; daysEarned: number; location: string; summary: string; status: string } };
 
 /** What the caller may do with the request right now (the API enforces every one of these again). */
 export interface ApprovalAbilitiesDto { canDecide: boolean; canCancel: boolean; canReassign: boolean; canBypass: boolean; canRequestInfo: boolean; canAnswerInfo: boolean; actingAsDelegateOf: string | null }

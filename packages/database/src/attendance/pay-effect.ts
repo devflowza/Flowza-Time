@@ -1,10 +1,11 @@
 import { sql } from 'kysely';
 import type { AttendanceSettings, DayMarkSource } from '@flowza/contracts';
-import { countLeaveDays, holidayDates, type WorkingCalendar } from '@flowza/domain';
+import { holidayDates, type WorkingCalendar } from '@flowza/domain';
 import type { Trx } from '../context.js';
 import type { JobQueue } from '../queue.js';
 import { activeMarksOn, effectiveBranchOn, isoDateOf, markDay, revokeMark, type DayMarkRow } from './day-marks.js';
 import { enqueueRecompute } from './recompute-queue.js';
+import { COMP_OFF_SYSTEM_KEY, loadLeaveBalances, loadLeaveTypePolicies } from '../leave/balances.js';
 
 /**
  * The pay-effect charger (HR portal Prompt 3, Finance parity `_deduct_leave_for_unexcused_note`): the ONE function through
@@ -67,26 +68,28 @@ export async function loadWorkingCalendar(trx: Trx, organizationId: string, empl
 
 interface Candidate { id: string; code: string; remaining: number; priority: number }
 
-/** Paid, tracked, non-excluded leave types with their remaining allowance for the year, in charging order. */
+/**
+ * Paid, tracked leave types that may be charged, with the available balance on the charged date, in charging order.
+ * Never charged: unpaid types, untracked types (no allocation, no allowance), special types (`is_special` — sick,
+ * maternity, Hajj… — leave v2), the codes in `excludeLeaveTypeCodes`, and the comp-off type (credits are earned, not
+ * charged). The balance is read through the ONE balance function (leave v2: allocations, carry-forward, accrual), not
+ * recomputed here; pending requests do not reserve (decision of Prompt 3).
+ */
 async function chargeableLeaveTypes(trx: Trx, organizationId: string, employeeId: string, date: string, settings: UnexcusedSettings): Promise<Candidate[]> {
   const year = Number(date.slice(0, 4));
-  const from = `${year}-01-01`; const to = `${year}-12-31`;
   const excluded = new Set(settings.excludeLeaveTypeCodes.map((c) => c.toUpperCase()));
   const priority = settings.leaveTypePriority.map((c) => c.toUpperCase());
-  const types = (await trx.selectFrom('leaveTypes').select(['id', 'code', 'annualAllowanceDays']).where('organizationId', '=', organizationId).where('status', '=', 'active').where('isPaid', '=', true).execute())
-    .filter((t) => t.annualAllowanceDays !== null && !excluded.has(String(t.code).toUpperCase()));
+  const types = (await loadLeaveTypePolicies(trx, organizationId))
+    .filter((t) => t.isPaid && !t.isSpecial && t.systemKey !== COMP_OFF_SYSTEM_KEY && !excluded.has(t.code.toUpperCase()));
   if (types.length === 0) return [];
-  const cal = await loadWorkingCalendar(trx, organizationId, employeeId, from, to);
-  const records = await trx.selectFrom('leaveRecords').select(['leaveTypeId', 'startDate', 'endDate', 'isHalfDay'])
-    .where('organizationId', '=', organizationId).where('employeeId', '=', employeeId).where('status', '=', 'APPROVED').where('leaveTypeId', 'in', types.map((t) => t.id))
-    .where('startDate', '<=', dv(to)).where('endDate', '>=', dv(from)).execute();
-  const clip = { from, to };
-  const candidates: Candidate[] = types.map((t) => {
-    const used = records.filter((r) => r.leaveTypeId === t.id).reduce((a, r) => a + countLeaveDays({ startDate: isoDateOf(r.startDate), endDate: isoDateOf(r.endDate), isHalfDay: r.isHalfDay }, cal, clip), 0);
-    const code = String(t.code).toUpperCase();
-    const idx = priority.indexOf(code);
-    return { id: t.id, code: String(t.code), remaining: Number(t.annualAllowanceDays) - used, priority: idx === -1 ? Number.POSITIVE_INFINITY : idx };
-  });
+  const balances = (await loadLeaveBalances(trx, organizationId, [employeeId], { year, asOf: date, types })).get(employeeId) ?? [];
+  const candidates: Candidate[] = [];
+  for (const t of types) {
+    const b = balances.find((x) => x.leaveTypeId === t.id);
+    if (!b || !b.tracked || b.availableDays === null) continue;
+    const idx = priority.indexOf(t.code.toUpperCase());
+    candidates.push({ id: t.id, code: t.code, remaining: b.availableDays, priority: idx === -1 ? Number.POSITIVE_INFINITY : idx });
+  }
   return candidates.sort((a, b) => a.priority - b.priority || b.remaining - a.remaining || a.code.localeCompare(b.code));
 }
 
@@ -101,8 +104,10 @@ export async function chargeUnexcusedDay(trx: Trx, queue: JobQueue, input: Charg
   if (excused) return none('excused', excused);
   const charged = marks.find((m) => m.kind === 'PAY_EFFECT' || m.kind === 'LOP');
   if (charged) return none('already_charged', charged);
+  // approved leave covers the day; a PENDING / INFO_REQUESTED request for it is an open explanation (and would clash with
+  // the charge under the leave overlap constraint of leave v2) — decide that request first
   const covering = await trx.selectFrom('leaveRecords').select('id').where('organizationId', '=', input.organizationId).where('employeeId', '=', input.employeeId)
-    .where('status', '=', 'APPROVED').where('startDate', '<=', dv(input.date)).where('endDate', '>=', dv(input.date)).executeTakeFirst();
+    .where('status', 'in', ['APPROVED', 'PENDING', 'INFO_REQUESTED']).where('startDate', '<=', dv(input.date)).where('endDate', '>=', dv(input.date)).executeTakeFirst();
   if (covering) return none('covered_by_leave');
 
   const pick = (await chargeableLeaveTypes(trx, input.organizationId, input.employeeId, input.date, settings)).find((c) => c.remaining >= payEffectDays);
@@ -116,7 +121,7 @@ export async function chargeUnexcusedDay(trx: Trx, queue: JobQueue, input: Charg
   const branchId = mark.branchId ?? await effectiveBranchOn(trx, input.organizationId, input.employeeId, input.date);
   const leave = await trx.insertInto('leaveRecords').values({
     organizationId: input.organizationId, employeeId: input.employeeId, branchId, leaveTypeId: pick.id, startDate: input.date, endDate: input.date,
-    isHalfDay: payEffectDays === 0.5, halfDayPart: payEffectDays === 0.5 ? (input.halfDayPart ?? 'FIRST_HALF') : null,
+    isHalfDay: payEffectDays === 0.5, halfDayPart: payEffectDays === 0.5 ? (input.halfDayPart ?? 'FIRST_HALF') : null, days: payEffectDays,
     status: 'APPROVED', source: 'INTERNAL', externalRef: `mark:${mark.id}`, reason: AUTO_CHARGE_NOTE, decisionNote: AUTO_CHARGE_NOTE, approvedBy: null, approvedAt: now, createdBy: input.createdBy ?? null,
   }).returning('id').executeTakeFirstOrThrow();
   await enqueueRecompute(queue, { organizationId: input.organizationId, employeeId: input.employeeId, date: input.date, reason: 'LEAVE_CHANGE', triggeredBy: input.createdBy ?? null, ...(opts.correlationId ? { correlationId: opts.correlationId } : {}) }, trx);

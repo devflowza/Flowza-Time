@@ -5,3 +5,4 @@ export * from './approvals.js';
 export * from './day-marks.js';
 export * from './schedule.js';
 export * from './reports.js';
+export * from './leave.js';

@@ -118,5 +118,8 @@ export const DOMAIN_EVENT_TYPES = [
   'leave.requested', 'leave.approved', 'leave.rejected',
   // Flowza Finance connector: emitted by the worker after 3 consecutive pull/push failures of a connector device.
   'sync.finance.failed',
+  // Leave v2 (HR portal Prompt 7): a comment on a leave request (targeted via payload.userIds: the other side of the
+  // thread), a year close carried balances forward (HR), comp-off credits expired (the employee, payload.userId)
+  'leave.comment_added', 'leave.year_closed', 'leave.comp_off_expired',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];

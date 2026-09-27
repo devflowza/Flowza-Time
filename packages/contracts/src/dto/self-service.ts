@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import { isoDateSchema, uuidSchema } from '../common.js';
 import type { AttendanceDailyRecordDto } from '../attendance.js';
-import type { ApprovalRequestStatus, LeaveStatus } from '../enums.js';
+import type { ApprovalRequestStatus, LeaveAccrualValue, LeaveCountModeValue, LeaveStatus } from '../enums.js';
+import type { CompOffBalanceDto, LeaveBalanceDto, LeaveWarningDto, SelfLeaveTotalsDto } from '../dto-features/leave.js';
 
 // Employee self-service (/orgs/:orgId/me/…). Every endpoint acts on the caller's own employee record in that
 // organisation (the membership's employee link); no endpoint accepts an employee id.
@@ -67,8 +68,18 @@ export type SelfDayDto = AttendanceDailyRecordDto & { branchName: string | null;
 
 export interface SelfAttendanceMonthDto { month: string; days: SelfDayDto[]; totals: SelfMonthTotals; leaveByDate: Record<string, { leaveTypeName: string; color: string | null; isHalfDay: boolean }>; holidaysByDate: Record<string, string> }
 
-export interface SelfLeaveTypeDto { id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; color: string | null; annualAllowanceDays: number | null }
-export interface SelfLeaveBalanceDto { leaveTypeId: string; allowanceDays: number | null; usedDays: number; pendingDays: number; remainingDays: number | null }
+export interface SelfLeaveTypeDto {
+  id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; color: string | null; annualAllowanceDays: number | null;
+  // leave v2 policy (optional: older API builds omit them)
+  requiresApproval?: boolean; countMode?: LeaveCountModeValue; allowHalfDay?: boolean; advanceNoticeDays?: number; maxConsecutiveDays?: number | null; accrual?: LeaveAccrualValue;
+  /** The organisation's comp-off type (booked through "Use comp-off", not the ordinary form). */
+  compOff?: boolean;
+}
+/**
+ * Pre-v2 fields (allowance = entitlement, used = taken, remaining = available − pending) plus the full leave v2 balance of
+ * the type (computeLeaveBalances), flattened; the v2 fields are optional so an older API build still parses.
+ */
+export interface SelfLeaveBalanceDto extends Partial<Omit<LeaveBalanceDto, 'leaveTypeId'>> { leaveTypeId: string; allowanceDays: number | null; usedDays: number; pendingDays: number; remainingDays: number | null }
 export interface SelfLeaveRecordDto {
   id: string; leaveTypeId: string; leaveTypeCode: string; leaveTypeName: string; color: string | null; isPaid: boolean;
   startDate: string; endDate: string; isHalfDay: boolean; halfDayPart: string | null; days: number;
@@ -80,6 +91,20 @@ export interface SelfLeaveRecordDto {
   /** "Level 1 of 2" style progress for a pending request. */
   approvalCurrentStep: number | null;
   approvalStepCount: number | null;
+  // ----- leave v2 (optional: older API builds omit them) -----
+  withdrawnAt?: string | null;
+  editedAt?: string | null;
+  /** The caller may edit / withdraw (PENDING or INFO_REQUESTED) or reply (INFO_REQUESTED). */
+  canEdit?: boolean;
+  canWithdraw?: boolean;
+  canReply?: boolean;
+  /** The open question while INFO_REQUESTED (the latest info_request comment). */
+  infoRequest?: { message: string; askedAt: string; askedByName: string | null } | null;
+  commentCount?: number;
+  /** Booked against comp-off credits. */
+  compOff?: boolean;
+  /** Rules the request broke that did not block it (returned by apply / edit). */
+  warnings?: LeaveWarningDto[];
 }
 export interface SelfLeaveDto {
   year: number;
@@ -88,6 +113,13 @@ export interface SelfLeaveDto {
   records: SelfLeaveRecordDto[];
   /** What the apply form needs to preview the days a range will charge. */
   calendar: { weeklyOffDays: number[]; holidays: string[] };
+  // ----- leave v2 (optional: older API builds omit them) -----
+  /** The date balances are computed for (today in the organisation's timezone, clamped into the year). */
+  asOf?: string;
+  /** The five tiles: entitlement, used, pending, available, accrued to date — summed over tracked ordinary types. */
+  totals?: SelfLeaveTotalsDto;
+  /** Comp-off credits balance (null when the organisation has no comp-off type). */
+  compOff?: CompOffBalanceDto | null;
 }
 
 export interface SelfHolidayDto { date: string; endDate: string | null; name: string; nameAr: string | null }

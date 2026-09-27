@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSIGNMENT_TARGETS, HOLIDAY_TYPES, RECORD_STATUSES, SHIFT_TYPES } from './enums.js';
+import { ASSIGNMENT_TARGETS, HOLIDAY_TYPES, LEAVE_ACCRUALS, LEAVE_APPLICABLE_GENDERS, LEAVE_COUNT_MODES, RECORD_STATUSES, SHIFT_TYPES } from './enums.js';
 import { codeSchema, isoDateSchema, timeSchema, uuidSchema } from './common.js';
 import { shiftBreakSchema } from './attendance.js';
 
@@ -78,6 +78,28 @@ export const leaveTypeInputSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   /** Days per calendar year shown as the employee's balance in the self-service portal; null = not tracked. Informs, never blocks. */
   annualAllowanceDays: z.number().min(0).max(366).multipleOf(0.5).nullable().optional(),
+  // ----- leave v2 policy (HR portal Prompt 7); defaults = the behaviour every existing type already had -----
+  /** false: an application is approved at once (the approval request is recorded as auto-approved). */
+  requiresApproval: z.boolean().default(true),
+  /** How a range is charged: working days (weekly offs / holidays free) or every calendar day. */
+  countMode: z.enum(LEAVE_COUNT_MODES).default('working'),
+  /** At most this many days charged by one request (self-service: refused; HR: warned). */
+  maxConsecutiveDays: z.number().int().min(1).max(366).nullable().optional(),
+  /** Calendar days between the application and the first day (self-service: refused below; HR: warned). */
+  advanceNoticeDays: z.number().int().min(0).max(365).default(0),
+  /** Who may take it: everyone, or only employees whose gender on file matches. */
+  applicableGender: z.enum(LEAVE_APPLICABLE_GENDERS).default('all'),
+  /** monthly: the yearly entitlement is earned month by month (accrued to date). */
+  accrual: z.enum(LEAVE_ACCRUALS).default('none'),
+  /** Unused days carried into the next year at year close (0 = none). */
+  carryForwardMaxDays: z.number().min(0).max(366).multipleOf(0.5).default(0),
+  /** Carried-forward days expire after this many months of the new year (null = never). */
+  carryForwardExpiryMonths: z.number().int().min(1).max(24).nullable().optional(),
+  /** Never charged automatically for unexcused days (sick, maternity, Hajj…). */
+  isSpecial: z.boolean().default(false),
+  allowHalfDay: z.boolean().default(true),
+  /** Offered in the self-service apply form. */
+  portalVisible: z.boolean().default(true),
 });
 
 /**

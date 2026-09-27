@@ -109,8 +109,27 @@ export type MissingPunchBehavior = (typeof MISSING_PUNCH_BEHAVIORS)[number];
 export const HOLIDAY_TYPES = ['PUBLIC', 'RELIGIOUS', 'COMPANY', 'REGIONAL'] as const;
 export type HolidayType = (typeof HOLIDAY_TYPES)[number];
 
-export const LEAVE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED'] as const;
+/** INFO_REQUESTED (leave v2): an approver asked the employee for more information; the reply puts it back to PENDING. */
+export const LEAVE_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'INFO_REQUESTED'] as const;
 export type LeaveStatus = (typeof LEAVE_STATUSES)[number];
+/** Leave statuses that hold dates (overlap protection) and count as pending in balances (all but APPROVED). */
+export const LEAVE_ACTIVE_STATUSES = ['PENDING', 'APPROVED', 'INFO_REQUESTED'] as const satisfies readonly LeaveStatus[];
+export const LEAVE_UNDECIDED_STATUSES = ['PENDING', 'INFO_REQUESTED'] as const satisfies readonly LeaveStatus[];
+
+/** Leave v2 type policy vocabularies (mirrored by CHECK constraints in migration 20260928000700). */
+export const LEAVE_COUNT_MODES = ['working', 'calendar'] as const;
+export type LeaveCountModeValue = (typeof LEAVE_COUNT_MODES)[number];
+export const LEAVE_ACCRUALS = ['none', 'monthly'] as const;
+export type LeaveAccrualValue = (typeof LEAVE_ACCRUALS)[number];
+export const LEAVE_APPLICABLE_GENDERS = ['all', 'male', 'female'] as const;
+export type LeaveApplicableGenderValue = (typeof LEAVE_APPLICABLE_GENDERS)[number];
+export const LEAVE_COMMENT_KINDS = ['comment', 'info_request', 'reply', 'system'] as const;
+export type LeaveCommentKind = (typeof LEAVE_COMMENT_KINDS)[number];
+/** Comp-off credit lifecycle; `cancelled` = the employee withdrew the request before a decision. */
+export const COMP_OFF_STATUSES = ['pending_approval', 'approved', 'rejected', 'used', 'partially_used', 'expired', 'cancelled'] as const;
+export type CompOffStatus = (typeof COMP_OFF_STATUSES)[number];
+export const COMP_OFF_WORKED_ON_TYPES = ['weekly_off', 'holiday'] as const;
+export type CompOffWorkedOnType = (typeof COMP_OFF_WORKED_ON_TYPES)[number];
 
 export const HALF_DAY_PARTS = ['FIRST_HALF', 'SECOND_HALF'] as const;
 export type HalfDayPart = (typeof HALF_DAY_PARTS)[number];

@@ -89,7 +89,7 @@ export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type LeaveSource = "EXTERNAL" | "INTERNAL";
 
-export type LeaveStatus = "APPROVED" | "CANCELLED" | "PENDING" | "REJECTED";
+export type LeaveStatus = "APPROVED" | "CANCELLED" | "INFO_REQUESTED" | "PENDING" | "REJECTED";
 
 export type LoginEvent = "failed" | "logout" | "mfa_challenge" | "password_reset" | "success";
 
@@ -578,6 +578,39 @@ export interface Branches {
   weeklyOffDays: number[] | null;
 }
 
+export interface CompOffCredits {
+  approvalRequestId: string | null;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  daysEarned: Numeric;
+  decisionNote: string | null;
+  employeeId: string;
+  expiresOn: Timestamp | null;
+  id: Generated<string>;
+  location: string;
+  organizationId: string;
+  status: Generated<string>;
+  summary: string;
+  updatedAt: Generated<Timestamp>;
+  usedDays: Generated<Numeric>;
+  workedMinutes: number;
+  workedOn: Timestamp;
+  workedOnType: string;
+}
+
+export interface CompOffUsages {
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  creditId: string;
+  days: Numeric;
+  employeeId: string;
+  id: Generated<string>;
+  leaveRecordId: string;
+  organizationId: string;
+  releasedAt: Timestamp | null;
+}
+
 export interface DataRetentionPolicies {
   dataClass: string;
   enabled: Generated<boolean>;
@@ -1029,6 +1062,25 @@ export interface JobsQueueArchive {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface LeaveAllocations {
+  adjustmentDays: Generated<Numeric>;
+  allocatedDays: Generated<Numeric>;
+  branchId: string | null;
+  carriedForwardDays: Generated<Numeric>;
+  carriedForwardExpiresOn: Timestamp | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  employeeId: string;
+  id: Generated<string>;
+  leaveTypeId: string;
+  notes: string | null;
+  openingBalanceDays: Generated<Numeric>;
+  organizationId: string;
+  updatedAt: Generated<Timestamp>;
+  updatedBy: string | null;
+  year: number;
+}
+
 export interface LeaveRecords {
   approvalRequestId: string | null;
   approvedAt: Timestamp | null;
@@ -1036,7 +1088,9 @@ export interface LeaveRecords {
   branchId: string | null;
   createdAt: Generated<Timestamp>;
   createdBy: string | null;
+  days: Numeric | null;
   decisionNote: string | null;
+  editedAt: Timestamp | null;
   employeeId: string;
   endDate: Timestamp;
   externalRef: string | null;
@@ -1050,19 +1104,42 @@ export interface LeaveRecords {
   startDate: Timestamp;
   status: Generated<LeaveStatus>;
   updatedAt: Generated<Timestamp>;
+  withdrawnAt: Timestamp | null;
+}
+
+export interface LeaveRequestComments {
+  authorUserId: string | null;
+  body: string;
+  createdAt: Generated<Timestamp>;
+  id: Generated<string>;
+  kind: Generated<string>;
+  leaveRecordId: string;
+  organizationId: string;
 }
 
 export interface LeaveTypes {
+  accrual: Generated<string>;
+  advanceNoticeDays: Generated<number>;
+  allowHalfDay: Generated<boolean>;
   annualAllowanceDays: Numeric | null;
+  applicableGender: Generated<string>;
+  carryForwardExpiryMonths: number | null;
+  carryForwardMaxDays: Generated<Numeric>;
   code: string;
   color: string | null;
+  countMode: Generated<string>;
   createdAt: Generated<Timestamp>;
   id: Generated<string>;
   isPaid: Generated<boolean>;
+  isSpecial: Generated<boolean>;
+  maxConsecutiveDays: number | null;
   name: string;
   nameAr: string | null;
   organizationId: string;
+  portalVisible: Generated<boolean>;
+  requiresApproval: Generated<boolean>;
   status: Generated<RecordStatus>;
+  systemKey: string | null;
   treatAsPresent: Generated<boolean>;
 }
 
@@ -1155,6 +1232,7 @@ export interface OrganizationSettings {
   dashboard: Generated<Json>;
   general: Generated<Json>;
   integrations: Generated<Json>;
+  leave: Generated<Json>;
   notifications: Generated<Json>;
   organizationId: string;
   reports: Generated<Json>;
@@ -1550,6 +1628,8 @@ export interface DB {
   attendanceRuleSets: AttendanceRuleSets;
   "audit.logs": AuditLogs;
   branches: Branches;
+  compOffCredits: CompOffCredits;
+  compOffUsages: CompOffUsages;
   dataRetentionPolicies: DataRetentionPolicies;
   departments: Departments;
   designations: Designations;
@@ -1577,7 +1657,9 @@ export interface DB {
   invitations: Invitations;
   "jobs.queue": JobsQueue;
   "jobs.queueArchive": JobsQueueArchive;
+  leaveAllocations: LeaveAllocations;
   leaveRecords: LeaveRecords;
+  leaveRequestComments: LeaveRequestComments;
   leaveTypes: LeaveTypes;
   loginHistory: LoginHistory;
   membershipBranches: MembershipBranches;
