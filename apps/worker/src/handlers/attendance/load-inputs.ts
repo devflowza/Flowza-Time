@@ -1,10 +1,27 @@
 import { sql } from 'kysely';
-import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, shiftBreakSchema, type AttendanceRules, type EmploymentStatus, type ShiftBreak } from '@flowza/contracts';
+import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, shiftBreakSchema, type AttendanceRules, type AttendanceSettings, type EmploymentStatus, type ShiftBreak } from '@flowza/contracts';
 import { addDays, dayOfWeek, errors, isValidTimezone, localDateTime } from '@flowza/shared';
-import type { Trx } from '@flowza/database';
-import { resolveRuleSet, resolveShift, type DailyCalculationInput, type EngineEvent, type EngineHoliday, type EngineLeave, type EngineRuleSet, type EngineShift, type EngineShiftAssignment, type EngineShiftPattern, type EmployeeScope } from '@flowza/domain';
-import { asArray, asDate, asObject, isoDate } from './common.js';
+import { activeMarksOn, type Trx } from '@flowza/database';
+import { resolveRuleSet, resolveShift, type DailyCalculationInput, type EngineDayMark, type EngineEvent, type EngineHoliday, type EngineLeave, type EnginePunchPayload, type EngineRuleSet, type EngineShift, type EngineShiftAssignment, type EngineShiftPattern, type EmployeeScope } from '@flowza/domain';
+import { asArray, asDate, asObject, isoDate, loadAttendanceSettings } from './common.js';
 import { historyOn } from './normalize.js';
+
+/**
+ * The self-service facts of a raw punch payload (written by the check-in endpoint of Prompt 4), read defensively: only the
+ * known keys with the expected shapes are passed to the engine, so a vendor payload that happens to carry a `channel`
+ * key of its own cannot flag a device punch as self-service. Returns null when the payload says nothing the engine reads.
+ */
+export function punchPayloadOf(raw: unknown): EnginePunchPayload | null {
+  const o = asObject(raw);
+  if (Object.keys(o).length === 0) return null;
+  const out: EnginePunchPayload = {};
+  if (o['channel'] === 'web' || o['channel'] === 'mobile') out.channel = o['channel'];
+  const verdict = o['geofenceVerdict'] ?? o['geofence_verdict'] ?? o['verdict'];
+  if (typeof verdict === 'string' && verdict.length > 0 && verdict.length <= 40) out.geofenceVerdict = verdict;
+  if (o['isMock'] === true || o['is_mock'] === true) out.isMock = true;
+  if (o['outOfWindow'] === true || o['out_of_window'] === true) out.outOfWindow = true;
+  return Object.keys(out).length === 0 ? null : out;
+}
 
 export interface LoadedDailyInputs {
   input: DailyCalculationInput;
@@ -15,6 +32,8 @@ export interface LoadedDailyInputs {
   /** Source per event id, so the recompute can derive `has_correction` from the attributed events. */
   eventSources: Map<string, EngineEvent['source']>;
   leave: { id: string; isPaid: boolean } | null;
+  /** The organisation's effective attendance settings (defaults filled in). */
+  settings: AttendanceSettings;
 }
 
 interface HistoryRow { branchId: string; departmentId: string | null; employmentStatus: EmploymentStatus; effectiveFrom: string; effectiveTo: string | null }
@@ -108,11 +127,12 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   const previous = placement(addDays(date, -1));
   const next = placement(addDays(date, 1));
 
-  const [org, branches, teamRows] = await Promise.all([
+  const [org, branches, teamRows, settings] = await Promise.all([
     trx.selectFrom('organizations').select(['weeklyOffDays', 'timezone']).where('id', '=', organizationId).executeTakeFirstOrThrow(),
     trx.selectFrom('branches').select(['id', 'timezone', 'weeklyOffDays', 'holidayCalendarId']).where('organizationId', '=', organizationId)
       .where('id', 'in', [...new Set([today.branchId, previous.branchId, next.branchId])]).execute(),
     trx.selectFrom('teamMembers').select('teamId').where('organizationId', '=', organizationId).where('employeeId', '=', employeeId).execute(),
+    loadAttendanceSettings(trx, organizationId),
   ]);
   const branch = branches.find((b) => b.id === today.branchId);
   if (!branch) throw errors.notFound('Branch', today.branchId);
@@ -141,14 +161,20 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   const resolved = resolveShift(assignments, patterns, scopeFor(today), date);
   const resolvedPrev = resolveShift(assignments, patterns, scopeFor(previous), addDays(date, -1));
   const resolvedNext = resolveShift(assignments, patterns, scopeFor(next), addDays(date, 1));
-  const shiftIds = [...new Set([resolved.shiftId, resolvedPrev.shiftId, resolvedNext.shiftId].filter((s): s is string => s !== null))];
+  // `settings.attendance.defaultShiftId` applies wherever no assignment resolves (today and the neighbouring dates) — it is an
+  // organisation-wide fallback, not an assignment, so `shiftAssignmentId` stays null. A rotation pattern's off day resolves
+  // to "no shift on purpose" and must not fall back either.
+  const defaultShiftId = settings.defaultShiftId ?? null;
+  const effectiveShiftId = (r: { shiftId: string | null; isPatternOff: boolean }): string | null => r.shiftId ?? (r.isPatternOff ? null : defaultShiftId);
+  const shiftIds = [...new Set([effectiveShiftId(resolved), effectiveShiftId(resolvedPrev), effectiveShiftId(resolvedNext)].filter((s): s is string => s !== null))];
   const shiftRows = shiftIds.length
     ? await trx.selectFrom('shifts').select(['id', 'code', 'name', 'type', 'startTime', 'endTime', 'requiredMinutes', 'coreStart', 'coreEnd', 'dayBoundary', 'breaks', 'punchInWindowBeforeMinutes', 'punchOutWindowAfterMinutes', 'graceInMinutes', 'graceOutMinutes'])
       .where('organizationId', '=', organizationId).where('id', 'in', shiftIds).execute()
     : [];
   const shifts = new Map(shiftRows.map((s) => [s.id, toEngineShift(s)]));
+  // an unknown (deleted) default shift silently resolves to "no shift" (the engine flags NO_SHIFT) rather than failing the day
   const shiftOf = (id: string | null): EngineShift | null => (id === null ? null : shifts.get(id) ?? null);
-  const shift = shiftOf(resolved.shiftId);
+  const shift = shiftOf(effectiveShiftId(resolved));
 
   // Rule set: branch-specific first, then organisation default (falls back to contract defaults when none is configured).
   const ruleSetRows = await loadRuleSetRows(trx, organizationId, today.branchId);
@@ -184,18 +210,25 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
     .executeTakeFirst();
   const leave: EngineLeave | null = leaveRow ? { id: leaveRow.id, leaveTypeCode: String(leaveRow.code), isPaid: leaveRow.isPaid, isHalfDay: leaveRow.isHalfDay, halfDayPart: leaveRow.halfDayPart } : null;
 
-  // Events in a generous window; the engine attributes them to punch windows.
+  // Events in a generous window; the engine attributes them to punch windows. The raw payload rides along (same
+  // partition key) so the self-service facts of a punch — channel, geofence verdict, policy window — reach the engine.
   const windowStart = localDateTime(addDays(date, -1), '00:00', timezone).toJSDate();
   const windowEnd = localDateTime(addDays(date, 2), '00:00', timezone).toJSDate();
-  const eventRows = await trx.selectFrom('attendanceEvents').select(['id', 'punchedAt', 'eventType', 'source', 'verificationMethod', 'deviceId', 'voidedAt'])
-    .where('organizationId', '=', organizationId).where('employeeId', '=', employeeId)
-    .where('punchedAt', '>=', windowStart).where('punchedAt', '<', windowEnd)
-    .orderBy('punchedAt', 'asc').orderBy('id', 'asc').execute();
+  const eventRows = await trx.selectFrom('attendanceEvents as ev')
+    .leftJoin('attendanceRawTransactions as rt', (join) => join.onRef('rt.id', '=', 'ev.rawTransactionId').onRef('rt.punchedAt', '=', 'ev.punchedAt'))
+    .select(['ev.id', 'ev.punchedAt', 'ev.eventType', 'ev.source', 'ev.verificationMethod', 'ev.deviceId', 'ev.voidedAt', 'rt.rawPayload'])
+    .where('ev.organizationId', '=', organizationId).where('ev.employeeId', '=', employeeId)
+    .where('ev.punchedAt', '>=', windowStart).where('ev.punchedAt', '<', windowEnd)
+    .orderBy('ev.punchedAt', 'asc').orderBy('ev.id', 'asc').execute();
   const eventSources = new Map<string, EngineEvent['source']>();
   const events: EngineEvent[] = eventRows.map((e) => {
     eventSources.set(e.id, e.source);
-    return { id: e.id, punchedAt: (e.punchedAt instanceof Date ? e.punchedAt : new Date(e.punchedAt)).toISOString(), eventType: e.eventType, source: e.source, verificationMethod: e.verificationMethod, deviceId: e.deviceId, voided: e.voidedAt !== null };
+    const payload = punchPayloadOf(e.rawPayload);
+    return { id: e.id, punchedAt: (e.punchedAt instanceof Date ? e.punchedAt : new Date(e.punchedAt)).toISOString(), eventType: e.eventType, source: e.source, verificationMethod: e.verificationMethod, deviceId: e.deviceId, voided: e.voidedAt !== null, ...(payload ? { payload } : {}) };
   });
+
+  // Active day marks (reviewed verdicts) for the date — folded in by the engine as flags / lopDays.
+  const dayMarks: EngineDayMark[] = (await activeMarksOn(trx, organizationId, employeeId, date)).map((m) => ({ id: m.id, kind: m.kind, payEffectDays: m.payEffectDays, source: m.source }));
 
   const input: DailyCalculationInput = {
     employeeId,
@@ -211,8 +244,10 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
     events,
     employment: { joiningDate: isoDate(employee.joiningDate), exitDate: employee.exitDate === null ? null : isoDate(employee.exitDate), status: today.status },
     ramadanEligible: asObject(employee.customFields)['ramadanEligible'] === true,
+    dayMarks,
+    settings: { nonWorkingDay: settings.nonWorkingDay },
     now: now.toISOString(),
-    adjacentShifts: { previous: shiftOf(resolvedPrev.shiftId), next: shiftOf(resolvedNext.shiftId) },
+    adjacentShifts: { previous: shiftOf(effectiveShiftId(resolvedPrev)), next: shiftOf(effectiveShiftId(resolvedNext)) },
   };
-  return { input, branchId: today.branchId, departmentId: today.departmentId, timezone, eventSources, leave: leave ? { id: leave.id, isPaid: leave.isPaid } : null };
+  return { input, branchId: today.branchId, departmentId: today.departmentId, timezone, eventSources, leave: leave ? { id: leave.id, isPaid: leave.isPaid } : null, settings };
 }

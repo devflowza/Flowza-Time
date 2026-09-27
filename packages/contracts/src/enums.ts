@@ -71,8 +71,25 @@ export type AttendanceEventType = (typeof ATTENDANCE_EVENT_TYPES)[number];
 export const ATTENDANCE_STATUSES = ['PRESENT', 'ABSENT', 'LEAVE', 'HOLIDAY', 'WEEKLY_OFF', 'HALF_DAY', 'MISSING_PUNCH', 'NOT_JOINED', 'EXITED', 'PENDING'] as const;
 export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 
-export const ATTENDANCE_FLAGS = ['LATE', 'EARLY_DEPARTURE', 'OVERTIME', 'MISSING_IN', 'MISSING_OUT', 'MANUAL_CORRECTION', 'OUT_OF_WINDOW', 'WORKED_ON_HOLIDAY', 'WORKED_ON_WEEKLY_OFF', 'HALF_DAY_LEAVE', 'DUPLICATE_PUNCHES_COLLAPSED', 'RAMADAN_HOURS', 'CROSS_MIDNIGHT', 'NO_SHIFT', 'UNDER_HOURS'] as const;
+/**
+ * Daily-record flags in their canonical (serialisation) order — the engine emits them in this order so equal results
+ * always compare equal. New flags are appended, never inserted, so stored records keep their order. The policy-parity
+ * flags (HR portal Prompt 3): UNEXCUSED / EXCUSED / LOP / PAY_EFFECT_* come from `attendance_day_marks`; OUTSIDE_GEOFENCE /
+ * SELF_SERVICE_PUNCH come from the punch payload; NON_WORKING_DAY_WORK marks work recorded on a weekly off / holiday.
+ */
+export const ATTENDANCE_FLAGS = ['LATE', 'EARLY_DEPARTURE', 'OVERTIME', 'MISSING_IN', 'MISSING_OUT', 'MANUAL_CORRECTION', 'OUT_OF_WINDOW', 'WORKED_ON_HOLIDAY', 'WORKED_ON_WEEKLY_OFF', 'HALF_DAY_LEAVE', 'DUPLICATE_PUNCHES_COLLAPSED', 'RAMADAN_HOURS', 'CROSS_MIDNIGHT', 'NO_SHIFT', 'UNDER_HOURS',
+  'UNEXCUSED', 'EXCUSED', 'LOP', 'PAY_EFFECT_HALF', 'PAY_EFFECT_FULL', 'OUTSIDE_GEOFENCE', 'SELF_SERVICE_PUNCH', 'NON_WORKING_DAY_WORK'] as const;
 export type AttendanceFlag = (typeof ATTENDANCE_FLAGS)[number];
+
+/** Kinds of `attendance_day_marks` rows: a reviewed verdict on one employee-day (HR portal Prompt 3). */
+export const DAY_MARK_KINDS = ['UNEXCUSED', 'EXCUSED', 'LOP', 'PAY_EFFECT'] as const;
+export type DayMarkKind = (typeof DAY_MARK_KINDS)[number];
+/** Who wrote a day mark: the day-close sweep, a note review (Prompt 4), HR by hand, or another system flow. */
+export const DAY_MARK_SOURCES = ['SWEEP', 'NOTE_REVIEW', 'HR', 'SYSTEM'] as const;
+export type DayMarkSource = (typeof DAY_MARK_SOURCES)[number];
+/** Pay effect of an unexcused day in days: none, half or a full day. */
+export const PAY_EFFECT_DAYS = [0, 0.5, 1] as const;
+export type PayEffectDays = (typeof PAY_EFFECT_DAYS)[number];
 
 export const SHIFT_TYPES = ['FIXED', 'FLEXIBLE'] as const;
 export type ShiftType = (typeof SHIFT_TYPES)[number];

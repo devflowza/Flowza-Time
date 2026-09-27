@@ -24,12 +24,13 @@ function comparable(s: PeriodSummary, recordVersions: Record<string, number>): s
   const sortedVersions = Object.fromEntries(Object.keys(recordVersions).sort().map((k) => [k, Number(recordVersions[k])]));
   return JSON.stringify({ ...s, recordVersions: sortedVersions });
 }
-function fromRow(r: { workingDays: number; presentDays: string; absentDays: string; leaveDays: string; paidLeaveDays: string; holidayDays: number; weeklyOffDays: number; halfDays: number; missingPunchDays: number; lateDays: number; regularMinutes: number; overtimeMinutes: number; overtimeWeeklyOffMinutes: number; overtimeHolidayMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; recordVersions: unknown }, periodStart: string, periodEnd: string, pendingDays: number, recordCount: number, totalOvertimeMinutes: number): string {
+function fromRow(r: { workingDays: number; presentDays: string; absentDays: string; leaveDays: string; paidLeaveDays: string; holidayDays: number; weeklyOffDays: number; halfDays: number; missingPunchDays: number; lateDays: number; regularMinutes: number; overtimeMinutes: number; overtimeWeeklyOffMinutes: number; overtimeHolidayMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; recordVersions: unknown; lopDays: string; unexcusedDays: number; excusedDays: number; nonWorkingDayWorkMinutes: number }, periodStart: string, periodEnd: string, pendingDays: number, recordCount: number, totalOvertimeMinutes: number): string {
   const s: PeriodSummary = {
     periodStart, periodEnd, workingDays: r.workingDays, presentDays: Number(r.presentDays), absentDays: Number(r.absentDays), leaveDays: Number(r.leaveDays), paidLeaveDays: Number(r.paidLeaveDays),
     holidayDays: r.holidayDays, weeklyOffDays: r.weeklyOffDays, halfDays: r.halfDays, missingPunchDays: r.missingPunchDays, lateDays: r.lateDays, regularMinutes: r.regularMinutes,
     overtimeMinutes: r.overtimeMinutes, overtimeWeeklyOffMinutes: r.overtimeWeeklyOffMinutes, overtimeHolidayMinutes: r.overtimeHolidayMinutes, totalOvertimeMinutes, lateMinutes: r.lateMinutes, earlyDepartureMinutes: r.earlyDepartureMinutes,
     pendingDays, recordCount,
+    lopDays: Number(r.lopDays), unexcusedDays: r.unexcusedDays, excusedDays: r.excusedDays, nonWorkingDayWorkMinutes: r.nonWorkingDayWorkMinutes,
   };
   const rv = (r.recordVersions && typeof r.recordVersions === 'object' && !Array.isArray(r.recordVersions) ? r.recordVersions : {}) as Record<string, number>;
   return comparable(s, rv);
@@ -130,6 +131,7 @@ export async function buildPeriodSummaries(trx: Trx, p: PeriodSummaryPayload, no
       holidayDays: summary.holidayDays, weeklyOffDays: summary.weeklyOffDays, halfDays: summary.halfDays, missingPunchDays: summary.missingPunchDays, lateDays: summary.lateDays,
       regularMinutes: summary.regularMinutes, overtimeMinutes: summary.overtimeMinutes, overtimeWeeklyOffMinutes: summary.overtimeWeeklyOffMinutes, overtimeHolidayMinutes: summary.overtimeHolidayMinutes,
       lateMinutes: summary.lateMinutes, earlyDepartureMinutes: summary.earlyDepartureMinutes, recordVersions: JSON.stringify(recordVersions), computedAt: now,
+      lopDays: summary.lopDays, unexcusedDays: summary.unexcusedDays, excusedDays: summary.excusedDays, nonWorkingDayWorkMinutes: summary.nonWorkingDayWorkMinutes,
     };
     const finalizeCols = p.finalize ? { status: 'finalized' as const, finalizedBy: p.requestedBy ?? null, finalizedAt: now } : {};
     if (!existing) {

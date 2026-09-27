@@ -111,6 +111,8 @@ export const DOMAIN_EVENT_TYPES = [
   'device.created', 'device.updated', 'device.online', 'device.offline', 'device.credentials_changed',
   'sync.queued', 'sync.completed', 'sync.failed', 'sync.item_failed',
   'attendance.created', 'attendance.updated', 'attendance.correction_submitted', 'attendance.correction_approved', 'attendance.correction_rejected',
+  // day-close sweep (HR portal Prompt 3): one event per (employee, sweep run) listing the days marked UNEXCUSED; targeted via payload.userIds
+  'attendance.unexcused_marked',
   'approval.pending', 'report.ready', 'report.failed', 'subscription.limit_reached',
   'leave.requested', 'leave.approved', 'leave.rejected',
 ] as const;

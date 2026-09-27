@@ -10,7 +10,11 @@ interface OutboxRow { id: string; organizationId: string | null; eventType: stri
  * Which users receive an in-app notification for an event type: by permission within the organisation. `when` filters
  * events that are published (realtime, webhooks) but must not become notifications.
  */
-const ROUTING: Record<string, { category: NotificationCategory; permission: string; recipients?: 'permission' | 'user'; when?: (p: Record<string, unknown>) => boolean; title: (p: Record<string, unknown>) => string; body?: (p: Record<string, unknown>) => string; link?: (p: Record<string, unknown>) => string }> = {
+const ROUTING: Record<string, { category: NotificationCategory; permission: string; recipients?: 'permission' | 'user' | 'users'; when?: (p: Record<string, unknown>) => boolean; title: (p: Record<string, unknown>) => string; body?: (p: Record<string, unknown>) => string; link?: (p: Record<string, unknown>) => string }> = {
+  // Day-close sweep (HR portal Prompt 3): one event per (employee, run). `recipients: 'users'` = exactly the logins the
+  // emitter resolved into payload.userIds (the employee + the managers holding attendance.approve), re-checked against
+  // active memberships of the organisation here — never every attendance.approve holder for every employee-day.
+  'attendance.unexcused_marked': { category: 'ATTENDANCE', permission: 'attendance.approve', recipients: 'users', title: (p) => `${Number(p['count'] ?? 0) === 1 ? 'An attendance day' : `${String(p['count'] ?? 0)} attendance days`} marked unexcused`, body: (p) => `${Array.isArray(p['dates']) ? (p['dates'] as string[]).slice(0, 5).join(', ') : ''}${Array.isArray(p['dates']) && (p['dates'] as string[]).length > 5 ? ', …' : ''}${p['autoDeduct'] === true ? ' · pay effect applied per policy' : ''}`, link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
   'device.offline': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device offline: ${String(p['deviceName'] ?? p['deviceId'] ?? '')}`, body: (p) => `No successful communication since ${String(p['lastSeenAt'] ?? 'unknown')}.`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'device.online': { category: 'DEVICE', permission: 'device.view', title: (p) => `Device back online: ${String(p['deviceName'] ?? '')}`, link: (p) => `/devices/${String(p['deviceId'] ?? '')}` },
   'sync.failed': { category: 'ATTENDANCE', permission: 'device.sync', title: (p) => `Sync failed: ${String(p['jobType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: (p) => `/sync/${String(p['syncJobId'] ?? '')}` },
@@ -61,8 +65,14 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
       const route = ROUTING[row.eventType];
       if (route && row.organizationId && (route.when?.(row.payload) ?? true)) {
         notifications += await (async () => {
-          // recipients: active members whose role holds the permission (+ specific user in payload.userId)
-          const recipients = route.recipients === 'user'
+          // recipients: active members whose role holds the permission (+ specific user in payload.userId), one specific user,
+          // or the explicit list in payload.userIds (kept to active members of the organisation — a stale id notifies nobody)
+          const userIds = Array.isArray(row.payload['userIds']) ? (row.payload['userIds'] as unknown[]).filter((u): u is string => typeof u === 'string' && /^[0-9a-f-]{36}$/i.test(u)) : [];
+          const recipients = route.recipients === 'users'
+            ? (userIds.length === 0 ? { rows: [] as Array<{ userId: string }> } : await sql<{ userId: string }>`
+            select distinct m.user_id as "userId" from public.org_memberships m
+            where m.organization_id = ${row.organizationId}::uuid and m.status = 'active' and m.user_id = any(${userIds}::uuid[])`.execute(trx))
+            : route.recipients === 'user'
             ? await sql<{ userId: string }>`select ${String(row.payload['userId'] ?? '00000000-0000-0000-0000-000000000000')}::uuid as "userId" where ${typeof row.payload['userId'] === 'string'}`.execute(trx)
             : await sql<{ userId: string }>`
             select distinct m.user_id as "userId" from public.org_memberships m

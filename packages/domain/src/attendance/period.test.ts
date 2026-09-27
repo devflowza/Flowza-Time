@@ -49,7 +49,24 @@ describe('summarisePeriod', () => {
       lateMinutes: 12,
       earlyDepartureMinutes: 280,
       pendingDays: 1,
+      lopDays: 0,
+      unexcusedDays: 0,
+      excusedDays: 0,
+      nonWorkingDayWorkMinutes: 0,
     });
+  });
+
+  it('adds up loss of pay, unexcused / excused days and non-working-day work from the policy-parity flags', () => {
+    const s = summarisePeriod([
+      record('2026-03-02', 'ABSENT', { flags: ['UNEXCUSED', 'LOP', 'PAY_EFFECT_FULL'] }),
+      record('2026-03-03', 'PRESENT', { flags: ['LATE', 'UNEXCUSED', 'LOP', 'PAY_EFFECT_HALF'], lateMinutes: 40 }),
+      record('2026-03-04', 'PRESENT', { flags: ['LATE', 'UNEXCUSED', 'PAY_EFFECT_HALF'], lateMinutes: 30 }), // charged to leave: no LOP
+      record('2026-03-05', 'ABSENT', { flags: ['EXCUSED'] }),
+      record('2026-03-06', 'WEEKLY_OFF', { workedMinutes: 300, flags: ['WORKED_ON_WEEKLY_OFF', 'NON_WORKING_DAY_WORK'] }),
+      record('2026-03-07', 'WEEKLY_OFF', { workedMinutes: 0, flags: ['WORKED_ON_WEEKLY_OFF'] }), // policy ignore: nothing recorded
+      record('2026-03-08', 'HOLIDAY', { workedMinutes: 120, overtimeMinutes: 120, overtimeCategory: 'HOLIDAY', flags: ['OVERTIME', 'WORKED_ON_HOLIDAY', 'NON_WORKING_DAY_WORK'] }),
+    ], { periodStart: '2026-03-01', periodEnd: '2026-03-31' });
+    expect(s).toMatchObject({ lopDays: 1.5, unexcusedDays: 3, excusedDays: 1, nonWorkingDayWorkMinutes: 420, absentDays: 2, lateDays: 2 });
   });
 
   it('defaults leave to paid unless told otherwise', () => {

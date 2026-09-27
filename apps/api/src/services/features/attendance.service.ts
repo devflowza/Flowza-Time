@@ -2,7 +2,7 @@ import { sql } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { DateTime } from 'luxon';
 import { SELF_CORRECTION_TYPES, SYSTEM_ROLE_IDS, type ActivityRange, type ApprovalRequestDto, type ApprovalStepDto, type ApprovalWorkflowInput, type AttendanceActivityDayDto, type AttendanceActivityDto, type AttendanceActivityMonthDto, type AttendanceActivityQuery, type AttendanceDailyRecordDto, type AttendanceStatus, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
-import { emitDomainEvent, type Trx } from '@flowza/database';
+import { emitDomainEvent, toDayMarkRow, type Trx } from '@flowza/database';
 import { activitySegments, summarisePeriod, weekRange, type MembershipGrant, type PeriodRecordLike } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
@@ -14,7 +14,7 @@ import { likeContains, pageOf, prefixTsQuery, toCount } from '../../lib/paginati
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject } from '../../lib/mappers.js';
 import { systemStep } from './context.js';
 import { enqueueRecalculation } from './recalc.js';
-import { DAILY_RECORD_COLUMNS, toDailyRecordDto, type DailyRecordRow } from './mappers.js';
+import { DAILY_RECORD_COLUMNS, toDailyRecordDto, toDayMarkDto, type DailyRecordRow } from './mappers.js';
 import { dv } from './sql-helpers.js';
 
 type EventsQuery = z.infer<typeof attendanceEventsQuerySchema>;
@@ -131,8 +131,11 @@ export async function getRecord(deps: ApiDeps, actor: Actor, orgId: string, id: 
     const events = await evq.orderBy('ev.punchedAt').execute();
     const history = await trx.selectFrom('attendanceDailyRecordHistory').select(['id', 'calculationVersion', 'reason', 'triggeredBy', 'jobId', 'snapshot', 'createdAt']).where('recordId', '=', id).orderBy('calculationVersion', 'desc').limit(50).execute();
     const corrections = await trx.selectFrom('attendanceCorrections').selectAll().where('organizationId', '=', orgId).where('employeeId', '=', row.employeeId).where('attendanceDate', '=', dv(date)).orderBy('createdAt', 'desc').execute();
+    // day marks (HR portal Prompt 3): every mark of the day, revoked ones included — the trail, not just the verdict in force
+    const marks = await trx.selectFrom('attendanceDayMarks').selectAll().where('organizationId', '=', orgId).where('employeeId', '=', row.employeeId).where('attendanceDate', '=', dv(date)).orderBy('createdAt', 'asc').orderBy('id', 'asc').execute();
     return {
       ...toDailyRecordDto(row), ruleSetId: row.ruleSetId, shiftAssignmentId: row.shiftAssignmentId, engineVersion: row.engineVersion, trace,
+      marks: marks.map((m) => toDayMarkDto(toDayMarkRow(m))),
       events: events.map((e) => ({ id: e.id, punchedAt: isoDateTime(e.punchedAt), localTime: DateTime.fromJSDate(e.punchedAt).setZone(row.timezone).toISO(), eventType: e.eventType, source: e.source, verificationMethod: e.verificationMethod, deviceId: e.deviceId, deviceName: e.deviceName, voidedAt: isoDateTimeOrNull(e.voidedAt), voidedByCorrectionId: e.voidedByCorrectionId, correctionId: e.correctionId, note: e.note, rawTransactionId: e.rawTransactionId === null ? null : String(e.rawTransactionId), attributed: traceEventIds.length ? traceEventIds.includes(e.id) : null })),
       history: history.map((h) => ({ id: String(h.id), calculationVersion: h.calculationVersion, reason: h.reason, triggeredBy: h.triggeredBy, jobId: h.jobId === null ? null : String(h.jobId), snapshot: jsonObject(h.snapshot), createdAt: isoDateTime(h.createdAt) })),
       corrections: corrections.map(toCorrectionDto),

@@ -278,6 +278,24 @@ export interface AttendanceDailyRecords {
   workedMinutes: Generated<number>;
 }
 
+export interface AttendanceDayMarks {
+  attendanceDate: Timestamp;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  employeeId: string;
+  id: Generated<string>;
+  kind: string;
+  organizationId: string;
+  payEffectDays: Generated<Numeric>;
+  reason: string | null;
+  revokedAt: Timestamp | null;
+  revokedBy: string | null;
+  revokeReason: string | null;
+  source: string;
+  sourceId: string | null;
+}
+
 export interface AttendanceEvents {
   branchId: string;
   correctionId: string | null;
@@ -318,6 +336,7 @@ export interface AttendancePeriodSummaries {
   createdAt: Generated<Timestamp>;
   earlyDepartureMinutes: Generated<number>;
   employeeId: string;
+  excusedDays: Generated<number>;
   finalizedAt: Timestamp | null;
   finalizedBy: string | null;
   halfDays: Generated<number>;
@@ -326,7 +345,9 @@ export interface AttendancePeriodSummaries {
   lateDays: Generated<number>;
   lateMinutes: Generated<number>;
   leaveDays: Generated<Numeric>;
+  lopDays: Generated<Numeric>;
   missingPunchDays: Generated<number>;
+  nonWorkingDayWorkMinutes: Generated<number>;
   organizationId: string;
   overtimeHolidayMinutes: Generated<number>;
   overtimeMinutes: Generated<number>;
@@ -338,6 +359,7 @@ export interface AttendancePeriodSummaries {
   recordVersions: Json | null;
   regularMinutes: Generated<number>;
   status: Generated<PeriodSummaryStatus>;
+  unexcusedDays: Generated<number>;
   updatedAt: Generated<Timestamp>;
   version: Generated<number>;
   weeklyOffDays: Generated<number>;
@@ -1406,6 +1428,7 @@ export interface DB {
   attendanceCorrections: AttendanceCorrections;
   attendanceDailyRecordHistory: AttendanceDailyRecordHistory;
   attendanceDailyRecords: AttendanceDailyRecords;
+  attendanceDayMarks: AttendanceDayMarks;
   attendanceEvents: AttendanceEvents;
   attendancePeriodLocks: AttendancePeriodLocks;
   attendancePeriodSummaries: AttendancePeriodSummaries;
