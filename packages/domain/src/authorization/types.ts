@@ -16,4 +16,10 @@ export interface MembershipGrant {
   allBranches: boolean;
   branchIds: string[];
   employeeId: string | null;
+  /**
+   * Direct reports of the membership's employee record (primary OR secondary manager), resolved through
+   * org_memberships.employee_id — the same rule as `app.team_employee_ids()` in RLS. Empty when the membership is not
+   * linked to an employee or nobody reports to that employee.
+   */
+  teamEmployeeIds: string[];
 }

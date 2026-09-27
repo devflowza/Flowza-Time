@@ -734,6 +734,7 @@ export interface Employees {
   photoPath: string | null;
   pinHash: string | null;
   search: Generated<string | null>;
+  secondaryManagerEmployeeId: string | null;
   updatedAt: Generated<Timestamp>;
   updatedBy: string | null;
   userId: string | null;
@@ -844,6 +845,7 @@ export interface Invitations {
   branchIds: Generated<string[]>;
   createdAt: Generated<Timestamp>;
   email: string;
+  employeeId: string | null;
   expiresAt: Timestamp;
   id: Generated<string>;
   invitedBy: string | null;

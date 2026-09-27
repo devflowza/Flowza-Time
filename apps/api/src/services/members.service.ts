@@ -7,7 +7,7 @@ import type { MembershipGrant } from '@flowza/domain';
 import { errors, randomToken, sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { requireBranchAccess, requirePermission } from '../lib/authorize.js';
-import { type Actor, runUser, runSystem, audit, diffObjects } from '../lib/service.js';
+import { type Actor, runUser, runSystem, audit, diffObjects, withSystemScope } from '../lib/service.js';
 import { likeContains, pageOf, resolveSort, toCount } from '../lib/pagination.js';
 import { groupBy } from '../lib/mappers.js';
 import { toInvitationDto, toMemberDto, type MemberRow } from './members.mappers.js';
@@ -88,6 +88,27 @@ async function assertEmployeeInOrg(trx: Trx, orgId: string, employeeId: string):
   if (!e) throw errors.validation('Employee not found in this organisation.', { issues: [{ path: 'employeeId', message: 'Unknown employee' }] });
 }
 
+/**
+ * One login per employee record: the link (org_memberships.employee_id) is what self-service, the team predicate and
+ * approvals resolve a person by, so a second membership pointing at the same employee would double their identity.
+ * Returns the reason when the employee is already taken by another membership (any status) or reserved by a pending
+ * invitation; callers in a user context run it in the organisation's system scope (memberships are hidden without user.view).
+ */
+async function employeeLinkClash(trx: Trx, orgId: string, employeeId: string, except: { membershipId?: string; userId?: string; invitationId?: string } = {}): Promise<string | null> {
+  let members = trx.selectFrom('orgMemberships').select('id').where('organizationId', '=', orgId).where('employeeId', '=', employeeId);
+  if (except.membershipId) members = members.where('id', '<>', except.membershipId);
+  if (except.userId) members = members.where('userId', '<>', except.userId);
+  if (await members.executeTakeFirst()) return 'This employee is already linked to another member of the organisation.';
+  let pending = trx.selectFrom('invitations').select('id').where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('acceptedAt', 'is', null).where('expiresAt', '>', new Date());
+  if (except.invitationId) pending = pending.where('id', '<>', except.invitationId);
+  if (await pending.executeTakeFirst()) return 'A pending invitation already links this employee; revoke it first.';
+  return null;
+}
+async function assertEmployeeUnlinked(trx: Trx, orgId: string, employeeId: string, except: { membershipId?: string } = {}): Promise<void> {
+  const clash = await withSystemScope(trx, orgId, (t) => employeeLinkClash(t, orgId, employeeId, except));
+  if (clash) throw errors.conflict(clash, { employeeId });
+}
+
 /** Builds the plain invitation token: `<orgId>.<secret>`; only sha256(secret) is stored. */
 function buildToken(orgId: string): { token: string; hash: string } {
   const secret = randomToken(32);
@@ -117,7 +138,7 @@ export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, i
     if (input.roleId === SYSTEM_ROLE_IDS.owner && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can invite another owner.');
     await assertRoleGrantable(trx, input.roleId, grant);
     await assertBranchesInOrg(trx, orgId, input.branchIds);
-    if (input.employeeId) await assertEmployeeInOrg(trx, orgId, input.employeeId);
+    if (input.employeeId) { await assertEmployeeInOrg(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId); }
     const existingMember = await trx.selectFrom('orgMemberships as m').innerJoin('userProfiles as u', 'u.id', 'm.userId').select(['m.id', 'm.status']).where('m.organizationId', '=', orgId).where(sql`lower(u.email::text)`, '=', input.email.toLowerCase()).executeTakeFirst();
     if (existingMember && existingMember.status !== 'suspended') throw errors.conflict('This user is already a member of the organisation.');
     const pending = await trx.selectFrom('invitations').select('id').where('organizationId', '=', orgId).where(sql`lower(email::text)`, '=', input.email.toLowerCase()).where('acceptedAt', 'is', null).where('expiresAt', '>', new Date()).executeTakeFirst();
@@ -125,10 +146,11 @@ export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, i
 
     const { token, hash } = buildToken(orgId);
     const expiresAt = new Date(Date.now() + INVITATION_TTL_DAYS * 86_400_000);
+    // The employee link travels with the invitation so an invitee who has no account yet still lands linked on acceptance.
     const inv = await trx.insertInto('invitations').values({
       organizationId: orgId, email: input.email, roleId: input.roleId, allBranches: input.allBranches, branchIds: input.allBranches ? [] : input.branchIds,
-      tokenHash: hash, invitedBy: actor.userId, expiresAt,
-    }).returning(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'invitedBy', 'expiresAt', 'acceptedAt', 'createdAt']).executeTakeFirstOrThrow();
+      employeeId: input.employeeId ?? null, tokenHash: hash, invitedBy: actor.userId, expiresAt,
+    }).returning(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'employeeId', 'invitedBy', 'expiresAt', 'acceptedAt', 'createdAt']).executeTakeFirstOrThrow();
 
     // Existing account (visible to us as an org peer or not at all): create the membership up-front as 'invited'.
     let membershipId: string | null = null;
@@ -140,7 +162,7 @@ export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, i
       await trx.deleteFrom('membershipBranches').where('membershipId', '=', m.id).execute();
       if (!input.allBranches) await trx.insertInto('membershipBranches').values(input.branchIds.map((b) => ({ membershipId: m.id, branchId: b }))).execute();
     }
-    await audit(trx, actor, orgId, 'member.invited', 'invitation', { entityId: inv.id, newValue: { email: input.email, roleId: input.roleId, allBranches: input.allBranches, branchIds: input.branchIds, membershipId } });
+    await audit(trx, actor, orgId, 'member.invited', 'invitation', { entityId: inv.id, newValue: { email: input.email, roleId: input.roleId, allBranches: input.allBranches, branchIds: input.branchIds, employeeId: input.employeeId ?? null, membershipId } });
     return toInvitationDto(inv, { token, membershipId });
   });
 }
@@ -148,8 +170,8 @@ export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, i
 export async function listInvitations(deps: ApiDeps, actor: Actor, orgId: string): Promise<InvitationDto[]> {
   requirePermission(actor.principal, orgId, 'user.view');
   return runUser(deps.db, actor, async (trx) => {
-    const rows = await trx.selectFrom('invitations as i').innerJoin('roles as r', 'r.id', 'i.roleId').leftJoin('userProfiles as u', 'u.id', 'i.invitedBy')
-      .select(['i.id', 'i.organizationId', 'i.email', 'i.roleId', 'i.allBranches', 'i.branchIds', 'i.invitedBy', 'i.expiresAt', 'i.acceptedAt', 'i.createdAt', 'r.name as roleName', 'u.fullName as invitedByName'])
+    const rows = await trx.selectFrom('invitations as i').innerJoin('roles as r', 'r.id', 'i.roleId').leftJoin('userProfiles as u', 'u.id', 'i.invitedBy').leftJoin('employees as e', 'e.id', 'i.employeeId')
+      .select(['i.id', 'i.organizationId', 'i.email', 'i.roleId', 'i.allBranches', 'i.branchIds', 'i.employeeId', 'i.invitedBy', 'i.expiresAt', 'i.acceptedAt', 'i.createdAt', 'r.name as roleName', 'u.fullName as invitedByName', 'e.employeeNumber as employeeNumber'])
       .where('i.organizationId', '=', orgId).where('i.acceptedAt', 'is', null).orderBy('i.createdAt', 'desc').limit(500).execute();
     return rows.map((r) => toInvitationDto(r));
   });
@@ -177,7 +199,7 @@ export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: strin
   if (!parsed) throw errors.notFound('Invitation');
   return runSystem(deps.db, parsed.orgId, actor.requestId, async (trx) => {
     // Never let the database do the secret comparison: load the organisation's open invitations and compare the hashes in constant time.
-    const candidates = await trx.selectFrom('invitations').select(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'expiresAt', 'acceptedAt', 'tokenHash'])
+    const candidates = await trx.selectFrom('invitations').select(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'employeeId', 'expiresAt', 'acceptedAt', 'tokenHash'])
       .where('organizationId', '=', parsed.orgId).orderBy('createdAt', 'desc').limit(1000).execute(); // accepted ones stay so a re-used token reports 'already accepted'
     const inv = candidates.find((c) => hashesEqual(c.tokenHash, parsed.hash));
     if (!inv) throw errors.notFound('Invitation');
@@ -186,13 +208,17 @@ export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: strin
     if (!actor.email || inv.email.toLowerCase() !== actor.email.toLowerCase()) throw errors.forbidden('This invitation was issued to a different email address.');
     const profile = await trx.selectFrom('userProfiles').select('id').where('id', '=', actor.userId).executeTakeFirst();
     if (!profile) await trx.insertInto('userProfiles').values({ id: actor.userId, email: actor.email, fullName: '' }).execute();
-    const membership = await trx.insertInto('orgMemberships').values({ organizationId: inv.organizationId, userId: actor.userId, roleId: inv.roleId, status: 'active', allBranches: inv.allBranches, joinedAt: new Date() })
-      .onConflict((oc) => oc.columns(['organizationId', 'userId']).doUpdateSet({ roleId: inv.roleId, status: 'active', allBranches: inv.allBranches, joinedAt: new Date() }))
+    // The employee link chosen at invitation time lands on the membership — unless somebody else took that employee in
+    // the meantime, in which case the membership is created unlinked (audited) rather than stealing the link or failing onboarding.
+    const linkClash = inv.employeeId ? await employeeLinkClash(trx, inv.organizationId, inv.employeeId, { userId: actor.userId, invitationId: inv.id }) : null;
+    const employeeLink = inv.employeeId && !linkClash ? { employeeId: inv.employeeId } : {};
+    const membership = await trx.insertInto('orgMemberships').values({ organizationId: inv.organizationId, userId: actor.userId, roleId: inv.roleId, status: 'active', allBranches: inv.allBranches, joinedAt: new Date(), ...employeeLink })
+      .onConflict((oc) => oc.columns(['organizationId', 'userId']).doUpdateSet({ roleId: inv.roleId, status: 'active', allBranches: inv.allBranches, joinedAt: new Date(), ...employeeLink }))
       .returning('id').executeTakeFirstOrThrow();
     await trx.deleteFrom('membershipBranches').where('membershipId', '=', membership.id).execute();
     if (!inv.allBranches && inv.branchIds.length > 0) await trx.insertInto('membershipBranches').values(inv.branchIds.map((b) => ({ membershipId: membership.id, branchId: b }))).execute();
     await trx.updateTable('invitations').set({ acceptedAt: new Date(), acceptedBy: actor.userId }).where('id', '=', inv.id).execute();
-    await audit(trx, actor, inv.organizationId, 'member.invitation_accepted', 'org_membership', { entityId: membership.id, newValue: { invitationId: inv.id, roleId: inv.roleId, allBranches: inv.allBranches, branchIds: inv.branchIds } });
+    await audit(trx, actor, inv.organizationId, 'member.invitation_accepted', 'org_membership', { entityId: membership.id, newValue: { invitationId: inv.id, roleId: inv.roleId, allBranches: inv.allBranches, branchIds: inv.branchIds, employeeId: inv.employeeId && !linkClash ? inv.employeeId : null, ...(linkClash ? { employeeLinkSkipped: linkClash } : {}) } });
     return { membershipId: membership.id, organizationId: inv.organizationId };
   });
 }
@@ -218,7 +244,7 @@ export async function updateMember(deps: ApiDeps, actor: Actor, orgId: string, i
     }
     if (before.roleKey === 'owner' && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can change another owner.');
     if (input.branchIds) await assertBranchesInOrg(trx, orgId, input.branchIds);
-    if (input.employeeId) await assertEmployeeInOrg(trx, orgId, input.employeeId);
+    if (input.employeeId) { await assertEmployeeInOrg(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId, { membershipId: id }); }
     const nextRole = input.roleId ?? before.roleId;
     const nextStatus = input.status ?? before.status;
     const nextAll = input.allBranches ?? (input.branchIds ? false : before.allBranches);

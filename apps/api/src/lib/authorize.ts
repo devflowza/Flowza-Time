@@ -20,6 +20,26 @@ export function requirePermission(principal: Principal, organizationId: string, 
   return m;
 }
 
+/** True when the employee is one of the membership's direct reports (primary or secondary manager on the employee record). */
+export function isTeamMember(m: MembershipGrant, employeeId: string): boolean {
+  return m.teamEmployeeIds.includes(employeeId);
+}
+
+/**
+ * Line-manager semantics (docs/hr-portal/prompt-pack.md, Prompt 1): the organisation-wide permission ⇒ allowed; otherwise
+ * the employee must be one of the caller's direct reports ⇒ allowed; else FORBIDDEN. The team comes from the principal
+ * snapshot (org_memberships.employee_id → employees.manager_employee_id / secondary_manager_employee_id), the same
+ * rule as `app.team_employee_ids()` — RLS applies it again row by row, additionally gated by the team key of the table
+ * (attendance.view_team / leave.view_team), so a service that passes here still only reads what the caller's role allows.
+ */
+export function requireTeamOrPermission(principal: Principal, organizationId: string, employeeId: string, ...permissions: Permission[]): MembershipGrant {
+  const m = requireMembership(principal, organizationId);
+  if (permissions.length > 0 && permissions.every((p) => hasPermission(m, p))) return m;
+  if (isTeamMember(m, employeeId)) return m;
+  const missing = permissions.length > 0 ? `Missing permission: ${permissions.join(', ')}` : 'No organisation-wide permission';
+  throw errors.forbidden(`${missing} — and the employee is not one of your direct reports.`);
+}
+
 /** Branch-scope check for explicit branch ids supplied by clients (RLS enforces it again). */
 export function requireBranchAccess(m: MembershipGrant, branchId: string | null | undefined): void {
   if (!branchId || m.allBranches) return;

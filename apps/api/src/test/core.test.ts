@@ -175,21 +175,21 @@ describe('members, invitations and roles', () => {
   it('creates a custom role (owner), refuses for users without role.manage and for permissions the actor lacks', async () => {
     const denied = await api.request('POST', `/orgs/${F.orgA}/roles`, { user: F.hrUserA, body: { key: 'x_role', name: 'X', permissions: ['employee.view'] } });
     expect(denied.status).toBe(403);
-    const res = await api.request('POST', `/orgs/${F.orgA}/roles`, { user: F.ownerA, body: { key: 'auditor', name: 'Auditor', description: 'Read-only + audit', permissions: ['dashboard.view', 'employee.view', 'audit.view'] } });
+    const res = await api.request('POST', `/orgs/${F.orgA}/roles`, { user: F.ownerA, body: { key: 'reviewer', name: 'Reviewer', description: 'Read-only + audit', permissions: ['dashboard.view', 'employee.view', 'audit.view'] } });
     expect(res.status).toBe(201);
     customRoleId = res.json.data.id;
-    expect(res.json.data).toMatchObject({ key: 'auditor', isSystem: false, permissions: ['audit.view', 'dashboard.view', 'employee.view'] });
+    expect(res.json.data).toMatchObject({ key: 'reviewer', isSystem: false, permissions: ['audit.view', 'dashboard.view', 'employee.view'] });
     const list = await api.request('GET', `/orgs/${F.orgA}/roles`, { user: F.hrUserA });
-    expect(list.json.data.filter((r: any) => r.isSystem)).toHaveLength(8);
+    expect(list.json.data.filter((r: any) => r.isSystem)).toHaveLength(10);
     expect(list.json.data.find((r: any) => r.id === customRoleId).memberCount).toBe(0);
-    const dup = await api.request('POST', `/orgs/${F.orgA}/roles`, { user: F.ownerA, body: { key: 'auditor', name: 'Auditor 2', permissions: ['employee.view'] } });
+    const dup = await api.request('POST', `/orgs/${F.orgA}/roles`, { user: F.ownerA, body: { key: 'reviewer', name: 'Reviewer 2', permissions: ['employee.view'] } });
     expect(dup.status).toBe(409);
   });
 
   it('assigns the custom role to a member; permissions take effect immediately (DB-driven)', async () => {
     const res = await api.request('PATCH', `/orgs/${F.orgA}/members/${F.membershipHrA}`, { user: F.ownerA, body: { roleId: customRoleId } });
     expect(res.status).toBe(200);
-    expect(res.json.data).toMatchObject({ roleId: customRoleId, roleKey: 'auditor' });
+    expect(res.json.data).toMatchObject({ roleId: customRoleId, roleKey: 'reviewer' });
     const me = await api.request('GET', '/me', { user: F.hrUserA });
     expect(me.json.data.memberships[0].permissions.sort()).toEqual(['audit.view', 'dashboard.view', 'employee.view']);
     const create = await api.request('POST', `/orgs/${F.orgA}/employees`, { user: F.hrUserA, body: { employeeNumber: 'X', firstName: 'A', lastName: 'B', joiningDate: '2026-01-01', branchId: F.branchHQ } });

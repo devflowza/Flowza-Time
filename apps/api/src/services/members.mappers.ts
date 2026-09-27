@@ -35,6 +35,7 @@ export function toMemberDto(row: MemberRow, branches: { id: string; name: string
 export interface InvitationRow {
   id: string; organizationId: string; email: string; roleId: string; allBranches: boolean; branchIds: string[]; invitedBy: string | null;
   expiresAt: Date; acceptedAt: Date | null; createdAt: Date; roleName?: string | null; invitedByName?: string | null;
+  employeeId?: string | null; employeeNumber?: string | null;
 }
 
 export function toInvitationDto(row: InvitationRow, extra: { token?: string; membershipId?: string | null } = {}): InvitationDto {
@@ -48,6 +49,8 @@ export function toInvitationDto(row: InvitationRow, extra: { token?: string; mem
     branchIds: row.branchIds ?? [],
     invitedBy: row.invitedBy,
     invitedByName: row.invitedByName ?? null,
+    employeeId: row.employeeId ?? null,
+    employeeNumber: row.employeeNumber ?? null,
     expiresAt: isoDateTime(row.expiresAt),
     acceptedAt: isoDateTimeOrNull(row.acceptedAt),
     createdAt: isoDateTime(row.createdAt),

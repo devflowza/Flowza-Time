@@ -39,7 +39,21 @@ function employeeQuery(trx: Trx, orgId: string) {
     .leftJoin('departments as d', 'd.id', 'e.departmentId')
     .leftJoin('designations as g', 'g.id', 'e.designationId')
     .leftJoin('employees as mgr', 'mgr.id', 'e.managerEmployeeId')
+    .leftJoin('employees as mgr2', 'mgr2.id', 'e.secondaryManagerEmployeeId')
     .where('e.organizationId', '=', orgId);
+}
+
+/**
+ * Employees already linked to a login of this organisation (any membership status) or reserved by a pending invitation.
+ * Read in the organisation's system scope: memberships are hidden from callers without user.view, and the filter must
+ * be exact for whoever picks an employee for a new login. Returns ids only.
+ */
+async function linkedEmployeeIds(trx: Trx, orgId: string): Promise<string[]> {
+  return withSystemScope(trx, orgId, async (t) => {
+    const members = await t.selectFrom('orgMemberships').select('employeeId').where('organizationId', '=', orgId).where('employeeId', 'is not', null).execute();
+    const invited = await t.selectFrom('invitations').select('employeeId').where('organizationId', '=', orgId).where('employeeId', 'is not', null).where('acceptedAt', 'is', null).where('expiresAt', '>', new Date()).execute();
+    return [...new Set([...members, ...invited].map((r) => r.employeeId).filter((id): id is string => !!id))];
+  });
 }
 
 async function syncSummaries(trx: Trx, orgId: string, employeeIds: string[]): Promise<Map<string, DeviceSyncSummary>> {
@@ -75,6 +89,8 @@ export async function listEmployees(deps: ApiDeps, actor: Actor, orgId: string, 
     if (q.employmentStatus) base = base.where('e.employmentStatus', '=', q.employmentStatus);
     if (q.employmentType) base = base.where('e.employmentType', '=', q.employmentType);
     if (q.managerEmployeeId) base = base.where('e.managerEmployeeId', '=', q.managerEmployeeId);
+    if (q.teamOf) { const id = q.teamOf; base = base.where((eb) => eb.or([eb('e.managerEmployeeId', '=', id), eb('e.secondaryManagerEmployeeId', '=', id)])); }
+    if (q.unlinked) { const linked = await linkedEmployeeIds(trx, orgId); if (linked.length) base = base.where('e.id', 'not in', linked); }
     if (q.search) {
       const like = likeContains(q.search);
       const tsq = prefixTsQuery(q.search);
@@ -144,7 +160,7 @@ async function orgToday(trx: Trx, orgId: string): Promise<string> {
   return DateTime.now().setZone(org?.timezone ?? 'UTC').toISODate() ?? DateTime.utc().toISODate()!;
 }
 
-async function assertReferences(trx: Trx, orgId: string, refs: { branchId?: string; departmentId?: string | null; designationId?: string | null; managerEmployeeId?: string | null; selfId?: string }): Promise<void> {
+async function assertReferences(trx: Trx, orgId: string, refs: { branchId?: string; departmentId?: string | null; designationId?: string | null; managerEmployeeId?: string | null; secondaryManagerEmployeeId?: string | null; selfId?: string }): Promise<void> {
   if (refs.branchId) {
     const b = await trx.selectFrom('branches').select(['id', 'status']).where('organizationId', '=', orgId).where('id', '=', refs.branchId).executeTakeFirst();
     if (!b) throw errors.validation('Branch not found in this organisation.', { issues: [{ path: 'branchId', message: 'Unknown branch' }] });
@@ -162,6 +178,15 @@ async function assertReferences(trx: Trx, orgId: string, refs: { branchId?: stri
     if (refs.selfId && refs.managerEmployeeId === refs.selfId) throw errors.validation('An employee cannot be their own manager.', { issues: [{ path: 'managerEmployeeId', message: 'Self reference' }] });
     const m = await trx.selectFrom('employees').select('id').where('organizationId', '=', orgId).where('id', '=', refs.managerEmployeeId).where('deletedAt', 'is', null).executeTakeFirst();
     if (!m) throw errors.validation('Manager not found in this organisation.', { issues: [{ path: 'managerEmployeeId', message: 'Unknown employee' }] });
+  }
+  if (refs.secondaryManagerEmployeeId) {
+    if (refs.selfId && refs.secondaryManagerEmployeeId === refs.selfId) throw errors.validation('An employee cannot be their own secondary manager.', { issues: [{ path: 'secondaryManagerEmployeeId', message: 'Self reference' }] });
+    const m = await trx.selectFrom('employees').select('id').where('organizationId', '=', orgId).where('id', '=', refs.secondaryManagerEmployeeId).where('deletedAt', 'is', null).executeTakeFirst();
+    if (!m) throw errors.validation('Secondary manager not found in this organisation.', { issues: [{ path: 'secondaryManagerEmployeeId', message: 'Unknown employee' }] });
+  }
+  // the database check constraint says the same; validating here names the field instead of surfacing a 23514
+  if (refs.managerEmployeeId && refs.secondaryManagerEmployeeId && refs.managerEmployeeId === refs.secondaryManagerEmployeeId) {
+    throw errors.validation('The secondary manager must be a different person from the manager.', { issues: [{ path: 'secondaryManagerEmployeeId', message: 'Same as manager' }] });
   }
 }
 
@@ -239,7 +264,7 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
   const grant = requirePermission(actor.principal, orgId, 'employee.create');
   requireBranchAccess(grant, input.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId });
+    await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId, secondaryManagerEmployeeId: input.secondaryManagerEmployeeId });
     // plan entitlement: count active employees org-wide (system scope, since branch-restricted creators only see their branch)
     const activeCount = await withSystemScope(trx, orgId, async (t) => {
       const row = await t.selectFrom('employees').select(({ fn }) => fn.countAll<string>().as('c')).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('employmentStatus', 'not in', ['terminated', 'resigned']).executeTakeFirstOrThrow();
@@ -252,7 +277,7 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
       organizationId: orgId, employeeNumber: input.employeeNumber, firstName: input.firstName, middleName: input.middleName ?? null, lastName: input.lastName, displayName, displayNameAr: input.displayNameAr ?? null,
       gender: input.gender, dateOfBirth: input.dateOfBirth ?? null, nationalityCode: input.nationalityCode ?? null, email: input.email ?? null, phone: input.phone ?? null,
       joiningDate: input.joiningDate, employmentStatus: input.employmentStatus, employmentType: input.employmentType, branchId: input.branchId, departmentId: input.departmentId ?? null,
-      designationId: input.designationId ?? null, managerEmployeeId: input.managerEmployeeId ?? null, deviceUserId, cardNumber: input.cardNumber ?? null, pinHash,
+      designationId: input.designationId ?? null, managerEmployeeId: input.managerEmployeeId ?? null, secondaryManagerEmployeeId: input.secondaryManagerEmployeeId ?? null, deviceUserId, cardNumber: input.cardNumber ?? null, pinHash,
       weeklyOffDays: input.weeklyOffDays ?? null, customFields: JSON.stringify(input.customFields ?? {}), createdBy: actor.userId, updatedBy: actor.userId,
     }).returning(['id', 'deviceUserId']).executeTakeFirstOrThrow();
     const row = input.deviceUserId ? await insert(input.deviceUserId) : await insertWithAutoDeviceUserId(trx, orgId, insert);
@@ -274,7 +299,10 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     const before = await loadEmployeeRow(trx, orgId, id);
     if (before.deletedAt) throw errors.invalidState('The employee has been deleted.');
     requireBranchAccess(grant, before.branchId);
-    await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId, selfId: id });
+    // the manager pair is validated as it will be AFTER the patch (a new primary equal to the kept secondary is refused too)
+    const effectiveManager = input.managerEmployeeId === undefined ? before.managerEmployeeId : input.managerEmployeeId;
+    const effectiveSecondary = input.secondaryManagerEmployeeId === undefined ? before.secondaryManagerEmployeeId : input.secondaryManagerEmployeeId;
+    await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: effectiveManager, secondaryManagerEmployeeId: effectiveSecondary, selfId: id });
     const { effectiveFrom: requestedFrom, changeReason, pin, customFields, ...rest } = input;
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(rest)) if (v !== undefined) patch[k] = v;

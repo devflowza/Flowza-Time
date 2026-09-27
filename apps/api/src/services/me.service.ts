@@ -65,6 +65,9 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
         allBranches: m.allBranches,
         branchIds: m.branchIds,
         employeeId: m.employeeId,
+        // line-manager semantics: direct reports come from the principal snapshot (org_memberships.employee_id link)
+        isManager: m.teamEmployeeIds.length > 0,
+        teamSize: m.teamEmployeeIds.length,
         featureFlags: flags.get(m.organizationId) ?? {},
         settings: parseSettings(settingsById.get(m.organizationId)),
       });

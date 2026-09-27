@@ -6,15 +6,15 @@ import type { Database } from '@flowza/database';
 /**
  * Loads the caller's memberships and permissions from the database (never from the JWT) so role changes
  * and suspensions take effect immediately (ADR-002/007). One round trip: `app.principal_snapshot` (migration
- * 20260909000300) returns everything as a single document, where the previous transaction needed up to ten
- * statements — and each of those is a trip from the API's region to the database's.
+ * 20260909000300, extended by 20260928000100 with the team) returns everything as a single document, where the
+ * previous transaction needed up to ten statements — and each of those is a trip from the API's region to the database's.
  */
 export interface LoadedPrincipal { principal: Principal; mfaRequiredOrgIds: ReadonlySet<string> }
 
 interface Snapshot {
   profile: { id: string; email: string; status: string } | null;
   isPlatformAdmin: boolean;
-  memberships: Array<{ membershipId: string; organizationId: string; roleId: string; roleKey: string; allBranches: boolean; employeeId: string | null; permissions: string[]; branchIds: string[] }>;
+  memberships: Array<{ membershipId: string; organizationId: string; roleId: string; roleKey: string; allBranches: boolean; employeeId: string | null; permissions: string[]; branchIds: string[]; teamEmployeeIds?: string[] }>;
   grants: Array<{ organizationId: string; accessLevel: 'read' | 'write' }>;
   allPermissions: string[];
   mfaRequiredOrgIds: string[];
@@ -33,6 +33,8 @@ export async function loadPrincipal(db: Database, userId: string, email: string 
     allBranches: m.allBranches,
     branchIds: m.branchIds,
     employeeId: m.employeeId,
+    // direct reports of the linked employee record (primary or secondary manager) — same rule as app.team_employee_ids()
+    teamEmployeeIds: m.teamEmployeeIds ?? [],
   }));
   // platform admins with an active grant get a synthetic membership carrying the grant's permission class
   if (snap.isPlatformAdmin) {
@@ -48,6 +50,7 @@ export async function loadPrincipal(db: Database, userId: string, email: string 
         allBranches: true,
         branchIds: [],
         employeeId: null,
+        teamEmployeeIds: [],
       });
     }
   }

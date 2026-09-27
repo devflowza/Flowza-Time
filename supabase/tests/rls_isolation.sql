@@ -4,17 +4,27 @@
 set client_min_messages = warning;
 
 -- ---------- fixtures (as superuser) ----------
+-- Org A: e1 (HQ) reports to e4 (primary, login manager-a, role manager) and e5 (secondary, login secondary-a, role manager);
+--        e6 (branch A-2) reports to e1 (a report of a report: reachable by the deep chain, NOT a direct report of e4);
+--        e2 (branch A-2) reports to e3 (the self-service employee, role `employee` — a relationship without a team key);
+--        auditor-a holds the read-only auditor role and is linked to no employee.
 begin;
 insert into auth.users (id, email) values
   ('a0000000-0000-0000-0000-000000000001', 'owner-a@test.local'),
   ('a0000000-0000-0000-0000-000000000002', 'bm-a@test.local'),
   ('a0000000-0000-0000-0000-000000000003', 'emp-a@test.local'),
+  ('a0000000-0000-0000-0000-000000000005', 'manager-a@test.local'),
+  ('a0000000-0000-0000-0000-000000000006', 'secondary-a@test.local'),
+  ('a0000000-0000-0000-0000-000000000007', 'auditor-a@test.local'),
   ('b0000000-0000-0000-0000-000000000001', 'owner-b@test.local'),
   ('c0000000-0000-0000-0000-000000000001', 'platform@test.local');
 insert into public.user_profiles (id, email, full_name) values
   ('a0000000-0000-0000-0000-000000000001', 'owner-a@test.local', 'Owner A'),
   ('a0000000-0000-0000-0000-000000000002', 'bm-a@test.local', 'Branch Manager A'),
   ('a0000000-0000-0000-0000-000000000003', 'emp-a@test.local', 'Employee A'),
+  ('a0000000-0000-0000-0000-000000000005', 'manager-a@test.local', 'Line Manager A'),
+  ('a0000000-0000-0000-0000-000000000006', 'secondary-a@test.local', 'Secondary Manager A'),
+  ('a0000000-0000-0000-0000-000000000007', 'auditor-a@test.local', 'Auditor A'),
   ('b0000000-0000-0000-0000-000000000001', 'owner-b@test.local', 'Owner B'),
   ('c0000000-0000-0000-0000-000000000001', 'platform@test.local', 'Platform Admin');
 insert into public.organizations (id, company_code, legal_name, display_name) values
@@ -28,11 +38,20 @@ insert into public.employees (id, organization_id, employee_number, first_name, 
   ('0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-000000000000', 'A-001', 'Ali', 'Said', 'Ali Said', '2025-01-01', '0a000000-0000-0000-0000-00000000000b', '1', null),
   ('0a000000-0000-0000-0000-0000000000e2', '0a000000-0000-0000-0000-000000000000', 'A-002', 'Sara', 'Nasser', 'Sara Nasser', '2025-01-01', '0a000000-0000-0000-0000-00000000000c', '2', null),
   ('0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-000000000000', 'A-003', 'Self', 'Service', 'Self Service', '2025-01-01', '0a000000-0000-0000-0000-00000000000c', '3', 'a0000000-0000-0000-0000-000000000003'),
+  ('0a000000-0000-0000-0000-0000000000e4', '0a000000-0000-0000-0000-000000000000', 'A-004', 'Mansoor', 'Manager', 'Mansoor Manager', '2025-01-01', '0a000000-0000-0000-0000-00000000000b', '4', null),
+  ('0a000000-0000-0000-0000-0000000000e5', '0a000000-0000-0000-0000-000000000000', 'A-005', 'Salma', 'Deputy', 'Salma Deputy', '2025-01-01', '0a000000-0000-0000-0000-00000000000b', '5', null),
+  ('0a000000-0000-0000-0000-0000000000e6', '0a000000-0000-0000-0000-000000000000', 'A-006', 'Junior', 'Report', 'Junior Report', '2025-01-01', '0a000000-0000-0000-0000-00000000000c', '6', null),
   ('0b000000-0000-0000-0000-0000000000e1', '0b000000-0000-0000-0000-000000000000', 'B-001', 'Omar', 'Khalid', 'Omar Khalid', '2025-01-01', '0b000000-0000-0000-0000-00000000000b', '1', null);
+update public.employees set manager_employee_id = '0a000000-0000-0000-0000-0000000000e4', secondary_manager_employee_id = '0a000000-0000-0000-0000-0000000000e5' where id = '0a000000-0000-0000-0000-0000000000e1';
+update public.employees set manager_employee_id = '0a000000-0000-0000-0000-0000000000e1' where id = '0a000000-0000-0000-0000-0000000000e6';
+update public.employees set manager_employee_id = '0a000000-0000-0000-0000-0000000000e3' where id = '0a000000-0000-0000-0000-0000000000e2';
 insert into public.org_memberships (id, organization_id, user_id, role_id, status, all_branches, employee_id) values
   ('0a000000-0000-0000-0000-0000000000a1', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'active', true, null),
   ('0a000000-0000-0000-0000-0000000000a2', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-000000000002', '10000000-0000-0000-0000-000000000005', 'active', false, null),
   ('0a000000-0000-0000-0000-0000000000a3', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-000000000003', '10000000-0000-0000-0000-000000000008', 'active', true, '0a000000-0000-0000-0000-0000000000e3'),
+  ('0a000000-0000-0000-0000-0000000000a5', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-000000000005', '10000000-0000-0000-0000-000000000009', 'active', true, '0a000000-0000-0000-0000-0000000000e4'),
+  ('0a000000-0000-0000-0000-0000000000a6', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-000000000006', '10000000-0000-0000-0000-000000000009', 'active', true, '0a000000-0000-0000-0000-0000000000e5'),
+  ('0a000000-0000-0000-0000-0000000000a7', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-000000000007', '10000000-0000-0000-0000-000000000010', 'active', true, null),
   ('0b000000-0000-0000-0000-0000000000a1', '0b000000-0000-0000-0000-000000000000', 'b0000000-0000-0000-0000-000000000001', '10000000-0000-0000-0000-000000000001', 'active', true, null);
 insert into public.membership_branches (membership_id, branch_id) values ('0a000000-0000-0000-0000-0000000000a2', '0a000000-0000-0000-0000-00000000000c');
 insert into public.platform_admins (user_id, level) values ('c0000000-0000-0000-0000-000000000001', 'support');
@@ -45,6 +64,9 @@ insert into public.attendance_daily_records (organization_id, employee_id, atten
   ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'Asia/Muscat', 'test', 'PRESENT'),
   ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '2026-09-01', '0a000000-0000-0000-0000-00000000000c', 'Asia/Muscat', 'test', 'PRESENT'),
   ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '2026-09-01', '0a000000-0000-0000-0000-00000000000c', 'Asia/Muscat', 'test', 'PRESENT'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e4', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'Asia/Muscat', 'test', 'PRESENT'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e5', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'Asia/Muscat', 'test', 'PRESENT'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e6', '2026-09-01', '0a000000-0000-0000-0000-00000000000c', 'Asia/Muscat', 'test', 'PRESENT'),
   ('0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000e1', '2026-09-01', '0b000000-0000-0000-0000-00000000000b', 'Asia/Muscat', 'test', 'PRESENT');
 insert into public.leave_types (id, organization_id, code, name, status) values
   ('0a000000-0000-0000-0000-0000000001a1', '0a000000-0000-0000-0000-000000000000', 'AL', 'Annual Leave', 'active'),
@@ -85,30 +107,34 @@ begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 select pg_temp.assert_eq((select count(*) from public.organizations), 1, 'owner A sees only org A');
-select pg_temp.assert_eq((select count(*) from public.employees), 3, 'owner A sees 3 employees of A');
+select pg_temp.assert_eq((select count(*) from public.employees), 6, 'owner A sees 6 employees of A');
 select pg_temp.assert_eq((select count(*) from public.employees where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'owner A cannot see org B employees even when filtering by B id');
 select pg_temp.assert_eq((select count(*) from public.devices), 1, 'owner A sees only A devices');
-select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 3, 'owner A sees 3 daily records');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 6, 'owner A sees 6 daily records');
 select pg_temp.assert_raises($q$ select count(*) from public.device_credentials $q$, 'owner A cannot read device_credentials at all');
 select pg_temp.assert_raises($q$ insert into public.employees (organization_id, employee_number, first_name, last_name, display_name, joining_date, branch_id, device_user_id) values ('0b000000-0000-0000-0000-000000000000','X','x','x','x','2025-01-01','0b000000-0000-0000-0000-00000000000b','99') $q$, 'owner A cannot insert an employee into org B');
 select pg_temp.assert_eq((select count(*) from jsonb_object_keys(secrets.masked_device_credentials('0a000000-0000-0000-0000-0000000000d1'))), 4, 'owner A gets masked credentials for own device');
 select pg_temp.assert_eq((select count(*) from jsonb_object_keys(secrets.masked_device_credentials('0b000000-0000-0000-0000-0000000000d1'))), 0, 'owner A gets nothing for org B device');
 select pg_temp.assert_raises($q$ select * from secrets.get_device_credentials('0a000000-0000-0000-0000-0000000000d1') $q$, 'user context cannot decrypt credentials');
+-- an owner is linked to no employee: no team, whatever the permissions
+select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 0, 'owner A (no employee link) has no team');
 rollback;
 
 -- ---------- as Branch Manager A (restricted to branch A-2) ----------
 begin;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000002","role":"authenticated"}', true);
-select pg_temp.assert_eq((select count(*) from public.employees), 2, 'branch manager sees only branch A-2 employees');
+select pg_temp.assert_eq((select count(*) from public.employees), 3, 'branch manager sees only branch A-2 employees');
 select pg_temp.assert_eq((select count(*) from public.branches), 1, 'branch manager sees only own branch');
 select pg_temp.assert_eq((select count(*) from public.devices), 0, 'branch manager sees no devices in HQ');
-select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 2, 'branch manager sees records of own branch only');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 3, 'branch manager sees records of own branch only');
 -- attempt to move an employee into HQ (branch spoofing) must fail via WITH CHECK
 select pg_temp.assert_raises($q$ update public.employees set branch_id = '0a000000-0000-0000-0000-00000000000b' where id = '0a000000-0000-0000-0000-0000000000e2' $q$, 'branch manager cannot move employee to a branch outside scope');
 -- cannot create employees (no employee.create), even in own branch
 select pg_temp.assert_raises($q$ insert into public.employees (organization_id, employee_number, first_name, last_name, display_name, joining_date, branch_id, device_user_id) values ('0a000000-0000-0000-0000-000000000000','A-009','x','x','x','2025-01-01','0a000000-0000-0000-0000-00000000000c','9') $q$, 'branch manager lacks employee.create');
 select pg_temp.assert_eq((select count(*) from public.employee_identity_documents), 0, 'branch manager has no employee.view_sensitive');
+-- branch_manager carries the team keys, but this membership is linked to no employee: team semantics add nothing
+select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 0, 'branch manager without an employee link has no team');
 rollback;
 
 -- ---------- as Employee (self-service) ----------
@@ -119,6 +145,10 @@ select pg_temp.assert_eq((select count(*) from public.employees), 1, 'employee s
 select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 1, 'employee sees only own attendance');
 select pg_temp.assert_eq((select count(*) from public.devices), 0, 'employee sees no devices');
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'Hacked' where id = '0a000000-0000-0000-0000-0000000000e3' $q$, 0, 'employee cannot update own master record');
+-- e2 reports to this employee, but the `employee` role holds no team key: the relationship alone opens nothing
+select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 1, 'employee is somebody''s manager (relationship exists)');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where employee_id = '0a000000-0000-0000-0000-0000000000e2'), 0, 'a manager relationship without attendance.view_team reveals no attendance');
+select pg_temp.assert_eq((select count(*) from public.employees where id = '0a000000-0000-0000-0000-0000000000e2'), 0, 'a manager relationship without a team key reveals no employee row');
 -- self-service leave (migration 20260927000100)
 select pg_temp.assert_eq((select count(*) from public.leave_types), 1, 'employee sees active leave types only');
 select pg_temp.assert_eq((select count(*) from public.leave_records), 2, 'employee sees only own leave');
@@ -141,6 +171,64 @@ select pg_temp.assert_raises($q$ insert into public.attendance_corrections (orga
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '2026-09-01', 'ADD_PUNCH', '2026-09-01 04:00+00', 'Not mine', 'a0000000-0000-0000-0000-000000000003', 'PENDING') $q$, 'employee cannot request a correction for someone else');
 select pg_temp.assert_raises($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '2026-09-01', 'ADD_PUNCH', '2026-09-01 05:00+00', 'Pre-approved', 'a0000000-0000-0000-0000-000000000003', 'APPROVED') $q$, 'employee cannot insert an approved correction');
+rollback;
+
+-- ---------- as Line Manager A (role manager, linked to e4 = primary manager of e1) — migration 20260928000100 ----------
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000005","role":"authenticated"}', true);
+select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 1, 'manager: exactly one direct report');
+select pg_temp.assert_eq((select count(*) from unnest(app.team_employee_ids()) t where t = '0a000000-0000-0000-0000-0000000000e1'), 1, 'manager: the direct report is e1');
+select pg_temp.assert_eq((select cardinality(app.team_employee_ids_deep())), 2, 'manager: chain to depth 5 = e1 + e6 (report of a report)');
+select pg_temp.assert_eq((select count(*) from unnest(app.team_employee_ids_deep()) t where t = '0a000000-0000-0000-0000-0000000000e6'), 1, 'manager: deep chain reaches e6');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 2, 'manager sees own record + the report''s (no organisation-wide attendance.view)');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where employee_id = '0a000000-0000-0000-0000-0000000000e1'), 1, 'manager reads the report''s daily record');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where employee_id = '0a000000-0000-0000-0000-0000000000e2'), 0, 'manager cannot read a non-report''s daily record');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where employee_id = '0a000000-0000-0000-0000-0000000000e6'), 0, 'a report of a report is NOT visible (direct reports only)');
+select pg_temp.assert_eq((select count(*) from public.leave_records), 1, 'manager sees the report''s leave only (leave.view_team)');
+select pg_temp.assert_eq((select count(*) from public.leave_records where employee_id = '0a000000-0000-0000-0000-0000000000e1'), 1, 'manager reads the report''s leave record');
+select pg_temp.assert_eq((select count(*) from public.employees), 6, 'manager holds employee.view: the employee directory stays organisation-wide');
+select pg_temp.assert_eq((select count(*) from public.devices), 0, 'manager has no device.view');
+select pg_temp.assert_rows($q$ update public.employees set display_name = 'x' where id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'manager cannot edit the report''s master record (no employee.update)');
+select pg_temp.assert_rows($q$ update public.attendance_daily_records set status = 'ABSENT' where employee_id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'manager cannot write daily records');
+select pg_temp.assert_rows($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 0, 'manager cannot approve leave through RLS (leave.approve is enforced by the API/engine, leave.manage by RLS)');
+rollback;
+
+-- ---------- as Secondary Manager A (role manager, linked to e5 = secondary manager of e1) ----------
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000006","role":"authenticated"}', true);
+select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 1, 'secondary manager: exactly one direct report');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 2, 'secondary manager sees own record + the report''s');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where employee_id = '0a000000-0000-0000-0000-0000000000e1'), 1, 'secondary manager reads the report''s daily record');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where employee_id = '0a000000-0000-0000-0000-0000000000e2'), 0, 'secondary manager cannot read a non-report''s daily record');
+select pg_temp.assert_eq((select count(*) from public.leave_records where employee_id = '0a000000-0000-0000-0000-0000000000e1'), 1, 'secondary manager reads the report''s leave');
+select pg_temp.assert_eq((select count(*) from public.leave_records where employee_id = '0a000000-0000-0000-0000-0000000000e3'), 0, 'secondary manager cannot read a non-report''s leave');
+rollback;
+
+-- ---------- as Auditor A (role auditor: read-only, no employee link) ----------
+begin;
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000007","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from public.employees), 6, 'auditor reads every employee');
+select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 6, 'auditor reads every daily record');
+select pg_temp.assert_eq((select count(*) from public.leave_records), 3, 'auditor reads every leave record');
+select pg_temp.assert_eq((select count(*) from public.organizations), 1, 'auditor reads the organisation');
+select pg_temp.assert_eq((select count(*) from public.devices), 0, 'auditor has no device.view');
+select pg_temp.assert_eq((select count(*) from public.employee_identity_documents), 0, 'auditor has no employee.view_sensitive');
+select pg_temp.assert_rows($q$ update public.employees set display_name = 'x' where id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'auditor cannot update employees');
+select pg_temp.assert_raises($q$ insert into public.employees (organization_id, employee_number, first_name, last_name, display_name, joining_date, branch_id, device_user_id) values ('0a000000-0000-0000-0000-000000000000','A-010','x','x','x','2025-01-01','0a000000-0000-0000-0000-00000000000b','10') $q$, 'auditor cannot create employees');
+select pg_temp.assert_rows($q$ delete from public.employees where id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'auditor cannot delete employees');
+select pg_temp.assert_raises($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000001a1', '2026-12-01', '2026-12-02', 'PENDING', 'a0000000-0000-0000-0000-000000000007') $q$, 'auditor cannot record leave');
+select pg_temp.assert_rows($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 0, 'auditor cannot approve leave');
+select pg_temp.assert_rows($q$ delete from public.leave_records where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 0, 'auditor cannot delete leave');
+select pg_temp.assert_raises($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '2026-09-01', 'ADD_PUNCH', '2026-09-01 04:00+00', 'Audit note', 'a0000000-0000-0000-0000-000000000007', 'PENDING') $q$, 'auditor cannot file corrections');
+select pg_temp.assert_rows($q$ update public.attendance_daily_records set status = 'ABSENT' where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'auditor cannot write daily records');
+select pg_temp.assert_raises($q$ insert into public.shifts (organization_id, code, name, type, start_time, end_time) values ('0a000000-0000-0000-0000-000000000000', 'AUD', 'Audit shift', 'FIXED', '08:00', '17:00') $q$, 'auditor cannot create shifts');
+select pg_temp.assert_rows($q$ update public.organizations set display_name = 'x' where id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'auditor cannot edit the organisation');
+select pg_temp.assert_rows($q$ update public.org_memberships set role_id = '10000000-0000-0000-0000-000000000001' where id = '0a000000-0000-0000-0000-0000000000a7' $q$, 0, 'auditor cannot promote themselves');
 rollback;
 
 -- ---------- as Owner B ----------
@@ -173,7 +261,7 @@ insert into public.platform_access_grants (platform_admin_user_id, organization_
 values ('c0000000-0000-0000-0000-000000000001', '0a000000-0000-0000-0000-000000000000', 'read', 'Support ticket #123 investigation', now() + interval '1 hour');
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"c0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
-select pg_temp.assert_eq((select count(*) from public.employees), 3, 'platform admin WITH grant sees org A employees');
+select pg_temp.assert_eq((select count(*) from public.employees), 6, 'platform admin WITH grant sees org A employees');
 select pg_temp.assert_eq((select count(*) from public.employees where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'grant does not extend to org B');
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'x' where id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'read grant cannot write');
 rollback;

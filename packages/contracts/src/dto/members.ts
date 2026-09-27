@@ -43,6 +43,9 @@ export const invitationDtoSchema = z.object({
   branchIds: z.array(uuidSchema),
   invitedBy: uuidSchema.nullable(),
   invitedByName: z.string().nullable().optional(),
+  /** Employee record the membership is linked to when the invitation is accepted (chosen while inviting). */
+  employeeId: uuidSchema.nullable().optional(),
+  employeeNumber: z.string().nullable().optional(),
   expiresAt: isoDateTimeSchema,
   acceptedAt: isoDateTimeSchema.nullable(),
   createdAt: isoDateTimeSchema,

@@ -7,7 +7,7 @@ import { activitySegments, summarisePeriod, weekRange, type MembershipGrant, typ
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
 import type { ApiDeps } from '../../deps.js';
-import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
+import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission, requireTeamOrPermission } from '../../lib/authorize.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
 import { enqueueJob } from '../../lib/jobs.js';
 import { likeContains, pageOf, prefixTsQuery, toCount } from '../../lib/pagination.js';
@@ -374,6 +374,9 @@ function correctionGrant(actor: Actor, orgId: string, input: CreateCorrectionInp
 
 export async function createCorrection(deps: ApiDeps, actor: Actor, orgId: string, input: CreateCorrectionInput): Promise<CorrectionDto & { approval: 'AUTO_APPROVED' | 'PENDING'; approvalRequestId: string | null }> {
   const { grant, selfService } = correctionGrant(actor, orgId, input);
+  // A line manager (attendance.correct without organisation-wide attendance.view) may only file corrections for their
+  // own direct reports; HR and branch managers hold attendance.view and pass unchanged.
+  if (!selfService) requireTeamOrPermission(actor.principal, orgId, input.employeeId, 'attendance.view');
   return runUser(deps.db, actor, async (trx) => {
     if (selfService) {
       // Settings → Attendance → "Self-service corrections" (off by default) decides whether employees may ask at all.

@@ -73,5 +73,9 @@ export const USERS = [
   { email: 'devices@albahja.example', name: 'Rajesh Kumar', role: 'attendance_admin', allBranches: true, branches: [] as string[] },
   { email: 'payroll@albahja.example', name: 'Maryam Al Siyabi', role: 'payroll', allBranches: true, branches: [] as string[] },
   { email: 'employee@albahja.example', name: 'Ahmed Al Hinai', role: 'employee', allBranches: true, branches: [] as string[] },
+  // line manager of the Information Technology department (team visibility through employees.manager_employee_id)
+  { email: 'manager@albahja.example', name: 'Nasser Al Maskari', role: 'manager', allBranches: true, branches: [] as string[] },
+  // read-only reviewer: sees everything the auditor role allows, changes nothing
+  { email: 'auditor@albahja.example', name: 'Hana Al Kindi', role: 'auditor', allBranches: true, branches: [] as string[] },
 ] as const;
 export const SEED_PASSWORD = 'FlowZa-Demo-2026!';

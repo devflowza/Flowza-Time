@@ -153,11 +153,28 @@ async function seedEmployees(db: Database, rng: Prng, ids: Ids, today: string): 
   const target = rows.find((e) => e.branchCode === 'MCT-HQ' && e.status === 'active' && !e.nightShift && !e.flexible)!;
   await db.updateTable('employees').set({ userId: selfServiceUser, displayName: 'Ahmed Al Hinai', firstName: 'Ahmed', lastName: 'Al Hinai' }).where('id', '=', target.id).execute();
   await db.updateTable('orgMemberships').set({ employeeId: target.id }).where('userId', '=', selfServiceUser).execute();
-  // managers: first employee per department manages it
+  // managers: the first active employee of each department (never the self-service employee) manages it; everybody
+  // else in the department reports to them, and about a third also get the department's deputy (its second employee)
+  // as secondary — dotted-line — manager. Reporting lines land on the current employment_history row as well.
+  const deptManagers = new Map<string, SeedEmployee>();
   for (const dep of ids.departments) {
-    const mgr = rows.find((e) => e.departmentId === dep && e.status === 'active');
-    if (mgr) await db.updateTable('departments').set({ managerEmployeeId: mgr.id }).where('id', '=', dep).execute();
+    const members = rows.filter((e) => e.departmentId === dep && e.status === 'active' && e.id !== target.id);
+    const mgr = members[0];
+    if (!mgr) continue;
+    deptManagers.set(dep, mgr);
+    const deputy = members[1] ?? null;
+    await db.updateTable('departments').set({ managerEmployeeId: mgr.id }).where('id', '=', dep).execute();
+    for (const e of rows.filter((x) => x.departmentId === dep && x.id !== mgr.id)) {
+      const secondary = deputy && e.id !== deputy.id && rng.chance(0.3) ? deputy.id : null;
+      await db.updateTable('employees').set({ managerEmployeeId: mgr.id, secondaryManagerEmployeeId: secondary }).where('id', '=', e.id).execute();
+      await db.updateTable('employmentHistory').set({ managerEmployeeId: mgr.id }).where('employeeId', '=', e.id).where('effectiveTo', 'is', null).execute();
+    }
   }
+  // the line-manager login IS the IT department's manager: their reports are visible through the team predicate only
+  const lineManager = deptManagers.get(itDept)!;
+  const lineManagerUser = ids.users['manager@albahja.example']!;
+  await db.updateTable('employees').set({ userId: lineManagerUser, displayName: 'Nasser Al Maskari', firstName: 'Nasser', lastName: 'Al Maskari' }).where('id', '=', lineManager.id).execute();
+  await db.updateTable('orgMemberships').set({ employeeId: lineManager.id }).where('userId', '=', lineManagerUser).execute();
   return rows;
 }
 

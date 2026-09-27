@@ -228,6 +228,10 @@ export const meDtoSchema = z.object({
     allBranches: z.boolean(),
     branchIds: z.array(uuidSchema),
     employeeId: uuidSchema.nullable(),
+    /** True when at least one active employee reports (primary or secondary manager) to the linked employee record. */
+    isManager: z.boolean().default(false),
+    /** Number of direct reports (defaults keep a /me document cached before this field existed parseable). */
+    teamSize: z.number().int().min(0).default(0),
     featureFlags: z.record(z.string(), z.boolean()),
     settings: organizationSettingsSchema,
   })),

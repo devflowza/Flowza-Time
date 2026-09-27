@@ -47,6 +47,8 @@ export interface SelfProfileDto {
   department: SelfRef | null;
   designation: SelfRef | null;
   manager: (SelfRef & { employeeNumber: string }) | null;
+  /** Dotted-line / backup manager, when HR recorded one. */
+  secondaryManager?: (SelfRef & { employeeNumber: string }) | null;
   teams: SelfRef[];
   weeklyOffDays: number[];
   roleName: string;

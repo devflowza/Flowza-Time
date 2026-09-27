@@ -10,7 +10,7 @@ end $$;
 begin;
 set local role flowza_system;
 select set_config('request.jwt.claims', '{"role":"flowza_system","org_id":"0a000000-0000-0000-0000-000000000000"}', true);
-select pg_temp.assert_eq((select count(*) from public.employees), 3, 'system context for org A sees A employees');
+select pg_temp.assert_eq((select count(*) from public.employees), 6, 'system context for org A sees A employees');
 select pg_temp.assert_eq((select count(*) from public.employees where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'system context for org A cannot see org B');
 select pg_temp.assert_eq((select count(*) from secrets.get_device_credentials('0a000000-0000-0000-0000-0000000000d1')), 1, 'system context decrypts own device credentials');
 select pg_temp.assert_eq((select count(*) from secrets.get_device_credentials('0b000000-0000-0000-0000-0000000000d1')), 0, 'system context for A cannot read B credentials');

@@ -23,7 +23,10 @@ const employeeFieldsSchema = z.object({
   branchId: uuidSchema,
   departmentId: uuidSchema.optional(),
   designationId: uuidSchema.optional(),
-  managerEmployeeId: uuidSchema.optional(),
+  /** Primary (line) manager; `null` on PATCH clears it. Drives team visibility and manager-chain approvals. */
+  managerEmployeeId: uuidSchema.nullable().optional(),
+  /** Secondary / dotted-line manager: also sees the employee as a direct report; backup approver when the primary is absent. */
+  secondaryManagerEmployeeId: uuidSchema.nullable().optional(),
   deviceUserId: deviceUserIdSchema.optional(), // auto-assigned when omitted
   cardNumber: z.string().trim().max(64).optional(),
   pin: z.string().regex(/^\d{4,8}$/).optional(),
@@ -54,6 +57,10 @@ export const employeeListQuerySchema = paginationQuerySchema.extend({
   employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional(),
   employmentType: z.enum(EMPLOYMENT_TYPES).optional(),
   managerEmployeeId: uuidSchema.optional(),
+  /** Direct reports of an employee: primary OR secondary manager equals the id (what the team predicate calls "team"). */
+  teamOf: uuidSchema.optional(),
+  /** Only employees not linked to a membership (any status) or to a pending invitation — candidates for a new login. */
+  unlinked: booleanQuerySchema.optional(),
   includeDeleted: booleanQuerySchema.default(false),
 });
 export type EmployeeListQuery = z.infer<typeof employeeListQuerySchema>;
@@ -86,6 +93,8 @@ export const employeeDtoSchema = z.object({
   designationName: z.string().nullable().optional(),
   managerEmployeeId: uuidSchema.nullable(),
   managerName: z.string().nullable().optional(),
+  secondaryManagerEmployeeId: uuidSchema.nullable().optional(),
+  secondaryManagerName: z.string().nullable().optional(),
   userId: uuidSchema.nullable(),
   deviceUserId: z.string(),
   cardNumber: z.string().nullable(),
@@ -120,7 +129,7 @@ export const identityDocumentInputSchema = z.object({
 });
 
 /** CSV/XLSX import row (§44). Column headers of the downloadable template. */
-export const employeeImportRowSchema = createEmployeeSchema.omit({ branchId: true, departmentId: true, designationId: true, managerEmployeeId: true }).extend({
+export const employeeImportRowSchema = createEmployeeSchema.omit({ branchId: true, departmentId: true, designationId: true, managerEmployeeId: true, secondaryManagerEmployeeId: true }).extend({
   branchCode: codeSchema,
   departmentCode: codeSchema.optional(),
   designationCode: codeSchema.optional(),

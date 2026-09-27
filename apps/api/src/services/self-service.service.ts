@@ -256,7 +256,7 @@ export async function cancelLeave(deps: ApiDeps, actor: Actor, orgId: string, id
 export async function getProfile(deps: ApiDeps, actor: Actor, orgId: string): Promise<SelfProfileDto> {
   const scope = selfScope(actor, orgId);
   return runUser(deps.db, actor, async (trx) => {
-    const e = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'displayName', 'displayNameAr', 'firstName', 'lastName', 'email', 'phone', 'gender', 'dateOfBirth', 'nationalityCode', 'joiningDate', 'employmentStatus', 'employmentType', 'photoPath', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'weeklyOffDays'])
+    const e = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'displayName', 'displayNameAr', 'firstName', 'lastName', 'email', 'phone', 'gender', 'dateOfBirth', 'nationalityCode', 'joiningDate', 'employmentStatus', 'employmentType', 'photoPath', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'secondaryManagerEmployeeId', 'weeklyOffDays'])
       .where('organizationId', '=', orgId).where('id', '=', scope.employeeId).where('deletedAt', 'is', null).executeTakeFirst();
     if (!e) throw errors.notFound('Employee record');
     const ctx = await loadContext(trx, orgId, scope.employeeId);
@@ -264,6 +264,7 @@ export async function getProfile(deps: ApiDeps, actor: Actor, orgId: string): Pr
       department: e.departmentId ? await t.selectFrom('departments').select(['id', 'name']).where('organizationId', '=', orgId).where('id', '=', e.departmentId).executeTakeFirst() : undefined,
       designation: e.designationId ? await t.selectFrom('designations').select(['id', 'name']).where('organizationId', '=', orgId).where('id', '=', e.designationId).executeTakeFirst() : undefined,
       manager: e.managerEmployeeId ? await t.selectFrom('employees').select(['id', 'displayName', 'employeeNumber']).where('organizationId', '=', orgId).where('id', '=', e.managerEmployeeId).executeTakeFirst() : undefined,
+      secondaryManager: e.secondaryManagerEmployeeId ? await t.selectFrom('employees').select(['id', 'displayName', 'employeeNumber']).where('organizationId', '=', orgId).where('id', '=', e.secondaryManagerEmployeeId).executeTakeFirst() : undefined,
       teams: await t.selectFrom('teamMembers as tm').innerJoin('teams as tt', 'tt.id', 'tm.teamId').select(['tt.id', 'tt.name']).where('tm.organizationId', '=', orgId).where('tm.employeeId', '=', scope.employeeId).orderBy('tt.name').execute(),
       role: /^[0-9a-f-]{36}$/i.test(scope.grant.roleId) ? await t.selectFrom('roles').select('name').where('id', '=', scope.grant.roleId).executeTakeFirst() : undefined,
     }));
@@ -274,6 +275,7 @@ export async function getProfile(deps: ApiDeps, actor: Actor, orgId: string): Pr
       branch: ctx.branch ? { id: ctx.branch.id, name: ctx.branch.name, timezone: ctx.branch.timezone } : null,
       department: ref.department ?? null, designation: ref.designation ?? null,
       manager: ref.manager ? { id: ref.manager.id, name: ref.manager.displayName, employeeNumber: ref.manager.employeeNumber } : null,
+      secondaryManager: ref.secondaryManager ? { id: ref.secondaryManager.id, name: ref.secondaryManager.displayName, employeeNumber: ref.secondaryManager.employeeNumber } : null,
       teams: ref.teams, weeklyOffDays: ctx.weeklyOffDays, roleName: ref.role?.name ?? scope.grant.roleKey,
     };
   });
