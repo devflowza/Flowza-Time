@@ -17,8 +17,9 @@ export default function TeamPage() {
   const employeeId = useEmployeeId();
   const can = useCan();
   const isManager = membership?.isManager ?? false;
-  // the directory needs employee.view; a manager whose role lacks it still sees the team size from /me
-  const canList = isManager && can('employee.view') && !!employeeId;
+  // the list needs employee.view_team (own record + direct reports) or the organisation-wide employee.view; a manager
+  // whose role holds neither still sees the team size from /me
+  const canList = isManager && (can('employee.view_team') || can('employee.view')) && !!employeeId;
   const q = useEmployees({ teamOf: employeeId ?? undefined, pageSize: 100, sort: 'displayName' }, canList);
   const teamSize = membership?.teamSize ?? 0;
 

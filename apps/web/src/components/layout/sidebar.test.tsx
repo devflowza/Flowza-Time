@@ -18,15 +18,27 @@ describe('Sidebar', () => {
     grantAll();
   });
 
-  it('shows the "My team" section only to members with direct reports, whatever their permissions', () => {
+  it('shows the "My team" section to members with direct reports whose role can read them (employee.view_team or employee.view)', () => {
     testState.employeeId = 'e1';
     testState.teamSize = 3;
-    grant('dashboard.view');
-    const { unmount } = renderWithProviders(<Sidebar />);
+    grant('dashboard.view', 'employee.view_team');
+    let r = renderWithProviders(<Sidebar />);
     expect(screen.getByText('My team')).toBeInTheDocument();
     expect(screen.getByRole('link', { name: 'Team overview' })).toHaveAttribute('href', '/team');
-    unmount();
+    // the line manager's key opens the team, not the organisation's directory
+    expect(screen.queryByRole('link', { name: 'Employees' })).not.toBeInTheDocument();
+    r.unmount();
+    grant('dashboard.view', 'employee.view');
+    r = renderWithProviders(<Sidebar />);
+    expect(screen.getByRole('link', { name: 'Team overview' })).toBeInTheDocument();
+    r.unmount();
+    // a reporting relationship alone opens nothing (the RLS team predicate is key-gated): no empty workspace in the menu
+    grant('dashboard.view');
+    r = renderWithProviders(<Sidebar />);
+    expect(screen.queryByRole('link', { name: 'Team overview' })).not.toBeInTheDocument();
+    r.unmount();
     testState.teamSize = 0;
+    grantAll();
     renderWithProviders(<Sidebar />);
     expect(screen.queryByRole('link', { name: 'Team overview' })).not.toBeInTheDocument();
   });

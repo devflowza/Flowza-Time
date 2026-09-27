@@ -6,6 +6,7 @@ import { loadApiConfig } from './config.js';
 import { createApp } from './app.js';
 import { createTokenVerifier } from './lib/jwt.js';
 import { createSupabasePlatformClients } from './lib/supabase-clients.js';
+import { databaseSessionRevoker } from './lib/sessions.js';
 
 const config = loadApiConfig();
 const log = createLogger({ name: 'flowza-api', level: config.LOG_LEVEL });
@@ -28,6 +29,7 @@ const app = createApp({
   verifyToken: createTokenVerifier({ supabaseUrl: config.SUPABASE_URL, jwtSecret: config.SUPABASE_JWT_SECRET }),
   realtime: platform.realtime,
   storage: platform.storage,
+  sessions: databaseSessionRevoker,
 });
 
 const server = serve({ fetch: app.fetch, port: config.API_PORT }, (info) => {
