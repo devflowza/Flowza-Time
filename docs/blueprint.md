@@ -671,9 +671,13 @@ No application code path uses Supabase `service_role`. Migrations/ops use it via
 
 - `permissions` are the vocabulary (`employee.view`, `attendance.correct`, `device.manage`…).
 - System roles (`owner`, `org_admin`, `hr_admin`, `hr_user`, `branch_manager`, `attendance_admin`,
-  `payroll`, `employee`) are seeded with permission sets; organisations may clone and customise roles
-  (`role.manage`).
+  `payroll`, `employee`, `manager` — line manager, team-scoped — and `auditor` — read-only) are seeded with
+  permission sets; organisations may clone and customise roles (`role.manage`).
 - A membership has one role and either `all_branches=true` or an explicit branch list.
+- **Team scope** (migration 20260928000100): a member whose linked employee record (`org_memberships.employee_id`) is
+  the `manager_employee_id` or `secondary_manager_employee_id` of other employees has those DIRECT reports as a team.
+  Holders of a team key (`attendance.view_team`, `leave.view_team`) read their team's rows without the organisation-wide
+  key; `app.team_employee_ids()` (direct) / `app.team_employee_ids_deep()` (chain to depth 5, for manager-chain approvals).
 - Helper functions (schema `app`, `STABLE`, `SECURITY DEFINER`, `search_path` pinned):
   - `app.uid()`, `app.claims()`, `app.is_system()`, `app.system_org_id()`
   - `app.org_ids_with_permission(perm text) → uuid[]` (memberships ∪ system org ∪ platform grants)
