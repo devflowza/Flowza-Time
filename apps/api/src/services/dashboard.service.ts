@@ -28,7 +28,9 @@ async function attendanceAgg(trx: Trx, orgId: string, from: string, to: string, 
     sql<string>`count(*) filter (where r.status = 'LEAVE')`.as('onLeave'),
     sql<string>`count(*) filter (where 'EARLY_DEPARTURE' = any(r.flags))`.as('earlyDeparture'),
     sql<string>`coalesce(sum(r.overtime_minutes), 0)`.as('overtimeMinutes'),
-    sql<string>`count(*) filter (where r.status = 'MISSING_PUNCH')`.as('missingPunch'),
+    // The engine never emits the MISSING_PUNCH status: a missing punch is the MISSING_IN / MISSING_OUT flag on a PRESENT,
+    // HALF_DAY or ABSENT record (missingPunchBehavior decides the status). Counting the status showed 0 forever.
+    sql<string>`count(*) filter (where r.flags && array['MISSING_IN', 'MISSING_OUT']::text[])`.as('missingPunch'),
   ]).groupBy(keyExpr).execute();
   return new Map(rows.map((r) => [groupBy ? r.key : 'all', { present: toCount(r.present), absent: toCount(r.absent), late: toCount(r.late), onLeave: toCount(r.onLeave), earlyDeparture: toCount(r.earlyDeparture), overtimeMinutes: toCount(r.overtimeMinutes), missingPunch: toCount(r.missingPunch) }]));
 }
@@ -52,7 +54,7 @@ export async function summary(deps: ApiDeps, actor: Actor, orgId: string, q: { d
                count(*) filter (where r.status = 'LEAVE') as on_leave,
                count(*) filter (where 'EARLY_DEPARTURE' = any(r.flags)) as early_departure,
                coalesce(sum(r.overtime_minutes), 0) as overtime_minutes,
-               count(*) filter (where r.status = 'MISSING_PUNCH') as missing_punch
+               count(*) filter (where r.flags && array['MISSING_IN', 'MISSING_OUT']::text[]) as missing_punch
         from public.attendance_daily_records r, day
         where r.organization_id = ${orgId} and r.attendance_date = day.d ${scoped('r.branch_id')}
       ),
@@ -110,7 +112,7 @@ export async function branches(deps: ApiDeps, actor: Actor, orgId: string, q: { 
                count(*) filter (where r.status = 'ABSENT') as absent,
                count(*) filter (where 'LATE' = any(r.flags)) as late,
                count(*) filter (where r.status = 'LEAVE') as on_leave,
-               count(*) filter (where r.status = 'MISSING_PUNCH') as missing_punch
+               count(*) filter (where r.flags && array['MISSING_IN', 'MISSING_OUT']::text[]) as missing_punch
         from public.attendance_daily_records r, day
         where r.organization_id = ${orgId} and r.attendance_date = day.d ${scoped('r.branch_id')}
         group by r.branch_id

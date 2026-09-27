@@ -29,7 +29,13 @@ export const STATUS_LETTER: Record<string, string> = { PRESENT: 'P', ABSENT: 'A'
 export const FLAG_TONE: Record<string, Tone> = {
   LATE: 'warning', EARLY_DEPARTURE: 'warning', OVERTIME: 'info', MISSING_IN: 'danger', MISSING_OUT: 'danger', MANUAL_CORRECTION: 'secondary', OUT_OF_WINDOW: 'neutral', WORKED_ON_HOLIDAY: 'info', WORKED_ON_WEEKLY_OFF: 'info',
   HALF_DAY_LEAVE: 'info', DUPLICATE_PUNCHES_COLLAPSED: 'neutral', RAMADAN_HOURS: 'secondary', CROSS_MIDNIGHT: 'neutral', NO_SHIFT: 'danger', UNDER_HOURS: 'warning',
+  // policy parity (HR portal Prompt 3): reviewed verdicts from day marks, pay effects, self-service punch facts
+  UNEXCUSED: 'danger', EXCUSED: 'success', LOP: 'danger', PAY_EFFECT_HALF: 'warning', PAY_EFFECT_FULL: 'warning',
+  OUTSIDE_GEOFENCE: 'warning', SELF_SERVICE_PUNCH: 'secondary', NON_WORKING_DAY_WORK: 'info',
 };
+
+/** Day-mark kinds (HR portal Prompt 3) → badge tone. */
+export const MARK_TONE: Record<string, Tone> = { UNEXCUSED: 'danger', EXCUSED: 'success', LOP: 'danger', PAY_EFFECT: 'warning' };
 
 export const CORRECTION_TONE: Record<string, Tone> = { PENDING: 'warning', APPROVED: 'info', APPLIED: 'success', REJECTED: 'danger', CANCELLED: 'neutral' };
 export const RAW_TONE: Record<string, Tone> = { pending: 'outline', normalized: 'success', unmatched: 'danger', ignored: 'neutral', error: 'danger', quarantined: 'warning', held: 'info' };

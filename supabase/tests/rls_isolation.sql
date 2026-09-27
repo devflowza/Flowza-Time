@@ -75,6 +75,12 @@ insert into public.leave_records (id, organization_id, employee_id, branch_id, l
   ('0a000000-0000-0000-0000-0000000001b1', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000001a1', '2026-10-04', '2026-10-05', 'PENDING'),
   ('0a000000-0000-0000-0000-0000000001b3', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-10-11', '2026-10-12', 'PENDING'),
   ('0a000000-0000-0000-0000-0000000001b4', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-08-02', '2026-08-03', 'APPROVED');
+-- attendance day marks (migration 20260928000300): e1 (HQ) unexcused, e2 (A-2) loss of pay, e3 (A-2, self-service) excused; one in org B
+insert into public.attendance_day_marks (id, organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values
+  ('0a000000-0000-0000-0000-0000000002a1', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'Day close'),
+  ('0a000000-0000-0000-0000-0000000002a2', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '2026-09-01', '0a000000-0000-0000-0000-00000000000c', 'LOP', 1, 'SWEEP', 'No paid leave left'),
+  ('0a000000-0000-0000-0000-0000000002a3', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '2026-09-01', '0a000000-0000-0000-0000-00000000000c', 'EXCUSED', 0, 'HR', 'Client visit'),
+  ('0b000000-0000-0000-0000-0000000002a1', '0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000e1', '2026-09-01', '0b000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'Day close');
 commit;
 
 -- helper to assert counts
@@ -118,6 +124,17 @@ select pg_temp.assert_eq((select count(*) from jsonb_object_keys(secrets.masked_
 select pg_temp.assert_raises($q$ select * from secrets.get_device_credentials('0a000000-0000-0000-0000-0000000000d1') $q$, 'user context cannot decrypt credentials');
 -- an owner is linked to no employee: no team, whatever the permissions
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 0, 'owner A (no employee link) has no team');
+-- day marks: organisation-wide read and write (attendance.view / attendance.approve), append-only with revocation
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 3, 'owner A sees the 3 day marks of A');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'owner A cannot see org B day marks');
+select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 1, 'owner A (attendance.approve) may mark a day');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'test') $q$, 'one active mark per (employee, date, kind)');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000e1', '2026-09-02', '0b000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'owner A cannot mark a day in org B');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set kind = 'EXCUSED', pay_effect_days = 0 where id = '0a000000-0000-0000-0000-0000000002a2' $q$, 'a day mark''s verdict is immutable');
+select pg_temp.assert_raises($q$ delete from public.attendance_day_marks where id = '0a000000-0000-0000-0000-0000000002a2' $q$, 'day marks are never deleted (revoke instead)');
+select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoked_by = 'a0000000-0000-0000-0000-000000000001', revoke_reason = 'Wrong day' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 1, 'owner A may revoke a mark');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set revoke_reason = 'Changed my mind' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 'a revoked mark is frozen');
+select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'test') $q$, 1, 'after the revocation a new active mark of the same kind may be written');
 rollback;
 
 -- ---------- as Branch Manager A (restricted to branch A-2) ----------
@@ -135,6 +152,10 @@ select pg_temp.assert_raises($q$ insert into public.employees (organization_id, 
 select pg_temp.assert_eq((select count(*) from public.employee_identity_documents), 0, 'branch manager has no employee.view_sensitive');
 -- branch_manager carries the team keys, but this membership is linked to no employee: team semantics add nothing
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 0, 'branch manager without an employee link has no team');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 2, 'branch manager sees the day marks of branch A-2 only');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'branch manager cannot mark a day outside the branch scope');
+select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '2026-09-02', '0a000000-0000-0000-0000-00000000000c', 'UNEXCUSED', 0, 'HR', 'test') $q$, 1, 'branch manager marks a day in own branch');
+select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 0, 'branch manager cannot revoke a mark outside the branch scope');
 rollback;
 
 -- ---------- as Employee (self-service) ----------
@@ -149,6 +170,10 @@ select pg_temp.assert_rows($q$ update public.employees set display_name = 'Hacke
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 1, 'employee is somebody''s manager (relationship exists)');
 select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where employee_id = '0a000000-0000-0000-0000-0000000000e2'), 0, 'a manager relationship without attendance.view_team reveals no attendance');
 select pg_temp.assert_eq((select count(*) from public.employees where id = '0a000000-0000-0000-0000-0000000000e2'), 0, 'a manager relationship without a team key reveals no employee row');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 1, 'employee sees only the day marks of own days');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where employee_id = '0a000000-0000-0000-0000-0000000000e2'), 0, 'a manager relationship without a team key reveals no day marks');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '2026-09-02', '0a000000-0000-0000-0000-00000000000c', 'EXCUSED', 0, 'HR', 'test') $q$, 'employee cannot excuse own day');
+select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'Not me' where id = '0a000000-0000-0000-0000-0000000002a3' $q$, 0, 'employee cannot revoke a mark on own day');
 -- self-service leave (migration 20260927000100)
 select pg_temp.assert_eq((select count(*) from public.leave_types), 1, 'employee sees active leave types only');
 select pg_temp.assert_eq((select count(*) from public.leave_records), 2, 'employee sees only own leave');
@@ -192,6 +217,10 @@ select pg_temp.assert_eq((select count(*) from public.devices), 0, 'manager has 
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'x' where id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'manager cannot edit the report''s master record (no employee.update)');
 select pg_temp.assert_rows($q$ update public.attendance_daily_records set status = 'ABSENT' where employee_id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'manager cannot write daily records');
 select pg_temp.assert_rows($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 0, 'manager cannot approve leave through RLS (leave.approve is enforced by the API/engine, leave.manage by RLS)');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 1, 'manager sees the day marks of the direct report only (attendance.view_team)');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where employee_id = '0a000000-0000-0000-0000-0000000000e1'), 1, 'manager reads the report''s day mark');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where employee_id in ('0a000000-0000-0000-0000-0000000000e2', '0a000000-0000-0000-0000-0000000000e3')), 0, 'manager cannot read a non-report''s day marks');
+select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 1, 'manager (attendance.approve) may mark the report''s day; the direct-report rule on writes is enforced by the API');
 rollback;
 
 -- ---------- as Secondary Manager A (role manager, linked to e5 = secondary manager of e1) ----------
@@ -204,6 +233,7 @@ select pg_temp.assert_eq((select count(*) from public.attendance_daily_records w
 select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where employee_id = '0a000000-0000-0000-0000-0000000000e2'), 0, 'secondary manager cannot read a non-report''s daily record');
 select pg_temp.assert_eq((select count(*) from public.leave_records where employee_id = '0a000000-0000-0000-0000-0000000000e1'), 1, 'secondary manager reads the report''s leave');
 select pg_temp.assert_eq((select count(*) from public.leave_records where employee_id = '0a000000-0000-0000-0000-0000000000e3'), 0, 'secondary manager cannot read a non-report''s leave');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 1, 'secondary manager sees the report''s day mark only');
 rollback;
 
 -- ---------- as Auditor A (role auditor: read-only, no employee link) ----------
@@ -229,6 +259,10 @@ select pg_temp.assert_rows($q$ update public.attendance_daily_records set status
 select pg_temp.assert_raises($q$ insert into public.shifts (organization_id, code, name, type, start_time, end_time) values ('0a000000-0000-0000-0000-000000000000', 'AUD', 'Audit shift', 'FIXED', '08:00', '17:00') $q$, 'auditor cannot create shifts');
 select pg_temp.assert_rows($q$ update public.organizations set display_name = 'x' where id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'auditor cannot edit the organisation');
 select pg_temp.assert_rows($q$ update public.org_memberships set role_id = '10000000-0000-0000-0000-000000000001' where id = '0a000000-0000-0000-0000-0000000000a7' $q$, 0, 'auditor cannot promote themselves');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 3, 'auditor reads every day mark');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'auditor cannot mark days');
+select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'audit' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 0, 'auditor cannot revoke marks');
+select pg_temp.assert_rows($q$ delete from public.attendance_day_marks where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'auditor cannot delete marks');
 rollback;
 
 -- ---------- as Owner B ----------
@@ -238,6 +272,10 @@ select set_config('request.jwt.claims', '{"sub":"b0000000-0000-0000-0000-0000000
 select pg_temp.assert_eq((select count(*) from public.employees), 1, 'owner B sees 1 employee');
 select pg_temp.assert_eq((select count(*) from public.attendance_daily_records where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A attendance');
 select pg_temp.assert_eq((select count(*) from public.org_memberships), 1, 'owner B sees only own memberships');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 1, 'owner B sees only own day marks');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A day marks (cross-tenant zero)');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'owner B cannot mark a day in org A');
+select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'owner B cannot revoke org A marks');
 rollback;
 
 -- ---------- forged system claim from an authenticated session must NOT work ----------
@@ -264,4 +302,6 @@ select set_config('request.jwt.claims', '{"sub":"c0000000-0000-0000-0000-0000000
 select pg_temp.assert_eq((select count(*) from public.employees), 6, 'platform admin WITH grant sees org A employees');
 select pg_temp.assert_eq((select count(*) from public.employees where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'grant does not extend to org B');
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'x' where id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'read grant cannot write');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 3, 'platform admin WITH a read grant reads org A day marks');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'a read grant cannot mark days');
 rollback;

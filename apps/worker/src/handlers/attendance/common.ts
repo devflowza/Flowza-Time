@@ -1,26 +1,21 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { z } from 'zod';
-import { isoDateSchema, uuidSchema } from '@flowza/contracts';
+import type { z } from 'zod';
+import { resolveAttendanceSettings, type AttendanceSettings } from '@flowza/contracts';
 import { errors } from '@flowza/shared';
-import type { JobQueue, RecordHistoryReason, Trx } from '@flowza/database';
+import type { JobQueue, Trx } from '@flowza/database';
 
-/** Reasons a recompute job may carry (mirrors `public.record_history_reason`). */
-export const RECOMPUTE_REASONS = ['NEW_EVENT', 'CORRECTION', 'RULE_CHANGE', 'SHIFT_CHANGE', 'HOLIDAY_CHANGE', 'LEAVE_CHANGE', 'RECALCULATION', 'MANUAL_OVERRIDE', 'UNLOCK'] as const satisfies readonly RecordHistoryReason[];
-export const recomputeReasonSchema = z.enum(RECOMPUTE_REASONS);
-export type RecomputeReason = z.infer<typeof recomputeReasonSchema>;
-
-export const recomputePayloadSchema = z.object({
-  organizationId: uuidSchema,
-  employeeId: uuidSchema,
-  date: isoDateSchema,
-  reason: recomputeReasonSchema.default('NEW_EVENT'),
-  bypassLock: z.boolean().default(false),
-  triggeredBy: uuidSchema.nullable().optional(),
-});
-export type RecomputePayload = z.infer<typeof recomputePayloadSchema>;
+// The RECOMPUTE_DAILY contract (reasons, payload schema, dedupe key, enqueue) lives in @flowza/database so the API's day-mark
+// and pay-effect writers enqueue exactly the job this worker consumes; re-exported here for the handlers and their tests.
+export { RECOMPUTE_REASONS, recomputeReasonSchema, recomputePayloadSchema, IMMEDIATE_RECOMPUTE_REASONS, recomputeDedupeKey, enqueueRecompute, type RecomputeReason, type RecomputePayload, type EnqueueRecomputeInput } from '@flowza/database';
 
 export const DEFAULT_PROCESSING_DELAY_SECONDS = 30;
+
+/** The organisation's effective attendance settings (`organization_settings.attendance`, defaults filled in; never throws). */
+export async function loadAttendanceSettings(trx: Trx, organizationId: string): Promise<AttendanceSettings> {
+  const row = await trx.selectFrom('organizationSettings').select('attendance').where('organizationId', '=', organizationId).executeTakeFirst();
+  return resolveAttendanceSettings(asObject(row?.attendance));
+}
 
 /** Parse a job payload with a stable, non-retryable error (a malformed payload never gets better by retrying). */
 export function parsePayload<T>(schema: z.ZodType<T>, payload: unknown): T {
@@ -60,48 +55,7 @@ export async function loadProcessingDelaySeconds(trx: Trx, organizationId: strin
   return typeof v === 'number' && Number.isFinite(v) && v >= 0 ? Math.min(3600, Math.floor(v)) : DEFAULT_PROCESSING_DELAY_SECONDS;
 }
 
-/**
- * Reasons whose recompute must run now. They get their own dedupe key so a debounced NEW_EVENT job that is already
- * pending (with a later `runAt` and the wrong reason) cannot absorb them — both jobs are idempotent, the later one is a no-op.
- */
-export const IMMEDIATE_RECOMPUTE_REASONS: ReadonlySet<RecomputeReason> = new Set<RecomputeReason>(['CORRECTION', 'MANUAL_OVERRIDE', 'UNLOCK']);
-export const recomputeDedupeKey = (employeeId: string, date: string, immediate = false): string => `recompute:${employeeId}:${date}${immediate ? ':immediate' : ''}`;
 export const normalizeDedupeKey = (organizationId: string): string => `normalize:${organizationId}`;
-
-export interface EnqueueRecomputeInput {
-  organizationId: string;
-  employeeId: string;
-  date: string;
-  reason?: RecomputeReason;
-  runAt?: Date;
-  bypassLock?: boolean;
-  triggeredBy?: string | null;
-  correlationId?: string;
-}
-
-/**
- * Enqueue one debounced RECOMPUTE_DAILY per (employee, date). The dedupe key coalesces bursts of punches; a job that is
- * already pending keeps its original `runAt` (jobs.enqueue returns the existing id).
- */
-export async function enqueueRecompute(queue: JobQueue, input: EnqueueRecomputeInput, trx?: Trx): Promise<string> {
-  const reason = input.reason ?? 'NEW_EVENT';
-  const immediate = IMMEDIATE_RECOMPUTE_REASONS.has(reason);
-  const payload: Record<string, unknown> = { organizationId: input.organizationId, employeeId: input.employeeId, date: input.date, reason };
-  if (input.bypassLock) payload['bypassLock'] = true;
-  if (input.triggeredBy) payload['triggeredBy'] = input.triggeredBy;
-  return queue.enqueue({
-    queue: 'processing',
-    jobType: 'RECOMPUTE_DAILY',
-    organizationId: input.organizationId,
-    payload,
-    priority: immediate ? 7 : 5,
-    runAt: input.runAt ?? new Date(),
-    dedupeKey: recomputeDedupeKey(input.employeeId, input.date, immediate),
-    lockTimeoutSeconds: 120,
-    maxAttempts: 5,
-    ...(input.correlationId ? { correlationId: input.correlationId } : {}),
-  }, trx);
-}
 
 /** Enqueue the normaliser for one organisation (called by the sweep, by ingestion, and by the normaliser itself to continue). */
 export async function enqueueNormalizeRaw(queue: JobQueue, organizationId: string, opts: { continuation?: boolean; trx?: Trx } = {}): Promise<string> {

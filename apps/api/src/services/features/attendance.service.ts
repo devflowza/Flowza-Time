@@ -2,7 +2,7 @@ import { sql } from 'kysely';
 import { jsonArrayFrom } from 'kysely/helpers/postgres';
 import { DateTime } from 'luxon';
 import { SELF_CORRECTION_TYPES, SYSTEM_ROLE_IDS, type ActivityRange, type ApprovalRequestDto, type ApprovalStepDto, type ApprovalWorkflowInput, type AttendanceActivityDayDto, type AttendanceActivityDto, type AttendanceActivityMonthDto, type AttendanceActivityQuery, type AttendanceDailyRecordDto, type AttendanceStatus, type CreateCorrectionInput, type DailyAttendanceListQuery, type MonthlyAttendanceListQuery, type PeriodLockInput, type RawTransactionsQuery, type RecalculateInput, type approvalDecisionSchema, type attendanceEventsQuerySchema } from '@flowza/contracts';
-import { emitDomainEvent, type Trx } from '@flowza/database';
+import { emitDomainEvent, toDayMarkRow, type Trx } from '@flowza/database';
 import { activitySegments, summarisePeriod, weekRange, type MembershipGrant, type PeriodRecordLike } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
@@ -14,7 +14,7 @@ import { likeContains, pageOf, prefixTsQuery, toCount } from '../../lib/paginati
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject } from '../../lib/mappers.js';
 import { systemStep } from './context.js';
 import { enqueueRecalculation } from './recalc.js';
-import { DAILY_RECORD_COLUMNS, toDailyRecordDto, type DailyRecordRow } from './mappers.js';
+import { DAILY_RECORD_COLUMNS, toDailyRecordDto, toDayMarkDto, type DailyRecordRow } from './mappers.js';
 import { dv } from './sql-helpers.js';
 
 type EventsQuery = z.infer<typeof attendanceEventsQuerySchema>;
@@ -43,6 +43,9 @@ function recordQuery(trx: Trx, orgId: string) {
 
 // ----- reads -----------------------------------------------------------------------------------------------------------
 
+/** Records with a missing punch: the MISSING_IN / MISSING_OUT flags (and a legacy MISSING_PUNCH status, should one exist). */
+const MISSING_PUNCH_PREDICATE = sql<boolean>`(r.status = 'MISSING_PUNCH' or r.flags && array['MISSING_IN', 'MISSING_OUT']::text[])`;
+
 export async function listDaily(deps: ApiDeps, actor: Actor, orgId: string, q: DailyAttendanceListQuery) {
   const { grant, ownOnly } = viewGrant(actor, orgId);
   const scope = branchFilter(grant, q.branchId);
@@ -52,7 +55,10 @@ export async function listDaily(deps: ApiDeps, actor: Actor, orgId: string, q: D
     if (scope) base = base.where('r.branchId', 'in', scope);
     if (q.departmentId) base = base.where('r.departmentId', '=', q.departmentId);
     if (q.shiftId) base = base.where('r.shiftId', '=', q.shiftId);
-    if (q.status) base = base.where('r.status', '=', q.status);
+    // MISSING_PUNCH is a flag-derived bucket: the engine records a missing punch as the MISSING_IN / MISSING_OUT flag and
+    // sets the status by the rule set's missingPunchBehavior (HR portal Prompt 3 defect fix — the status alone matched nothing)
+    if (q.status === 'MISSING_PUNCH') base = base.where(MISSING_PUNCH_PREDICATE);
+    else if (q.status) base = base.where('r.status', '=', q.status);
     if (q.flag) base = base.where(sql<boolean>`${sql.val(q.flag)} = any (r.flags)`);
     if (q.search) { const like = likeContains(q.search); const tsq = prefixTsQuery(q.search); base = base.where((eb) => eb.or([...(tsq ? [sql<boolean>`e.search @@ to_tsquery('simple', ${tsq})`] : []), eb('e.displayName', 'ilike', like), eb(sql`e.employee_number::text`, 'ilike', like)])); }
     const page = pageOf(q);
@@ -61,19 +67,22 @@ export async function listDaily(deps: ApiDeps, actor: Actor, orgId: string, q: D
     // the same set, evaluated once). Each separate query is a round trip between the API's region and the database's.
     // Records without a punch (null first_in_at) sort after those with one, whichever direction is asked for.
     const byStatusQuery = base.select(['r.status', (eb) => eb.fn.countAll().as('n')]).groupBy('r.status');
+    const missingPunchQuery = base.where(MISSING_PUNCH_PREDICATE).select((eb) => eb.fn.countAll().as('n'));
     const rows = await base
-      .select([...DAILY_RECORD_COLUMNS, sql<string>`count(*) over ()`.as('total'), jsonArrayFrom(byStatusQuery).as('byStatus')])
+      .select([...DAILY_RECORD_COLUMNS, sql<string>`count(*) over ()`.as('total'), jsonArrayFrom(byStatusQuery).as('byStatus'), missingPunchQuery.as('missingPunch')])
       .orderBy(sql.raw(`${sortCol} ${q.order} nulls last`)).orderBy('r.id').limit(page.pageSize).offset(page.offset).execute();
     const first = rows[0];
     let total = first ? toCount(first.total) : 0;
     let byStatus: Record<string, number> = first ? Object.fromEntries(first.byStatus.map((t) => [t.status, toCount(t.n)])) : {};
+    let missingPunch = first ? toCount(first.missingPunch) : 0;
     if (!first && page.offset > 0) {
       // a page past the end: the totals still describe the whole set
       const totals = await byStatusQuery.execute();
       byStatus = Object.fromEntries(totals.map((t) => [t.status, toCount(t.n)]));
       total = Object.values(byStatus).reduce((a, n) => a + n, 0);
+      missingPunch = toCount((await missingPunchQuery.executeTakeFirst())?.n);
     }
-    return { data: rows.map(({ total: _t, byStatus: _s, ...r }) => toDailyRecordDto(r as DailyRecordRow)), total, meta: { byStatus } };
+    return { data: rows.map(({ total: _t, byStatus: _s, missingPunch: _m, ...r }) => toDailyRecordDto(r as DailyRecordRow)), total, meta: { byStatus, missingPunch } };
   });
 }
 
@@ -131,8 +140,11 @@ export async function getRecord(deps: ApiDeps, actor: Actor, orgId: string, id: 
     const events = await evq.orderBy('ev.punchedAt').execute();
     const history = await trx.selectFrom('attendanceDailyRecordHistory').select(['id', 'calculationVersion', 'reason', 'triggeredBy', 'jobId', 'snapshot', 'createdAt']).where('recordId', '=', id).orderBy('calculationVersion', 'desc').limit(50).execute();
     const corrections = await trx.selectFrom('attendanceCorrections').selectAll().where('organizationId', '=', orgId).where('employeeId', '=', row.employeeId).where('attendanceDate', '=', dv(date)).orderBy('createdAt', 'desc').execute();
+    // day marks (HR portal Prompt 3): every mark of the day, revoked ones included — the trail, not just the verdict in force
+    const marks = await trx.selectFrom('attendanceDayMarks').selectAll().where('organizationId', '=', orgId).where('employeeId', '=', row.employeeId).where('attendanceDate', '=', dv(date)).orderBy('createdAt', 'asc').orderBy('id', 'asc').execute();
     return {
       ...toDailyRecordDto(row), ruleSetId: row.ruleSetId, shiftAssignmentId: row.shiftAssignmentId, engineVersion: row.engineVersion, trace,
+      marks: marks.map((m) => toDayMarkDto(toDayMarkRow(m))),
       events: events.map((e) => ({ id: e.id, punchedAt: isoDateTime(e.punchedAt), localTime: DateTime.fromJSDate(e.punchedAt).setZone(row.timezone).toISO(), eventType: e.eventType, source: e.source, verificationMethod: e.verificationMethod, deviceId: e.deviceId, deviceName: e.deviceName, voidedAt: isoDateTimeOrNull(e.voidedAt), voidedByCorrectionId: e.voidedByCorrectionId, correctionId: e.correctionId, note: e.note, rawTransactionId: e.rawTransactionId === null ? null : String(e.rawTransactionId), attributed: traceEventIds.length ? traceEventIds.includes(e.id) : null })),
       history: history.map((h) => ({ id: String(h.id), calculationVersion: h.calculationVersion, reason: h.reason, triggeredBy: h.triggeredBy, jobId: h.jobId === null ? null : String(h.jobId), snapshot: jsonObject(h.snapshot), createdAt: isoDateTime(h.createdAt) })),
       corrections: corrections.map(toCorrectionDto),

@@ -5,7 +5,8 @@
   "status": { "PRESENT": "Present", "ABSENT": "Absent", "LEAVE": "Leave", "HOLIDAY": "Holiday", "WEEKLY_OFF": "Weekly off", "HALF_DAY": "Half day", "MISSING_PUNCH": "Missing punch", "NOT_JOINED": "Not joined", "EXITED": "Exited", "PENDING": "Pending" },
   "flags": {
     "LATE": "Late", "EARLY_DEPARTURE": "Early departure", "OVERTIME": "Overtime", "MISSING_IN": "Missing IN", "MISSING_OUT": "Missing OUT", "MANUAL_CORRECTION": "Corrected", "OUT_OF_WINDOW": "Out of window",
-    "WORKED_ON_HOLIDAY": "Worked on holiday", "WORKED_ON_WEEKLY_OFF": "Worked on weekly off", "HALF_DAY_LEAVE": "Half-day leave", "DUPLICATE_PUNCHES_COLLAPSED": "Duplicates collapsed", "RAMADAN_HOURS": "Ramadan hours", "CROSS_MIDNIGHT": "Cross-midnight", "NO_SHIFT": "No shift", "UNDER_HOURS": "Under hours"
+    "WORKED_ON_HOLIDAY": "Worked on holiday", "WORKED_ON_WEEKLY_OFF": "Worked on weekly off", "HALF_DAY_LEAVE": "Half-day leave", "DUPLICATE_PUNCHES_COLLAPSED": "Duplicates collapsed", "RAMADAN_HOURS": "Ramadan hours", "CROSS_MIDNIGHT": "Cross-midnight", "NO_SHIFT": "No shift", "UNDER_HOURS": "Under hours",
+    "UNEXCUSED": "Unexcused", "EXCUSED": "Excused", "LOP": "Loss of pay", "PAY_EFFECT_HALF": "Pay effect ½ day", "PAY_EFFECT_FULL": "Pay effect 1 day", "OUTSIDE_GEOFENCE": "Outside geofence", "SELF_SERVICE_PUNCH": "Self-service punch", "NON_WORKING_DAY_WORK": "Worked on a non-working day"
   },
   "correctionStatus": { "PENDING": "Pending", "APPROVED": "Approved", "APPLIED": "Applied", "REJECTED": "Rejected", "CANCELLED": "Cancelled" },
   "correctionType": { "ADD_PUNCH": "Add punch", "EDIT_PUNCH": "Edit punch", "REMOVE_PUNCH": "Remove punch", "SET_STATUS": "Set status" },
@@ -28,7 +29,13 @@
     "noEvents": "No events", "noEventsHint": "No punches were recorded around this date.", "eventTime": "Time", "eventType": "Type", "source": "Source", "device": "Device", "verification": "Verification", "attributed": "Attributed", "viaCorrection": "via correction", "voided": "Voided", "yes": "Yes", "otherDay": "Other day",
     "noHistory": "No previous versions", "noHistoryHint": "A snapshot is stored every time the record is recomputed.", "recomputed": "Recomputed", "triggeredBy": "by {{by}}",
     "noCorrections": "No corrections", "noCorrectionsHint": "Corrections requested for this day appear here with their approval status.", "correctionType": "Type", "change": "Change", "reason": "Reason", "newPunch": "new punch", "removed": "removed",
-    "locked": "Locked", "lockedHint": "This period is locked; unlock it before requesting corrections.", "requestCorrection": "Request correction"
+    "locked": "Locked", "lockedHint": "This period is locked; unlock it before requesting corrections.", "requestCorrection": "Request correction",
+    "marks": {
+      "title": "Day marks", "lop": "Loss of pay {{days}} day", "lopHint": "Counted as loss of pay in the payroll summary of the period.",
+      "kinds": { "UNEXCUSED": "Unexcused", "EXCUSED": "Excused", "LOP": "Loss of pay · {{days}} day", "PAY_EFFECT": "Charged to leave · {{days}} day" },
+      "sources": { "SWEEP": "Day close", "NOTE_REVIEW": "Note review", "HR": "HR", "SYSTEM": "System" },
+      "created": "{{source}} · {{at}}", "revoked": "Revoked {{at}}: {{reason}}", "revokedShort": "revoked"
+    }
   },
   "trace": {
     "empty": "No calculation trace", "emptyHint": "This record was created without a trace (manual status or legacy engine).", "engine": "Engine {{version}}",

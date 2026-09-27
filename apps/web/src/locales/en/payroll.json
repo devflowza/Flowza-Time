@@ -9,7 +9,10 @@
   },
   "summaries": {
     "title": "Summaries — {{period}}", "hint": "Days as counts (half days = .5), time as h:mm.", "employee": "Employee", "workingDays": "Working", "presentDays": "Present", "absentDays": "Absent", "leaveDays": "Leave (paid)", "holidayDays": "Holidays", "late": "Late days (h:mm)", "missingPunchDays": "Missing punch", "regular": "Regular h:mm", "overtime": "OT h:mm",
-    "overtimeBreakdown": "Weekly off {{weeklyOff}} · Holiday {{holiday}}", "computedAt": "Computed", "status": { "draft": "Draft", "finalized": "Finalised" }, "allStatuses": "All statuses",
+    "overtimeBreakdown": "Weekly off {{weeklyOff}} · Holiday {{holiday}}", "computedAt": "Computed",
+    "unexcusedDays": "Unexcused (excused)", "unexcusedHint": "Days marked unexcused by the day close or by HR; {{excused}} day(s) excused.", "excusedShort": "{{count}} excused",
+    "lopDays": "LOP days", "lopHint": "Loss-of-pay days (half days = .5): unexcused days no paid leave could cover.",
+    "nonWorkingDay": "Off-day work h:mm", "nonWorkingDayHint": "Hours worked on weekly offs and holidays (counted as overtime or not, per the attendance settings).", "status": { "draft": "Draft", "finalized": "Finalised" }, "allStatuses": "All statuses",
     "empty": "No summaries for this period", "emptyHint": "Build the summaries once attendance for the period has been reviewed."
   }
 }

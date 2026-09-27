@@ -15,6 +15,8 @@ select pg_temp.assert_eq((select count(*) from public.employees where organizati
 select pg_temp.assert_eq((select count(*) from secrets.get_device_credentials('0a000000-0000-0000-0000-0000000000d1')), 1, 'system context decrypts own device credentials');
 select pg_temp.assert_eq((select count(*) from secrets.get_device_credentials('0b000000-0000-0000-0000-0000000000d1')), 0, 'system context for A cannot read B credentials');
 select pg_temp.assert_eq((select count(*) from jobs.queue), 0, 'system can read the job queue');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 3, 'system context for org A reads A day marks');
+select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'system context for org A cannot read B day marks');
 rollback;
 begin;
 set local role flowza_system;
