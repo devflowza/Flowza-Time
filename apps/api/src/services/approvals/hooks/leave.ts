@@ -101,6 +101,7 @@ export const leaveHook: EntityHook = {
   entityType: 'LEAVE',
   approvePermission: 'leave.approve',
   viewPermission: 'leave.view',
+  managePermission: 'leave.manage',
   notifiesSubject: true,
   mayCancel: mayWithdrawLeave,
   async onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext) {

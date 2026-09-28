@@ -16,6 +16,7 @@ export const compOffHook: EntityHook = {
   entityType: 'COMP_OFF',
   approvePermission: 'leave.approve',
   viewPermission: 'leave.view',
+  managePermission: 'leave.manage',
   mayCancel: mayWithdrawLeave,
   async onApproved(_deps: ApiDeps, trx: Trx, ctx: HookContext) {
     const credit = await trx.selectFrom('compOffCredits').select(['id', 'workedOn']).where('organizationId', '=', ctx.orgId).where('id', '=', ctx.entityId).where('status', '=', 'pending_approval').executeTakeFirst();

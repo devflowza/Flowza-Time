@@ -41,6 +41,12 @@ export interface EntityHook {
   approvePermission: Permission;
   /** Org-wide read key: with it, a permission holder decides across the organisation; without it, only for direct reports. */
   viewPermission: Permission;
+  /**
+   * Who may withdraw somebody else's request of this entity (with the org-wide view key, Finance B-98), besides the
+   * requester and approval.manage — the key the integrated engine's `canCancel` reads (`managePermissionFor`). Leave and
+   * comp-off set `leave.manage`; in this branch their `mayCancel` applies exactly that rule.
+   */
+  managePermission?: Permission;
   onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onRejected(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onCancelled?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
