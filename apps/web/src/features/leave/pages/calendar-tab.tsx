@@ -7,7 +7,7 @@ import { Combobox } from '@/components/forms';
 import { fmtDate, todayIso } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useActiveMembership, useCan, useOrgTimezone } from '@/features/me/use-me';
-import { useBranchOptions } from '@/features/organization/lookups';
+import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { useLeaveCalendar } from '../api';
 import { fmtLeaveDays, monthDates, shiftLeaveMonth, weekdayOf } from '../model';
 import { LeaveTypeDot } from '../components/leave-status';
@@ -32,7 +32,8 @@ function Cell({ items, date }: { items: TeamLeaveDto[]; date: string }) {
 
 /**
  * Team calendar: one row per employee with leave in the month, a cell per day coloured by the leave type (pending and info
- * requested drawn dashed). HR (leave.view) sees the branches in scope; a manager with leave.view_team their team.
+ * requested drawn dashed). HR (leave.view) sees the branches in scope and filters by branch / department; a manager with
+ * leave.view_team sees their team.
  */
 export function LeaveCalendarTab() {
   const { t } = useTranslation('leave');
@@ -43,9 +44,12 @@ export function LeaveCalendarTab() {
   const weeklyOff = membership?.organization.weeklyOffDays ?? [];
   const [month, setMonth] = useState(() => todayIso(tz).slice(0, 7));
   const [branchId, setBranchId] = useState<string | null>(null);
+  const [departmentId, setDepartmentId] = useState<string | null>(null);
   const [includePending, setIncludePending] = useState(true);
-  const q = useLeaveCalendar({ month, branchId: branchId ?? undefined, includePending });
+  const q = useLeaveCalendar({ month, branchId: branchId ?? undefined, departmentId: departmentId ?? undefined, includePending });
+  const orgWide = can('leave.view');
   const branches = useBranchOptions();
+  const departments = useDepartmentOptions(branchId);
   const dates = useMemo(() => monthDates(month), [month]);
   const byEmployee = useMemo(() => {
     const out = new Map<string, TeamLeaveDto[]>();
@@ -62,7 +66,8 @@ export function LeaveCalendarTab() {
           <span className="min-w-36 text-center text-sm font-semibold tnum" aria-live="polite">{fmtDate(`${month}-01`, 'MMMM yyyy')}</span>
           <Button size="icon" variant="outline" className="size-8" aria-label={t('calendar.next')} onClick={() => setMonth((m) => shiftLeaveMonth(m, 1))}><ChevronRight className="rtl:rotate-180" /></Button>
         </div>
-        {can('leave.view') ? <Combobox value={branchId} onChange={setBranchId} options={branches.options} loading={branches.isLoading} clearable placeholder={tc('common.branch')} className="h-8 w-44" /> : null}
+        {orgWide ? <Combobox value={branchId} onChange={(v) => { setBranchId(v); setDepartmentId(null); }} options={branches.options} loading={branches.isLoading} clearable placeholder={tc('common.branch')} className="h-8 w-44" /> : null}
+        {orgWide ? <Combobox value={departmentId} onChange={setDepartmentId} options={departments.options} loading={departments.isLoading} clearable placeholder={tc('common.department')} className="h-8 w-44" /> : null}
         <div className="flex items-center gap-2"><Switch id="leave-cal-pending" checked={includePending} onCheckedChange={setIncludePending} /><Label htmlFor="leave-cal-pending" className="text-sm">{t('calendar.includePending')}</Label></div>
         {legend.length ? <ul className="ms-auto flex flex-wrap gap-3 text-xs">{legend.map((e) => <li key={e.leaveTypeId} className="flex items-center gap-1.5"><LeaveTypeDot color={e.color} />{e.leaveTypeName}</li>)}</ul> : null}
       </div>

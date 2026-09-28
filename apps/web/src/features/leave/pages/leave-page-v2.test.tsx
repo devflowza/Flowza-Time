@@ -26,6 +26,7 @@ registerNamespace('leave', en, ar);
 const AL = '22222222-2222-4222-8222-222222222222';
 const CO = '33333333-3333-4333-8333-333333333333';
 const EMP = '44444444-4444-4444-8444-444444444444';
+const DEP = '55555555-5555-4555-8555-555555555555';
 const types = [
   { id: AL, code: 'AL', name: 'Annual Leave', nameAr: null, isPaid: true, treatAsPresent: false, color: '#175cd3', annualAllowanceDays: 30, status: 'active', createdAt: '', requiresApproval: true, countMode: 'working', advanceNoticeDays: 7, maxConsecutiveDays: 10, carryForwardMaxDays: 5, applicableGender: 'all', accrual: 'none', portalVisible: true, isSpecial: false, compOff: false },
   { id: CO, code: 'CO', name: 'Comp off', nameAr: null, isPaid: true, treatAsPresent: false, color: '#6941c6', annualAllowanceDays: null, status: 'active', createdAt: '', requiresApproval: true, countMode: 'working', portalVisible: false, isSpecial: true, compOff: true, systemKey: 'COMP_OFF' },
@@ -45,6 +46,7 @@ beforeEach(() => {
     '/orgs/org-1/leave-types': { data: types },
     '/orgs/org-1/employees': page([]),
     '/orgs/org-1/branches': page([]),
+    '/orgs/org-1/departments': page([{ id: DEP, name: 'Finance', code: 'FIN', branchId: null, branchName: null, status: 'active' }]),
     '/orgs/org-1/leave-balances': page([{ employeeId: EMP, employeeNumber: 'MG-1012', employeeName: 'Priya Sharma', branchId: null, departmentId: null, joiningDate: '2024-01-01', year: 2026, asOf: '2026-09-28', balances: [balance(), balance({ leaveTypeId: CO, code: 'CO', name: 'Comp off', compOff: true, tracked: true, entitlementDays: 1, takenDays: 0, pendingDays: 0, availableDays: 1, availableAfterPendingDays: 1, carriedForwardDays: 0, carriedForwardExpiresOn: null })] }]),
     '/orgs/org-1/leave-allocations': page([{ id: 'a1', employeeId: EMP, employeeNumber: 'MG-1012', employeeName: 'Priya Sharma', branchId: null, leaveTypeId: AL, leaveTypeCode: 'AL', leaveTypeName: 'Annual Leave', year: 2026, allocatedDays: 30, carriedForwardDays: 4, carriedForwardExpiresOn: '2026-03-31', openingBalanceDays: 0, adjustmentDays: 0, notes: null, updatedAt: '2026-01-01T00:00:00Z', updatedBy: null }]),
     '/orgs/org-1/leave-calendar': { data: { month: '2026-10', from: '2026-10-01', to: '2026-10-31', truncated: false, employees: [{ employeeId: EMP, employeeName: 'Priya Sharma', employeeNumber: 'MG-1012', branchId: null, departmentId: null }], entries: [{ id: 'l1', employeeId: EMP, employeeName: 'Priya Sharma', employeeNumber: 'MG-1012', leaveTypeId: AL, leaveTypeName: 'Annual Leave', leaveTypeCode: 'AL', color: '#175cd3', startDate: '2026-10-04', endDate: '2026-10-08', isHalfDay: false, halfDayPart: null, days: 4, status: 'APPROVED' }] } },
@@ -149,6 +151,15 @@ describe('Balances, allocations, calendar, types', () => {
     renderWithProviders(<LeavePage />, { route: '/leave?tab=calendar' });
     expect(await screen.findByRole('rowheader', { name: /Priya Sharma/ })).toBeInTheDocument();
     expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/leave-calendar', expect.objectContaining({ includePending: true }));
+  });
+
+  it('filters the team calendar by department', async () => {
+    renderWithProviders(<LeavePage />, { route: '/leave?tab=calendar' });
+    await screen.findByRole('rowheader', { name: /Priya Sharma/ });
+    // the combobox trigger shows its placeholder (a combobox takes no name from its content)
+    fireEvent.click(screen.getByText('Department').closest('[role="combobox"]')!);
+    fireEvent.click(await screen.findByText('Finance'));
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/leave-calendar', expect.objectContaining({ departmentId: DEP })));
   });
 
   it('keeps the comp-off type system-managed (no delete, no deactivate)', async () => {
