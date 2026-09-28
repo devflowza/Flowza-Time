@@ -61,9 +61,10 @@ export function useApprovalMutations() {
   const bypass = useMutation({ mutationFn: ({ requestId, reason }: { requestId: string; reason: string }) => post<ApprovalRequestDto>(`${requestId}/bypass`, { reason }), onSuccess: invalidate });
   /**
    * The same decision on several requests; the API decides each one through the engine and reports one line per request.
-   * Each line names the level the caller saw on that row, so a late click never closes the next level.
+   * Each line names the level the caller saw on that row, so a late click never closes the next level; a line may name the
+   * seat an override fills (`onBehalfOfUserId`) — a line that needs one and lacks it is refused on its own.
    */
-  const bulkDecide = useMutation({ mutationFn: async ({ items, decision, comment }: { items: Array<{ requestId: string; stepNo: number }>; decision: DecisionKind; comment?: string }) => (await api.post<Envelope<ApprovalBulkDecideResultDto>>(`/orgs/${orgId}/approvals/bulk-decide`, { items, decision, comment: comment || undefined })).data, onSuccess: invalidate });
+  const bulkDecide = useMutation({ mutationFn: async ({ items, decision, comment }: { items: Array<{ requestId: string; stepNo: number; onBehalfOfUserId?: string }>; decision: DecisionKind; comment?: string }) => (await api.post<Envelope<ApprovalBulkDecideResultDto>>(`/orgs/${orgId}/approvals/bulk-decide`, { items, decision, comment: comment || undefined })).data, onSuccess: invalidate });
   return { decide, cancel, reassign, bypass, requestInfo, answerInfo, bulkDecide };
 }
 

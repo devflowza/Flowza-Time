@@ -24,9 +24,13 @@ export function evaluateLevel(mode: ApprovalStepModeSpec, requiredCount: number 
 /**
  * One actor row as the level's evaluation sees it. `onBehalfOfUserId` names the seat a decision was taken FOR when the
  * decider did not hold it themselves: an organisation-wide approver's override or an escalated approver fills exactly one
- * pending seat of the level (Finance B-91: one row per call).
+ * pending seat of the level (Finance B-91: one row per call). `resolutionPath` and `createdAt` (when the row was written)
+ * feed the extra-hand rule and the seat order used by `pendingSeats`.
  */
-export interface ActorDecisionRow { userId: string; viaDelegationOf: string | null; onBehalfOfUserId?: string | null; decision: string }
+export interface ActorDecisionRow { userId: string; viaDelegationOf: string | null; onBehalfOfUserId?: string | null; decision: string; resolutionPath?: string | null; createdAt?: Date | string | null }
+
+/** An approver added to an overdue level who has not decided yet: an extra pair of hands, not a seat of the level. */
+export const isExtraHandRow = (r: { resolutionPath?: string | null; onBehalfOfUserId?: string | null }): boolean => r.resolutionPath === 'escalated' && !r.onBehalfOfUserId;
 
 /** The seat a row decides for: the seat named on an override / escalation, else the approver a delegate covers, else the person. */
 export const seatOfRow = (r: { userId: string; viaDelegationOf: string | null; onBehalfOfUserId?: string | null }): string => r.onBehalfOfUserId ?? r.viaDelegationOf ?? r.userId;
@@ -50,20 +54,49 @@ export function collapseSeats(rows: readonly ActorDecisionRow[]): SeatDecision[]
   return [...seats.values()].filter((d): d is SeatDecision => d !== null);
 }
 
+const writtenAt = (v: Date | string | null | undefined): number => {
+  if (v === null || v === undefined) return 0;
+  const ms = v instanceof Date ? v.getTime() : Date.parse(v);
+  return Number.isFinite(ms) ? ms : 0;
+};
+
 /**
- * The seats of a level still waiting for a decision, in seat order (the order their first row was written, i.e. the order
- * resolution seated them). An override or an escalated approver fills the first of these unless the call names one.
+ * SEAT ORDER, the one order of a level's seats wherever order matters: the engine's default seat for an override, the
+ * request DTO's `pendingSeats`, the web's "Deciding for" list. Seats are ordered by when the seat's first row was written,
+ * then by the seat's user id. A level's seats are all written by the submitting transaction, which gives them one
+ * timestamp, so in practice they are ordered by user id; a seat written later (a reassignment) comes after them. The order
+ * never depends on how the rows were read: not the physical row order, not a random row id (rows written by one statement
+ * share their creation time — the review P2-13 follow-up). Extra hands are not seats and are never listed.
+ */
+export function seatOrder(rows: readonly ActorDecisionRow[]): string[] {
+  const firstWritten = new Map<string, number>();
+  for (const r of rows) {
+    if (isExtraHandRow(r)) continue;
+    const seat = seatOfRow(r);
+    const at = writtenAt(r.createdAt);
+    const seen = firstWritten.get(seat);
+    if (seen === undefined || at < seen) firstWritten.set(seat, at);
+  }
+  return [...firstWritten.entries()].sort(([a, x], [b, y]) => x - y || (a < b ? -1 : a > b ? 1 : 0)).map(([seat]) => seat);
+}
+
+/**
+ * The seats of a level still waiting for a decision, in seat order (`seatOrder`). An override or an escalated approver fills
+ * one of these: the one the call names, or — only where `seatMustBeNamed` says the choice cannot matter — the first.
  */
 export function pendingSeats(rows: readonly ActorDecisionRow[]): string[] {
-  const order: string[] = [];
-  const state = new Map<string, SeatDecision | null>();
-  for (const r of rows) {
-    const seat = seatOfRow(r);
-    if (!state.has(seat)) order.push(seat);
-    const [decision] = collapseSeats(rows.filter((x) => seatOfRow(x) === seat));
-    state.set(seat, decision ?? null);
-  }
-  return order.filter((s) => state.get(s) === 'PENDING');
+  const seatRows = rows.filter((r) => !isExtraHandRow(r));
+  return seatOrder(seatRows).filter((seat) => collapseSeats(seatRows.filter((r) => seatOfRow(r) === seat))[0] === 'PENDING');
+}
+
+/**
+ * Must an override (or an escalated approver's decision) name the seat it fills? Yes when the level counts approvals (ALL
+ * or QUORUM) and more than one seat is still waiting: which seat is filled decides who still has to act, so the engine
+ * never picks one (Finance decides one named approver row per call). With ANY, or with a single waiting seat, the first
+ * pending seat in seat order is the target, and it is deterministic.
+ */
+export function seatMustBeNamed(mode: ApprovalStepModeSpec, pendingSeatCount: number): boolean {
+  return mode !== 'ANY' && pendingSeatCount > 1;
 }
 
 /**

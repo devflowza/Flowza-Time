@@ -139,8 +139,13 @@
     "approvalRecorded": "Approval recorded — waiting for the other approvers",
     "rejectionRecorded": "Rejection recorded — the other approvers can still approve",
     "noop": "You had already decided this level",
-    "overrideHint": "You are not an approver of this level: your decision is an organisation-wide override that fills the seat of {{name}}, and it is logged. The level’s rule still applies — when everyone must approve, the others still decide.",
-    "escalatedHint": "You were added when this level became overdue: your decision fills the seat of {{name}}."
+    "overrideHint": "You are not an approver of this level: your decision is an organisation-wide override that fills the seat of {{name}}, and it is logged.",
+    "escalatedHint": "You were added when this level became overdue: your decision fills the seat of {{name}}.",
+    "overrideChooseHint": "You are not an approver of this level: your decision is an organisation-wide override that fills one approver’s seat, and it is logged. This level needs several approvals, so choose whose seat it fills — the others still decide.",
+    "escalatedChooseHint": "You were added when this level became overdue: your decision fills one approver’s seat. This level needs several approvals, so choose whose — the others still decide.",
+    "decidingFor": "Deciding for",
+    "decidingForPlaceholder": "Choose an approver",
+    "decidingForRequired": "Choose the approver whose seat your decision fills."
   },
   "detail": {
     "title": "Request",
@@ -157,7 +162,7 @@
     "system": "System",
     "nobody": "—",
     "noEvents": "No events yet",
-    "onBehalfOf": "In the seat of {{name}}"
+    "onBehalfOf": "for {{name}}"
   },
   "timeline": {
     "submitted": "Submitted",

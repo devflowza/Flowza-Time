@@ -440,7 +440,7 @@ organisation reading theirs touches ≤ 200 (measured 17).
 | B-81 one active policy per entity type | ✓ (adapted) | canonical `applies_to` on write and in the index (P2-8) |
 | B-83 validation, permission, soft delete | ✓ | the single-seat quorum is refused with a field error (P2-7) |
 | B-87 subject never approver; requester excluded | ✓ | no self-approval switch (P0-3); SoD on the live link (P0-4); reassign never seats the requester or subject (P2-2) |
-| B-91 who may decide; disabled users cannot | ✓ | one seat per call; override only by an organisation-wide approve holder or the owner, naming the level; line managers never override (P0-1 / P2-13); suspended members read and decide nothing (P0-2) |
+| B-91 who may decide; disabled users cannot | ✓ | one seat per call; override only by an organisation-wide approve holder or the owner, naming the level — and naming the seat on an ALL / QUORUM level with several seats waiting (§9.8); line managers never override (P0-1 / P2-13); suspended members read and decide nothing (P0-2) |
 | B-92 deciding about oneself refused, owner logged | ✓ | live link (P0-4); single-owner organisation (P1-7) |
 | B-93 / B-94 level satisfaction, rejection terminal | ✓ | reassignment keeps the arithmetic (P1-1) |
 | B-95 non-current level / already decided ⇒ no-op | ✓ (adapted) | a decision always names its level, so no re-targeting (P1-2); a repeat on a decided seat is a no-op; closed or non-current is 409 (decision 5) |
@@ -490,3 +490,128 @@ databases: `flowza_p2f`, `flowza_p2f_rls`, `flowza_p2f_ci2`, and the brief's rep
 - The hosted apply (Prompt 12) will report any workflows the self-approval clean-up or the canonical `applies_to`
   de-duplication touched, as `approval_workflow.self_approval_removed` / `approval_workflow.duplicate_deactivated`
   rows in `audit.logs`.
+
+### 9.8 Follow-up: an override names the seat it fills (integrator gate run on `7b47fe4`)
+
+**What failed.** "P2-13 a QUORUM override counts one approval …" failed once under full-suite load. The owner's decision
+came back PENDING where APPROVED was expected, and the test passed when run alone.
+
+**Root cause, and why it was a product defect, not a flaky test.**
+- A level's seats are written by ONE statement at submit, and the column default `created_at = now()` is the
+  transaction's start time, so every seat of a level carries the same `created_at`.
+- The engine and the DTO read actor rows `order by created_at, id`, so the tie was broken by a random uuid.
+- An unnamed override filled `open[0]`, which was therefore a random approver's seat. When that happened to be `hrLinked`,
+  hrLinked's own decision became a no-op.
+
+In production, an organisation-wide approver's unnamed decision silently took a random person's seat on an ALL or QUORUM
+level.
+
+**Fix** (Finance parity: its decide always names the approver row):
+
+1. **An override names its seat where the choice matters.** An override (organisation-wide approve holder or owner) or an
+   escalated approver's decision must name `onBehalfOfUserId` when the level is ALL or QUORUM and more than one seat is
+   still waiting. Otherwise the call gets `400` "Choose which approver you are deciding for…", with issue path
+   `onBehalfOfUserId` (`APPROVAL_SEAT_CHOICE_MESSAGE` in the contracts; the rule is `seatMustBeNamed` in the domain). The
+   check runs before anything is written. On an ANY level, or with a single waiting seat, the target defaults to the first
+   waiting seat in seat order. A named seat that is not waiting stays a `400`.
+2. **Seat order is deterministic everywhere, and documented.** In the domain, `seatOrder` / `pendingSeats` order seats by
+   when the seat's first row was written, then by the approver's user id. They do not depend on how the rows were read:
+   the domain test runs every permutation of the rows. A reassignment, written later, comes after the level's own seats.
+   The engine's and the DTO's reads are ordered `created_at, user_id`, never a random id. Every step DTO carries
+   `pendingSeats` (`{ userId, userName }` in seat order), and abilities carry `mustChooseSeat`. Both are computed by the
+   same domain functions the engine uses.
+3. **Web.** When `mustChooseSeat` is true, the decision dialog shows a "Deciding for" select of the waiting approvers. The
+   decision cannot be sent until one is chosen. Otherwise the note names the seat the decision fills. Either way the call
+   sends `onBehalfOfUserId`, so what the approver saw is what gets decided. The request panel labels an override row
+   "for <name>" (Arabic: «نيابةً عن»). A payload without `pendingSeats` (an older API) is read from the actor rows with the
+   same rules.
+4. **Bulk.** Each item may carry `onBehalfOfUserId`. An item that needs one and lacks it fails on its own with the same
+   message; the other items go through.
+5. **A stand-in on the primary's seat is ONE seat.** That covers a delegate, and the secondary manager the portal
+   (Prompt 4) seats with `via_delegation_of` = primary and path `secondary`: `seatOfRow` is the primary. Such a level
+   therefore lists one waiting seat, and an override on it needs no name, even in ALL mode. The integrator's
+   `assessDecider` line for `secondary` rows (`ownVia = 'actor'`) lives on the integrated branch and composes with this:
+   it decides who may use the seat, and this rule counts the seat once.
+6. **Other ties made deterministic.**
+   - The organisation directory's membership reads (`created_at, user_id`).
+   - The submit-time subject lookup.
+   - The worker's escalation list (sorted, so the `escalated` timeline entry and its notices never depend on read order).
+   - The worker's current-level scan (tie-break on the request id).
+
+**Tests** (each fails when its fix is removed: mutation-checked by restoring the random tie-break, by disabling
+`seatMustBeNamed`, and by dropping the dialog's seat):
+
+| Layer | Tests |
+|---|---|
+| API | "P2-13 a QUORUM override counts one approval; a branch-scoped approver never overrides outside their branch" (now names the seat, and hrLinked still decides their own seat after an override named the HR admin's) |
+| API | "P2-13 an unnamed override on an ALL or QUORUM level with several waiting seats is refused (choose the approver), and nothing is written" |
+| API | "P2-13 an escalated approver names the seat too when several wait" |
+| API | "P2-13 a stand-in seated on the primary's seat (the secondary manager) is one seat: an override on such a level needs no name" |
+| API | "P2-13 bulk lines name the seat too: a line that needs one and lacks it fails on its own, the others go through" |
+| API | "P2-13 with ANY, or a single waiting seat, the unnamed override takes the first seat in seat order — the same one every time" |
+| API | "P2-13 every request lists a level's actors and waiting seats in the same order (seats written together share their creation time)" |
+| Domain | "lists the seats still waiting, in seat order: when the seat was first written, then its user id" |
+| Domain | "P2-13 the seat order never depends on how the rows were read …" |
+| Domain | "never lists an extra hand …" |
+| Domain | "P2-13 a stand-in seated on the primary's seat (the secondary manager, or a delegate) is ONE seat with it, never a second one" |
+| Domain | "P2-13 an override names its seat on ALL / QUORUM levels with several waiting seats; ANY or a single seat has one target" |
+| Web | "P2-13 an override on a level that needs several approvals asks whom it is deciding for, and sends that seat" |
+| Web | "P2-13 an escalated approver on such a level chooses too" |
+| Web | "P2-13 reads the waiting seats from an older payload without pendingSeats …" |
+| Web | "P0-1 tells an organisation-wide approver … names it, and sends that seat" |
+
+**Order-dependence sweep.**
+- A scan of every API and worker test found one ordered comparison of an unordered read, `deliveries.test.ts:174`. It
+  expects a single-element array, so its order cannot matter.
+- It also found 91 `executeTakeFirst()` reads without an `ORDER BY`. Each was reviewed: all are lookups by a unique key,
+  or read a table that holds exactly one matching row in that test (one-level workflows, single-item sync jobs, one
+  command).
+- Among the approval services, the only order-sensitive reads were the ones fixed above.
+- The API suite ran twice in a row, and the two-run check paid off: the first pass failed P1-7 and P2-4 in both runs.
+  The cause was not order. The review suite builds each correction on "the next day of June", and the new tests pushed
+  that counter past 30, into invalid dates. That is the "passes alone, fails with more tests" shape again. Both suites'
+  helpers now roll into the following months (`Date.UTC` arithmetic), and both runs are green.
+
+**Exported signatures: additions only.**
+- `bulkDecide`'s items gain an optional `onBehalfOfUserId`.
+- The domain gains `seatOrder`, `seatMustBeNamed` and `isExtraHandRow`, and `ActorDecisionRow` gains optional
+  `resolutionPath` and `createdAt`.
+- The contracts gain `APPROVAL_SEAT_CHOICE_MESSAGE`, `ApprovalSeatDto`, `ApprovalStepDto.pendingSeats?`,
+  `ApprovalAbilitiesDto.mustChooseSeat?`, and `onBehalfOfUserId?` on a bulk item.
+
+Behaviour change (deliberate): an unnamed override on an ALL / QUORUM level with several waiting seats is now a `400`; it
+used to fill a random seat. No migration was needed: seat order uses the existing `created_at` and `user_id` columns.
+
+**Merge notes (the integrated branch moved on while this was built — `ddc1cef` with Prompt 4, then `08ce01c` with Leave v2;
+not merged here, as asked).**
+- `decision-dialog.tsx` conflicts in two hunks with Prompt 4's pay-effect choice. Resolve as a union: keep the pay-effect
+  state and `PayEffectChoice`, and keep the seat choice, its hint and `seatMissing`. `submit` spreads both `payEffectDays`
+  and `onBehalfOfUserId`. The dialog imports `waitingSeats`: `firstWaitingSeatName` is gone from `labels.ts`.
+- `portal/notes.service.ts` decides an HR-oversight review as an override naming only the level. That still works on the
+  default MANAGER level (one seat, with or without the secondary stand-in) and on ANY levels. On a workflow that makes an
+  attendance note's level ALL / QUORUM with several waiting seats, it now gets the `400` seat choice, until its review
+  body passes `onBehalfOfUserId` through.
+- Leave v2's HR decision (`leave/hr-leave.service.ts`) is in the same position. It decides with an explicit `stepNo`
+  (the level HR saw, or the seat HR holds), so an HR override on an ALL / QUORUM leave level with several approvers
+  waiting now gets the same `400`. The Approvals inbox decides such a level with "Deciding for". If the Leave page
+  should too, its PATCH needs to pass `onBehalfOfUserId`.
+- `attendance.service.ts` decides corrections without a `stepNo`, which already means "own seat only", so it is
+  unaffected.
+
+**Gates on the merged tree after the fix** (`7b47fe4` plus this commit):
+
+Local Postgres 16 @ 127.0.0.1:54329. DB suites ran under `flock /tmp/flowza-dbtests.lock` in this worktree's databases.
+
+| Gate | Result |
+|---|---|
+| `pnpm build:packages`, `pnpm lint` (`--max-warnings 0`), typecheck (api, web, worker) | pass |
+| `pnpm test:unit` | pass: shared 4, contracts 5, domain 265, device-providers 286, database 20 |
+| `pnpm --filter @flowza/web run test` | pass: 64 files, 271 tests |
+| RLS (`run-rls-tests.sh`, `flowza_p2f_rls`) | pass: 314 assertions (`rls_approvals` 89, still last; `rls_hr_workspace` 37) |
+| `pnpm test:db` | pass: 3 files, 15 tests |
+| `pnpm --filter @flowza/api run test`, **twice in a row** | pass both times: 26 files, 299 tests |
+| worker (`vitest run`) | pass: 15 files, 154 tests, 1 skipped (pre-existing) |
+| apps build | pass |
+| `flowza_p2f_ci2` reset, single-transaction replay (`flowza_p2f_tx`) | pass |
+| `--seed` reset of `flowza_p2f`, then `pnpm db:types` | pass; in sync (87 tables), no diff |
+| `build:e2e` + Playwright | pass: 46 tests, approvals 10 |

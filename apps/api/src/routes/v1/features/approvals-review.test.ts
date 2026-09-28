@@ -71,9 +71,10 @@ function nextRange(days = 1) {
   return { startDate: start, endDate: d.toISOString().slice(0, 10) };
 }
 let correctionDay = 1;
+/** A correction on a fresh past day per call (from 2 June 2026 on, rolling into the following months — never an invalid date). */
 function correction(employeeId: string, reason = 'Forgot to punch out') {
   correctionDay += 1;
-  const day = `2026-06-${String(correctionDay).padStart(2, '0')}`;
+  const day = new Date(Date.UTC(2026, 5, correctionDay)).toISOString().slice(0, 10);
   return { employeeId, attendanceDate: day, type: 'ADD_PUNCH', proposedPunchedAt: `${day}T13:05:00Z`, reason };
 }
 const decide = (requestId: string, token: string, body: Record<string, unknown>, orgId = f.orgId) => h.request('POST', `${base(orgId)}/approvals/${requestId}/decide`, { token, body });
@@ -172,11 +173,127 @@ describe('P0-1 / P2-13 — who may decide: one seat per call', () => {
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'QUORUM', requiredCount: 2 }]);
     const c = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
     const id = c.body.data.approvalRequestId as string;
-    expect((await decide(id, f.owner, { decision: 'APPROVE', stepNo: 1 })).body.data).toMatchObject({ status: 'PENDING', terminal: false });
+    // three HR admins wait: the override names the seat it fills (it used to take a random one — the follow-up below)
+    expect((await decide(id, f.owner, { decision: 'APPROVE', stepNo: 1, onBehalfOfUserId: f.hrAdmin })).body.data).toMatchObject({ status: 'PENDING', terminal: false });
     // branch B's manager holds attendance.approve + attendance.view, but e1 is in branch A
     expect((await detail(id, f.branchManagerB)).status).toBe(404);
     expect((await decide(id, f.branchManagerB, { decision: 'APPROVE', stepNo: 1 })).status).toBe(403);
+    // hrLinked still holds their own seat after the override named the HR admin's: their approval is the second one
     expect((await decide(id, hrLinked, { decision: 'APPROVE', stepNo: 1 })).body.data).toMatchObject({ status: 'APPROVED', terminal: true });
+  });
+});
+
+describe('P2-13 follow-up — an override names the seat it fills; seat order is deterministic', () => {
+  const hrSeats = () => [f.hrAdmin, hrLinked, hr20].sort();
+
+  it('P2-13 an unnamed override on an ALL or QUORUM level with several waiting seats is refused (choose the approver), and nothing is written', async () => {
+    for (const level of [{ mode: 'QUORUM', requiredCount: 2 }, { mode: 'ALL' }] as const) {
+      await clearWorkflows();
+      await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, ...level }]);
+      const c = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
+      const id = c.body.data.approvalRequestId as string;
+      // the DTO says a seat must be chosen, and lists the waiting seats in seat order with their names
+      const seen = await detail(id, f.owner);
+      expect(seen.body.data.abilities).toMatchObject({ canDecide: true, decideVia: 'override', mustChooseSeat: true });
+      expect(seen.body.data.steps[0].pendingSeats.map((x: { userId: string }) => x.userId)).toEqual(hrSeats());
+      expect(seen.body.data.steps[0].pendingSeats.every((x: { userName: string | null }) => !!x.userName)).toBe(true);
+      // a seated approver decides their own seat: no choice to make
+      expect((await detail(id, hrLinked)).body.data.abilities).toMatchObject({ decideVia: 'actor', mustChooseSeat: false });
+      const unnamed = await decide(id, f.owner, { decision: 'APPROVE', stepNo: 1 });
+      expect(unnamed.status).toBe(400);
+      expect(unnamed.body.message).toMatch(/^Choose which approver you are deciding for/);
+      expect(JSON.stringify(unnamed.body)).toContain('onBehalfOfUserId');
+      // nothing was decided, nothing was logged
+      expect((await actorsOf(id)).map((a) => [a.userId, a.decision]).sort()).toEqual(hrSeats().map((u) => [u, 'PENDING']));
+      expect(await eventsOf(id)).toEqual(['submitted']);
+      // naming a seat that is not waiting is refused too; naming a waiting one fills exactly that seat
+      expect((await decide(id, f.owner, { decision: 'APPROVE', stepNo: 1, onBehalfOfUserId: f.hrUser })).status).toBe(400);
+      const named = await decide(id, f.owner, { decision: 'APPROVE', stepNo: 1, onBehalfOfUserId: hr20 });
+      expect(named.body.data).toMatchObject({ status: 'PENDING', terminal: false });
+      expect((await actorsOf(id)).find((a) => a.userId === f.owner)).toMatchObject({ onBehalfOfUserId: hr20, decision: 'APPROVED', resolutionPath: 'override' });
+      expect((await detail(id, f.hrAdmin)).body.data.steps[0].pendingSeats.map((x: { userId: string }) => x.userId)).toEqual(hrSeats().filter((u) => u !== hr20));
+    }
+  });
+
+  it('P2-13 an escalated approver names the seat too when several wait', async () => {
+    await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ALL' }]);
+    const c = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
+    const id = c.body.data.approvalRequestId as string;
+    const step = await stepOf(id);
+    await h.admin.insertInto('approvalStepActors').values({ organizationId: f.orgId, stepId: step.id, userId: f.payrollUser, resolutionPath: 'escalated' }).execute();
+    expect((await detail(id, f.payrollUser)).body.data.abilities).toMatchObject({ decideVia: 'escalated', mustChooseSeat: true });
+    const unnamed = await decide(id, f.payrollUser, { decision: 'APPROVE', stepNo: 1 });
+    expect(unnamed.status).toBe(400);
+    expect(unnamed.body.message).toMatch(/^Choose which approver you are deciding for/);
+    expect((await decide(id, f.payrollUser, { decision: 'APPROVE', stepNo: 1, onBehalfOfUserId: hrLinked })).body.data).toMatchObject({ status: 'PENDING' });
+    expect((await actorsOf(id)).find((a) => a.userId === f.payrollUser)).toMatchObject({ onBehalfOfUserId: hrLinked, decision: 'APPROVED' });
+  });
+
+  it('P2-13 a stand-in seated on the primary\'s seat (the secondary manager) is one seat: an override on such a level needs no name', async () => {
+    await workflow('LEAVE', [{ order: 1, approverType: 'MANAGER', mode: 'ALL' }]);
+    const r = await h.request('POST', `${base()}/me/leave`, { token: staff5, body: { leaveTypeId, ...nextRange(1), reason: 'Stand-in' } });
+    const id = r.body.data.approvalRequestId as string;
+    // the portal seats the secondary manager ON the primary's seat: via_delegation_of = primary, path `secondary`
+    await h.admin.insertInto('approvalStepActors').values({ organizationId: f.orgId, stepId: (await stepOf(id)).id, userId: deputy, viaDelegationOf: lineManager, resolutionPath: 'secondary' }).execute();
+    const seen = await detail(id, f.owner);
+    expect(seen.body.data.steps[0].pendingSeats.map((x: { userId: string }) => x.userId)).toEqual([lineManager]);
+    expect(seen.body.data.abilities).toMatchObject({ decideVia: 'override', mustChooseSeat: false });
+    const over = await decide(id, f.owner, { decision: 'APPROVE', stepNo: 1 });
+    expect(over.body.data).toMatchObject({ status: 'APPROVED', terminal: true });
+    expect((await actorsOf(id)).find((a) => a.userId === f.owner)).toMatchObject({ onBehalfOfUserId: lineManager, decision: 'APPROVED' });
+    // both rows of that one seat are closed
+    expect((await actorsOf(id)).filter((a) => a.userId === lineManager || a.userId === deputy).map((a) => a.decision)).toEqual(['SKIPPED', 'SKIPPED']);
+  });
+
+  it('P2-13 bulk lines name the seat too: a line that needs one and lacks it fails on its own, the others go through', async () => {
+    await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'QUORUM', requiredCount: 2 }]);
+    const a = (await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) })).body.data.approvalRequestId as string;
+    const b = (await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) })).body.data.approvalRequestId as string;
+    const bulk = await h.request('POST', `${base()}/approvals/bulk-decide`, { token: f.owner, body: { items: [{ requestId: a, stepNo: 1 }, { requestId: b, stepNo: 1, onBehalfOfUserId: f.hrAdmin }], decision: 'APPROVE' } });
+    expect(bulk.status).toBe(200);
+    expect(bulk.body.data).toMatchObject({ succeeded: 1, failed: 1 });
+    expect(bulk.body.data.results[0]).toMatchObject({ requestId: a, ok: false, code: 'VALIDATION_ERROR' });
+    expect(bulk.body.data.results[0].message).toMatch(/^Choose which approver you are deciding for/);
+    expect(bulk.body.data.results[1]).toMatchObject({ requestId: b, ok: true, status: 'PENDING' });
+    expect(await eventsOf(a)).toEqual(['submitted']);
+    expect((await actorsOf(b)).find((x) => x.userId === f.owner)).toMatchObject({ onBehalfOfUserId: f.hrAdmin, decision: 'APPROVED' });
+  });
+
+  it('P2-13 with ANY, or a single waiting seat, the unnamed override takes the first seat in seat order — the same one every time', async () => {
+    // ANY: approving settles whichever seat it fills; a rejection fills the first seat in seat order and leaves the others
+    await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ANY' }]);
+    const settle = (await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) })).body.data.approvalRequestId as string;
+    expect((await detail(settle, f.owner)).body.data.abilities).toMatchObject({ decideVia: 'override', mustChooseSeat: false });
+    expect((await decide(settle, f.owner, { decision: 'APPROVE', stepNo: 1 })).body.data).toMatchObject({ status: 'APPROVED', terminal: true });
+    expect((await actorsOf(settle)).find((a) => a.userId === f.owner)).toMatchObject({ onBehalfOfUserId: hrSeats()[0] });
+    for (let i = 0; i < 5; i += 1) {
+      const id = (await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) })).body.data.approvalRequestId as string;
+      const rejected = await decide(id, f.owner, { decision: 'REJECT', stepNo: 1, comment: 'Not this one' });
+      expect(rejected.body.data).toMatchObject({ status: 'PENDING', terminal: false });
+      expect((await actorsOf(id)).find((a) => a.userId === f.owner)).toMatchObject({ onBehalfOfUserId: hrSeats()[0], decision: 'REJECTED' });
+      expect((await detail(id, f.hrAdmin)).body.data.steps[0].pendingSeats.map((x: { userId: string }) => x.userId)).toEqual(hrSeats().slice(1));
+    }
+    // ALL with one seat left: the override fills that seat, named or not
+    await clearWorkflows();
+    await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ALL' }]);
+    const all = (await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) })).body.data.approvalRequestId as string;
+    const [first, second, last] = hrSeats();
+    expect((await decide(all, first!, { decision: 'APPROVE', stepNo: 1 })).body.data.status).toBe('PENDING');
+    expect((await decide(all, second!, { decision: 'APPROVE', stepNo: 1 })).body.data.status).toBe('PENDING');
+    expect((await detail(all, f.owner)).body.data.abilities).toMatchObject({ decideVia: 'override', mustChooseSeat: false });
+    const lastSeat = await decide(all, f.owner, { decision: 'APPROVE', stepNo: 1 });
+    expect(lastSeat.body.data).toMatchObject({ status: 'APPROVED', terminal: true });
+    expect((await actorsOf(all)).find((a) => a.userId === f.owner)).toMatchObject({ onBehalfOfUserId: last });
+  });
+
+  it('P2-13 every request lists a level\'s actors and waiting seats in the same order (seats written together share their creation time)', async () => {
+    await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ALL' }]);
+    for (let i = 0; i < 4; i += 1) {
+      const id = (await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) })).body.data.approvalRequestId as string;
+      const step = (await detail(id, f.owner)).body.data.steps[0] as { actors: Array<{ userId: string }>; pendingSeats: Array<{ userId: string }> };
+      expect(step.actors.map((a) => a.userId)).toEqual(hrSeats());
+      expect(step.pendingSeats.map((x) => x.userId)).toEqual(hrSeats());
+    }
   });
 });
 

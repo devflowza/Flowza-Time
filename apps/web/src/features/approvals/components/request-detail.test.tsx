@@ -95,7 +95,7 @@ describe('RequestDetail — one request', () => {
     };
     mockGet({ '/orgs/org-1/approvals/r7': { data: overridden } });
     renderWithProviders(<RequestDetail requestId="r7" />);
-    expect(await screen.findByText('In the seat of Fatma HR')).toBeInTheDocument();
+    expect(await screen.findByText('for Fatma HR')).toBeInTheDocument();
     expect(screen.getByText('Authorised override')).toBeInTheDocument();
   });
 });

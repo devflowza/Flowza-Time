@@ -22,7 +22,7 @@ async function currentSteps(trx: Trx, orgId: string): Promise<CurrentStep[]> {
   return trx.selectFrom('approvalSteps as s').innerJoin('approvalRequests as r', 'r.id', 's.requestId')
     .select(['s.id as stepId', 's.requestId', 's.stepNo', 'r.entityType', 'r.entityId', 'r.employeeId', 'r.branchId', 'r.requestedBy', 'r.subjectUserId', 'r.workflowId', 's.activatedAt', 's.dueAt', 's.escalatedAt', 's.remindedAt', 's.escalateTo'])
     .where('r.organizationId', '=', orgId).where('r.status', '=', 'PENDING').where('s.status', '=', 'PENDING').whereRef('s.stepNo', '=', 'r.currentStep')
-    .orderBy('r.createdAt').execute() as Promise<CurrentStep[]>;
+    .orderBy('r.createdAt').orderBy('r.id').execute() as Promise<CurrentStep[]>;
 }
 
 async function pendingActorIds(trx: Trx, stepId: string): Promise<string[]> {
@@ -76,7 +76,8 @@ async function escalate(trx: Trx, orgId: string, s: CurrentStep, now: Date): Pro
       const next = await trx.selectFrom('approvalSteps').select('id').where('requestId', '=', s.requestId).where('stepNo', '=', s.stepNo + 1).executeTakeFirst();
       candidates = next ? (await trx.selectFrom('approvalStepActors').select('userId').where('stepId', '=', next.id).execute()).map((a) => a.userId) : [];
     } else candidates = await membersByRole(trx, orgId, t === 'HR_ADMIN' ? 'hr_admin' : 'owner', s.branchId);
-    added = [...new Set(eligible(candidates))];
+    // sorted: the escalation's timeline entry and notices never depend on the order rows were read in
+    added = [...new Set(eligible(candidates))].sort();
     if (added.length) { target = t; break; }
   }
   if (added.length) await trx.insertInto('approvalStepActors').values(added.map((userId) => ({ organizationId: orgId, stepId: s.stepId, userId, viaDelegationOf: null, resolutionPath: 'escalated' }))).onConflict((oc) => oc.columns(['stepId', 'userId']).doNothing()).execute();
