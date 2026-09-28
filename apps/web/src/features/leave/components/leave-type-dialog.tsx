@@ -2,8 +2,8 @@ import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
 import type { z } from 'zod';
-import { LEAVE_ACCRUALS, LEAVE_APPLICABLE_GENDERS, LEAVE_COUNT_MODES, leaveTypeInputSchema } from '@flowza/contracts';
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/components/ui';
+import { EMPLOYMENT_TYPES, LEAVE_ACCRUALS, LEAVE_APPLICABLE_GENDERS, LEAVE_COUNT_MODES, leaveTypeInputSchema } from '@flowza/contracts';
+import { Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { blankToUndefined } from '@/features/organization/form-utils';
@@ -32,6 +32,7 @@ function SwitchField({ id, label, hint, checked, onChange, disabled }: { id: str
 export function LeaveTypeDialog({ open, onOpenChange, leaveType }: { open: boolean; onOpenChange: (o: boolean) => void; leaveType: LeaveTypeDto | null }) {
   const { t } = useTranslation('leave');
   const { t: tc } = useTranslation();
+  const { t: te } = useTranslation('employees');
   const { createType, updateType } = useLeaveMutations();
   const system = !!leaveType?.compOff;
   const form = useForm<FormValues, unknown, LeaveTypeInput>({
@@ -40,9 +41,10 @@ export function LeaveTypeDialog({ open, onOpenChange, leaveType }: { open: boole
       ? {
           code: leaveType.code, name: leaveType.name, nameAr: leaveType.nameAr ?? undefined, isPaid: leaveType.isPaid, treatAsPresent: leaveType.treatAsPresent ?? false, color: leaveType.color ?? undefined, annualAllowanceDays: leaveType.annualAllowanceDays ?? null,
           requiresApproval: leaveType.requiresApproval ?? true, countMode: leaveType.countMode ?? 'working', maxConsecutiveDays: leaveType.maxConsecutiveDays ?? null, advanceNoticeDays: leaveType.advanceNoticeDays ?? 0, applicableGender: leaveType.applicableGender ?? 'all',
+          applicableEmploymentTypes: (leaveType.applicableEmploymentTypes ?? null) as FormValues['applicableEmploymentTypes'],
           accrual: leaveType.accrual ?? 'none', carryForwardMaxDays: leaveType.carryForwardMaxDays ?? 0, carryForwardExpiryMonths: leaveType.carryForwardExpiryMonths ?? null, isSpecial: leaveType.isSpecial ?? false, allowHalfDay: leaveType.allowHalfDay ?? true, portalVisible: leaveType.portalVisible ?? true,
         }
-      : { code: '', name: '', isPaid: true, treatAsPresent: false, color: COLORS[0], annualAllowanceDays: null, requiresApproval: true, countMode: 'working', maxConsecutiveDays: null, advanceNoticeDays: 0, applicableGender: 'all', accrual: 'none', carryForwardMaxDays: 0, carryForwardExpiryMonths: null, isSpecial: false, allowHalfDay: true, portalVisible: true },
+      : { code: '', name: '', isPaid: true, treatAsPresent: false, color: COLORS[0], annualAllowanceDays: null, requiresApproval: true, countMode: 'working', maxConsecutiveDays: null, advanceNoticeDays: 0, applicableGender: 'all', applicableEmploymentTypes: null, accrual: 'none', carryForwardMaxDays: 0, carryForwardExpiryMonths: null, isSpecial: false, allowHalfDay: true, portalVisible: true },
   });
   const { register, control, setValue, formState: { errors, isSubmitting } } = form;
   const color = useWatch({ control, name: 'color' });
@@ -84,6 +86,26 @@ export function LeaveTypeDialog({ open, onOpenChange, leaveType }: { open: boole
                 <Controller control={control} name="applicableGender" render={({ field }) => (
                   <Select value={field.value ?? 'all'} onValueChange={field.onChange} disabled={system}><SelectTrigger id="lt-gender"><SelectValue /></SelectTrigger><SelectContent>{LEAVE_APPLICABLE_GENDERS.map((g) => <SelectItem key={g} value={g}>{t(`genders.${g}`)}</SelectItem>)}</SelectContent></Select>
                 )} />
+              </FormField>
+              <FormField label={t('fields.applicableEmploymentTypes')} htmlFor="lt-emp-types" hint={t('fields.applicableEmploymentTypesHint')} error={errors.applicableEmploymentTypes?.message} className="sm:col-span-2">
+                <Controller control={control} name="applicableEmploymentTypes" render={({ field }) => {
+                  // none ticked = every employment type (stored as null); B-41 employee-type applicability
+                  const selected = field.value ?? [];
+                  const toggle = (type: (typeof EMPLOYMENT_TYPES)[number], on: boolean) => {
+                    const next = on ? [...selected, type] : selected.filter((x) => x !== type);
+                    field.onChange(next.length ? EMPLOYMENT_TYPES.filter((x) => next.includes(x)) : null);
+                  };
+                  return (
+                    <div id="lt-emp-types" role="group" aria-label={t('fields.applicableEmploymentTypes')} className="flex flex-wrap gap-x-4 gap-y-2 pt-1">
+                      {EMPLOYMENT_TYPES.map((type) => (
+                        <Label key={type} className="flex items-center gap-2 text-sm font-normal">
+                          <Checkbox checked={selected.includes(type)} onCheckedChange={(v) => toggle(type, v === true)} disabled={system} aria-label={te(`employmentType.${type}`)} />
+                          {te(`employmentType.${type}`)}
+                        </Label>
+                      ))}
+                    </div>
+                  );
+                }} />
               </FormField>
               <FormField label={t('fields.advanceNoticeDays')} htmlFor="lt-notice" hint={t('fields.advanceNoticeDaysHint')} error={errors.advanceNoticeDays?.message}>
                 <Input id="lt-notice" type="number" inputMode="numeric" min={0} max={365} step={1} dir="ltr" className="w-32 tnum" {...register('advanceNoticeDays', { setValueAs: numberOrZero })} aria-invalid={!!errors.advanceNoticeDays} />

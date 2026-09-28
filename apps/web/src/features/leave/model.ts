@@ -15,8 +15,22 @@ export const UNDECIDED_LEAVE_STATUSES: readonly string[] = ['PENDING', 'INFO_REQ
 /** Days without a trailing ".0" (half days keep their ".5"); "—" when unknown. */
 export const fmtLeaveDays = (n: number | null | undefined): string => (n === null || n === undefined || Number.isNaN(n) ? '—' : Number.isInteger(n) ? String(n) : n.toFixed(1));
 
-export interface PreviewCalendar { weeklyOffDays: readonly number[]; holidays: ReadonlySet<string> }
+/**
+ * `isOff`, when set, decides a date on its own (review P1-1 / P1-2: the per-date working calendar the API sends — the branch of
+ * each date, its holidays, weekly offs and rotation off days); without it the weekly offs and holidays decide.
+ */
+export interface PreviewCalendar { weeklyOffDays: readonly number[]; holidays: ReadonlySet<string>; isOff?: (date: string) => boolean }
 export type CountMode = 'working' | 'calendar';
+
+/** The calendar of a /me/leave answer: its per-date off days inside the range they cover, the weekly offs and holidays outside it (and from older API builds). */
+export function previewCalendarOf(c: { weeklyOffDays: readonly number[]; holidays: readonly string[]; offDates?: readonly string[]; from?: string; to?: string } | null | undefined): PreviewCalendar {
+  const weeklyOffDays = c?.weeklyOffDays ?? [];
+  const holidays = new Set(c?.holidays ?? []);
+  if (!c?.offDates) return { weeklyOffDays, holidays };
+  const off = new Set(c.offDates);
+  const { from, to } = c;
+  return { weeklyOffDays, holidays, isOff: (date) => ((!from || date >= from) && (!to || date <= to) ? off.has(date) : weeklyOffDays.includes(weekdayOf(date)) || holidays.has(date)) };
+}
 
 /** Days a range charges: working days (weekly offs and holidays free) or every calendar date; a half day is 0.5 of its date. */
 export function previewLeaveDaysByMode(startDate: string, endDate: string, isHalfDay: boolean, cal: PreviewCalendar, mode: CountMode = 'working'): number {
@@ -25,7 +39,8 @@ export function previewLeaveDaysByMode(startDate: string, endDate: string, isHal
   if (!start.isValid || !end.isValid || end < start) return 0;
   let days = 0;
   for (let d = start; d <= end; d = d.plus({ days: 1 })) {
-    if (mode === 'calendar' || (!cal.weeklyOffDays.includes(d.weekday % 7) && !cal.holidays.has(d.toISODate()!))) days += 1;
+    const iso = d.toISODate()!;
+    if (mode === 'calendar' || !(cal.isOff ? cal.isOff(iso) : cal.weeklyOffDays.includes(d.weekday % 7) || cal.holidays.has(iso))) days += 1;
   }
   return isHalfDay ? days * 0.5 : days;
 }

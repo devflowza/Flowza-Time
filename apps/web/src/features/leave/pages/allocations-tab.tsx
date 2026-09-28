@@ -85,9 +85,18 @@ export function AllocationsTab() {
       />
       <AllocationDialog key={`${dialog.open}-${dialog.allocation?.id ?? 'new'}-${year}`} open={dialog.open} onOpenChange={(o) => setDialog((d) => ({ ...d, open: o }))} year={year} allocation={dialog.allocation} />
       <ConfirmDialog open={confirm === 'generate'} onOpenChange={(o) => !o && setConfirm(null)} title={t('allocations.generateTitle', { year })} description={t('allocations.generateHint')} confirmLabel={t('allocations.generate', { year })} loading={generate.isPending}
-        onConfirm={() => generate.mutate({ year }, { onSuccess: (r) => { toast.success(t('allocations.generated', { created: r.created, skipped: r.skipped })); setConfirm(null); }, onError: toastError })} />
+        onConfirm={() => generate.mutate({ year }, {
+          // review P0-2: nobody allocates leave to themselves — the caller's own rows are left for another HR user
+          onSuccess: (r) => { toast.success(t('allocations.generated', { created: r.created, skipped: r.skipped }), r.skippedOwn ? { description: t('allocations.generatedOwnSkipped', { count: r.skippedOwn }) } : undefined); setConfirm(null); },
+          onError: toastError,
+        })} />
       <ConfirmDialog open={confirm === 'close'} onOpenChange={(o) => !o && setConfirm(null)} title={t('allocations.closeTitle', { from: fromYear, to: year })} description={t('allocations.closeHint', { from: fromYear, to: year })} confirmLabel={t('allocations.closeYear', { from: fromYear, to: year })} loading={closeYear.isPending}
-        onConfirm={() => closeYear.mutate(fromYear, { onSuccess: (r) => { toastJobQueued(r.jobId, navigate, t('allocations.closeQueued', { from: r.fromYear, to: r.toYear })); setConfirm(null); }, onError: toastError })} />
+        onConfirm={() => closeYear.mutate(fromYear, {
+          // review P2-6: the close runs on the processing queue — its job id means nothing to /sync; "View" opens the
+          // allocations of the year it fills (AGENTS.md frontend pitfall #1)
+          onSuccess: (r) => { toastJobQueued(r.jobId, navigate, t('allocations.closeQueued', { from: r.fromYear, to: r.toYear }), { to: `/leave?tab=allocations&year=${r.toYear}` }); setConfirm(null); },
+          onError: toastError,
+        })} />
     </div>
   );
 }

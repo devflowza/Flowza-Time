@@ -17,6 +17,8 @@ import { useTabTable } from '@/features/organization/use-tab-table';
 import { useEmployeeOptions } from '@/features/employees/api';
 import { toastJobQueued } from '@/features/employees/job-toast';
 import { toastMutationError } from '@/features/attendance/period-locked';
+import { useApprovalRequest } from '@/features/approvals/api';
+import { waitingSeats } from '@/features/approvals/labels';
 import { useLeaveMutations, useLeaveRecords, useLeaveTypeOptions, useLeaveTypes } from '../api';
 import type { LeaveRecordDto, LeaveTypeDto, WithRecalc } from '../types';
 import { decisionOutcome, fmtLeaveDays, UNDECIDED_LEAVE_STATUSES } from '../model';
@@ -50,7 +52,9 @@ function ApprovalCell({ r }: { r: LeaveRecordDto }) {
 /**
  * Approve or reject an undecided request (the note is shown to the employee). A decision names the approval level the
  * user saw (`stepNo`, P1-2): the API refuses it if the request has moved on, and never settles another level on the
- * user's behalf. The toast says what actually happened (P2-9): the leave approved, or only its level.
+ * user's behalf. The toast says what actually happened (P2-9): the leave approved, or only its level. An organisation-wide
+ * override on a level that waits for several approvers (ALL / QUORUM) fills ONE seat and must say whose (engine §9.8,
+ * leave v2 review): the request's abilities say so (`mustChooseSeat`), and a "Deciding for" select names the seat.
  */
 function DecisionDialog({ decision, onClose }: { decision: Decision | null; onClose: () => void }) {
   const { t } = useTranslation('leave');
@@ -58,11 +62,18 @@ function DecisionDialog({ decision, onClose }: { decision: Decision | null; onCl
   const navigate = useNavigate();
   const { updateRecord } = useLeaveMutations();
   const [note, setNote] = useState('');
+  const [chosen, setChosen] = useState('');
   const r = decision?.record;
   const approve = decision?.status === 'APPROVED';
   // the approval engine requires a reason for a rejection (the employee reads it)
   const missing = !approve && note.trim().length === 0;
   const stepNo = r && r.approvalRequestId && r.approvalStatus === 'PENDING' && r.approvalCurrentStep ? r.approvalCurrentStep : null;
+  const request = useApprovalRequest(stepNo !== null && r?.approvalRequestId ? r.approvalRequestId : null).data ?? null;
+  const fillsSeat = request?.abilities.decideVia === 'override' || request?.abilities.decideVia === 'escalated';
+  const mustChoose = !!request && fillsSeat && request.abilities.mustChooseSeat === true && request.currentStep === stepNo;
+  const seats = mustChoose && request ? waitingSeats(request) : [];
+  const target = seats.some((s) => s.userId === chosen) ? chosen : '';
+  const seatMissing = mustChoose && !target;
   const announce = (res: WithRecalc<LeaveRecordDto>, sent: 'APPROVED' | 'REJECTED') => {
     const out = decisionOutcome(res, { decision: sent, stepNo: stepNo ?? r?.approvalCurrentStep ?? null });
     const names = out.waitingFor.length ? out.waitingFor.join(', ') : t('decision.nextApprover');
@@ -73,14 +84,14 @@ function DecisionDialog({ decision, onClose }: { decision: Decision | null; onCl
     else toast.success(title);
   };
   const submit = () => {
-    if (!decision || !r || missing) return;
-    updateRecord.mutate({ id: r.id, input: { status: decision.status, decisionNote: note.trim() || null, ...(stepNo !== null ? { stepNo } : {}) } }, {
-      onSuccess: (res) => { announce(res, decision.status); setNote(''); onClose(); },
+    if (!decision || !r || missing || seatMissing) return;
+    updateRecord.mutate({ id: r.id, input: { status: decision.status, decisionNote: note.trim() || null, ...(stepNo !== null ? { stepNo } : {}), ...(mustChoose && target ? { onBehalfOfUserId: target } : {}) } }, {
+      onSuccess: (res) => { announce(res, decision.status); setNote(''); setChosen(''); onClose(); },
       onError: (e) => toastMutationError(e, navigate),
     });
   };
   return (
-    <Dialog open={!!decision} onOpenChange={(o) => { if (!o) { setNote(''); onClose(); } }}>
+    <Dialog open={!!decision} onOpenChange={(o) => { if (!o) { setNote(''); setChosen(''); onClose(); } }}>
       <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>{approve ? t('decision.approveTitle') : t('decision.rejectTitle')}</DialogTitle>
@@ -88,12 +99,20 @@ function DecisionDialog({ decision, onClose }: { decision: Decision | null; onCl
         </DialogHeader>
         {stepNo !== null && r?.approvalStepCount ? <p className="text-xs text-muted-foreground" data-testid="decision-level">{t('decision.atLevel', { n: stepNo, count: r.approvalStepCount })}</p> : null}
         {r?.reason ? <p className="rounded-md border bg-muted/30 p-3 text-sm"><span className="font-medium">{t('fields.reason')}:</span> {r.reason}</p> : null}
+        {mustChoose ? (
+          <FormField label={t('decision.decidingFor')} htmlFor="leave-decision-seat" required hint={t('decision.decidingForHint')}>
+            <Select value={chosen} onValueChange={setChosen}>
+              <SelectTrigger id="leave-decision-seat" aria-invalid={seatMissing || undefined}><SelectValue placeholder={t('decision.decidingForPlaceholder')} /></SelectTrigger>
+              <SelectContent>{seats.map((s) => <SelectItem key={s.userId} value={s.userId}>{s.userName ?? s.userId.slice(0, 8)}</SelectItem>)}</SelectContent>
+            </Select>
+          </FormField>
+        ) : null}
         <FormField label={t('decision.note')} htmlFor="leave-decision-note" optional={approve} required={!approve} hint={approve ? t('decision.noteHint') : t('decision.noteRequired')}>
           <Textarea id="leave-decision-note" rows={3} maxLength={1000} value={note} onChange={(e) => setNote(e.target.value)} aria-invalid={missing || undefined} />
         </FormField>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={() => { setNote(''); onClose(); }}>{tc('common.cancel')}</Button>
-          <Button type="button" variant={approve ? 'default' : 'destructive'} disabled={missing} loading={updateRecord.isPending} onClick={submit}>{approve ? <Check /> : <X />} {approve ? t('decision.approve') : t('decision.reject')}</Button>
+          <Button type="button" variant={approve ? 'default' : 'destructive'} disabled={missing || seatMissing} loading={updateRecord.isPending} onClick={submit}>{approve ? <Check /> : <X />} {approve ? t('decision.approve') : t('decision.reject')}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -189,6 +208,7 @@ function RecordsTab() {
 /** One line of the type's policy: approval, counting, notice / cap, carry-forward. */
 function PolicySummary({ lt }: { lt: LeaveTypeDto }) {
   const { t } = useTranslation('leave');
+  const { t: te } = useTranslation('employees');
   const bits: string[] = [];
   if (lt.requiresApproval === false) bits.push(t('types.chips.noApproval'));
   if (lt.countMode === 'calendar') bits.push(t('types.chips.calendarDays'));
@@ -197,6 +217,7 @@ function PolicySummary({ lt }: { lt: LeaveTypeDto }) {
   if (lt.accrual === 'monthly') bits.push(t('types.chips.monthly'));
   if (lt.carryForwardMaxDays) bits.push(t('types.chips.carryForward', { count: lt.carryForwardMaxDays }));
   if (lt.applicableGender && lt.applicableGender !== 'all') bits.push(t(`genders.${lt.applicableGender}`));
+  if (lt.applicableEmploymentTypes?.length) bits.push(t('types.chips.employmentTypes', { types: lt.applicableEmploymentTypes.map((x) => te(`employmentType.${x}`)).join(' / ') }));
   if (lt.portalVisible === false && !lt.compOff) bits.push(t('types.chips.hrOnly'));
   if (lt.isSpecial && !lt.compOff) bits.push(t('types.chips.special'));
   return bits.length ? <div className="flex max-w-[320px] flex-wrap gap-1">{bits.map((b) => <Badge key={b} variant="secondary" className="font-normal">{b}</Badge>)}</div> : <span className="text-xs text-muted-foreground">—</span>;

@@ -1,7 +1,6 @@
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Users } from 'lucide-react';
-import { Card, CardContent, EmptyState, ErrorState, Skeleton } from '@/components/ui';
+import { Card, CardContent, ErrorState, Skeleton } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { useActiveMembership, useCan } from '@/features/me/use-me';
 import { useTeamLeave } from '@/features/portal/leave-api';
@@ -10,7 +9,8 @@ import { LeaveStatusBadge, LeaveTypeDot } from './leave-status';
 
 /**
  * A manager's view on /my: the team's approved or pending leave that ends today or later (at most 20). Shown only to members
- * with direct reports who hold leave.view_team; the API scopes the list to the caller's team.
+ * with direct reports who hold leave.view_team; the API scopes the list to the caller's team. Hidden when there is nothing
+ * to show (Finance parity B-62, leave v2 review P2-7) — it stays while loading and on error, so a failure is visible.
  */
 export function TeamUpcomingLeave() {
   const { t } = useTranslation('leave');
@@ -19,6 +19,7 @@ export function TeamUpcomingLeave() {
   const visible = !!membership?.isManager && can('leave.view_team');
   const q = useTeamLeave(visible);
   if (!visible) return null;
+  if (q.isSuccess && (q.data?.length ?? 0) === 0) return null;
   return (
     <Card>
       <div className="flex items-center justify-between gap-2 px-5 pt-4 pb-2">
@@ -38,7 +39,7 @@ export function TeamUpcomingLeave() {
               </li>
             ))}
           </ul>
-        ) : <EmptyState icon={Users} title={t('team.empty')} className="py-6" />}
+        ) : null}
       </CardContent>
     </Card>
   );

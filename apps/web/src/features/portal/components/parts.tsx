@@ -25,7 +25,7 @@ export function BalanceRow({ b, name, color }: { b: SelfLeaveBalanceDto; name: s
       <div className="flex items-baseline justify-between gap-2 text-sm">
         <span className="flex min-w-0 items-center gap-2 font-medium"><TypeDot color={color} /><span className="truncate">{name}</span></span>
         <span className={cn('shrink-0 text-xs tnum', over ? 'font-medium text-destructive' : 'text-muted-foreground')}>
-          {b.allowanceDays === null ? t('leave.usedOnly', { days: fmtDays(b.usedDays) }) : t('leave.remainingOf', { remaining: fmtDays(b.remainingDays ?? 0), allowance: fmtDays(b.allowanceDays) })}
+          {b.allowanceDays === null ? t('leave.usedOnly', { count: b.usedDays, days: fmtDays(b.usedDays) }) : t('leave.remainingOf', { count: b.allowanceDays, remaining: fmtDays(b.remainingDays ?? 0), allowance: fmtDays(b.allowanceDays) })}
         </span>
       </div>
       {shares ? (
