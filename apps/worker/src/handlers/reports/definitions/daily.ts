@@ -1,5 +1,6 @@
+import { DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
-import { DASH, deriveHours, minutesBetweenInstants, pairPunches, type DerivedHours } from '@flowza/domain';
+import { DASH, deriveHours, eachDateInclusive, minutesBetweenInstants, pairPunches, type DerivedHours } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ReportContext } from '../context.js';
 import { codeInputOf, loadRecords, type DailyRecord } from '../data/records.js';
@@ -54,26 +55,40 @@ export function hoursColumns(ctx: ReportContext): ReportColumn[] {
 
 /**
  * Sample 1 — Daily Report: every employee with a record on one day, grouped by department, one row per IN/OUT pair,
- * hours in the tenant's notation, the attendance-code legend underneath.
+ * hours in the tenant's notation, the attendance-code legend underneath. With `to` (HR portal Prompt 6a review, ATT-21) the
+ * same sheet for each day of a range of at most DAILY_REPORT_MAX_DAYS — the register's range as one file: the date heads each
+ * day's departments (and becomes a Date column in spreadsheets).
  */
 export const dailyAttendance: ReportDefinition = {
   key: 'daily_attendance',
   async build(trx: Trx, ctx: ReportContext): Promise<ReportDocument> {
     const date = ctx.params.from;
     if (!date) throw errors.validation('Missing report parameters.', { issues: [{ path: 'parameters.from', message: 'Required' }] });
+    const to = ctx.params.to && ctx.params.to > date ? ctx.params.to : date;
+    if (dailyReportRangeTooLong({ from: date, to })) throw errors.validation(`The Daily Report covers at most ${DAILY_REPORT_MAX_DAYS} days.`, { issues: [{ path: 'parameters.to', message: `At most ${DAILY_REPORT_MAX_DAYS} days` }] });
+    const dates = eachDateInclusive(date, to);
+    const range = dates.length > 1;
     // A record whose status is NOT_JOINED or EXITED belongs to someone who was not on the payroll that day (the engine
     // writes one for every employee a range recalculation touches); the daily sheet lists only the day's staff.
-    const records = (await loadRecords(trx, ctx, { from: date, to: date })).filter((r) => r.status !== 'EXITED' && r.status !== 'NOT_JOINED');
+    const records = (await loadRecords(trx, ctx, { from: date, to })).filter((r) => r.status !== 'EXITED' && r.status !== 'NOT_JOINED');
     const roster = await loadRoster(trx, ctx, { employeeIds: [...new Set(records.map((r) => r.employeeId))] });
     const byEmployee = new Map(roster.map((e) => [e.id, e]));
     type Item = { e: RosterEmployee; r: DailyRecord };
-    const items: Item[] = [];
-    for (const r of records) { const e = byEmployee.get(r.employeeId); if (e) items.push({ e, r }); }
-    const groups = groupByDepartment(ctx, items, (i) => (i.r.departmentId ? ctx.departments.get(i.r.departmentId) ?? null : null));
-    const sections: ReportSection[] = groups.map((g) => ({
-      heading: { label: ctx.t('group.department'), value: g.label },
-      rows: sortByEmployeeNumber(g.items.map((i) => ({ ...i, employeeNumber: i.e.employeeNumber }))).flatMap((i) => dailyRowsFor(ctx, i.e, i.r)),
-    }));
+    const byDate = new Map<string, Item[]>();
+    for (const r of records) { const e = byEmployee.get(r.employeeId); if (e) byDate.set(r.attendanceDate, [...(byDate.get(r.attendanceDate) ?? []), { e, r }]); }
+    const sections: ReportSection[] = [];
+    for (const d of dates) {
+      const items = byDate.get(d);
+      if (!items) continue;
+      const groups = groupByDepartment(ctx, items, (i) => (i.r.departmentId ? ctx.departments.get(i.r.departmentId) ?? null : null));
+      for (const g of groups) {
+        sections.push({
+          ...(range ? { superHeading: ctx.date(d, 'cccc, d MMMM, yyyy') } : {}),
+          heading: { label: ctx.t('group.department'), value: g.label },
+          rows: sortByEmployeeNumber(g.items.map((i) => ({ ...i, employeeNumber: i.e.employeeNumber }))).flatMap((i) => dailyRowsFor(ctx, i.e, i.r)),
+        });
+      }
+    }
     const columns: ReportColumn[] = [
       { key: 'empId', label: ctx.t('col.empId'), width: 8, mono: true },
       { key: 'name', label: ctx.t('col.empName'), width: 26 },
@@ -85,10 +100,11 @@ export const dailyAttendance: ReportDefinition = {
     ];
     return {
       key: 'daily_attendance', title: ctx.t('report.daily_attendance.title'), company: ctx.company,
-      period: ctx.date(date, 'cccc, d MMMM, yyyy'), orientation: 'portrait', columns, sections,
+      period: range ? ctx.t('period.fromTo', { from: ctx.headerDate(date), to: ctx.headerDate(to) }) : ctx.date(date, 'cccc, d MMMM, yyyy'), orientation: 'portrait', columns, sections,
       legend: ctx.legend(), legendTitle: ctx.t('legend.title'), notes: ctx.notes(), endOfReport: false, endOfReportLabel: ctx.t('group.endOfReport'),
       generatedAt: ctx.now, generatedLabel: ctx.generatedLabel(), pageLabel: ctx.pageLabel, timezone: ctx.timezone, locale: ctx.locale, dir: ctx.dir,
-      rowCount: countRows(sections), flatten: { headingColumnLabel: ctx.t('col.department'), fieldColumns: false }, fileStem: `daily-report-${date}`,
+      rowCount: countRows(sections), flatten: { headingColumnLabel: ctx.t('col.department'), superHeadingColumnLabel: range ? ctx.t('col.date') : null, fieldColumns: false },
+      fileStem: range ? `daily-report-${date}-${to}` : `daily-report-${date}`,
     };
   },
 };

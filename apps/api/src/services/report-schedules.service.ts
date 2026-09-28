@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type Selectable } from 'kysely';
 import {
-  createReportScheduleSchema, REPORT_RECIPIENT_MAX_RESOLVED, REPORT_SHARES_PER_HOUR, REPORT_TYPE_DEFINITIONS, SCHEDULABLE_REPORT_TYPES,
+  createReportScheduleSchema, DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, REPORT_RECIPIENT_MAX_RESOLVED, REPORT_SHARES_PER_HOUR, REPORT_TYPE_DEFINITIONS, SCHEDULABLE_REPORT_TYPES,
   type CreateReportScheduleInput, type ReportDeliveryChannel, type ReportDeliveryDto, type ReportDeliveryMode, type ReportDeliveryStatus, type ReportPeriodRule, type ReportRecipientOptionsDto,
   type ReportRecipients, type ReportRunNowResultDto, type ReportRunSummaryDto, type ReportScheduleCadence, type ReportScheduleDto, type ReportScheduleFilters, type ReportScheduleRunStatus,
   type ReportShareResultDto, type ReportType, type ReportTypeDefinition, type ShareReportInput, type UpdateReportScheduleInput,
@@ -28,8 +28,12 @@ import { systemStep } from './features/context.js';
  * belongs to the recipient (requested_by), so it is fetched through their authenticated session: the notification carries an
  * application link and the 5-minute signed URL is minted on click, after report.export is re-checked. No bearer link is mailed.
  *
- * Authorisation: schedules are read with report.view and written with report.schedule (RLS enforces both, branch-scoped on the
- * schedule's branch); the author must also hold the report type's own permissions — you can only distribute what you can see.
+ * Authorisation: schedules are read with report.view (RLS: a branch-scoped holder sees the schedules of their branches only —
+ * never the organisation-wide ones) and written with report.schedule by THIS service only: since the Prompt 6a review
+ * (defect 3) `authenticated` holds no write privilege on `report_schedules`, and every write runs as a system step AFTER the
+ * checks here — the stored row must sit inside a branch-scoped caller's branches (before), the new specification too (after),
+ * and `next_run_at` / `last_*` / `created_by` are computed here, never taken from a client. The author must also hold the report
+ * type's own permissions — you can only distribute what you can see.
  */
 
 export const REPORT_DELIVERY_JOB_TYPE = 'RUN_REPORT_SCHEDULE';
@@ -71,6 +75,10 @@ async function validateSpec(trx: Trx, orgId: string, grant: MembershipGrant, rep
   const missing = required.filter((p) => params[p] === undefined);
   if (missing.length) throw errors.validation('Missing report parameters.', { issues: missing.map((m) => ({ path: `filters.${m}`, message: 'Required' })) });
   const out: Record<string, unknown> = { ...params };
+  // a Daily Report over a range (review ATT-21): at most DAILY_REPORT_MAX_DAYS, as POST /reports refuses it
+  if (reportType === 'daily_attendance' && dailyReportRangeTooLong({ from: typeof out['from'] === 'string' ? out['from'] : null, to: typeof out['to'] === 'string' ? out['to'] : null })) {
+    throw errors.validation(`The Daily Report covers at most ${DAILY_REPORT_MAX_DAYS} days.`, { issues: [{ path: 'parameters.to', message: `At most ${DAILY_REPORT_MAX_DAYS} days` }] });
+  }
   const branchId = typeof out['branchId'] === 'string' ? out['branchId'] : undefined;
   requireBranchAccess(grant, branchId);
   if (!grant.allBranches && !branchId) throw errors.forbidden('Branch-scoped users must choose one of their branches.');
@@ -90,8 +98,24 @@ async function validateSpec(trx: Trx, orgId: string, grant: MembershipGrant, rep
   return out;
 }
 
-/** Active members the recipient list resolves to right now (explicit users + holders of the roles); unknown ids / roles refused. */
-async function resolveRecipients(trx: Trx, orgId: string, recipients: ReportRecipients): Promise<string[]> {
+/**
+ * The members a caller may address and see in the picker (review minor 12): everyone for an organisation-wide caller; for a
+ * branch-scoped caller, the members whose access covers one of the caller's branches (all branches, or a listed branch) or whose
+ * linked employee record belongs to one of them.
+ */
+function memberScopeSql(grant: MembershipGrant) {
+  if (grant.allBranches) return sql<boolean>`true`;
+  const branches = grant.branchIds.length ? grant.branchIds : ['00000000-0000-0000-0000-000000000000'];
+  return sql<boolean>`(m.all_branches
+    or exists (select 1 from public.membership_branches mb where mb.membership_id = m.id and mb.branch_id = any(${branches}::uuid[]))
+    or exists (select 1 from public.employees e where e.id = m.employee_id and e.organization_id = m.organization_id and e.branch_id = any(${branches}::uuid[])))`;
+}
+
+/**
+ * Active members the recipient list resolves to right now (explicit users + holders of the roles); unknown ids / roles refused,
+ * and explicit users outside a branch-scoped author's member scope refused like unknown ones (the picker never showed them).
+ */
+async function resolveRecipients(trx: Trx, orgId: string, recipients: ReportRecipients, grant?: MembershipGrant): Promise<string[]> {
   return withSystemScope(trx, orgId, async (t) => {
     if (recipients.roleKeys.length) {
       const roles = await t.selectFrom('roles').select('key').where('key', 'in', recipients.roleKeys).where((eb) => eb.or([eb('organizationId', 'is', null), eb('organizationId', '=', orgId)])).execute();
@@ -99,7 +123,9 @@ async function resolveRecipients(trx: Trx, orgId: string, recipients: ReportReci
       if (unknown.length) throw errors.validation('Unknown role.', { issues: [{ path: 'recipients.roleKeys', message: 'Unknown role' }], unknown });
     }
     if (recipients.userIds.length) {
-      const members = await t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('status', '=', 'active').where('userId', 'in', recipients.userIds).execute();
+      const members = (await sql<{ userId: string }>`
+        select m.user_id as "userId" from public.org_memberships m
+        where m.organization_id = ${orgId}::uuid and m.status = 'active' and m.user_id = any(${recipients.userIds}::uuid[]) and ${grant ? memberScopeSql(grant) : sql`true`}`.execute(t)).rows;
       const unknown = recipients.userIds.filter((u) => !members.some((m) => m.userId === u));
       if (unknown.length) throw errors.validation('One or more recipients are not active members of this organisation.', { issues: [{ path: 'recipients.userIds', message: 'Not an active member' }], unknown });
     }
@@ -163,6 +189,37 @@ async function loadSchedule(trx: Trx, orgId: string, id: string, opts: { lock?: 
   return row;
 }
 
+/**
+ * The STORED schedule must sit inside a branch-scoped caller's branches (review defect 3): an organisation-wide schedule
+ * (branch null) or another branch's is not theirs to re-point, run or delete, whatever the new specification says. RLS already
+ * hides such rows from them; this is the explicit second check.
+ */
+function requireScheduleScope(grant: MembershipGrant, row: Pick<ScheduleRow, 'branchId'>): void {
+  if (grant.allBranches) return;
+  if (!row.branchId || !grant.branchIds.includes(row.branchId)) throw errors.forbidden('This schedule covers branches outside your access scope.');
+}
+
+/**
+ * The schedule a change targets (update, delete, run-now — callers hold report.view + report.schedule), read in the
+ * organisation's system scope so a schedule outside a branch-scoped caller's branches answers 403 (refused) rather than 404,
+ * then checked against the caller's scope. Within scope the row is exactly what the caller's RLS shows them.
+ */
+async function loadScheduleForChange(trx: Trx, orgId: string, id: string, grant: MembershipGrant): Promise<ScheduleRow> {
+  const row = await withSystemScope(trx, orgId, (t) => loadSchedule(t, orgId, id));
+  requireScheduleScope(grant, row);
+  return row;
+}
+
+/**
+ * Lock the row for a write (system step: `authenticated` holds no write privilege on report_schedules) and make sure it is the
+ * version the caller was authorised against — a concurrent edit is a conflict, never silently overwritten.
+ */
+async function lockUnchanged(t: Trx, orgId: string, seen: ScheduleRow): Promise<ScheduleRow> {
+  const locked = await loadSchedule(t, orgId, seen.id, { lock: true });
+  if (new Date(locked.updatedAt).getTime() !== new Date(seen.updatedAt).getTime()) throw errors.conflict('The schedule changed meanwhile. Please refresh.');
+  return locked;
+}
+
 export async function getSchedule(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<ReportScheduleDto> {
   requirePermission(actor.principal, orgId, 'report.view');
   return runUser(deps.db, actor, async (trx) => {
@@ -186,11 +243,12 @@ export async function createSchedule(deps: ApiDeps, actor: Actor, orgId: string,
   if (!SCHEDULABLE_REPORT_TYPES.includes(input.reportType)) throw errors.validation('This report type cannot be scheduled.', { issues: [{ path: 'reportType', message: 'Not schedulable' }] });
   return runUser(deps.db, actor, async (trx) => {
     const filters = await validateSpec(trx, orgId, grant, input.reportType, input.format, input.filters as Record<string, unknown>, { requireNonPeriod: true });
-    const recipients = await resolveRecipients(trx, orgId, input.recipients);
+    const recipients = await resolveRecipients(trx, orgId, input.recipients, grant);
     if (recipients.length === 0) throw errors.validation('None of the chosen recipients is an active member.', { issues: [{ path: 'recipients', message: 'No active recipients' }] });
     const timing = await orgTiming(trx, orgId);
     const nextRunAt = input.isActive ? nextScheduleRun(timingOf(input, timing.timezone), new Date()) : null;
-    const row = await trx.insertInto('reportSchedules').values({ organizationId: orgId, ...scheduleColumns(input, filters, nextRunAt), createdBy: actor.userId, updatedBy: actor.userId }).returningAll().executeTakeFirstOrThrow();
+    // written by the service's system step after the checks above (authenticated holds no write privilege on the table)
+    const row = await systemStep(trx, orgId, (t) => t.insertInto('reportSchedules').values({ organizationId: orgId, ...scheduleColumns(input, filters, nextRunAt), createdBy: actor.userId, updatedBy: actor.userId }).returningAll().executeTakeFirstOrThrow());
     await audit(trx, actor, orgId, 'report_schedule.created', 'report_schedule', { entityId: row.id, branchId: row.branchId, newValue: { name: row.name, reportType: row.reportType, format: row.format, cadence: row.cadence, runDay: row.runDay, runTime: input.runTime, periodRule: row.periodRule, recipients: input.recipients, channels: input.channels, isActive: row.isActive, filters } });
     return toScheduleDto(row, timing, await userNames(trx, orgId, [actor.userId]));
   });
@@ -209,30 +267,39 @@ function inputOf(row: ScheduleRow): CreateReportScheduleInput {
 export async function updateSchedule(deps: ApiDeps, actor: Actor, orgId: string, id: string, patch: UpdateReportScheduleInput): Promise<ReportScheduleDto> {
   const grant = requirePermission(actor.principal, orgId, 'report.view', 'report.schedule');
   return runUser(deps.db, actor, async (trx) => {
-    const row = await loadSchedule(trx, orgId, id, { lock: true });
+    // the stored schedule inside a branch-scoped caller's branches (before the change) …
+    const row = await loadScheduleForChange(trx, orgId, id, grant);
     const before = inputOf(row);
     const parsed = createReportScheduleSchema.safeParse({ ...before, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
     if (!parsed.success) throw errors.validation('Invalid schedule.', { issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
     const next = parsed.data;
     if (!SCHEDULABLE_REPORT_TYPES.includes(next.reportType)) throw errors.validation('This report type cannot be scheduled.', { issues: [{ path: 'reportType', message: 'Not schedulable' }] });
+    // … and the new specification inside the caller's scope too (after the change)
     const filters = await validateSpec(trx, orgId, grant, next.reportType, next.format, next.filters as Record<string, unknown>, { requireNonPeriod: true });
-    const recipients = await resolveRecipients(trx, orgId, next.recipients);
+    const recipients = await resolveRecipients(trx, orgId, next.recipients, grant);
     if (next.isActive && recipients.length === 0) throw errors.validation('None of the chosen recipients is an active member.', { issues: [{ path: 'recipients', message: 'No active recipients' }] });
     const timing = await orgTiming(trx, orgId);
     const timingChanged = before.cadence !== next.cadence || before.runDay !== next.runDay || before.runTime !== next.runTime;
     const nextRunAt = !next.isActive ? null : (timingChanged || !row.isActive || !row.nextRunAt) ? nextScheduleRun(timingOf(next, timing.timezone), new Date()) : row.nextRunAt;
-    const saved = await trx.updateTable('reportSchedules').set({ ...scheduleColumns(next, filters, nextRunAt), updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', id).returningAll().executeTakeFirstOrThrow();
+    const saved = await systemStep(trx, orgId, async (t) => {
+      await lockUnchanged(t, orgId, row);
+      return t.updateTable('reportSchedules').set({ ...scheduleColumns(next, filters, nextRunAt), updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', id).returningAll().executeTakeFirstOrThrow();
+    });
     await audit(trx, actor, orgId, 'report_schedule.updated', 'report_schedule', { entityId: id, branchId: saved.branchId, oldValue: { ...before }, newValue: { ...next, filters } });
     return toScheduleDto(saved, timing, await userNames(trx, orgId, saved.createdBy ? [saved.createdBy] : []));
   });
 }
 
 export async function deleteSchedule(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
-  requirePermission(actor.principal, orgId, 'report.view', 'report.schedule');
+  const grant = requirePermission(actor.principal, orgId, 'report.view', 'report.schedule');
   await runUser(deps.db, actor, async (trx) => {
-    const row = await loadSchedule(trx, orgId, id, { lock: true });
-    const res = await trx.deleteFrom('reportSchedules').where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
-    if (Number(res.numDeletedRows ?? 0n) === 0) throw errors.notFound('Report schedule', id);
+    const row = await loadScheduleForChange(trx, orgId, id, grant);
+    const deleted = await systemStep(trx, orgId, async (t) => {
+      await lockUnchanged(t, orgId, row);
+      const res = await t.deleteFrom('reportSchedules').where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
+      return Number(res.numDeletedRows ?? 0n);
+    });
+    if (deleted === 0) throw errors.notFound('Report schedule', id);
     await audit(trx, actor, orgId, 'report_schedule.deleted', 'report_schedule', { entityId: id, branchId: row.branchId, oldValue: { ...inputOf(row) } });
   });
 }
@@ -241,8 +308,8 @@ export async function deleteSchedule(deps: ApiDeps, actor: Actor, orgId: string,
 export async function runScheduleNow(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<ReportRunNowResultDto> {
   const grant = requirePermission(actor.principal, orgId, 'report.view', 'report.schedule');
   return runUser(deps.db, actor, async (trx) => {
-    const row = await loadSchedule(trx, orgId, id);
-    // the author's own access still bounds what they may send (a colleague's schedule of a branch they cannot see is hidden by RLS)
+    // the stored schedule must be the caller's to run, and their own access still bounds what they may send
+    const row = await loadScheduleForChange(trx, orgId, id, grant);
     await validateSpec(trx, orgId, grant, row.reportType as ReportType, row.format, jsonObject(row.filters), { requireNonPeriod: true });
     await systemStep(trx, orgId, (t) => consumeShareQuota(t, orgId));
     const timing = await orgTiming(trx, orgId);
@@ -261,7 +328,7 @@ export async function shareReport(deps: ApiDeps, actor: Actor, orgId: string, in
   return runUser(deps.db, actor, async (trx) => {
     const parameters = await validateSpec(trx, orgId, grant, input.reportType, input.format, { ...input.parameters }, { requireNonPeriod: false });
     delete parameters['branchScope']; delete parameters['branchIds'];
-    const recipients = await resolveRecipients(trx, orgId, input.recipients);
+    const recipients = await resolveRecipients(trx, orgId, input.recipients, grant);
     if (recipients.length === 0) throw errors.validation('None of the chosen recipients is an active member.', { issues: [{ path: 'recipients', message: 'No active recipients' }] });
     if (recipients.length > REPORT_RECIPIENT_MAX_RESOLVED) throw errors.validation(`A report can be shared with at most ${REPORT_RECIPIENT_MAX_RESOLVED} people at once.`, { recipients: recipients.length });
     await systemStep(trx, orgId, (t) => consumeShareQuota(t, orgId));
@@ -280,7 +347,8 @@ export async function listDeliveries(deps: ApiDeps, actor: Actor, orgId: string,
   const manager = hasPermission(grant, 'report.schedule');
   return runUser(deps.db, actor, async (trx) => {
     let base = trx.selectFrom('reportDeliveries as d').where('d.organizationId', '=', orgId);
-    // a recipient sees their own deliveries; a branch-scoped scheduler sees what they sent, received, or the schedules RLS shows them
+    // a recipient sees their own deliveries; a branch-scoped scheduler sees what they sent, received, or the deliveries of the
+    // schedules of their branches (RLS since the review: report_deliveries_select applies the same rule)
     if (!manager) base = base.where('d.recipientUserId', '=', actor.userId);
     else if (!grant.allBranches) {
       const visible = (await trx.selectFrom('reportSchedules').select('id').where('organizationId', '=', orgId).execute()).map((s) => s.id);
@@ -308,24 +376,31 @@ export async function listDeliveries(deps: ApiDeps, actor: Actor, orgId: string,
   });
 }
 
-/** GET /report-recipients — members (with role, manager flag, branch scope size) and roles for the Share / Schedule picker. */
+/**
+ * GET /report-recipients — members (with role, manager flag, branch scope size) and roles for the Share / Schedule picker. A
+ * branch-scoped caller gets the members inside their branch scope (`memberScopeSql`) and role counts over that set; e-mail
+ * addresses only for user.view holders — everyone else gets names (review minor 12: the picker is not a member directory).
+ */
 export async function recipientOptions(deps: ApiDeps, actor: Actor, orgId: string): Promise<ReportRecipientOptionsDto> {
-  requirePermission(actor.principal, orgId, 'report.view', 'report.schedule');
+  const grant = requirePermission(actor.principal, orgId, 'report.view', 'report.schedule');
+  const withEmail = hasPermission(grant, 'user.view');
   return runUser(deps.db, actor, (trx) => withSystemScope(trx, orgId, async (t) => {
     const members = await sql<{ userId: string; displayName: string; email: string; roleKey: string; roleName: string; isManager: boolean; branchCount: number | null }>`
-      select m.user_id as "userId", coalesce(nullif(u.full_name, ''), u.email) as "displayName", u.email, r.key as "roleKey", r.name as "roleName",
+      select m.user_id as "userId",
+        coalesce(nullif(u.full_name, ''), case when ${withEmail}::boolean then u.email::text else left(u.email::text, 1) || '***' || substring(u.email::text from position('@' in u.email::text)) end) as "displayName",
+        u.email, r.key as "roleKey", r.name as "roleName",
         (m.employee_id is not null and exists (select 1 from public.employees e where e.organization_id = m.organization_id and e.deleted_at is null
            and e.employment_status not in ('terminated', 'resigned') and (e.manager_employee_id = m.employee_id or e.secondary_manager_employee_id = m.employee_id))) as "isManager",
         case when m.all_branches then null else (select count(*)::int from public.membership_branches mb where mb.membership_id = m.id) end as "branchCount"
       from public.org_memberships m join public.user_profiles u on u.id = m.user_id join public.roles r on r.id = m.role_id
-      where m.organization_id = ${orgId}::uuid and m.status = 'active'
+      where m.organization_id = ${orgId}::uuid and m.status = 'active' and ${memberScopeSql(grant)}
       order by 2, 1
       limit 2000`.execute(t);
     const roles = await sql<{ key: string; name: string; members: number }>`
       select r.key, r.name, count(m.id)::int as members from public.roles r
-      left join public.org_memberships m on m.role_id = r.id and m.organization_id = ${orgId}::uuid and m.status = 'active'
+      left join public.org_memberships m on m.role_id = r.id and m.organization_id = ${orgId}::uuid and m.status = 'active' and ${memberScopeSql(grant)}
       where r.organization_id is null or r.organization_id = ${orgId}::uuid
       group by r.key, r.name order by r.name`.execute(t);
-    return { users: members.rows, roles: roles.rows };
+    return { users: members.rows.map((u) => ({ ...u, email: withEmail ? u.email : null })), roles: roles.rows };
   }));
 }

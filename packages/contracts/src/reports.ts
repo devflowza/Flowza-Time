@@ -21,6 +21,8 @@ export const reportParametersSchema = z.object({
   employmentStatus: z.enum(['active', 'inactive', 'all']).optional(),
   /** audit_report: attendance edits in the samples' layout, or the whole audit log. */
   scope: z.enum(['attendance', 'all']).optional(),
+  /** monthly_summary: the summary page's name / employee-number search (HR portal Prompt 6a review, defect 10). */
+  search: z.string().trim().max(100).optional(),
 });
 export type ReportParameters = z.infer<typeof reportParametersSchema>;
 

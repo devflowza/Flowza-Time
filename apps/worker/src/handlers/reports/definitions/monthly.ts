@@ -1,13 +1,12 @@
-import { DateTime } from 'luxon';
 import { lopDaysOf } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { eachDateInclusive } from '@flowza/domain';
-import { errors } from '@flowza/shared';
 import type { ReportContext } from '../context.js';
 import { codeInputOf, loadRecords, type DailyRecord } from '../data/records.js';
 import { loadRoster } from '../data/roster.js';
 import { cell, countRows, EMPTY_CELL, num, type ReportColumn, type ReportDocument, type ReportSection } from '../model.js';
 import { TONE_OF_GROUP } from './daily.js';
+import { monthPeriod } from './month-period.js';
 import type { ReportDefinition } from './types.js';
 
 /**
@@ -19,12 +18,8 @@ import type { ReportDefinition } from './types.js';
 export const monthlyAttendance: ReportDefinition = {
   key: 'monthly_attendance',
   async build(trx: Trx, ctx: ReportContext): Promise<ReportDocument> {
-    const month = ctx.params.month;
-    if (!month) throw errors.validation('Missing report parameters.', { issues: [{ path: 'parameters.month', message: 'Required' }] });
-    const start = DateTime.fromISO(`${month}-01`, { zone: 'utc' });
-    if (!start.isValid) throw errors.validation('Invalid month.', { issues: [{ path: 'parameters.month', message: 'Expected YYYY-MM' }] });
-    const from = start.toISODate()!;
-    const to = start.endOf('month').toISODate()!;
+    // the month, or its first days up to `to` for a month-to-date run (review minor 13: never a day after the period)
+    const { month, from, to, whole } = monthPeriod(ctx.params);
     const days = eachDateInclusive(from, to);
     const roster = await loadRoster(trx, ctx, { employedBetween: { from, to } });
     const records = await loadRecords(trx, ctx, { from, to, employeeIds: roster.map((e) => e.id) });
@@ -59,7 +54,7 @@ export const monthlyAttendance: ReportDefinition = {
       period: ctx.t('period.forThePeriod', { from: ctx.headerDate(from), to: ctx.headerDate(to) }), orientation: 'landscape', columns, sections,
       legend: ctx.legend(), legendTitle: ctx.t('legend.title'), notes: [ctx.t('footer.lop')], endOfReport: false, endOfReportLabel: ctx.t('group.endOfReport'),
       generatedAt: ctx.now, generatedLabel: ctx.generatedLabel(), pageLabel: ctx.pageLabel, timezone: ctx.timezone, locale: ctx.locale, dir: ctx.dir,
-      rowCount: countRows(sections), flatten: { headingColumnLabel: null, fieldColumns: false }, fileStem: `monthly-attendance-${month}`,
+      rowCount: countRows(sections), flatten: { headingColumnLabel: null, fieldColumns: false }, fileStem: whole ? `monthly-attendance-${month}` : `monthly-attendance-${from}-${to}`,
     };
   },
 };

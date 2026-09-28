@@ -8,7 +8,7 @@ import { parsePayload } from '../attendance/common.js';
 import { loadReportContext } from './context.js';
 import { REPORT_DEFINITIONS } from './definitions/index.js';
 import { renderDocument } from './render/index.js';
-import { settleDelivery } from './deliveries.js';
+import { settleCancelledDelivery, settleDelivery } from './deliveries.js';
 import type { Logger } from '@flowza/shared';
 
 export const generateReportPayloadSchema = z.object({ organizationId: uuidSchema, reportRequestId: uuidSchema });
@@ -50,7 +50,11 @@ export async function generateReportRequest(deps: WorkerDeps, log: Logger, job: 
   const claimed = await withContext(deps.db, { kind: 'system', organizationId, jobId: job.id }, async (trx) => {
     const row = await trx.selectFrom('reportRequests').select(['id', 'reportType', 'format', 'parameters', 'status', 'requestedBy', 'branchId']).where('organizationId', '=', organizationId).where('id', '=', reportRequestId).forUpdate().executeTakeFirst();
     if (!row) throw errors.notFound('Report request', reportRequestId);
-    if (row.status === 'CANCELLED' || row.status === 'COMPLETED' || row.status === 'EXPIRED') return { row, skip: true as const };
+    if (row.status === 'CANCELLED' || row.status === 'COMPLETED' || row.status === 'EXPIRED') {
+      // a shared / scheduled copy its recipient cancelled must not stay `queued` in the delivery trail forever (review minor 14)
+      if (row.status === 'CANCELLED') await settleCancelledDelivery(trx, organizationId, row.id);
+      return { row, skip: true as const };
+    }
     await trx.updateTable('reportRequests').set({ status: 'RUNNING', startedAt: now, error: null }).where('id', '=', row.id).execute();
     return { row, skip: false as const };
   });

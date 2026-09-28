@@ -273,6 +273,12 @@ export async function settleDelivery(trx: Trx, organizationId: string, reportReq
   return true;
 }
 
+/** A delivered copy whose report request was cancelled (by its recipient) settles as `cancelled`; true when one was settled. */
+export async function settleCancelledDelivery(trx: Trx, organizationId: string, reportRequestId: string): Promise<boolean> {
+  const res = await trx.updateTable('reportDeliveries').set({ status: 'cancelled' }).where('organizationId', '=', organizationId).where('reportRequestId', '=', reportRequestId).where('status', '=', 'queued').executeTakeFirst();
+  return Number(res.numUpdatedRows ?? 0n) > 0;
+}
+
 export function registerDeliveryHandlers(registry: HandlerRegistry): void {
   registry.register({ jobType: REPORT_DELIVERY_JOB_TYPE, handler: runReportDeliveryHandler, timeoutMs: 5 * 60_000 });
 }
