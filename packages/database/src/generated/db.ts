@@ -1143,12 +1143,30 @@ export interface Invitations {
   allBranches: Generated<boolean>;
   branchIds: Generated<string[]>;
   createdAt: Generated<Timestamp>;
+  deliverySentAt: Timestamp | null;
+  /**
+   * sha256 (hex) of the token e-mailed by the worker; the plain token is never stored.
+   */
+  deliveryTokenHash: string | null;
   email: string;
   employeeId: string | null;
   expiresAt: Timestamp;
   id: Generated<string>;
   invitedBy: string | null;
   organizationId: string;
+  /**
+   * The invitation that replaced this one when it was resent.
+   */
+  replacedById: string | null;
+  /**
+   * Set when the invitation was revoked (by an administrator, by a resend, by revoking portal access or by the employee leaving). A revoked invitation cannot be accepted; validation reports it as revoked.
+   */
+  revokedAt: Timestamp | null;
+  revokedBy: string | null;
+  /**
+   * Why it was revoked: revoked | resent | access_revoked | employee_left | superseded (free text up to 500 characters).
+   */
+  revokeReason: string | null;
   roleId: string;
   tokenHash: string;
 }

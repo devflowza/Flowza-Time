@@ -42,7 +42,7 @@ export async function offboardLinkedLogins(deps: ApiDeps, trx: Trx, actor: Actor
     logins: await t.selectFrom('orgMemberships').select(['id', 'userId', 'employeeId', 'status', 'roleId'])
       .where('organizationId', '=', orgId).where('employeeId', 'in', ids).where('status', '<>', 'suspended').orderBy('id').execute(),
     invitations: await t.selectFrom('invitations').select(['id', 'email', 'employeeId'])
-      .where('organizationId', '=', orgId).where('employeeId', 'in', ids).where('acceptedAt', 'is', null).orderBy('id').execute(),
+      .where('organizationId', '=', orgId).where('employeeId', 'in', ids).where('acceptedAt', 'is', null).where('revokedAt', 'is', null).orderBy('id').execute(),
     activeOwners: toCount((await t.selectFrom('orgMemberships').select((eb) => eb.fn.countAll().as('n'))
       .where('organizationId', '=', orgId).where('roleId', '=', SYSTEM_ROLE_IDS.owner).where('status', '=', 'active').executeTakeFirst())?.n),
   }));
@@ -64,7 +64,8 @@ export async function offboardLinkedLogins(deps: ApiDeps, trx: Trx, actor: Actor
 
   await withSystemScope(trx, orgId, async (t) => {
     if (logins.length) await t.updateTable('orgMemberships').set({ status: 'suspended' }).where('organizationId', '=', orgId).where('id', 'in', logins.map((l) => l.id)).execute();
-    if (invitations.length) await t.deleteFrom('invitations').where('organizationId', '=', orgId).where('id', 'in', invitations.map((i) => i.id)).execute();
+    // revoked, not deleted (HR portal Prompt 6b): the token then validates as `revoked` rather than unknown
+    if (invitations.length) await t.updateTable('invitations').set({ revokedAt: new Date(), revokedBy: actor.userId, revokeReason: 'employee_left' }).where('organizationId', '=', orgId).where('id', 'in', invitations.map((i) => i.id)).execute();
   });
 
   for (const l of logins) {

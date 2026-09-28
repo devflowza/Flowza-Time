@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, LayoutDashboard, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, LayoutDashboard, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
 import type { Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -13,13 +13,19 @@ import portalAttendanceEn from '@/locales/en/portal-attendance.json';
 import portalAttendanceAr from '@/locales/ar/portal-attendance.json';
 import attendanceReviewEn from '@/locales/en/attendance-review.json';
 import attendanceReviewAr from '@/locales/ar/attendance-review.json';
+import attendanceAdminEn from '@/locales/en/attendance-admin.json';
+import attendanceAdminAr from '@/locales/ar/attendance-admin.json';
+import { usePendingCounts, useTeamAccess } from '@/features/team/api';
+import '@/features/team/i18n';
 
 registerNamespace('portal', portalEn, portalAr);
 // HR portal Prompt 4: check-in / requests / shift entries and the reasons / geofences review pages
 registerNamespace('portal-attendance', portalAttendanceEn, portalAttendanceAr);
 registerNamespace('attendance-review', attendanceReviewEn, attendanceReviewAr);
+// HR portal Prompt 6b: the regularisation register and the comments & approvals report
+registerNamespace('attendance-admin', attendanceAdminEn, attendanceAdminAr);
 
-interface NavItem { to: string; label: string; icon: LucideIcon; permissions?: Permission[]; any?: boolean; /** Overrides `permissions` when set (e.g. any of several keys, or line-manager status). */ visible?: boolean }
+interface NavItem { to: string; label: string; icon: LucideIcon; permissions?: Permission[]; any?: boolean; /** Overrides `permissions` when set (e.g. any of several keys, or line-manager status). */ visible?: boolean; /** A count shown on the item (0 hides it). */ badge?: number }
 interface NavSection { label?: string; items: NavItem[] }
 
 /**
@@ -65,6 +71,12 @@ export function Sidebar() {
   // organisation-wide employee.view) — the RLS team predicate is key-gated, so without one it would only ever show an
   // empty page.
   const isManager = hasDirectReports && (can('employee.view_team') || can('employee.view'));
+  // HR portal Prompt 5: the team workspace also opens with a team attendance / leave key (always with direct reports), and
+  // the Approvals item carries the count waiting for the member — /me.approvals.actionable, refreshed by the badge query
+  // (team/pending-counts, whose approvals half is the same engine definition) the topbar chip already runs
+  const team = useTeamAccess();
+  const counts = usePendingCounts(team.pendingChip);
+  const approvalsBadge = counts.data?.approvals ?? approvalsSignal?.actionable ?? 0;
 
   const sections: NavSection[] = [
     { items: [{ to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, permissions: ['dashboard.view'] }] },
@@ -78,14 +90,14 @@ export function Sidebar() {
       { to: '/my/requests', label: t('portal-attendance:nav.requests'), icon: Inbox },
       { to: '/my/shift', label: t('portal-attendance:nav.shift'), icon: CalendarClock },
     ] }] : []),
-    ...(isManager ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound }] }] : []),
+    ...(isManager || team.page ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound }] }] : []),
     { label: t('nav.sections.workforce'), items: [
       { to: '/employees', label: t('nav.employees'), icon: Users, permissions: ['employee.view'] },
       { to: '/attendance', label: t('nav.attendance'), icon: Activity, permissions: ['attendance.view'] },
       { to: '/corrections', label: t('nav.corrections'), icon: ClipboardList, permissions: ['attendance.view'] },
       // engine v2: approvers of attendance or leave, approval admins, line managers (their team's requests) and anybody
       // with approvals waiting for them or a delegation to them in force today
-      { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || hasDirectReports || approvalsWaiting },
+      { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || hasDirectReports || approvalsWaiting, badge: approvalsBadge },
       { to: '/leave', label: t('nav.leave'), icon: CalendarOff, permissions: ['leave.view'] },
       // HR attendance workspace (HR portal Prompt 6a)
       { to: '/attendance/summary', label: t('nav.attendanceSummary'), icon: Sigma, permissions: ['attendance.view', 'attendance.view_team'], any: true },
@@ -93,6 +105,8 @@ export function Sidebar() {
       // HR portal Prompt 4: reasons (line managers review their team's, HR organisation-wide) and the geofences
       { to: '/attendance/notes', label: t('attendance-review:nav.notes'), icon: MessageSquareText, visible: can('attendance.review_notes') || can('attendance.approve') || hasDirectReports },
       { to: '/attendance/geofences', label: t('attendance-review:nav.geofences'), icon: MapPinned, permissions: ['attendance.manage_geofences'] },
+      // HR portal Prompt 6b: the regularisation register (approvers and reviewers; RLS scopes the rows to their branches)
+      { to: '/attendance/regularisations', label: t('attendance-admin:nav.regularisations'), icon: ClipboardCheck, permissions: ['attendance.approve', 'attendance.review_notes'], any: true },
     ] },
     { label: t('nav.sections.devices'), items: [
       { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'] },
@@ -141,14 +155,22 @@ export function Sidebar() {
               {section.label && collapsed ? <div className="mx-3 mb-1 border-t border-sidebar-border" /> : null}
               <ul className="space-y-px">
                 {items.map((item) => {
+                  const badgeId = item.badge && item.badge > 0 ? `nav-badge-${item.to.replace(/\W+/g, '-')}` : undefined;
                   const link = (
-                    <NavLink to={item.to} end={item.to === '/' || item.to === '/my' || nestedItemMatches(item.to)} className={itemClass(collapsed)}>
+                    <NavLink to={item.to} end={item.to === '/' || item.to === '/my' || nestedItemMatches(item.to)} className={itemClass(collapsed)} aria-describedby={badgeId}>
                       <item.icon className={iconClass} aria-hidden />
                       {collapsed ? <span className="sr-only">{item.label}</span> : <span className="truncate">{item.label}</span>}
+                      {/* the count is decorative here; the link DESCRIBES it (aria-describedby) so its name stays the label */}
+                      {item.badge && item.badge > 0 ? (
+                        collapsed
+                          ? <span className="absolute end-2 top-1.5 size-2 rounded-full bg-destructive ring-2 ring-sidebar" aria-hidden data-testid={`nav-badge-${item.to}`} />
+                          : <span className="ms-auto min-w-5 rounded-full bg-destructive px-1.5 text-center text-[10px] font-semibold leading-5 text-destructive-foreground tnum" aria-hidden data-testid={`nav-badge-${item.to}`}>{item.badge > 99 ? '99+' : item.badge}</span>
+                      ) : null}
                     </NavLink>
                   );
                   return (
                     <li key={item.to}>
+                      {badgeId ? <span id={badgeId} className="sr-only">{t('team:chip.label', { count: item.badge })}</span> : null}
                       {collapsed ? (
                         <Tooltip delayDuration={0}>
                           <TooltipTrigger asChild>{link}</TooltipTrigger>

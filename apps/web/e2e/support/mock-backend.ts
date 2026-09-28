@@ -611,3 +611,59 @@ function portalAttendanceDouble(state: MockBackend) {
     } as Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }>,
   };
 }
+
+// ---- team workspace (HR portal Prompt 5) ----------------------------------------------------------------------------------------
+/** The line manager of the team scenario: Maryam's employee record manages Salim (primary) and Khalid (secondary). */
+export const MANAGER_EMPLOYEE_ID = employeesFixture[1]!.id;
+/** A custom team-lead role: the team keys and no approve key (the system Line Manager role carries both approve keys) — so their approvals live on /team (Finance B-66). */
+export const LINE_MANAGER_PERMISSIONS: Permission[] = ['dashboard.view', 'employee.view_team', 'attendance.view_team', 'attendance.view_own', 'attendance.correct', 'leave.view_team', 'leave.request', 'approval.delegate', 'attendance.checkin', 'attendance.note', 'shift.view', 'holiday.view'];
+export const TEAM_NOTE_ID = 'abababab-abab-4bab-8bab-000000000001';
+
+/**
+ * Stateful handlers of the team workspace: today's board of two reports (one late with a reason waiting for the manager, one on
+ * leave), the counts behind the manager badge, the reasons list and the review decision — a rejected reason leaves the queue
+ * and the counts drop, like the real API.
+ */
+export function teamHandlers(): { get: NonNullable<MockBackendOptions['get']>; post: NonNullable<MockBackendOptions['post']>; reviews: unknown[] } {
+  const today = new Date().toISOString().slice(0, 10);
+  const salim = employeesFixture[0]!;
+  const khalid = employeesFixture[2]!;
+  const reviews: unknown[] = [];
+  let rejected = false;
+  const member = (e: EmployeeDto, over: Record<string, unknown>) => ({
+    employeeId: e.id, employeeNumber: e.employeeNumber, employeeName: e.displayName, designationName: 'Storekeeper', departmentName: 'Operations', branchId: e.branchId, branchName: e.branchName, relation: 'primary',
+    date: today, timezone: 'Asia/Muscat', status: 'present', recordStatus: 'PRESENT', recordId: null, flags: [], firstInAt: null, lastOutAt: null, liveState: 'NONE', lastPunchAt: null, workedMinutes: 0, workedIsLive: false,
+    lateMinutes: 0, leave: null, pendingItems: 0, ...over,
+  });
+  const members = () => [
+    member(salim, { status: 'late', recordStatus: 'PRESENT', flags: ['LATE'], firstInAt: `${today}T04:17:00Z`, liveState: 'IN', lastPunchAt: `${today}T04:17:00Z`, workedMinutes: 95, workedIsLive: true, lateMinutes: 17, pendingItems: rejected ? 0 : 1 }),
+    member(khalid, { relation: 'secondary', status: 'on_leave', recordStatus: null, leave: { leaveTypeName: 'Annual Leave', leaveTypeCode: 'AL', color: '#16a34a', isHalfDay: false, halfDayPart: null, status: 'APPROVED' } }),
+  ];
+  const summary = () => ({ data: { date: today, generatedAt: new Date().toISOString(), members: members(), totals: { reports: 2, present: 1, late: 1, absent: 0, onLeave: 1, missingPunch: 0, weeklyOff: 0, holiday: 0, notInYet: 0, inNow: 1, pendingItems: rejected ? 0 : 1 } } });
+  const note = () => ({
+    id: TEAM_NOTE_ID, employeeId: salim.id, attendanceDate: today, category: 'late_reason', note: 'Road closed near the Wadi Kabir roundabout', status: rejected ? 'rejected' : 'pending', submittedAt: `${today}T04:30:00Z`,
+    reviewedBy: rejected ? USER_ID : null, reviewedByName: rejected ? 'Aisha Al Balushi' : null, reviewedAt: rejected ? new Date().toISOString() : null, reviewReason: null, reviewVia: rejected ? 'manager' : null,
+    infoRequestMessage: null, infoRequestedAt: null, payEffectDays: rejected ? 0.5 : null, lossOfPay: false, deductedLeaveTypeCode: rejected ? 'AL' : null, deductedLeaveTypeName: rejected ? 'Annual Leave' : null,
+    approvalRequestId: null, approvalStatus: null, approvalCurrentStep: null, approvalStepCount: null, excusedAt: null, createdAt: `${today}T04:30:00Z`, updatedAt: new Date().toISOString(),
+    employeeName: salim.displayName, employeeNumber: salim.employeeNumber, branchId: salim.branchId, branchName: salim.branchName, dayStatus: 'PRESENT', dayFlags: ['LATE'], firstInAt: `${today}T04:17:00Z`, lastOutAt: null, timezone: 'Asia/Muscat',
+    excusedCountYear: 1, isOversight: false, canReview: !rejected,
+  });
+  return {
+    reviews,
+    get: {
+      [`/orgs/${ORG_ID}/team/summary`]: () => summary(),
+      [`/orgs/${ORG_ID}/team/pending-counts`]: () => ({ data: { approvals: 0, notes: rejected ? 0 : 1, total: rejected ? 0 : 1 } }),
+      [`/orgs/${ORG_ID}/team/leave`]: (url: URL) => ({ data: { from: url.searchParams.get('from'), to: url.searchParams.get('to'), today, entries: [], upcoming: [], pendingForMe: 0 } }),
+      [`/orgs/${ORG_ID}/attendance/notes`]: (url: URL) => page(url.searchParams.get('open') === 'true' && rejected ? [] : [note()]),
+      [`/orgs/${ORG_ID}/approvals`]: () => page([]),
+    },
+    post: {
+      [`/orgs/${ORG_ID}/attendance/notes/${TEAM_NOTE_ID}/review`]: (body) => {
+        reviews.push(body);
+        const b = body as { decision: string; payEffectDays?: number };
+        if (b.decision === 'reject') rejected = true;
+        return { body: { data: { note: note(), requestStatus: null, terminal: true, charge: { outcome: 'charged_leave', payEffectDays: b.payEffectDays ?? 0, leaveTypeCode: 'AL' } } } };
+      },
+    },
+  };
+}

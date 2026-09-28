@@ -53,8 +53,12 @@ export const invitationDtoSchema = z.object({
   token: z.string().optional(),
   /** Present when the invitee already had an account and a membership was created directly. */
   membershipId: uuidSchema.nullable().optional(),
+  /** When the worker last e-mailed the invitation (null until it has). */
+  deliverySentAt: isoDateTimeSchema.nullable().optional(),
 });
 export type InvitationDto = z.infer<typeof invitationDtoSchema>;
+/** Worker job that e-mails an invitation (it mints the e-mailed token and stores only its hash). */
+export const INVITATION_EMAIL_JOB_TYPE = 'SEND_INVITATION_EMAIL';
 
 export const acceptInvitationSchema = z.object({ token: z.string().min(16).max(256) });
 export type AcceptInvitationInput = z.infer<typeof acceptInvitationSchema>;
@@ -104,3 +108,56 @@ export const userProfileDtoSchema = z.object({
   lastLoginAt: isoDateTimeSchema.nullable(),
 });
 export type UserProfileDto = z.infer<typeof userProfileDtoSchema>;
+
+// ----- invitations parity (HR portal Prompt 6b, Finance B-67 … B-76) -----------------------------------------------------------
+
+/** What a token stands for, without accepting it. */
+export const INVITATION_STATES = ['valid', 'accepted', 'revoked', 'expired'] as const;
+export type InvitationState = (typeof INVITATION_STATES)[number];
+
+/** POST /invitations/validate (public, rate limited): the token's state and who it is for, masked. Nothing is accepted. */
+export const validateInvitationSchema = z.object({ token: z.string().min(16).max(256) });
+export type ValidateInvitationInput = z.infer<typeof validateInvitationSchema>;
+export interface InvitationPreviewDto {
+  state: InvitationState;
+  organizationName: string;
+  /** Name of the linked employee record, when the invitation carries one. */
+  employeeName: string | null;
+  /** The invited address with most of it hidden (`a***@e***.com`): enough to recognise, not to harvest. */
+  emailMasked: string;
+  expiresAt: string;
+}
+
+/** The portal (FlowZa Time login) state of one employee record. */
+export const PORTAL_ACCESS_STATES = ['none', 'invited', 'active', 'suspended'] as const;
+export type PortalAccessState = (typeof PORTAL_ACCESS_STATES)[number];
+export interface EmployeePortalAccessDto {
+  employeeId: string;
+  state: PortalAccessState;
+  /** The membership linked to the employee (active, invited or suspended), if any. */
+  membership: { id: string; userId: string; email: string; fullName: string; roleId: string; roleName: string; status: 'invited' | 'active' | 'suspended'; lastLoginAt: string | null } | null;
+  /** The pending invitation carrying this employee, if any (expired ones included, flagged). */
+  invitation: { id: string; email: string; roleId: string; roleName: string | null; expiresAt: string; createdAt: string; expired: boolean } | null;
+  /** The address an invitation would go to: the work email, else a personal email on the record. */
+  suggestedEmail: string | null;
+  suggestedEmailSource: 'work' | 'personal' | null;
+  /** The employee left (terminated / resigned / archived): access cannot be granted or restored. */
+  employeeLeft: boolean;
+}
+
+/** POST /orgs/:orgId/employees/:id/portal-access/invite — email defaults to the work / personal email, role to `employee`. */
+export const portalAccessInviteSchema = z.object({
+  email: emailSchema.optional(),
+  roleId: uuidSchema.optional(),
+  /** Absent = the employee's own branch only. */
+  allBranches: z.boolean().optional(),
+  branchIds: z.array(uuidSchema).max(200).optional(),
+});
+export type PortalAccessInviteInput = z.infer<typeof portalAccessInviteSchema>;
+
+/** Revoke / restore portal access (suspends / reactivates the linked login; the employee link stays). */
+export const portalAccessChangeSchema = z.object({ reason: z.string().trim().max(500).optional() });
+export type PortalAccessChangeInput = z.infer<typeof portalAccessChangeSchema>;
+
+/** What a resend did: a fresh invitation (the old token is revoked) or a suspended login restored (Finance B-69). */
+export interface PortalAccessResendResultDto { action: 'reinvited' | 'restored'; invitation: InvitationDto | null; access: EmployeePortalAccessDto }

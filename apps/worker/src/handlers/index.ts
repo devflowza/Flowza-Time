@@ -6,6 +6,7 @@ import { registerSyncHandlers } from './sync/index.js';
 import { registerReportHandlers } from './reports/index.js';
 import { registerApprovalHandlers } from './approvals/index.js';
 import { registerLeaveHandlers } from './leave/index.js';
+import { registerMemberHandlers } from './members/index.js';
 
 /**
  * Registers every job handler. Handler modules live in ./<area>/ and export `register<Area>Handlers(registry)`:
@@ -16,6 +17,7 @@ import { registerLeaveHandlers } from './leave/index.js';
  *   reports (GENERATE_REPORT, EXPORT_EMPLOYEES) — see ./reports and docs/reports.md
  *   approvals (APPROVAL_REMINDERS: escalation, 24-hour reminders, the daily digest)
  *   leave (LEAVE_YEAR_CLOSE: carry-forward into next year's allocations; LEAVE_COMP_OFF_EXPIRY: the daily comp-off expiry)
+ *   members (SEND_INVITATION_EMAIL: e-mails an invitation with a token minted at send time, hash only)
  */
 export function buildHandlerRegistry(): HandlerRegistry {
   const registry = new HandlerRegistry();
@@ -26,5 +28,6 @@ export function buildHandlerRegistry(): HandlerRegistry {
   registerReportHandlers(registry);
   registerApprovalHandlers(registry);
   registerLeaveHandlers(registry);
+  registerMemberHandlers(registry);
   return registry;
 }

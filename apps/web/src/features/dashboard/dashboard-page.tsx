@@ -45,6 +45,11 @@ export default function DashboardPage() {
     range, setRange,
     branches: branches.data, branchesLoading: branches.isLoading, branchesError: branches.isError ? branches.error : null, retryBranches: () => void branches.refetch(),
     settings, can, rtl: i18n.dir() === 'rtl',
+    viewer: {
+      hasReports: membership?.isManager ?? false,
+      approver: can('attendance.approve') || can('leave.approve') || can('approval.manage'),
+      teamAttendance: can('attendance.view_team') || can('attendance.view'),
+    },
   };
 
   const part = daypart(DateTime.now().setZone(tz).hour);

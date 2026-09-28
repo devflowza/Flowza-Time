@@ -7,7 +7,7 @@ import { activitySegments, summarisePeriod, weekRange, type MembershipGrant, typ
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
 import type { ApiDeps } from '../../deps.js';
-import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission, requireTeamOrPermission } from '../../lib/authorize.js';
+import { branchFilter, hasPermission, isTeamMember, requireBranchAccess, requireMembership, requirePermission, requireTeamOrPermission } from '../../lib/authorize.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
 import { enqueueJob } from '../../lib/jobs.js';
 import { likeContains, pageOf, prefixTsQuery, toCount } from '../../lib/pagination.js';
@@ -129,11 +129,18 @@ export async function listMonthly(deps: ApiDeps, actor: Actor, orgId: string, q:
 }
 
 export async function getRecord(deps: ApiDeps, actor: Actor, orgId: string, id: string) {
-  const { grant, ownOnly } = viewGrant(actor, orgId);
+  // a line manager (attendance.view_team) opens a direct report's record from the team workspace (HR portal Prompt 5): the
+  // team predicate decides (RLS applies it again), not a branch grant; everyone else keeps the organisation-wide / own rule
+  const grant = requireMembership(actor.principal, orgId);
+  const orgWide = hasPermission(grant, 'attendance.view');
+  const own = hasPermission(grant, 'attendance.view_own') ? grant.employeeId : null;
+  const team = hasPermission(grant, 'attendance.view_team');
+  if (!orgWide && !own && !team) throw errors.forbidden('Missing permission: attendance.view.');
   return runUser(deps.db, actor, async (trx) => {
     const row = (await recordQuery(trx, orgId).select([...DAILY_RECORD_COLUMNS, 'r.trace', 'r.ruleSetId', 'r.shiftAssignmentId', 'r.engineVersion']).where('r.id', '=', id).executeTakeFirst()) as (DailyRecordRow & { trace: unknown; ruleSetId: string | null; shiftAssignmentId: string | null; engineVersion: string }) | undefined;
-    if (!row || (ownOnly && row.employeeId !== ownOnly)) throw errors.notFound('Attendance record', id);
-    requireBranchAccess(grant, row.branchId);
+    const viaTeam = !!row && team && isTeamMember(grant, row.employeeId) && row.employeeId !== grant.employeeId;
+    if (!row || (!orgWide && !viaTeam && row.employeeId !== own)) throw errors.notFound('Attendance record', id);
+    if (!viaTeam) requireBranchAccess(grant, row.branchId);
     const date = isoDate(row.attendanceDate);
     const dayStart = DateTime.fromISO(date, { zone: row.timezone }).minus({ days: 1 }).toJSDate();
     const dayEnd = DateTime.fromISO(date, { zone: row.timezone }).plus({ days: 2 }).toJSDate();

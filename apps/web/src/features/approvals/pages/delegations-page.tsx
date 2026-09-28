@@ -86,8 +86,12 @@ export function DelegationDialog({ open, onOpenChange }: { open: boolean; onOpen
   );
 }
 
-/** /approvals/delegations — my delegations (both directions); with approval.manage, the organisation's. */
-export default function DelegationsPage() {
+/**
+ * The delegations list — mine in both directions; with approval.manage, the organisation's — with revoke and the create
+ * dialog. The body of /approvals/delegations, also embedded in the team workspace (HR portal Prompt 5); the caller owns the
+ * "create" state so the button can sit in its own header.
+ */
+export function DelegationsPanel({ creating, onCreatingChange }: { creating: boolean; onCreatingChange: (open: boolean) => void }) {
   const { t } = useTranslation('approvals');
   const tz = useOrgTimezone();
   const today = todayIso(tz);
@@ -95,14 +99,12 @@ export default function DelegationsPage() {
   const [scope, setScope] = useState<'mine' | 'all'>('mine');
   const q = useDelegations(access.manage ? scope : 'mine');
   const { revoke } = useDelegationMutations();
-  const [open, setOpen] = useState(false);
+  const setOpen = onCreatingChange;
   const [revoking, setRevoking] = useState<ApprovalDelegationDto | null>(null);
   const rows = q.data ?? [];
   const typesText = (d: ApprovalDelegationDto) => (d.entityTypes?.length ? d.entityTypes.map((e) => t(`entity.${e}`)).join(', ') : t('delegations.allTypes'));
   return (
-    <div className="page-container space-y-4">
-      <PageHeader title={t('delegations.title')} description={t('delegations.subtitle')} breadcrumbs={<Link to="/approvals" className="inline-flex items-center gap-1 hover:underline"><ArrowLeft className="size-3 rtl:rotate-180" /> {t('title')}</Link>}
-        actions={access.delegate ? <Button size="sm" onClick={() => setOpen(true)}><Plus /> {access.manage ? t('delegations.addFor') : t('delegations.add')}</Button> : undefined} />
+    <>
       {access.manage ? (
         <div className="flex gap-1.5" role="group">
           {(['mine', 'all'] as const).map((s) => <Button key={s} size="sm" variant={scope === s ? 'default' : 'outline'} aria-pressed={scope === s} onClick={() => setScope(s)}>{s === 'mine' ? t('delegations.scopeMine') : t('delegations.scopeAll')}</Button>)}
@@ -131,9 +133,23 @@ export default function DelegationsPage() {
           )}
         </CardContent>
       </Card>
-      <DelegationDialog key={String(open)} open={open} onOpenChange={setOpen} />
+      <DelegationDialog key={String(creating)} open={creating} onOpenChange={setOpen} />
       <ConfirmDialog open={!!revoking} onOpenChange={(o) => !o && setRevoking(null)} title={t('delegations.revokeTitle')} description={t('delegations.revokeHint')} confirmLabel={t('delegations.revoke')} destructive loading={revoke.isPending}
         onConfirm={() => { if (!revoking) return; revoke.mutate(revoking.id, { onSuccess: () => { toast.success(t('delegations.revokedToast')); setRevoking(null); }, onError: toastError }); }} />
+    </>
+  );
+}
+
+/** /approvals/delegations — my delegations (both directions); with approval.manage, the organisation's. */
+export default function DelegationsPage() {
+  const { t } = useTranslation('approvals');
+  const access = useApprovalAccess();
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="page-container space-y-4">
+      <PageHeader title={t('delegations.title')} description={t('delegations.subtitle')} breadcrumbs={<Link to="/approvals" className="inline-flex items-center gap-1 hover:underline"><ArrowLeft className="size-3 rtl:rotate-180" /> {t('title')}</Link>}
+        actions={access.delegate ? <Button size="sm" onClick={() => setOpen(true)}><Plus /> {access.manage ? t('delegations.addFor') : t('delegations.add')}</Button> : undefined} />
+      <DelegationsPanel creating={open} onCreatingChange={setOpen} />
     </div>
   );
 }

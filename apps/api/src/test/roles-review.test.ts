@@ -131,12 +131,15 @@ describe('A. leaving the organisation ends every login linked to the employee re
     expect((await auditRows(h.admin, 'member.suspended')).find((r) => r.entityId === p.membershipId)?.newValue).toMatchObject({ source: 'delete' });
 
     expect((await h.request('DELETE', `${base()}/employees/${archivedOnly}`, { token: f.hrAdmin, body: { exitDate: EXIT } })).status).toBe(200);
-    expect(await h.admin.selectFrom('invitations').select('id').where('id', '=', inv.body.data.id).executeTakeFirst()).toBeUndefined();
+    // revoked, not deleted (HR portal Prompt 6b): the token then validates as `revoked` instead of reading as unknown
+    expect(await h.admin.selectFrom('invitations').select(['revokeReason']).where('id', '=', inv.body.data.id).where('revokedAt', 'is not', null).executeTakeFirst()).toEqual({ revokeReason: 'employee_left' });
     expect((await auditRows(h.admin, 'member.invitation_revoked')).some((r) => r.entityId === inv.body.data.id && (r.newValue as { cause: string }).cause === 'employee_left')).toBe(true);
     // the invitee cannot accept their way back in
     const invitee = uuid('c');
     await seedUser(h.admin, invitee, 'future-hire-review@test.local', 'Future Hire');
-    expect((await h.request('POST', '/api/v1/invitations/accept', { token: `${invitee}:future-hire-review@test.local`, body: { token: inv.body.data.token } })).status).toBe(404);
+    const refused = await h.request('POST', '/api/v1/invitations/accept', { token: `${invitee}:future-hire-review@test.local`, body: { token: inv.body.data.token } });
+    expect(refused.status).toBe(409);
+    expect(refused.body.message).toMatch(/revoked/);
   });
 
   it('keeps the rules of member suspension: only an owner ends an owner\'s login, and nobody ends their own', async () => {

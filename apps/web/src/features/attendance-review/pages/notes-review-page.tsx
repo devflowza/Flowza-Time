@@ -11,8 +11,11 @@ import { AR_NS } from '../i18n';
 import { useNotesForReview, useReviewAccess } from '../api';
 import { NoteReviewDialog } from '../components/note-review-dialog';
 import { SelfieReviewPanel } from '../components/selfie-review';
+import { AA_NS } from '@/features/attendance-admin/i18n';
+import { NotesReport } from '@/features/attendance-admin/components/notes-report';
 
-const TABS = ['reasons', 'selfies'] as const;
+// 'report': the comments & approvals report (HR portal Prompt 6b, features/attendance-admin)
+const TABS = ['reasons', 'selfies', 'report'] as const;
 type Tab = (typeof TABS)[number];
 const STATUS_FILTERS = ['open', 'approved', 'excused', 'rejected', 'all'] as const;
 type StatusFilter = (typeof STATUS_FILTERS)[number];
@@ -111,6 +114,7 @@ function ReasonsTab({ scope, status, onScope, onStatus, oversight }: { scope: No
  */
 export default function NotesReviewPage() {
   const { t } = useTranslation(AR_NS);
+  const { t: ta } = useTranslation(AA_NS);
   const access = useReviewAccess();
   const [params, setParams] = useSearchParams();
   const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') && (params.get('tab') !== 'selfies' || access.selfies) ? (params.get('tab') as Tab) : 'reasons';
@@ -128,9 +132,10 @@ export default function NotesReviewPage() {
     <div className="page-container space-y-5">
       <PageHeader title={t('notes.title')} description={t('notes.subtitle')} actions={<Button asChild variant="outline"><Link to="/approvals">{t('notes.openInbox')}</Link></Button>} />
       <Tabs value={tab} onValueChange={(v) => set({ tab: v })}>
-        <TabsList aria-label={t('notes.title')}>{TABS.filter((tb) => tb !== 'selfies' || access.selfies).map((tb) => <TabsTrigger key={tb} value={tb}>{t(`notes.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
+        <TabsList aria-label={t('notes.title')}>{TABS.filter((tb) => tb !== 'selfies' || access.selfies).map((tb) => <TabsTrigger key={tb} value={tb}>{tb === 'report' ? ta('report.tab') : t(`notes.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
         <TabsContent value="reasons">{tab === 'reasons' ? <ReasonsTab scope={scope} status={status} oversight={access.oversight} onScope={(s) => set({ scope: s })} onStatus={(s) => set({ status: s })} /> : null}</TabsContent>
         <TabsContent value="selfies">{tab === 'selfies' ? <SelfieReviewPanel /> : null}</TabsContent>
+        <TabsContent value="report">{tab === 'report' ? <NotesReport oversight={access.oversight} /> : null}</TabsContent>
       </Tabs>
     </div>
   );

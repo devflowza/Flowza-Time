@@ -42,5 +42,6 @@
     "lateTrend": "التأخيرات", "branchComparison": "مقارنة الفروع", "deviceHealth": "صحة الأجهزة", "recentSync": "أحدث مهام المزامنة", "empty": "لا توجد بيانات حضور بعد",
     "emptyHint": "سجّل جهازاً أو استورد الموظفين للبدء."
   },
-  "notifications": { "title": "الإشعارات", "markAllRead": "تعليم الكل كمقروء", "empty": "لا توجد إشعارات جديدة", "emptyHint": "ستظهر هنا تنبيهات الأجهزة والحضور والموافقات.", "unread": "{{count}} غير مقروء" }
+  "notifications": { "title": "الإشعارات", "markAllRead": "تعليم الكل كمقروء", "empty": "لا توجد إشعارات جديدة", "emptyHint": "ستظهر هنا تنبيهات الأجهزة والحضور والموافقات.", "unread": "{{count}} غير مقروء",
+    "categories": { "APPROVAL": "الموافقات", "ATTENDANCE": "الحضور", "LEAVE": "الإجازات", "REPORTS": "التقارير", "DEVICE": "الأجهزة", "SYSTEM": "النظام", "SUBSCRIPTION": "الاشتراك" } }
 }

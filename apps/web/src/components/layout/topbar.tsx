@@ -9,6 +9,7 @@ import { useUiStore } from '@/stores/ui-store';
 import { LanguageSwitcher } from './language-switcher';
 import { useUnreadCount } from '@/features/notifications/use-notifications';
 import { GlobalSearchDialog } from '@/features/search/global-search';
+import { PendingChip } from '@/features/team/components/pending-chip';
 
 export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const { t } = useTranslation();
@@ -57,6 +58,8 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
         {membership ? <Button variant="ghost" size="icon" className="lg:hidden" aria-label={t('common.searchPlaceholder')} onClick={() => setSearchOpen(true)}><Search /></Button> : null}
         <LanguageSwitcher />
         <Button variant="ghost" size="icon" aria-label={t('common.theme')} onClick={() => setTheme(theme === 'dark' ? 'light' : 'dark')}>{theme === 'dark' ? <Sun /> : <Moon />}</Button>
+        {/* managers / approvers: what waits for them (team/pending-counts), next to the unread-notification badge */}
+        {membership ? <PendingChip /> : null}
         <Button variant="ghost" size="icon" asChild aria-label={t('nav.notifications')}>
           <Link to="/notifications" className="relative">
             <Bell />
