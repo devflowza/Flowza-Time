@@ -235,6 +235,14 @@ export interface ApprovalRequests {
   cancelledBy: string | null;
   cancelReason: string | null;
   completedAt: Timestamp | null;
+  /**
+   * Other employees the request is about besides employee_id (a shift swap's colleague): never seated, never decide, bypass, ask, withdraw on behalf or receive a reassignment (segregation of duties; the owner is the logged exception).
+   */
+  coSubjectEmployeeIds: string[] | null;
+  /**
+   * Logins linked to the co-subject employees when the request was submitted (the live membership link is checked as well).
+   */
+  coSubjectUserIds: string[] | null;
   createdAt: Generated<Timestamp>;
   currentStep: Generated<number>;
   decidedBy: string | null;
@@ -1602,6 +1610,7 @@ export interface SelfieCheckins {
   status: Generated<SelfieCheckinStatus>;
   updatedAt: Generated<Timestamp>;
   verdict: string | null;
+  verdictReason: string | null;
 }
 
 export interface ShiftAssignments {
