@@ -251,7 +251,8 @@ describe('accuracy warning (4-P2-16)', () => {
     apiMock.post.mockResolvedValue({ data: preview() });
     renderWithProviders(<CheckInPage />);
     expect(await screen.findByTestId('accuracy-warning')).toHaveTextContent('±90 m');
-    expect(screen.getByTestId('verdict-banner')).toHaveTextContent('Inside HQ');
+    // the verdict arrives with the preview (a request after the fix), the warning straight from the fix: wait for both
+    expect(await screen.findByTestId('verdict-banner')).toHaveTextContent('Inside HQ');
   });
   it('4-P2-16 says nothing for a precise fix', async () => {
     mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 20 });
