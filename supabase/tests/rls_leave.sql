@@ -2,7 +2,9 @@
 -- usage, the self-service withdraw policy + guard on leave records (edits are the API's) and the half-day aware overlap constraint. Who
 -- reads what: the employee their own rows, a line manager their direct reports' (leave.view_team), HR the organisation
 -- (branch-scoped), the auditor read-only, an approval assignee the thread of the leave routed to them — and nobody anything
--- of another tenant. Runs after rls_isolation.sql and rls_approvals.sql (their fixtures are committed) as superuser.
+-- of another tenant. Runs after rls_isolation.sql (its fixtures are committed) as superuser. It needs nothing from
+-- rls_approvals.sql — the approval-assignee case builds its own request and rolls it back — and it commits rows only to the
+-- leave v2 tables (plus one leave type and leave record of org B), so rls_approvals.sql stays the last suite of the runner.
 \set QUIET on
 \set ON_ERROR_STOP on
 set client_min_messages = warning;
@@ -32,7 +34,7 @@ grant execute on all functions in schema pg_temp to public;
 
 -- ---------- fixtures (superuser) ----------
 -- Org A: allocations for e1 (HQ, report of manager-a) and e3 (A-2, the self-service employee emp-a); comments on e1's
--- pending leave (1b1, the leave routed to assignee-a by rls_approvals.sql), e3's pending (1b3) and approved (1b4) leave;
+-- pending leave (1b1), e3's pending (1b3) and approved (1b4) leave;
 -- comp-off credits for e3 (approved, used by 1b4) and e1 (pending). Org B: one of each.
 begin;
 insert into public.leave_types (id, organization_id, code, name, status) values ('0b000000-0000-0000-0000-0000000007a1', '0b000000-0000-0000-0000-000000000000', 'AL', 'Annual Leave', 'active');
@@ -108,13 +110,31 @@ select pg_temp.assert_raises($q$ insert into public.leave_allocations (organizat
 select pg_temp.assert_rows($q$ update public.comp_off_credits set status = 'approved', expires_on = '2026-12-10' where id = '0a000000-0000-0000-0000-0000000007e1' $q$, 0, 'a line manager decides credits through the engine only');
 rollback;
 
--- ---------- Approval assignee (rls_approvals.sql: R1 is the LEAVE request of 1b1, routed to assignee-a — no key at all) ----------
+-- ---------- Approval assignee (a member with no leave key at all, seated on the LEAVE request of one leave) ----------
+-- Self-contained and rolled back: its own member, leave, thread and request (a pending request is unique per leave, so it
+-- does not reuse 1b1, which rls_approvals.sql routes later).
 begin;
+insert into auth.users (id, email) values ('a0000000-0000-0000-0000-0000000007a8', 'leave-assignee-a@test.local');
+insert into public.user_profiles (id, email, full_name) values ('a0000000-0000-0000-0000-0000000007a8', 'leave-assignee-a@test.local', 'Leave Assignee A');
+insert into public.org_memberships (organization_id, user_id, role_id, status, all_branches) values
+  ('0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-0000000007a8', '10000000-0000-0000-0000-000000000008', 'active', true);
+insert into public.leave_records (id, organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status) values
+  ('0a000000-0000-0000-0000-0000000007b8', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000001a1', '2027-02-01', '2027-02-02', 'PENDING');
+insert into public.leave_request_comments (organization_id, leave_record_id, author_user_id, body, kind) values
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000007b8', 'a0000000-0000-0000-0000-000000000001', 'Who covers the week?', 'comment');
+insert into public.approval_requests (id, organization_id, entity_type, entity_id, branch_id, employee_id, subject_user_id, current_step, status, requested_by) values
+  ('0a000000-0000-0000-0000-0000000007f1', '0a000000-0000-0000-0000-000000000000', 'LEAVE', '0a000000-0000-0000-0000-0000000007b8', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000000e1', null, 1, 'PENDING', 'a0000000-0000-0000-0000-000000000001');
+insert into public.approval_steps (id, organization_id, request_id, step_no, approver_type, status, mode) values
+  ('0a000000-0000-0000-0000-0000000007f2', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000007f1', 1, 'USER', 'PENDING', 'ANY');
+insert into public.approval_step_actors (organization_id, step_id, user_id, resolution_path) values
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000007f2', 'a0000000-0000-0000-0000-0000000007a8', 'user');
 set local role authenticated;
-select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000008","role":"authenticated"}', true);
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-0000000007a8","role":"authenticated"}', true);
 select pg_temp.assert_eq((select count(*) from public.leave_request_comments), 1, 'assignee reads the thread of the leave routed to them only');
-select pg_temp.assert_rows($q$ insert into public.leave_request_comments (organization_id, leave_record_id, author_user_id, body, kind) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000001b1', 'a0000000-0000-0000-0000-000000000008', 'Looks fine to me', 'comment') $q$, 1, 'assignee comments on it');
+select pg_temp.assert_rows($q$ insert into public.leave_request_comments (organization_id, leave_record_id, author_user_id, body, kind) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000007b8', 'a0000000-0000-0000-0000-0000000007a8', 'Looks fine to me', 'comment') $q$, 1, 'assignee comments on it');
+select pg_temp.assert_raises($q$ insert into public.leave_request_comments (organization_id, leave_record_id, author_user_id, body, kind) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000001b3', 'a0000000-0000-0000-0000-0000000007a8', 'Not routed to me', 'comment') $q$, 'assignee cannot comment on a leave not routed to them');
 select pg_temp.assert_eq((select count(*) from public.leave_allocations), 0, 'assignee reads no allocations');
+select pg_temp.assert_eq((select count(*) from public.comp_off_credits), 0, 'assignee reads no comp-off credits');
 rollback;
 
 -- ---------- Owner A (organisation-wide) ----------
