@@ -75,6 +75,11 @@ async function assertRoleUsable(trx: Trx, orgId: string, roleId: string): Promis
  * not hold `branch.view`, and whether the caller may hand the branches out is THE member-management rule's question (its
  * branch-scope clause runs first and answers 403), never a side effect of what the caller can read.
  */
+/** Same set of branch ids, order ignored (an unchanged scope is not rewritten: the database guard judges every rewrite). */
+function sameBranches(a: readonly string[], b: readonly string[]): boolean {
+  return a.length === b.length && [...a].sort().join() === [...b].sort().join();
+}
+
 async function assertBranchesInOrg(trx: Trx, orgId: string, branchIds: string[]): Promise<void> {
   if (branchIds.length === 0) return;
   const found = await withSystemScope(trx, orgId, (t) => t.selectFrom('branches').select('id').where('organizationId', '=', orgId).where('id', 'in', branchIds).execute());
@@ -470,7 +475,7 @@ export async function updateMember(deps: ApiDeps, actor: Actor, orgId: string, i
     if (nextStatus === 'active' && before.status !== 'active') patch['joinedAt'] = new Date();
     await trx.updateTable('orgMemberships').set(patch).where('id', '=', id).where('organizationId', '=', orgId).execute();
     if (nextAll) await trx.deleteFrom('membershipBranches').where('membershipId', '=', id).execute();
-    else if (input.branchIds && (before.allBranches || !sameBranches(input.branchIds, before.branchIds))) {
+    else if (input.branchIds && (before.allBranches || !sameBranches(input.branchIds, beforeBranchIds))) {
       await trx.deleteFrom('membershipBranches').where('membershipId', '=', id).execute();
       await trx.insertInto('membershipBranches').values([...new Set(input.branchIds)].map((b) => ({ membershipId: id, branchId: b }))).execute();
     }

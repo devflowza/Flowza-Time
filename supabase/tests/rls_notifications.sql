@@ -190,7 +190,8 @@ rollback;
 -- the relay's other tables: a member marks their own notices read, and changes nothing else of them
 begin;
 select pg_temp.ntf_fixtures();
-set local session authorization authenticator;
+-- Prompt 10: a PostgREST session reaches no row (<table>_no_data_api), so a member's writes arrive through the API's own login
+set local session authorization flowza_api;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
 select pg_temp.assert_rows($q$ update public.notifications set read_at = now() where id = '0a000000-0000-0000-0000-0000000008a3' $q$, 1, '8-P0-1 a member marks their own notice read');
@@ -216,7 +217,8 @@ select set_config('request.jwt.claims', '', true);
 create temporary table p8f_mfa_before on commit drop as select app.principal_snapshot('a0000000-0000-0000-0000-000000000001') -> 'mfaRequiredOrgIds' as mfa;
 grant select on p8f_mfa_before to public;
 select pg_temp.assert_eq((select (mfa @> '["0a000000-0000-0000-0000-000000000000"]'::jsonb)::int from p8f_mfa_before), 1, '8-P0-2 org A requires MFA of its owner before the probe');
-set local session authorization authenticator;
+-- Prompt 10: a PostgREST session reaches no row (<table>_no_data_api), so a member's writes arrive through the API's own login
+set local session authorization flowza_api;
 set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"b0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 select pg_temp.assert_raises($q$ update public.organization_settings set security = '{}'::jsonb where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, '8-P0-2 notification.manage cannot write A''s security group directly');
