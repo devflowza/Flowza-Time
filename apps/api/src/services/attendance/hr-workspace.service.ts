@@ -1,27 +1,28 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import {
-  ATTENDANCE_SUMMARY_EXPORT_MAX_ROWS,
+  ATTENDANCE_SUMMARY_EXPORT_MAX_ROWS, unmatchedAssignBlockedReason,
   type AttendanceCalendarDayDto, type AttendanceCalendarQuery, type AttendanceCalendarRowDto, type AttendanceEngineOutcomeDto, type AttendanceEventType, type AttendancePreviewDto,
-  type AttendancePreviewInput, type AttendanceRecordEditInput, type AttendanceRecordEditResultDto, type AttendanceStatus, type AttendanceSummaryExportDto, type AttendanceSummaryExportQuery,
-  type AttendanceSummaryFigures, type AttendanceSummaryQuery, type AttendanceSummaryRowDto, type AttendanceTimelineDto, type AttendanceTimelineQuery, type BulkAttendanceStatusInput,
-  type BulkStatusItemResultDto, type BulkStatusResultDto, type CreateCorrectionInput, type FiledCorrectionDto, type ManualStatusDto, type ManualStatusesQuery, type PlannedCorrectionDto,
-  type PunchFactsDto, type TimelineRawDto, type UnmatchedActionResultDto, type UnmatchedAssignInput, type UnmatchedIgnoreInput, type UnmatchedPunchGroupDto, type UnmatchedPunchesQuery,
-  type UnmatchedRestoreInput, type UnmatchedSuggestionDto,
+  type AttendancePreviewInput, type AttendanceRecordEditInput, type AttendanceRecordEditResultDto, type AttendanceStatus, type AttendanceSummaryExportDto, type AttendanceSummaryExportInput,
+  type AttendanceSummaryFigures, type AttendanceSummaryFilters, type AttendanceSummaryQuery, type AttendanceSummaryRowDto, type AttendanceTimelineDto, type AttendanceTimelineQuery,
+  type BulkAttendanceStatusInput, type BulkStatusItemResultDto, type BulkStatusResultDto, type CreateCorrectionInput, type FiledCorrectionDto, type ManualStatusDto, type ManualStatusesQuery,
+  type PlannedCorrectionDto, type PunchFactsDto, type TimelineRawDto, type UnmatchedActionResultDto, type UnmatchedAssignBlockedReason, type UnmatchedAssignInput, type UnmatchedIgnoreInput,
+  type UnmatchedPunchGroupDto, type UnmatchedPunchesQuery, type UnmatchedRestoreInput, type UnmatchedSuggestionDto,
 } from '@flowza/contracts';
-import { loadDailyInputs, type LoadedDailyInputs, type Trx } from '@flowza/database';
+import { attendanceSummaryCount, attendanceSummaryRows, attendanceSummaryTotals, loadDailyInputs, type AttendanceSummaryDbFigures, type AttendanceSummaryScope, type LoadedDailyInputs, type Trx } from '@flowza/database';
 import { calculateDailyRecord, type DailyCalculationResult, type EngineEvent, type MembershipGrant } from '@flowza/domain';
 import { AppError, errors, event } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
-import { branchFilter, hasPermission, requireAnyPermission, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
-import { toCsvLine } from '../../lib/csv.js';
+import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
 import { enqueueJob } from '../../lib/jobs.js';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonObject } from '../../lib/mappers.js';
 import { likeContains, toCount } from '../../lib/pagination.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
+import { loadSettings } from '../../lib/settings.js';
 import { createCorrection } from '../features/attendance.service.js';
 import { systemStep } from '../features/context.js';
 import { dv } from '../features/sql-helpers.js';
+import { requireDayBranchAccess } from './correction-guards.js';
 
 /**
  * HR attendance workspace (HR portal Prompt 6a): the register's Add / Edit record (with a policy preview), bulk status, the
@@ -138,8 +139,14 @@ async function planDay(trx: Trx, orgId: string, grant: MembershipGrant, input: {
   const emp = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'displayName', 'branchId', 'deletedAt']).where('organizationId', '=', orgId).where('id', '=', input.employeeId).executeTakeFirst();
   if (!emp || emp.deletedAt) throw errors.notFound('Employee', input.employeeId);
   requireBranchAccess(grant, emp.branchId);
+  // review defect 2: the day belongs to the branch that OWNED it (its record, the employment history on that date), not only to
+  // the employee's current branch — a transfer must not open the previous branch's days (the caller's own record excepted, as
+  // in createCorrection's self-service door)
+  const own = grant.employeeId !== null && grant.employeeId === emp.id;
+  if (!own) await requireDayBranchAccess(trx, orgId, grant, emp, input.date);
   const loaded = await withSystemScope(trx, orgId, (t) => loadDailyInputs(t, orgId, emp.id, input.date, now));
   if (!loaded) throw errors.notFound('Employee', input.employeeId);
+  if (!own) requireBranchAccess(grant, loaded.branchId);
   const current = calculateDailyRecord(loaded.input);
 
   const eventsById = new Map(loaded.input.events.map((e) => [e.id, e]));
@@ -332,11 +339,16 @@ function employeesInMonth(trx: Trx, orgId: string, from: string, to: string, f: 
   return q;
 }
 
-/** Organisation-wide attendance.view (branch-scoped as usual), or a line manager's team (RLS decides which rows). */
-function readScope(actor: Actor, orgId: string, branchId: string | undefined): { grant: MembershipGrant; branchScope: string[] | null } {
-  const grant = requireAnyPermission(actor.principal, orgId, 'attendance.view', 'attendance.view_team');
-  if (hasPermission(grant, 'attendance.view')) return { grant, branchScope: branchFilter(grant, branchId) };
-  return { grant, branchScope: branchId ? [branchId] : null };
+/**
+ * Organisation-wide attendance.view (branch-scoped as usual), or a line manager's team (RLS decides which rows). With `allowOwn`
+ * (the summary, which feeds the employee profile's month strip), an attendance.view_own holder reads their OWN row only.
+ */
+function readScope(actor: Actor, orgId: string, branchId: string | undefined, opts: { allowOwn?: boolean } = {}): { grant: MembershipGrant; branchScope: string[] | null; ownOnly: string | null } {
+  const grant = requireMembership(actor.principal, orgId);
+  if (hasPermission(grant, 'attendance.view')) return { grant, branchScope: branchFilter(grant, branchId), ownOnly: null };
+  if (hasPermission(grant, 'attendance.view_team')) return { grant, branchScope: branchId ? [branchId] : null, ownOnly: null };
+  if (opts.allowOwn && hasPermission(grant, 'attendance.view_own') && grant.employeeId) return { grant, branchScope: branchId ? [branchId] : null, ownOnly: grant.employeeId };
+  throw errors.forbidden('Missing permission: one of attendance.view, attendance.view_team.');
 }
 
 /** GET /attendance/calendar — a month grid per employee: status, flags, times and hours per day, and whether the status is manual. */
@@ -375,154 +387,93 @@ export async function calendar(deps: ApiDeps, actor: Actor, orgId: string, q: At
 
 // ---- monthly summary -----------------------------------------------------------------------------------------------------------
 
-interface SummarySqlRow {
-  employeeId: string; employeeNumber: string; employeeName: string; branchId: string; departmentId: string | null;
-  presentDays: string | number; lateDays: number; halfDays: number; leaveDays: string | number; absentDays: string | number; missingPunchDays: number; holidayDays: number;
-  weeklyOffDays: number; daysWorked: number; workedMinutes: string | number; overtimeMinutes: string | number; lopDays: string | number; unexcusedDays: number;
-  pendingDays: number; recordCount: number; finalizedAt: Date | null;
+/** The employee filter of a summary read: the page's filters, the caller's own row for a view_own caller. */
+function summaryScope(q: AttendanceSummaryFilters, branchScope: string[] | null, ownOnly: string | null): AttendanceSummaryScope {
+  let employeeIds: string[] | null = q.employeeId ? [q.employeeId] : null;
+  if (ownOnly) employeeIds = employeeIds ? employeeIds.filter((id) => id === ownOnly) : [ownOnly];
+  // RLS already restricts the days of a branch-scoped caller to their branches: no explicit record filter under the API
+  return { employeeBranchIds: branchScope, recordBranchIds: null, departmentId: q.departmentId ?? null, employeeIds, search: q.search ?? null, includeFinalized: true };
 }
 
-/**
- * One row per employee employed during the month, computed in SQL from `attendance_daily_records` under the caller's RLS (so a
- * branch-scoped HR user gets their branches and a line manager their team) with the period summary's fractions (a half day is
- * 0.5 present + 0.5 leave or absent; see `summarisePeriod`). When the month's payroll period summary is FINALIZED and visible to
- * the caller (payroll.view), its day counts win — they are what payroll paid.
- */
-function summaryRowsQuery(orgId: string, from: string, to: string, f: EmployeeFilter) {
-  const like = f.search ? likeContains(f.search) : null;
-  const scope = f.branchScope ? (f.branchScope.length ? f.branchScope : ['00000000-0000-0000-0000-000000000000']) : null;
-  return sql`
-    with emp as (
-      select e.id, e.employee_number::text as employee_number, e.display_name, e.branch_id, e.department_id
-      from public.employees e
-      where e.organization_id = ${orgId}::uuid and e.deleted_at is null
-        and e.joining_date <= ${to}::date and (e.exit_date is null or e.exit_date >= ${from}::date)
-        and (${scope}::uuid[] is null or e.branch_id = any(${scope}::uuid[]))
-        and (${f.departmentId ?? null}::uuid is null or e.department_id = ${f.departmentId ?? null}::uuid)
-        and (${f.employeeId ?? null}::uuid is null or e.id = ${f.employeeId ?? null}::uuid)
-        and (${like}::text is null or e.display_name ilike ${like}::text or e.employee_number::text ilike ${like}::text)
-    ),
-    rec as (
-      select r.employee_id,
-        count(*)::int as record_count,
-        coalesce(sum(case when r.status in ('PRESENT', 'MISSING_PUNCH') then (case when 'HALF_DAY_LEAVE' = any(r.flags) then 0.5 else 1 end)
-                          when r.status = 'HALF_DAY' then 0.5 else 0 end), 0)::numeric as present_days,
-        (count(*) filter (where 'LATE' = any(r.flags)))::int as late_days,
-        (count(*) filter (where r.status = 'HALF_DAY' or (r.status in ('PRESENT', 'MISSING_PUNCH') and 'HALF_DAY_LEAVE' = any(r.flags))))::int as half_days,
-        coalesce(sum(case when r.status = 'LEAVE' then 1
-                          when r.status in ('PRESENT', 'MISSING_PUNCH', 'HALF_DAY', 'ABSENT') and 'HALF_DAY_LEAVE' = any(r.flags) then 0.5 else 0 end), 0)::numeric as leave_days,
-        coalesce(sum(case when r.status = 'ABSENT' then (case when 'HALF_DAY_LEAVE' = any(r.flags) then 0.5 else 1 end)
-                          when r.status = 'HALF_DAY' and not ('HALF_DAY_LEAVE' = any(r.flags)) then 0.5 else 0 end), 0)::numeric as absent_days,
-        (count(*) filter (where r.status = 'MISSING_PUNCH' or r.flags && array['MISSING_IN', 'MISSING_OUT']::text[]))::int as missing_punch_days,
-        (count(*) filter (where r.status = 'HOLIDAY'))::int as holiday_days,
-        (count(*) filter (where r.status = 'WEEKLY_OFF'))::int as weekly_off_days,
-        (count(*) filter (where r.worked_minutes > 0))::int as days_worked,
-        coalesce(sum(greatest(r.worked_minutes, 0)), 0)::bigint as worked_minutes,
-        coalesce(sum(greatest(r.overtime_minutes, 0)), 0)::bigint as overtime_minutes,
-        coalesce(sum(case when 'LOP' = any(r.flags) then (case when 'PAY_EFFECT_FULL' = any(r.flags) then 1 when 'PAY_EFFECT_HALF' = any(r.flags) then 0.5 else 0 end) else 0 end), 0)::numeric as lop_days,
-        (count(*) filter (where 'UNEXCUSED' = any(r.flags)))::int as unexcused_days,
-        (count(*) filter (where r.status = 'PENDING'))::int as pending_days
-      from public.attendance_daily_records r
-      where r.organization_id = ${orgId}::uuid and r.attendance_date between ${from}::date and ${to}::date and r.employee_id in (select id from emp)
-      group by r.employee_id
-    ),
-    fin as (
-      select distinct on (s.employee_id) s.employee_id, s.present_days, s.late_days, s.half_days, s.leave_days, s.absent_days, s.missing_punch_days, s.holiday_days, s.weekly_off_days,
-        (s.regular_minutes + s.overtime_minutes + s.overtime_weekly_off_minutes + s.overtime_holiday_minutes)::bigint as worked_minutes,
-        (s.overtime_minutes + s.overtime_weekly_off_minutes + s.overtime_holiday_minutes)::bigint as overtime_minutes,
-        s.lop_days, s.unexcused_days, s.finalized_at
-      from public.attendance_period_summaries s
-      where s.organization_id = ${orgId}::uuid and s.period_start = ${from}::date and s.period_end = ${to}::date and s.status = 'finalized'
-        and s.employee_id in (select id from emp)
-      order by s.employee_id, s.version desc
-    )
-    select emp.id as "employeeId", emp.employee_number as "employeeNumber", emp.display_name as "employeeName", emp.branch_id as "branchId", emp.department_id as "departmentId",
-      coalesce(fin.present_days, rec.present_days, 0) as "presentDays", coalesce(fin.late_days, rec.late_days, 0) as "lateDays", coalesce(fin.half_days, rec.half_days, 0) as "halfDays",
-      coalesce(fin.leave_days, rec.leave_days, 0) as "leaveDays", coalesce(fin.absent_days, rec.absent_days, 0) as "absentDays",
-      coalesce(fin.missing_punch_days, rec.missing_punch_days, 0) as "missingPunchDays", coalesce(fin.holiday_days, rec.holiday_days, 0) as "holidayDays",
-      coalesce(fin.weekly_off_days, rec.weekly_off_days, 0) as "weeklyOffDays", coalesce(rec.days_worked, 0) as "daysWorked",
-      coalesce(fin.worked_minutes, rec.worked_minutes, 0) as "workedMinutes", coalesce(fin.overtime_minutes, rec.overtime_minutes, 0) as "overtimeMinutes",
-      coalesce(fin.lop_days, rec.lop_days, 0) as "lopDays", coalesce(fin.unexcused_days, rec.unexcused_days, 0) as "unexcusedDays",
-      coalesce(rec.pending_days, 0) as "pendingDays", coalesce(rec.record_count, 0) as "recordCount", fin.finalized_at as "finalizedAt"
-    from emp left join rec on rec.employee_id = emp.id left join fin on fin.employee_id = emp.id`;
-}
-
-const num = (v: string | number | null | undefined): number => { const n = typeof v === 'number' ? v : Number(v ?? 0); return Number.isFinite(n) ? n : 0; };
-
-function toFigures(r: SummarySqlRow): AttendanceSummaryFigures {
-  const daysWorked = num(r.daysWorked);
-  const workedMinutes = num(r.workedMinutes);
+function figuresDto(f: AttendanceSummaryDbFigures): AttendanceSummaryFigures {
   return {
-    presentDays: num(r.presentDays), lateDays: num(r.lateDays), halfDays: num(r.halfDays), leaveDays: num(r.leaveDays), absentDays: num(r.absentDays),
-    missingPunchDays: num(r.missingPunchDays), holidayDays: num(r.holidayDays), weeklyOffDays: num(r.weeklyOffDays), daysWorked, workedMinutes,
-    overtimeMinutes: num(r.overtimeMinutes), averageWorkedMinutes: daysWorked > 0 ? Math.round(workedMinutes / daysWorked) : 0, lopDays: num(r.lopDays),
-    unexcusedDays: num(r.unexcusedDays), pendingDays: num(r.pendingDays), recordCount: num(r.recordCount),
+    presentDays: f.presentDays, lateDays: f.lateDays, halfDays: f.halfDays, leaveDays: f.leaveDays, absentDays: f.absentDays, missingPunchDays: f.missingPunchDays, holidayDays: f.holidayDays,
+    weeklyOffDays: f.weeklyOffDays, daysWorked: f.daysWorked, workedMinutes: f.workedMinutes, overtimeMinutes: f.overtimeMinutes, averageWorkedMinutes: f.averageWorkedMinutes, lopDays: f.lopDays,
+    unexcusedDays: f.unexcusedDays, pendingDays: f.pendingDays, recordCount: f.recordCount,
   };
 }
 
-function sumFigures(rows: readonly AttendanceSummaryFigures[]): AttendanceSummaryFigures {
-  const total: AttendanceSummaryFigures = { presentDays: 0, lateDays: 0, halfDays: 0, leaveDays: 0, absentDays: 0, missingPunchDays: 0, holidayDays: 0, weeklyOffDays: 0, daysWorked: 0, workedMinutes: 0, overtimeMinutes: 0, averageWorkedMinutes: 0, lopDays: 0, unexcusedDays: 0, pendingDays: 0, recordCount: 0 };
-  for (const r of rows) {
-    for (const k of Object.keys(total) as Array<keyof AttendanceSummaryFigures>) if (k !== 'averageWorkedMinutes') total[k] += r[k];
-  }
-  total.averageWorkedMinutes = total.daysWorked > 0 ? Math.round(total.workedMinutes / total.daysWorked) : 0;
-  return total;
-}
-
-async function summaryRows(trx: Trx, orgId: string, q: AttendanceSummaryExportQuery, branchScope: string[] | null, page: { limit: number; offset: number } | null): Promise<{ rows: AttendanceSummaryRowDto[]; all: AttendanceSummaryFigures[] }> {
-  const { from, to } = monthRange(q.month);
-  const base = summaryRowsQuery(orgId, from, to, { branchScope, departmentId: q.departmentId, employeeId: q.employeeId, search: q.search });
-  const all = (await sql<SummarySqlRow>`${base} order by "employeeName", "employeeId"`.execute(trx)).rows;
-  const slice = page ? all.slice(page.offset, page.offset + page.limit) : all;
-  const names = await namesOf(trx, orgId, [...new Set(slice.map((r) => r.branchId))], [...new Set(slice.map((r) => r.departmentId).filter((d): d is string => d !== null))]);
-  const rows = slice.map((r) => ({
-    ...toFigures(r), employeeId: r.employeeId, employeeNumber: r.employeeNumber, employeeName: r.employeeName, branchId: r.branchId, branchName: names.branches.get(r.branchId) ?? null,
-    departmentId: r.departmentId, departmentName: r.departmentId ? names.departments.get(r.departmentId) ?? null : null,
-    source: r.finalizedAt ? 'FINALIZED' as const : 'LIVE' as const, finalizedAt: isoDateTimeOrNull(r.finalizedAt),
-  }));
-  return { rows, all: all.map(toFigures) };
-}
-
-/** GET /attendance/summary — the monthly summary page (paged rows + the totals of the whole filtered set). */
+/**
+ * GET /attendance/summary — the monthly summary page: one SQL page of rows (the employee set is paged before the figures are
+ * aggregated) + one aggregate over the whole filtered set for the totals (review defect 9). The figures come from
+ * `@flowza/database`'s `attendanceSummaryRows` / `attendanceSummaryTotals`: ONE definition shared with the employee profile's
+ * month strip, the print statement and the worker's `monthly_summary` report (review defects 8, 10). Under the caller's RLS: a
+ * branch-scoped HR user gets their branches, a line manager their team, a view_own caller their own row.
+ */
 export async function summary(deps: ApiDeps, actor: Actor, orgId: string, q: AttendanceSummaryQuery): Promise<{ data: AttendanceSummaryRowDto[]; total: number; meta: { month: string; from: string; to: string; totals: AttendanceSummaryFigures } }> {
-  const { branchScope } = readScope(actor, orgId, q.branchId);
+  const { branchScope, ownOnly } = readScope(actor, orgId, q.branchId, { allowOwn: true });
   const { from, to } = monthRange(q.month);
+  const scope = summaryScope(q, branchScope, ownOnly);
   return runUser(deps.db, actor, async (trx) => {
-    const res = await summaryRows(trx, orgId, q, branchScope, { limit: q.pageSize, offset: (q.page - 1) * q.pageSize });
-    return { data: res.rows, total: res.all.length, meta: { month: q.month, from, to, totals: sumFigures(res.all) } };
+    const rows = await attendanceSummaryRows(trx, orgId, { from, to }, scope, { limit: q.pageSize, offset: (q.page - 1) * q.pageSize });
+    const all = await attendanceSummaryTotals(trx, orgId, { from, to }, scope);
+    const names = await namesOf(trx, orgId, [...new Set(rows.map((r) => r.branchId))], [...new Set(rows.map((r) => r.departmentId).filter((d): d is string => d !== null))]);
+    const data = rows.map((r): AttendanceSummaryRowDto => ({
+      ...figuresDto(r), employeeId: r.employeeId, employeeNumber: r.employeeNumber, employeeName: r.employeeName, branchId: r.branchId, branchName: names.branches.get(r.branchId) ?? null,
+      departmentId: r.departmentId, departmentName: r.departmentId ? names.departments.get(r.departmentId) ?? null : null,
+      source: r.finalizedAt ? 'FINALIZED' : 'LIVE', finalizedAt: isoDateTimeOrNull(r.finalizedAt),
+    }));
+    return { data, total: all.employees, meta: { month: q.month, from, to, totals: figuresDto(all.totals) } };
   });
 }
 
-/** Spreadsheet formula injection guard (AGENTS.md exports rule): text starting with = + - @ tab CR is prefixed with an apostrophe. */
-export function escapeSpreadsheetText(v: string): string {
-  return /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
-}
-
-const hours = (minutes: number): string => (minutes / 60).toFixed(2);
-
 /**
- * GET /attendance/summary/export — the same figures as CSV (UTF-8 with BOM, formula-safe cells, a TOTAL row). Gated by
- * report.export (declared for exactly this, enforced here), counted against an hourly organisation quota and audited with the
- * row count. The file is built synchronously: it is bounded by ATTENDANCE_SUMMARY_EXPORT_MAX_ROWS employees.
+ * POST /attendance/summary/export — the summary of the filtered set as a FILE, through the report pipeline (review defect 10,
+ * AGENTS.md rule 5: generating a report returns a job id). A `monthly_summary` report request owned by the caller is queued for
+ * the worker, which reads the SAME figures (`attendanceSummaryRows`) under the caller's scope written into the parameters — the
+ * branches of a branch-scoped caller (their days only, as RLS shows them), a line manager's team — and the file is downloaded
+ * from the Reports page (report.export again, owner-only signed URL, audited `report.exported` with the row count). Needs
+ * report.view + report.export; counted against the hourly organisation quota; audited here with the expected row count.
  */
-export async function exportSummary(deps: ApiDeps, actor: Actor, orgId: string, q: AttendanceSummaryExportQuery): Promise<AttendanceSummaryExportDto> {
-  const { grant, branchScope } = readScope(actor, orgId, q.branchId);
-  if (!hasPermission(grant, 'report.export')) throw errors.forbidden('Missing permission: report.export.');
+export async function exportSummary(deps: ApiDeps, actor: Actor, orgId: string, input: AttendanceSummaryExportInput): Promise<AttendanceSummaryExportDto> {
+  const { grant, branchScope } = readScope(actor, orgId, input.branchId);
+  const missing = (['report.view', 'report.export'] as const).filter((p) => !hasPermission(grant, p));
+  if (missing.length) throw errors.forbidden(`Missing permission: ${missing.join(', ')}.`);
+  const { from, to } = monthRange(input.month);
   return runUser(deps.db, actor, async (trx) => {
-    const res = await summaryRows(trx, orgId, q, branchScope, null);
-    if (res.rows.length > ATTENDANCE_SUMMARY_EXPORT_MAX_ROWS) throw errors.validation(`The export is limited to ${ATTENDANCE_SUMMARY_EXPORT_MAX_ROWS} employees; filter by branch or department.`, { rows: res.rows.length });
-    await systemStep(trx, orgId, (t) => consumeQuota(t, orgId, 'attendance_summary_exports', SUMMARY_EXPORTS_PER_HOUR));
-    const header = ['Employee No.', 'Employee', 'Branch', 'Department', 'Present', 'Late', 'Half day', 'On leave', 'Absent', 'Missed punch', 'Holidays', 'Weekly offs', 'Days worked', 'Worked hours', 'Overtime hours', 'Avg hours/day', 'LOP days', 'Unexcused days', 'Source'];
-    const line = (cells: Array<string | number>) => toCsvLine(cells.map((c) => (typeof c === 'number' ? c : escapeSpreadsheetText(c))));
-    const lines = [line(header)];
-    for (const r of res.rows) {
-      lines.push(line([r.employeeNumber, r.employeeName, r.branchName ?? '', r.departmentName ?? '', r.presentDays, r.lateDays, r.halfDays, r.leaveDays, r.absentDays, r.missingPunchDays, r.holidayDays, r.weeklyOffDays, r.daysWorked, hours(r.workedMinutes), hours(r.overtimeMinutes), hours(r.averageWorkedMinutes), r.lopDays, r.unexcusedDays, r.source]));
+    const settings = await loadSettings(trx, orgId);
+    if (settings.security.exportRequiresReason && !input.reason) throw errors.validation('This organisation requires a reason for exports.', { issues: [{ path: 'reason', message: 'Required' }] });
+    // the rows the caller sees on the page: refused up front when the file would be too large
+    const rowCount = await attendanceSummaryCount(trx, orgId, { from, to }, summaryScope(input, branchScope, null));
+    if (rowCount > ATTENDANCE_SUMMARY_EXPORT_MAX_ROWS) throw errors.validation(`The export is limited to ${ATTENDANCE_SUMMARY_EXPORT_MAX_ROWS} employees; filter by branch or department.`, { rows: rowCount });
+    // the worker runs in the organisation's system context: the caller's scope travels in the parameters (never widened)
+    const parameters: Record<string, unknown> = { month: input.month, finalizedFigures: hasPermission(grant, 'payroll.view') };
+    if (input.departmentId) parameters['departmentId'] = input.departmentId;
+    if (input.search) parameters['search'] = input.search;
+    let branchId: string | null = input.branchId ?? null;
+    let employeeIds: string[] | null = input.employeeId ? [input.employeeId] : null;
+    if (hasPermission(grant, 'attendance.view')) {
+      if (!grant.allBranches) {
+        if (!branchId) { if (grant.branchIds.length === 1) branchId = grant.branchIds[0]!; else parameters['branchIds'] = grant.branchIds; }
+        parameters['branchScope'] = grant.branchIds;
+      }
+    } else {
+      // attendance.view_team: the line manager's page = their direct reports and themselves
+      const team = [...new Set([...grant.teamEmployeeIds, ...(grant.employeeId ? [grant.employeeId] : [])])];
+      employeeIds = employeeIds ? employeeIds.filter((id) => team.includes(id)) : team;
     }
-    const t = sumFigures(res.all);
-    lines.push(line(['', 'TOTAL', '', '', t.presentDays, t.lateDays, t.halfDays, t.leaveDays, t.absentDays, t.missingPunchDays, t.holidayDays, t.weeklyOffDays, t.daysWorked, hours(t.workedMinutes), hours(t.overtimeMinutes), hours(t.averageWorkedMinutes), t.lopDays, t.unexcusedDays, '']));
-    await audit(trx, actor, orgId, 'attendance.summary_exported', 'attendance_daily_record', { branchId: q.branchId ?? null, newValue: { month: q.month, rowCount: res.rows.length, filters: { branchId: q.branchId ?? null, departmentId: q.departmentId ?? null, employeeId: q.employeeId ?? null, search: q.search ?? null } } });
-    // UTF-8 byte order mark first, so Excel opens Arabic names correctly
-    return { fileName: `attendance-summary-${q.month}.csv`, contentType: 'text/csv', content: `\uFEFF${lines.join('\r\n')}\r\n`, rowCount: res.rows.length };
+    if (branchId) parameters['branchId'] = branchId;
+    if (employeeIds) parameters['employeeIds'] = employeeIds;
+    await systemStep(trx, orgId, (t) => consumeQuota(t, orgId, 'attendance_summary_exports', SUMMARY_EXPORTS_PER_HOUR));
+    const row = await trx.insertInto('reportRequests').values({ organizationId: orgId, reportType: 'monthly_summary', format: input.format, parameters: JSON.stringify(parameters), status: 'QUEUED', requestedBy: actor.userId, branchId })
+      .returning('id').executeTakeFirstOrThrow();
+    const jobId = await enqueueJob(deps.queue, trx, { queue: 'reports', jobType: 'GENERATE_REPORT', organizationId: orgId, payload: { organizationId: orgId, reportRequestId: row.id }, correlationId: actor.requestId, priority: 5 });
+    await trx.updateTable('reportRequests').set({ queueJobId: jobId }).where('id', '=', row.id).execute();
+    await audit(trx, actor, orgId, 'attendance.summary_export_requested', 'report_request', {
+      entityId: row.id, branchId, reason: input.reason ?? null,
+      newValue: { reportType: 'monthly_summary', format: input.format, month: input.month, rowCount, jobId, filters: { branchId: input.branchId ?? null, departmentId: input.departmentId ?? null, employeeId: input.employeeId ?? null, search: input.search ?? null } },
+    });
+    return { reportId: row.id, jobId, status: 'QUEUED', reportType: 'monthly_summary', rowCount };
   });
 }
 
@@ -632,8 +583,10 @@ export async function listUnmatched(deps: ApiDeps, actor: Actor, orgId: string, 
     const data = groups.map((g): UnmatchedPunchGroupDto => {
       const device = scope.devices.get(g.deviceId);
       const branchId = g.branchId ?? device?.branchId ?? null;
+      const assignBlockedReason = unmatchedAssignBlockedReason(device?.providerKey ?? '');
       const suggestions: UnmatchedSuggestionDto[] = [];
-      for (const c of candidates) {
+      // no suggestions where Assign cannot work (connector / system device): the fix is elsewhere
+      for (const c of assignBlockedReason ? [] : candidates) {
         if (suggestions.length >= 3) break;
         if (c.deviceUserId === g.deviceEmployeeId) suggestions.push({ employeeId: c.id, employeeNumber: String(c.employeeNumber), displayName: c.displayName, reason: 'device_user_id' });
         else if (String(c.employeeNumber) === g.deviceEmployeeId) suggestions.push({ employeeId: c.id, employeeNumber: String(c.employeeNumber), displayName: c.displayName, reason: 'employee_number' });
@@ -641,6 +594,7 @@ export async function listUnmatched(deps: ApiDeps, actor: Actor, orgId: string, 
       return {
         deviceId: g.deviceId, deviceName: device?.name ?? null, deviceCode: device?.code ?? null, providerKey: device?.providerKey ?? '', branchId, branchName: branchId ? names.branches.get(branchId) ?? null : null,
         deviceEmployeeId: g.deviceEmployeeId, status: q.status, count: toCount(g.count), firstPunchAt: isoDateTime(g.firstPunchAt), lastPunchAt: isoDateTime(g.lastPunchAt), lastReceivedAt: isoDateTime(g.lastReceivedAt), suggestions,
+        assignBlockedReason,
       };
     });
     return { data, total };
@@ -659,17 +613,30 @@ async function requeueNormalize(deps: ApiDeps, trx: Trx, actor: Actor, orgId: st
   return enqueueJob(deps.queue, trx, { queue: 'processing', jobType: 'NORMALIZE_RAW', organizationId: orgId, payload: { organizationId: orgId }, dedupeKey: `normalize:${orgId}`, correlationId: actor.requestId, priority: 6 });
 }
 
+const ASSIGN_BLOCKED_MESSAGES: Record<UnmatchedAssignBlockedReason, string> = {
+  CONNECTOR_RESOLVES_BY_EMPLOYEE_NUMBER: 'Punches from the Flowza Finance connector are matched by employee number, not by a device mapping: fix the employee number in FlowZa Time or in Flowza Finance, then re-queue the punches from the Raw transactions tab.',
+  SELF_SERVICE_RESOLVES_BY_MEMBERSHIP: "Self-service punches are matched to the member's linked employee record, not by a device mapping: link the member to the employee (Users), then re-queue the punches from the Raw transactions tab.",
+};
+
 /**
  * POST /attendance/unmatched/assign — map a device user id to an employee on that device and re-queue its unmatched rows.
- * Writes the row the normaliser reads FIRST (`device_employee_states`, before provider identities and employees.device_user_id;
- * for Flowza Finance connectors right after the connector's own resolver), so the next normaliser run attributes the punches.
- * A device user id already mapped to someone else, or an employee already mapped to another id on the device, is a conflict —
- * never silently re-pointed. The mapping is `desired` (the person belongs on the device under this id).
+ * Writes the row the normaliser reads FIRST for a device (`device_employee_states`, before provider identities and
+ * employees.device_user_id), so the next normaliser run attributes the punches. A device user id already mapped to someone
+ * else, or an employee already mapped to another id on the device, is a conflict — never silently re-pointed. The mapping is
+ * `desired` (the person belongs on the device under this id).
+ *
+ * Refused (409 INVALID_STATE, `details.reason`) on devices whose punches never go through that mapping (review defect 4): the
+ * Flowza Finance connector resolves ONLY by employee number (normalize.ts, finance-identity.ts — review D7 of Prompt 9), the
+ * self-service device by the member's linked employee. A mapping there would be written, reported as a success, and never read.
+ * Ignore / Restore stay available on them: setting a group aside, or giving it back to the normaliser after the employee number
+ * was fixed, is meaningful for every device.
  */
 export async function assignUnmatched(deps: ApiDeps, actor: Actor, orgId: string, input: UnmatchedAssignInput): Promise<UnmatchedActionResultDto> {
   const grant = requirePermission(actor.principal, orgId, 'attendance.view_raw', 'device.sync');
   return runUser(deps.db, actor, async (trx) => {
     const device = await triageDevice(trx, orgId, grant, input.deviceId);
+    const blocked = unmatchedAssignBlockedReason(device.providerKey);
+    if (blocked) throw errors.invalidState(ASSIGN_BLOCKED_MESSAGES[blocked], { reason: blocked, providerKey: device.providerKey });
     const emp = await trx.selectFrom('employees').select(['id', 'branchId', 'displayName', 'deletedAt']).where('organizationId', '=', orgId).where('id', '=', input.employeeId).executeTakeFirst();
     if (!emp || emp.deletedAt) throw errors.validation('Employee not found.', { issues: [{ path: 'employeeId', message: 'Unknown employee' }] });
     requireBranchAccess(grant, emp.branchId);

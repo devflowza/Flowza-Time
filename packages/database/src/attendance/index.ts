@@ -4,3 +4,5 @@ export * from './day-marks.js';
 export * from './pay-effect.js';
 // The engine's daily input loader, shared by the worker's recompute and the API's record preview (HR portal Prompt 6a).
 export * from './load-inputs.js';
+// The monthly summary figures, shared by the API's summary page / month strip and the worker's monthly_summary report (Prompt 6a review).
+export * from './summary.js';

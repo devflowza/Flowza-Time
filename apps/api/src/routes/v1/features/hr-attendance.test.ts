@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from 'kysely';
+import { DateTime } from 'luxon';
 import { loadDailyInputs, withContext } from '@flowza/database';
 import { calculateDailyRecord, summarisePeriod } from '@flowza/domain';
 import { auditRows, createApiHarness, queueJobs, seedDevice, seedMembership, seedOrg, seedUser, uuid, ROLE, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
@@ -8,8 +9,9 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
 
 /**
  * HR attendance workspace (HR portal Prompt 6a): preview (no writes, equals the engine), record edits and bulk status through
- * the correction path, the Auto/Manual source, calendar, monthly summary (+ CSV behind report.export), the punch timeline and
- * the unmatched-punch triage; plus report.export enforced on report downloads and the employee export.
+ * the correction path, the Auto/Manual source, calendar, monthly summary (+ the queued `monthly_summary` report behind
+ * report.export), the punch timeline and the unmatched-punch triage; plus report.export enforced on report downloads and the
+ * employee export. Tests named `6a-…` are the regressions of the adversarial review (docs/hr-portal/reviews/06a-…).
  */
 let h: ApiHarness; let f: OrgFixture; let device: string;
 let lineManager: string; // role `manager`, linked to e3 (e1's manager): team scope, no report.export
@@ -195,22 +197,69 @@ describe('GET /attendance/summary', () => {
     expect(hrUser.body.data[0]).toMatchObject({ employeeId: f.e2, source: 'LIVE', presentDays: 1 });
   });
 
-  it('exports CSV only with report.export, formula-safe, with a TOTAL row, audited', async () => {
-    await h.admin.updateTable('employees').set({ displayName: '=HYPERLINK("x")' }).where('id', '=', f.e3).execute();
-    const csv = await h.request('GET', `${base()}/attendance/summary/export?month=${MONTH}`, { token: f.hrUser });
-    expect(csv.status).toBe(200);
-    const content = csv.body.data.content as string;
-    expect(content.charCodeAt(0)).toBe(0xfeff);
-    const lines = content.trim().split('\r\n');
-    expect(lines[0]).toContain('Employee No.,Employee,Branch');
-    expect(lines).toHaveLength(1 + 3 + 1);
-    expect(content).toContain(`'=HYPERLINK`);
-    expect(lines[lines.length - 1]).toContain('TOTAL');
-    expect(csv.body.data.rowCount).toBe(3);
-    const audit = await auditRows(h.admin, 'attendance.summary_exported');
-    expect(audit[0]?.newValue).toMatchObject({ month: MONTH, rowCount: 3 });
-    const manager = await h.request('GET', `${base()}/attendance/summary/export?month=${MONTH}`, { token: lineManager });
-    expect(manager.status).toBe(403);
+  it('6a-D10 the export is a queued monthly_summary report (202 + report id), report.view + report.export, audited', async () => {
+    const res = await h.request('POST', `${base()}/attendance/summary/export`, { token: f.hrUser, body: { month: MONTH } });
+    expect(res.status).toBe(202);
+    expect(res.body.data).toMatchObject({ status: 'QUEUED', reportType: 'monthly_summary', rowCount: 3 });
+    const req = await h.admin.selectFrom('reportRequests').selectAll().where('id', '=', res.body.data.reportId).executeTakeFirstOrThrow();
+    expect(req).toMatchObject({ reportType: 'monthly_summary', format: 'csv', status: 'QUEUED', requestedBy: f.hrUser });
+    expect(req.parameters).toMatchObject({ month: MONTH, finalizedFigures: false });
+    const job = (await queueJobs(h.admin, 'GENERATE_REPORT')).find((j) => j.payload['reportRequestId'] === res.body.data.reportId);
+    expect(job?.id).toBe(res.body.data.jobId);
+    expect((await auditRows(h.admin, 'attendance.summary_export_requested'))[0]?.newValue).toMatchObject({ month: MONTH, rowCount: 3, reportType: 'monthly_summary' });
+    // the file is fetched from the Reports page like every report: the requester's own copy
+    const mine = await h.request('GET', `${base()}/reports/${res.body.data.reportId}`, { token: f.hrUser });
+    expect(mine.status).toBe(200);
+    // a branch-scoped caller's scope travels with the request (the worker runs in the organisation's system context)
+    const bm = await h.request('POST', `${base()}/attendance/summary/export`, { token: f.branchManagerB, body: { month: MONTH, search: 'Employee' } });
+    expect(bm.status).toBe(202);
+    const bmReq = await h.admin.selectFrom('reportRequests').select(['parameters', 'branchId']).where('id', '=', bm.body.data.reportId).executeTakeFirstOrThrow();
+    expect(bmReq.parameters).toMatchObject({ month: MONTH, branchId: f.branchB, branchScope: [f.branchB], search: 'Employee' });
+    expect(bmReq.branchId).toBe(f.branchB);
+    // no report.export → refused; the synchronous GET is gone
+    expect((await h.request('POST', `${base()}/attendance/summary/export`, { token: lineManager, body: { month: MONTH } })).status).toBe(403);
+    expect((await h.request('GET', `${base()}/attendance/summary/export?month=${MONTH}`, { token: f.hrUser })).status).toBe(404);
+  });
+
+  it('6a-D10 a line manager with report.export exports their team (+ self) only', async () => {
+    const roleId = uuid('9');
+    await withContext(h.tdb.db, { kind: 'system', organizationId: f.orgId }, async (trx) => {
+      await trx.insertInto('roles').values({ id: roleId, organizationId: f.orgId, key: 'team_exporter', name: 'Team exporter', isSystem: false }).execute();
+      await trx.insertInto('rolePermissions').values(['attendance.view_team', 'report.view', 'report.export'].map((permissionKey) => ({ roleId, permissionKey }))).execute();
+    });
+    const lead = uuid('c'); await seedUser(h.admin, lead, 'team-exporter-hrws@test.local', 'Team exporter'); await seedMembership(h.admin, f.orgId, lead, roleId, { employeeId: f.e3 });
+    const res = await h.request('POST', `${base()}/attendance/summary/export`, { token: lead, body: { month: MONTH } });
+    expect(res.status).toBe(202);
+    expect(res.body.data.rowCount).toBe(2);
+    const req = await h.admin.selectFrom('reportRequests').select('parameters').where('id', '=', res.body.data.reportId).executeTakeFirstOrThrow();
+    expect(((req.parameters as { employeeIds: string[] }).employeeIds).sort()).toEqual([f.e1, f.e3].sort());
+  });
+
+  it('6a-D9 pages in SQL: each page carries its rows, the totals always cover the whole filtered set', async () => {
+    const all = await h.request('GET', `${base()}/attendance/summary?month=${MONTH}&pageSize=200`, { token: f.hrAdmin });
+    const pages = await Promise.all([1, 2, 3, 4].map((page) => h.request('GET', `${base()}/attendance/summary?month=${MONTH}&page=${page}&pageSize=1`, { token: f.hrAdmin })));
+    expect(pages.map((p) => p.body.data.length)).toEqual([1, 1, 1, 0]);
+    expect(pages.flatMap((p) => p.body.data.map((r: { employeeId: string }) => r.employeeId))).toEqual(all.body.data.map((r: { employeeId: string }) => r.employeeId));
+    for (const p of pages) {
+      expect(p.body.meta.total).toBe(3);
+      expect(p.body.meta.totals).toEqual(all.body.meta.totals);
+    }
+  });
+
+  it('6a-D8 the month strip reads the same summary: a view_own caller gets exactly their own row', async () => {
+    const own = await h.request('GET', `${base()}/attendance/summary?month=${MONTH}&pageSize=1`, { token: f.employeeUser });
+    expect(own.status).toBe(200);
+    expect(own.body.data.map((r: { employeeId: string }) => r.employeeId)).toEqual([f.e1]);
+    const hr = await h.request('GET', `${base()}/attendance/summary?month=${MONTH}&employeeId=${f.e1}`, { token: f.hrAdmin });
+    const { branchName: _b, departmentName: _d, ...ownFigures } = own.body.data[0];
+    const { branchName: _b2, departmentName: _d2, ...hrFigures } = hr.body.data[0];
+    expect(ownFigures).toEqual(hrFigures);
+    expect(own.body.data[0]).toMatchObject({ presentDays: 3, absentDays: 1.5, leaveDays: 1.5 });
+    // somebody else's row stays out of reach
+    const other = await h.request('GET', `${base()}/attendance/summary?month=${MONTH}&employeeId=${f.e2}`, { token: f.employeeUser });
+    expect(other.body.data).toEqual([]);
+    // the calendar (a register surface) stays closed to view_own callers
+    expect((await h.request('GET', `${base()}/attendance/calendar?month=${MONTH}`, { token: f.employeeUser })).status).toBe(403);
   });
 });
 
@@ -313,5 +362,126 @@ describe('report.export is enforced where the app exports (backward compatibilit
     expect(denied.status).toBe(403);
     const owner = await h.request('POST', `${base()}/employees/bulk`, { token: f.owner, body: { action: 'export', format: 'csv' } });
     expect([200, 202]).toContain(owner.status);
+  });
+});
+
+describe('6a-D4 unmatched punches on a Flowza Finance connector', () => {
+  let finance: string;
+  beforeAll(async () => {
+    finance = await seedDevice(h.admin, f.orgId, f.branchA, { providerKey: 'flowza_finance', code: 'HRWS-FIN' });
+    // an employee whose device user id equals the Finance identity: never a suggestion on the connector
+    await h.admin.updateTable('employees').set({ deviceUserId: 'FIN-777' }).where('id', '=', f.e2).execute();
+    for (let i = 0; i < 2; i += 1) {
+      await sql`insert into public.attendance_raw_transactions (organization_id, device_id, branch_id, provider_key, device_employee_id, punched_at, dedupe_hash, source, processing_status)
+        values (${f.orgId}::uuid, ${finance}::uuid, null, 'flowza_finance', 'FIN-777', ${`2026-08-06T05:0${i}:00Z`}, ${`fin-777-${i}`}, 'POLL', 'unmatched')`.execute(h.admin);
+    }
+    // a control group on an ordinary device: Assign stays available there
+    await sql`insert into public.attendance_raw_transactions (organization_id, device_id, branch_id, provider_key, device_employee_id, punched_at, dedupe_hash, source, processing_status)
+      values (${f.orgId}::uuid, ${device}::uuid, null, 'mock', '7777', '2026-08-06T06:00:00Z', 'um-7777-0', 'POLL', 'unmatched')`.execute(h.admin);
+  });
+
+  it('6a-D4 lists the group with the reason Assign cannot work and no suggestions', async () => {
+    const res = await h.request('GET', `${base()}/attendance/unmatched?deviceId=${finance}`, { token: f.hrAdmin });
+    expect(res.status).toBe(200);
+    expect(res.body.data).toEqual([expect.objectContaining({ deviceEmployeeId: 'FIN-777', providerKey: 'flowza_finance', count: 2, assignBlockedReason: 'CONNECTOR_RESOLVES_BY_EMPLOYEE_NUMBER', suggestions: [] })]);
+    const normal = await h.request('GET', `${base()}/attendance/unmatched?deviceId=${device}`, { token: f.hrAdmin });
+    expect(normal.body.data.find((g: { deviceEmployeeId: string }) => g.deviceEmployeeId === '7777')).toMatchObject({ providerKey: 'mock', assignBlockedReason: null });
+  });
+
+  it('6a-D4 refuses Assign with 409 INVALID_STATE and writes no device mapping; Ignore / Restore still work', async () => {
+    const res = await h.request('POST', `${base()}/attendance/unmatched/assign`, { token: f.hrAdmin, body: { deviceId: finance, deviceEmployeeId: 'FIN-777', employeeId: f.e2 } });
+    expect(res.status).toBe(409);
+    expect(res.body).toMatchObject({ code: 'INVALID_STATE', details: { reason: 'CONNECTOR_RESOLVES_BY_EMPLOYEE_NUMBER' } });
+    expect(res.body.message).toMatch(/employee number/i);
+    expect(await h.admin.selectFrom('deviceEmployeeStates').select('id').where('deviceId', '=', finance).execute()).toEqual([]);
+    const statuses = (await h.admin.selectFrom('attendanceRawTransactions').select('processingStatus').where('deviceId', '=', finance).execute()).map((r) => r.processingStatus);
+    expect(statuses).toEqual(['unmatched', 'unmatched']);
+    const ignore = await h.request('POST', `${base()}/attendance/unmatched/ignore`, { token: f.hrAdmin, body: { deviceId: finance, deviceEmployeeId: 'FIN-777', reason: 'Not on FlowZa Time yet' } });
+    expect(ignore.status).toBe(200);
+    expect(ignore.body.data.rows).toBe(2);
+    const restore = await h.request('POST', `${base()}/attendance/unmatched/restore`, { token: f.hrAdmin, body: { deviceId: finance, deviceEmployeeId: 'FIN-777' } });
+    expect(restore.status).toBe(200);
+    expect(restore.body.data.rows).toBe(2);
+  });
+});
+
+describe('6a-D2 a day belongs to the branch that owned it (transfers)', () => {
+  let e5: string; let hrA: string;
+  const B_DAY = '2026-08-10'; const A_DAY = '2026-08-20';
+  beforeAll(async () => {
+    // e5 worked in branch B until 2026-08-15 and in branch A since; the 10th belongs to B, the 20th to A
+    e5 = uuid('e');
+    await h.admin.insertInto('employees').values({ id: e5, organizationId: f.orgId, branchId: f.branchA, employeeNumber: 'EMP5', firstName: 'First5', lastName: 'Last5', displayName: 'Employee 5', joiningDate: '2024-01-01', deviceUserId: '1005' }).execute();
+    await h.admin.insertInto('employmentHistory').values([
+      { organizationId: f.orgId, employeeId: e5, effectiveFrom: '2024-01-01', effectiveTo: '2026-08-15', branchId: f.branchB, departmentId: null, designationId: null, managerEmployeeId: null, employmentType: 'full_time', employmentStatus: 'active', reason: 'Joined' },
+      { organizationId: f.orgId, employeeId: e5, effectiveFrom: '2026-08-15', effectiveTo: null, branchId: f.branchA, departmentId: null, designationId: null, managerEmployeeId: null, employmentType: 'full_time', employmentStatus: 'active', reason: 'Transfer' },
+    ]).execute();
+    await h.admin.insertInto('attendanceDailyRecords').values([rec(e5, f.branchB, B_DAY, 'PRESENT', [], 485), rec(e5, f.branchA, A_DAY, 'PRESENT', [], 480)]).execute();
+    hrA = uuid('c'); await seedUser(h.admin, hrA, 'hr-branch-a-hrws@test.local', 'HR branch A'); await seedMembership(h.admin, f.orgId, hrA, ROLE.hr_admin, { branchIds: [f.branchA] });
+  });
+
+  it('6a-D2 a branch-A HR admin can neither preview nor edit the branch-B day of an employee who moved to A', async () => {
+    const preview = await h.request('POST', `${base()}/attendance/preview`, { token: hrA, body: { employeeId: e5, date: B_DAY } });
+    expect([403, 404]).toContain(preview.status);
+    expect(preview.body.data).toBeUndefined();
+    const edit = await h.request('POST', `${base()}/attendance/record-edits`, { token: hrA, body: { employeeId: e5, date: B_DAY, status: 'ABSENT', reason: 'Transfer probe' } });
+    expect(edit.status).toBe(403);
+    // the Corrections page's own door (createCorrection) refuses the same day
+    const correction = await h.request('POST', `${base()}/attendance/corrections`, { token: hrA, body: { employeeId: e5, attendanceDate: B_DAY, type: 'SET_STATUS', proposedStatus: 'ABSENT', reason: 'Transfer probe' } });
+    expect(correction.status).toBe(403);
+    expect(await h.admin.selectFrom('attendanceCorrections').select('id').where('employeeId', '=', e5).where('attendanceDate', '=', sql<Date>`${B_DAY}::date`).execute()).toEqual([]);
+  });
+
+  it('6a-D2 bulk status refuses the branch-B item and applies the branch-A one', async () => {
+    const res = await h.request('POST', `${base()}/attendance/bulk-status`, { token: hrA, body: { status: 'ABSENT', reason: 'Transfer probe', items: [{ employeeId: e5, date: B_DAY }, { employeeId: e5, date: A_DAY }] } });
+    expect(res.status).toBe(200);
+    expect(res.body.data.results[0]).toMatchObject({ ok: false, error: { code: 'FORBIDDEN' } });
+    expect(res.body.data.results[1]).toMatchObject({ ok: true, approval: 'AUTO_APPROVED' });
+  });
+
+  it('6a-D2 the same-branch day and an unrestricted HR admin still work', async () => {
+    const own = await h.request('POST', `${base()}/attendance/preview`, { token: hrA, body: { employeeId: e5, date: A_DAY } });
+    expect(own.status).toBe(200);
+    const unrestricted = await h.request('POST', `${base()}/attendance/preview`, { token: f.hrAdmin, body: { employeeId: e5, date: B_DAY } });
+    expect(unrestricted.status).toBe(200);
+    expect(unrestricted.body.data.current.workedMinutes).toBeGreaterThanOrEqual(0);
+  });
+});
+
+describe('6a-D6 statuses and punches only inside today and the employment', () => {
+  let leaver: string;
+  const muscat = () => DateTime.now().setZone('Asia/Muscat');
+  beforeAll(async () => {
+    leaver = uuid('e');
+    await h.admin.insertInto('employees').values({ id: leaver, organizationId: f.orgId, branchId: f.branchA, employeeNumber: 'EMP6', firstName: 'First6', lastName: 'Last6', displayName: 'Employee 6', joiningDate: '2024-01-01', exitDate: '2026-08-31', deviceUserId: '1006' }).execute();
+  });
+
+  it('6a-D6 bulk status: a future date, a date before joining and a date after exit are refused per item', async () => {
+    const tomorrow = muscat().plus({ days: 1 }).toISODate()!;
+    const today = muscat().toISODate()!;
+    const res = await h.request('POST', `${base()}/attendance/bulk-status`, { token: f.hrAdmin, body: { status: 'PRESENT', reason: 'Date window probe', items: [
+      { employeeId: f.e2, date: tomorrow }, { employeeId: f.e2, date: '2023-06-01' }, { employeeId: leaver, date: '2026-09-05' }, { employeeId: leaver, date: '2026-08-31' }, { employeeId: f.e2, date: today },
+    ] } });
+    expect(res.status).toBe(200);
+    const r = res.body.data.results;
+    expect(r[0]).toMatchObject({ ok: false, error: { code: 'VALIDATION_ERROR' } });
+    expect(r[0].error.message).toMatch(/future/i);
+    expect(r[1]).toMatchObject({ ok: false, error: { code: 'VALIDATION_ERROR' } });
+    expect(r[1].error.message).toMatch(/before the employee joined/i);
+    expect(r[2]).toMatchObject({ ok: false, error: { code: 'VALIDATION_ERROR' } });
+    expect(r[2].error.message).toMatch(/after the employee left/i);
+    expect(r[3]).toMatchObject({ ok: true });
+    expect(r[4]).toMatchObject({ ok: true });
+  });
+
+  it('6a-D6 record edits and the Corrections page refuse a future date (organisation timezone)', async () => {
+    const tomorrow = muscat().plus({ days: 1 }).toISODate()!;
+    const edit = await h.request('POST', `${base()}/attendance/record-edits`, { token: f.hrAdmin, body: { employeeId: f.e2, date: tomorrow, status: 'PRESENT', reason: 'Future probe' } });
+    expect(edit.status).toBe(400);
+    const addPunch = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrAdmin, body: { employeeId: f.e2, attendanceDate: tomorrow, type: 'ADD_PUNCH', proposedPunchedAt: `${tomorrow}T04:00:00Z`, proposedEventType: 'PUNCH_IN', reason: 'Future probe' } });
+    expect(addPunch.status).toBe(400);
+    const beforeJoin = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrAdmin, body: { employeeId: f.e2, attendanceDate: '2023-12-31', type: 'SET_STATUS', proposedStatus: 'PRESENT', reason: 'Before joining' } });
+    expect(beforeJoin.status).toBe(400);
+    expect(await h.admin.selectFrom('attendanceCorrections').select('id').where('employeeId', '=', f.e2).where('attendanceDate', 'in', [sql<Date>`${tomorrow}::date`, sql<Date>`'2023-12-31'::date`]).execute()).toEqual([]);
   });
 });
