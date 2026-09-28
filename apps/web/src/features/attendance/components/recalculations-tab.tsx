@@ -1,11 +1,10 @@
 import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
-import { Link } from 'react-router';
+import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Calculator, ExternalLink } from 'lucide-react';
+import { Calculator } from 'lucide-react';
 import { DataTable } from '@/components/data-table';
-import { Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
-import { buttonVariants } from '@/components/ui/button';
+import { Badge, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 import { useCan, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
@@ -14,6 +13,7 @@ import { useRecalculations } from '../api';
 import type { RecalculationDto } from '../types';
 import { JobStatusBadge } from './badges';
 import { RecalculateDialog } from './recalculate-dialog';
+import '../workspace-i18n';
 
 const ALL = '__all__';
 const STATUSES = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'CANCELLED'];
@@ -29,16 +29,21 @@ export function RecalculationsTab() {
   const q = useRecalculations(query);
   const branches = useBranchOptions();
   const [open, setOpen] = useState(false);
+  const { t: tw } = useTranslation('attendanceWorkspace');
+  // ?request=<id>: the recalculation a "Queued" toast pointed at (Sync punches / Recalculate), badged in the list
+  const [params] = useSearchParams();
+  const highlighted = params.get('request');
 
   const columns = useMemo<ColumnDef<RecalculationDto, unknown>[]>(() => [
-    { id: 'range', header: t('recalc.range'), cell: ({ row }) => <span className="whitespace-nowrap tnum">{fmtDate(row.original.fromDate)} → {fmtDate(row.original.toDate)}</span> },
+    { id: 'range', header: t('recalc.range'), cell: ({ row }) => <span className="inline-flex flex-wrap items-center gap-1.5 whitespace-nowrap tnum" data-highlighted={row.original.id === highlighted || undefined}>{fmtDate(row.original.fromDate)} → {fmtDate(row.original.toDate)}{row.original.id === highlighted ? <Badge variant="info" className="text-[10px]">{tw('sync.thisRequest')}</Badge> : null}</span> },
     { id: 'scope', header: t('recalc.scope'), cell: ({ row }) => { const r = row.original; const parts = [r.branchId ? branches.byId.get(r.branchId)?.name ?? t('recalc.oneBranch') : t('recalc.allBranches'), r.employeeIds?.length ? t('recalc.nEmployees', { count: r.employeeIds.length }) : null].filter(Boolean); return <span className="text-xs">{parts.join(' · ')}</span>; } },
     { id: 'reason', header: t('recalc.reason'), cell: ({ row }) => <span className="block max-w-[260px] truncate text-xs" title={row.original.reason}>{row.original.reason}</span> },
     { id: 'status', header: tc('common.status'), cell: ({ row }) => <div className="flex flex-col gap-0.5"><JobStatusBadge status={row.original.status} />{row.original.summary && typeof row.original.summary['recordsUpdated'] === 'number' ? <span className="text-[11px] text-muted-foreground tnum">{t('recalc.recordsUpdated', { count: Number(row.original.summary['recordsUpdated']) })}</span> : null}</div> },
     { id: 'requestedBy', header: t('recalc.requestedBy'), cell: ({ row }) => <span className="text-xs">{row.original.requestedByName ?? '—'}</span> },
     { id: 'createdAt', header: tc('common.createdAt'), cell: ({ row }) => <span className="whitespace-nowrap text-xs tnum">{fmtDateTime(row.original.createdAt, tz)}</span> },
-    { id: 'job', header: t('recalc.job'), cell: ({ row }) => row.original.jobId ? <Link to={`/sync/${row.original.jobId}`} onClick={(e) => e.stopPropagation()} className={buttonVariants({ variant: 'link', size: 'sm', className: 'h-auto p-0' })}>{t('recalc.viewJob')} <ExternalLink className="size-3" /></Link> : '—' },
-  ], [t, tc, tz, branches.byId]);
+    // a queue job id, not a sync job: /sync/:id cannot show it, so the id is shown for support and the status column tracks it
+    { id: 'job', header: t('recalc.job'), cell: ({ row }) => row.original.jobId ? <span className="font-mono text-[11px] text-muted-foreground" dir="ltr" title={tw('sync.jobIdHint')}>#{row.original.jobId}</span> : '—' },
+  ], [t, tc, tw, tz, branches.byId, highlighted]);
 
   return (
     <div className="space-y-3">

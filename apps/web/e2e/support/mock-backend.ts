@@ -99,6 +99,69 @@ export const branchesFixture = [
   { id: BRANCH_B, organizationId: ORG_ID, code: 'SOH', name: 'Sohar Plant', nameAr: 'صحار', countryCode: 'OM', city: 'Sohar', address: {}, timezone: 'Asia/Muscat', latitude: null, longitude: null, geofenceRadiusM: null, contact: {}, weeklyOffDays: null, holidayCalendarId: null, status: 'active', employeeCount: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
 ];
 
+// ---- HR attendance workspace (HR portal Prompt 6a) ------------------------------------------------------------------------------
+/** "Today" of the workspace fixtures: the calendar's today ring and the last day HR may add a record for. */
+export const WORKSPACE_TODAY = '2026-09-20';
+const outcome = (over: Record<string, unknown> = {}) => ({ status: 'ABSENT', flags: [], firstInAt: null, lastOutAt: null, workedMinutes: 0, breakMinutes: 0, lateMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 0, scheduledMinutes: 540, punchCount: 0, lopDays: 0, ...over });
+const calendarDay = (recordId: string, date: string, over: Record<string, unknown> = {}) => ({
+  recordId, status: 'PRESENT', flags: [], statusSource: 'AUTO', firstInAt: `${date}T04:02:00Z`, lastOutAt: `${date}T13:05:00Z`, workedMinutes: 543, lateMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 0, timezone: 'Asia/Muscat', ...over,
+});
+/** One month of the calendar register: working days present, a late day, a manual absence, weekly offs; Salim's 14th left empty. */
+export function calendarFixture(month = '2026-09') {
+  const rows = employeesFixture.map((e, i) => {
+    const days: Record<string, unknown> = {};
+    for (let d = 1; d <= 19; d += 1) {
+      const date = `${month}-${String(d).padStart(2, '0')}`;
+      const dow = new Date(`${date}T00:00:00Z`).getUTCDay();
+      if (d === 14 && i === 0) continue; // no record: HR adds it in the scenario
+      if (dow === 5 || dow === 6) days[date] = calendarDay(`rec-${i}-${d}`, date, { status: 'WEEKLY_OFF', firstInAt: null, lastOutAt: null, workedMinutes: 0 });
+      else if (d === 8) days[date] = calendarDay(`rec-${i}-${d}`, date, { flags: ['LATE'], lateMinutes: 17, firstInAt: `${date}T04:17:00Z` });
+      else if (d === 9 && i === 1) days[date] = calendarDay(`rec-${i}-${d}`, date, { status: 'ABSENT', statusSource: 'MANUAL', firstInAt: null, lastOutAt: null, workedMinutes: 0, flags: ['MANUAL_CORRECTION'] });
+      else days[date] = calendarDay(`rec-${i}-${d}`, date);
+    }
+    return { employeeId: e.id, employeeNumber: e.employeeNumber, employeeName: e.displayName, branchId: e.branchId, departmentId: null, joiningDate: e.joiningDate, exitDate: null, days };
+  });
+  return { data: rows, meta: { page: 1, pageSize: 12, total: rows.length, totalPages: 1, month, days: [], today: WORKSPACE_TODAY } };
+}
+/** POST /attendance/preview: the empty day as the engine sees it, then the proposed check-in / check-out. */
+export function previewFixture(body: { employeeId: string; date: string; inAt?: string | null; outAt?: string | null }) {
+  const e = employeesFixture.find((x) => x.id === body.employeeId) ?? employeesFixture[0]!;
+  const proposed = !!(body.inAt || body.outAt);
+  const plan = [
+    ...(body.inAt ? [{ type: 'ADD_PUNCH', originalEventId: null, originalPunchedAt: null, proposedPunchedAt: body.inAt, proposedEventType: 'PUNCH_IN', proposedStatus: null }] : []),
+    ...(body.outAt ? [{ type: 'ADD_PUNCH', originalEventId: null, originalPunchedAt: null, proposedPunchedAt: body.outAt, proposedEventType: 'PUNCH_OUT', proposedStatus: null }] : []),
+  ];
+  return {
+    data: {
+      employeeId: e.id, employeeNumber: e.employeeNumber, employeeName: e.displayName, date: body.date, timezone: 'Asia/Muscat', recordId: null,
+      shift: { id: '99999999-9999-4999-8999-000000000001', code: 'DAY', name: 'Day shift', expectedStartAt: `${body.date}T04:00:00Z`, expectedEndAt: `${body.date}T13:00:00Z`, scheduledMinutes: 540 },
+      current: outcome(),
+      preview: proposed ? outcome({ status: 'PRESENT', firstInAt: body.inAt ?? null, lastOutAt: body.outAt ?? null, workedMinutes: 510, punchCount: 2, flags: ['EARLY_DEPARTURE'], earlyDepartureMinutes: 30 }) : outcome(),
+      statusSource: 'AUTO', manualStatus: null, punches: { in: null, out: null }, plan, pendingCorrections: 0, locked: false,
+    },
+  };
+}
+const summaryFigures = (present: number, late: number, absent: number) => ({ presentDays: present, lateDays: late, halfDays: 0, leaveDays: 1, absentDays: absent, missingPunchDays: 0, holidayDays: 0, weeklyOffDays: 4, daysWorked: present, workedMinutes: present * 540, overtimeMinutes: 45, averageWorkedMinutes: 540, lopDays: 0, unexcusedDays: absent, pendingDays: 0, recordCount: 19 });
+export function summaryFixture(month = '2026-09') {
+  const rows = employeesFixture.map((e, i) => ({ ...summaryFigures(13 - i, i, i), employeeId: e.id, employeeNumber: e.employeeNumber, employeeName: e.displayName, branchId: e.branchId, branchName: e.branchName, departmentId: null, departmentName: 'Operations', source: 'LIVE', finalizedAt: null }));
+  const totals = rows.reduce((acc, r) => ({ ...acc, presentDays: acc.presentDays + r.presentDays, lateDays: acc.lateDays + r.lateDays, absentDays: acc.absentDays + r.absentDays, leaveDays: acc.leaveDays + r.leaveDays, workedMinutes: acc.workedMinutes + r.workedMinutes, overtimeMinutes: acc.overtimeMinutes + r.overtimeMinutes }), summaryFigures(0, 0, 0));
+  return { data: rows, meta: { page: 1, pageSize: 50, total: rows.length, totalPages: 1, month, from: `${month}-01`, to: `${month}-30`, totals } };
+}
+/** GET / POST handlers of the HR attendance workspace, to spread into installMockBackend's options. */
+export function hrWorkspaceHandlers(): { get: NonNullable<MockBackendOptions['get']>; post: NonNullable<MockBackendOptions['post']> } {
+  return {
+    get: {
+      [`/orgs/${ORG_ID}/attendance/calendar`]: (url: URL) => calendarFixture(url.searchParams.get('month') ?? '2026-09'),
+      [`/orgs/${ORG_ID}/attendance/summary`]: (url: URL) => summaryFixture(url.searchParams.get('month') ?? '2026-09'),
+      [`/orgs/${ORG_ID}/attendance/manual-statuses`]: { data: [] },
+    },
+    post: {
+      [`/orgs/${ORG_ID}/attendance/preview`]: (body) => ({ body: previewFixture(body as Parameters<typeof previewFixture>[0]) }),
+      [`/orgs/${ORG_ID}/attendance/record-edits`]: () => ({ status: 201, body: { data: { corrections: [{ id: 'c-in', type: 'ADD_PUNCH', status: 'APPROVED', approval: 'AUTO_APPROVED' }, { id: 'c-out', type: 'ADD_PUNCH', status: 'APPROVED', approval: 'AUTO_APPROVED' }], applied: true, failed: null, unchanged: 0 } } }),
+    },
+  };
+}
+
 export const page = <T,>(data: T[], pageNo = 1, pageSize = 25) => ({ data, meta: { page: pageNo, pageSize, total: data.length, totalPages: Math.max(1, Math.ceil(data.length / pageSize)) } });
 
 export interface MockBackendOptions {

@@ -116,7 +116,8 @@ export async function getReport(deps: ApiDeps, actor: Actor, orgId: string, id: 
   return runUser(deps.db, actor, async (trx) => toReportDto(await loadReport(trx, actor, orgId, id, grant)));
 }
 export async function downloadReport(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<{ url: string; expiresInSeconds: number; fileName: string }> {
-  const grant = requirePermission(actor.principal, orgId, 'report.view');
+  // a download IS the export: report.export was declared for it and is enforced here (HR portal Prompt 6a), on top of report.view
+  const grant = requirePermission(actor.principal, orgId, 'report.view', 'report.export');
   return runUser(deps.db, actor, async (trx) => {
     const r = await loadReport(trx, actor, orgId, id, grant);
     if (r.status !== 'COMPLETED' || !r.filePath) throw errors.invalidState(`The report is ${r.status}; only completed reports can be downloaded.`);

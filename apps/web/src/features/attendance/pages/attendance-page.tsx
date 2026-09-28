@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useNavigate, useSearchParams } from 'react-router';
-import { Calculator, ClipboardPlus } from 'lucide-react';
+import { Calculator, ClipboardPlus, FilePlus2 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { Button, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { useCan } from '@/features/me/use-me';
@@ -13,13 +13,19 @@ import { RecalculationsTab } from '../components/recalculations-tab';
 import { PeriodLocksTab } from '../components/period-locks-tab';
 import { RecalculateDialog } from '../components/recalculate-dialog';
 import type { CorrectionPreset } from '../components/record-dialog';
+import { CalendarView } from '../components/calendar-view';
+import { SyncPunchesButton } from '../components/sync-punches-button';
+import { HR_EDIT_PERMISSIONS } from '../components/workspace-dialogs';
+import { RecordEditDialog } from '../components/record-edit-dialog';
+import '../workspace-i18n';
 
-const TABS = ['daily', 'monthly', 'raw', 'recalc', 'periods'] as const;
+const TABS = ['daily', 'monthly', 'calendar', 'raw', 'recalc', 'periods'] as const;
 type Tab = (typeof TABS)[number];
 
-/** /attendance?tab=daily|monthly|raw|recalc|periods — filters live in the same URL (shareable views). */
+/** /attendance?tab=daily|monthly|calendar|raw|recalc|periods — filters live in the same URL (shareable views). */
 export default function AttendancePage() {
   const { t } = useTranslation('attendance');
+  const { t: tw } = useTranslation('attendanceWorkspace');
   const can = useCan();
   const navigate = useNavigate();
   const [params, setParams] = useSearchParams();
@@ -28,6 +34,8 @@ export default function AttendancePage() {
   const tab: Tab = (visible as readonly string[]).includes(requested) ? (requested as Tab) : 'daily';
   const [correction, setCorrection] = useState<{ open: boolean; preset?: CorrectionPreset }>({ open: false });
   const [recalcOpen, setRecalcOpen] = useState(false);
+  const [addKey, setAddKey] = useState(0);
+  const [addOpen, setAddOpen] = useState(false);
   const setTab = (v: string) => setParams((prev) => { const n = new URLSearchParams(prev); n.set('tab', v); n.delete('page'); return n; });
   const requestCorrection = (preset?: CorrectionPreset) => setCorrection({ open: true, preset });
 
@@ -35,22 +43,26 @@ export default function AttendancePage() {
     <div className="page-container">
       <PageHeader title={t('title')} description={t('subtitle')} actions={
         <>
+          {can('attendance.recalculate') ? <SyncPunchesButton /> : null}
           {can('attendance.recalculate') ? <Button variant="outline" size="sm" onClick={() => setRecalcOpen(true)}><Calculator /> {t('recalc.title')}</Button> : null}
+          {can(...HR_EDIT_PERMISSIONS) ? <Button variant="outline" size="sm" onClick={() => { setAddKey((k) => k + 1); setAddOpen(true); }}><FilePlus2 /> {tw('edit.titleAdd')}</Button> : null}
           {can('attendance.correct') ? <Button size="sm" onClick={() => requestCorrection()}><ClipboardPlus /> {t('record.requestCorrection')}</Button> : null}
         </>
       } />
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList aria-label={t('title')} className="max-w-full overflow-x-auto">
-          {visible.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`tabs.${tb}`)}</TabsTrigger>)}
+          {visible.map((tb) => <TabsTrigger key={tb} value={tb}>{tb === 'calendar' ? tw('tabs.calendar') : t(`tabs.${tb}`)}</TabsTrigger>)}
         </TabsList>
         <TabsContent value="daily">{tab === 'daily' ? <DailyView onRequestCorrection={can('attendance.correct') ? requestCorrection : undefined} /> : null}</TabsContent>
         <TabsContent value="monthly">{tab === 'monthly' ? <MonthlyView onRequestCorrection={can('attendance.correct') ? requestCorrection : undefined} /> : null}</TabsContent>
+        <TabsContent value="calendar">{tab === 'calendar' ? <CalendarView onRequestCorrection={can('attendance.correct') ? requestCorrection : undefined} /> : null}</TabsContent>
         <TabsContent value="raw">{tab === 'raw' ? <RawTransactionsTab /> : null}</TabsContent>
         <TabsContent value="recalc">{tab === 'recalc' ? <RecalculationsTab /> : null}</TabsContent>
         <TabsContent value="periods">{tab === 'periods' ? <PeriodLocksTab /> : null}</TabsContent>
       </Tabs>
       <CorrectionDialog key={`${correction.open}-${correction.preset?.employeeId ?? ''}-${correction.preset?.attendanceDate ?? ''}`} open={correction.open} onOpenChange={(o) => setCorrection((c) => ({ ...c, open: o }))} preset={correction.preset} onCreated={() => navigate('/corrections')} />
       <RecalculateDialog key={String(recalcOpen)} open={recalcOpen} onOpenChange={setRecalcOpen} />
+      {addOpen ? <RecordEditDialog key={addKey} open onOpenChange={setAddOpen} /> : null}
     </div>
   );
 }
