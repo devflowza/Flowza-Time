@@ -39,9 +39,11 @@ describe('attendance settings (policy parity)', () => {
     expect(get0.status).toBe(200);
     expect(get0.body.data.selfService).toEqual(DEFAULT_ATTENDANCE_SETTINGS.selfService);
     expect(get0.body.data.unexcused).toEqual(DEFAULT_ATTENDANCE_SETTINGS.unexcused);
+    // an IP allow-list is saved only behind the edge (EDGE_SHARED_SECRET — HR portal Prompt 4 review, P2-18: this harness has
+    // none, so a non-empty list is refused; portal-review-fixes*.test.ts cover both sides)
     const put = await h.request('PUT', `${base()}/settings/attendance`, { token: f.owner, body: {
       processingDelaySeconds: 30, payrollPeriod: 'calendar_month', payrollCutoffDay: 25, allowSelfServiceCorrections: false,
-      selfService: { webCheckIn: true, mobileCheckIn: true, requireGeofence: 'block', allowSelfieCheckIn: false, ipAllowList: ['10.0.0.0/8'], checkInWindow: { start: '06:00', end: '12:00' }, checkOutWindow: null, outOfWindowAction: 'reject', duplicatePunchSeconds: 90 },
+      selfService: { webCheckIn: true, mobileCheckIn: true, requireGeofence: 'block', allowSelfieCheckIn: false, ipAllowList: [], checkInWindow: { start: '06:00', end: '12:00' }, checkOutWindow: null, outOfWindowAction: 'reject', duplicatePunchSeconds: 90 },
       missedPunch: { detectionEnabled: true, dayCloseGraceDays: 1, singlePunchSplitTime: '13:00' },
       nonWorkingDay: { action: 'overtime' },
       unexcused: { autoDeductEnabled: true, graceDays: 2, payEffectAbsent: 1, payEffectLate: 0.5, payEffectMissingPunch: 0.5, leaveTypePriority: ['al', 'CL'], excludeLeaveTypeCodes: ['SL', 'ML', 'PTL', 'HJ'] },
@@ -49,7 +51,7 @@ describe('attendance settings (policy parity)', () => {
       stats: { attendanceTargetPct: 92, fullDayHours: 8.5 },
     } });
     expect(put.status).toBe(200);
-    expect(put.body.data.selfService).toMatchObject({ webCheckIn: true, requireGeofence: 'block', ipAllowList: ['10.0.0.0/8'], checkInWindow: { start: '06:00', end: '12:00' }, checkOutWindow: null, duplicatePunchSeconds: 90 });
+    expect(put.body.data.selfService).toMatchObject({ webCheckIn: true, requireGeofence: 'block', ipAllowList: [], regularisation: true, checkInWindow: { start: '06:00', end: '12:00' }, checkOutWindow: null, duplicatePunchSeconds: 90 });
     expect(put.body.data.unexcused).toMatchObject({ autoDeductEnabled: true, graceDays: 2, leaveTypePriority: ['AL', 'CL'] });
     expect(put.body.data.stats).toEqual({ attendanceTargetPct: 92, fullDayHours: 8.5 });
     const get1 = await h.request('GET', `${base()}/settings/attendance`, { token: f.owner });

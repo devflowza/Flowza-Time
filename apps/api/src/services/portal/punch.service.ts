@@ -9,7 +9,7 @@ import {
   type SelfPunchRefusal, type SelfPunchResultDto, type SelfPunchStatusDto, type SelfieCheckinStatus,
 } from '@flowza/contracts';
 import { ensureSelfServiceDevice, type Trx } from '@flowza/database';
-import type { GeofenceEvaluation, GeofenceFence, MembershipGrant } from '@flowza/domain';
+import { withinGeofenceOf, type GeofenceEvaluation, type GeofenceFence, type MembershipGrant } from '@flowza/domain';
 import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { requireBranchAccess, requireMembership } from '../../lib/authorize.js';
@@ -30,7 +30,13 @@ import { evaluateForEmployee, fencesForEmployee, selfFences, toVerdictDto } from
  * virtual self-service device (`ensureSelfServiceDevice`), with the standard dedupe hash, normalised by the worker into an
  * event and a daily record. The punch time is ALWAYS the server's clock (a queued offline punch keeps its queue time in
  * the payload for information only). The raw payload carries what the engine turns into flags: channel
- * (SELF_SERVICE_PUNCH), the geofence verdict (OUTSIDE_GEOFENCE), `outOfWindow` (OUT_OF_WINDOW), `isMock`.
+ * (SELF_SERVICE_PUNCH), `withinGeofence` — the B-36 truth table, OUTSIDE_GEOFENCE only when a real fence was evaluated and
+ * failed (review P2-7) — with the verdict and its reason, `outOfWindow` (OUT_OF_WINDOW), `isMock`.
+ *
+ * The web / mobile switches judge the channel the CLIENT declares (review P2-8): the apps respect them, but they are a
+ * product switch, not a control — the location, geofence, IP allow-list and window rules are what bind an adversarial
+ * client. The IP allow-list is enforced only behind the edge (`EDGE_SHARED_SECRET`): without it the client address is a
+ * header the caller chose, so the list is treated as off (and cannot be saved — review P2-18).
  *
  * Before anything is written the organisation's policy (Settings → Attendance → self-service) is enforced: the channel
  * switch (web / mobile), the IP allow-list, locked periods, the check-in / check-out windows (accept, flag or reject), the
@@ -39,7 +45,7 @@ import { evaluateForEmployee, fencesForEmployee, selfFences, toVerdictDto } from
  */
 
 const SELFIE_BUCKET = 'employee-photos';
-/** Lifetime of a selfie photo's signed URL (the only way anybody reaches the object — storage policies deny the prefix). */
+/** How long a client may keep a served selfie photo (the API serves it inline — review P2-17; storage policies deny the prefix to every client role). */
 const PHOTO_URL_SECONDS = 60;
 /** Organisation-wide keys that open a selfie PHOTO (with attendance.view, in branch scope): the attendance reviewers. Deciding a selfie takes attendance.approve. */
 const PHOTO_OVERSIGHT_KEYS = ['attendance.approve', 'attendance.review_notes'] as const;
@@ -90,11 +96,23 @@ function toPunchDto(r: RawPunchRow): SelfPunchDto {
   return { id: r.id, punchedAt: isoDateTime(r.punchedAt), direction: r.direction, source: r.source, channel, verdict: isVerdict(p['verdict']) ? p['verdict'] : null, deviceName: r.deviceName, processingStatus: r.processingStatus };
 }
 
+/**
+ * The IP allow-list the punch endpoint enforces (review P2-18): the organisation's list only when the API sits behind the edge
+ * (`EDGE_SHARED_SECRET` set — the one setup in which the client address is not a header the caller chose). Without the edge
+ * secret a list saved earlier is treated as OFF, with a warning in the log; the settings endpoint refuses to save a new one.
+ */
+export function effectiveIpAllowList(deps: Pick<ApiDeps, 'config' | 'log'>, orgId: string, list: readonly string[]): readonly string[] {
+  if (list.length === 0 || deps.config.EDGE_SHARED_SECRET) return list;
+  deps.log.warn({ event: 'ip_allow_list_ignored', organizationId: orgId, reason: 'EDGE_SHARED_SECRET is not set: the client address cannot be trusted, so the self-service IP allow-list is treated as off' });
+  return [];
+}
+
 interface PunchContext { emp: EmployeeCtx; settings: AttendanceSettings; grants: Grants; fences: GeofenceFence[] }
-async function loadPunchContext(trx: Trx, orgId: string, employeeId: string): Promise<PunchContext> {
+async function loadPunchContext(deps: Pick<ApiDeps, 'config' | 'log'>, trx: Trx, orgId: string, employeeId: string): Promise<PunchContext> {
   const emp = await loadEmployeeCtx(trx, orgId, employeeId);
   const [settings, grants, fences] = await Promise.all([attendancePolicy(trx, orgId), loadGrants(trx, orgId, employeeId), fencesForEmployee(trx, orgId, emp)]);
-  return { emp, settings, grants, fences };
+  const ipAllowList = [...effectiveIpAllowList(deps, orgId, settings.selfService.ipAllowList)];
+  return { emp, settings: { ...settings, selfService: { ...settings.selfService, ipAllowList } }, grants, fences };
 }
 
 /** Refusals that hold whatever the direction or the location (the check-in page's blockers). */
@@ -130,9 +148,11 @@ async function assess(trx: Trx, orgId: string, ctx: PunchContext, input: { chann
   const last = recent[0] ?? null;
   const lastDirection: SelfPunchDirection | null = last && (last.direction === 'in' || last.direction === 'out') ? last.direction : null;
   if (opts.sequence && lastDirection === input.direction) refusals.push(input.direction === 'in' ? 'ALREADY_CHECKED_IN' : 'NOT_CHECKED_IN');
+  // the duplicate window is per DIRECTION (review P1-4): a second check-in within it is a double tap, a check-out right after
+  // a check-in is not (the sequence rules judge it). A genuine duplicate is the FIRST refusal: the punch is already recorded.
   const dupSeconds = ctx.settings.selfService.duplicatePunchSeconds;
-  const lastSelf = recent.find((r) => r.source === 'SELF_SERVICE');
-  if (dupSeconds > 0 && lastSelf && at.getTime() - lastSelf.punchedAt.getTime() < dupSeconds * 1000) refusals.push('DUPLICATE_PUNCH');
+  const lastSame = recent.find((r) => r.source === 'SELF_SERVICE' && r.direction === input.direction);
+  if (dupSeconds > 0 && lastSame && at.getTime() - lastSame.punchedAt.getTime() < dupSeconds * 1000) refusals.unshift('DUPLICATE_PUNCH');
   const local = localInstant(at, ctx.emp.timezone);
   const window = input.direction === 'in' ? ctx.settings.selfService.checkInWindow : ctx.settings.selfService.checkOutWindow;
   const outOfWindow = !inLocalWindow(window, local.minuteOfDay);
@@ -163,7 +183,11 @@ const REFUSAL_TEXT: Record<SelfPunchRefusal, string> = {
   PERIOD_LOCKED: 'The attendance period is locked.',
   NOT_ACTIVE: 'Your employment is not active.',
 };
-/** The HTTP error of a refused punch: stable code + `details.reason` (and every other refusal that applied). */
+/**
+ * The HTTP error of a refused punch: stable code + `details.reason` (and every other refusal that applied). A duplicate
+ * (409) names the direction it duplicates (`details.direction`, review P1-4): the offline queue counts a queued punch as
+ * already recorded only when that direction is its own.
+ */
 export function refusalError(refusals: readonly SelfPunchRefusal[], extra: Record<string, unknown> = {}): AppError {
   const reason = refusals[0]!;
   const details = { reason, refusals: [...refusals], ...extra };
@@ -179,7 +203,7 @@ export function refusalError(refusals: readonly SelfPunchRefusal[], extra: Recor
 export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string, q: { channel: SelfPunchChannel }): Promise<SelfPunchStatusDto> {
   const self = portalSelf(actor, orgId, 'attendance.checkin');
   return runUser(deps.db, actor, async (trx) => {
-    const ctx = await loadPunchContext(trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
     const now = new Date();
     const local = localInstant(now, ctx.emp.timezone);
     const blockers = await standingRefusals(trx, orgId, ctx, q.channel, actor.ip, now);
@@ -217,7 +241,7 @@ function startOfLocalDay(at: Date, tz: string): Date {
 export async function previewPunch(deps: ApiDeps, actor: Actor, orgId: string, input: { direction: SelfPunchDirection; channel: SelfPunchChannel; lat?: number | undefined; lng?: number | undefined; accuracy?: number | undefined; isMock?: boolean | undefined }): Promise<SelfPunchPreviewDto> {
   const self = portalSelf(actor, orgId, 'attendance.checkin');
   return runUser(deps.db, actor, async (trx) => {
-    const ctx = await loadPunchContext(trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
     const a = await assess(trx, orgId, ctx, input, actor.ip, new Date(), { sequence: true });
     return { verdict: { ...toVerdictDto(a.evaluation), verdict: a.verdict }, outOfWindow: a.outOfWindow, refusals: a.refusals, wouldBeFlagged: a.flagged };
   });
@@ -242,7 +266,7 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
       const verdict = isVerdict(p['verdict']) ? p['verdict'] : 'no_fence';
       return { kind: 'ok', result: { replayed: true, punch: dto, verdict: { verdict, reason: typeof p['verdictReason'] === 'string' ? p['verdictReason'] : 'replayed', geofenceId: typeof p['geofenceId'] === 'string' ? p['geofenceId'] : null, geofenceName: typeof p['geofenceName'] === 'string' ? p['geofenceName'] : null, distanceM: typeof p['distanceM'] === 'number' ? p['distanceM'] : null, scope: null, enforcement: null }, outOfWindow: p['outOfWindow'] === true, flagged: verdict === 'flagged' || p['outOfWindow'] === true } };
     }
-    const ctx = await loadPunchContext(trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
     const a = await assess(trx, orgId, ctx, input, actor.ip, now, { sequence: true });
     const verdictDto = { ...toVerdictDto(a.evaluation), verdict: a.verdict };
     const location = { lat: input.lat ?? null, lng: input.lng ?? null, accuracy: input.accuracy ?? null, isMock: input.isMock === true };
@@ -256,6 +280,8 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
     }
     const payload = {
       channel: input.channel, lat: location.lat, lng: location.lng, accuracy: location.accuracy, geofenceId: verdictDto.geofenceId, geofenceName: verdictDto.geofenceName, verdict: a.verdict, verdictReason: a.evaluation.reason,
+      // the B-36 truth table (review P2-7): the engine flags OUTSIDE_GEOFENCE only for `false` (a real fence evaluated and failed)
+      withinGeofence: withinGeofenceOf(a.evaluation),
       distanceM: verdictDto.distanceM, ip: actor.ip, userAgent: actor.userAgent, isMock: location.isMock, outOfWindow: a.flagOutOfWindow, clientQueuedAt: input.clientQueuedAt ?? null,
       ...(a.outOfWindow && !a.flagOutOfWindow ? { outOfWindowAccepted: true } : {}), ...(a.verdict !== a.evaluation.verdict ? { openAttendance: true } : {}),
     };
@@ -279,7 +305,7 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
       result: { replayed: false, punch: { id: written.rawId, punchedAt: now.toISOString(), direction: input.direction, source: 'SELF_SERVICE', channel: input.channel, verdict: a.verdict, deviceName: 'FlowZa Self-Service', processingStatus: 'pending' }, verdict: verdictDto, outOfWindow: a.outOfWindow, flagged: a.flagged },
     };
   });
-  if (outcome.kind === 'refused') throw refusalError(outcome.refusals, { verdict: outcome.verdict });
+  if (outcome.kind === 'refused') throw refusalError(outcome.refusals, { verdict: outcome.verdict, direction: input.direction });
   return outcome.result;
 }
 
@@ -287,7 +313,96 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
 
 export interface SelfieImage { bytes: Buffer; contentType: 'image/jpeg' | 'image/png' | 'image/webp'; ext: 'jpg' | 'png' | 'webp'; sha256: string }
 
-/** Decode + sniff the photo (JPEG / PNG / WebP by their magic bytes, never by the declared type); at most 2 MB. */
+/**
+ * Markup that has no business inside a photo (review P2-17): a file carrying any of these is a polyglot, whatever its first
+ * bytes say. Matched case-insensitively over the whole file.
+ */
+const HTML_MARKERS = ['<script', '<html', '<!doctype', '<iframe', '<body', '<svg', '<object', '<embed', 'javascript:'] as const;
+function hasHtmlMarker(bytes: Buffer): boolean {
+  const text = bytes.toString('latin1').toLowerCase();
+  return HTML_MARKERS.some((m) => text.includes(m));
+}
+
+/** Trailing NUL padding some encoders add after the end marker carries nothing; anything else after it is refused. */
+function endOfContent(b: Buffer): number {
+  let end = b.length;
+  while (end > 0 && b[end - 1] === 0x00) end -= 1;
+  return end;
+}
+
+/**
+ * JPEG: SOI, then well-formed marker segments (lengths inside the file), entropy-coded scans, and EOI ending the file —
+ * nothing after it but NUL padding.
+ */
+function jpegStructureOk(b: Buffer): boolean {
+  const end = endOfContent(b);
+  if (end < 4 || b[0] !== 0xff || b[1] !== 0xd8 || b[end - 2] !== 0xff || b[end - 1] !== 0xd9) return false;
+  let i = 2;
+  while (i + 1 < end) {
+    if (b[i] !== 0xff) return false;
+    let marker = b[i + 1]!;
+    while (marker === 0xff && i + 2 < end) { i += 1; marker = b[i + 1]!; } // fill bytes
+    if (marker === 0xd9) return i + 2 === end; // EOI: must end the image
+    if (marker === 0x01 || (marker >= 0xd0 && marker <= 0xd7)) { i += 2; continue; } // standalone markers (TEM, RSTn)
+    if (marker === 0x00 || marker === 0xd8 || i + 4 > end) return false;
+    const len = b.readUInt16BE(i + 2);
+    if (len < 2 || i + 2 + len > end) return false;
+    i += 2 + len;
+    if (marker === 0xda) {
+      // start of scan: entropy-coded data up to the next marker that is neither a stuffed 0x00, a restart nor a fill byte
+      while (i + 1 < end) {
+        if (b[i] === 0xff) {
+          const next = b[i + 1]!;
+          if (next === 0x00 || (next >= 0xd0 && next <= 0xd7)) { i += 2; continue; }
+          if (next === 0xff) { i += 1; continue; }
+          break;
+        }
+        i += 1;
+      }
+    }
+  }
+  return false;
+}
+
+const PNG_SIGNATURE = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]);
+
+/** PNG: the signature, IHDR first (13 bytes), chunks whose lengths stay inside the file, and IEND ending it exactly. */
+function pngStructureOk(b: Buffer): boolean {
+  if (b.length < 8 + 25 + 12 || !b.subarray(0, 8).equals(PNG_SIGNATURE)) return false;
+  let i = 8; let first = true;
+  while (i + 12 <= b.length) {
+    const len = b.readUInt32BE(i);
+    const type = b.subarray(i + 4, i + 8).toString('latin1');
+    if (!/^[A-Za-z]{4}$/.test(type)) return false;
+    if (first) { if (type !== 'IHDR' || len !== 13) return false; first = false; }
+    const next = i + 12 + len;
+    if (next > b.length) return false;
+    if (type === 'IEND') return len === 0 && next === b.length;
+    i = next;
+  }
+  return false;
+}
+
+/** WebP: RIFF whose size is exactly the file, the WEBP form, a VP8 / VP8L / VP8X first chunk, and chunks tiling the file. */
+function webpStructureOk(b: Buffer): boolean {
+  if (b.length < 20 || b.subarray(0, 4).toString('latin1') !== 'RIFF' || b.subarray(8, 12).toString('latin1') !== 'WEBP') return false;
+  if (b.readUInt32LE(4) + 8 !== b.length) return false;
+  if (!['VP8 ', 'VP8L', 'VP8X'].includes(b.subarray(12, 16).toString('latin1'))) return false;
+  let i = 12;
+  while (i + 8 <= b.length) {
+    const size = b.readUInt32LE(i + 4);
+    const next = i + 8 + size + (size % 2);
+    if (next > b.length) return false;
+    i = next;
+  }
+  return i === b.length;
+}
+
+/**
+ * Decode and validate the photo STRUCTURALLY (review P2-17): JPEG (SOI … EOI), PNG (signature, IHDR … IEND) or WebP (RIFF
+ * sized to the file) — by the bytes, never the declared type — with nothing appended after the image's end and no markup
+ * anywhere inside it; at most 2 MB. The detected type is the one the photo is stored and served with.
+ */
 export function parseSelfieImage(input: { base64?: string | undefined; bytes?: Uint8Array | undefined }): SelfieImage {
   let bytes: Buffer;
   if (input.bytes) bytes = Buffer.from(input.bytes);
@@ -299,15 +414,15 @@ export function parseSelfieImage(input: { base64?: string | undefined; bytes?: U
   if (bytes.length > SELFIE_MAX_BYTES) throw new AppError('PAYLOAD_TOO_LARGE', 'The photo is larger than 2 MB.', { details: { maxBytes: SELFIE_MAX_BYTES, bytes: bytes.length } });
   if (bytes.length < 16) throw errors.validation('The photo is empty.', { issues: [{ path: 'imageBase64', message: 'Empty image' }] });
   let kind: Pick<SelfieImage, 'contentType' | 'ext'> | null = null;
-  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) kind = { contentType: 'image/jpeg', ext: 'jpg' };
-  else if (bytes.subarray(0, 8).equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))) kind = { contentType: 'image/png', ext: 'png' };
-  else if (bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP') kind = { contentType: 'image/webp', ext: 'webp' };
-  if (!kind) throw errors.validation('The photo must be a JPEG, PNG or WebP image.', { issues: [{ path: 'imageBase64', message: 'Unsupported image format' }] });
+  if (bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff) kind = jpegStructureOk(bytes) ? { contentType: 'image/jpeg', ext: 'jpg' } : null;
+  else if (bytes.subarray(0, 8).equals(PNG_SIGNATURE)) kind = pngStructureOk(bytes) ? { contentType: 'image/png', ext: 'png' } : null;
+  else if (bytes.subarray(0, 4).toString('latin1') === 'RIFF' && bytes.subarray(8, 12).toString('latin1') === 'WEBP') kind = webpStructureOk(bytes) ? { contentType: 'image/webp', ext: 'webp' } : null;
+  if (!kind || hasHtmlMarker(bytes)) throw errors.validation('The photo must be a JPEG, PNG or WebP image.', { issues: [{ path: 'imageBase64', message: 'Unsupported or malformed image' }] });
   return { bytes, ...kind, sha256: createHash('sha256').update(bytes).digest('hex') };
 }
 
-type SelfieRow = { id: string; organizationId: string; employeeId: string; branchId: string | null; punchedAt: Date; direction: string; photoPath: string; latitude: number | null; longitude: number | null; accuracyM: number | null; verdict: string | null; status: SelfieCheckinStatus; reviewedBy: string | null; reviewedAt: Date | null; reviewReason: string | null; rawTransactionId: string | null; createdAt: Date };
-const SELFIE_COLUMNS = ['id', 'organizationId', 'employeeId', 'branchId', 'punchedAt', 'direction', 'photoPath', 'latitude', 'longitude', 'accuracyM', 'verdict', 'status', 'reviewedBy', 'reviewedAt', 'reviewReason', 'rawTransactionId', 'createdAt'] as const;
+type SelfieRow = { id: string; organizationId: string; employeeId: string; branchId: string | null; punchedAt: Date; direction: string; photoPath: string; latitude: number | null; longitude: number | null; accuracyM: number | null; verdict: string | null; verdictReason: string | null; status: SelfieCheckinStatus; reviewedBy: string | null; reviewedAt: Date | null; reviewReason: string | null; rawTransactionId: string | null; createdAt: Date };
+const SELFIE_COLUMNS = ['id', 'organizationId', 'employeeId', 'branchId', 'punchedAt', 'direction', 'photoPath', 'latitude', 'longitude', 'accuracyM', 'verdict', 'verdictReason', 'status', 'reviewedBy', 'reviewedAt', 'reviewReason', 'rawTransactionId', 'createdAt'] as const;
 
 /**
  * Who may SEE a selfie photo: the employee themself, their line managers (primary or secondary — the team relationship), and
@@ -345,7 +460,7 @@ export async function submitSelfie(deps: ApiDeps, actor: Actor, orgId: string, i
   if (!deps.storage.upload) throw errors.dependency('Photo storage');
   return runUser(deps.db, actor, async (trx) => {
     await lockEmployee(trx, 'self-punch', self.employeeId);
-    const ctx = await loadPunchContext(trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
     if (!ctx.settings.selfService.allowSelfieCheckIn) throw new AppError('FORBIDDEN', 'Selfie check-in is turned off for this organisation.', { details: { reason: 'SELFIE_DISABLED' } });
     if (!ctx.grants.openAttendance && !ctx.grants.selfieRequired) throw new AppError('FORBIDDEN', 'Selfie check-in needs an attendance grant from your manager.', { details: { reason: 'SELFIE_NOT_GRANTED' } });
     const now = new Date();
@@ -357,14 +472,14 @@ export async function submitSelfie(deps: ApiDeps, actor: Actor, orgId: string, i
     if (dupSeconds > 0) {
       const recent = await withSystemScope(trx, orgId, (t) => t.selectFrom('selfieCheckins').select('id').where('organizationId', '=', orgId).where('employeeId', '=', ctx.emp.id)
         .where('direction', '=', input.direction).where('createdAt', '>', new Date(now.getTime() - dupSeconds * 1000)).executeTakeFirst());
-      if (recent) throw refusalError(['DUPLICATE_PUNCH']);
+      if (recent) throw refusalError(['DUPLICATE_PUNCH'], { direction: input.direction });
     }
     const evaluation = evaluateForEmployee(ctx.emp, ctx.fences, { ...input }, ctx.settings.selfService.requireGeofence, now);
     const id = randomUUID();
     const photoPath = `checkins/${orgId}/${ctx.emp.id}/${id}.${input.image.ext}`;
     await systemStep(trx, orgId, (t) => t.insertInto('selfieCheckins').values({
       id, organizationId: orgId, employeeId: ctx.emp.id, branchId: ctx.emp.branchId, punchedAt: now, direction: input.direction, photoPath, photoSha256: input.image.sha256,
-      latitude: input.lat ?? null, longitude: input.lng ?? null, accuracyM: input.accuracy ?? null, verdict: evaluation.verdict, status: 'pending', createdBy: actor.userId,
+      latitude: input.lat ?? null, longitude: input.lng ?? null, accuracyM: input.accuracy ?? null, verdict: evaluation.verdict, verdictReason: evaluation.reason.slice(0, 60), status: 'pending', createdBy: actor.userId,
     }).execute());
     // the row commits only if the photo is stored (a failed upload rolls the check-in back)
     const stored = await deps.storage.upload!(SELFIE_BUCKET, photoPath, input.image.bytes, input.image.contentType);
@@ -418,36 +533,56 @@ async function loadSelfieForReview(trx: Trx, orgId: string, grant: MembershipGra
   return { row, role };
 }
 
-/** Sign the photo for PHOTO_URL_SECONDS and audit the issue (who, which check-in, how they were entitled). */
-async function signSelfiePhoto(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, row: Pick<SelfieRow, 'id' | 'branchId' | 'photoPath'>, via: 'self' | 'manager' | 'oversight'): Promise<SelfiePhotoDto> {
-  const url = await deps.storage.signedUrl(SELFIE_BUCKET, row.photoPath, PHOTO_URL_SECONDS);
-  if (!url) throw errors.dependency('Photo storage');
-  await audit(trx, actor, orgId, 'attendance.selfie_photo_viewed', 'selfie_checkin', { entityId: row.id, branchId: row.branchId, newValue: { via } });
-  return { url, expiresInSeconds: PHOTO_URL_SECONDS };
+/**
+ * The photo for one of its viewers, SERVED BY THE API (review P2-17): the object is read server-side, validated structurally
+ * again (an object stored before the validation existed is refused, not served) and handed back as a `data:` URL of the
+ * DETECTED type inside the API's JSON, which goes out with `X-Content-Type-Options: nosniff`. No storage URL leaves the API,
+ * so there is nothing a browser could be sent to that would render the object as anything but that image. Every issue is
+ * audited (who, which check-in, how they were entitled) — a refused one too: the refusal is returned, committed with its audit
+ * row, and raised by the caller afterwards (`throwIfPhotoRefused`).
+ */
+type ServedPhoto = SelfiePhotoDto | { refused: 'PHOTO_INVALID' };
+async function servePhoto(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, row: Pick<SelfieRow, 'id' | 'branchId' | 'photoPath'>, via: 'self' | 'manager' | 'oversight'): Promise<ServedPhoto> {
+  const stored = deps.storage.download ? await deps.storage.download(SELFIE_BUCKET, row.photoPath) : null;
+  if (!stored) throw errors.dependency('Photo storage');
+  let image: SelfieImage;
+  try { image = parseSelfieImage({ bytes: stored }); } catch {
+    deps.log.warn({ event: 'selfie_photo_refused', organizationId: orgId, selfieId: row.id, reason: 'not_a_valid_image' });
+    await audit(trx, actor, orgId, 'attendance.selfie_photo_refused', 'selfie_checkin', { entityId: row.id, branchId: row.branchId, newValue: { via, reason: 'not_a_valid_image' } });
+    return { refused: 'PHOTO_INVALID' };
+  }
+  await audit(trx, actor, orgId, 'attendance.selfie_photo_viewed', 'selfie_checkin', { entityId: row.id, branchId: row.branchId, newValue: { via, contentType: image.contentType } });
+  return { url: `data:${image.contentType};base64,${image.bytes.toString('base64')}`, expiresInSeconds: PHOTO_URL_SECONDS, contentType: image.contentType };
+}
+
+/** After the transaction committed (with its audit row): a refused photo answers 409, nothing of the object is sent. */
+function throwIfPhotoRefused(served: ServedPhoto): SelfiePhotoDto {
+  if ('refused' in served) throw new AppError('INVALID_STATE', 'This photo cannot be shown: the stored file is not a valid image.', { details: { reason: served.refused } });
+  return served;
 }
 
 /**
- * A short-lived signed URL of a selfie photo for its viewers (photoViewerRole) — the ONLY way to reach the object: the storage
- * policies deny every client role the checkins/ prefix. Anybody else gets 404 (the check-in's existence is not confirmed).
+ * A selfie photo for its viewers (photoViewerRole), served by the API — the ONLY way to reach the object: the storage policies
+ * deny every client role the checkins/ prefix. Anybody else gets 404 (the check-in's existence is not confirmed).
  */
 export async function selfiePhotoUrl(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<SelfiePhotoDto> {
   const grant = requireMembership(actor.principal, orgId);
-  return runUser(deps.db, actor, async (trx) => {
+  return throwIfPhotoRefused(await runUser(deps.db, actor, async (trx) => {
     const row = (await withSystemScope(trx, orgId, (t) => t.selectFrom('selfieCheckins').select(['id', 'employeeId', 'branchId', 'photoPath']).where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst()));
     const via = row ? photoViewerRole(grant, row) : null;
     if (!row || !via) throw errors.notFound('Selfie check-in', id);
-    return signSelfiePhoto(deps, trx, actor, orgId, row, via);
-  });
+    return servePhoto(deps, trx, actor, orgId, row, via);
+  }));
 }
 
 /** The employee's own selfie photo (My requests → Selfies); RLS reads their own rows only, so somebody else's is not found. */
 export async function mySelfiePhotoUrl(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<SelfiePhotoDto> {
   const self = portalSelf(actor, orgId);
-  return runUser(deps.db, actor, async (trx) => {
+  return throwIfPhotoRefused(await runUser(deps.db, actor, async (trx) => {
     const row = await trx.selectFrom('selfieCheckins').select(['id', 'employeeId', 'branchId', 'photoPath']).where('organizationId', '=', orgId).where('id', '=', id).where('employeeId', '=', self.employeeId).executeTakeFirst();
     if (!row) throw errors.notFound('Selfie check-in', id);
-    return signSelfiePhoto(deps, trx, actor, orgId, row, 'self');
-  });
+    return servePhoto(deps, trx, actor, orgId, row, 'self');
+  }));
 }
 
 export async function reviewSelfie(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: SelfieReviewInput): Promise<SelfieCheckinDto> {
@@ -466,7 +601,7 @@ export async function reviewSelfie(deps: ApiDeps, actor: Actor, orgId: string, i
         const device = await ensureSelfServiceDevice(t, orgId);
         const res = await ingestRawTransactions(t, { id: device.id, organizationId: orgId, generation: device.generation, providerKey: device.providerKey, branchId: emp.branchId, timezone: emp.timezone }, [{
           providerTransactionId: `selfie:${id}`, deviceEmployeeId: emp.id, punchedAt: row.punchedAt.toISOString(), deviceLocalTime: null, verificationMethod: 'face', direction: row.direction === 'out' ? 'out' : 'in',
-          rawPayload: { channel: 'mobile', selfieId: id, lat: row.latitude, lng: row.longitude, accuracy: row.accuracyM, verdict: row.verdict, isMock: false, outOfWindow: false, approvedBy: actor.userId, reviewVia: role },
+          rawPayload: { channel: 'mobile', selfieId: id, lat: row.latitude, lng: row.longitude, accuracy: row.accuracyM, verdict: row.verdict, verdictReason: row.verdictReason, withinGeofence: withinGeofenceOf({ verdict: row.verdict, reason: row.verdictReason }), isMock: false, outOfWindow: false, approvedBy: actor.userId, reviewVia: role },
         }], { source: 'SELF_SERVICE', now });
         const newId = res.ids[0] ?? null;
         if (newId) {

@@ -121,6 +121,12 @@ export async function putSettingsGroup(deps: ApiDeps, actor: Actor, orgId: strin
   requirePermission(actor.principal, orgId, 'organization.manage');
   const groupSchema = organizationSettingsSchema.shape[group];
   const value = groupSchema.parse(payload ?? {}); // ZodError → 400 VALIDATION_ERROR envelope
+  // HR portal Prompt 4 review, P2-18: an IP allow-list is only as good as the client address, which the API can trust only
+  // behind the edge (EDGE_SHARED_SECRET). Without it the address is a header the caller chose — refuse to save a list that
+  // would look like a control and not be one (the punch endpoint treats an older saved list as off).
+  if (group === 'attendance' && !deps.config.EDGE_SHARED_SECRET && ((value as OrganizationSettings['attendance']).selfService?.ipAllowList.length ?? 0) > 0) {
+    throw errors.validation('The IP allow-list needs the API to run behind the configured edge (EDGE_SHARED_SECRET); without it the client address cannot be trusted. Clear the list, or ask your administrator to configure the edge first.', { issues: [{ path: 'selfService.ipAllowList', message: 'Requires the edge secret (EDGE_SHARED_SECRET)' }] });
+  }
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadSettings(trx, orgId);
     await trx.insertInto('organizationSettings')

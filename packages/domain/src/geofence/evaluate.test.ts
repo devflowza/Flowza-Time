@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { effectiveEnforcement, evaluateGeofence, fenceDistance, haversineM, inactiveReason, isFlagVerdict, isRefusalVerdict, pointInPolygon } from './evaluate.js';
+import { effectiveEnforcement, evaluateGeofence, fenceDistance, haversineM, inactiveReason, isFlagVerdict, isRefusalVerdict, pointInPolygon, withinGeofenceOf } from './evaluate.js';
 import type { GeofenceFence, GeofencePoint, GeofenceWhen } from './types.js';
 
 // Muscat-ish office; 0.001° of latitude ≈ 111 m.
@@ -144,6 +144,18 @@ describe('evaluateGeofence', () => {
     expect(evaluateGeofence(OFFICE, 10, [flagFar, flagNear], opts())).toMatchObject({ verdict: 'flagged', geofenceId: flagNear.id });
   });
 
+  it('4-ATT-63/64 the pack\'s decision, kept and documented: the most specific scope decides alone, the worst verdict within it (probe P8)', () => {
+    const orgHard = fence({ scope: 'org', enforcement: 'hard_block', center: north(3000) });
+    const employeeSoft = fence({ scope: 'employee', enforcement: 'soft_warn', center: OFFICE });
+    // far from both: the employee's own (soft) fence decides; the organisation's hard fence is not judged
+    expect(evaluateGeofence(north(9000), 10, [orgHard, employeeSoft], opts())).toMatchObject({ verdict: 'flagged', winningScope: 'employee' });
+    // inside the employee's fence, outside the organisation's hard one: allowed
+    expect(evaluateGeofence(OFFICE, 10, [orgHard, employeeSoft], opts())).toMatchObject({ verdict: 'allowed', winningScope: 'employee' });
+    // within the winning scope the worst result decides: one failing fence fails the punch
+    const employeeHard = fence({ scope: 'employee', enforcement: 'hard_block', center: north(3000) });
+    expect(evaluateGeofence(OFFICE, 10, [employeeSoft, employeeHard], opts())).toMatchObject({ verdict: 'denied_outside', winningScope: 'employee', geofenceId: employeeHard.id });
+  });
+
   it('direction switches: a fence required only on check-in does not judge a check-out', () => {
     const f = fence({ enforcement: 'hard_block', requireOnCheckOut: false });
     expect(evaluateGeofence(north(900), 10, [f], opts({ direction: 'in' }))).toMatchObject({ verdict: 'denied_outside' });
@@ -156,5 +168,24 @@ describe('evaluateGeofence', () => {
     expect(isRefusalVerdict('flagged')).toBe(false);
     expect(isFlagVerdict('flagged')).toBe(true);
     expect(isFlagVerdict('logged')).toBe(false);
+  });
+});
+
+describe('withinGeofenceOf — the B-36 truth table (4-P2-7)', () => {
+  it('4-P2-7 true inside, false only when a real fence failed, null otherwise', () => {
+    const f = fence({ enforcement: 'soft_warn', accuracyThresholdM: 50 });
+    const of = (point: GeofencePoint | null, accuracy: number | null, fences: GeofenceFence[], over: Partial<Parameters<typeof evaluateGeofence>[3]> = {}) => withinGeofenceOf(evaluateGeofence(point, accuracy, fences, opts(over)));
+    expect(of(north(10), 10, [f])).toBe(true); // inside
+    expect(of(north(300), 10, [f])).toBe(false); // a real fence was evaluated with a location and failed
+    expect(of(OFFICE, 5, [f], { isMock: true })).toBe(false); // a mocked location inside a fence check fails it
+    expect(of(null, null, [f])).toBeNull(); // no location: cannot say
+    expect(of(north(10), 80, [f])).toBeNull(); // fix too imprecise to judge: cannot say
+    expect(of(north(300), 10, [])).toBeNull(); // no fence assigned
+    expect(of(north(300), 10, [f], { policy: 'off' })).toBeNull(); // geofencing off
+    expect(of(OFFICE, 5, [], { isMock: true })).toBeNull(); // mock, but no fence judged it
+    // a stored verdict without its reason (older rows): only an outright refusal counts as failed
+    expect(withinGeofenceOf({ verdict: 'denied_outside', reason: null })).toBe(false);
+    expect(withinGeofenceOf({ verdict: 'flagged', reason: null })).toBeNull();
+    expect(withinGeofenceOf({ verdict: null, reason: null })).toBeNull();
   });
 });

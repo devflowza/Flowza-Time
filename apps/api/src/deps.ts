@@ -60,4 +60,9 @@ export interface StorageSigner {
    * when the storage refused the object.
    */
   upload?(bucket: string, path: string, body: Uint8Array, contentType: string): Promise<boolean>;
+  /**
+   * Reads an object server-side (the API serves selfie photos itself, with the type detected from the bytes and nosniff —
+   * HR portal Prompt 4 review, P2-17). Optional like `upload`; null when the object cannot be read.
+   */
+  download?(bucket: string, path: string): Promise<Uint8Array | null>;
 }
