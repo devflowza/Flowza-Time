@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { AttendanceNoteDto } from '@flowza/contracts';
 import { createMemoryStore, queuedPunches, replayQueue, type QueuedPunch } from './offline-queue';
 import { distanceMeters, fmtDistance, nearestFence } from './geo';
-import { activeNotesByDate, needsReason, suggestedCategory } from './notes-model';
+import { activeNotesByDate, needsReason, reasonRequired, suggestedCategory } from './notes-model';
 import { swappableDays } from './shift-format';
 
 const punch = (key: string, at: string, orgId = 'org-1'): QueuedPunch => ({ key, orgId, direction: 'in', clientQueuedAt: at, attempts: 0, lastError: null });
@@ -64,6 +64,15 @@ describe('reasons model', () => {
     expect(suggestedCategory('PRESENT', ['LATE'])).toBe('late_reason');
     expect(suggestedCategory('ABSENT')).toBe('absence_reason');
     expect(suggestedCategory('PRESENT')).toBe('other');
+  });
+
+  it('marks a day as requiring a reason only for the requirement the organisation switched on', () => {
+    expect(reasonRequired('ABSENT', [], undefined)).toBe(false);
+    expect(reasonRequired('ABSENT', [], { requireReasonForAbsent: true })).toBe(true);
+    expect(reasonRequired('ABSENT', [], { requireReasonForLate: true })).toBe(false);
+    expect(reasonRequired('PRESENT', ['LATE'], { requireReasonForLate: true })).toBe(true);
+    expect(reasonRequired('PRESENT', ['LATE'], { requireReasonForAbsent: true })).toBe(false);
+    expect(reasonRequired('HALF_DAY', ['EARLY_DEPARTURE'], { requireReasonForLate: true, requireReasonForAbsent: true })).toBe(false);
   });
 
   it('offers only working days without leave, holiday or a swap for a swap', () => {

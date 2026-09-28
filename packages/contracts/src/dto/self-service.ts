@@ -110,4 +110,9 @@ export interface SelfOverviewDto {
   pendingRegularisations?: number;
   /** Shift swaps I filed that wait for a decision, and swaps colleagues filed that name me. */
   pendingSwaps?: number;
+  /**
+   * Days of the last 30 (before today) the organisation requires a reason for (`attendance.notes.requireReasonForLate` /
+   * `requireReasonForAbsent`) and that carry none; absent when neither requirement is on.
+   */
+  reasonsRequired?: number;
 }

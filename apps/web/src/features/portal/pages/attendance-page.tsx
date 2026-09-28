@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import { AlarmClock, CalendarCheck, CalendarX2, ChevronLeft, ChevronRight, ClipboardList, Clock, Hourglass, MessageSquarePlus, TrendingUp, Undo2 } from 'lucide-react';
 import type { AttendanceNoteDto, SelfDayDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
-import { Button, Card, ConfirmDialog, EmptyState, ErrorState, Skeleton, StatCard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
+import { Badge, Button, Card, ConfirmDialog, EmptyState, ErrorState, Skeleton, StatCard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { fmtDate, fmtDateTime, fmtMinutes, fmtTime, todayIso } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useActiveMembership, useEmployeeId, useOrgTimezone } from '@/features/me/use-me';
@@ -23,7 +23,7 @@ import { useMyNotes } from '../attendance-api';
 import { NoteDialog } from '../components/note-dialog';
 import { NoteStatusBadge } from '../components/attendance-badges';
 import { SelfStats } from '../components/self-stats';
-import { activeNotesByDate, needsReason, suggestedCategory } from '../notes-model';
+import { activeNotesByDate, needsReason, reasonRequired, suggestedCategory } from '../notes-model';
 
 // HR portal Prompt 4 adds the last-30-days table (with reasons) and the employee's own statistics
 const TABS = ['calendar', 'recent', 'log', 'stats', 'activity', 'corrections'] as const;
@@ -75,7 +75,7 @@ function DailyLog({ days, onSelect }: { days: SelfDayDto[]; onSelect: (d: SelfDa
  * missing punch asks for a reason; any day can carry one (a client visit, field work). The table reads the two months the
  * window spans and the employee's notes of the window.
  */
-function Last30Days({ today, onSelect, onReason }: { today: string; onSelect: (d: SelfDayDto) => void; onReason: (p: { day: SelfDayDto; note: AttendanceNoteDto | null }) => void }) {
+function Last30Days({ today, onSelect, onReason, rules }: { today: string; onSelect: (d: SelfDayDto) => void; onReason: (p: { day: SelfDayDto; note: AttendanceNoteDto | null }) => void; rules?: { requireReasonForLate?: boolean; requireReasonForAbsent?: boolean } | undefined }) {
   const { t } = useTranslation('portal');
   const { t: tpa } = useTranslation(PA_NS);
   const from = DateTime.fromISO(today).minus({ days: 29 }).toISODate() ?? today;
@@ -99,7 +99,8 @@ function Last30Days({ today, onSelect, onReason }: { today: string; onSelect: (d
           <TableBody>
             {days.map((r) => {
               const note = byDate.get(r.attendanceDate) ?? null;
-              const asks = needsReason(r.status, r.flags);
+              const required = r.attendanceDate < today && reasonRequired(r.status, r.flags, rules);
+              const asks = required || needsReason(r.status, r.flags);
               return (
                 <TableRow key={r.id} data-testid="recent-day">
                   <TableCell className="whitespace-nowrap font-medium tnum"><button type="button" className="hover:underline" onClick={() => onSelect(r)}>{fmtDate(r.attendanceDate, 'EEE dd MMM')}</button></TableCell>
@@ -115,7 +116,10 @@ function Last30Days({ today, onSelect, onReason }: { today: string; onSelect: (d
                         {note.status === 'info_requested' || note.status === 'pending' ? <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onReason({ day: r, note })}>{note.status === 'info_requested' ? tpa('notes.respond') : tpa('notes.edit')}</Button> : null}
                       </span>
                     ) : (
-                      <Button size="sm" variant={asks ? 'outline' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => onReason({ day: r, note: null })}><MessageSquarePlus /> {asks ? tpa('notes.add') : tpa('notes.addShort')}</Button>
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        {required ? <Badge variant="danger" data-testid="reason-required">{tpa('notes.required')}</Badge> : null}
+                        <Button size="sm" variant={asks ? 'outline' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => onReason({ day: r, note: null })}><MessageSquarePlus /> {asks ? tpa('notes.add') : tpa('notes.addShort')}</Button>
+                      </span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -220,7 +224,7 @@ export default function MyAttendancePage() {
         <TabsContent value="log">
           {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !q.data ? <TableSkeleton cols={9} rows={6} /> : <DailyLog days={q.data.days} onSelect={(d) => set({ day: d.id })} />}
         </TabsContent>
-        <TabsContent value="recent">{tab === 'recent' ? <Last30Days today={today} onSelect={(d) => set({ day: d.id })} onReason={setReason} /> : null}</TabsContent>
+        <TabsContent value="recent">{tab === 'recent' ? <Last30Days today={today} onSelect={(d) => set({ day: d.id })} onReason={setReason} rules={(membership?.settings.attendance as { notes?: { requireReasonForLate?: boolean; requireReasonForAbsent?: boolean } } | undefined)?.notes} /> : null}</TabsContent>
         <TabsContent value="stats">{tab === 'stats' ? <SelfStats /> : null}</TabsContent>
         <TabsContent value="activity">{tab === 'activity' && employeeId ? <ActivityTab employeeId={employeeId} /> : null}</TabsContent>
         <TabsContent value="corrections">{tab === 'corrections' ? <CorrectionsTab timezone={dayTz} /> : null}</TabsContent>

@@ -124,10 +124,11 @@ describe('attendance notes — the reviewer side', () => {
     expect((await review(noteId, { decision: 'approve' })).status).toBe(409);
   });
 
-  it('a new reason after a rejection reverses the review\'s charge; oversight excuses it (recorded as oversight)', async () => {
+  it('a new reason after a rejection keeps the review\'s charge until it is decided; oversight excuses it (recorded as oversight)', async () => {
     const again = await note(D.absent, { category: 'other', note: 'Here is the clinic slip, stamped' });
     expect(again.status).toBe(201);
-    expect((await marks(f.e1, D.absent)).filter((x) => x.revokedAt === null && x.source === 'NOTE_REVIEW')).toHaveLength(0);
+    // re-filing does not buy back the decided pay effect: the rejection's marks stay while the new reason waits
+    expect((await marks(f.e1, D.absent)).filter((x) => x.revokedAt === null && x.source === 'NOTE_REVIEW').map((x) => x.kind).sort()).toEqual(['LOP', 'UNEXCUSED']);
     const r = await review(again.body.data.id, { decision: 'excuse', reason: 'Slip checked' }, f.hrAdmin);
     expect(r.status).toBe(200);
     expect(r.body.data).toMatchObject({ terminal: true, requestStatus: 'APPROVED', note: { status: 'excused', reviewVia: 'oversight', reviewReason: 'Slip checked' } });
@@ -343,5 +344,28 @@ describe('statistics and the portal home', () => {
     for (const key of ['date', 'timezone', 'today', 'month', 'recent', 'balances', 'upcomingLeave', 'pendingLeave', 'pendingCorrections', 'upcomingHolidays']) expect(r.body.data).toHaveProperty(key);
     expect(r.body.data).toMatchObject({ pendingNotes: 0, infoRequestedNotes: 0, pendingRegularisations: 0, pendingSwaps: 0 });
     expect(r.body.data.punch).toMatchObject({ lastDirection: null, checkInEnabled: false, canCheckIn: false });
+    // no reason requirement switched on: the field is not sent at all
+    expect(r.body.data).not.toHaveProperty('reasonsRequired');
+  });
+
+  it('counts the recent days that need a reason once the organisation requires one, until one is given', async () => {
+    const days = { absent: isoToday(-3), late: isoToday(-2), present: isoToday(-1) };
+    await seedDay(e4, days.absent, 'ABSENT');
+    await seedDay(e4, days.late, 'PRESENT', ['LATE']);
+    await seedDay(e4, days.present, 'PRESENT');
+    await seedDay(e4, isoToday(0), 'ABSENT'); // today is still running: never counted
+    const setNotes = async (notes: { requireReasonForLate: boolean; requireReasonForAbsent: boolean }) => {
+      const row = await h.admin.selectFrom('organizationSettings').select('attendance').where('organizationId', '=', f.orgId).executeTakeFirstOrThrow();
+      const att = (typeof row.attendance === 'string' ? JSON.parse(row.attendance) : row.attendance ?? {}) as Record<string, unknown>;
+      await h.admin.updateTable('organizationSettings').set({ attendance: JSON.stringify({ ...att, notes }) }).where('organizationId', '=', f.orgId).execute();
+    };
+    const required = async () => (await h.request('GET', `${base()}/me/overview`, { token: emp4User })).body.data.reasonsRequired;
+    await setNotes({ requireReasonForLate: false, requireReasonForAbsent: true });
+    expect(await required()).toBe(1);
+    await setNotes({ requireReasonForLate: true, requireReasonForAbsent: true });
+    expect(await required()).toBe(2);
+    expect((await note(days.absent, {}, emp4User)).status).toBe(201);
+    expect(await required()).toBe(1);
+    await setNotes({ requireReasonForLate: false, requireReasonForAbsent: false });
   });
 });

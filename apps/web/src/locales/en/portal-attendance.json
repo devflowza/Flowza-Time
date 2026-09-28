@@ -135,6 +135,8 @@
     "footerLink": "Request a regularisation"
   },
   "home": {
+    "reasonsRequired_one": "{{count}} day needs a reason",
+    "reasonsRequired_other": "{{count}} days need a reason",
     "punchTitle": "Check in",
     "lastIn": "Checked in at {{time}}",
     "lastOut": "Checked out at {{time}}",
@@ -163,6 +165,7 @@
   "notes": {
     "add": "Add a reason",
     "addShort": "Reason",
+    "required": "Reason required",
     "edit": "Edit",
     "respond": "Answer",
     "title": "Explain a day",

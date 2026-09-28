@@ -36,7 +36,8 @@ export async function getMyStats(deps: ApiDeps, actor: Actor, orgId: string, q: 
  * What the portal home adds to the overview (HR portal Prompt 4): today's punch state and the caller's open items (reasons
  * waiting for review or for an answer, regularisations, swaps). Optional fields of `SelfOverviewDto`, merged by the route.
  */
-export async function portalOverviewExtras(deps: ApiDeps, actor: Actor, orgId: string): Promise<Pick<SelfOverviewDto, 'punch' | 'pendingNotes' | 'infoRequestedNotes' | 'pendingRegularisations' | 'pendingSwaps'>> {
+type OverviewExtras = Pick<SelfOverviewDto, 'punch' | 'pendingNotes' | 'infoRequestedNotes' | 'pendingRegularisations' | 'pendingSwaps' | 'reasonsRequired'>;
+export async function portalOverviewExtras(deps: ApiDeps, actor: Actor, orgId: string): Promise<OverviewExtras> {
   const grant = requireMembership(actor.principal, orgId);
   const employeeId = grant.employeeId;
   if (!employeeId) return {};
@@ -48,12 +49,24 @@ export async function portalOverviewExtras(deps: ApiDeps, actor: Actor, orgId: s
       const pendingRegularisations = await count(t.selectFrom('attendanceRegularisationRequests').select((eb) => eb.fn.countAll<string>().as('n')).where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('status', '=', 'pending'));
       const pendingSwaps = await count(t.selectFrom('shiftSwapRequests').select((eb) => eb.fn.countAll<string>().as('n')).where('organizationId', '=', orgId).where('status', '=', 'pending')
         .where((eb) => eb.or([eb('requesterEmployeeId', '=', employeeId), eb('targetEmployeeId', '=', employeeId)])));
-      const out: Pick<SelfOverviewDto, 'punch' | 'pendingNotes' | 'infoRequestedNotes' | 'pendingRegularisations' | 'pendingSwaps'> = {
+      const out: OverviewExtras = {
         pendingNotes: Number(notes.find((n) => n.status === 'pending')?.n ?? 0), infoRequestedNotes: Number(notes.find((n) => n.status === 'info_requested')?.n ?? 0), pendingRegularisations, pendingSwaps,
       };
+      const settings = await attendancePolicy(t, orgId);
+      // the organisation insists on a reason for late / absent days: count the recent ones still without one
+      if (settings.notes.requireReasonForLate || settings.notes.requireReasonForAbsent) {
+        const today = localInstant(new Date(), emp.timezone).date;
+        const from = addDays(today, -30);
+        const days = await t.selectFrom('attendanceDailyRecords').select(['attendanceDate', 'status', 'flags']).where('organizationId', '=', orgId).where('employeeId', '=', employeeId)
+          .where('attendanceDate', '>=', dv(from)).where('attendanceDate', '<', dv(today)).execute();
+        const explained = new Set((await t.selectFrom('attendanceNotes').select('attendanceDate').where('organizationId', '=', orgId).where('employeeId', '=', employeeId)
+          .where('attendanceDate', '>=', dv(from)).where('status', 'in', ['pending', 'info_requested', 'approved', 'excused']).execute()).map((n) => isoDate(n.attendanceDate)));
+        out.reasonsRequired = days.filter((d) => !explained.has(isoDate(d.attendanceDate))
+          && ((settings.notes.requireReasonForLate && ((d.flags ?? []) as string[]).includes('LATE')) || (settings.notes.requireReasonForAbsent && d.status === 'ABSENT'))).length;
+      }
       if (hasPermission(grant, 'attendance.checkin')) {
         const now = new Date();
-        const policy = (await attendancePolicy(t, orgId)).selfService;
+        const policy = settings.selfService;
         const since = new Date(now.getTime() - 20 * 3_600_000);
         const punches = await t.selectFrom('attendanceRawTransactions').select(['punchedAt', 'direction']).where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('punchedAt', '>=', since)
           .orderBy('punchedAt', 'desc').limit(50).execute();

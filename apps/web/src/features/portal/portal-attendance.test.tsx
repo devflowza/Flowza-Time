@@ -1,18 +1,21 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
+import { DateTime } from 'luxon';
 
 vi.mock('@/lib/api-client', async () => (await import('@/features/employees/test-mocks')).apiClientModule);
 vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/test-mocks')).useMeModule);
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import type { AttendanceNoteDto, RegularisationDto, SelfPunchPreviewDto, SelfPunchStatusDto, SelfStatsDto } from '@flowza/contracts';
+import type { AttendanceNoteDto, RegularisationDto, SelfDayDto, SelfPunchPreviewDto, SelfPunchStatusDto, SelfStatsDto } from '@flowza/contracts';
+import { todayIso } from '@/lib/format';
 import { ApiError, apiMock, grantAll, mockGet, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
 import { Sidebar } from '@/components/layout/sidebar';
 import './routes';
 import CheckInPage from './pages/checkin-page';
 import MyRequestsPage from './pages/requests-page';
 import MyShiftPage from './pages/shift-page';
+import MyAttendancePage from './pages/attendance-page';
 import { HomePunchCard, PendingSelfItems } from './components/home-attendance';
 import { NoteDialog } from './components/note-dialog';
 import { SelfStats } from './components/self-stats';
@@ -46,7 +49,7 @@ function mockGeolocation(fix: { latitude: number; longitude: number; accuracy: n
 }
 
 beforeEach(() => { resetApiMock(); grantAll(); testState.orgId = ORG; testState.employeeId = EMP; setPunchQueueStore(createMemoryStore()); });
-afterEach(() => { setPunchQueueStore(null); });
+afterEach(() => { setPunchQueueStore(null); testState.settings = {}; });
 
 describe('portal navigation (Prompt 4)', () => {
   it('adds check-in, requests and shift to "My workspace"', () => {
@@ -201,7 +204,7 @@ describe('MyShiftPage', () => {
 
 describe('portal home (Prompt 4)', () => {
   it('shows the punch state and what is waiting on others', () => {
-    const overview = { date: '2026-09-27', timezone: 'Asia/Muscat', punch: { lastDirection: 'in' as const, lastPunchAt: '2026-09-27T04:05:00Z', punchesToday: 1, canCheckIn: false, canCheckOut: true, checkInEnabled: true }, infoRequestedNotes: 1, pendingNotes: 2, pendingRegularisations: 0, pendingSwaps: 1 };
+    const overview = { date: '2026-09-27', timezone: 'Asia/Muscat', punch: { lastDirection: 'in' as const, lastPunchAt: '2026-09-27T04:05:00Z', punchesToday: 1, canCheckIn: false, canCheckOut: true, checkInEnabled: true }, infoRequestedNotes: 1, pendingNotes: 2, pendingRegularisations: 0, pendingSwaps: 1, reasonsRequired: 3 };
     renderWithProviders(<><PendingSelfItems overview={overview as never} /><HomePunchCard overview={overview as never} /></>);
     expect(screen.getByTestId('home-punch')).toHaveTextContent('Checked in at 08:05');
     expect(screen.getByRole('link', { name: /Check out/ })).toHaveAttribute('href', '/my/checkin');
@@ -210,11 +213,67 @@ describe('portal home (Prompt 4)', () => {
     expect(pending).toHaveTextContent('2 reasons awaiting review');
     expect(pending).toHaveTextContent('1 shift swap pending');
     expect(pending).not.toHaveTextContent('regularisation');
+    // the organisation requires a reason for these days and none was given: the badge leads to the last-30-days table
+    expect(screen.getByRole('link', { name: '3 days need a reason' })).toHaveAttribute('href', '/my/attendance?tab=recent');
   });
 
   it('stays hidden when self-service check-in is off (or the API predates it)', () => {
     renderWithProviders(<HomePunchCard overview={{ date: '2026-09-27', timezone: 'Asia/Muscat' } as never} />);
     expect(screen.queryByTestId('home-punch')).not.toBeInTheDocument();
+  });
+});
+
+describe('MyAttendancePage — last 30 days (Prompt 4)', () => {
+  const today = todayIso('Asia/Muscat');
+  const ago = (n: number) => DateTime.fromISO(today).minus({ days: n }).toISODate() ?? today;
+  const rec = (id: string, date: string, status: string, flags: string[] = []): SelfDayDto => ({
+    id, employeeId: EMP, employeeNumber: 'MG-1012', employeeName: 'Priya Sharma', attendanceDate: date, branchId: 'b1', branchName: 'Head Office', departmentId: null, departmentName: null,
+    shiftId: 's1', shiftName: 'Office 08:00–17:00', timezone: 'Asia/Muscat', expectedStartAt: null, expectedEndAt: null, scheduledMinutes: 480, firstInAt: null, lastOutAt: null, workedMinutes: 0,
+    breakMinutes: 0, lateMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 0, overtimeCategory: null, status, flags, punchCount: 0, hasCorrection: false, calculationVersion: 1,
+    computedAt: `${date}T10:00:00Z`, lockedAt: null, lopDays: 0, unexcused: false,
+  } as SelfDayDto);
+  const totals = { present: 1, absent: 2, leave: 0, holiday: 0, weeklyOff: 0, halfDay: 0, late: 1, missingPunch: 0, workedMinutes: 0, overtimeMinutes: 0, lateMinutes: 0, earlyDepartureMinutes: 0, workingDays: 3, attendanceRate: 0.33 };
+
+  it('lists each day with its reason and marks the days the organisation requires a reason for', async () => {
+    // only absences need a reason in this organisation; a late day still invites one, without the "required" mark
+    testState.settings = { attendance: { notes: { requireReasonForAbsent: true, requireReasonForLate: false } } };
+    const days = [rec('r3', ago(3), 'ABSENT'), rec('r2', ago(2), 'PRESENT', ['LATE']), rec('r1', ago(1), 'ABSENT')];
+    mockGet({
+      [`/orgs/${ORG}/me/attendance`]: (q: Record<string, unknown> | undefined) => ({ data: { month: String(q?.month), days: days.filter((d) => d.attendanceDate.startsWith(String(q?.month))), totals, leaveByDate: {}, holidaysByDate: {} } }),
+      [`/orgs/${ORG}/me/attendance/notes`]: { data: [note({ id: 'n1', attendanceDate: ago(1), status: 'pending' })] },
+    });
+    renderWithProviders(<MyAttendancePage />, { route: '/my/attendance?tab=recent' });
+    const rows = await screen.findAllByTestId('recent-day');
+    expect(rows).toHaveLength(3);
+    // newest first: yesterday carries its pending reason (editable), not a "required" mark
+    expect(within(rows[0]!).getByText('Awaiting review')).toBeInTheDocument();
+    expect(within(rows[0]!).getByRole('button', { name: 'Edit' })).toBeInTheDocument();
+    expect(within(rows[0]!).queryByTestId('reason-required')).not.toBeInTheDocument();
+    expect(within(rows[1]!).queryByTestId('reason-required')).not.toBeInTheDocument();
+    expect(within(rows[1]!).getByRole('button', { name: /Add a reason/ })).toBeInTheDocument();
+    expect(within(rows[2]!).getByTestId('reason-required')).toHaveTextContent('Reason required');
+
+    // "Add a reason" opens the dialog on that day with the absence category suggested
+    apiMock.post.mockResolvedValue({ data: note({ id: 'n3', attendanceDate: ago(3) }) });
+    fireEvent.click(within(rows[2]!).getByRole('button', { name: /Add a reason/ }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/Details/), { target: { value: 'Hospital visit' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Send' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`/orgs/${ORG}/me/attendance/notes`, { date: ago(3), category: 'absence_reason', note: 'Hospital visit' }));
+  });
+
+  it('marks nothing as required when the organisation requires no reason', async () => {
+    const days = [rec('r1', ago(1), 'ABSENT')];
+    mockGet({
+      [`/orgs/${ORG}/me/attendance`]: (q: Record<string, unknown> | undefined) => ({ data: { month: String(q?.month), days: days.filter((d) => d.attendanceDate.startsWith(String(q?.month))), totals, leaveByDate: {}, holidaysByDate: {} } }),
+      [`/orgs/${ORG}/me/attendance/notes`]: { data: [] },
+    });
+    renderWithProviders(<MyAttendancePage />, { route: '/my/attendance?tab=recent' });
+    const rows = await screen.findAllByTestId('recent-day');
+    expect(rows).toHaveLength(1);
+    expect(screen.queryByTestId('reason-required')).not.toBeInTheDocument();
+    // an absence still invites a reason
+    expect(within(rows[0]!).getByRole('button', { name: /Add a reason/ })).toBeInTheDocument();
   });
 });
 

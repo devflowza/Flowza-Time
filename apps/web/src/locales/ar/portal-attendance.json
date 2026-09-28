@@ -143,6 +143,12 @@
     "footerLink": "اطلب تسوية"
   },
   "home": {
+    "reasonsRequired_zero": "لا أيام تحتاج مبررًا",
+    "reasonsRequired_one": "يوم واحد يحتاج مبررًا",
+    "reasonsRequired_two": "يومان يحتاجان مبررًا",
+    "reasonsRequired_few": "{{count}} أيام تحتاج مبررًا",
+    "reasonsRequired_many": "{{count}} يومًا تحتاج مبررًا",
+    "reasonsRequired_other": "{{count}} يوم يحتاج مبررًا",
     "punchTitle": "تسجيل الدخول",
     "lastIn": "سُجّل دخولك الساعة {{time}}",
     "lastOut": "سُجّل خروجك الساعة {{time}}",
@@ -191,6 +197,7 @@
   "notes": {
     "add": "إضافة مبرر",
     "addShort": "مبرر",
+    "required": "المبرر مطلوب",
     "edit": "تعديل",
     "respond": "إجابة",
     "title": "شرح يوم",

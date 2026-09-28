@@ -38,6 +38,7 @@ export function PendingSelfItems({ overview }: { overview: SelfOverviewDto | und
   const { t } = useTranslation(PA_NS);
   if (!overview) return null;
   const items = [
+    { n: overview.reasonsRequired ?? 0, key: 'home.reasonsRequired', to: '/my/attendance?tab=recent', tone: 'danger' as const },
     { n: overview.infoRequestedNotes ?? 0, key: 'home.infoRequested', to: '/my/requests?tab=reasons', tone: 'info' as const },
     { n: overview.pendingNotes ?? 0, key: 'home.pendingNotes', to: '/my/requests?tab=reasons', tone: 'warning' as const },
     { n: overview.pendingRegularisations ?? 0, key: 'home.pendingRegularisations', to: '/my/requests?tab=regularisations', tone: 'warning' as const },

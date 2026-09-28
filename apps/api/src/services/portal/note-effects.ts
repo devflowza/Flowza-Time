@@ -51,12 +51,16 @@ export function needsExplanation(day: Pick<DayFacts, 'status' | 'flags'> | null)
   return day.status === 'ABSENT' || day.status === 'MISSING_PUNCH' || day.flags.includes('LATE') || day.flags.includes('MISSING_IN') || day.flags.includes('MISSING_OUT');
 }
 
-/** Undo what the sweep or an earlier review charged or marked on the day (reversible charges, UNEXCUSED marks). Idempotent. */
-export async function clearReviewableMarks(t: Trx, deps: ApiDeps, orgId: string, employeeId: string, date: string, actorUserId: string | null, reason: string, correlationId?: string): Promise<{ reversed: number }> {
-  const res = await reverseUnexcusedCharge(t, deps.queue, { organizationId: orgId, employeeId, date, revokedBy: actorUserId, reason, sources: REVIEWABLE_MARK_SOURCES }, correlationId ? { correlationId } : {});
+/**
+ * Undo what the sweep or an earlier review charged or marked on the day (reversible charges, UNEXCUSED marks). Idempotent.
+ * `sources` narrows it: a newly filed reason undoes only the automatic sweep's charge; a reviewer's rejection stands until
+ * the new reason is itself decided.
+ */
+export async function clearReviewableMarks(t: Trx, deps: ApiDeps, orgId: string, employeeId: string, date: string, actorUserId: string | null, reason: string, correlationId?: string, sources: readonly DayMarkSource[] = REVIEWABLE_MARK_SOURCES): Promise<{ reversed: number }> {
+  const res = await reverseUnexcusedCharge(t, deps.queue, { organizationId: orgId, employeeId, date, revokedBy: actorUserId, reason, sources }, correlationId ? { correlationId } : {});
   let reversed = res.reversedMarks.length;
   for (const m of await activeMarksOn(t, orgId, employeeId, date)) {
-    if (m.kind === 'UNEXCUSED' && REVIEWABLE_MARK_SOURCES.includes(m.source)) {
+    if (m.kind === 'UNEXCUSED' && sources.includes(m.source)) {
       if (await revokeMark(t, deps.queue, { organizationId: orgId, markId: m.id, revokedBy: actorUserId, reason }, correlationId ? { correlationId } : {})) reversed += 1;
     }
   }

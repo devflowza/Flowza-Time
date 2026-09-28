@@ -14,6 +14,12 @@ export function needsReason(status: string, flags: readonly string[] | null | un
   return ASKING_STATUSES.has(status) || (flags ?? []).some((f) => ASKING_FLAGS.has(f));
 }
 
+/** The organisation insists on a reason for this day (`attendance.notes.requireReasonForLate` / `requireReasonForAbsent`). */
+export function reasonRequired(status: string, flags: readonly string[] | null | undefined, rules: { requireReasonForLate?: boolean; requireReasonForAbsent?: boolean } | undefined): boolean {
+  if (!rules) return false;
+  return (!!rules.requireReasonForLate && (flags ?? []).includes('LATE')) || (!!rules.requireReasonForAbsent && status === 'ABSENT');
+}
+
 /**
  * The note that speaks for each day: the active one (anything but rejected — the API keeps one active note per day), else
  * the most recent rejected one so the decision stays visible.

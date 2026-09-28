@@ -117,8 +117,10 @@ export async function submitNote(deps: ApiDeps, actor: Actor, orgId: string, inp
     const note = await systemStep(trx, orgId, async (t) => {
       const row = await t.insertInto('attendanceNotes').values({ organizationId: orgId, employeeId: emp.id, branchId, attendanceDate: input.date, category: input.category, note: input.note, status: 'pending', submittedBy: actor.userId })
         .returning('id').executeTakeFirstOrThrow();
-      // while the reason is reviewed the day is not charged: the sweep's (or an earlier review's) charge and marks are undone
-      await clearReviewableMarks(t, deps, orgId, emp.id, input.date, actor.userId, 'reason given by the employee', actor.requestId);
+      // while the reason is reviewed the day is not charged automatically: the day-close sweep's charge and marks are undone.
+      // A reviewer's earlier rejection (NOTE_REVIEW) is NOT: re-filing must not buy back a decided pay effect — it stands until
+      // this new reason is decided (approve / excuse reverse it, a new rejection replaces it).
+      await clearReviewableMarks(t, deps, orgId, emp.id, input.date, actor.userId, 'reason given by the employee', actor.requestId, ['SWEEP']);
       return row;
     });
     await routeNote(deps, trx, actor, orgId, { id: note.id, attendanceDate: input.date }, emp, branchId);
