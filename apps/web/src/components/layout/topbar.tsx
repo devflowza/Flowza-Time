@@ -82,6 +82,8 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => navigate('/settings/security')}>{t('nav.settings')}</DropdownMenuItem>
+            {/* every member's own notification preferences (notifications review 8-P1-4) */}
+            {membership ? <DropdownMenuItem onSelect={() => navigate('/account/notifications')}>{t('notifications.settingsLink')}</DropdownMenuItem> : null}
             <DropdownMenuSeparator />
             <DropdownMenuItem onSelect={() => void signOut()} destructive><LogOut /> {t('nav.signOut')}</DropdownMenuItem>
           </DropdownMenuContent>

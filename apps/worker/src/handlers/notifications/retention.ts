@@ -14,8 +14,12 @@ import type { JobContext } from '../types.js';
  *  - `notification_deliveries`: settled (sent / failed / skipped) e-mail deliveries older than RETENTION_DELIVERIES_DAYS;
  *    pending ones are still being worked on.
  * Organisations under legal hold are skipped entirely. Deletes run in batches (RETENTION_BATCH_SIZE rows, each batch its own
- * short transaction, per organisation on its (organization_id, time) index), capped per class and run; a capped class
- * simply continues the next day. One log line and one platform audit row per run record what was purged.
+ * short transaction, per organisation on its (organization_id, time) index). Every organisation — and the bucket of rows
+ * without one — gets its first batch of each class in EVERY run (review 8-P1-1: a shared cap consumed by one probe per empty
+ * organisation starved the organisations after the 200th, and the organisation-less bucket, forever); only the further
+ * batches of an organisation that still has more to purge count against RETENTION_MAX_BATCHES, taken round-robin so no
+ * organisation waits behind a bigger one. A capped class simply continues the next day. One log line and one platform audit
+ * row per run record what was purged; `batches` counts the batches that deleted something.
  */
 export const NOTIFICATION_RETENTION_JOB_TYPE = 'NOTIFICATION_RETENTION';
 export const RETENTION_EVENTS_DAYS = 90;
@@ -60,20 +64,31 @@ export async function runNotificationRetention(deps: WorkerDeps, opts: { batchSi
     deliveries: new Date(now.getTime() - RETENTION_DELIVERIES_DAYS * 86_400_000),
   };
   for (const cls of ['deliveries', 'notifications', 'domainEvents'] as const) {
-    let batches = 0;
+    const purge = async (orgId: string | null): Promise<number> => {
+      const res = await withContext(deps.db, ctx, (trx) => PURGES[cls](orgId, cutoffs[cls], batchSize).execute(trx));
+      const deleted = Number(res.numAffectedRows ?? 0);
+      summary[cls] += deleted;
+      if (deleted > 0) summary.batches++;
+      return deleted;
+    };
+    // pass 1: one batch for every organisation and for the organisation-less bucket, whatever the cap
+    let more: Array<string | null> = [];
     for (const orgId of eligible) {
       if (cls === 'notifications' && orgId !== null && withPolicy.has(orgId)) continue;
-      for (;;) {
-        if (batches >= maxBatches) break;
-        const res = await withContext(deps.db, ctx, (trx) => PURGES[cls](orgId, cutoffs[cls], batchSize).execute(trx));
-        const deleted = Number(res.numAffectedRows ?? 0);
-        batches++;
-        summary[cls] += deleted;
-        if (deleted < batchSize) break;
-      }
-      if (batches >= maxBatches) { summary.capped.push(cls); break; }
+      if (await purge(orgId) >= batchSize) more.push(orgId);
     }
-    summary.batches += batches;
+    // then round-robin over the ones with more to purge, up to the cap of further batches
+    let extra = 0;
+    while (more.length > 0 && extra < maxBatches) {
+      const next: Array<string | null> = [];
+      for (const orgId of more) {
+        if (extra >= maxBatches) { next.push(orgId); continue; }
+        extra++;
+        if (await purge(orgId) >= batchSize) next.push(orgId);
+      }
+      more = next;
+    }
+    if (more.length > 0) summary.capped.push(cls);
   }
   await withContext(deps.db, ctx, (trx) => trx.insertInto('audit.logs').values({
     organizationId: null, actorUserId: null, actorType: 'SYSTEM', action: 'notifications.retention_applied', entityType: 'platform', entityId: null,

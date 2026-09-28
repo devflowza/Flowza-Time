@@ -9,6 +9,7 @@ import type { HandlerRegistry, JobContext } from '../types.js';
 import { pickLocale, renderEmail, renderNotification } from './templates/render.js';
 import { MISSING_PUNCH_REMINDER_JOB_TYPE, missingPunchRemindersHandler } from './missing-punch.js';
 import { NOTIFICATION_RETENTION_JOB_TYPE, notificationRetentionHandler } from './retention.js';
+import { digestPayload, isDigestEvent, isRequestNotice, requestNotice, withLeaveTypeNames } from './source-facts.js';
 
 interface OutboxRow { id: string; organizationId: string | null; eventType: string; aggregateType: string; aggregateId: string | null; payload: Record<string, unknown>; actorUserId: string | null; occurredAt: Date; publishAttempts: number }
 
@@ -52,8 +53,8 @@ export const ROUTING: Readonly<Record<string, NotificationRouteSpec>> = {
   'approval.reassigned': { recipients: 'users' },
   // an approval.manage holder approved the request as an exception: the approvers who were waiting are told it no longer needs them
   'approval.bypassed': { recipients: 'users' },
-  'attendance.correction_approved': { permission: 'attendance.correct' },
-  'attendance.correction_rejected': { permission: 'attendance.correct' },
+  // review 8-P0-4: a correction's decision reaches the requester and the person concerned once, through approval.decided (the
+  // engine's targeted notice, never the decider); attendance.correction_approved / _rejected are published for realtime only.
   // Self-service leave: HR hears about a request only when the approval engine did not route it (older rows); the engine's
   // approval.pending reaches the actual approvers instead. The employee (payload.userId) hears about the decision.
   'leave.requested': { permission: 'leave.manage', when: (p) => !p['approvalRequestId'] },
@@ -127,12 +128,12 @@ async function loadOrgFacts(trx: Trx, orgId: string): Promise<OrgFacts | null> {
 
 interface Recipient { userId: string; employeeId: string | null; locale: string; profileStatus: string }
 /** The recipients of an event per its route, kept to active members of the organisation (one query for their facts). */
-async function recipientsOf(trx: Trx, route: NotificationRouteSpec, row: OutboxRow): Promise<Recipient[]> {
+async function recipientsOf(trx: Trx, route: NotificationRouteSpec, row: OutboxRow, payload: Payload, parties: ReadonlySet<string> | null): Promise<Recipient[]> {
   const orgId = row.organizationId!;
-  const one = R.id(row.payload['userId']);
+  const one = R.id(payload['userId']);
   let ids: string[] = [];
   if (route.recipients === 'users') {
-    ids = (Array.isArray(row.payload['userIds']) ? (row.payload['userIds'] as unknown[]) : []).map(R.id).filter((u): u is string => u !== null).slice(0, MAX_TARGETED_RECIPIENTS);
+    ids = (Array.isArray(payload['userIds']) ? (payload['userIds'] as unknown[]) : []).map(R.id).filter((u): u is string => u !== null).slice(0, MAX_TARGETED_RECIPIENTS);
   } else if (route.recipients === 'user') {
     ids = one ? [one] : [];
   } else {
@@ -143,6 +144,8 @@ async function recipientsOf(trx: Trx, route: NotificationRouteSpec, row: OutboxR
     ids = [...holders.rows.map((h) => h.userId), ...(one ? [one] : [])];
   }
   ids = [...new Set(ids)];
+  // an approval notice reaches the parties of its request only (review 8-P0-1)
+  if (parties) ids = ids.filter((u) => parties.has(u));
   if (ids.length === 0) return [];
   const rows = await sql<Recipient>`
     select m.user_id as "userId", m.employee_id as "employeeId", p.locale, p.status as "profileStatus"
@@ -174,16 +177,32 @@ async function notify(trx: Trx, deps: JobContext['deps'], orgs: Map<string, OrgF
   if (!orgs.has(row.organizationId)) orgs.set(row.organizationId, await loadOrgFacts(trx, row.organizationId));
   const org = orgs.get(row.organizationId);
   if (!org) return;
-  const recipients = await recipientsOf(trx, route, row);
+  // review 8-P0-1: an approval notice says what its REQUEST says (entity, person, dates, level, decision, comment — from the
+  // request and its timeline entry of the same transaction), never what the event's payload claims; the digest carries its
+  // counts only; a leave-family notice names the leave type in both languages (8-P2-2)
+  let source: Payload = row.payload;
+  let parties: ReadonlySet<string> | null = null;
+  const src = { ...row, organizationId: row.organizationId };
+  if (isRequestNotice(row)) {
+    const derived = await requestNotice(trx, src);
+    if (!derived) { log.warn(event('notification_event_unverified', { eventId: row.id, eventType: row.eventType, organizationId: row.organizationId })); return; }
+    source = derived.payload;
+    parties = derived.parties;
+  } else if (isDigestEvent(row)) {
+    source = digestPayload(row.payload);
+  } else {
+    source = await withLeaveTypeNames(trx, src, row.payload);
+  }
+  const recipients = await recipientsOf(trx, route, row, source, parties);
   if (recipients.length === 0) return;
-  const payload: Payload = { ...row.payload, aggregateType: row.aggregateType, aggregateId: row.aggregateId };
+  const payload: Payload = { ...source, aggregateType: row.aggregateType, aggregateId: row.aggregateId };
   const prefs = await trx.selectFrom('notificationPreferences').select(['userId', 'channel', 'enabled'])
     .where('organizationId', '=', row.organizationId).where('category', '=', entry.category).where('channel', 'in', ['IN_APP', 'EMAIL'])
     .where('userId', 'in', recipients.map((r) => r.userId)).execute();
   const requested = channelsOf(row.payload);
   const now = deps.now();
   for (const r of recipients) {
-    const audience = audienceOf(r.employeeId, row.payload['employeeId']);
+    const audience = audienceOf(r.employeeId, payload['employeeId']);
     const resolved = resolveNotification(row.eventType, payload, { audience, timezone: org.timezone });
     if (!resolved) continue;
     const preferences: Partial<Record<NotificationDeliveryChannel, boolean>> = {};
@@ -268,24 +287,50 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
 
 /**
  * The approve / reject links of an approval e-mail: a fresh token pair for THIS recipient and THIS level, minted in the
- * organisation's system context (the token table is system-only). Returns null when the level is no longer waiting for
- * the recipient (decided, withdrawn, reassigned) — the e-mail then only links to the request. The links open the web action
- * page, which asks the approver to confirm and POSTs the decision (never acted on by a GET).
+ * organisation's system context (the token table is system-only). Only for a recipient who holds their OWN pending seat on the
+ * request's current level (review 8-P1-2) — as its approver, the approver's delegate while the delegation is in force today,
+ * the reporting line's secondary manager standing in on the primary's seat, or the reassignee — because a link decides the seat
+ * it was minted for (`requireSeat`). An approver added by escalation (an extra hand who would fill somebody else's seat, and
+ * must choose whose on an ALL / QUORUM level with several seats waiting) or an organisation-wide override gets the link to the
+ * request only, like a recipient whose seat was decided, withdrawn or reassigned meanwhile. The links open the web action
+ * page, which shows the request and asks the approver to confirm before it POSTs the decision (never acted on by a GET).
  */
 async function oneClickLinks(trx: Trx, deps: JobContext['deps'], d: { organizationId: string; userId: string; data: Record<string, unknown> }): Promise<{ approve: string; reject: string } | null> {
   const requestId = R.id(d.data['requestId']) ?? (d.data['aggregateType'] === 'approval_request' ? R.id(d.data['aggregateId']) : null);
   if (!requestId) return null;
-  await applyContext(trx, { kind: 'system', organizationId: d.organizationId });
+  // under a savepoint: a failure (a token that cannot be stored) rolls back with the context switch and surfaces as itself
+  await sql`savepoint one_click_links`.execute(trx);
   try {
-    const step = await trx.selectFrom('approvalSteps as s').innerJoin('approvalRequests as r', 'r.id', 's.requestId').innerJoin('approvalStepActors as a', 'a.stepId', 's.id')
-      .select(['s.id as stepId', 'r.id as requestId']).where('r.id', '=', requestId).where('r.status', '=', 'PENDING').where('s.status', '=', 'PENDING').whereRef('s.stepNo', '=', 'r.currentStep')
-      .where('a.userId', '=', d.userId).where('a.decision', '=', 'PENDING').executeTakeFirst();
-    if (!step) return null;
-    const pair = await issueApprovalEmailTokens(trx, { organizationId: d.organizationId, requestId: step.requestId, stepId: step.stepId, userId: d.userId }, { now: deps.now() });
-    const base = `${webBase(deps)}/approvals/email-action?org=${encodeURIComponent(d.organizationId)}`;
-    return { approve: `${base}&action=APPROVE&token=${encodeURIComponent(pair.approve)}`, reject: `${base}&action=REJECT&token=${encodeURIComponent(pair.reject)}` };
-  } finally {
+    await applyContext(trx, { kind: 'system', organizationId: d.organizationId });
+    const { rows } = await sql<{ stepId: string; requestId: string }>`
+      select s.id as "stepId", r.id as "requestId"
+      from public.approval_requests r
+      join public.approval_steps s on s.request_id = r.id and s.step_no = r.current_step and s.status = 'PENDING'
+      join public.approval_step_actors a on a.step_id = s.id and a.user_id = ${d.userId}::uuid and a.decision = 'PENDING'
+      where r.id = ${requestId}::uuid and r.organization_id = ${d.organizationId}::uuid and r.status = 'PENDING'
+        -- never an escalated extra hand or an override: they fill somebody else's seat (the app asks whose)
+        and coalesce(a.resolution_path, '') not in ('escalated', 'override', 'owner_override')
+        -- a stamped delegate seat only while that delegation is still in force today (the engine's rule)
+        and (a.via_delegation_of is null or a.resolution_path = 'secondary' or app.approval_delegate_of(r.organization_id, a.via_delegation_of, r.entity_type) = a.user_id)
+        -- and the seat is still waiting (nobody decided it for them: the approver a delegate covers, an override)
+        and not exists (
+          select 1 from public.approval_step_actors o
+          where o.step_id = s.id and o.decision in ('APPROVED', 'REJECTED')
+            and coalesce(o.on_behalf_of_user_id, o.via_delegation_of, o.user_id) = coalesce(a.via_delegation_of, a.user_id))
+      limit 1`.execute(trx);
+    const step = rows[0];
+    let links: { approve: string; reject: string } | null = null;
+    if (step) {
+      const pair = await issueApprovalEmailTokens(trx, { organizationId: d.organizationId, requestId: step.requestId, stepId: step.stepId, userId: d.userId }, { now: deps.now() });
+      const base = `${webBase(deps)}/approvals/email-action?org=${encodeURIComponent(d.organizationId)}`;
+      links = { approve: `${base}&action=APPROVE&token=${encodeURIComponent(pair.approve)}`, reject: `${base}&action=REJECT&token=${encodeURIComponent(pair.reject)}` };
+    }
     await applyContext(trx, { kind: 'platform' });
+    await sql`release savepoint one_click_links`.execute(trx);
+    return links;
+  } catch (err) {
+    await sql`rollback to savepoint one_click_links`.execute(trx);
+    throw err;
   }
 }
 
@@ -295,6 +340,9 @@ export function webUrl(base: string, path: string | null | undefined): string {
   const b = base.replace(/\/+$/, '');
   return typeof path === 'string' && path.startsWith('/') && !path.startsWith('//') ? `${b}${path}` : `${b}/`;
 }
+
+/** The notification settings page every active member can open (review 8-P1-4). */
+export const NOTIFICATION_SETTINGS_PATH = '/account/notifications';
 
 /** E-mail attempts per delivery (the first send + retries), and the waits between them. */
 export const DELIVERY_MAX_ATTEMPTS = 5;
@@ -341,16 +389,32 @@ export async function deliverNotifications({ deps, log, job }: JobContext) {
       limit ${Number(job.payload['batchSize'] ?? 100)}
       for update of d skip locked`.execute(trx);
     let sent = 0; let skipped = 0; let retried = 0; let failed = 0;
-    for (const d of pending.rows) {
-      const problem = !isDeliverableAddress(d.email) ? 'invalid_recipient_address'
-        : d.profileStatus !== 'active' ? 'recipient_disabled'
-        : d.organizationId && d.membershipStatus !== 'active' ? 'recipient_not_member' : null;
-      if (problem) {
-        await sql`update public.notification_deliveries set status = 'skipped', error = ${problem}, next_attempt_at = null where id = ${d.id}::bigint`.execute(trx);
-        skipped++;
-        continue;
-      }
+    // Each delivery runs under its own savepoint (review 8-P2-3): a failing row — a token that cannot be minted, a mailer
+    // error, a failing bookkeeping write — rolls back alone, and the rows before it stay `sent` (never mailed twice) while the
+    // rows after it are still delivered.
+    const book = async (write: () => Promise<unknown>, what: string, deliveryId: string): Promise<void> => {
+      await sql`savepoint notification_delivery_book`.execute(trx);
       try {
+        await write();
+        await sql`release savepoint notification_delivery_book`.execute(trx);
+      } catch (bookErr) {
+        await sql`rollback to savepoint notification_delivery_book`.execute(trx);
+        log.error(event('notification_delivery_bookkeeping_failed', { deliveryId, what, err: (bookErr as Error).message }));
+      }
+    };
+    for (const d of pending.rows) {
+      let mailed: { provider: string; id: string | null } | null = null;
+      await sql`savepoint notification_delivery`.execute(trx);
+      try {
+        const problem = !isDeliverableAddress(d.email) ? 'invalid_recipient_address'
+          : d.profileStatus !== 'active' ? 'recipient_disabled'
+          : d.organizationId && d.membershipStatus !== 'active' ? 'recipient_not_member' : null;
+        if (problem) {
+          await sql`update public.notification_deliveries set status = 'skipped', error = ${problem}, next_attempt_at = null where id = ${d.id}::bigint`.execute(trx);
+          await sql`release savepoint notification_delivery`.execute(trx);
+          skipped++;
+          continue;
+        }
         const data = d.data && typeof d.data === 'object' && !Array.isArray(d.data) ? (d.data as Record<string, unknown>) : {};
         const locale = pickLocale(d.userLocale, d.orgLocale);
         const timezone = d.timezone && isValidTimezone(d.timezone) ? d.timezone : 'UTC';
@@ -363,19 +427,32 @@ export async function deliverNotifications({ deps, log, job }: JobContext) {
           rendered, locale, orgName,
           // the link stored with the notice is the one the relay resolved; the rendering only supplies the words
           url: webUrl(base, d.link ?? rendered.link),
-          preferencesUrl: webUrl(base, d.employeeId ? '/my/profile' : '/settings/notifications'),
+          // review 8-P1-4: an employee manages e-mails on their profile (a page of the live bundle too); every other member on
+          // /account/notifications, which needs a membership only (Settings needs organization.view)
+          preferencesUrl: webUrl(base, d.employeeId ? '/my/profile' : NOTIFICATION_SETTINGS_PATH),
           locked: rendered.resolved ? !rendered.resolved.entry.userConfigurable : false,
           oneClick,
         });
         const res = await deps.mailer.send({ to: d.email, subject: mail.subject, html: mail.html, text: mail.text });
+        mailed = res;
         await sql`update public.notification_deliveries set status = 'sent', provider = ${res.provider}, provider_message_id = ${res.id}, sent_at = now(), attempts = attempts + 1, next_attempt_at = null, error = null where id = ${d.id}::bigint`.execute(trx);
+        await sql`release savepoint notification_delivery`.execute(trx);
         sent++;
       } catch (err) {
+        await sql`rollback to savepoint notification_delivery`.execute(trx);
+        const message = String((err as Error).message).slice(0, 500);
+        if (mailed) {
+          // the e-mail went out and only its bookkeeping failed: it is recorded as sent, never mailed again
+          const m = mailed;
+          await book(() => sql`update public.notification_deliveries set status = 'sent', provider = ${m.provider}, provider_message_id = ${m.id}, sent_at = now(), attempts = attempts + 1, next_attempt_at = null, error = null where id = ${d.id}::bigint`.execute(trx), 'sent', d.id);
+          sent++;
+          continue;
+        }
         const attempts = Number(d.attempts) + 1;
         const giveUp = attempts >= DELIVERY_MAX_ATTEMPTS;
-        await sql`update public.notification_deliveries set status = ${giveUp ? 'failed' : 'pending'}::public.delivery_status, attempts = ${attempts},
-          next_attempt_at = ${giveUp ? null : new Date(now.getTime() + deliveryBackoffMs(attempts))}, error = ${String((err as Error).message).slice(0, 500)} where id = ${d.id}::bigint`.execute(trx);
-        if (giveUp) { failed++; log.warn(event('notification_email_failed', { deliveryId: d.id, attempts, err: (err as Error).message })); } else retried++;
+        await book(() => sql`update public.notification_deliveries set status = ${giveUp ? 'failed' : 'pending'}::public.delivery_status, attempts = ${attempts},
+          next_attempt_at = ${giveUp ? null : new Date(now.getTime() + deliveryBackoffMs(attempts))}, error = ${message} where id = ${d.id}::bigint`.execute(trx), 'attempt', d.id);
+        if (giveUp) { failed++; log.warn(event('notification_email_failed', { deliveryId: d.id, attempts, err: message })); } else retried++;
       }
     }
     if (pending.rows.length) log.info(event('notifications_delivered', { attempted: pending.rows.length, sent, skipped, retried, failed }));

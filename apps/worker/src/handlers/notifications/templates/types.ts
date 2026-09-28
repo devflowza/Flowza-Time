@@ -56,6 +56,11 @@ export interface LocaleTemplates {
   geofenceReasons: Record<string, string>;
   regularisationTypes: Record<string, string>;
   metrics: Record<string, string>;
+  /**
+   * Flowza Finance connector failure codes (review 8-P2-2: a notice never prints a code where a localised name exists — the same
+   * names as Settings → Integrations); an unknown code prints as it is.
+   */
+  financeErrors: Record<string, string>;
   /** Base templates by notification type and overrides by `type#variant`. */
   templates: Record<string, NotificationTemplate | NotificationTemplateOverride>;
 }

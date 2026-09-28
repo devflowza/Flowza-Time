@@ -255,7 +255,10 @@
     "done": "Done — the request is now {{status}}.",
     "invalid": "This link is incomplete or not meant for this account.",
     "open": "Open the request",
-    "inbox": "Go to approvals"
+    "inbox": "Go to approvals",
+    "leaveType": "Leave type",
+    "dates": "Dates",
+    "notWaiting": "This request no longer waits for your decision from this link (it is {{status}}, or your level was decided or moved). Open it in the app to see what happened."
   },
   "workflows": {
     "title": "Approval workflows",

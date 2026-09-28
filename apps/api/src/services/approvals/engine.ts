@@ -41,6 +41,12 @@ export interface SubmitInput {
    * excepted, logged).
    */
   coSubjectEmployeeIds?: readonly string[];
+  /**
+   * False: the caller tells the first level itself (review 8-P2-8 — an attendance note answered by editing its reason is a new
+   * request whose approvers hear `approval.info_answered`, the words of what happened, through `announceAnswer`, not a fresh
+   * "waiting for your approval"). Default true: the first level's approvers get `approval.pending`.
+   */
+  notifyFirstLevel?: boolean;
 }
 export interface SubmitResult { requestId: string; status: 'PENDING' | 'APPROVED'; autoApproved: boolean; stepCount: number; firstStepActorIds: string[] }
 
@@ -417,8 +423,10 @@ export async function submit(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
       if (i === 0) { firstActors = res.actors; firstStepId = step.id; }
     }
     await recordEvent(t, orgId, req.id, 'submitted', actor.userId, { workflowId: row?.id ?? null, workflowName: row?.name ?? null, steps: resolved.map(({ spec, res }, i) => ({ stepNo: i + 1, approverType: spec.approverType, mode: spec.mode, path: res.path, actors: res.actors.length })) });
-    const payload = await requestPayload(t, orgId, req);
-    await emitTargeted(t, orgId, 'approval.pending', req.id, firstActors.map((a) => a.userId), { ...payload, stepId: firstStepId, stepNo: 1 }, actor);
+    if (input.notifyFirstLevel !== false) {
+      const payload = await requestPayload(t, orgId, req);
+      await emitTargeted(t, orgId, 'approval.pending', req.id, firstActors.map((a) => a.userId), { ...payload, stepId: firstStepId, stepNo: 1 }, actor);
+    }
     return { requestId: req.id, status: 'PENDING', autoApproved: false, stepCount: resolved.length, firstStepActorIds: firstActors.map((a) => a.userId) };
   });
 }
@@ -607,7 +615,11 @@ export async function cancelWithin(deps: ApiDeps, t: Trx, actor: Actor, orgId: s
   await recordEvent(t, orgId, req.id, 'cancelled', actor.userId, { reason: stored, source: opts.source ?? 'api' });
   if (opts.runHook !== false) await hookFor(req.entityType)?.onCancelled?.(deps, t, hookCtx(orgId, req, actor, stored));
   const payload = await requestPayload(t, orgId, req);
-  await emitTargeted(t, orgId, 'approval.decided', req.id, (current?.actors ?? []).filter((a) => a.decision === 'PENDING' || a.decision === 'SKIPPED').map((a) => a.userId).filter((u) => u !== actor.userId), { ...payload, decision: 'CANCELLED', comment: stored, decidedBy: actor.userId }, actor);
+  const waiting = (current?.actors ?? []).filter((a) => a.decision === 'PENDING' || a.decision === 'SKIPPED').map((a) => a.userId);
+  // review 8-P1-3: withdrawn by somebody other than the requester (HR withdrawing an employee's pending leave, an
+  // organisation-wide cancel) — the requester and the person concerned are told too, as the catalogue says; never the canceller
+  const parties = actor.userId !== req.requestedBy ? [req.requestedBy, req.subjectUserId] : [];
+  await emitTargeted(t, orgId, 'approval.decided', req.id, [...waiting, ...parties].filter((u): u is string => !!u && u !== actor.userId), { ...payload, decision: 'CANCELLED', comment: stored, decidedBy: actor.userId }, actor);
   return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: 'CANCELLED' };
 }
 
@@ -619,9 +631,11 @@ export async function cancelForEntity(deps: ApiDeps, t: Trx, actor: Actor, orgId
 
 /**
  * A material edit voids the pending request (Finance B-96): actors and later steps are skipped, the request reads
- * INVALIDATED, the approvers of the current step are told, and the caller resubmits. System step.
+ * INVALIDATED, the approvers of the current step are told, and the caller resubmits. System step. `notify: false` keeps the
+ * invalidation on the timeline without telling the approvers — the caller tells them what happened itself (review 8-P2-8: an
+ * answer given by editing the document reads as an answer, not as "changed while pending").
  */
-export async function invalidateForEntity(t: Trx, actor: Actor, orgId: string, entityType: ApprovalEntity, entityId: string, reason: string): Promise<CloseOutcome | null> {
+export async function invalidateForEntity(t: Trx, actor: Actor, orgId: string, entityType: ApprovalEntity, entityId: string, reason: string, opts: { notify?: boolean } = {}): Promise<CloseOutcome | null> {
   const pending = await t.selectFrom('approvalRequests').select('id').where('organizationId', '=', orgId).where('entityType', '=', entityType).where('entityId', '=', entityId).where('status', '=', 'PENDING').executeTakeFirst();
   if (!pending) return null;
   const req = await lockRequest(t, orgId, pending.id);
@@ -630,9 +644,11 @@ export async function invalidateForEntity(t: Trx, actor: Actor, orgId: string, e
   const current = steps.find((s) => s.stepNo === req.currentStep);
   await skipPending(t, steps.filter((s) => s.status === 'PENDING').map((s) => s.id), null);
   await t.updateTable('approvalRequests').set({ status: 'INVALIDATED', completedAt: new Date(), invalidationReason: reason, infoRequestedAt: null }).where('id', '=', req.id).execute();
-  await recordEvent(t, orgId, req.id, 'invalidated', actor.userId, { reason });
-  const payload = await requestPayload(t, orgId, req);
-  await emitTargeted(t, orgId, 'approval.decided', req.id, (current?.actors ?? []).map((a) => a.userId).filter((u) => u !== actor.userId), { ...payload, decision: 'INVALIDATED', comment: reason, decidedBy: actor.userId }, actor);
+  await recordEvent(t, orgId, req.id, 'invalidated', actor.userId, { reason, ...(opts.notify === false ? { notified: false } : {}) });
+  if (opts.notify !== false) {
+    const payload = await requestPayload(t, orgId, req);
+    await emitTargeted(t, orgId, 'approval.decided', req.id, (current?.actors ?? []).map((a) => a.userId).filter((u) => u !== actor.userId), { ...payload, decision: 'INVALIDATED', comment: reason, decidedBy: actor.userId }, actor);
+  }
   return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: 'INVALIDATED' };
 }
 
@@ -813,7 +829,13 @@ export async function answerInfo(deps: ApiDeps, trx: Trx, actor: Actor, orgId: s
     const steps = await loadSteps(t, req.id);
     const step = steps.find((s) => s.stepNo === req.currentStep && s.status === 'PENDING');
     await t.updateTable('approvalRequests').set({ infoRequestedAt: null }).where('id', '=', req.id).execute();
-    await recordEvent(t, orgId, req.id, 'info_answered', actor.userId, { stepNo: req.currentStep, comment });
+    // review 8-P2-1: the level's clocks were paused while the question waited for this answer; they restart now — the escalation
+    // deadline is re-armed from the answer (once per level: an escalated level stays escalated) and the day-long reminder
+    // becomes due again a day after it (the worker counts from the latest answer)
+    const now = new Date();
+    const dueAt = step && !step.escalatedAt ? escalationDueAt({ escalateAfterHours: step.escalateAfterHours, escalateTo: step.escalateTo }, now) : null;
+    if (step) await t.updateTable('approvalSteps').set({ remindedAt: null, ...(dueAt ? { dueAt } : {}) }).where('id', '=', step.id).execute();
+    await recordEvent(t, orgId, req.id, 'info_answered', actor.userId, { stepNo: req.currentStep, comment, ...(dueAt ? { dueAt: dueAt.toISOString() } : {}) });
     await hookFor(req.entityType)?.onInfoAnswered?.(deps, t, hookCtx(orgId, req, actor, comment));
     const payload = await requestPayload(t, orgId, req);
     await emitTargeted(t, orgId, 'approval.info_answered', req.id, (step?.actors ?? []).filter((a) => a.decision === 'PENDING').map((a) => a.userId), { ...payload, comment, answeredBy: actor.userId }, actor);
@@ -821,6 +843,22 @@ export async function answerInfo(deps: ApiDeps, trx: Trx, actor: Actor, orgId: s
   });
   await audit(trx, actor, orgId, 'approval.info_answered', 'approval_request', { entityId: requestId, branchId: out.branchId, newValue: { comment } });
   return out;
+}
+
+/**
+ * The requester answered a question by editing the document, which replaced its request (review 8-P2-8 — an attendance note's
+ * reason edited while INFO_REQUESTED): the new request's timeline records the answer and its current level's approvers hear
+ * `approval.info_answered` with it. The caller submitted the new request with `notifyFirstLevel: false`. System step.
+ */
+export async function announceAnswer(t: Trx, actor: Actor, orgId: string, requestId: string, answer: string): Promise<void> {
+  const req = await lockRequest(t, orgId, requestId);
+  if (req.status !== 'PENDING') return;
+  const steps = await loadSteps(t, req.id);
+  const step = steps.find((s) => s.stepNo === req.currentStep && s.status === 'PENDING');
+  const comment = answer.trim().slice(0, 2000);
+  await recordEvent(t, orgId, req.id, 'info_answered', actor.userId, { stepNo: req.currentStep, comment, byEdit: true });
+  const payload = await requestPayload(t, orgId, req);
+  await emitTargeted(t, orgId, 'approval.info_answered', req.id, (step?.actors ?? []).filter((a) => a.decision === 'PENDING').map((a) => a.userId), { ...payload, comment, answeredBy: actor.userId }, actor);
 }
 
 export { hookFor, approvePermissionFor, viewPermissionFor, managePermissionFor };

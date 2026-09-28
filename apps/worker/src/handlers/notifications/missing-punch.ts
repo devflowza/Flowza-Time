@@ -13,8 +13,10 @@ import { asDate, isoDate } from '../attendance/common.js';
  * shift — else the self-service check-out window's end, else first IN + `attendance.stats.fullDayHours`) plus
  * `notifications.missingPunchReminderHours` gets ONE `punch.missing_out` notice for that employee-day.
  *
- *  - Organisation-local: "today" and "yesterday" are the organisation's local dates (a night shift that started yesterday is
- *    still reminded after midnight); a record's due time is computed in the record's own timezone.
+ *  - Branch-local: "today" and "yesterday" are the local dates of the record's BRANCH (its timezone; the organisation's when a
+ *    branch's timezone is unusable) — a branch far east or west of the organisation keeps its reminder (review 8-P2-6), and a
+ *    night shift that started yesterday is still reminded after midnight; a record's due time is computed in the record's own
+ *    timezone (the one its attendance date is in).
  *  - Not on non-working days: records whose status is LEAVE / HOLIDAY / WEEKLY_OFF (or outside employment) and days covered
  *    by an approved full-day leave are skipped.
  *  - Once per employee-day: the `missing_punch_reminders` ledger (primary key organisation × employee × date) is claimed with
@@ -64,15 +66,27 @@ export async function runMissingPunchReminders(deps: WorkerDeps, organizationId:
     const attendance = resolveAttendanceSettings(settings?.attendance ?? {});
     const zone = isValidTimezone(org.timezone) ? org.timezone : 'UTC';
     const local = DateTime.fromJSDate(now).setZone(zone);
-    const today = local.toISODate() ?? now.toISOString().slice(0, 10);
-    const yesterday = local.minus({ days: 1 }).toISODate() ?? today;
-    summary.today = today;
+    summary.today = local.toISODate() ?? now.toISOString().slice(0, 10);
+    // each branch's own "yesterday … today" (review 8-P2-6): branches in the same local dates share one window — at most three
+    // windows at any instant, since every timezone's date is within one day of UTC's
+    const windows = new Map<string, { yesterday: string; today: string; branchIds: string[] }>();
+    for (const b of await trx.selectFrom('branches').select(['id', 'timezone']).where('organizationId', '=', organizationId).execute()) {
+      const branchLocal = DateTime.fromJSDate(now).setZone(isValidTimezone(b.timezone) ? b.timezone : zone);
+      const today = branchLocal.toISODate() ?? summary.today;
+      const w = windows.get(today) ?? { yesterday: branchLocal.minus({ days: 1 }).toISODate() ?? today, today, branchIds: [] };
+      w.branchIds.push(b.id);
+      windows.set(today, w);
+    }
+    if (windows.size === 0) return summary;
+    const earliest = [...windows.values()].map((w) => w.yesterday).sort()[0]!;
+    const latest = [...windows.values()].map((w) => w.today).sort().at(-1)!;
 
     // open days: a check-in without a check-out (the engine leaves last_out_at empty while the day is open, and flags
     // MISSING_OUT once it closed with an earlier OUT on record), not reminded yet
     const rows = await trx.selectFrom('attendanceDailyRecords as d').innerJoin('employees as e', (j) => j.onRef('e.id', '=', 'd.employeeId').onRef('e.organizationId', '=', 'd.organizationId'))
       .select(['d.employeeId', 'd.attendanceDate', 'd.firstInAt', 'd.expectedEndAt', 'd.timezone'])
-      .where('d.organizationId', '=', organizationId).where('d.attendanceDate', '>=', asDate(yesterday)).where('d.attendanceDate', '<=', asDate(today))
+      .where('d.organizationId', '=', organizationId)
+      .where((eb) => eb.or([...windows.values()].map((w) => eb.and([eb('d.branchId', 'in', w.branchIds), eb('d.attendanceDate', '>=', asDate(w.yesterday)), eb('d.attendanceDate', '<=', asDate(w.today))]))))
       .where('d.firstInAt', 'is not', null)
       .where((eb) => eb.or([eb('d.lastOutAt', 'is', null), sql<boolean>`'MISSING_OUT' = any(d.flags)`]))
       .where('d.status', 'not in', [...NON_WORKING])
@@ -88,7 +102,7 @@ export async function runMissingPunchReminders(deps: WorkerDeps, organizationId:
       const employeeIds = [...new Set(candidates.map((c) => c.employeeId))];
       const [leaves, logins] = await Promise.all([
         trx.selectFrom('leaveRecords').select(['employeeId', 'startDate', 'endDate']).where('organizationId', '=', organizationId).where('status', '=', 'APPROVED').where('isHalfDay', '=', false)
-          .where('employeeId', 'in', employeeIds).where('startDate', '<=', asDate(today)).where('endDate', '>=', asDate(yesterday)).execute(),
+          .where('employeeId', 'in', employeeIds).where('startDate', '<=', asDate(latest)).where('endDate', '>=', asDate(earliest)).execute(),
         trx.selectFrom('orgMemberships').select(['employeeId', 'userId']).where('organizationId', '=', organizationId).where('status', '=', 'active').where('employeeId', 'in', employeeIds).execute(),
       ]);
       const onLeave = (employeeId: string, date: string) => leaves.some((l) => l.employeeId === employeeId && isoDate(l.startDate) <= date && isoDate(l.endDate) >= date);
@@ -116,7 +130,7 @@ export async function runMissingPunchReminders(deps: WorkerDeps, organizationId:
       }
     }
     // the ledger only has to remember the days still in reach
-    const keepFrom = local.minus({ days: MISSING_PUNCH_LEDGER_DAYS }).toISODate() ?? yesterday;
+    const keepFrom = local.minus({ days: MISSING_PUNCH_LEDGER_DAYS }).toISODate() ?? earliest;
     await trx.deleteFrom('missingPunchReminders').where('organizationId', '=', organizationId).where('attendanceDate', '<', asDate(keepFrom)).execute();
     return summary;
   });

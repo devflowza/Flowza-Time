@@ -7,7 +7,10 @@ import type { WorkerDeps } from '../../deps.js';
 import type { HandlerRegistry, JobContext } from '../types.js';
 import { approvalEntityFacts } from './facts.js';
 
-/** A current level still waiting this long after it became current gets one reminder to its pending approvers (B-102). */
+/**
+ * A current level still waiting this long after it became current — or after the requester answered the last question on
+ * it — gets one reminder to its pending approvers (B-102).
+ */
 export const APPROVAL_REMINDER_AFTER_HOURS = 24;
 /** The daily digest goes out on the first run at or after this local hour (organisation timezone). */
 export const APPROVAL_DIGEST_LOCAL_HOUR = 8;
@@ -17,15 +20,30 @@ interface CurrentStep {
   requestedBy: string | null; subjectUserId: string | null; workflowId: string | null; activatedAt: Date | null; dueAt: Date | null; escalatedAt: Date | null; remindedAt: Date | null; escalateTo: string | null;
   /** Other people the request is about (HR portal Prompt 4 review, P0-2 — a swap's colleague) and their logins at submit. */
   coSubjectEmployeeIds: string[] | null; coSubjectUserIds: string[] | null;
+  /** Set while an approver's question waits for the requester's answer (review 8-P2-1: the level's clocks are paused). */
+  infoRequestedAt: Date | null;
+  /** When the requester last answered a question on the request: the reminder clock restarts there (review 8-P2-1). */
+  lastAnsweredAt: Date | null;
 }
 
 export interface ApprovalRemindersResult { escalated: number; reminded: number; digests: number }
 
 async function currentSteps(trx: Trx, orgId: string): Promise<CurrentStep[]> {
   return trx.selectFrom('approvalSteps as s').innerJoin('approvalRequests as r', 'r.id', 's.requestId')
-    .select(['s.id as stepId', 's.requestId', 's.stepNo', 'r.entityType', 'r.entityId', 'r.employeeId', 'r.branchId', 'r.requestedBy', 'r.subjectUserId', 'r.workflowId', 's.activatedAt', 's.dueAt', 's.escalatedAt', 's.remindedAt', 's.escalateTo', 'r.coSubjectEmployeeIds', 'r.coSubjectUserIds'])
+    .select(['s.id as stepId', 's.requestId', 's.stepNo', 'r.entityType', 'r.entityId', 'r.employeeId', 'r.branchId', 'r.requestedBy', 'r.subjectUserId', 'r.workflowId', 's.activatedAt', 's.dueAt', 's.escalatedAt', 's.remindedAt', 's.escalateTo', 'r.coSubjectEmployeeIds', 'r.coSubjectUserIds', 'r.infoRequestedAt'])
+    .select((eb) => eb.selectFrom('approvalRequestEvents as e').select((e) => e.fn.max('e.at').as('at')).whereRef('e.requestId', '=', 'r.id').where('e.kind', '=', 'info_answered').as('lastAnsweredAt'))
     .where('r.organizationId', '=', orgId).where('r.status', '=', 'PENDING').where('s.status', '=', 'PENDING').whereRef('s.stepNo', '=', 'r.currentStep')
     .orderBy('r.createdAt').orderBy('r.id').execute() as Promise<CurrentStep[]>;
+}
+
+/**
+ * Since when the current level has been waiting for its approvers: its activation, or the requester's last answer when that is
+ * later (review 8-P2-1 — a question hands the request back to the requester; the answer starts the level's clock again).
+ */
+export function waitingSinceOf(s: Pick<CurrentStep, 'activatedAt' | 'lastAnsweredAt'>): Date | null {
+  const answered = s.lastAnsweredAt ? new Date(s.lastAnsweredAt) : null;
+  if (!s.activatedAt) return null;
+  return answered && answered.getTime() > s.activatedAt.getTime() ? answered : s.activatedAt;
 }
 
 async function pendingActorIds(trx: Trx, stepId: string): Promise<string[]> {
@@ -93,7 +111,7 @@ async function escalate(trx: Trx, orgId: string, s: CurrentStep, now: Date): Pro
   }
   if (added.length) await trx.insertInto('approvalStepActors').values(added.map((userId) => ({ organizationId: orgId, stepId: s.stepId, userId, viaDelegationOf: null, resolutionPath: 'escalated' }))).onConflict((oc) => oc.columns(['stepId', 'userId']).doNothing()).execute();
   await trx.updateTable('approvalSteps').set({ escalatedAt: now }).where('id', '=', s.stepId).execute();
-  await recordEvent(trx, orgId, s.requestId, 'escalated', { stepNo: s.stepNo, target: target ?? s.escalateTo, added, ...(added.length ? {} : { reason: 'nobody else to escalate to' }) });
+  await recordEvent(trx, orgId, s.requestId, 'escalated', { stepNo: s.stepNo, target: target ?? s.escalateTo, added, dueAt: s.dueAt?.toISOString() ?? null, ...(added.length ? {} : { reason: 'nobody else to escalate to' }) });
   if (added.length) await emitTargeted(trx, orgId, 'approval.escalated', s.requestId, added, { ...(await requestPayload(trx, orgId, s)), target, dueAt: s.dueAt?.toISOString() ?? null });
   return added;
 }
@@ -103,35 +121,43 @@ async function escalate(trx: Trx, orgId: string, s: CurrentStep, now: Date): Pro
  * approvers of levels waiting longer than a day (once per level), and once a day — the first run at or after 08:00 in the
  * organisation's timezone — send every approver ONE digest notification with their pending counts (idempotent through
  * `approval_digest_runs`).
+ *
+ * A request whose approver asked a question (INFO_REQUESTED — `info_requested_at` set) waits for the REQUESTER, not for its
+ * approvers (review 8-P2-1): it is neither escalated, nor reminded, nor counted in the digest until it is answered. The answer
+ * restarts the level's clocks: the reminder is due a day after the answer, and the escalation deadline is re-armed from the
+ * answer by the engine (apps/api `answerInfo`).
  */
 export async function runApprovalReminders(deps: WorkerDeps, orgId: string, opts: { jobId?: string } = {}): Promise<ApprovalRemindersResult> {
   const now = deps.now();
   return withContext(deps.db, { kind: 'system', organizationId: orgId, ...(opts.jobId ? { jobId: opts.jobId } : {}) }, async (trx) => {
     const steps = await currentSteps(trx, orgId);
     let escalated = 0; let reminded = 0; let digests = 0;
-    for (const s of steps) {
+    // the requests waiting for their approvers (not for the requester's answer to a question)
+    const waiting = steps.filter((s) => !s.infoRequestedAt);
+    for (const s of waiting) {
       if (s.dueAt && s.dueAt.getTime() <= now.getTime() && !s.escalatedAt && s.escalateTo) { await escalate(trx, orgId, s, now); escalated += 1; }
     }
     const remindBefore = now.getTime() - APPROVAL_REMINDER_AFTER_HOURS * 3_600_000;
-    for (const s of steps) {
-      if (s.remindedAt || !s.activatedAt || s.activatedAt.getTime() > remindBefore) continue;
+    for (const s of waiting) {
+      const since = waitingSinceOf(s);
+      if (s.remindedAt || !since || since.getTime() > remindBefore) continue;
       const userIds = await pendingActorIds(trx, s.stepId);
       await trx.updateTable('approvalSteps').set({ remindedAt: now }).where('id', '=', s.stepId).execute();
-      await recordEvent(trx, orgId, s.requestId, 'reminded', { stepNo: s.stepNo, recipients: userIds.length });
-      await emitTargeted(trx, orgId, 'approval.reminder', s.requestId, userIds, { ...(await requestPayload(trx, orgId, s)), kind: 'reminder', waitingSince: s.activatedAt.toISOString() });
+      await recordEvent(trx, orgId, s.requestId, 'reminded', { stepNo: s.stepNo, recipients: userIds.length, waitingSince: since.toISOString() });
+      await emitTargeted(trx, orgId, 'approval.reminder', s.requestId, userIds, { ...(await requestPayload(trx, orgId, s)), kind: 'reminder', waitingSince: since.toISOString() });
       reminded += 1;
     }
     // daily digest
     const org = await trx.selectFrom('organizations').select('timezone').where('id', '=', orgId).executeTakeFirst();
     const local = DateTime.fromJSDate(now, { zone: org?.timezone ?? 'UTC' });
     const localDate = local.toISODate();
-    if (localDate && local.hour >= APPROVAL_DIGEST_LOCAL_HOUR && steps.length) {
+    if (localDate && local.hour >= APPROVAL_DIGEST_LOCAL_HOUR && waiting.length) {
       const claimed = await sql<{ organizationId: string }>`insert into public.approval_digest_runs (organization_id, digest_date, sent_at, recipients) values (${orgId}::uuid, ${localDate}::date, ${now}, 0)
         on conflict (organization_id, digest_date) do nothing returning organization_id as "organizationId"`.execute(trx);
       if (claimed.rows.length) {
         const byUser = new Map<string, Map<string, number>>();
-        const actors = await trx.selectFrom('approvalStepActors').select(['stepId', 'userId']).where('stepId', 'in', steps.map((s) => s.stepId)).where('decision', '=', 'PENDING').execute();
-        const typeOf = new Map(steps.map((s) => [s.stepId, s.entityType]));
+        const actors = await trx.selectFrom('approvalStepActors').select(['stepId', 'userId']).where('stepId', 'in', waiting.map((s) => s.stepId)).where('decision', '=', 'PENDING').execute();
+        const typeOf = new Map(waiting.map((s) => [s.stepId, s.entityType]));
         for (const a of actors) {
           const counts = byUser.get(a.userId) ?? new Map<string, number>();
           const type = typeOf.get(a.stepId) ?? 'OTHER';

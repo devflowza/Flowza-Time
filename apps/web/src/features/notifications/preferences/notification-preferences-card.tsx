@@ -17,8 +17,9 @@ const LOCALES: readonly NotificationLocale[] = ['en', 'ar'];
 /**
  * The member's own notification preferences for the active organisation (HR portal Prompt 8): per category, in-app and
  * e-mail switches. Cells the member cannot switch (items they must act on, system and subscription notices) render locked
- * with the reason; categories that cannot reach the member are not listed. Each switch saves at once. Shown on /my/profile
- * (employees) and Settings → Notifications (staff).
+ * with the reason; categories that cannot reach the member are not listed. Each switch saves at once. Shown on
+ * /account/notifications (every member — notifications review 8-P1-4), /my/profile (employees) and Settings → Notifications
+ * (staff).
  */
 export function NotificationPreferencesCard() {
   const { t } = useTranslation('notificationPrefs');

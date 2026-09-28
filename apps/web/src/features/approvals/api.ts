@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ApprovalBulkDecideResultDto, ApprovalDecideResultDto, ApprovalDelegationDto, ApprovalDelegationInput, ApprovalEntity, ApprovalInboxScope, ApprovalRequestDto, ApprovalWorkflowDto, ApprovalWorkflowInput } from '@flowza/contracts';
+import type { ApprovalBulkDecideResultDto, ApprovalDecideResultDto, ApprovalDelegationDto, ApprovalEmailPreviewDto, ApprovalDelegationInput, ApprovalEntity, ApprovalInboxScope, ApprovalRequestDto, ApprovalWorkflowDto, ApprovalWorkflowInput } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { env } from '@/lib/env';
 import { qk } from '@/lib/query-keys';
@@ -86,6 +86,20 @@ export async function downloadApprovalHistory(orgId: string, query: Omit<InboxQu
   a.href = url; a.download = name; a.rel = 'noopener';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+/**
+ * What a one-click e-mail link is about, BEFORE the approver confirms (notifications review 8-P0-1): the API reads the request
+ * itself — never the e-mail — and spends nothing. Not retried: a used, expired or foreign link answers the same every time.
+ */
+export function useEmailPreview({ orgId, token, action }: { orgId: string; token: string; action: DecisionKind | null }) {
+  return useQuery({
+    queryKey: ['approval-email-preview', orgId, token, action],
+    queryFn: async () => (await api.post<Envelope<ApprovalEmailPreviewDto>>(`/orgs/${orgId}/approvals/email-action/preview`, { token, action })).data,
+    enabled: !!orgId && !!token && !!action,
+    retry: false,
+    staleTime: Infinity,
+  });
 }
 
 /** The one-click e-mail action. The organisation comes from the link (it may not be the active one). */

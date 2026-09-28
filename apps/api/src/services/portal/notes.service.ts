@@ -7,7 +7,7 @@ import { branchFilter, hasPermission, isTeamMember, requireMembership } from '..
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
 import { isoDate, isoDateTime, isoDateTimeOrNull, numberOrNull } from '../../lib/mappers.js';
 import { pageOf, toCount } from '../../lib/pagination.js';
-import { decideWithin, invalidateForEntity, requestInfo, submit } from '../approvals/engine.js';
+import { announceAnswer, decideWithin, invalidateForEntity, requestInfo, submit } from '../approvals/engine.js';
 import { loadDelegationMap } from '../approvals/context.js';
 import { systemStep } from '../features/context.js';
 import { orgToday } from '../features/recalc.js';
@@ -84,12 +84,18 @@ export async function listMyNotes(deps: ApiDeps, actor: Actor, orgId: string, q:
   });
 }
 
-/** Route a (re)submitted note: the workflow, else the line manager with the secondary standing in; returns the request id. */
-async function routeNote(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, note: { id: string; attendanceDate: string }, emp: Awaited<ReturnType<typeof loadEmployeeCtx>>, branchId: string): Promise<string> {
-  const submitted = await submit(deps, trx, actor, orgId, { entityType: 'ATTENDANCE_NOTE', entityId: note.id, employeeId: emp.id, branchId, departmentId: emp.departmentId, units: null, requestedBy: actor.userId, noWorkflow: { kind: 'MANAGER' } });
+/**
+ * Route a (re)submitted note: the workflow, else the line manager with the secondary standing in; returns the request id.
+ * `answer`: the note was edited to answer an approver's question (review 8-P2-8) — its approvers hear "answer received" with
+ * the new reason (`approval.info_answered`, recorded on the new request's timeline), not a fresh "waiting for your approval".
+ */
+async function routeNote(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, note: { id: string; attendanceDate: string }, emp: Awaited<ReturnType<typeof loadEmployeeCtx>>, branchId: string, opts: { answer?: string } = {}): Promise<string> {
+  const answered = opts.answer !== undefined;
+  const submitted = await submit(deps, trx, actor, orgId, { entityType: 'ATTENDANCE_NOTE', entityId: note.id, employeeId: emp.id, branchId, departmentId: emp.departmentId, units: null, requestedBy: actor.userId, noWorkflow: { kind: 'MANAGER' }, notifyFirstLevel: !answered });
   const secondary = await systemStep(trx, orgId, async (t) => {
-    const s = await seatSecondaryManager(t, actor, orgId, { requestId: submitted.requestId, entityType: 'ATTENDANCE_NOTE', entityId: note.id, employeeId: emp.id, secondaryManagerEmployeeId: emp.secondaryManagerEmployeeId, employeeName: emp.displayName });
+    const s = await seatSecondaryManager(t, actor, orgId, { requestId: submitted.requestId, entityType: 'ATTENDANCE_NOTE', entityId: note.id, employeeId: emp.id, secondaryManagerEmployeeId: emp.secondaryManagerEmployeeId, employeeName: emp.displayName, notify: !answered });
     await t.updateTable('attendanceNotes').set({ approvalRequestId: submitted.requestId }).where('id', '=', note.id).execute();
+    if (answered) await announceAnswer(t, actor, orgId, submitted.requestId, opts.answer ?? '');
     return s;
   });
   // the line managers who are NOT seated on the request (a workflow routed it elsewhere) still hear that a reason was given
@@ -134,7 +140,9 @@ export async function submitNote(deps: ApiDeps, actor: Actor, orgId: string, inp
  * Edit one's own open reason. Any material change — the text or the category of a pending reason (HR portal Prompt 4 review,
  * P1-5; Finance B-96, like a leave edit), or an answer to a question (status info_requested) — sends it back for review: the
  * old request is INVALIDATED (the timeline reads "superseded") and a new one routed, so an approval given to the old text
- * never carries over to the new one. An edit that changes nothing leaves the request as it is.
+ * never carries over to the new one. An edit that changes nothing leaves the request as it is. An ANSWER tells the approvers
+ * so (review 8-P2-8): they hear `approval.info_answered` with the new reason, not "changed while pending" plus a new "waiting
+ * for your approval" — the invalidation stays on the old request's timeline.
  */
 export async function updateMyNote(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: SelfNoteUpdateInput): Promise<AttendanceNoteDto> {
   const self = portalSelf(actor, orgId, 'attendance.note');
@@ -153,9 +161,9 @@ export async function updateMyNote(deps: ApiDeps, actor: Actor, orgId: string, i
       const res = await t.updateTable('attendanceNotes').set({ ...(input.category ? { category: input.category } : {}), ...(input.note ? { note: input.note } : {}), ...(resubmit ? { status: 'pending', submittedAt: new Date() } : {}) })
         .where('id', '=', id).where('status', '=', before.status).executeTakeFirst();
       if (Number(res.numUpdatedRows) !== 1) throw errors.conflict('The reason changed meanwhile. Please refresh.');
-      if (resubmit) await invalidateForEntity(t, actor, orgId, 'ATTENDANCE_NOTE', id, answered ? 'The employee answered the question and updated the reason.' : 'The employee changed the reason while it was waiting for review.');
+      if (resubmit) await invalidateForEntity(t, actor, orgId, 'ATTENDANCE_NOTE', id, answered ? 'The employee answered the question and updated the reason.' : 'The employee changed the reason while it was waiting for review.', { notify: !answered });
     });
-    if (resubmit) await routeNote(deps, trx, actor, orgId, { id, attendanceDate: date }, emp, before.branchId ?? emp.branchId);
+    if (resubmit) await routeNote(deps, trx, actor, orgId, { id, attendanceDate: date }, emp, before.branchId ?? emp.branchId, answered ? { answer: input.note ?? before.note } : {});
     await audit(trx, actor, orgId, resubmit ? 'attendance.note_resubmitted' : 'attendance.note_updated', 'attendance_note', { entityId: id, branchId: before.branchId, oldValue: { category: before.category, note: before.note, status: before.status }, newValue: input });
     const saved = (await withSystemScope(trx, orgId, (t) => loadNote(t, orgId, id)))!;
     return (await toNoteDtos(trx, orgId, [saved]))[0]!;

@@ -170,6 +170,37 @@ export const approvalEmailActionSchema = z.object({
   comment: z.string().trim().max(1000).optional(),
 });
 export type ApprovalEmailActionInput = z.infer<typeof approvalEmailActionSchema>;
+/**
+ * POST /orgs/:orgId/approvals/email-action/preview — what a one-click link is about, BEFORE the approver confirms (review
+ * 8-P0-1): read-only (the token is not spent), bound to the signed-in owner of the token, rate-limited like the action.
+ */
+export const approvalEmailPreviewSchema = z.object({
+  token: z.string().min(16).max(256),
+  action: z.enum(APPROVAL_DECISIONS),
+});
+export type ApprovalEmailPreviewInput = z.infer<typeof approvalEmailPreviewSchema>;
+/**
+ * The request summary the e-mail landing page shows before the Approve / Reject button: read from the request itself under
+ * the approver's own access (what their inbox shows), never from the e-mail. `actionable` — the link's level is still the
+ * request's current, pending level.
+ */
+export interface ApprovalEmailPreviewDto {
+  requestId: string;
+  action: (typeof APPROVAL_DECISIONS)[number];
+  entityType: ApprovalEntity;
+  employeeName: string | null;
+  date: string | null;
+  endDate: string | null;
+  leaveTypeName: string | null;
+  /** The leave type's Arabic name when it has one (an Arabic page shows it — review 8-P2-2). */
+  leaveTypeNameAr: string | null;
+  stepNo: number;
+  stepCount: number;
+  currentStep: number;
+  status: ApprovalRequestStatus;
+  actionable: boolean;
+  expiresAt: string;
+}
 
 export const approvalDelegationInputSchema = z.object({
   delegateUserId: uuidSchema,

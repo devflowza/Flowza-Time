@@ -16,7 +16,7 @@ import { dv } from '../features/sql-helpers.js';
  * another party to the request (a swap's colleague — review P0-2).
  * Runs in a system step (the approval tables are written by the platform only).
  */
-export async function seatSecondaryManager(t: Trx, actor: Actor, orgId: string, input: { requestId: string; entityType: ApprovalEntity; entityId: string; employeeId: string; secondaryManagerEmployeeId: string | null; employeeName: string | null }): Promise<string | null> {
+export async function seatSecondaryManager(t: Trx, actor: Actor, orgId: string, input: { requestId: string; entityType: ApprovalEntity; entityId: string; employeeId: string; secondaryManagerEmployeeId: string | null; employeeName: string | null; /** False: the caller tells the level itself (review 8-P2-8). */ notify?: boolean }): Promise<string | null> {
   if (!input.secondaryManagerEmployeeId || input.secondaryManagerEmployeeId === input.employeeId) return null;
   const req = await t.selectFrom('approvalRequests').select(['id', 'status', 'workflowId', 'currentStep', 'subjectUserId', 'requestedBy', 'coSubjectEmployeeIds', 'coSubjectUserIds']).where('organizationId', '=', orgId).where('id', '=', input.requestId).executeTakeFirst();
   if (!req || req.status !== 'PENDING' || req.workflowId !== null || req.currentStep !== 1) return null;
@@ -35,7 +35,7 @@ export async function seatSecondaryManager(t: Trx, actor: Actor, orgId: string, 
   if (existing) return null;
   await t.insertInto('approvalStepActors').values({ organizationId: orgId, stepId: step.id, userId: secondary.userId, viaDelegationOf: step.approverUserId, resolutionPath: 'secondary' }).execute();
   await recordEvent(t, orgId, req.id, 'secondary_seated', actor.userId, { stepNo: 1, userId: secondary.userId, standsInFor: step.approverUserId });
-  await emitTargeted(t, orgId, 'approval.pending', req.id, [secondary.userId], { requestId: req.id, entityType: input.entityType, entityId: input.entityId, employeeId: input.employeeId, employeeName: input.employeeName, requestedBy: req.requestedBy, stepId: step.id, stepNo: 1, secondaryManager: true }, { userId: actor.userId, requestId: actor.requestId });
+  if (input.notify !== false) await emitTargeted(t, orgId, 'approval.pending', req.id, [secondary.userId], { requestId: req.id, entityType: input.entityType, entityId: input.entityId, employeeId: input.employeeId, employeeName: input.employeeName, requestedBy: req.requestedBy, stepId: step.id, stepNo: 1, secondaryManager: true }, { userId: actor.userId, requestId: actor.requestId });
   return secondary.userId;
 }
 

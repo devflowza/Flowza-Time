@@ -47,16 +47,24 @@ test.describe('Approvals', () => {
     await expect(panel.getByText('Moved to level 2')).toBeVisible();
   });
 
-  test('P2-12 e-mail link → nothing is sent on load; the approver confirms and the token is sent once', async ({ page }) => {
+  test('P2-12 8-P0-1 e-mail link → the request is shown first (read-only preview), nothing is decided on load; the approver confirms and the token is sent once', async ({ page }) => {
     const handlers = approvalsHandlers();
     const backend = await installMockBackend(page, { get: handlers.get, post: handlers.post });
     const emailActions = () => backend.calls.filter((c) => c.method === 'POST' && c.path === `/orgs/${ORG_ID}/approvals/email-action`);
+    const previews = () => backend.calls.filter((c) => c.method === 'POST' && c.path === `/orgs/${ORG_ID}/approvals/email-action/preview`);
     await page.goto(`/approvals/email-action?org=${ORG_ID}&action=APPROVE&token=${EMAIL_TOKEN}`);
     await expect(page.getByRole('heading', { level: 1, name: 'Confirm your decision' })).toBeVisible();
     await expect(page.getByText('You are about to approve the request from your e-mail.')).toBeVisible();
+    // what the link is about, read by the API from the request (never from the e-mail), before any decision
+    const summary = page.getByTestId('email-action-summary');
+    await expect(summary).toContainText('Salim Al Harthy');
+    await expect(summary).toContainText('Annual Leave');
+    await expect(summary).toContainText('04 Oct 2026 → 05 Oct 2026');
+    await expect(summary).toContainText('Level 2 of 2');
     // mail scanners follow links: opening it decides nothing (settled network, still no call)
     await page.waitForLoadState('networkidle');
     expect(emailActions()).toHaveLength(0);
+    expect(previews().map((c) => c.body)).toEqual([{ token: EMAIL_TOKEN, action: 'APPROVE' }]);
     await page.getByRole('button', { name: 'Approve' }).click();
     await expect(page.getByText('Done — the request is now Approved.')).toBeVisible();
     expect(emailActions()).toHaveLength(1);

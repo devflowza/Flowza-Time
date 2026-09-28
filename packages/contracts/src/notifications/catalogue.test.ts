@@ -3,8 +3,8 @@ import { DOMAIN_EVENT_TYPES } from '../sync.js';
 import { DEFAULT_NOTIFICATION_SETTINGS, notificationSettingsSchema, organizationSettingsSchema, resolveNotificationSettings } from '../organizations.js';
 import { updateNotificationPreferencesSchema } from '../dto/notifications.js';
 import {
-  approvalContextFacts, decideNotificationChannels, isConfigurablePreference, localDateOf, NON_NOTIFYING_EVENT_TYPES, NOTIFICATION_CATALOGUE, NOTIFICATION_ORG_SWITCHES, NOTIFICATION_TYPES, notificationData,
-  notificationPreferenceCells, notificationTemplateKeys, resolveNotification, type NotificationContext,
+  approvalContextFacts, decideNotificationChannels, isConfigurablePreference, localDateOf, NON_NOTIFYING_EVENT_TYPES, NOTIFICATION_CATALOGUE, NOTIFICATION_ORG_SWITCHES, NOTIFICATION_ROUTE_KEYS, NOTIFICATION_TYPES, notificationData,
+  notificationDataKeys, notificationPreferenceCells, notificationTemplateKeys, resolveNotification, type NotificationContext,
 } from './catalogue.js';
 
 const OTHER: NotificationContext = { audience: 'other', timezone: 'Asia/Muscat' };
@@ -68,7 +68,12 @@ describe('deep links', () => {
     expect(resolveNotification('attendance.selfie_decided', { at: '2026-09-20T21:30:00Z', decision: 'approved' }, SELF)!.link).toBe('/my/requests?tab=selfies&date=2026-09-21');
     expect(resolveNotification('leave.approved', { aggregateId: REQ }, SELF)!.link).toBe(`/my/leave?request=${REQ}`);
     expect(resolveNotification('leave.info_requested', { leaveRecordId: REQ }, SELF)!.link).toBe(`/my/leave?request=${REQ}`);
-    expect(resolveNotification('punch.missing_out', { attendanceDate: '2026-09-21' }, SELF)!.link).toBe('/my/checkin?date=2026-09-21');
+  });
+  it('8-P2-4 the missing check-out notice opens /my (its check-in card — a page of the live bundle too); 8-P2-5 an import opens /employees/import?importId=', () => {
+    expect(resolveNotification('punch.missing_out', { attendanceDate: '2026-09-21' }, SELF)!.link).toBe('/my');
+    expect(resolveNotification('employee.imported', { importId: REQ, phase: 'queued' }, OTHER)!.link).toBe(`/employees/import?importId=${REQ}`);
+    expect(resolveNotification('employee.imported', { aggregateType: 'employee_import', aggregateId: REQ }, OTHER)!.link).toBe(`/employees/import?importId=${REQ}`);
+    expect(resolveNotification('employee.imported', { importId: '../../admin' }, OTHER)!.link).toBe('/employees/import');
   });
   it('the same event leads the employee to the portal and a manager to the register', () => {
     const p = { employeeId: EMP, dates: ['2026-09-14', '2026-09-15'], count: 2 };
@@ -79,6 +84,29 @@ describe('deep links', () => {
   it('never puts a malformed id into a link', () => {
     expect(resolveNotification('approval.pending', { requestId: '../../admin' }, OTHER)!.link).toBe('/approvals');
     expect(resolveNotification('device.offline', { deviceId: 'x"><script>' }, OTHER)!.link).toBe('/devices');
+  });
+});
+
+describe('review fixes (docs/hr-portal/reviews/08-notifications-review.md)', () => {
+  it('8-P0-4 a correction\'s decision is not a notice of its own: approval.decided tells the requester and the person concerned', () => {
+    for (const t of ['attendance.correction_approved', 'attendance.correction_rejected']) {
+      expect(NOTIFICATION_CATALOGUE[t], t).toBeUndefined();
+      expect(NON_NOTIFYING_EVENT_TYPES as readonly string[], t).toContain(t);
+    }
+    expect(NOTIFICATION_CATALOGUE['approval.decided']!.recipients).toMatch(/requester/);
+  });
+  it('8-P0-5 the data whitelist of a type is the aggregate, the routing facts and the type\'s own variables; an unknown type keeps the first two only', () => {
+    expect(notificationDataKeys('attendance.note_info_requested')).toEqual(['aggregateType', 'aggregateId', ...NOTIFICATION_ROUTE_KEYS, 'attendanceDate', 'question']);
+    expect(notificationDataKeys('no.such_type')).toEqual(['aggregateType', 'aggregateId', ...NOTIFICATION_ROUTE_KEYS]);
+    const e = NOTIFICATION_CATALOGUE['approval.pending']!;
+    const payload = { requestId: REQ, entityType: 'LEAVE', employeeName: 'Ali', stepNo: 1, userIds: [EMP], leaveTypeNameAr: 'إجازة', comment: 'x' };
+    const data = notificationData(e, payload, resolveNotification('approval.pending', payload, OTHER)!.route, { type: 'approval_request', id: REQ });
+    for (const k of Object.keys(data)) expect(notificationDataKeys('approval.pending'), k).toContain(k);
+  });
+  it('8-P2-2 every notice naming a leave type carries its Arabic name too (the recipient\'s language picks one)', () => {
+    for (const e of Object.values(NOTIFICATION_CATALOGUE)) {
+      if (e.vars['leaveTypeName']) expect(e.vars, e.type).toHaveProperty('leaveTypeNameAr');
+    }
   });
 });
 

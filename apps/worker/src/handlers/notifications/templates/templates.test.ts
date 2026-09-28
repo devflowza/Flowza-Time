@@ -94,8 +94,6 @@ function expectedLink(key: string): string {
   const table: Record<string, string> = {
     'attendance.unexcused_marked#self': '/my/attendance?month=2026-09',
     'attendance.unexcused_marked#manager': `/attendance?employeeId=${ID.employee}`,
-    'attendance.correction_approved': `/attendance?employeeId=${ID.employee}&date=2026-09-15`,
-    'attendance.correction_rejected': `/attendance?employeeId=${ID.employee}&date=2026-09-15`,
     'attendance.note_submitted': `/approvals?request=${ID.approvalRequest}`,
     'attendance.note_info_requested': '/my/requests?tab=reasons&date=2026-09-15',
     'shift.swap_requested': '/my/shift?date=2026-09-15',
@@ -122,11 +120,11 @@ function expectedLink(key: string): string {
     'attendance.selfie_decided': '/my/requests?tab=selfies&date=2026-09-15',
     'attendance.punch_flagged': `/attendance?employeeId=${ID.employee}&date=2026-09-15`,
     'attendance.regularisation_decided': '/my/requests?tab=regularisations&date=2026-09-15',
-    'punch.missing_out': '/my/checkin?date=2026-09-15',
+    'punch.missing_out': '/my',
     'shift.swap_decided': '/my/shift?date=2026-09-15',
     'report.scheduled_delivery': `/reports?download=${ID.report}`,
     'sync.finance.failed': '/settings/integrations',
-    'employee.imported': `/employees/imports/${ID.aggregate}`,
+    'employee.imported': `/employees/import?importId=${ID.aggregate}`,
   };
   if (byType[type]) return byType[type]!;
   throw new Error(`no expected link for ${key}`);
@@ -239,7 +237,7 @@ describe('notification templates', () => {
 
   it('outcome-specific texts: a rejected reason says what it cost; a question carries the question; an escalation and a reminder say so', () => {
     const r = (type: string, data: Record<string, unknown>, audience: NotificationAudience = 'other') => renderNotification({ type, data, locale: 'en', timezone: TZ, orgName: 'Acme', audience, now: NOW });
-    expect(r('attendance.note_decided', { decision: 'rejected', attendanceDate: '2026-09-15', payEffectDays: 0.5, chargeOutcome: 'charged_leave', leaveTypeCode: 'AL', reason: 'No proof' }).body).toBe('Half a day deducted from your AL leave · Reason: No proof');
+    expect(r('attendance.note_decided', { decision: 'rejected', attendanceDate: '2026-09-15', payEffectDays: 0.5, chargeOutcome: 'charged_leave', leaveTypeCode: 'AL', reason: 'No proof' }).body).toBe('Half a day deducted from your AL balance · Reason: No proof');
     expect(r('attendance.note_decided', { decision: 'rejected', attendanceDate: '2026-09-15', payEffectDays: 1, chargeOutcome: 'lop', lossOfPay: true }).body).toBe('One day recorded as loss of pay');
     expect(r('attendance.note_decided', { decision: 'rejected', attendanceDate: '2026-09-15', payEffectDays: 0 }).body).toBe('No pay effect was applied.');
     expect(r('leave.info_requested', { question: 'Which city?', leaveTypeName: 'Annual', startDate: '2026-10-01', endDate: '2026-10-03' }).body).toBe('Which city? · Annual · 1 Oct 2026 → 3 Oct 2026');
@@ -279,5 +277,48 @@ describe('notification templates', () => {
     expect(locked.html).not.toContain('https://app.example/settings/notifications');
     expect(locked.html).toContain('dir="rtl"');
     expect(templateFor(NOTIFICATION_TEMPLATES.en, 'approval.decided', 'approval.decided#REJECTED')?.cta).toBe('View the request');
+  });
+
+  it('8-P2-2 an Arabic notice names the leave type in Arabic and prints no Latin code where a localised name exists', () => {
+    const render = (locale: NotificationLocale, type: string, data: Record<string, unknown>, audience: NotificationAudience = 'other') =>
+      renderNotification({ type, data, locale, timezone: TZ, orgName: 'Acme', audience, now: NOW });
+    const names = { leaveTypeName: 'Casual Leave', leaveTypeNameAr: 'إجازة عارضة' };
+    // the approval notice of a leave request: Arabic name for an Arabic reader, English name for an English one
+    const pendingAr = render('ar', 'approval.pending', { entityType: 'LEAVE', employeeName: 'سارة', date: '2026-10-01', endDate: '2026-10-02', ...names });
+    expect(pendingAr.body).toContain('إجازة عارضة');
+    expect(pendingAr.body).not.toContain('Casual Leave');
+    expect(render('en', 'approval.pending', { entityType: 'LEAVE', employeeName: 'Sara', date: '2026-10-01', endDate: '2026-10-02', ...names }).body).toContain('Casual Leave');
+    // the leave decision to the employee
+    for (const type of ['leave.approved', 'leave.rejected', 'leave.info_requested', 'leave.requested', 'leave.comment_added']) {
+      const ar = render('ar', type, { startDate: '2026-10-01', endDate: '2026-10-02', employeeName: 'سارة', question: 'لماذا؟', excerpt: 'تعليق', ...names });
+      expect(`${ar.title} ${ar.body}`, type).not.toContain('Casual Leave');
+    }
+    expect(render('ar', 'leave.approved', { startDate: '2026-10-01', endDate: '2026-10-02', ...names }).title).toContain('إجازة عارضة');
+    // a type without an Arabic name falls back to its name (never blank)
+    expect(render('ar', 'leave.approved', { startDate: '2026-10-01', endDate: '2026-10-02', leaveTypeName: 'Casual Leave' }).title).toContain('Casual Leave');
+    // a reason rejected against a leave balance: the type's Arabic name, not the code "AL"
+    const charged = { decision: 'rejected', attendanceDate: '2026-09-15', payEffectDays: 0.5, chargeOutcome: 'charged_leave', leaveTypeCode: 'AL', leaveTypeName: 'Annual Leave', leaveTypeNameAr: 'إجازة سنوية' };
+    const chargedAr = render('ar', 'attendance.note_decided', charged, 'subject');
+    expect(chargedAr.body).toContain('إجازة سنوية');
+    expect(chargedAr.body).not.toMatch(/\bAL\b/);
+    expect(render('en', 'attendance.note_decided', charged, 'subject').body).toBe('Half a day deducted from your Annual Leave balance');
+    // only the code known (the type was deleted meanwhile): the code, as the last resort
+    expect(render('en', 'attendance.note_decided', { ...charged, leaveTypeName: undefined, leaveTypeNameAr: undefined }, 'subject').body).toBe('Half a day deducted from your AL balance');
+    // a Flowza Finance failure code by its localised name
+    const finance = { direction: 'pull', consecutiveFailures: 3, code: 'AUTH_FAILED', error: 'HTTP 401', reason: 'streak' };
+    const financeAr = render('ar', 'sync.finance.failed', finance);
+    expect(financeAr.body).toContain(NOTIFICATION_TEMPLATES.ar.financeErrors['AUTH_FAILED']!);
+    expect(financeAr.body).not.toContain('AUTH_FAILED');
+    expect(render('en', 'sync.finance.failed', finance).body).toContain('Credential rejected: HTTP 401');
+    // the Arabic and English failure-code tables name the same codes
+    expect(Object.keys(NOTIFICATION_TEMPLATES.ar.financeErrors).sort()).toEqual(Object.keys(NOTIFICATION_TEMPLATES.en.financeErrors).sort());
+  });
+
+  it('8-P2-4 the missing check-out notice links to /my (a page of the live bundle too) and 8-P2-5 an import to /employees/import?importId=', () => {
+    const missing = resolveNotification('punch.missing_out', { employeeId: ID.employee, attendanceDate: '2026-09-15', endSource: 'shift' }, { audience: 'subject', timezone: TZ });
+    expect(missing?.link).toBe('/my');
+    const imported = resolveNotification('employee.imported', { aggregateType: 'employee_import', aggregateId: ID.import, phase: 'finished', imported: 3 }, { audience: 'other', timezone: TZ });
+    expect(imported?.link).toBe(`/employees/import?importId=${ID.import}`);
+    expect(resolveNotification('employee.imported', { importId: ID.import, aggregateId: ID.aggregate, phase: 'queued' }, { audience: 'other', timezone: TZ })?.link).toBe(`/employees/import?importId=${ID.import}`);
   });
 });

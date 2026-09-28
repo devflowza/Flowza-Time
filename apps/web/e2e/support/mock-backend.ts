@@ -223,6 +223,15 @@ export function approvalsHandlers(): { get: NonNullable<MockBackendOptions['get'
         decided = { ...base, status: b.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED', completedAt: nowIso(), decidedBy: USER_ID, decidedByName: 'Aisha Al Balushi', abilities: { ...base.abilities, canDecide: false, decideVia: null } };
         return { body: { data: { ...decided, noop: false, terminal: true } } };
       },
+      // notifications review 8-P0-1: what the link is about, read from the request, before the approver confirms (read-only)
+      [`/orgs/${ORG_ID}/approvals/email-action/preview`]: (body) => {
+        const b = body as { token: string; action: 'APPROVE' | 'REJECT' };
+        if (b.token !== EMAIL_TOKEN) return { status: 404, body: { code: 'NOT_FOUND', message: 'Approval link not found' } };
+        if (decided) return { status: 409, body: { code: 'INVALID_STATE', message: 'This approval link has already been used.' } };
+        const r = approvalRequestFixture();
+        const leave = r.context?.kind === 'LEAVE' ? r.context.leave : null;
+        return { body: { data: { requestId: r.id, action: b.action, entityType: r.entityType, employeeName: r.employeeName, date: leave?.startDate ?? null, endDate: leave?.endDate ?? null, leaveTypeName: leave?.leaveTypeName ?? null, leaveTypeNameAr: 'إجازة سنوية', stepNo: r.currentStep, stepCount: r.stepCount, currentStep: r.currentStep, status: r.status, actionable: true, expiresAt: '2099-01-01T00:00:00Z' } } };
+      },
       [`/orgs/${ORG_ID}/approvals/email-action`]: (body) => {
         const b = body as { token: string; action: 'APPROVE' | 'REJECT'; comment?: string };
         if (b.token !== EMAIL_TOKEN) return { status: 404, body: { code: 'NOT_FOUND', message: 'Approval link not found' } };

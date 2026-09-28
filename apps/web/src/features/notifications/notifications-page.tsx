@@ -1,9 +1,10 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bell, CheckCheck } from 'lucide-react';
+import { Bell, CheckCheck, Settings2 } from 'lucide-react';
 import { Link } from 'react-router';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, EmptyState, ErrorState, Skeleton } from '@/components/ui';
+import { buttonVariants } from '@/components/ui/button';
 import { fmtRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useMarkRead, useNotifications } from './use-notifications';
@@ -19,7 +20,13 @@ export function NotificationsPage() {
   const routeOf = useNotificationRoute();
   return (
     <div className="page-container">
-      <PageHeader title={t('notifications.title')} actions={<Button variant="outline" size="sm" onClick={() => markRead.mutate('all')} loading={markRead.isPending}><CheckCheck /> {t('notifications.markAllRead')}</Button>} />
+      <PageHeader title={t('notifications.title')} actions={(
+        <>
+          {/* every member's own preferences (notifications review 8-P1-4) */}
+          <Link to="/account/notifications" className={buttonVariants({ variant: 'ghost', size: 'sm' })}><Settings2 /> {t('notifications.settingsLink')}</Link>
+          <Button variant="outline" size="sm" onClick={() => markRead.mutate('all')} loading={markRead.isPending}><CheckCheck /> {t('notifications.markAllRead')}</Button>
+        </>
+      )} />
       {q.isLoading ? <div className="space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
         : q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} />
         : q.data && q.data.data.length === 0 ? <EmptyState icon={Bell} title={t('notifications.empty')} description={t('notifications.emptyHint')} />

@@ -1,5 +1,5 @@
 import type { Context, Hono } from 'hono';
-import { approvalBulkDecideSchema, approvalBypassSchema, approvalCancelSchema, approvalDecideSchema, approvalDelegationInputSchema, approvalDelegationListQuerySchema, approvalEmailActionSchema, approvalInboxQuerySchema, approvalInfoSchema, approvalLegacyDecisionSchema, approvalReassignSchema, approvalWorkflowInputSchema, approvalWorkflowUpdateSchema, myApprovalsQuerySchema } from '@flowza/contracts';
+import { approvalBulkDecideSchema, approvalBypassSchema, approvalCancelSchema, approvalDecideSchema, approvalDelegationInputSchema, approvalDelegationListQuerySchema, approvalEmailActionSchema, approvalEmailPreviewSchema, approvalInboxQuerySchema, approvalInfoSchema, approvalLegacyDecisionSchema, approvalReassignSchema, approvalWorkflowInputSchema, approvalWorkflowUpdateSchema, myApprovalsQuerySchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { rateLimit } from '../../../middleware/rate-limit.js';
@@ -20,6 +20,10 @@ export const APPROVAL_EMAIL_ACTION_LIMIT = { windowMs: 60_000, max: 20 } as cons
 export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const emailActionByIp = rateLimit({ name: 'approval-email-ip', ...APPROVAL_EMAIL_ACTION_LIMIT, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' });
   const emailActionByUser = rateLimit({ name: 'approval-email-user', ...APPROVAL_EMAIL_ACTION_LIMIT, keyFn: (c) => c.get('principal')?.userId ?? 'anon' });
+  // the read-only preview of a link (review 8-P0-1) has its own limiters with the same budget: showing a link never costs the
+  // approver the decision it is about
+  const emailPreviewByIp = rateLimit({ name: 'approval-email-preview-ip', ...APPROVAL_EMAIL_ACTION_LIMIT, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' });
+  const emailPreviewByUser = rateLimit({ name: 'approval-email-preview-user', ...APPROVAL_EMAIL_ACTION_LIMIT, keyFn: (c) => c.get('principal')?.userId ?? 'anon' });
   const decideAndReturn = async (c: Context<AppEnv>, input: { stepNo?: number | undefined; decision: 'APPROVE' | 'REJECT'; comment?: string | undefined; onBehalfOfUserId?: string | undefined; payEffectDays?: 0 | 0.5 | 1 | undefined }) => {
     const actor = actorOf(c, deps); const orgId = param(c, 'orgId'); const id = param(c, 'requestId');
     const { dto, outcome } = await runUser(deps.db, actor, async (trx) => {
@@ -50,6 +54,8 @@ export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
     approvals.assertNotSystemRejected(outcome);
     return ok(c, await approvals.getRequest(deps, actor, orgId, outcome.requestId).then((r) => ({ ...r, noop: outcome.noop, terminal: outcome.terminal })));
   });
+  // what the link is about, before the approver confirms: never spends the token, never changes anything
+  v1.post('/orgs/:orgId/approvals/email-action/preview', emailPreviewByIp, emailPreviewByUser, async (c) => ok(c, await approvals.previewEmailToken(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, approvalEmailPreviewSchema))));
   v1.post('/orgs/:orgId/approvals/bulk-decide', async (c) => ok(c, await approvals.bulkDecide(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, approvalBulkDecideSchema))));
   v1.get('/orgs/:orgId/approvals/:requestId', async (c) => ok(c, await approvals.getRequest(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'requestId'))));
   v1.post('/orgs/:orgId/approvals/:requestId/decide', async (c) => decideAndReturn(c, await body(c, approvalDecideSchema)));

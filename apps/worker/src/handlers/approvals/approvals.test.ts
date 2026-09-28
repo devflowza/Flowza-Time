@@ -105,7 +105,7 @@ describe('approvals.reminders', () => {
     expect(timeline[1]!.detail).toMatchObject({ target: 'HR_ADMIN', added: [U.hr] });
   });
 
-  it('the relay notifies exactly the targeted users; the approver\'s e-mail gets a one-click token pair', async () => {
+  it('the relay notifies exactly the targeted users; 8-P1-2 a one-click token pair only for a recipient\'s own seat, never an escalation target\'s', async () => {
     const res = await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
     expect(res.relayed).toBeGreaterThanOrEqual(5);
     const notifs = await h.tdb.adminDb.selectFrom('notifications').select(['userId', 'type', 'title', 'link']).where('organizationId', '=', ORG).execute();
@@ -117,15 +117,23 @@ describe('approvals.reminders', () => {
     expect(digestA).toMatchObject({ title: '2 approvals waiting for you', link: '/approvals' });
     expect((await h.tdb.adminDb.selectFrom('notifications').select('body').where('userId', '=', U.a).where('title', '=', '2 approvals waiting for you').executeTakeFirstOrThrow()).body).toBe('Attendance correction: 1 · Leave request: 1');
     await deliverNotifications({ job: fakeJob('DELIVER_NOTIFICATIONS'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
-    // tokens only for levels still waiting for that recipient: HR (escalated on request 1), A (reminder on request 1), B (escalated on request 2)
+    // tokens only for a recipient's OWN pending seat (review 8-P1-2): A (the reminder on request 1, A's own seat) — not HR nor B,
+    // who joined their levels by escalation (extra hands who would fill somebody else's seat: the app asks whose)
     const tokens = await h.tdb.adminDb.selectFrom('approvalEmailTokens').select(['userId', 'requestId', 'action']).execute();
-    expect(tokens.filter((t) => t.userId === U.hr && t.requestId === req1).map((t) => t.action).sort()).toEqual(['APPROVE', 'REJECT']);
+    expect(tokens.filter((t) => t.userId === U.a && t.requestId === req1).map((t) => t.action).sort()).toEqual(['APPROVE', 'REJECT']);
+    expect(tokens.filter((t) => t.userId === U.hr || t.userId === U.b)).toEqual([]);
     expect(tokens.some((t) => t.userId === U.subject)).toBe(false);
-    expect(h.emails.some((e) => e.to === `${U.hr}@t.local` && e.subject.includes('Escalated to you'))).toBe(true);
+    const hrMail = h.emails.find((e) => e.to === `${U.hr}@t.local` && e.subject.includes('Escalated to you'))!;
+    expect(hrMail.html).not.toContain('/approvals/email-action');
+    expect(hrMail.html).toContain(`http://web.test/approvals?request=${req1}`);
   });
 
   it('an exception approval (B-99) tells the approvers who were waiting, with no one-click token', async () => {
-    await h.tdb.adminDb.insertInto('domainEvents').values({ organizationId: ORG, eventType: 'approval.bypassed', aggregateType: 'approval_request', aggregateId: req2, payload: JSON.stringify({ userIds: [U.b], requestId: req2, entityType: 'ATTENDANCE_CORRECTION', employeeName: 'Subject One', reason: 'Payroll cut-off today' }), actorUserId: U.hr }).execute();
+    // as the engine writes it: the timeline entry and the event in one transaction (the relay derives the notice from them)
+    await h.tdb.adminDb.transaction().execute(async (t) => {
+      await t.insertInto('approvalRequestEvents').values({ organizationId: ORG, requestId: req2, kind: 'bypassed', actorUserId: U.hr, detail: JSON.stringify({ stepNo: 1, reason: 'Payroll cut-off today', skippedSteps: [1, 2] }) }).execute();
+      await t.insertInto('domainEvents').values({ organizationId: ORG, eventType: 'approval.bypassed', aggregateType: 'approval_request', aggregateId: req2, payload: JSON.stringify({ userIds: [U.b], requestId: req2, entityType: 'ATTENDANCE_CORRECTION', employeeName: 'Subject One', reason: 'Payroll cut-off today' }), actorUserId: U.hr }).execute();
+    });
     const tokensBefore = (await h.tdb.adminDb.selectFrom('approvalEmailTokens').select('id').where('userId', '=', U.b).execute()).length;
     await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
     const notice = await h.tdb.adminDb.selectFrom('notifications').select(['title', 'body', 'link']).where('userId', '=', U.b).where('type', '=', 'approval.bypassed').executeTakeFirstOrThrow();

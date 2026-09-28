@@ -42,6 +42,6 @@
     "lateTrend": "Late arrivals", "branchComparison": "Branch comparison", "deviceHealth": "Device health", "recentSync": "Recent sync jobs", "empty": "No attendance data yet",
     "emptyHint": "Register a device or import employees to get started."
   },
-  "notifications": { "title": "Notifications", "markAllRead": "Mark all as read", "empty": "You're all caught up", "emptyHint": "Device, attendance and approval alerts will appear here.", "unread": "{{count}} unread",
+  "notifications": { "title": "Notifications", "markAllRead": "Mark all as read", "empty": "You're all caught up", "emptyHint": "Device, attendance and approval alerts will appear here.", "unread": "{{count}} unread", "settingsLink": "Notification settings", "settingsTitle": "Notification settings", "settingsDescription": "Choose which notices reach you in the app and by e-mail, and their language.", "settingsNoMembership": "Notification settings belong to an organisation — select one first.",
     "categories": { "APPROVAL": "Approvals", "ATTENDANCE": "Attendance", "LEAVE": "Leave", "REPORTS": "Reports", "DEVICE": "Devices", "SYSTEM": "System", "SUBSCRIPTION": "Subscription" } }
 }

@@ -107,6 +107,15 @@ export function templateVars(type: string, data: Readonly<Record<string, unknown
   }
   const get = (k: string) => read.get(k);
 
+  // leave types: both names travel with the notice and the recipient's language picks one — an Arabic notice prints the Arabic
+  // name when the type has one, never the English name or the code where a localised name exists (review 8-P2-2)
+  const leaveTypeName = (L.locale === 'ar' ? str(get('leaveTypeNameAr')) : null) ?? str(get('leaveTypeName'));
+  delete vars['leaveTypeNameAr'];
+  if (leaveTypeName) vars['leaveTypeName'] = oneLine(leaveTypeName);
+  else delete vars['leaveTypeName'];
+  const leaveTypeLabel = leaveTypeName ?? str(get('leaveTypeCode'));
+  if (leaveTypeLabel) vars['leaveTypeLabel'] = oneLine(leaveTypeLabel);
+
   // approvals: "Leave request — Ali Said", the leave type and dates (or the day), the level, how long it has waited
   const entityType = str(get('entityType'));
   if (entityType) {
@@ -115,7 +124,6 @@ export function templateVars(type: string, data: Readonly<Record<string, unknown
     vars['item'] = vars['employeeName'] ? `${label} — ${vars['employeeName']}` : label;
   }
   const dateRange = range(L, str(get('date')), str(get('endDate')));
-  const leaveTypeName = str(get('leaveTypeName'));
   const details = leaveTypeName && dateRange ? `${leaveTypeName}${L.separators.parts}${dateRange}` : dateRange ?? (L.locale === 'en' ? str(get('summary')) : null);
   if (details) vars['details'] = oneLine(details);
   const stepNo = num(get('stepNo'));
@@ -181,6 +189,9 @@ export function templateVars(type: string, data: Readonly<Record<string, unknown
   const jobType = str(get('jobType'));
   if (jobType) vars['jobTypeText'] = (L.syncJobTypes as Record<string, string>)[jobType] ?? jobType.replaceAll('_', ' ').toLowerCase();
   if (type === 'sync.finance.failed') vars['financeDirection'] = direction === 'pull' ? L.common.financeDirection.pull : direction === 'push' ? L.common.financeDirection.push : L.common.financeDirection.sync;
+  // a connector failure code by its localised name (Settings → Integrations uses the same names); an unknown code as it is
+  const code = str(get('code'));
+  if (code && type === 'sync.finance.failed') vars['codeText'] = L.financeErrors[code] ?? code;
   const punches = num(get('punches'));
   if (punches !== null) vars['punchesPhrase'] = plural(L, L.plurals.punches, punches);
   const metric = str(get('metric'));

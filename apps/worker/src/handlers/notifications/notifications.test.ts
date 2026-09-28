@@ -55,6 +55,27 @@ async function emit(orgId: string, eventType: string, payload: Record<string, un
   await a().insertInto('domainEvents').values({ organizationId: orgId, eventType: eventType as never, aggregateType, aggregateId, payload: JSON.stringify(payload) }).execute();
   return aggregateId;
 }
+/**
+ * An approval notice the way the engine writes it (review 8-P0-1 — the relay derives every approval notice from its request):
+ * the request, its level with the recipients SEATED on it (they are parties of the request), and the timeline entry written
+ * in the same transaction as the event. Returns the request id (the event's aggregate).
+ */
+async function approvalEvent(type: string, o: { kind: string; userIds: string[]; entityType?: string; entityId?: string; employeeId?: string; subjectUserId?: string | null; detail?: Record<string, unknown>; payload?: Record<string, unknown>; seats?: Array<{ userId: string; resolutionPath?: string; viaDelegationOf?: string | null }>; mode?: 'ANY' | 'ALL' | 'QUORUM'; requiredCount?: number | null; requestId?: string }): Promise<string> {
+  const requestId = o.requestId ?? randomUUID();
+  await a().transaction().execute(async (t) => {
+    if (!o.requestId) {
+      const subject = o.subjectUserId === undefined ? U.emp : o.subjectUserId;
+      await t.insertInto('approvalRequests').values({ id: requestId, organizationId: ORG, entityType: (o.entityType ?? 'ATTENDANCE_CORRECTION') as never, entityId: o.entityId ?? randomUUID(), branchId: BRANCH, employeeId: o.employeeId ?? E.one, subjectUserId: subject, requestedBy: subject, currentStep: 1, status: 'PENDING' }).execute();
+      // already reminded: the reminder sweeps of the tests below leave these levels alone
+      const step = await t.insertInto('approvalSteps').values({ organizationId: ORG, requestId, stepNo: 1, approverType: 'USER', mode: o.mode ?? 'ANY', requiredCount: o.requiredCount === undefined ? 1 : o.requiredCount, status: 'PENDING', activatedAt: clock, remindedAt: clock }).returning('id').executeTakeFirstOrThrow();
+      const seats = o.seats ?? o.userIds.map((userId) => ({ userId }));
+      await t.insertInto('approvalStepActors').values(seats.map((x) => ({ organizationId: ORG, stepId: step.id, userId: x.userId, viaDelegationOf: x.viaDelegationOf ?? null, resolutionPath: x.resolutionPath ?? 'user' }))).execute();
+    }
+    await t.insertInto('approvalRequestEvents').values({ organizationId: ORG, requestId, kind: o.kind, detail: JSON.stringify(o.detail ?? { stepNo: 1 }) }).execute();
+    await t.insertInto('domainEvents').values({ organizationId: ORG, eventType: type as never, aggregateType: 'approval_request', aggregateId: requestId, payload: JSON.stringify({ ...(o.payload ?? {}), userIds: o.userIds }) }).execute();
+  });
+  return requestId;
+}
 async function outcome(type: string, aggregateId: string, userId: string) {
   const n = await a().selectFrom('notifications').select(['id', 'inApp', 'readAt', 'title', 'link', 'data', 'category']).where('type', '=', type).where('userId', '=', userId)
     .where(sql<boolean>`data->>'aggregateId' = ${aggregateId}`).executeTakeFirst();
@@ -96,23 +117,24 @@ beforeAll(async () => {
 afterAll(async () => { await h?.close(); });
 
 describe('relay: the channel decision per recipient', () => {
-  const approval = (extra: Record<string, unknown> = {}) => ({ entityType: 'ATTENDANCE_CORRECTION', employeeName: 'Emp 1', stepNo: 1, date: '2026-09-12', requestId: randomUUID(), userIds: [U.owner], ...extra });
+  const pending = { kind: 'submitted' };
   const leave = { userId: U.owner, leaveTypeName: 'Annual', startDate: '2026-10-01', endDate: '2026-10-02' };
-  const MATRIX: Array<{ name: string; type: string; payload: Record<string, unknown>; org?: Record<string, unknown>; prefs?: Array<[NotificationCategory, NotificationDeliveryChannel, boolean]>; expect: { row: boolean; inApp?: boolean; read?: boolean; email?: boolean } }> = [
-    { name: 'approval pending, defaults: in-app + e-mail', type: 'approval.pending', payload: approval(), expect: { row: true, inApp: true, read: false, email: true } },
-    { name: 'approval pending, e-mail preference off: in-app only', type: 'approval.pending', payload: approval(), prefs: [['APPROVAL', 'EMAIL', false]], expect: { row: true, inApp: true, email: false } },
-    { name: 'approval pending, organisation switch off: in-app only', type: 'approval.pending', payload: approval(), org: { approvalPending: false }, expect: { row: true, inApp: true, email: false } },
-    { name: 'approval pending, in-app preference off: still in the inbox (an item to act on)', type: 'approval.pending', payload: approval(), prefs: [['APPROVAL', 'IN_APP', false]], expect: { row: true, inApp: true, read: false, email: true } },
+  const digest = { kind: 'digest', total: 2, counts: [{ entityType: 'LEAVE', count: 2 }], digestDate: '2026-09-15', userIds: [U.owner] };
+  const MATRIX: Array<{ name: string; type: string; payload?: Record<string, unknown>; request?: { kind: string; entityType?: string }; aggregateType?: string; org?: Record<string, unknown>; prefs?: Array<[NotificationCategory, NotificationDeliveryChannel, boolean]>; expect: { row: boolean; inApp?: boolean; read?: boolean; email?: boolean } }> = [
+    { name: 'approval pending, defaults: in-app + e-mail', type: 'approval.pending', request: pending, expect: { row: true, inApp: true, read: false, email: true } },
+    { name: 'approval pending, e-mail preference off: in-app only', type: 'approval.pending', request: pending, prefs: [['APPROVAL', 'EMAIL', false]], expect: { row: true, inApp: true, email: false } },
+    { name: 'approval pending, organisation switch off: in-app only', type: 'approval.pending', request: pending, org: { approvalPending: false }, expect: { row: true, inApp: true, email: false } },
+    { name: 'approval pending, in-app preference off: still in the inbox (an item to act on)', type: 'approval.pending', request: pending, prefs: [['APPROVAL', 'IN_APP', false]], expect: { row: true, inApp: true, read: false, email: true } },
     { name: 'leave decision, in-app preference off: e-mail only (stored read, out of the inbox)', type: 'leave.approved', payload: leave, prefs: [['LEAVE', 'IN_APP', false]], expect: { row: true, inApp: false, read: true, email: true } },
     { name: 'leave decision, both preferences off: nothing', type: 'leave.approved', payload: leave, prefs: [['LEAVE', 'IN_APP', false], ['LEAVE', 'EMAIL', false]], expect: { row: false } },
     { name: 'leave decision, leaveUpdates off: in-app only', type: 'leave.approved', payload: leave, org: { leaveUpdates: false }, expect: { row: true, inApp: true, email: false } },
-    { name: 'a decision on leave follows leaveUpdates', type: 'approval.decided', payload: approval({ entityType: 'LEAVE', decision: 'APPROVED' }), org: { leaveUpdates: false }, expect: { row: true, inApp: true, email: false } },
-    { name: 'a decision on a correction does not follow leaveUpdates', type: 'approval.decided', payload: approval({ decision: 'REJECTED' }), org: { leaveUpdates: false }, expect: { row: true, inApp: true, email: true } },
-    { name: 'a decision on a correction follows attendanceNotes', type: 'approval.decided', payload: approval({ decision: 'REJECTED' }), org: { attendanceNotes: false }, expect: { row: true, inApp: true, email: false } },
+    { name: 'a decision on leave follows leaveUpdates', type: 'approval.decided', request: { kind: 'approved', entityType: 'LEAVE' }, org: { leaveUpdates: false }, expect: { row: true, inApp: true, email: false } },
+    { name: 'a decision on a correction does not follow leaveUpdates', type: 'approval.decided', request: { kind: 'rejected' }, org: { leaveUpdates: false }, expect: { row: true, inApp: true, email: true } },
+    { name: 'a decision on a correction follows attendanceNotes', type: 'approval.decided', request: { kind: 'rejected' }, org: { attendanceNotes: false }, expect: { row: true, inApp: true, email: false } },
     { name: 'subscription notice ignores the member\'s preferences', type: 'subscription.limit_reached', payload: { metric: 'employees', limit: 5 }, prefs: [['SUBSCRIPTION', 'IN_APP', false], ['SUBSCRIPTION', 'EMAIL', false]], expect: { row: true, inApp: true, email: true } },
     { name: 'system notice ignores the member\'s preferences', type: 'employee.imported', payload: { phase: 'queued', validRows: 3 }, prefs: [['SYSTEM', 'IN_APP', false], ['SYSTEM', 'EMAIL', false]], expect: { row: true, inApp: true, email: true } },
-    { name: 'daily digest: in-app only by default', type: 'approval.reminder', payload: { kind: 'digest', total: 2, counts: [{ entityType: 'LEAVE', count: 2 }], digestDate: '2026-09-15', userIds: [U.owner] }, expect: { row: true, inApp: true, email: false } },
-    { name: 'daily digest: e-mailed with dailyDigest on', type: 'approval.reminder', payload: { kind: 'digest', total: 2, counts: [{ entityType: 'LEAVE', count: 2 }], digestDate: '2026-09-15', userIds: [U.owner] }, org: { dailyDigest: true }, expect: { row: true, inApp: true, email: true } },
+    { name: 'daily digest: in-app only by default', type: 'approval.reminder', payload: digest, aggregateType: 'approval_digest', expect: { row: true, inApp: true, email: false } },
+    { name: 'daily digest: e-mailed with dailyDigest on', type: 'approval.reminder', payload: digest, aggregateType: 'approval_digest', org: { dailyDigest: true }, expect: { row: true, inApp: true, email: true } },
     { name: 'report delivery asked for e-mail only with the e-mail preference off: nothing', type: 'report.scheduled_delivery', payload: { userIds: [U.owner], channels: ['email'], mode: 'send_now', reportType: 'late_report' }, prefs: [['REPORTS', 'EMAIL', false]], expect: { row: false } },
     { name: 'flagged punch with punchFlagged off: in-app only', type: 'attendance.punch_flagged', payload: { userIds: [U.owner], employeeId: E.one, employeeName: 'Emp 1', outcome: 'flagged', reason: 'outside', at: '2026-09-15T04:00:00Z' }, org: { punchFlagged: false }, expect: { row: true, inApp: true, email: false } },
   ];
@@ -120,7 +142,7 @@ describe('relay: the channel decision per recipient', () => {
   it.each(MATRIX)('$name', async (c) => {
     await setSwitches(ORG, c.org ?? {});
     await setPrefs(U.owner, c.prefs ?? []);
-    const agg = await emit(ORG, c.type, c.payload, c.type.startsWith('approval.') ? 'approval_request' : 'test');
+    const agg = c.request ? await approvalEvent(c.type, { ...c.request, userIds: [U.owner] }) : await emit(ORG, c.type, c.payload ?? {}, c.aggregateType ?? 'test');
     await relay();
     const o = await outcome(c.type, agg, U.owner);
     expect(o.row).toBe(c.expect.row);
@@ -241,6 +263,17 @@ describe('delivery', () => {
     expect(mail.text).toContain(`http://web.test/my/leave?request=${agg}`);
     expect(mail.html).toContain('http://web.test/my/profile'); // an employee manages e-mails on their profile
   });
+
+  it('8-P1-4 a member without an employee link manages their e-mails at /account/notifications (every member can open it), never at Settings', async () => {
+    const sentBefore = h.emails.length;
+    await emit(ORG, 'report.ready', { userId: U.approver, reportTitle: 'Attendance summary', reportType: 'attendance_summary', format: 'xlsx' }, 'report');
+    await relay();
+    await deliver();
+    const mail = h.emails.slice(sentBefore).find((e) => e.to === 'approver@n.local')!; // a manager with no employee link
+    expect(mail.html).toContain('href="http://web.test/account/notifications"');
+    expect(mail.text).toContain('http://web.test/account/notifications');
+    expect(`${mail.html}${mail.text}`).not.toContain('/settings/notifications');
+  });
 });
 
 describe('attendance.missing-punch-reminder', () => {
@@ -315,12 +348,12 @@ describe('attendance.missing-punch-reminder', () => {
     expect(await reminders(ORG_OFF)).toHaveLength(0);
   });
 
-  it('the relay tells the employee, in their language, with a link to check out', async () => {
+  it('8-P2-4 the relay tells the employee, in their language, with a link to /my (the check-in card — a page of the live bundle too)', async () => {
     await relay();
     const n = await a().selectFrom('notifications').select(['userId', 'title', 'link', 'category']).where('type', '=', 'punch.missing_out').where('organizationId', '=', ORG).orderBy('userId').execute();
     expect(n.map((x) => x.userId).sort()).toEqual([U.emp, U.e6].sort());
     const emp = n.find((x) => x.userId === U.emp)!;
-    expect(emp.link).toBe('/my/checkin?date=2026-09-15');
+    expect(emp.link).toBe('/my');
     expect(emp.category).toBe('ATTENDANCE');
     expect(emp.title).toMatch(/[؀-ۿ]/);
     expect(n.find((x) => x.userId === U.e6)!.title).toBe('You have not checked out yet (15 Sep 2026)');
@@ -389,10 +422,13 @@ describe('notifications.retention', () => {
     const before = await oldEvents();
     expect(before).toBeGreaterThanOrEqual(7);
 
-    // a capped run stops after one batch and says so; the next run carries on
+    // a capped run: every organisation and the organisation-less bucket still get their first batch (review 8-P1-1), then ONE
+    // further batch (the cap) for the organisation with more to purge; it says so, and the next run carries on
     const capped = await runNotificationRetention(h.deps, { batchSize: 2, maxBatches: 1 });
-    expect(capped.capped).toEqual(['deliveries', 'notifications', 'domainEvents']);
-    expect(capped.domainEvents).toBe(2);
+    expect(capped.capped).toEqual(['domainEvents']);
+    expect(capped.domainEvents).toBe(5); // ORG 2 + 2 (the one extra batch), the organisation-less event 1
+    expect(capped.notifications).toBe(3); // ORG 2 + 1: done within the cap
+    expect(capped.deliveries).toBe(2);
 
     const res = await runNotificationRetention(h.deps, { batchSize: 2 });
     expect(res.capped).toEqual([]);
@@ -412,5 +448,322 @@ describe('notifications.retention', () => {
     await notificationTasks[1]!.run(h.deps);
     const jobs = await a().selectFrom('jobs.queue').select(['jobType', 'dedupeKey']).where('jobType', '=', NOTIFICATION_RETENTION_JOB_TYPE).execute();
     expect(jobs).toEqual([{ jobType: NOTIFICATION_RETENTION_JOB_TYPE, dedupeKey: 'notification-retention' }]);
+  });
+});
+
+// ================================================================================================================================
+// Notifications review fixes (docs/hr-portal/reviews/08-notifications-review.md)
+// ================================================================================================================================
+/** Relay whatever earlier tests left unpublished and settle the pending e-mails, so a test counts only its own. */
+const settle = async () => { await relay(); await a().updateTable('notificationDeliveries').set({ status: 'skipped' }).where('status', '=', 'pending').execute(); };
+const tokenCount = async (userId?: string) => (await (userId ? a().selectFrom('approvalEmailTokens').select('id').where('userId', '=', userId) : a().selectFrom('approvalEmailTokens').select('id')).execute()).length;
+const noticeOf = (type: string, requestId: string, userId: string) => a().selectFrom('notifications').select(['id', 'title', 'body', 'link', 'data']).where('type', '=', type).where('userId', '=', userId).where(sql<boolean>`data->>'aggregateId' = ${requestId}`).executeTakeFirst();
+
+describe('8-P0-1 an approval notice says what its REQUEST says, never what the event claims', () => {
+  it('8-P0-1 a forged approval event — no request behind it, or no timeline entry of its own transaction — notifies nobody and mints no link', async () => {
+    await settle();
+    const tokens = await tokenCount();
+    // a made-up request id (what a client could write before the outbox was locked)
+    const ghost = await emit(ORG, 'approval.pending', { requestId: randomUUID(), entityType: 'LEAVE', employeeName: 'Somebody', userIds: [U.approver] }, 'approval_request');
+    // a REAL request with the approver seated — the genuine notice goes out …
+    const real = await approvalEvent('approval.pending', { kind: 'submitted', userIds: [U.approver] });
+    await relay();
+    expect(await noticeOf('approval.pending', real, U.approver)).toBeDefined();
+    expect(await noticeOf('approval.pending', ghost, U.approver)).toBeUndefined();
+    // … but a row naming that request, written by another transaction (no timeline entry of its own), is a forgery
+    await a().insertInto('domainEvents').values({ organizationId: ORG, eventType: 'approval.decided', aggregateType: 'approval_request', aggregateId: real, payload: JSON.stringify({ decision: 'REJECTED', comment: 'Verify your account at https://evil.example', userIds: [U.approver, U.owner] }) }).execute();
+    await a().insertInto('domainEvents').values({ organizationId: ORG, eventType: 'approval.pending', aggregateType: 'approval_request', aggregateId: real, payload: JSON.stringify({ employeeName: 'Somebody else', userIds: [U.approver] }) }).execute();
+    const res = await relay();
+    expect(res.failed).toBe(0);
+    expect(await noticeOf('approval.decided', real, U.approver)).toBeUndefined();
+    expect(await noticeOf('approval.decided', real, U.owner)).toBeUndefined();
+    expect((await a().selectFrom('notifications').select('id').where('type', '=', 'approval.pending').where(sql<boolean>`data->>'aggregateId' = ${real}`).execute())).toHaveLength(1);
+    // the forged rows are published (realtime) and never retried
+    expect(await a().selectFrom('domainEvents').select('id').where('publishedAt', 'is', null).where('aggregateId', 'in', [real, ghost]).execute()).toHaveLength(0);
+    const sentBefore = h.emails.length;
+    await deliver();
+    const mails = h.emails.slice(sentBefore);
+    expect(mails).toHaveLength(1); // the genuine notice only
+    expect(mails.some((m) => m.html.includes('evil.example'))).toBe(false);
+    expect(await tokenCount()).toBe(tokens + 2); // one approve / reject pair, for the genuine notice
+  });
+
+  it('8-P0-1 a genuine notice renders the request\'s facts and its timeline\'s own comment; only the request\'s parties hear it', async () => {
+    const req = await approvalEvent('approval.decided', {
+      kind: 'rejected', detail: { stepNo: 1, comment: 'No proof given' }, userIds: [U.owner, U.approver], seats: [{ userId: U.owner }],
+      // what the event claims: none of it reaches the notice
+      payload: { decision: 'APPROVED', entityType: 'LEAVE', employeeName: 'Forged Name', comment: 'Click https://evil.example', leaveTypeName: 'Fake leave', date: '2020-01-01' },
+    });
+    await relay();
+    const n = await noticeOf('approval.decided', req, U.owner);
+    expect(n?.title).toBe('Attendance correction — Emp 1 was rejected');
+    expect(n?.body).toContain('No proof given');
+    expect(`${n?.title} ${n?.body}`).not.toMatch(/Forged|evil|Fake|2020/);
+    expect(n?.data).toMatchObject({ decision: 'REJECTED', entityType: 'ATTENDANCE_CORRECTION', employeeName: 'Emp 1', comment: 'No proof given', requestId: req });
+    // U.approver was named by the event but is no party of this request (not seated, not the requester, not the subject)
+    expect(await noticeOf('approval.decided', req, U.approver)).toBeUndefined();
+  });
+
+  it('8-P0-1 the daily digest carries its counts only: no request, no entity, no one-click link, whatever the row claims', async () => {
+    await settle();
+    await setSwitches(ORG, { dailyDigest: true });
+    const req = await approvalEvent('approval.pending', { kind: 'submitted', userIds: [U.owner] });
+    await relay();
+    const tokens = await tokenCount(U.owner);
+    await deliver();
+    expect(await tokenCount(U.owner)).toBe(tokens + 2); // the genuine pending notice: the owner holds the seat
+    const digest = await emit(ORG, 'approval.reminder', { kind: 'reminder', requestId: req, entityType: 'LEAVE', employeeName: 'Somebody', total: 1, counts: [{ entityType: 'LEAVE', count: 1 }], digestDate: '2026-09-16', userIds: [U.owner] }, 'approval_digest');
+    await relay();
+    const n = await a().selectFrom('notifications').select(['title', 'link', 'data']).where('type', '=', 'approval.reminder').where('userId', '=', U.owner).where(sql<boolean>`data->>'aggregateId' = ${digest}`).executeTakeFirstOrThrow();
+    expect(n.link).toBe('/approvals');
+    expect(n.title).toBe('1 approval waiting for you');
+    expect(n.data).not.toHaveProperty('requestId');
+    expect(n.data).not.toHaveProperty('employeeName');
+    const tokensAfterDigest = await tokenCount(U.owner);
+    await deliver();
+    expect(await tokenCount(U.owner)).toBe(tokensAfterDigest); // the digest mints nothing
+    await setSwitches(ORG, {});
+  });
+});
+
+describe('8-P1-2 one-click links only for the recipient\'s OWN pending seat on the current level', () => {
+  it.each(['ALL', 'QUORUM'] as const)('8-P1-2 on an %s level with several seats waiting, the escalation target gets the request link only; the seat holders get working pairs', async (mode) => {
+    await settle();
+    const req = await approvalEvent('approval.pending', { kind: 'submitted', userIds: [U.approver, U.e6], mode, requiredCount: mode === 'QUORUM' ? 2 : null, subjectUserId: U.emp });
+    const step = (await a().selectFrom('approvalSteps').select('id').where('requestId', '=', req).executeTakeFirstOrThrow()).id;
+    // the level escalated to the owner: an extra hand, who would fill one of the two waiting seats and must choose which
+    await a().insertInto('approvalStepActors').values({ organizationId: ORG, stepId: step, userId: U.owner, resolutionPath: 'escalated' }).execute();
+    await approvalEvent('approval.escalated', { requestId: req, kind: 'escalated', detail: { stepNo: 1, target: 'OWNER', added: [U.owner] }, userIds: [U.owner] });
+    await relay();
+    const before = { owner: await tokenCount(U.owner), approver: await tokenCount(U.approver), e6: await tokenCount(U.e6) };
+    const sentBefore = h.emails.length;
+    await deliver();
+    expect(await tokenCount(U.owner)).toBe(before.owner);
+    expect(await tokenCount(U.approver)).toBe(before.approver + 2);
+    expect(await tokenCount(U.e6)).toBe(before.e6 + 2);
+    const ownerMail = h.emails.slice(sentBefore).find((m) => m.to === 'owner@n.local')!;
+    expect(ownerMail.subject).toContain('Escalated to you');
+    expect(ownerMail.html).not.toContain('/approvals/email-action');
+    expect(ownerMail.html).toContain(`http://web.test/approvals?request=${req}`);
+    expect(h.emails.slice(sentBefore).find((m) => m.to === 'approver@n.local')!.html).toContain('/approvals/email-action');
+  });
+
+  it('8-P1-2 a delegate\'s seat gets links only while the delegation is in force; a seat decided for its holder gets none', async () => {
+    await settle();
+    // U.e6 was stamped at submit as the delegate of U.approver
+    const lapsed = await approvalEvent('approval.pending', { kind: 'submitted', userIds: [U.e6], seats: [{ userId: U.e6, resolutionPath: 'delegate', viaDelegationOf: U.approver }] });
+    await relay();
+    const e6 = await tokenCount(U.e6);
+    await deliver();
+    expect(await tokenCount(U.e6)).toBe(e6); // no delegation in force today: the seat is the approver's again
+    expect(await noticeOf('approval.pending', lapsed, U.e6)).toBeDefined(); // the notice itself still goes out
+    const delegation = (await a().insertInto('approvalDelegations').values({ organizationId: ORG, delegatorUserId: U.approver, delegateUserId: U.e6, startsOn: '2000-01-01', endsOn: '2099-12-31', isActive: true }).returning('id').executeTakeFirstOrThrow()).id;
+    try {
+      await approvalEvent('approval.reminder', { requestId: lapsed, kind: 'reminded', detail: { stepNo: 1, waitingSince: clock.toISOString() }, userIds: [U.e6] });
+      await relay();
+      await deliver();
+      expect(await tokenCount(U.e6)).toBe(e6 + 2); // in force: the delegate decides the seat
+      // the approver decided their seat themselves meanwhile: the delegate's row still reads PENDING, the seat does not
+      const step = (await a().selectFrom('approvalSteps').select('id').where('requestId', '=', lapsed).executeTakeFirstOrThrow()).id;
+      await a().insertInto('approvalStepActors').values({ organizationId: ORG, stepId: step, userId: U.approver, resolutionPath: 'user', decision: 'APPROVED', decidedAt: new Date() }).execute();
+      await approvalEvent('approval.reminder', { requestId: lapsed, kind: 'reminded', detail: { stepNo: 1, waitingSince: clock.toISOString() }, userIds: [U.e6] });
+      await relay();
+      await deliver();
+      expect(await tokenCount(U.e6)).toBe(e6 + 2);
+    } finally {
+      await a().deleteFrom('approvalDelegations').where('id', '=', delegation).execute();
+    }
+  });
+});
+
+describe('8-P2-2 leave-type names in the recipient\'s language, read from the leave', () => {
+  it('8-P2-2 an Arabic recipient reads the Arabic name of the leave type — never the English one the event carried', async () => {
+    const lt = (await a().insertInto('leaveTypes').values({ organizationId: ORG, code: 'CL', name: 'Casual Leave', nameAr: 'إجازة عارضة' }).returning('id').executeTakeFirstOrThrow()).id;
+    const own = (await a().insertInto('leaveRecords').values({ organizationId: ORG, employeeId: E.one, leaveTypeId: lt, startDate: '2026-10-05', endDate: '2026-10-06', status: 'APPROVED' }).returning('id').executeTakeFirstOrThrow()).id;
+    // leave.approved as the leave hook writes it: the English name only
+    await a().insertInto('domainEvents').values({ organizationId: ORG, eventType: 'leave.approved', aggregateType: 'leave_record', aggregateId: own, payload: JSON.stringify({ userId: U.emp, employeeId: E.one, leaveTypeName: 'Casual Leave', startDate: '2026-10-05', endDate: '2026-10-06' }) }).execute();
+    await relay();
+    const decided = await a().selectFrom('notifications').select(['title', 'data']).where('type', '=', 'leave.approved').where('userId', '=', U.emp).where(sql<boolean>`data->>'aggregateId' = ${own}`).executeTakeFirstOrThrow();
+    expect(decided.title).toContain('إجازة عارضة');
+    expect(decided.title).not.toContain('Casual');
+    expect(decided.data).toMatchObject({ leaveTypeName: 'Casual Leave', leaveTypeNameAr: 'إجازة عارضة' });
+    // the approval notice of somebody else's leave, to an Arabic approver: the facts come from the leave record, in Arabic
+    const theirs = (await a().insertInto('leaveRecords').values({ organizationId: ORG, employeeId: E.noShift, leaveTypeId: lt, startDate: '2026-10-12', endDate: '2026-10-13', status: 'PENDING' }).returning('id').executeTakeFirstOrThrow()).id;
+    const req = await approvalEvent('approval.pending', { kind: 'submitted', entityType: 'LEAVE', entityId: theirs, employeeId: E.noShift, subjectUserId: U.e6, userIds: [U.emp], payload: { leaveTypeName: 'Casual Leave' } });
+    await relay();
+    const pending = await noticeOf('approval.pending', req, U.emp);
+    expect(pending?.body).toContain('إجازة عارضة');
+    expect(pending?.body).not.toContain('Casual');
+    // a rejected reason charged to that type's balance: the name, not the code
+    const note = await emit(ORG, 'attendance.note_decided', { userIds: [U.emp], employeeId: E.one, attendanceDate: '2026-09-14', decision: 'rejected', payEffectDays: 1, chargeOutcome: 'charged_leave', leaveTypeCode: 'CL', lossOfPay: false }, 'attendance_note');
+    await relay();
+    const charged = await a().selectFrom('notifications').select('body').where('type', '=', 'attendance.note_decided').where('userId', '=', U.emp).where(sql<boolean>`data->>'aggregateId' = ${note}`).executeTakeFirstOrThrow();
+    expect(charged.body).toContain('إجازة عارضة');
+    expect(charged.body).not.toMatch(/\bCL\b/);
+  });
+});
+
+describe('8-P2-3 delivery: one failing row never aborts, re-mails or stalls the batch', () => {
+  it('8-P2-3 a failing delivery rolls back alone: the rows before it stay sent (never mailed twice), the rows after it are delivered', async () => {
+    await settle();
+    const first = await emit(ORG, 'device.offline', { deviceName: 'First' });
+    await relay();
+    const middle = await approvalEvent('approval.pending', { kind: 'submitted', userIds: [U.approver] });
+    await relay();
+    const last = await emit(ORG, 'device.online', { deviceName: 'Last' });
+    await relay();
+    const deliveryOf = async (type: string, agg: string, userId: string) => {
+      const n = (await outcome(type, agg, userId)).n!;
+      return a().selectFrom('notificationDeliveries').select(['status', 'attempts', 'error']).where('notificationId', '=', n.id).executeTakeFirstOrThrow();
+    };
+    // a test-only trigger makes the middle row's one-click token fail to mint
+    await sql`create or replace function public.p8f_token_fail() returns trigger language plpgsql as $f$ begin if new.user_id = ${sql.lit(U.approver)}::uuid then raise exception 'token store down'; end if; return new; end $f$`.execute(a());
+    await sql`create trigger p8f_token_fail before insert on public.approval_email_tokens for each row execute function public.p8f_token_fail()`.execute(a());
+    const sentBefore = h.emails.length;
+    try {
+      const res = await deliver();
+      expect(res).toMatchObject({ sent: 2, retried: 1, failed: 0 });
+      expect(await deliveryOf('device.offline', first, U.owner)).toMatchObject({ status: 'sent', attempts: 1 });
+      expect(await deliveryOf('approval.pending', middle, U.approver)).toMatchObject({ status: 'pending', attempts: 1, error: 'token store down' });
+      expect(await deliveryOf('device.online', last, U.owner)).toMatchObject({ status: 'sent', attempts: 1 });
+    } finally {
+      await sql`drop trigger if exists p8f_token_fail on public.approval_email_tokens`.execute(a());
+      await sql`drop function if exists public.p8f_token_fail()`.execute(a());
+    }
+    clock = new Date(clock.getTime() + deliveryBackoffMs(1));
+    await deliver();
+    expect(await deliveryOf('approval.pending', middle, U.approver)).toMatchObject({ status: 'sent', attempts: 2 });
+    const mails = h.emails.slice(sentBefore);
+    expect(mails.filter((m) => m.to === 'owner@n.local')).toHaveLength(2); // never mailed twice
+    expect(mails.filter((m) => m.to === 'approver@n.local')).toHaveLength(1);
+  });
+});
+
+describe('8-P2-6 the missing check-out window follows the BRANCH timezone', () => {
+  const PP = { org: '0c000000-0000-4000-8000-0000000000d1', branch: '0c000000-0000-4000-8000-0000000000d2', emp: '0c000000-0000-4000-8000-0000000000d3' };
+  const KI = { org: '0c000000-0000-4000-8000-0000000000d4', branch: '0c000000-0000-4000-8000-0000000000d5', emp: '0c000000-0000-4000-8000-0000000000d6' };
+  const USERS = { east: 'c0000000-0000-4000-8000-0000000000d1', west: 'c0000000-0000-4000-8000-0000000000d2' };
+  const reminded = async (orgId: string) => (await a().selectFrom('domainEvents').select('payload').where('eventType', '=', 'punch.missing_out' as never).where('organizationId', '=', orgId).execute()).map((e) => e.payload as Record<string, unknown>);
+  const record = (o: { organizationId: string; branchId: string; employeeId: string; date: string; timezone: string; firstInAt: string; expectedEndAt: string }) =>
+    a().insertInto('attendanceDailyRecords').values({ organizationId: o.organizationId, employeeId: o.employeeId, attendanceDate: o.date, branchId: o.branchId, timezone: o.timezone, engineVersion: 'test', status: 'PENDING' as never, flags: [], trace: JSON.stringify({}), firstInAt: new Date(o.firstInAt), expectedEndAt: new Date(o.expectedEndAt), lastOutAt: null }).execute();
+
+  beforeAll(async () => {
+    await sql`insert into auth.users (id, email) values (${USERS.east}::uuid, 'east@n.local'), (${USERS.west}::uuid, 'west@n.local')`.execute(a());
+    await a().insertInto('userProfiles').values([{ id: USERS.east, email: 'east@n.local', fullName: 'East' }, { id: USERS.west, email: 'west@n.local', fullName: 'West' }]).execute();
+    // the organisation in Pago Pago (UTC−11) with a branch in Kiritimati (UTC+14) — the reviewer's case — and the reverse
+    await a().insertInto('organizations').values([
+      { id: PP.org, companyCode: 'NTFPP', legalName: 'PP', displayName: 'PP', timezone: 'Pacific/Pago_Pago' },
+      { id: KI.org, companyCode: 'NTFKI', legalName: 'KI', displayName: 'KI', timezone: 'Pacific/Kiritimati' },
+    ]).execute();
+    await a().insertInto('branches').values([
+      { id: PP.branch, organizationId: PP.org, code: 'EAST', name: 'East', timezone: 'Pacific/Kiritimati' },
+      { id: KI.branch, organizationId: KI.org, code: 'WEST', name: 'West', timezone: 'Pacific/Pago_Pago' },
+    ]).execute();
+    await a().insertInto('employees').values([
+      { id: PP.emp, organizationId: PP.org, branchId: PP.branch, employeeNumber: 'E', firstName: 'East', lastName: 'E', displayName: 'East', joiningDate: '2024-01-01', deviceUserId: '1' },
+      { id: KI.emp, organizationId: KI.org, branchId: KI.branch, employeeNumber: 'W', firstName: 'West', lastName: 'W', displayName: 'West', joiningDate: '2024-01-01', deviceUserId: '1' },
+    ]).execute();
+    await a().insertInto('orgMemberships').values([
+      { organizationId: PP.org, userId: USERS.east, roleId: ROLE.employee, status: 'active', allBranches: true, employeeId: PP.emp },
+      { organizationId: KI.org, userId: USERS.west, roleId: ROLE.employee, status: 'active', allBranches: true, employeeId: KI.emp },
+    ]).execute();
+    // East: 16 Sept in Kiritimati, shift 08:00–17:00 local = 15 Sept 18:00 → 16 Sept 03:00 UTC; due 19:00 local = 05:00 UTC —
+    // when the organisation's own date (Pago Pago) is still the 15th
+    await record({ organizationId: PP.org, branchId: PP.branch, employeeId: PP.emp, date: '2026-09-16', timezone: 'Pacific/Kiritimati', firstInAt: '2026-09-15T18:05:00Z', expectedEndAt: '2026-09-16T03:00:00Z' });
+    // West: 15 Sept in Pago Pago, shift 14:00–23:00 local = 16 Sept 01:00 → 10:00 UTC; due 01:00 local on the 16th = 12:00 UTC —
+    // when the organisation's own date (Kiritimati) is already the 17th, so the 15th is not even its "yesterday"
+    await record({ organizationId: KI.org, branchId: KI.branch, employeeId: KI.emp, date: '2026-09-15', timezone: 'Pacific/Pago_Pago', firstInAt: '2026-09-16T01:05:00Z', expectedEndAt: '2026-09-16T10:00:00Z' });
+  });
+
+  it('8-P2-6 a branch far EAST of the organisation (the reviewer\'s mp.branch_tz) is reminded once, at the right minute', async () => {
+    clock = new Date('2026-09-16T04:59:00Z'); // 18:59 in Kiritimati (still 15 Sept 17:59 in Pago Pago)
+    expect(await runMissingPunchReminders(h.deps, PP.org)).toMatchObject({ today: '2026-09-15', candidates: 1, notDue: 1, reminded: 0 });
+    clock = new Date('2026-09-16T05:01:00Z');
+    expect(await runMissingPunchReminders(h.deps, PP.org)).toMatchObject({ candidates: 1, reminded: 1, stale: 0 });
+    clock = new Date('2026-09-16T11:30:00Z');
+    expect(await runMissingPunchReminders(h.deps, PP.org)).toMatchObject({ reminded: 0 });
+    expect(await reminded(PP.org)).toEqual([expect.objectContaining({ employeeId: PP.emp, attendanceDate: '2026-09-16', userIds: [USERS.east] })]);
+  });
+
+  it('8-P2-6 and a branch far WEST of the organisation too', async () => {
+    clock = new Date('2026-09-16T11:59:00Z'); // 00:59 on the 16th in Pago Pago; already 17 Sept 01:59 in Kiritimati
+    expect(await runMissingPunchReminders(h.deps, KI.org)).toMatchObject({ today: '2026-09-17', candidates: 1, notDue: 1, reminded: 0 });
+    clock = new Date('2026-09-16T12:01:00Z');
+    expect(await runMissingPunchReminders(h.deps, KI.org)).toMatchObject({ candidates: 1, reminded: 1 });
+    expect(await reminded(KI.org)).toEqual([expect.objectContaining({ employeeId: KI.emp, attendanceDate: '2026-09-15', userIds: [USERS.west] })]);
+  });
+});
+
+describe('8-P1-1 retention reaches every organisation', () => {
+  it('8-P1-1 every organisation and the organisation-less bucket make progress in each run — even behind 205 organisations with nothing to purge', async () => {
+    clock = new Date('2026-09-20T00:00:00Z');
+    const old = new Date(clock.getTime() - 200 * 86_400_000);
+    // whatever the tests above left to purge goes first, so that this run counts its own batches only
+    await settle();
+    await runNotificationRetention(h.deps);
+    // 205 empty organisations whose ids sort before the tail's
+    const empties = Array.from({ length: 205 }, (_, i) => ({ id: `1f000000-0000-4000-8000-${String(i).padStart(12, '0')}`, companyCode: `RET${i}`, legalName: `R${i}`, displayName: `R${i}`, timezone: 'Asia/Muscat' }));
+    await a().insertInto('organizations').values(empties).execute();
+    const TAIL = 'fe000000-0000-4000-8000-000000000001';
+    await a().insertInto('organizations').values({ id: TAIL, companyCode: 'RETTAIL', legalName: 'Tail', displayName: 'Tail', timezone: 'Asia/Muscat' }).execute();
+    const ev = (org: string | null) => ({ organizationId: org, eventType: 'device.online' as never, aggregateType: 'device', aggregateId: randomUUID(), payload: '{}', occurredAt: old, publishedAt: old });
+    await a().insertInto('domainEvents').values([ev(TAIL), ev(TAIL), ev(TAIL), ev(null), ev(null), ev(null)]).execute();
+    await a().insertInto('notifications').values(Array.from({ length: 3 }, () => ({ organizationId: TAIL, userId: U.owner, category: 'DEVICE' as const, type: 'device.online', title: 'x', data: '{}', createdAt: old, readAt: old }))).execute();
+    const left = async () => ({
+      tailEvents: Number((await sql<{ n: string }>`select count(*) as n from public.domain_events where organization_id = ${TAIL}::uuid`.execute(a())).rows[0]!.n),
+      orphanEvents: Number((await sql<{ n: string }>`select count(*) as n from public.domain_events where organization_id is null and occurred_at < ${new Date(clock.getTime() - 90 * 86_400_000)}`.execute(a())).rows[0]!.n),
+      tailNotifications: Number((await sql<{ n: string }>`select count(*) as n from public.notifications where organization_id = ${TAIL}::uuid`.execute(a())).rows[0]!.n),
+    });
+    expect(await left()).toEqual({ tailEvents: 3, orphanEvents: 3, tailNotifications: 3 });
+    // the default constants (RETENTION_MAX_BATCHES = 200 < the organisations in front of the tail)
+    const res = await runNotificationRetention(h.deps);
+    expect(await left()).toEqual({ tailEvents: 0, orphanEvents: 0, tailNotifications: 0 });
+    expect(res.organizations).toBeGreaterThan(205);
+    expect(res.capped).toEqual([]);
+    expect(res.batches).toBe(3); // the batches that deleted something: tail events, organisation-less events, tail notifications
+  });
+});
+
+describe('8-P2-1 a pending question pauses the reminder and the escalation', () => {
+  it('8-P2-1 no reminder, escalation or digest while INFO_REQUESTED; the reminder clock restarts from the answer', async () => {
+    const Q = { org: '0c000000-0000-4000-8000-0000000000c1', branch: '0c000000-0000-4000-8000-0000000000c2', emp: '0c000000-0000-4000-8000-0000000000c3' };
+    await a().insertInto('organizations').values({ id: Q.org, companyCode: 'NTFQ', legalName: 'Q', displayName: 'Q', timezone: 'Asia/Muscat' }).execute();
+    await a().insertInto('branches').values({ id: Q.branch, organizationId: Q.org, code: 'HQ', name: 'HQ' }).execute();
+    await a().insertInto('employees').values({ id: Q.emp, organizationId: Q.org, branchId: Q.branch, employeeNumber: 'Q1', firstName: 'Q', lastName: 'One', displayName: 'Q One', joiningDate: '2024-01-01', deviceUserId: '1' }).execute();
+    await a().insertInto('orgMemberships').values([
+      { organizationId: Q.org, userId: U.owner, roleId: ROLE.owner, status: 'active', allBranches: true },
+      { organizationId: Q.org, userId: U.approver, roleId: ROLE.manager, status: 'active', allBranches: true },
+      { organizationId: Q.org, userId: U.emp, roleId: ROLE.employee, status: 'active', allBranches: true, employeeId: Q.emp },
+    ]).execute();
+    const T = new Date('2026-09-19T20:00:00Z'); // 00:00 in Muscat on 20 Sept
+    const H = (hours: number) => new Date(T.getTime() + hours * 3_600_000);
+    const req = (await a().insertInto('approvalRequests').values({ organizationId: Q.org, entityType: 'OVERTIME_CLAIM', entityId: randomUUID(), branchId: Q.branch, employeeId: Q.emp, subjectUserId: U.emp, requestedBy: U.emp, currentStep: 1, status: 'PENDING', infoRequestedAt: H(1), createdAt: T }).returning('id').executeTakeFirstOrThrow()).id;
+    const step = (await a().insertInto('approvalSteps').values({ organizationId: Q.org, requestId: req, stepNo: 1, approverType: 'USER', approverUserId: U.approver, mode: 'ANY', requiredCount: 1, status: 'PENDING', activatedAt: T, dueAt: H(2), escalateTo: 'OWNER', escalateAfterHours: 2 }).returning('id').executeTakeFirstOrThrow()).id;
+    await a().insertInto('approvalStepActors').values({ organizationId: Q.org, stepId: step, userId: U.approver, resolutionPath: 'user' }).execute();
+    await a().insertInto('approvalRequestEvents').values({ organizationId: Q.org, requestId: req, kind: 'info_requested', actorUserId: U.approver, at: H(1), detail: JSON.stringify({ stepNo: 1, comment: 'Which project?' }) }).execute();
+    // past due and a day old — but the request waits for the requester's answer
+    clock = H(30); // 06:00 Muscat on 21 Sept
+    expect(await runApprovalReminders(h.deps, Q.org)).toEqual({ escalated: 0, reminded: 0, digests: 0 });
+    clock = H(37); // 13:00 Muscat: the digest hour passed — nothing waits for an approver
+    expect(await runApprovalReminders(h.deps, Q.org)).toEqual({ escalated: 0, reminded: 0, digests: 0 });
+    // the answer (what answerInfo writes: the marker cleared, the timeline entry, the escalation deadline re-armed from it)
+    const A = H(40);
+    await a().updateTable('approvalRequests').set({ infoRequestedAt: null }).where('id', '=', req).execute();
+    await a().insertInto('approvalRequestEvents').values({ organizationId: Q.org, requestId: req, kind: 'info_answered', actorUserId: U.emp, at: A, detail: JSON.stringify({ stepNo: 1, comment: 'Project X', dueAt: new Date(A.getTime() + 2 * 3_600_000).toISOString() }) }).execute();
+    await a().updateTable('approvalSteps').set({ dueAt: new Date(A.getTime() + 2 * 3_600_000), remindedAt: null }).where('id', '=', step).execute();
+    clock = new Date(A.getTime() + 1 * 3_600_000);
+    expect(await runApprovalReminders(h.deps, Q.org)).toMatchObject({ escalated: 0, reminded: 0 });
+    clock = new Date(A.getTime() + 3 * 3_600_000);
+    expect(await runApprovalReminders(h.deps, Q.org)).toMatchObject({ escalated: 1, reminded: 0 });
+    // the level became current 64 h ago, but the reminder waits a day from the ANSWER
+    clock = new Date(A.getTime() + 23 * 3_600_000);
+    expect(await runApprovalReminders(h.deps, Q.org)).toMatchObject({ reminded: 0 });
+    clock = new Date(A.getTime() + 25 * 3_600_000);
+    expect(await runApprovalReminders(h.deps, Q.org)).toMatchObject({ reminded: 1 });
+    const reminder = await a().selectFrom('domainEvents').select('payload').where('eventType', '=', 'approval.reminder').where('aggregateId', '=', req).executeTakeFirstOrThrow();
+    expect(reminder.payload).toMatchObject({ kind: 'reminder', waitingSince: A.toISOString() });
+    const timeline = await a().selectFrom('approvalRequestEvents').select(['kind', 'detail']).where('requestId', '=', req).orderBy('id').execute();
+    expect(timeline.map((t) => t.kind)).toEqual(['info_requested', 'info_answered', 'escalated', 'reminded']);
+    expect(timeline[3]!.detail).toMatchObject({ waitingSince: A.toISOString() });
   });
 });
