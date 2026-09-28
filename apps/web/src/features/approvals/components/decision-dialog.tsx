@@ -5,7 +5,7 @@ import type { ApprovalRequestDto } from '@flowza/contracts';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Textarea } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
 import { useApprovalMutations, type DecisionKind } from '../api';
-import { decisionToast } from '../labels';
+import { decisionToast, firstWaitingSeatName } from '../labels';
 import { ApprovalContext, EntityIcon } from './parts';
 
 export type Decision = DecisionKind;
@@ -18,6 +18,8 @@ export function DecisionDialog({ request, decision, timezone, onClose }: { reque
   const [comment, setComment] = useState('');
   const reject = decision === 'REJECT';
   const missing = reject && comment.trim().length === 0;
+  const via = request?.abilities.decideVia ?? null;
+  const seatName = request && (via === 'override' || via === 'escalated') ? firstWaitingSeatName(request) ?? '—' : null;
   const submit = () => {
     if (!request || missing) return;
     decide.mutate({ requestId: request.id, stepNo: request.currentStep, decision, comment: comment.trim() || undefined }, {
@@ -42,6 +44,7 @@ export function DecisionDialog({ request, decision, timezone, onClose }: { reque
             </div>
           </div>
         ) : null}
+        {seatName ? <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100" role="note" data-testid="decision-seat-hint">{via === 'override' ? t('decision.overrideHint', { name: seatName }) : t('decision.escalatedHint', { name: seatName })}</p> : null}
         <FormField label={t('decision.comment')} htmlFor="dec-comment" required={reject} optional={!reject}>
           <Textarea id="dec-comment" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={reject ? t('decision.rejectPlaceholder') : t('decision.approvePlaceholder')} aria-invalid={missing || undefined} />
           {missing ? <p className="text-xs text-muted-foreground">{t('decision.commentRequired')}</p> : null}

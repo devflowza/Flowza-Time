@@ -82,6 +82,7 @@ function StepCard({ step, current, pending, timezone }: { step: ApprovalStepDto;
           <li key={`${a.userId}-${a.viaDelegationOf ?? ''}`} className="flex flex-wrap items-center gap-2 text-sm">
             <span className="font-medium">{a.userName ?? a.userId.slice(0, 8)}</span>
             {a.viaDelegationOf ? <Badge variant="info">{t('inbox.delegateOf', { name: a.viaDelegationOfName ?? a.viaDelegationOf.slice(0, 8) })}</Badge> : null}
+            {a.onBehalfOfUserId ? <Badge variant="outline">{t('detail.onBehalfOf', { name: a.onBehalfOfName ?? a.onBehalfOfUserId.slice(0, 8) })}</Badge> : null}
             {a.resolutionPath && a.resolutionPath !== 'delegate' ? <span className="text-xs text-muted-foreground">{pathText(t, a.resolutionPath)}</span> : null}
             <RequestStatusBadge status={a.decision} />
             {a.decidedAt ? <span className="text-xs text-muted-foreground tnum">{fmtDateTime(a.decidedAt, timezone)}</span> : null}
@@ -183,7 +184,7 @@ export function RequestDetail({ requestId }: { requestId: string }) {
         onSubmit={(comment) => answerInfo.mutate({ requestId: r.id, comment }, { onSuccess: () => { toast.success(t('info.answered')); closePrompt(); }, onError: toastError })} />
       <TextPrompt key={`bypass-${prompt}`} open={prompt === 'bypass'} title={t('bypass.title')} hint={t('bypass.hint')} label={t('bypass.reason')} placeholder={t('bypass.placeholder')} required minLength={3} loading={bypass.isPending} confirmLabel={t('actions.bypass')} onClose={closePrompt}
         onSubmit={(reason) => bypass.mutate({ requestId: r.id, reason }, { onSuccess: () => { toast.success(t('bypass.done')); closePrompt(); }, onError: toastError })} />
-      <TextPrompt key={`withdraw-${prompt}`} open={prompt === 'withdraw'} title={t('withdraw.title')} hint={t('withdraw.hint')} label={t('withdraw.reason')} required={false} loading={cancel.isPending} confirmLabel={t('actions.withdraw')} destructive onClose={closePrompt}
+      <TextPrompt key={`withdraw-${prompt}`} open={prompt === 'withdraw'} title={t('withdraw.title')} hint={t('withdraw.hint')} label={t('withdraw.reason')} placeholder={t('withdraw.reasonPlaceholder')} required minLength={3} loading={cancel.isPending} confirmLabel={t('actions.withdraw')} destructive onClose={closePrompt}
         onSubmit={(reason) => cancel.mutate({ requestId: r.id, reason }, { onSuccess: () => { toast.success(t('withdraw.done')); closePrompt(); }, onError: toastError })} />
     </div>
   );

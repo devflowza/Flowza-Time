@@ -4,7 +4,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
 import type { z } from 'zod';
 import { ArrowDown, ArrowUp, Plus, Trash2, X } from 'lucide-react';
-import { APPROVAL_ENTITIES, APPROVAL_ESCALATION_TARGETS, APPROVAL_STEP_MODES, APPROVER_TYPES, PERMISSIONS, RECORD_STATUSES, approvalWorkflowInputSchema, type ApprovalWorkflowInput } from '@flowza/contracts';
+import { APPROVAL_ENTITIES, APPROVAL_ESCALATION_TARGETS, APPROVAL_STEP_MODES, APPROVER_TYPES, PERMISSIONS, RECORD_STATUSES, SINGLE_SEAT_QUORUM_MESSAGE, approvalWorkflowInputSchema, type ApprovalWorkflowInput } from '@flowza/contracts';
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/components/ui';
 import { Combobox, type ComboboxOption } from '@/components/forms';
 import { toast, toastError } from '@/lib/toast';
@@ -19,9 +19,9 @@ const MAX_STEPS = 5;
 const DECIDING_KEYS = ['attendance.approve', 'leave.approve', 'approval.manage'];
 
 function toDefaults(w: WorkflowDto | null): FormValues {
-  if (!w) return { name: '', entityType: 'ATTENDANCE_CORRECTION', branchId: null, isDefault: true, status: 'active', steps: [{ order: 1, approverType: 'MANAGER', mode: 'ANY' }], appliesTo: {}, minUnits: null, allowSelfApproval: false };
+  if (!w) return { name: '', entityType: 'ATTENDANCE_CORRECTION', branchId: null, isDefault: true, status: 'active', steps: [{ order: 1, approverType: 'MANAGER', mode: 'ANY' }], appliesTo: {}, minUnits: null };
   return {
-    name: w.name, entityType: w.entityType, branchId: w.branchId, isDefault: w.isDefault, status: w.status as FormValues['status'], appliesTo: { ...w.appliesTo }, minUnits: w.minUnits, allowSelfApproval: w.allowSelfApproval,
+    name: w.name, entityType: w.entityType, branchId: w.branchId, isDefault: w.isDefault, status: w.status as FormValues['status'], appliesTo: { ...w.appliesTo }, minUnits: w.minUnits,
     steps: w.steps.map((s, i) => ({ ...s, order: i + 1 })),
   };
 }
@@ -55,6 +55,8 @@ function StepEditor({ i, control, count, onMove, onRemove, setValue, roleOptions
 }) {
   const { t } = useTranslation('approvals');
   const step = useWatch({ control, name: `steps.${i}` }) as StepValues | undefined;
+  // the schema's message for a quorum above one on a single-seat approver type, in the reader's language (review P2-7)
+  const requiredCountError = errors?.requiredCount?.message === SINGLE_SEAT_QUORUM_MESSAGE ? t('workflows.singleSeatQuorum') : errors?.requiredCount?.message;
   const type = step?.approverType ?? 'MANAGER';
   const [roleBy, setRoleBy] = useState<'permission' | 'role'>(step?.roleId && !step.permission ? 'role' : 'permission');
   const permissionOptions = useMemo<ComboboxOption[]>(() => [...PERMISSIONS].sort((a, b) => (DECIDING_KEYS.includes(a) ? -1 : 0) - (DECIDING_KEYS.includes(b) ? -1 : 0) || a.localeCompare(b)).map((p) => ({ value: p, label: p })), []);
@@ -103,14 +105,14 @@ function StepEditor({ i, control, count, onMove, onRemove, setValue, roleOptions
       <div className="grid gap-3 sm:grid-cols-4">
         <FormField label={t('workflows.mode')} htmlFor={`wf-step-${i}-mode`}>
           <Controller control={control} name={`steps.${i}.mode`} render={({ field }) => (
-            <Select value={field.value ?? 'ANY'} onValueChange={(v) => { field.onChange(v); if (v === 'QUORUM' && !step?.requiredCount) setValue(`steps.${i}.requiredCount`, 2); }}>
+            <Select value={field.value ?? 'ANY'} onValueChange={(v) => { field.onChange(v); if (v === 'QUORUM' && !step?.requiredCount) setValue(`steps.${i}.requiredCount`, 2); if (v !== 'QUORUM') setValue(`steps.${i}.requiredCount`, undefined); }}>
               <SelectTrigger id={`wf-step-${i}-mode`}><SelectValue /></SelectTrigger>
               <SelectContent>{APPROVAL_STEP_MODES.map((m) => <SelectItem key={m} value={m}>{t(`workflows.modeLabel.${m}`)}</SelectItem>)}</SelectContent>
             </Select>
           )} />
         </FormField>
         {step?.mode === 'QUORUM' ? (
-          <FormField label={t('workflows.requiredCount')} htmlFor={`wf-step-${i}-quorum`} error={errors?.requiredCount?.message}>
+          <FormField label={t('workflows.requiredCount')} htmlFor={`wf-step-${i}-quorum`} error={requiredCountError}>
             <Controller control={control} name={`steps.${i}.requiredCount`} render={({ field }) => <Input id={`wf-step-${i}-quorum`} type="number" min={1} max={50} value={field.value ?? ''} onChange={(e) => field.onChange(e.target.value === '' ? undefined : Number(e.target.value))} />} />
           </FormField>
         ) : <div className="hidden sm:block" />}
@@ -136,10 +138,10 @@ function StepEditor({ i, control, count, onMove, onRemove, setValue, roleOptions
 }
 
 /**
- * Approval workflow editor v2: request type, branch, tier (from N units), applies-to narrowing, self-approval (off by
- * default) and up to 5 levels — manager, secondary manager, manager chain (N levels up), HR admins, department head,
- * branch manager, a role or a permission, a named user — each with a decision mode (any / all / quorum) and an optional
- * escalation after N hours.
+ * Approval workflow editor v2: request type, branch, tier (from N units), applies-to narrowing and up to 5 levels —
+ * manager, secondary manager, manager chain (N levels up), HR admins, department head, branch manager, a role or a
+ * permission, a named user — each with a decision mode (any / all / quorum) and an optional escalation after N hours.
+ * There is no self-approval switch: the person a request is about never decides it (review P0-3).
  */
 export function WorkflowDialog({ open, onOpenChange, workflow }: { open: boolean; onOpenChange: (o: boolean) => void; workflow: WorkflowDto | null }) {
   const { t } = useTranslation('approvals');
@@ -213,12 +215,6 @@ export function WorkflowDialog({ open, onOpenChange, workflow }: { open: boolean
               <div className="flex items-center justify-between gap-4 rounded-md border p-3">
                 <div><Label htmlFor="wf-default">{t('workflows.isDefault')}</Label><p className="text-xs text-muted-foreground">{t('workflows.isDefaultHint')}</p></div>
                 <Switch id="wf-default" checked={field.value ?? true} onCheckedChange={field.onChange} />
-              </div>
-            )} />
-            <Controller control={control} name="allowSelfApproval" render={({ field }) => (
-              <div className="flex items-center justify-between gap-4 rounded-md border p-3">
-                <div><Label htmlFor="wf-self">{t('workflows.allowSelfApproval')}</Label><p className="text-xs text-muted-foreground">{t('workflows.allowSelfApprovalHint')}</p></div>
-                <Switch id="wf-self" checked={field.value ?? false} onCheckedChange={field.onChange} />
               </div>
             )} />
           </div>

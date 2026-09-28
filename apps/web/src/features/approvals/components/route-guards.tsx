@@ -13,7 +13,11 @@ export function RequireAccess({ allowed, children }: { allowed: boolean; childre
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
 }
 
-/** /approvals: approvers (any approve key or approval.manage) and line managers. */
+/**
+ * /approvals: every active member of the organisation (review P1-6). The API scopes each row, so a delegate, a named
+ * approver or an escalated approver who holds no approve key reaches the requests waiting for them, and anybody reaches
+ * "My requests".
+ */
 export function InboxRoute() {
   const access = useApprovalAccess();
   return <RequireAccess allowed={access.inbox}><ApprovalsPage /></RequireAccess>;

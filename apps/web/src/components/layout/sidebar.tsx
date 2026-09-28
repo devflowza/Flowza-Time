@@ -45,9 +45,14 @@ export function Sidebar() {
   const can = useCan();
   const { data: me } = useMe();
   const employeeId = useEmployeeId();
+  const membership = useActiveMembership();
   // Direct reports (/me: isManager) is a reporting RELATIONSHIP. The approval engine routes MANAGER steps to it whatever
   // the manager's role, and the inbox is actor-scoped (membership only), so it alone opens Approvals.
-  const hasDirectReports = useActiveMembership()?.isManager ?? false;
+  const hasDirectReports = membership?.isManager ?? false;
+  // /me also says when approvals wait for somebody who holds no approve key — a delegate, a named or escalated approver —
+  // or when a delegation to them is in force today (review P1-6). A /me cached before the field existed has none.
+  const approvalsSignal = membership?.approvals as { actionable?: number; delegatedToMe?: boolean } | undefined;
+  const approvalsWaiting = (approvalsSignal?.actionable ?? 0) > 0 || approvalsSignal?.delegatedToMe === true;
   // The "My team" workspace additionally needs a key that can read those reports' records (employee.view_team, or the
   // organisation-wide employee.view) — the RLS team predicate is key-gated, so without one it would only ever show an
   // empty page.
@@ -67,8 +72,9 @@ export function Sidebar() {
       { to: '/employees', label: t('nav.employees'), icon: Users, permissions: ['employee.view'] },
       { to: '/attendance', label: t('nav.attendance'), icon: Activity, permissions: ['attendance.view'] },
       { to: '/corrections', label: t('nav.corrections'), icon: ClipboardList, permissions: ['attendance.view'] },
-      // engine v2: approvers of attendance or leave, approval admins and line managers (their team's requests)
-      { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || hasDirectReports },
+      // engine v2: approvers of attendance or leave, approval admins, line managers (their team's requests) and anybody
+      // with approvals waiting for them or a delegation to them in force today
+      { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || hasDirectReports || approvalsWaiting },
       { to: '/leave', label: t('nav.leave'), icon: CalendarOff, permissions: ['leave.view'] },
       // HR attendance workspace (HR portal Prompt 6a)
       { to: '/attendance/summary', label: t('nav.attendanceSummary'), icon: Sigma, permissions: ['attendance.view', 'attendance.view_team'], any: true },

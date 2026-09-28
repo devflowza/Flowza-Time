@@ -15,6 +15,7 @@ describe('Sidebar', () => {
     testState.orgId = 'org-1';
     testState.employeeId = null;
     testState.teamSize = 0;
+    testState.approvals = { actionable: 0, delegatedToMe: false };
     grantAll();
   });
 
@@ -83,6 +84,25 @@ describe('Sidebar', () => {
     testState.teamSize = 2;
     renderWithProviders(<Sidebar />);
     expect(approvalsLink()).toHaveAttribute('href', '/approvals');
+  });
+
+  it('P1-6 shows Approvals to a member without any approve key when /me says approvals wait for them or a delegation is in force', () => {
+    const approvalsLink = () => screen.queryByRole('link', { name: 'Approvals' });
+    grant('dashboard.view');
+    // a named USER approver / an escalated approver: something waits for them
+    testState.approvals = { actionable: 2, delegatedToMe: false };
+    let r = renderWithProviders(<Sidebar />);
+    expect(approvalsLink()).toHaveAttribute('href', '/approvals');
+    r.unmount();
+    // a delegate covering a colleague today, before anything is routed to them
+    testState.approvals = { actionable: 0, delegatedToMe: true };
+    r = renderWithProviders(<Sidebar />);
+    expect(approvalsLink()).toHaveAttribute('href', '/approvals');
+    r.unmount();
+    // nothing waiting, no delegation: no menu item (the page itself stays reachable)
+    testState.approvals = { actionable: 0, delegatedToMe: false };
+    renderWithProviders(<Sidebar />);
+    expect(approvalsLink()).not.toBeInTheDocument();
   });
 
   it('hides the platform entry from an ordinary tenant user', () => {

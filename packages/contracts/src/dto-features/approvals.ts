@@ -178,8 +178,11 @@ export const approvalDelegationListQuerySchema = z.object({
 
 export interface ApprovalActorDto {
   userId: string; userName: string | null; viaDelegationOf: string | null; viaDelegationOfName: string | null;
-  /** The seat an override or an escalated approver decided for (they fill exactly one pending seat of the level). */
-  onBehalfOfUserId: string | null; onBehalfOfName: string | null;
+  /**
+   * The seat an override or an escalated approver decided for (they fill exactly one pending seat of the level). Always
+   * sent by the API (null when the row is the person's own seat); optional in the type so older fixtures keep compiling.
+   */
+  onBehalfOfUserId?: string | null; onBehalfOfName?: string | null;
   resolutionPath: string | null; decision: ApprovalStatus; decidedAt: string | null; comment: string | null;
 }
 export interface ApprovalStepDto {

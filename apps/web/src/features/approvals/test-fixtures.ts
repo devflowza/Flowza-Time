@@ -5,7 +5,7 @@ export function approvalStep(over: Partial<ApprovalStepDto> = {}): ApprovalStepD
   return {
     id: 'step-1', requestId: 'req-1', stepNo: 1, approverType: 'MANAGER', approverRoleId: null, approverUserId: 'u1', permissionKey: null, mode: 'ANY', requiredCount: 1, status: 'PENDING',
     resolutionPath: 'primary', resolutionReason: null, activatedAt: '2024-03-02T08:00:00Z', dueAt: null, escalateTo: null, escalatedAt: null, remindedAt: null, actedBy: null, actedByName: null, actedAt: null, comment: null,
-    actors: [{ userId: 'u1', userName: 'Dev', viaDelegationOf: null, viaDelegationOfName: null, resolutionPath: 'primary', decision: 'PENDING', decidedAt: null, comment: null }],
+    actors: [{ userId: 'u1', userName: 'Dev', viaDelegationOf: null, viaDelegationOfName: null, onBehalfOfUserId: null, onBehalfOfName: null, resolutionPath: 'primary', decision: 'PENDING', decidedAt: null, comment: null }],
     ...over,
   };
 }
