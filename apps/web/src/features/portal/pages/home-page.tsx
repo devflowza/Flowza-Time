@@ -100,7 +100,7 @@ export default function PortalHomePage() {
       <section aria-label={t('home.thisMonth')}>
         <h2 className="mb-2 text-sm font-semibold">{t('home.thisMonth')} <span className="font-normal text-muted-foreground">· {d ? fmtDate(`${d.month.month}-01`, 'MMMM yyyy') : ''}</span></h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <StatCard label={t('home.attendanceRate')} value={m?.attendanceRate === null || m?.attendanceRate === undefined ? '—' : `${Math.round(m.attendanceRate * 100)}%`} hint={m ? t('home.attendanceRateHint', { present: m.present + m.halfDay * 0.5, working: m.workingDays }) : undefined} icon={TrendingUp} tone="success" loading={overview.isLoading} onClick={() => void navigate('/my/attendance')} />
+          <StatCard label={t('home.attendanceRate')} value={m?.attendanceRate === null || m?.attendanceRate === undefined ? '—' : `${Math.round(m.attendanceRate * 100)}%`} hint={m ? t('home.attendanceRateHint', { present: m.attendedDays ?? m.present + m.halfDay * 0.5, working: m.workingDays }) : undefined} icon={TrendingUp} tone="success" loading={overview.isLoading} onClick={() => void navigate('/my/attendance')} />
           <StatCard label={t('home.presentDays')} value={m ? fmtDays(m.present + m.halfDay * 0.5) : '—'} icon={CalendarCheck} loading={overview.isLoading} />
           <StatCard label={t('home.lateArrivals')} value={m?.late ?? '—'} hint={m && m.lateMinutes ? t('home.lateHint', { minutes: fmtMinutes(m.lateMinutes) }) : undefined} icon={AlarmClock} tone={m && m.late > 0 ? 'warning' : 'default'} loading={overview.isLoading} />
           <StatCard label={t('home.workedHours')} value={m ? fmtMinutes(m.workedMinutes) : '—'} icon={Clock} loading={overview.isLoading} />

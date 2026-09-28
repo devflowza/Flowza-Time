@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { AttendanceNoteDto } from '@flowza/contracts';
-import { createMemoryStore, queuedPunches, replayQueue, type QueuedPunch } from './offline-queue';
+import { createMemoryStore, discardOwn, purgeUnattributed, queuedPunches, replayQueue, type QueuedPunch } from './offline-queue';
 import { distanceMeters, fmtDistance, nearestFence } from './geo';
 import { activeNotesByDate, needsReason, reasonRequired, suggestedCategory } from './notes-model';
 import { swappableDays } from './shift-format';
 
-const punch = (key: string, at: string, orgId = 'org-1'): QueuedPunch => ({ key, orgId, direction: 'in', clientQueuedAt: at, attempts: 0, lastError: null });
+const punch = (key: string, at: string, orgId = 'org-1', userId = 'user-a'): QueuedPunch => ({ key, userId, orgId, direction: 'in', clientQueuedAt: at, attempts: 0, lastError: null });
 
 describe('offline punch queue', () => {
   it('replays in the order the punches were taken and keeps only the other organisation\'s', async () => {
@@ -14,7 +14,7 @@ describe('offline punch queue', () => {
     await store.put(punch('a', '2026-09-27T04:00:00Z'));
     await store.put(punch('x', '2026-09-27T03:00:00Z', 'org-2'));
     const sent: string[] = [];
-    const res = await replayQueue(store, 'org-1', async (p) => { sent.push(p.key); return { kind: 'sent' }; });
+    const res = await replayQueue(store, 'org-1', 'user-a', async (p) => { sent.push(p.key); return { kind: 'sent' }; });
     expect(sent).toEqual(['a', 'b']);
     expect(res).toMatchObject({ sent: 2, remaining: 0, stoppedEarly: false, refused: [] });
     expect((await store.all()).map((p) => p.key)).toEqual(['x']);
@@ -23,12 +23,40 @@ describe('offline punch queue', () => {
   it('drops a refused punch (the server judged it) but stops at the first retryable failure', async () => {
     const store = createMemoryStore();
     for (const [k, at] of [['a', '04'], ['b', '05'], ['c', '06']] as const) await store.put(punch(k, `2026-09-27T${at}:00:00Z`));
-    const res = await replayQueue(store, 'org-1', async (p) => (p.key === 'a' ? { kind: 'refused', reason: 'DUPLICATE_PUNCH' } : { kind: 'retry', error: 'offline' }));
-    expect(res.refused.map((r) => [r.punch.key, r.reason])).toEqual([['a', 'DUPLICATE_PUNCH']]);
+    const res = await replayQueue(store, 'org-1', 'user-a', async (p) => (p.key === 'a' ? { kind: 'refused', reason: 'OUTSIDE_GEOFENCE' } : { kind: 'retry', error: 'offline' }));
+    expect(res.refused.map((r) => [r.punch.key, r.reason])).toEqual([['a', 'OUTSIDE_GEOFENCE']]);
     expect(res.stoppedEarly).toBe(true);
-    const left = await queuedPunches(store, 'org-1');
+    const left = await queuedPunches(store, 'org-1', 'user-a');
     expect(left.map((p) => p.key)).toEqual(['b', 'c']);
     expect(left[0]).toMatchObject({ attempts: 1, lastError: 'offline' });
+  });
+
+  it('4-P0-3 a punch queued by one user is never shown, replayed or discarded under another user\'s session', async () => {
+    const store = createMemoryStore();
+    await store.put(punch('a-1', '2026-09-27T04:00:00Z', 'org-1', 'user-a'));
+    await store.put(punch('b-1', '2026-09-27T05:00:00Z', 'org-1', 'user-b'));
+    // user B sees and sends only their own punch; user A's stays untouched for A
+    expect((await queuedPunches(store, 'org-1', 'user-b')).map((p) => p.key)).toEqual(['b-1']);
+    const sent: string[] = [];
+    const res = await replayQueue(store, 'org-1', 'user-b', async (p) => { sent.push(p.key); return { kind: 'sent' }; });
+    expect(sent).toEqual(['b-1']);
+    expect(res).toMatchObject({ sent: 1, remaining: 0 });
+    expect((await store.all()).map((p) => [p.key, p.userId])).toEqual([['a-1', 'user-a']]);
+    // B cannot discard A's punch; A can
+    expect(await discardOwn(store, 'org-1', 'user-b', 'a-1')).toBe(false);
+    expect((await store.all()).map((p) => p.key)).toEqual(['a-1']);
+    expect(await discardOwn(store, 'org-1', 'user-a', 'a-1')).toBe(true);
+    expect(await store.all()).toEqual([]);
+  });
+
+  it('4-P0-3 punches saved before the queue recorded its users are removed, never replayed', async () => {
+    const store = createMemoryStore();
+    const legacy = { key: 'old-1', orgId: 'org-1', direction: 'in', clientQueuedAt: '2026-09-27T03:00:00Z', attempts: 0, lastError: null } as unknown as QueuedPunch;
+    await store.put(legacy);
+    await store.put(punch('mine', '2026-09-27T04:00:00Z'));
+    expect(await purgeUnattributed(store)).toBe(1);
+    expect((await store.all()).map((p) => p.key)).toEqual(['mine']);
+    expect(await purgeUnattributed(store)).toBe(0); // a one-time clean-up
   });
 });
 

@@ -39,6 +39,24 @@ describe('policy-parity flags from the punch payload (HR portal Prompt 3)', () =
     expect(mock.trace.steps.find((s) => s.step === 'punch.geofence')?.detail).toContain('mock location');
   });
 
+  it('4-P2-7 never flags OUTSIDE_GEOFENCE when the location is unknown or no real fence was evaluated (B-36 truth table)', () => {
+    const flagsOf = (payload: Parameters<typeof day>[2]) => calculateDailyRecord(input({ events: day('09:00', '17:00', { channel: 'mobile', ...payload }) })).flags;
+    // written since the fix: withinGeofence alone decides (true inside, false a real fence failed, null cannot say)
+    expect(flagsOf({ withinGeofence: false, geofenceVerdict: 'flagged', geofenceReason: 'outside' })).toContain('OUTSIDE_GEOFENCE');
+    expect(flagsOf({ withinGeofence: false, geofenceVerdict: 'denied_mock', geofenceReason: 'mock_location', isMock: true })).toContain('OUTSIDE_GEOFENCE');
+    expect(flagsOf({ withinGeofence: true, geofenceVerdict: 'allowed', geofenceReason: 'inside' })).not.toContain('OUTSIDE_GEOFENCE');
+    expect(flagsOf({ withinGeofence: null, geofenceVerdict: 'flagged', geofenceReason: 'location_missing' })).not.toContain('OUTSIDE_GEOFENCE');
+    expect(flagsOf({ withinGeofence: null, geofenceVerdict: 'no_fence', geofenceReason: 'no_fences_assigned', isMock: true })).not.toContain('OUTSIDE_GEOFENCE');
+    // payloads written before it: the reviewer's probe payloads (rev4-engine-geofence) no longer flag
+    expect(flagsOf({ geofenceVerdict: 'no_fence', geofenceReason: 'no_fences_assigned', isMock: true })).not.toContain('OUTSIDE_GEOFENCE'); // mock + no fence assigned
+    expect(flagsOf({ geofenceVerdict: 'no_fence', geofenceReason: 'geofence_off', isMock: true })).not.toContain('OUTSIDE_GEOFENCE'); // mock + geofencing off
+    expect(flagsOf({ geofenceVerdict: 'flagged', geofenceReason: 'location_missing' })).not.toContain('OUTSIDE_GEOFENCE'); // no coordinates on a soft fence
+    expect(flagsOf({ geofenceVerdict: 'logged', geofenceReason: 'gps_accuracy_too_low' })).not.toContain('OUTSIDE_GEOFENCE'); // fix too imprecise
+    expect(flagsOf({ geofenceVerdict: 'flagged', geofenceReason: 'outside' })).toContain('OUTSIDE_GEOFENCE'); // a real fence failed
+    expect(flagsOf({ geofenceVerdict: 'flagged' })).toContain('OUTSIDE_GEOFENCE'); // the Finance connector's verdict (no reason)
+    expect(flagsOf({ isMock: true })).toContain('OUTSIDE_GEOFENCE'); // a device reporting a mock location with no verdict at all
+  });
+
   it('flags OUT_OF_WINDOW when the payload says the punch fell outside the policy window', () => {
     const r = calculateDailyRecord(input({ events: day('09:00', '17:00', { channel: 'web', outOfWindow: true }) }));
     expect(r.flags).toContain('OUT_OF_WINDOW');

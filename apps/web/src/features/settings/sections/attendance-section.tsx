@@ -95,7 +95,7 @@ function AttendanceForm({ initial }: { initial: OrganizationSettings['attendance
   const { register, control, formState: { errors, isSubmitting, isDirty } } = form;
   const onSubmit = form.handleSubmit(async (values) => { try { await putGroup.mutateAsync({ group: 'attendance', value: values }); toast.success(t('saved')); form.reset(values); } catch (e) { toastError(e); } });
   const ss = errors.selfService; const mp = errors.missedPunch; const ux = errors.unexcused; const st = errors.stats;
-  const switchRow = (name: 'selfService.webCheckIn' | 'selfService.mobileCheckIn' | 'selfService.allowSelfieCheckIn' | 'missedPunch.detectionEnabled' | 'unexcused.autoDeductEnabled' | 'notes.requireReasonForLate' | 'notes.requireReasonForAbsent', id: string, label: string, hint?: string) => (
+  const switchRow = (name: 'selfService.webCheckIn' | 'selfService.mobileCheckIn' | 'selfService.allowSelfieCheckIn' | 'selfService.regularisation' | 'missedPunch.detectionEnabled' | 'unexcused.autoDeductEnabled' | 'notes.requireReasonForLate' | 'notes.requireReasonForAbsent', id: string, label: string, hint?: string) => (
     <Controller control={control} name={name} render={({ field }) => <SwitchRow id={id} label={label} hint={hint} control={<Switch id={id} checked={!!field.value} onCheckedChange={field.onChange} disabled={readOnly} />} />} />
   );
   const payEffectSelect = (name: 'unexcused.payEffectAbsent' | 'unexcused.payEffectLate' | 'unexcused.payEffectMissingPunch', id: string, label: string) => (
@@ -129,11 +129,14 @@ function AttendanceForm({ initial }: { initial: OrganizationSettings['attendance
       <Controller control={control} name="allowSelfServiceCorrections" render={({ field }) => <SwitchRow id="att-self" label={t('attendance.selfService')} hint={t('attendance.selfServiceHint')} control={<Switch id="att-self" checked={!!field.value} onCheckedChange={field.onChange} disabled={readOnly} />} />} />
 
       <Group title={t('attendance.selfServiceCheckIn.title')} hint={t('attendance.selfServiceCheckIn.hint')}>
-        <div className="grid gap-3 sm:grid-cols-3">
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {switchRow('selfService.webCheckIn', 'att-ss-web', t('attendance.selfServiceCheckIn.web'))}
           {switchRow('selfService.mobileCheckIn', 'att-ss-mobile', t('attendance.selfServiceCheckIn.mobile'))}
           {switchRow('selfService.allowSelfieCheckIn', 'att-ss-selfie', t('attendance.selfServiceCheckIn.selfie'))}
+          {switchRow('selfService.regularisation', 'att-ss-reg', t('attendance.selfServiceCheckIn.regularisation'), t('attendance.selfServiceCheckIn.regularisationHint'))}
         </div>
+        {/* review P2-8: the web / mobile switches judge the channel the app declares — a product switch, not a control */}
+        <p className="text-xs text-muted-foreground" data-testid="att-ss-channel-note">{t('attendance.selfServiceCheckIn.channelNote')}</p>
         <div className="grid gap-4 sm:grid-cols-2">
           <FormField label={t('attendance.selfServiceCheckIn.geofence')} htmlFor="att-ss-geo" hint={t('attendance.selfServiceCheckIn.geofenceHint')}>
             <Controller control={control} name="selfService.requireGeofence" render={({ field }) => (

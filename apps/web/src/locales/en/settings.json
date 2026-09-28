@@ -107,9 +107,12 @@
       "checkOutFrom": "Check-out window start",
       "checkOutTo": "Check-out window end",
       "ipAllowList": "IP allow-list",
-      "ipAllowListHint": "One address or CIDR block per line. Empty = any network.",
+      "ipAllowListHint": "One address or CIDR block per line. Empty = any network. Enforced only when the API runs behind the configured edge (EDGE_SHARED_SECRET): without it a list cannot be saved, and one saved earlier is ignored.",
       "duplicateSeconds": "Duplicate punch guard (seconds)",
-      "duplicateSecondsHint": "A second self-service punch within this many seconds is treated as a duplicate."
+      "duplicateSecondsHint": "A second self-service punch within this many seconds is treated as a duplicate.",
+      "regularisation": "Regularisation requests",
+      "regularisationHint": "Employees ask to fix a missed or wrong punch, unmarked work from home or a system downtime. Each request is decided through approvals, and the approved change is applied on the approver’s behalf.",
+      "channelNote": "Web and mobile check-in follow the channel the app reports: they decide what the apps offer, but they are not a security control. Location, geofences, the IP allow-list and the time windows are what the server enforces."
     },
     "missedPunch": {
       "title": "Missed punches and day close",

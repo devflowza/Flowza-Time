@@ -63,6 +63,19 @@ describe('AttendanceSection (policy parity)', () => {
     });
   });
 
+  it('4-P2-8 4-P2-9 4-P2-18 says the channel switches are client-declared, offers the regularisation switch (on by default) and says the IP list needs the edge', async () => {
+    apiMock.put.mockImplementation(async (_path: string, value: unknown) => ({ data: value }));
+    renderWithProviders(<AttendanceSection />);
+    const regularisation = await screen.findByRole('switch', { name: /Regularisation requests/ });
+    expect(regularisation).toBeChecked();
+    expect(screen.getByTestId('att-ss-channel-note')).toHaveTextContent(/not a security control/);
+    expect(screen.getByText(/EDGE_SHARED_SECRET/)).toBeInTheDocument();
+    fireEvent.click(regularisation);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1));
+    expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/attendance', { ...current, selfService: { ...current.selfService, regularisation: false } });
+  });
+
   it('rejects an invalid address in the IP allow-list', async () => {
     renderWithProviders(<AttendanceSection />);
     const ips = await screen.findByLabelText(/IP allow-list/);

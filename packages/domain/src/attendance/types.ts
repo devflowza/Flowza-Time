@@ -21,11 +21,21 @@ export interface EngineShift {
 
 /**
  * Facts a self-service punch carries in its raw payload (written by the check-in endpoint, HR portal Prompt 4). The
- * engine turns them into flags: `channel` → SELF_SERVICE_PUNCH, an outside/mock geofence verdict → OUTSIDE_GEOFENCE,
- * `outOfWindow` → OUT_OF_WINDOW. Every field is optional: device punches carry none of them.
+ * engine turns them into flags: `channel` → SELF_SERVICE_PUNCH, a punch a REAL fence judged outside → OUTSIDE_GEOFENCE
+ * (see `withinGeofence`), `outOfWindow` → OUT_OF_WINDOW. Every field is optional: device punches carry none of them.
  */
 export interface EnginePunchPayload {
   channel?: 'web' | 'mobile' | null;
+  /**
+   * The B-36 truth table (HR portal Prompt 4 review, P2-7): true = inside the fence that judged the punch; false = a real
+   * fence was evaluated with a location and the punch failed it (outside, or a mocked location); null = cannot say (no
+   * location, a fix too imprecise to judge, no fence assigned, geofencing off). When present it alone decides
+   * OUTSIDE_GEOFENCE (only `false` flags); payloads written before it existed fall back to `geofenceVerdict` +
+   * `geofenceReason`.
+   */
+  withinGeofence?: boolean | null;
+  /** Why the verdict was given (`inside`, `outside`, `mock_location`, `location_missing`, `gps_accuracy_too_low`, `geofence_off`, `no_fences_assigned`). */
+  geofenceReason?: string | null;
   /** Geofence verdict as the check-in endpoint evaluated it (`allowed`, `no_fence`, `flagged`, `logged`, `denied_outside`, `denied_mock`, …). */
   geofenceVerdict?: string | null;
   /** The device reported a mocked location. */

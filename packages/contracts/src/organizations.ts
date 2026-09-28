@@ -97,10 +97,20 @@ const leaveTypeCodeSchema = z.string().trim().min(1).max(32).transform((v) => v.
 
 /** What a self-service check-in must satisfy before it is stored (HR portal Prompt 3; enforced by the punch endpoint of Prompt 4). */
 export const attendanceSelfServiceSettingsSchema = z.object({
-  /** Web check-in switch (default off — tenants opt in). */
+  /**
+   * Web check-in switch (default off — tenants opt in). The web / mobile switches judge the channel the CLIENT declares
+   * (`channel` of the punch): the apps respect them, but they are a product switch, not a security control — the location,
+   * geofence, IP allow-list and window rules are what an adversarial client cannot get around (HR portal Prompt 4 review, P2-8).
+   */
   webCheckIn: z.boolean().default(false),
-  /** Mobile check-in switch (default off). */
+  /** Mobile check-in switch (default off; client-declared channel, see `webCheckIn`). */
   mobileCheckIn: z.boolean().default(false),
+  /**
+   * Employees may file regularisation requests (missed / wrong punch, WFH unmarked, system downtime) from the portal (default
+   * on). Independent of `allowSelfServiceCorrections`: a regularisation is always decided through the approval engine and its
+   * outcome is applied on behalf of that approval (the audit names the approver) — HR-only rules for DIRECT corrections stand.
+   */
+  regularisation: z.boolean().default(true),
   /** How an outside-geofence punch is treated: ignored, stored with the OUTSIDE_GEOFENCE flag, or refused. */
   requireGeofence: z.enum(['off', 'flag', 'block']).default('flag'),
   /** Selfie check-in for employees with an open-attendance grant. */
@@ -141,8 +151,11 @@ export const attendanceUnexcusedSettingsSchema = z.object({
   payEffectMissingPunch: payEffectDaysSchema.default(0.5),
   /** Paid leave types charged first, in this order; then the paid type with the most remaining allowance. */
   leaveTypePriority: z.array(leaveTypeCodeSchema).max(20).default(['AL', 'CL']),
-  /** Leave types never charged automatically (sick, maternity, paternity, Hajj by default). */
-  excludeLeaveTypeCodes: z.array(leaveTypeCodeSchema).max(50).default(['SL', 'ML', 'PTL', 'HJ']),
+  /**
+   * Leave types never charged automatically: sick, maternity, paternity, Hajj, and — Finance parity (ATT-82) — marriage,
+   * bereavement, adoption and compassionate leave. A leave type flagged `is_special` is never charged whatever this list says.
+   */
+  excludeLeaveTypeCodes: z.array(leaveTypeCodeSchema).max(50).default(['SL', 'ML', 'PTL', 'HJ', 'MARRIAGE', 'BEREAVEMENT', 'ADOPTION', 'COMPASSIONATE']),
 });
 
 /** Whether the portal insists on a reason for a late / absent day (Prompt 4 reads it). */

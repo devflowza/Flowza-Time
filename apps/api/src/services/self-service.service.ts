@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
-import type { AttendanceStatus, SelfAttendanceMonthDto, SelfDayDto, SelfHolidayDto, SelfLeaveRecordDto, SelfMonthTotals, SelfOverviewDto, SelfProfileDto } from '@flowza/contracts';
+import type { SelfAttendanceMonthDto, SelfDayDto, SelfHolidayDto, SelfLeaveRecordDto, SelfMonthTotals, SelfOverviewDto, SelfProfileDto } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
-import { holidayDates, type MembershipGrant, type WorkingCalendar } from '@flowza/domain';
+import { attendanceRateOf, holidayDates, isOpenDay, type MembershipGrant, type WorkingCalendar } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { hasPermission, requireMembership } from '../lib/authorize.js';
@@ -108,20 +108,22 @@ async function fillNames(trx: Trx, orgId: string, days: SelfDayDto[]): Promise<S
   return days.map((d) => ({ ...d, branchName: d.branchName ?? b.get(d.branchId) ?? null, departmentName: d.departmentName ?? (d.departmentId ? dp.get(d.departmentId) ?? null : null), shiftName: d.shiftName ?? (d.shiftId ? s.get(d.shiftId) ?? null : null) }));
 }
 
-const NOT_EXPECTED: ReadonlySet<AttendanceStatus> = new Set(['HOLIDAY', 'WEEKLY_OFF', 'NOT_JOINED', 'EXITED', 'PENDING']);
-
-export function monthTotals(days: readonly SelfDayDto[]): SelfMonthTotals {
-  const t: SelfMonthTotals = { present: 0, absent: 0, leave: 0, holiday: 0, weeklyOff: 0, halfDay: 0, late: 0, missingPunch: 0, workedMinutes: 0, overtimeMinutes: 0, lateMinutes: 0, earlyDepartureMinutes: 0, workingDays: 0, attendanceRate: null };
+/**
+ * The month card's totals. The working days and the attendance rate are THE portal definition shared with the statistics
+ * card (`attendanceRateOf`, HR portal Prompt 4 review P2-14 — approved leave is outside the denominator), and `today`'s
+ * running day is never counted as a missing punch while only its check-out is outstanding.
+ */
+export function monthTotals(days: readonly SelfDayDto[], today?: string): SelfMonthTotals {
+  const t: SelfMonthTotals = { present: 0, absent: 0, leave: 0, holiday: 0, weeklyOff: 0, halfDay: 0, late: 0, missingPunch: 0, workedMinutes: 0, overtimeMinutes: 0, lateMinutes: 0, earlyDepartureMinutes: 0, workingDays: 0, attendedDays: 0, attendanceRate: null };
   for (const d of days) {
     if (d.status === 'PRESENT') t.present += 1; else if (d.status === 'ABSENT') t.absent += 1; else if (d.status === 'LEAVE') t.leave += 1; else if (d.status === 'HOLIDAY') t.holiday += 1; else if (d.status === 'WEEKLY_OFF') t.weeklyOff += 1; else if (d.status === 'HALF_DAY') t.halfDay += 1;
     if (d.flags.includes('LATE')) t.late += 1;
-    if (d.status === 'MISSING_PUNCH' || d.flags.includes('MISSING_IN') || d.flags.includes('MISSING_OUT')) t.missingPunch += 1;
-    if (!NOT_EXPECTED.has(d.status)) t.workingDays += 1;
+    const open = today !== undefined && isOpenDay({ date: d.attendanceDate, flags: d.flags }, today);
+    if (!open && (d.status === 'MISSING_PUNCH' || d.flags.includes('MISSING_IN') || d.flags.includes('MISSING_OUT'))) t.missingPunch += 1;
     t.workedMinutes += d.workedMinutes; t.overtimeMinutes += d.overtimeMinutes; t.lateMinutes += d.lateMinutes; t.earlyDepartureMinutes += d.earlyDepartureMinutes;
   }
-  // a MISSING_PUNCH day still had the employee at work; count it with present for the rate
-  const attended = t.present + t.halfDay * 0.5 + days.filter((d) => d.status === 'MISSING_PUNCH').length;
-  t.attendanceRate = t.workingDays > 0 ? Math.min(1, attended / t.workingDays) : null;
+  const rate = attendanceRateOf(days);
+  t.workingDays = rate.expectedDays; t.attendedDays = rate.attendedDays; t.attendanceRate = rate.rate;
   return t;
 }
 
@@ -148,7 +150,7 @@ export async function getAttendanceMonth(deps: ApiDeps, actor: Actor, orgId: str
     }
     const holidaysByDate: Record<string, string> = {};
     for (const h of await loadHolidays(trx, orgId, ctx, from, to)) for (const d of holidayDates([h])) if (d >= from && d <= to) holidaysByDate[d] = h.name;
-    return { month, days, totals: monthTotals(days), leaveByDate, holidaysByDate };
+    return { month, days, totals: monthTotals(days, todayIn(ctx.timezone)), leaveByDate, holidaysByDate };
   });
 }
 
@@ -217,7 +219,7 @@ export async function getOverview(deps: ApiDeps, actor: Actor, orgId: string): P
     return {
       date: today, timezone: ctx.timezone,
       today: monthDays.find((d) => d.attendanceDate === today) ?? null,
-      month: { month: today.slice(0, 7), totals: monthTotals(monthDays) },
+      month: { month: today.slice(0, 7), totals: monthTotals(monthDays, today) },
       recent, balances, upcomingLeave, pendingLeave, pendingCorrections,
       upcomingHolidays: holidays.filter((h) => (h.endDate ?? h.date) >= today).slice(0, 5),
     };

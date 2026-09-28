@@ -13,7 +13,7 @@ import enApprovals from '@/locales/en/approvals.json';
 import arApprovals from '@/locales/ar/approvals.json';
 import { Sidebar } from '@/components/layout/sidebar';
 import { DecisionDialog } from '@/features/approvals/components/decision-dialog';
-import { approvalRequest } from '@/features/approvals/test-fixtures';
+import { approvalRequest, approvalStep } from '@/features/approvals/test-fixtures';
 import './routes';
 import NotesReviewPage from './pages/notes-review-page';
 import GeofencesPage from './pages/geofences-page';
@@ -107,6 +107,40 @@ describe('NotesReviewPage', () => {
     expect(screen.getAllByRole('button', { name: 'Organisation' })).toHaveLength(1); // only the first render's
   });
 
+  it('4-seat-choice an organisation-wide reviewer names whose seat the decision fills on a level waiting for several reviewers', async () => {
+    const hr = (userId: string, userName: string) => ({ userId, userName, viaDelegationOf: null, viaDelegationOfName: null, onBehalfOfUserId: null, onBehalfOfName: null, resolutionPath: 'hr_admin', decision: 'PENDING' as const, decidedAt: null, comment: null });
+    const seats = [{ userId: 'u7', userName: 'Fatma HR' }, { userId: 'u8', userName: 'Salim HR' }];
+    const request = approvalRequest({ entityType: 'ATTENDANCE_NOTE', abilities: { canDecide: true, canCancel: false, canReassign: false, canBypass: false, canRequestInfo: true, canAnswerInfo: false, actingAsDelegateOf: null, decideVia: 'override', mustChooseSeat: true }, steps: [approvalStep({ mode: 'ALL', actors: [hr('u7', 'Fatma HR'), hr('u8', 'Salim HR')], pendingSeats: seats })] });
+    mockGet({ [`/orgs/${ORG}/attendance/notes`]: page([item({ isOversight: true })]), [`/orgs/${ORG}/approvals/req-1`]: { data: request } });
+    apiMock.post.mockResolvedValue({ data: { note: item({ status: 'approved' }), requestStatus: 'PENDING', terminal: false, charge: null } });
+    renderWithProviders(<NotesReviewPage />, { route: '/attendance/notes' });
+    const row = await screen.findByTestId('note-review-row');
+    fireEvent.click(within(row).getByRole('button', { name: /Approve/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByTestId('note-review-seat-hint')).toHaveTextContent(/choose whose seat it fills/);
+    const approve = within(dialog).getByRole('button', { name: /Approve/ });
+    expect(approve).toBeDisabled();
+    fireEvent.keyDown(within(dialog).getByLabelText(/Deciding for/), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Salim HR' }));
+    await waitFor(() => expect(approve).toBeEnabled());
+    fireEvent.click(approve);
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`/orgs/${ORG}/attendance/notes/n1/review`, { decision: 'approve', onBehalfOfUserId: 'u8' }));
+  });
+
+  it('4-seat-choice a single waiting seat is named for the reviewer, never asked; a seated line manager fills their own seat', async () => {
+    const one = approvalRequest({ entityType: 'ATTENDANCE_NOTE', abilities: { canDecide: true, canCancel: false, canReassign: false, canBypass: false, canRequestInfo: true, canAnswerInfo: false, actingAsDelegateOf: null, decideVia: 'override', mustChooseSeat: false }, steps: [approvalStep({ pendingSeats: [{ userId: 'u9', userName: 'Nasser' }] })] });
+    mockGet({ [`/orgs/${ORG}/attendance/notes`]: page([item()]), [`/orgs/${ORG}/approvals/req-1`]: { data: one } });
+    apiMock.post.mockResolvedValue({ data: { note: item({ status: 'excused' }), requestStatus: 'APPROVED', terminal: true, charge: null } });
+    renderWithProviders(<NotesReviewPage />, { route: '/attendance/notes' });
+    const row = await screen.findByTestId('note-review-row');
+    fireEvent.click(within(row).getByRole('button', { name: /Excuse/ }));
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByTestId('note-review-seat-hint')).toHaveTextContent(/Nasser/);
+    expect(within(dialog).queryByLabelText(/Deciding for/)).toBeNull();
+    fireEvent.click(within(dialog).getByRole('button', { name: /Excuse/ }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`/orgs/${ORG}/attendance/notes/n1/review`, { decision: 'excuse', onBehalfOfUserId: 'u9' }));
+  });
+
   it('shows who decided a closed reason and what the rejection cost', async () => {
     mockGet({ [`/orgs/${ORG}/attendance/notes`]: page([item({ status: 'rejected', canReview: false, reviewedByName: 'Mansoor', reviewReason: 'No proof', payEffectDays: 1, lossOfPay: true })]) });
     renderWithProviders(<NotesReviewPage />, { route: '/attendance/notes?status=rejected' });
@@ -178,6 +212,18 @@ describe('GeofencesPage', () => {
     fireEvent.change(within(dialog).getByLabelText(/Polygon/), { target: { value: '23.60, 58.40\n23.61, 58.40\n23.61, 58.41' } });
     fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`/orgs/${ORG}/geofences`, expect.objectContaining({ name: 'Yard', latitude: 23.6, longitude: 58.4, radiusM: 150, polygon: [[23.6, 58.4], [23.61, 58.4], [23.61, 58.41]], enforcement: 'soft_warn', branchId: null })));
+  });
+
+  it('4-P0-1 a fence the caller may not change is read-only and says why; the precedence rule is on the page (ATT-63/64)', async () => {
+    mockGet({ [`/orgs/${ORG}/geofences`]: { data: [fence({ id: 'g1', name: 'HQ', editable: false, hiddenAssignments: 2 }), fence({ id: 'g2', name: 'Org zone', editable: false, hiddenAssignments: 0 }), fence({ id: 'g3', name: 'Mine', editable: true, hiddenAssignments: 0 })] }, '*': page([]) });
+    renderWithProviders(<GeofencesPage />);
+    const rows = await screen.findAllByTestId('geofence-row');
+    expect(rows.map((r) => r.getAttribute('data-editable'))).toEqual(['false', 'false', 'true']);
+    expect(within(rows[0]!).getByTestId('geofence-read-only')).toHaveTextContent('it also applies to 2 targets outside your branches');
+    expect(within(rows[1]!).getByTestId('geofence-read-only')).toHaveTextContent('another branch or to the whole organisation');
+    for (const name of [/Applies to|Assign/, 'Edit geofence', 'Delete']) expect(within(rows[0]!).getByRole('button', { name })).toBeDisabled();
+    expect(within(rows[2]!).getByRole('button', { name: 'Edit geofence' })).toBeEnabled();
+    expect(screen.getByTestId('geofence-precedence')).toHaveTextContent(/most specific assignment .* wins .* worst result decides/);
   });
 
   it('runs the dry-run tester', async () => {

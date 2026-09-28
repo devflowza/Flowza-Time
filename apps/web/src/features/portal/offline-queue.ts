@@ -8,10 +8,18 @@ import type { SelfPunchDirection } from '@flowza/contracts';
  *
  * Environments without IndexedDB (a private window that refuses it, jsdom in tests) fall back to an in-memory store: the
  * queue then survives navigation but not a reload, which is the best that can be done there.
+ *
+ * Every queued punch belongs to the USER who took it and the organisation it was taken in (HR portal Prompt 4 review, P0-3):
+ * it is shown, replayed and discarded only under that user's own session — a browser shared by two people (a kiosk, a family
+ * device) never sends one person's punch, location and idempotency key as the other's. Signing out leaves other people's
+ * punches where they are (their owner sends them when they sign in again). Punches saved before the queue knew its users
+ * cannot be attributed to anybody: they are removed once, with a notice, and never sent.
  */
 export interface QueuedPunch {
   /** The idempotency key of the punch (also the store key). */
   key: string;
+  /** The signed-in user who took the punch. */
+  userId: string;
   orgId: string;
   direction: SelfPunchDirection;
   lat?: number | undefined;
@@ -87,9 +95,30 @@ export function punchQueueStore(): PunchQueueStore {
 /** Tests swap the store (e.g. to pre-fill it). */
 export function setPunchQueueStore(store: PunchQueueStore | null): void { shared = store; }
 
-/** Queued punches of one organisation, oldest first (they are replayed in the order they were taken). */
-export async function queuedPunches(store: PunchQueueStore, orgId: string): Promise<QueuedPunch[]> {
-  return (await store.all()).filter((p) => p.orgId === orgId).sort((a, b) => a.clientQueuedAt.localeCompare(b.clientQueuedAt));
+/** True when the queued punch was taken by this user in this organisation — the only punches they may see, send or discard. */
+export const ownPunch = (p: Pick<QueuedPunch, 'userId' | 'orgId'>, orgId: string, userId: string): boolean => p.orgId === orgId && typeof p.userId === 'string' && p.userId === userId;
+
+/** The signed-in user's queued punches in one organisation, oldest first (they are replayed in the order they were taken). */
+export async function queuedPunches(store: PunchQueueStore, orgId: string, userId: string): Promise<QueuedPunch[]> {
+  return (await store.all()).filter((p) => ownPunch(p, orgId, userId)).sort((a, b) => a.clientQueuedAt.localeCompare(b.clientQueuedAt));
+}
+
+/**
+ * Remove the punches saved before the queue recorded who took them (review P0-3): nobody can tell whose they are, so they
+ * are never sent. Returns how many were removed (the page tells the employee once — the next time there are none).
+ */
+export async function purgeUnattributed(store: PunchQueueStore): Promise<number> {
+  const orphans = (await store.all()).filter((p) => typeof (p as Partial<QueuedPunch>).userId !== 'string' || !(p as Partial<QueuedPunch>).userId);
+  for (const p of orphans) await store.remove(p.key);
+  return orphans.length;
+}
+
+/** Remove one queued punch — only the signed-in user's own. Returns false when it is somebody else's (or gone). */
+export async function discardOwn(store: PunchQueueStore, orgId: string, userId: string, key: string): Promise<boolean> {
+  const item = (await store.all()).find((p) => p.key === key);
+  if (!item || !ownPunch(item, orgId, userId)) return false;
+  await store.remove(key);
+  return true;
 }
 
 /** What sending one punch produced: recorded (or replayed), refused for good (with the reason), or try again later. */
@@ -97,11 +126,12 @@ export type SendOutcome = { kind: 'sent' } | { kind: 'refused'; reason: string }
 export interface ReplayResult { sent: number; refused: Array<{ punch: QueuedPunch; reason: string }>; remaining: number; stoppedEarly: boolean }
 
 /**
- * Send the organisation's queued punches in order. A sent or refused punch leaves the queue (a refusal is final: the server
- * judged it); the first "retry" (still offline, a 5xx) stops the run so the order of the rest is kept.
+ * Send the signed-in user's queued punches of the organisation in order — nobody else's. A sent or refused punch leaves the
+ * queue (a refusal is final: the server judged it); the first "retry" (still offline, a 5xx, a duplicate the server holds for
+ * the OTHER direction) stops the run so the order of the rest is kept.
  */
-export async function replayQueue(store: PunchQueueStore, orgId: string, send: (p: QueuedPunch) => Promise<SendOutcome>): Promise<ReplayResult> {
-  const queue = await queuedPunches(store, orgId);
+export async function replayQueue(store: PunchQueueStore, orgId: string, userId: string, send: (p: QueuedPunch) => Promise<SendOutcome>): Promise<ReplayResult> {
+  const queue = await queuedPunches(store, orgId, userId);
   const result: ReplayResult = { sent: 0, refused: [], remaining: queue.length, stoppedEarly: false };
   for (const p of queue) {
     const outcome = await send(p);

@@ -131,8 +131,10 @@ export async function submitNote(deps: ApiDeps, actor: Actor, orgId: string, inp
 }
 
 /**
- * Edit one's own open reason. A pending note is corrected in place (its request stays); an answer to a question (status
- * info_requested) sends it back for review: the old request is invalidated and a new one routed.
+ * Edit one's own open reason. Any material change — the text or the category of a pending reason (HR portal Prompt 4 review,
+ * P1-5; Finance B-96, like a leave edit), or an answer to a question (status info_requested) — sends it back for review: the
+ * old request is INVALIDATED (the timeline reads "superseded") and a new one routed, so an approval given to the old text
+ * never carries over to the new one. An edit that changes nothing leaves the request as it is.
  */
 export async function updateMyNote(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: SelfNoteUpdateInput): Promise<AttendanceNoteDto> {
   const self = portalSelf(actor, orgId, 'attendance.note');
@@ -144,11 +146,14 @@ export async function updateMyNote(deps: ApiDeps, actor: Actor, orgId: string, i
     const date = isoDate(before.attendanceDate);
     if (await isPeriodLocked(trx, orgId, before.branchId, date)) throw errors.periodLocked('The attendance period of this date is locked.');
     const emp = await loadEmployeeCtx(trx, orgId, self.employeeId);
-    const resubmit = before.status === 'info_requested';
+    const changed = (input.category !== undefined && input.category !== before.category) || (input.note !== undefined && input.note !== before.note);
+    const answered = before.status === 'info_requested';
+    const resubmit = answered || changed;
     await systemStep(trx, orgId, async (t) => {
-      await t.updateTable('attendanceNotes').set({ ...(input.category ? { category: input.category } : {}), ...(input.note ? { note: input.note } : {}), ...(resubmit ? { status: 'pending', submittedAt: new Date() } : {}) })
-        .where('id', '=', id).where('status', '=', before.status).execute();
-      if (resubmit) await invalidateForEntity(t, actor, orgId, 'ATTENDANCE_NOTE', id, 'The employee answered the question and updated the reason.');
+      const res = await t.updateTable('attendanceNotes').set({ ...(input.category ? { category: input.category } : {}), ...(input.note ? { note: input.note } : {}), ...(resubmit ? { status: 'pending', submittedAt: new Date() } : {}) })
+        .where('id', '=', id).where('status', '=', before.status).executeTakeFirst();
+      if (Number(res.numUpdatedRows) !== 1) throw errors.conflict('The reason changed meanwhile. Please refresh.');
+      if (resubmit) await invalidateForEntity(t, actor, orgId, 'ATTENDANCE_NOTE', id, answered ? 'The employee answered the question and updated the reason.' : 'The employee changed the reason while it was waiting for review.');
     });
     if (resubmit) await routeNote(deps, trx, actor, orgId, { id, attendanceDate: date }, emp, before.branchId ?? emp.branchId);
     await audit(trx, actor, orgId, resubmit ? 'attendance.note_resubmitted' : 'attendance.note_updated', 'attendance_note', { entityId: id, branchId: before.branchId, oldValue: { category: before.category, note: before.note, status: before.status }, newValue: input });
@@ -258,9 +263,10 @@ export async function reviewNote(deps: ApiDeps, actor: Actor, orgId: string, id:
         requestStatus = 'PENDING'; terminal = false;
       } else {
         // the current level is named explicitly: an organisation-wide reviewer who is not seated decides as an override of it
+        // the seat an override fills, when the level waits for several reviewers (engine §9.8): the review page names it
         const outcome = await decideWithin(deps, trx, actor, orgId, request.id, {
           stepNo: request.currentStep, decision: input.decision === 'reject' ? 'REJECT' : 'APPROVE', comment,
-          ...(input.decision === 'reject' ? { payEffectDays: input.payEffectDays ?? 0 } : {}), detail: { outcome: input.decision, source: 'note_review' },
+          ...(input.decision === 'reject' ? { payEffectDays: input.payEffectDays ?? 0 } : {}), ...(input.onBehalfOfUserId ? { onBehalfOfUserId: input.onBehalfOfUserId } : {}), detail: { outcome: input.decision, source: 'note_review' },
         });
         requestStatus = outcome.status as ApprovalRequestStatus; terminal = outcome.terminal;
       }
@@ -275,7 +281,7 @@ export async function reviewNote(deps: ApiDeps, actor: Actor, orgId: string, id:
       terminal = input.decision !== 'request_info';
     }
     await audit(trx, actor, orgId, REVIEW_AUDIT_ACTION[input.decision], 'attendance_note', {
-      entityId: note.id, branchId: note.branchId, reason: input.reason ?? null, newValue: { decision: input.decision, payEffectDays: input.payEffectDays ?? null, via: routed ? 'seat' : role, requestId: request?.id ?? null, terminal },
+      entityId: note.id, branchId: note.branchId, reason: input.reason ?? null, newValue: { decision: input.decision, payEffectDays: input.payEffectDays ?? null, via: routed ? 'seat' : role, requestId: request?.id ?? null, terminal, onBehalfOfUserId: input.onBehalfOfUserId ?? null },
     });
     const after = (await withSystemScope(trx, orgId, (t) => loadNote(t, orgId, note.id)))!;
     const [dto] = await toNoteDtos(trx, orgId, [after]);

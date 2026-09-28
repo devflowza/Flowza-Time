@@ -13,3 +13,4 @@ export * from './sync-jobs.js';
 export * from './approval-tokens.js';
 export * from './attendance/index.js';
 export * from './leave/index.js';
+export * from './employees/effective-branch.js';

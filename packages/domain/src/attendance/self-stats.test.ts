@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeSelfStats, punctualityOf, punctualityWindows, selfStatsRange, type SelfStatsDay } from './self-stats.js';
+import { attendanceRateOf, computeSelfStats, isOpenDay, punctualityOf, punctualityWindows, selfStatsRange, type SelfStatsDay } from './self-stats.js';
 
 const day = (date: string, status: SelfStatsDay['status'], over: Partial<SelfStatsDay> = {}): SelfStatsDay => ({
   date, status, flags: [], workedMinutes: status === 'PRESENT' ? 480 : status === 'HALF_DAY' ? 240 : 0, lateMinutes: 0, firstInAt: null, expectedStartAt: null, ...over,
@@ -49,6 +49,32 @@ describe('computeSelfStats', () => {
     expect(s.attendancePct).toBeNull();
     expect(s.avgHoursPerDay).toBeNull();
     expect(s.hints).toEqual([]);
+  });
+});
+
+describe('the one attendance rate (4-P2-14)', () => {
+  // the reviewer's E1 days (today = 2026-09-08): stats card 78.6 % vs month card 61.1 % before the fix
+  const E1: SelfStatsDay[] = [
+    day('2026-09-08', 'PRESENT', { flags: ['MISSING_OUT'] }), day('2026-09-07', 'MISSING_PUNCH', { flags: ['MISSING_OUT'] }), day('2026-09-06', 'WEEKLY_OFF'), day('2026-09-05', 'WEEKLY_OFF'),
+    day('2026-09-04', 'ABSENT'), day('2026-09-03', 'HALF_DAY'), day('2026-09-02', 'PRESENT', { flags: ['LATE'] }), day('2026-09-01', 'PRESENT'), day('2026-08-31', 'PRESENT'), day('2026-08-26', 'LEAVE'), day('2026-08-25', 'LEAVE'),
+  ];
+  it('4-P2-14 approved leave is outside the denominator; half days count half; missing-punch days count as attended', () => {
+    expect(attendanceRateOf(E1)).toEqual({ expectedDays: 7, attendedDays: 5.5, rate: 5.5 / 7 });
+    // the statistics card reads the very same number
+    const s = computeSelfStats(E1, SETTINGS, { from: '2026-08-01', to: '2026-09-30', today: '2026-09-08' });
+    expect(s.workingDays).toBe(7);
+    expect(s.attendancePct).toBe(78.6);
+    // a day with half-day leave: only its working half was expected — worked in full it is 100 %
+    expect(attendanceRateOf([day('2026-09-01', 'HALF_DAY', { flags: ['HALF_DAY_LEAVE'] })])).toEqual({ expectedDays: 0.5, attendedDays: 0.5, rate: 1 });
+    expect(attendanceRateOf([day('2026-09-01', 'ABSENT', { flags: ['HALF_DAY_LEAVE'] })])).toEqual({ expectedDays: 0.5, attendedDays: 0, rate: 0 });
+    expect(attendanceRateOf([day('2026-09-01', 'LEAVE'), day('2026-09-02', 'HOLIDAY')]).rate).toBeNull();
+  });
+  it('4-P2-14 today\'s running day is never a missing check-out (a missing check-in today still is)', () => {
+    expect(isOpenDay({ date: '2026-09-08', flags: ['MISSING_OUT'] }, '2026-09-08')).toBe(true);
+    expect(isOpenDay({ date: '2026-09-07', flags: ['MISSING_OUT'] }, '2026-09-08')).toBe(false);
+    expect(isOpenDay({ date: '2026-09-08', flags: ['MISSING_IN', 'MISSING_OUT'] }, '2026-09-08')).toBe(false);
+    const s = computeSelfStats(E1, SETTINGS, { from: '2026-08-01', to: '2026-09-30', today: '2026-09-08' });
+    expect(s.missingCheckouts).toBe(1); // yesterday's, not today's open day
   });
 });
 
