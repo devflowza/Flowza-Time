@@ -2,30 +2,37 @@ import { useMemo } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
-import { ArrowLeft, CalendarRange, ChevronLeft, ChevronRight, FileSpreadsheet, Printer, X } from 'lucide-react';
-import type { AttendanceSummaryRowDto } from '@flowza/contracts';
+import { ArrowLeft, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, Printer, X } from 'lucide-react';
+import type { AttendanceSummaryRowDto, ReportFormat } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
-import { Badge, Button, Input, StatCard } from '@/components/ui';
+import { Badge, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Input, StatCard } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { useServerTable } from '@/hooks/use-server-table';
 import { fmtDate, fmtDateTime, todayIso } from '@/lib/format';
-import { toast, toastError } from '@/lib/toast';
+import { toastError } from '@/lib/toast';
 import { useCan, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { SearchBox } from '@/features/organization/components/search-box';
 import { useEmployeeOptions } from '@/features/employees/api';
+import { toastJobQueued } from '@/features/employees/job-toast';
 import '../workspace-i18n';
-import { saveTextFile, useAttendanceSummary, useWorkspaceMutations } from '../workspace-api';
+import { useAttendanceSummary, useWorkspaceMutations } from '../workspace-api';
 import { fmtDays, fmtHm, shiftMonth } from '../status';
 
 const num = (n: number) => <span className="tnum">{fmtDays(n)}</span>;
 
+const EXPORT_FORMATS: readonly ReportFormat[] = ['csv', 'xlsx', 'pdf'];
+
 /**
  * /attendance/summary (HR portal Prompt 6a): one row per employee for a month — present (a half day counts ½), late, half days,
- * leave, absent, missing punch, holidays, weekly offs, days worked, hours, average per worked day, overtime and loss of pay.
- * Figures come from the daily records the caller may read (attendance.view, or their team with attendance.view_team); a month
- * whose payroll period is finalised shows the finalised day counts. The CSV export needs report.export.
+ * leave, absent, missing punch, holidays, weekly offs, days worked, hours, average per worked day, overtime, loss of pay and
+ * unexcused days. Figures come from the daily records the caller may read (attendance.view, or their team with
+ * attendance.view_team); a month whose payroll period is finalised shows the finalised day counts.
+ *
+ * Review fixes (docs/hr-portal/reviews/06a-…): the export queues a `monthly_summary` report (report.export; the file is downloaded
+ * from Reports — defect 10); a row opens the register calendar for attendance.view holders and the employee's statement for a
+ * line manager, who cannot open the register (defect 5); the print link is an export, so it needs report.export (minor 11).
  */
 export default function AttendanceSummaryPage() {
   const { t } = useTranslation('attendanceWorkspace');
@@ -34,6 +41,7 @@ export default function AttendanceSummaryPage() {
   const tz = useOrgTimezone();
   const can = useCan();
   const navigate = useNavigate();
+  const canRegister = can('attendance.view');
   const table = useServerTable({ pageSize: 50 });
   const f = table.state.filters;
   const currentMonth = todayIso(tz).slice(0, 7);
@@ -53,10 +61,14 @@ export default function AttendanceSummaryPage() {
     const id = f['employeeId'];
     return id && !employees.options.some((o) => o.value === id) ? [{ value: id, label: ta('monthly.selectedEmployee') }, ...employees.options] : employees.options;
   }, [employees.options, f, ta]);
-  const doExport = () => exportSummary.mutate(filters, {
-    onSuccess: (file) => { saveTextFile(file); toast.success(t('summary.exported', { count: file.rowCount })); },
+  const doExport = (format: ReportFormat) => exportSummary.mutate({ ...filters, format }, {
+    onSuccess: (res) => toastJobQueued(res.reportId, navigate, t('summary.exportQueued', { count: res.rowCount }), { to: '/reports', actionLabel: t('summary.openReports') }),
     onError: toastError,
   });
+  // the register (calendar) needs organisation-wide attendance.view; a line manager's destination is the statement view
+  const openRow = (r: AttendanceSummaryRowDto) => navigate(canRegister
+    ? `/attendance?tab=calendar&employeeId=${r.employeeId}&month=${month}`
+    : `/attendance/print?employeeId=${r.employeeId}&month=${month}`);
 
   const columns = useMemo<ColumnDef<AttendanceSummaryRowDto, unknown>[]>(() => [
     { id: 'employee', header: ta('columns.employee'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.employeeName}</p><p className="truncate text-xs text-muted-foreground"><span className="font-mono" dir="ltr">{row.original.employeeNumber}</span>{row.original.departmentName ? ` · ${row.original.departmentName}` : row.original.branchName ? ` · ${row.original.branchName}` : ''}</p></div> },
@@ -73,16 +85,25 @@ export default function AttendanceSummaryPage() {
     { id: 'average', header: t('summary.columns.average'), enableSorting: false, cell: ({ row }) => <span className="tnum">{fmtHm(row.original.averageWorkedMinutes)}</span> },
     { id: 'overtime', header: t('summary.columns.overtime'), enableSorting: false, cell: ({ row }) => <span className={row.original.overtimeMinutes ? 'tnum text-blue-700 dark:text-blue-300' : 'tnum'}>{fmtHm(row.original.overtimeMinutes)}</span> },
     { id: 'lop', header: t('summary.columns.lop'), enableSorting: false, cell: ({ row }) => num(row.original.lopDays) },
+    { id: 'unexcused', header: t('summary.columns.unexcused'), enableSorting: false, cell: ({ row }) => <span className={row.original.unexcusedDays ? 'tnum text-red-700 dark:text-red-300' : 'tnum'}>{fmtDays(row.original.unexcusedDays)}</span> },
     { id: 'source', header: t('summary.columns.source'), enableSorting: false, cell: ({ row }) => row.original.source === 'FINALIZED' ? <Badge variant="success" title={row.original.finalizedAt ? fmtDateTime(row.original.finalizedAt, tz) : undefined}>{t('summary.finalized')}</Badge> : <Badge variant="outline">{t('summary.live')}</Badge> },
-    { id: 'actions', header: '', enableSorting: false, enableHiding: false, cell: ({ row }) => <Button asChild variant="ghost" size="icon" className="size-7"><Link to={`/attendance/print?employeeId=${row.original.employeeId}&month=${month}`} onClick={(e) => e.stopPropagation()} aria-label={t('print.open')} title={t('print.open')}><Printer /></Link></Button> },
-  ], [t, ta, tz, month]);
+    // printing / saving the statement is an export (review minor 11): the link is for report.export holders
+    ...(canExport ? [{ id: 'actions', header: '', enableSorting: false, enableHiding: false, cell: ({ row }) => <Button asChild variant="ghost" size="icon" className="size-7"><Link to={`/attendance/print?employeeId=${row.original.employeeId}&month=${month}`} onClick={(e) => e.stopPropagation()} aria-label={t('print.open')} title={t('print.open')}><Printer /></Link></Button> } satisfies ColumnDef<AttendanceSummaryRowDto, unknown>] : []),
+  ], [t, ta, tz, month, canExport]);
 
   return (
     <div className="page-container space-y-4">
       <PageHeader
         title={t('summary.title')} description={t('summary.subtitle')}
         breadcrumbs={<Link to="/attendance" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3 rtl:rotate-180" /> {ta('title')}</Link>}
-        actions={canExport ? <Button variant="outline" size="sm" onClick={doExport} loading={exportSummary.isPending} data-testid="summary-export"><FileSpreadsheet /> {t('summary.export')}</Button> : null}
+        actions={canExport ? (
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild><Button variant="outline" size="sm" loading={exportSummary.isPending} data-testid="summary-export"><FileSpreadsheet /> {t('summary.export')} <ChevronDown /></Button></DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              {EXPORT_FORMATS.map((format) => <DropdownMenuItem key={format} onSelect={() => doExport(format)} data-testid={`summary-export-${format}`}>{t(`summary.exportAs.${format}`)}</DropdownMenuItem>)}
+            </DropdownMenuContent>
+          </DropdownMenu>
+        ) : null}
       />
       <div className="flex flex-wrap items-center gap-2">
         <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
@@ -106,7 +127,7 @@ export default function AttendanceSummaryPage() {
       <DataTable
         columns={columns} data={q.data?.data} total={q.data?.meta.total} page={table.state.page} pageSize={pageSize}
         onPageChange={table.setPage} onPageSizeChange={table.setPageSize} isLoading={q.isLoading || q.isFetching} error={q.error} onRetry={() => void q.refetch()} storageKey="attendance-summary"
-        onRowClick={(r) => navigate(`/attendance?tab=calendar&employeeId=${r.employeeId}&month=${month}`)}
+        onRowClick={openRow}
         emptyTitle={t('summary.empty')} emptyDescription={hasFilters ? tc('common.noResultsHint') : t('summary.emptyHint')}
         toolbar={
           <>
@@ -121,6 +142,7 @@ export default function AttendanceSummaryPage() {
           <div className="space-y-1">
             <div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{r.employeeName}</span>{r.source === 'FINALIZED' ? <Badge variant="success">{t('summary.finalized')}</Badge> : null}</div>
             <p className="text-xs text-muted-foreground tnum">{t('summary.card', { present: fmtDays(r.presentDays), late: fmtDays(r.lateDays), absent: fmtDays(r.absentDays), leave: fmtDays(r.leaveDays), worked: fmtHm(r.workedMinutes) })}</p>
+            {r.unexcusedDays ? <p className="text-xs text-red-700 tnum dark:text-red-300">{t('summary.columns.unexcused')}: {fmtDays(r.unexcusedDays)}</p> : null}
           </div>
         )}
       />

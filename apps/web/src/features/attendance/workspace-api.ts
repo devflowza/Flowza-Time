@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  AttendanceCalendarRowDto, AttendancePreviewDto, AttendancePreviewInput, AttendanceRecordEditInput, AttendanceRecordEditResultDto, AttendanceSummaryExportDto, AttendanceSummaryFigures,
+  AttendanceCalendarRowDto, AttendancePreviewDto, AttendancePreviewInput, AttendanceRecordEditInput, AttendanceRecordEditResultDto, AttendanceSummaryExportDto, AttendanceSummaryExportInput, AttendanceSummaryFigures,
   AttendanceSummaryRowDto, AttendanceTimelineDto, BulkAttendanceStatusInput, BulkStatusResultDto, ManualStatusDto, UnmatchedActionResultDto, UnmatchedAssignInput, UnmatchedIgnoreInput,
   UnmatchedPunchGroupDto, UnmatchedRestoreInput,
 } from '@flowza/contracts';
@@ -78,19 +78,13 @@ export function useWorkspaceMutations() {
     mutationFn: async (input: BulkAttendanceStatusInput) => (await api.post<Envelope<BulkStatusResultDto>>(`/orgs/${orgId}/attendance/bulk-status`, input, { idempotencyKey: crypto.randomUUID() })).data,
     onSuccess: invalidate,
   });
-  const exportSummary = useMutation({ mutationFn: async (query: Query) => (await api.get<Envelope<AttendanceSummaryExportDto>>(`/orgs/${orgId}/attendance/summary/export`, query)).data });
+  // a queued `monthly_summary` report (review defect 10): 202 + the report id; the file is downloaded from the Reports page
+  const exportSummary = useMutation({
+    mutationFn: async (input: AttendanceSummaryExportInput) => (await api.post<Envelope<AttendanceSummaryExportDto>>(`/orgs/${orgId}/attendance/summary/export`, input, { idempotencyKey: crypto.randomUUID() })).data,
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.entity(orgId, 'reports') }); },
+  });
   const assign = useMutation({ mutationFn: async (input: UnmatchedAssignInput) => (await api.post<Envelope<UnmatchedActionResultDto>>(`/orgs/${orgId}/attendance/unmatched/assign`, input)).data, onSuccess: invalidateTriage });
   const ignore = useMutation({ mutationFn: async (input: UnmatchedIgnoreInput) => (await api.post<Envelope<UnmatchedActionResultDto>>(`/orgs/${orgId}/attendance/unmatched/ignore`, input)).data, onSuccess: invalidateTriage });
   const restore = useMutation({ mutationFn: async (input: UnmatchedRestoreInput) => (await api.post<Envelope<UnmatchedActionResultDto>>(`/orgs/${orgId}/attendance/unmatched/restore`, input)).data, onSuccess: invalidateTriage });
   return { editRecord, bulkStatus, exportSummary, assign, ignore, restore };
-}
-
-/** Save a text export (CSV built by the API) as a file. */
-export function saveTextFile(file: { fileName: string; contentType: string; content: string }) {
-  const blob = new Blob([file.content], { type: `${file.contentType};charset=utf-8` });
-  const url = URL.createObjectURL(blob);
-  const a = document.createElement('a');
-  a.href = url; a.download = file.fileName;
-  document.body.appendChild(a); a.click(); a.remove();
-  setTimeout(() => URL.revokeObjectURL(url), 1_000);
 }
