@@ -1,8 +1,9 @@
 import { useMemo, useState } from 'react';
+import { DateTime } from 'luxon';
 import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { AlarmClock, CalendarCheck, CalendarX2, ChevronLeft, ChevronRight, ClipboardList, Clock, Hourglass, TrendingUp, Undo2 } from 'lucide-react';
-import type { SelfDayDto } from '@flowza/contracts';
+import { AlarmClock, CalendarCheck, CalendarX2, ChevronLeft, ChevronRight, ClipboardList, Clock, Hourglass, MessageSquarePlus, TrendingUp, Undo2 } from 'lucide-react';
+import type { AttendanceNoteDto, SelfDayDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { Button, Card, ConfirmDialog, EmptyState, ErrorState, Skeleton, StatCard, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { fmtDate, fmtDateTime, fmtMinutes, fmtTime, todayIso } from '@/lib/format';
@@ -17,8 +18,16 @@ import { useSelfAttendance } from '../api';
 import { fmtDays, shiftMonth, validMonth } from '../model';
 import { MonthCalendar } from '../components/month-calendar';
 import { SelfCorrectionDialog } from '../components/self-correction-dialog';
+import { PA_NS } from '../attendance-i18n';
+import { useMyNotes } from '../attendance-api';
+import { NoteDialog, suggestedCategory } from '../components/note-dialog';
+import { NoteStatusBadge } from '../components/attendance-badges';
+import { SelfStats } from '../components/self-stats';
+import { activeNotesByDate, needsReason } from '../notes-model';
 
-const TABS = ['calendar', 'log', 'activity', 'corrections'] as const;
+// HR portal Prompt 4 adds the last-30-days table (with reasons) and the employee's own statistics
+const TABS = ['calendar', 'recent', 'log', 'stats', 'activity', 'corrections'] as const;
+const PA_TABS: ReadonlySet<string> = new Set(['recent', 'stats']);
 type Tab = (typeof TABS)[number];
 
 function DailyLog({ days, onSelect }: { days: SelfDayDto[]; onSelect: (d: SelfDayDto) => void }) {
@@ -58,6 +67,64 @@ function DailyLog({ days, onSelect }: { days: SelfDayDto[]; onSelect: (d: SelfDa
         ))}
       </ul>
     </>
+  );
+}
+
+/**
+ * The last 30 days with the reason given for each (HR portal Prompt 4): a day the engine judged absent, late, half or with a
+ * missing punch asks for a reason; any day can carry one (a client visit, field work). The table reads the two months the
+ * window spans and the employee's notes of the window.
+ */
+function Last30Days({ today, onSelect, onReason }: { today: string; onSelect: (d: SelfDayDto) => void; onReason: (p: { day: SelfDayDto; note: AttendanceNoteDto | null }) => void }) {
+  const { t } = useTranslation('portal');
+  const { t: tpa } = useTranslation(PA_NS);
+  const from = DateTime.fromISO(today).minus({ days: 29 }).toISODate() ?? today;
+  const current = useSelfAttendance(today.slice(0, 7));
+  const previous = useSelfAttendance(from.slice(0, 7));
+  const notes = useMyNotes({ from, to: today });
+  const byDate = useMemo(() => activeNotesByDate(notes.data ?? []), [notes.data]);
+  const days = useMemo(() => {
+    const all = new Map<string, SelfDayDto>();
+    for (const d of [...(previous.data?.days ?? []), ...(current.data?.days ?? [])]) if (d.attendanceDate >= from && d.attendanceDate <= today) all.set(d.attendanceDate, d);
+    return [...all.values()].sort((a, b) => b.attendanceDate.localeCompare(a.attendanceDate));
+  }, [previous.data, current.data, from, today]);
+  if (current.isError) return <ErrorState error={current.error} onRetry={() => void current.refetch()} />;
+  if (current.isLoading || previous.isLoading) return <TableSkeleton cols={8} rows={6} />;
+  if (days.length === 0) return <EmptyState icon={CalendarX2} title={t('attendance.emptyMonth')} description={t('attendance.emptyMonthHint')} />;
+  return (
+    <div className="rounded-lg border bg-card shadow-card" data-testid="last-30-days">
+      <div className="overflow-x-auto">
+        <Table>
+          <TableHeader><TableRow>{(['date', 'status', 'in', 'out', 'worked', 'flags'] as const).map((c) => <TableHead key={c}>{t(`attendance.columns.${c}`)}</TableHead>)}<TableHead>{tpa('attendance.reasonColumn')}</TableHead></TableRow></TableHeader>
+          <TableBody>
+            {days.map((r) => {
+              const note = byDate.get(r.attendanceDate) ?? null;
+              const asks = needsReason(r.status, r.flags);
+              return (
+                <TableRow key={r.id} data-testid="recent-day">
+                  <TableCell className="whitespace-nowrap font-medium tnum"><button type="button" className="hover:underline" onClick={() => onSelect(r)}>{fmtDate(r.attendanceDate, 'EEE dd MMM')}</button></TableCell>
+                  <TableCell><AttendanceStatusBadge status={r.status} /></TableCell>
+                  <TableCell className="text-xs tnum" dir="ltr">{fmtTime(r.firstInAt, r.timezone)}</TableCell>
+                  <TableCell className="text-xs tnum" dir="ltr">{fmtTime(r.lastOutAt, r.timezone)}</TableCell>
+                  <TableCell className="text-xs tnum">{fmtMinutes(r.workedMinutes)}</TableCell>
+                  <TableCell><FlagChips flags={r.flags} max={2} size="xs" /></TableCell>
+                  <TableCell>
+                    {note ? (
+                      <span className="flex flex-wrap items-center gap-1.5">
+                        <NoteStatusBadge status={note.status} />
+                        {note.status === 'info_requested' || note.status === 'pending' ? <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onReason({ day: r, note })}>{note.status === 'info_requested' ? tpa('notes.respond') : tpa('notes.edit')}</Button> : null}
+                      </span>
+                    ) : (
+                      <Button size="sm" variant={asks ? 'outline' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => onReason({ day: r, note: null })}><MessageSquarePlus /> {asks ? tpa('notes.add') : tpa('notes.addShort')}</Button>
+                    )}
+                  </TableCell>
+                </TableRow>
+              );
+            })}
+          </TableBody>
+        </Table>
+      </div>
+    </div>
   );
 }
 
@@ -111,6 +178,9 @@ export default function MyAttendancePage() {
   const openId = params.get('day');
   const q = useSelfAttendance(month);
   const [correction, setCorrection] = useState<{ date: string; timezone: string } | null>(null);
+  const [reason, setReason] = useState<{ day: SelfDayDto; note: AttendanceNoteDto | null } | null>(null);
+  const { t: tpa } = useTranslation(PA_NS);
+  const monthNotes = useMyNotes({ from: `${month}-01`, to: DateTime.fromISO(`${month}-01`).endOf('month').toISODate() ?? `${month}-28` }, tab === 'calendar');
   const totals = q.data?.totals;
   const set = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);
@@ -143,18 +213,21 @@ export default function MyAttendancePage() {
       </div>
 
       <Tabs value={tab} onValueChange={(v) => set({ tab: v })}>
-        <TabsList aria-label={t('attendance.title')} className="max-w-full overflow-x-auto">{TABS.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`attendance.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
+        <TabsList aria-label={t('attendance.title')} className="max-w-full overflow-x-auto">{TABS.map((tb) => <TabsTrigger key={tb} value={tb}>{PA_TABS.has(tb) ? tpa(`attendance.tabs.${tb}`) : t(`attendance.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
         <TabsContent value="calendar">
-          {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !q.data ? <Skeleton className="h-96 w-full" /> : <Card className="p-3"><MonthCalendar data={q.data} firstDayOfWeek={firstDayOfWeek} today={today} onSelect={(d) => set({ day: d.id })} /></Card>}
+          {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !q.data ? <Skeleton className="h-96 w-full" /> : <Card className="p-3"><MonthCalendar data={q.data} firstDayOfWeek={firstDayOfWeek} today={today} onSelect={(d) => set({ day: d.id })} notes={monthNotes.data} /></Card>}
         </TabsContent>
         <TabsContent value="log">
           {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !q.data ? <TableSkeleton cols={9} rows={6} /> : <DailyLog days={q.data.days} onSelect={(d) => set({ day: d.id })} />}
         </TabsContent>
+        <TabsContent value="recent">{tab === 'recent' ? <Last30Days today={today} onSelect={(d) => set({ day: d.id })} onReason={setReason} /> : null}</TabsContent>
+        <TabsContent value="stats">{tab === 'stats' ? <SelfStats /> : null}</TabsContent>
         <TabsContent value="activity">{tab === 'activity' && employeeId ? <ActivityTab employeeId={employeeId} /> : null}</TabsContent>
         <TabsContent value="corrections">{tab === 'corrections' ? <CorrectionsTab timezone={dayTz} /> : null}</TabsContent>
       </Tabs>
 
       <RecordDialog recordId={openId} onClose={() => set({ day: null })} onRequestCorrection={(p) => { set({ day: null }); setCorrection({ date: p.attendanceDate, timezone: p.timezone ?? dayTz }); }} />
+      {reason ? <NoteDialog key={reason.note?.id ?? reason.day.attendanceDate} open onOpenChange={(o) => !o && setReason(null)} date={reason.day.attendanceDate} note={reason.note} defaultCategory={suggestedCategory(reason.day.status, reason.day.flags)} /> : null}
       <SelfCorrectionDialog key={correction ? `${correction.date}` : 'closed'} open={!!correction} onOpenChange={(o) => !o && setCorrection(null)} date={correction?.date ?? null} timezone={correction?.timezone ?? dayTz} />
     </div>
   );

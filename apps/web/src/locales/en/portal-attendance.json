@@ -1,0 +1,379 @@
+{
+  "nav": {
+    "checkin": "Check in / out",
+    "requests": "My requests",
+    "shift": "My shift"
+  },
+  "checkin": {
+    "title": "Check in / out",
+    "subtitle": "Punch from this device. The time is always the server's clock; your location is checked against the work zones assigned to you.",
+    "serverTime": "Server time",
+    "checkIn": "Check in",
+    "checkOut": "Check out",
+    "checkedInAt": "Checked in at {{time}}",
+    "checkedOutAt": "Checked out at {{time}}",
+    "notYet": "You have not punched today.",
+    "todayPunches": "Today's punches",
+    "noPunches": "No punches yet today.",
+    "seeAttendance": "My attendance",
+    "viaPortal": "Portal",
+    "viaTerminal": "Terminal",
+    "direction": {
+      "in": "In",
+      "out": "Out",
+      "unknown": "Punch"
+    },
+    "workZone": "your work zone",
+    "locating": "Finding your location…",
+    "locate": "Use my location",
+    "relocate": "Refresh",
+    "noLocation": "Location not shared",
+    "accuracy": "±{{meters}} m",
+    "nearest": "nearest zone {{name}} ({{distance}})",
+    "noFences": "no work zone is assigned to you",
+    "geo": {
+      "denied": "Location access is blocked. Allow location for this site in your browser settings, then refresh.",
+      "unavailable": "Your location could not be determined. Move to an open area or turn on location services.",
+      "timeout": "Finding your location took too long. Try again.",
+      "unsupported": "This browser cannot share your location."
+    },
+    "verdict": {
+      "no_fence": {
+        "title": "No work zone applies",
+        "body": "Your punch is recorded without a location check."
+      },
+      "allowed": {
+        "title": "Inside {{zone}}",
+        "body": "You are inside your work zone. You can punch."
+      },
+      "flagged": {
+        "title": "Outside {{zone}}",
+        "body": "You are {{distance}} from the zone. Your punch is recorded and flagged for your manager to review."
+      },
+      "logged": {
+        "title": "Outside {{zone}}",
+        "body": "You are {{distance}} from the zone. Your punch is recorded and your location is logged."
+      },
+      "denied_outside": {
+        "title": "Outside {{zone}}",
+        "body": "You are {{distance}} from the zone. Move inside the work zone to punch."
+      },
+      "denied_mock": {
+        "title": "Simulated location detected",
+        "body": "Your device reports a mock location. Turn off location spoofing or developer mock locations, then try again."
+      },
+      "lowAccuracy": "Your location is too imprecise to confirm you are inside {{zone}}. Move near a window or turn on precise location, then refresh.",
+      "locationMissing": "Share your location to punch here: {{zone}} is checked for every punch."
+    },
+    "verdictChip": {
+      "no_fence": "No zone",
+      "allowed": "In zone",
+      "flagged": "Flagged",
+      "logged": "Logged",
+      "denied_outside": "Outside",
+      "denied_mock": "Mock location"
+    },
+    "mockNote": "Location spoofing apps and mock locations are detected and recorded.",
+    "outOfWindow": "It is outside the punch window ({{start}}–{{end}}).",
+    "windowIn": "Check-in window {{start}}–{{end}}",
+    "windowOut": "Check-out window {{start}}–{{end}}",
+    "blockedTitle": "You can't punch from here right now",
+    "refusal": {
+      "WEB_CHECKIN_DISABLED": "Web check-in is turned off for your organisation.",
+      "MOBILE_CHECKIN_DISABLED": "Mobile check-in is turned off for your organisation.",
+      "IP_NOT_ALLOWED": "Punches are only accepted from your organisation's network.",
+      "OUT_OF_WINDOW": "Punching is not allowed at this time of day.",
+      "OUTSIDE_GEOFENCE": "You are outside your work zone.",
+      "MOCK_LOCATION": "A mock location was detected.",
+      "SELFIE_REQUIRED": "Your punches need a selfie.",
+      "DUPLICATE_PUNCH": "You punched moments ago; this one was not recorded twice.",
+      "ALREADY_CHECKED_IN": "You are already checked in. Check out first.",
+      "NOT_CHECKED_IN": "You are not checked in. Check in first.",
+      "PERIOD_LOCKED": "This attendance period is locked for payroll.",
+      "NOT_ACTIVE": "Your employee record is not active."
+    },
+    "recorded": {
+      "in": "Checked in at {{time}}",
+      "out": "Checked out at {{time}}"
+    },
+    "flaggedHint": "Recorded and flagged for your manager to review.",
+    "replayed": "This punch was already recorded.",
+    "selfie": {
+      "buttonIn": "Check in with a selfie",
+      "buttonOut": "Check out with a selfie",
+      "titleIn": "Selfie check-in",
+      "titleOut": "Selfie check-out",
+      "hint": "Take a clear photo of your face. It counts as a punch — at the time you send it — once your manager approves it.",
+      "start": "Open camera",
+      "capture": "Take photo",
+      "retake": "Retake",
+      "upload": "Choose a photo",
+      "send": "Send for review",
+      "sent": "Selfie sent for review. It counts once your manager approves it.",
+      "noCamera": "The camera is not available here. Choose a photo instead.",
+      "noLocation": "Your location is not included; your manager sees that too.",
+      "tooLarge": "The photo is larger than 2 MB.",
+      "badType": "Use a JPEG, PNG or WebP photo.",
+      "required": "Your organisation requires a selfie with every punch.",
+      "previewAlt": "Your selfie",
+      "cameraAlt": "Camera preview"
+    },
+    "offline": {
+      "title": "Saved on this device ({{count}})",
+      "hint": "These punches are sent automatically when the connection is back. The server records its own time and keeps the time you punched as a note.",
+      "queued": "No connection. Your punch is saved on this device and will be sent automatically.",
+      "syncNow": "Sync now",
+      "discard": "Discard",
+      "takenAt": "punched {{time}}",
+      "attempts_one": "{{count}} attempt",
+      "attempts_other": "{{count}} attempts",
+      "synced_one": "{{count}} offline punch sent",
+      "synced_other": "{{count}} offline punches sent",
+      "refused": "An offline punch was refused: {{reason}}"
+    },
+    "footer": "Forgot to punch, or a punch is wrong?",
+    "footerLink": "Request a regularisation"
+  },
+  "home": {
+    "punchTitle": "Check in",
+    "lastIn": "Checked in at {{time}}",
+    "lastOut": "Checked out at {{time}}",
+    "notYet": "Not checked in yet today",
+    "punchesToday_one": "{{count}} punch today",
+    "punchesToday_other": "{{count}} punches today",
+    "pendingNotes_one": "{{count}} reason awaiting review",
+    "pendingNotes_other": "{{count}} reasons awaiting review",
+    "infoRequested_one": "{{count}} reason needs more information",
+    "infoRequested_other": "{{count}} reasons need more information",
+    "pendingRegularisations_one": "{{count}} regularisation awaiting approval",
+    "pendingRegularisations_other": "{{count}} regularisations awaiting approval",
+    "pendingSwaps_one": "{{count}} shift swap pending",
+    "pendingSwaps_other": "{{count}} shift swaps pending"
+  },
+  "attendance": {
+    "tabs": {
+      "recent": "Last 30 days",
+      "stats": "My statistics"
+    },
+    "reasonColumn": "Reason"
+  },
+  "calendar": {
+    "hasReason": "A reason was given for this day"
+  },
+  "notes": {
+    "add": "Add a reason",
+    "addShort": "Reason",
+    "edit": "Edit",
+    "respond": "Answer",
+    "title": "Explain a day",
+    "hint": "Tell your manager why the day looks the way it does. It is reviewed like a request; nothing changes until it is.",
+    "date": "Day",
+    "dateRequired": "Choose the day.",
+    "category": "What happened?",
+    "categories": {
+      "client_visit": "Client visit",
+      "field_work": "Field work",
+      "late_reason": "Reason for being late",
+      "absence_reason": "Reason for absence",
+      "wfh": "Worked from home",
+      "other": "Other"
+    },
+    "note": "Details",
+    "noteHint": "A few words your manager can act on.",
+    "noteTooShort": "Write at least 3 characters.",
+    "submit": "Send",
+    "save": "Save changes",
+    "sendAnswer": "Send answer",
+    "submitted": "Reason sent to your manager.",
+    "updated": "Reason updated.",
+    "resubmitted": "Answer sent. Your manager reviews the reason again.",
+    "question": "Your manager asked: {{question}}",
+    "reviewedBy": "by {{name}}",
+    "deducted": "{{days}} day charged to {{type}}",
+    "charged": "{{days}} day charged",
+    "lop": "{{days}} day unpaid",
+    "status": {
+      "pending": "Awaiting review",
+      "approved": "Approved",
+      "rejected": "Not accepted",
+      "excused": "Excused",
+      "info_requested": "More information needed"
+    },
+    "empty": "No reasons yet",
+    "emptyHint": "Add a reason to a day from My attendance, or here."
+  },
+  "regularisation": {
+    "new": "Request regularisation",
+    "title": "Request a regularisation",
+    "hint": "For a missed or wrong punch, a work-from-home day that was not marked, or a terminal that was down. Nothing changes until it is approved.",
+    "date": "Day",
+    "dayRequired": "Choose the day.",
+    "type": "What needs fixing?",
+    "types": {
+      "missed_punch": "I missed a punch",
+      "wrong_punch": "A punch has the wrong time",
+      "wfh_unmarked": "I worked from home",
+      "system_downtime": "The terminal / system was down"
+    },
+    "in": "Check-in time ({{zone}})",
+    "out": "Check-out time ({{zone}})",
+    "timesRequired": "Give the check-in and / or check-out time.",
+    "presentHint": "Once approved the day counts as present; any times you give are added as punches.",
+    "reason": "Reason",
+    "reasonHint": "At least 3 characters, e.g. \"Terminal was offline at the gate\".",
+    "reasonTooShort": "Write at least 3 characters.",
+    "submit": "Send request",
+    "submitted": "Regularisation requested. Your approvers have been notified.",
+    "status": {
+      "pending": "Awaiting approval",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Withdrawn"
+    },
+    "applied": "Applied",
+    "withdraw": "Withdraw",
+    "withdrawTitle": "Withdraw this regularisation request?",
+    "withdrawHint": "Your approvers will no longer see it. You can send a new one later.",
+    "withdrawn": "Regularisation request withdrawn",
+    "empty": "No regularisation requests",
+    "emptyHint": "Missed a punch or worked from home? Request a regularisation."
+  },
+  "requests": {
+    "title": "My requests",
+    "subtitle": "Reasons, regularisations, shift swaps and selfie check-ins you sent, and the decisions on them.",
+    "tabs": {
+      "reasons": "Reasons",
+      "regularisations": "Regularisations",
+      "swaps": "Shift swaps",
+      "selfies": "Selfie check-ins"
+    },
+    "columns": {
+      "date": "Day",
+      "type": "Type",
+      "details": "Details",
+      "status": "Status",
+      "decision": "Decision",
+      "submitted": "Sent"
+    },
+    "level": "level {{n}} of {{count}}"
+  },
+  "selfies": {
+    "empty": "No selfie check-ins",
+    "emptyHint": "Selfie check-ins you send from the check-in page appear here with their review.",
+    "status": {
+      "pending": "Awaiting review",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    }
+  },
+  "shift": {
+    "title": "My shift",
+    "subtitle": "Your working pattern for the coming days, where it comes from, and your shift swaps.",
+    "today": "Today",
+    "upcoming_one": "Next {{count}} day",
+    "upcoming_other": "Next {{count}} days",
+    "noUpcoming": "No schedule for the coming days.",
+    "off": "Day off",
+    "holiday": "Holiday: {{name}}",
+    "onLeave": "On leave",
+    "noShift": "No shift",
+    "grace": "Grace period {{minutes}} min",
+    "source": {
+      "ASSIGNMENT": "Assigned",
+      "PATTERN": "Rotation",
+      "DEFAULT": "Default",
+      "NONE": "—"
+    },
+    "target": {
+      "ORGANIZATION": "Organisation",
+      "BRANCH": "Branch",
+      "DEPARTMENT": "Department",
+      "TEAM": "Team",
+      "EMPLOYEE": "Personal"
+    },
+    "history": "Assignment history",
+    "noHistory": "No assignments yet.",
+    "from": "From {{date}}",
+    "fromTo": "{{from}} → {{to}}",
+    "swapAssignment": "Swap",
+    "requestSwap": "Request a swap",
+    "swapPending": "Swap pending with {{name}}",
+    "swapApproved": "Swapped with {{name}}",
+    "swaps": "Shift swaps"
+  },
+  "swap": {
+    "title": "Request a shift swap",
+    "hint": "Pick a day and a colleague: you work their shift and they work yours. Your manager decides; the swap applies to that day only.",
+    "date": "Day",
+    "pickDate": "Choose a day",
+    "noDays": "No working day to swap in the coming days",
+    "dateRequired": "Choose the day.",
+    "yourShift": "Your shift",
+    "colleague": "Colleague",
+    "colleagueRequired": "Choose a colleague.",
+    "search": "Search colleagues",
+    "noCandidates": "No colleague works a different shift that day.",
+    "ineligible": "Not available",
+    "reason": "Reason",
+    "reasonTooShort": "Write at least 3 characters.",
+    "submit": "Send request",
+    "submitted": "Swap requested. Your manager has been notified.",
+    "columns": {
+      "date": "Day",
+      "with": "Between",
+      "shifts": "Shifts",
+      "status": "Status",
+      "decision": "Reason / decision"
+    },
+    "mine": "You ⇄ {{name}}",
+    "theirs": "{{name}} ⇄ you",
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Withdrawn"
+    },
+    "withdraw": "Withdraw",
+    "withdrawTitle": "Withdraw this swap request?",
+    "withdrawHint": "Your manager and your colleague will no longer see it as pending.",
+    "withdrawn": "Swap request withdrawn",
+    "empty": "No shift swaps",
+    "emptyHint": "Need to trade a day? Request a swap from My shift."
+  },
+  "stats": {
+    "title": "My statistics",
+    "ranges": {
+      "30d": "Last 30 days",
+      "month": "This month",
+      "year": "This year"
+    },
+    "attendance": "Attendance",
+    "attendanceHint": "Target {{target}}% · leave excluded",
+    "avgHours": "Average hours / day",
+    "avgHoursHint": "Full day {{hours}} h",
+    "lateDays": "Late days",
+    "leaveDays": "Leave days",
+    "missingCheckouts": "Missing check-outs",
+    "punctuality": "Punctuality",
+    "windows": {
+      "last7Days": "Last 7 days",
+      "thisMonth": "This month",
+      "lastMonth": "Last month"
+    },
+    "onTime": "{{onTime}} of {{days}} days on time",
+    "avgDelay": "Average delay {{minutes}}",
+    "noDays": "No working days",
+    "hints": {
+      "title": "Where to improve",
+      "none": "All good — nothing needs attention.",
+      "low_attendance": "Your attendance ({{value}}%) is below the {{target}}% target.",
+      "short_hours": "You average {{value}} h a day, under the {{target}} h full day.",
+      "late_days_one": "You were late on {{value}} day.",
+      "late_days_other": "You were late on {{value}} days.",
+      "absent_days_one": "{{value}} day absent without leave.",
+      "absent_days_other": "{{value}} days absent without leave.",
+      "missing_checkouts_one": "You forgot to check out on {{value}} day.",
+      "missing_checkouts_other": "You forgot to check out on {{value}} days."
+    }
+  }
+}

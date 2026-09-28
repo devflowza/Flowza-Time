@@ -1,21 +1,26 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import type { SelfAttendanceMonthDto, SelfDayDto } from '@flowza/contracts';
+import { MessageSquareText } from 'lucide-react';
+import type { AttendanceNoteDto, SelfAttendanceMonthDto, SelfDayDto } from '@flowza/contracts';
 import { fmtMinutes, fmtTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { cellClass } from '@/features/attendance/status';
 import { monthWeeks, weekdayOrder } from '../model';
+import { activeNotesByDate } from '../notes-model';
+import { PA_NS } from '../attendance-i18n';
 
 /**
  * One month of the employee's own days as a calendar. Each day shows the engine's status, first-in / last-out and the
  * worked time; approved leave and holidays label days that have no record yet (future dates). Days with a record open
  * the record detail.
  */
-export function MonthCalendar({ data, firstDayOfWeek, today, onSelect }: { data: SelfAttendanceMonthDto; firstDayOfWeek: number; today: string; onSelect: (day: SelfDayDto) => void }) {
+export function MonthCalendar({ data, firstDayOfWeek, today, onSelect, notes }: { data: SelfAttendanceMonthDto; firstDayOfWeek: number; today: string; onSelect: (day: SelfDayDto) => void; /** The employee's reasons (HR portal Prompt 4): a day that carries one shows a marker. */ notes?: readonly AttendanceNoteDto[] | undefined }) {
   const { t } = useTranslation('portal');
   const { t: ta } = useTranslation('attendance');
+  const { t: tpa } = useTranslation(PA_NS);
   const weeks = useMemo(() => monthWeeks(data.month, firstDayOfWeek), [data.month, firstDayOfWeek]);
   const byDate = useMemo(() => new Map(data.days.map((d) => [d.attendanceDate, d])), [data.days]);
+  const notesByDate = useMemo(() => activeNotesByDate(notes ?? []), [notes]);
 
   return (
     <div className="overflow-x-auto">
@@ -36,7 +41,10 @@ export function MonthCalendar({ data, firstDayOfWeek, today, onSelect }: { data:
                   <>
                     <span className="flex items-center justify-between gap-1">
                       <span className={cn('tnum text-xs font-semibold', date === today && 'rounded-full bg-primary px-1.5 text-primary-foreground')}>{Number(date.slice(8))}</span>
-                      {r?.flags.includes('LATE') ? <span className="size-1.5 rounded-full bg-amber-500" title={ta('flags.LATE')} aria-hidden /> : null}
+                      <span className="flex items-center gap-1">
+                        {notesByDate.has(date) ? <MessageSquareText className="size-3 text-primary" aria-label={tpa('calendar.hasReason')} /> : null}
+                        {r?.flags.includes('LATE') ? <span className="size-1.5 rounded-full bg-amber-500" title={ta('flags.LATE')} aria-hidden /> : null}
+                      </span>
                     </span>
                     {label ? <span className={cn('mt-1 block truncate rounded px-1 py-0.5 text-[10px] font-medium', r ? cellClass(r.status) : 'bg-muted text-muted-foreground')} style={!r && leave?.color ? { backgroundColor: `${leave.color}22`, color: leave.color } : undefined}>{label}</span> : null}
                     {r && (r.firstInAt || r.lastOutAt) ? <span className="mt-1 block truncate text-[10px] text-muted-foreground tnum" dir="ltr">{fmtTime(r.firstInAt, r.timezone)} – {fmtTime(r.lastOutAt, r.timezone)}</span> : null}
