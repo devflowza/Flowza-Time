@@ -1,7 +1,9 @@
 import { DateTime } from 'luxon';
 import { z } from 'zod';
 import type { AttendanceEventType, PunchDirection, RawTransaction, VerificationMethod } from '@flowza/contracts';
-import { FINANCE_DEFAULT_BASE_URL } from '@flowza/contracts';
+import { FINANCE_DEFAULT_BASE_URL, FLOWZA_FINANCE_PROVIDER_KEY } from '@flowza/contracts';
+import { sha256Hex } from '@flowza/shared';
+import { assertEgressUrl, EgressError } from '../../egress.js';
 import { boundedText, isValidTimezone } from '../../protocol-utils.js';
 import { ProviderError, type SyncCursor } from '../../types.js';
 
@@ -12,6 +14,8 @@ export const FINANCE_INGEST_PATH = 'attendance-ingest';
 export const FINANCE_EXPORT_MAX_LIMIT = 1000;
 export const FINANCE_EXPORT_DEFAULT_LIMIT = 500;
 export const FINANCE_INGEST_MAX_BATCH = 500;
+/** Largest response body the connector reads (an export page of 1000 rows is ~1 MB); larger bodies abort the request. */
+export const FINANCE_MAX_RESPONSE_BYTES = 16 * 1024 * 1024;
 const RAW_FIELD_MAX = 64;
 const NIL_UUID = '00000000-0000-0000-0000-000000000000';
 
@@ -124,10 +128,14 @@ export function toFinanceVerify(method: VerificationMethod | string | null | und
 
 const CURSOR_TOKEN = /^[A-Za-z0-9_-]{1,128}$/;
 
+/** `details.reason` of the ONE error that means "the stored cursor is unusable" — the only failure after which the engine rewinds. */
+export const FINANCE_INVALID_CURSOR_REASON = 'invalid_cursor';
+
 /**
  * Our stored cursor is `{ since: <next_cursor> }` — Finance's token stored verbatim (it is opaque: base64url("<created_at>|<id>")
- * of the last exported row). `null` / `{}` = start from the beginning. Anything else was not issued by this provider → INVALID_CONFIG,
- * which the sync engine answers with a time-based rewind (AGENTS.md cursor rule).
+ * of the last exported row). `null` / `{}` = start from the beginning (bounded by the connector's start date). Anything else was
+ * not issued by this provider → INVALID_CONFIG with `details.reason = 'invalid_cursor'`, which the sync engine answers with a
+ * time-based rewind (AGENTS.md cursor rule). HTTP-level failures never carry that reason, so they never move the cursor.
  */
 export function parseFinanceCursor(cursor: SyncCursor | null): string | undefined {
   if (cursor === null || cursor === undefined) return undefined;
@@ -139,7 +147,11 @@ export function parseFinanceCursor(cursor: SyncCursor | null): string | undefine
   return since;
 }
 function invalidCursor(cursor: unknown): ProviderError {
-  return new ProviderError('INVALID_CONFIG', 'Unparseable Flowza Finance cursor', { retryable: false, details: { cursor: boundedText(JSON.stringify(cursor), 200) } });
+  return new ProviderError('INVALID_CONFIG', 'Unparseable Flowza Finance cursor', { retryable: false, details: { reason: FINANCE_INVALID_CURSOR_REASON, cursor: boundedText(JSON.stringify(cursor), 200) } });
+}
+/** True only for the error {@link parseFinanceCursor} raises: a transport or HTTP failure must never reset the cursor. */
+export function isFinanceCursorError(err: unknown): boolean {
+  return ProviderError.is(err) && err.details?.['reason'] === FINANCE_INVALID_CURSOR_REASON;
 }
 
 /**
@@ -172,13 +184,29 @@ export function parseFinanceTime(value: string): DateTime | null {
 export interface MappedFinancePunch { transaction: RawTransaction | null; reason?: 'no_identity' | 'bad_time' }
 
 /**
- * Finance export row → RawTransaction. Identity = `employee_number` (Finance's employee, when the PIN is mapped) else the producing
- * device's `pin`; rows with neither cannot be attributed and are skipped (counted, never invented). `punchedAt` is Finance's
- * `time_utc`; `deviceLocalTime` is that instant in the producing device's zone. The raw payload keeps an allowlist of Finance
- * fields — bounded strings, never anything biometric.
+ * Raw rows whose Finance punch carries no `employee_number` are stored under a namespaced identity `pin:<finance device serial>:<pin>`.
+ * The PIN of a Finance terminal is NOT one of our identities (it may coincide with a local device user id or card number of somebody
+ * else), so it is kept visible and unmatched for reconciliation — never compared with our employees. Employee numbers cannot contain
+ * ':' (codeSchema), so the prefix cannot collide with one.
+ */
+export const FINANCE_PIN_IDENTITY_PREFIX = 'pin:';
+export function financePinIdentity(deviceSerial: string | null | undefined, pin: string): string {
+  const id = `${FINANCE_PIN_IDENTITY_PREFIX}${(deviceSerial ?? '').trim() || '?'}:${pin}`;
+  return id.length <= 64 ? id : `${FINANCE_PIN_IDENTITY_PREFIX}#${sha256Hex(`${deviceSerial ?? ''}|${pin}`).slice(0, 58)}`;
+}
+export const isFinancePinIdentity = (deviceEmployeeId: string): boolean => deviceEmployeeId.startsWith(FINANCE_PIN_IDENTITY_PREFIX);
+
+/**
+ * Finance export row → RawTransaction. Identity = Finance's `employee_number` (trimmed) — the ONLY value the normaliser matches,
+ * against our `employees.employee_number`. A row Finance has not attributed (no employee number) keeps the producing device's PIN
+ * under the namespaced identity of {@link financePinIdentity} and stays unmatched; rows with neither are skipped (counted, never
+ * invented). `punchedAt` is Finance's `time_utc`; `deviceLocalTime` is that instant in the producing device's zone. The raw payload
+ * keeps an allowlist of Finance fields — bounded strings, never anything biometric.
  */
 export function mapFinancePunch(punch: FinanceExportPunch, connectorSerial: string): MappedFinancePunch {
-  const identity = (punch.employee_number ?? punch.pin ?? '').trim();
+  const employeeNumber = (punch.employee_number ?? '').trim();
+  const pin = (punch.pin ?? '').trim();
+  const identity = employeeNumber.length > 0 ? employeeNumber : pin.length > 0 ? financePinIdentity(punch.device_serial, pin) : '';
   if (identity.length === 0 || identity.length > 64) return { transaction: null, reason: 'no_identity' };
   const at = parseFinanceTime(punch.time_utc);
   if (!at) return { transaction: null, reason: 'bad_time' };
@@ -214,22 +242,7 @@ export function mapFinancePunch(punch: FinanceExportPunch, connectorSerial: stri
   };
 }
 
-// ----- base URL (the ONE egress rule for the connector, shared by the API service and the worker) --------------------------
-
-/**
- * Loopback, link-local, RFC-1918/ULA, CGNAT, multicast and bare intranet names: a tenant must not be able to point the worker at
- * them (SSRF). Pattern-based like the API's cloud-provider guard — the resolved address is not re-checked (known limit, documented).
- */
-export function isPrivateHostname(hostname: string): boolean {
-  const h = hostname.toLowerCase().replace(/^\[|\]$/g, '');
-  if (h === 'localhost' || h.endsWith('.localhost') || h.endsWith('.local') || h.endsWith('.internal') || h.endsWith('.lan')) return true;
-  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(h)) {
-    const [a = 0, b = 0] = h.split('.').map(Number);
-    return a === 0 || a === 10 || a === 127 || (a === 192 && b === 168) || (a === 172 && b >= 16 && b <= 31) || (a === 169 && b === 254) || (a === 100 && b >= 64 && b <= 127) || a >= 224;
-  }
-  if (h.includes(':')) return h === '::1' || h === '::' || h.startsWith('fc') || h.startsWith('fd') || h.startsWith('fe80') || h.startsWith('::ffff:');
-  return !h.includes('.');
-}
+// ----- base URL (syntax half of the connector's egress rule; the provider adds the DNS check and the pinned connection) -------
 
 export interface FinanceBaseUrlOptions {
   /** Local development / tests only: accept `http://` and private or loopback hosts. Production keeps https + public hosts. */
@@ -237,7 +250,10 @@ export interface FinanceBaseUrlOptions {
 }
 
 /**
- * Validates and normalises the Finance functions base URL: https only, a public host, no credentials in the URL, no trailing slash.
+ * Validates and normalises the Finance functions base URL with the shared egress guard (`assertEgressUrl`: https only, no
+ * credentials, trailing dot stripped, IP literals in any spelling and private names refused) plus the connector's own shape rules
+ * (no query string or fragment, no trailing slash). Syntax only: `FlowzaFinanceProvider.vetBaseUrl` also resolves the host and
+ * refuses non-public addresses, and every call connects to the address it checked.
  * Throws ProviderError('INVALID_CONFIG'); the API translates that into a 400 with the same message.
  */
 export function resolveFinanceBaseUrl(raw: unknown, opts: FinanceBaseUrlOptions = {}): string {
@@ -247,9 +263,44 @@ export function resolveFinanceBaseUrl(raw: unknown, opts: FinanceBaseUrlOptions 
   if (url.username || url.password) throw invalidBaseUrl('Finance base URL must not carry credentials');
   if (url.search || url.hash) throw invalidBaseUrl('Finance base URL must not carry a query string or fragment');
   if (url.protocol !== 'https:' && !(opts.allowPrivateHosts && url.protocol === 'http:')) throw invalidBaseUrl('Finance base URL must use https');
-  if (!opts.allowPrivateHosts && isPrivateHostname(url.hostname)) throw invalidBaseUrl('Finance base URL must point at a public host');
+  try { url = assertEgressUrl(url, { allowPrivate: opts.allowPrivateHosts === true }); } catch (err) {
+    if (EgressError.is(err)) throw invalidBaseUrl('Finance base URL must point at a public host');
+    throw err;
+  }
   return `${url.origin}${url.pathname.replace(/\/+$/, '')}`;
 }
-function invalidBaseUrl(message: string): ProviderError {
-  return new ProviderError('INVALID_CONFIG', message, { retryable: false, details: { field: 'baseUrl' } });
+export function invalidBaseUrl(message: string): ProviderError {
+  return new ProviderError('INVALID_CONFIG', message, { retryable: false, details: { field: 'baseUrl', reason: 'refused_by_policy' } });
+}
+
+// ----- connector identity helpers (shared by the worker and the API) ----------------------------------------------------------
+
+/**
+ * Throttle / circuit-breaker account of one connector: the organisation AND the connector device. Every tenant talks to the same
+ * default Finance base URL, so a key derived from the URL would put all of them in one throttle queue and one circuit (one tenant's
+ * failures opening another tenant's circuit). Hashed so it can be logged and stored.
+ */
+export function financeAccountKey(organizationId: string, deviceId: string): string {
+  return sha256Hex(`${FLOWZA_FINANCE_PROVIDER_KEY}|${organizationId}|${deviceId}`).slice(0, 16);
+}
+
+/**
+ * The connector's start date (`devices.config.syncFrom`, `YYYY-MM-DD`, a calendar day in the connector's timezone) as the UTC
+ * instant of that day's midnight; null when absent or unreadable (no lower bound). Punches before it are never synchronised in
+ * either direction, and the first pull and the first push start there instead of at the beginning of history.
+ */
+export function financeSyncFromStart(syncFrom: unknown, timezone: string | null | undefined): string | null {
+  if (typeof syncFrom !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(syncFrom)) return null;
+  const zone = timezone && isValidTimezone(timezone) ? timezone : 'UTC';
+  const day = DateTime.fromISO(syncFrom, { zone });
+  return day.isValid ? day.startOf('day').toUTC().toISO() : null;
+}
+
+/**
+ * Serials this connector used before a re-pointing (`devices.config.previousSerials`). Finance's loop guard only excludes the
+ * CURRENT connector device, so punches FlowZa Time pushed under an older serial would otherwise come back as Finance punches.
+ */
+export function financePreviousSerials(config: Record<string, unknown>): string[] {
+  const v = config['previousSerials'];
+  return Array.isArray(v) ? v.filter((s): s is string => typeof s === 'string' && s.length > 0).slice(0, 20) : [];
 }

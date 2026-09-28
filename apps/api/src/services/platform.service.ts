@@ -1,7 +1,7 @@
 import { type z } from 'zod';
 import { provisionTenant } from './tenant-provisioning.js';
 import type { AccessGrantDto, CreateAccessGrantInput, CreateOrganizationInput, CreateOrganizationResult, FeatureFlagDto, OrgFeatureFlagDto, OrgStatus, PlanDto, PlatformHealthDto, PlatformOrganizationDto, accessGrantListQuerySchema, platformOrgListQuerySchema, putFeatureFlagsSchema, putOrgFeatureFlagsSchema, updateOrganizationStatusSchema } from '@flowza/contracts';
-import { SYSTEM_ROLE_IDS } from '@flowza/contracts';
+import { FLOWZA_FINANCE_PROVIDER_KEY, SYSTEM_ROLE_IDS } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { errors, isValidTimezone, newId, randomToken, sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
@@ -58,7 +58,8 @@ export async function getOrganization(deps: ApiDeps, actor: Actor, id: string): 
   if (!row) throw errors.notFound('Organisation', id);
   const counts = await runSystem(deps.db, id, actor.requestId, async (trx) => ({
     employees: toCount((await trx.selectFrom('employees').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', id).where('deletedAt', 'is', null).executeTakeFirst())?.n),
-    devices: toCount((await trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', id).where('status', '!=', 'decommissioned').executeTakeFirst())?.n),
+    // terminals only: the Flowza Finance connector is platform plumbing, not a device seat (plan limit and usage metering alike)
+    devices: toCount((await trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', id).where('status', '!=', 'decommissioned').where('providerKey', '!=', FLOWZA_FINANCE_PROVIDER_KEY).executeTakeFirst())?.n),
     branches: toCount((await trx.selectFrom('branches').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', id).where('status', '!=', 'archived').executeTakeFirst())?.n),
     users: toCount((await trx.selectFrom('orgMemberships').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', id).where('status', '=', 'active').executeTakeFirst())?.n),
   }));
