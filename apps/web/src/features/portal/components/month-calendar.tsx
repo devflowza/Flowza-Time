@@ -3,6 +3,7 @@ import { useTranslation } from 'react-i18next';
 import { MessageSquareText } from 'lucide-react';
 import type { AttendanceNoteDto, SelfAttendanceMonthDto, SelfDayDto } from '@flowza/contracts';
 import { fmtMinutes, fmtTime } from '@/lib/format';
+import { useLocalName } from '@/lib/local-name';
 import { cn } from '@/lib/utils';
 import { cellClass } from '@/features/attendance/status';
 import { monthWeeks, weekdayOrder } from '../model';
@@ -21,6 +22,7 @@ export function MonthCalendar({ data, firstDayOfWeek, today, onSelect, notes }: 
   const weeks = useMemo(() => monthWeeks(data.month, firstDayOfWeek), [data.month, firstDayOfWeek]);
   const byDate = useMemo(() => new Map(data.days.map((d) => [d.attendanceDate, d])), [data.days]);
   const notesByDate = useMemo(() => activeNotesByDate(notes ?? []), [notes]);
+  const ln = useLocalName();
 
   return (
     <div className="overflow-x-auto">
@@ -36,7 +38,7 @@ export function MonthCalendar({ data, firstDayOfWeek, today, onSelect, notes }: 
                 const r = byDate.get(date);
                 const leave = data.leaveByDate[date];
                 const holiday = data.holidaysByDate[date];
-                const label = r ? ta(`status.${r.status}`, { defaultValue: r.status }) : leave?.leaveTypeName ?? holiday ?? null;
+                const label = r ? ta(`status.${r.status}`, { defaultValue: r.status }) : leave ? ln(leave.leaveTypeName, leave.leaveTypeNameAr) : holiday ? ln(holiday, data.holidaysByDateAr?.[date]) : null;
                 const body = (
                   <>
                     <span className="flex items-center justify-between gap-1">

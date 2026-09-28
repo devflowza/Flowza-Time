@@ -22,6 +22,14 @@ type StatusFilter = (typeof STATUS_FILTERS)[number];
 const NOTE_TONE: Record<AttendanceNoteStatus, 'warning' | 'info' | 'success' | 'danger'> = { pending: 'warning', info_requested: 'info', approved: 'success', excused: 'success', rejected: 'danger' };
 const PAGE_SIZE = 25;
 
+/**
+ * The review actions' column: pinned to the inline end (right in English, left in Arabic) over the columns scrolling beneath.
+ * The dividing line is drawn by a pseudo-element: a collapsed table border stays behind when its cell sticks.
+ */
+const STICKY_END = "sticky end-0 z-10 bg-card before:absolute before:inset-y-0 before:start-0 before:w-px before:bg-border before:content-['']";
+const STICKY_END_HEAD = `${STICKY_END} bg-linear-to-r from-muted/50 to-muted/50`;
+const STICKY_END_CELL = `${STICKY_END} text-end`;
+
 function ReasonsTab({ scope, status, onScope, onStatus, oversight }: { scope: NoteListScope; status: StatusFilter; onScope: (s: NoteListScope) => void; onStatus: (s: StatusFilter) => void; oversight: boolean }) {
   const { t } = useTranslation(AR_NS);
   const [page, setPage] = useState(1);
@@ -52,7 +60,8 @@ function ReasonsTab({ scope, status, onScope, onStatus, oversight }: { scope: No
         <div className="rounded-lg border bg-card shadow-card">
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader><TableRow>{(['employee', 'date', 'day', 'reason', 'status'] as const).map((c) => <TableHead key={c}>{t(`notes.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>
+              {/* the actions column stays at the visible end while the rest scrolls sideways (a narrow screen, a long table) */}
+              <TableHeader><TableRow>{(['employee', 'date', 'day', 'reason', 'status'] as const).map((c) => <TableHead key={c}>{t(`notes.columns.${c}`)}</TableHead>)}<TableHead className={STICKY_END_HEAD} /></TableRow></TableHeader>
               <TableBody>
                 {rows.map((n) => (
                   <TableRow key={n.id} data-testid="note-review-row">
@@ -68,17 +77,20 @@ function ReasonsTab({ scope, status, onScope, onStatus, oversight }: { scope: No
                       {n.dayStatus ? <span className="flex flex-wrap items-center gap-1"><AttendanceStatusBadge status={n.dayStatus} /><FlagChips flags={n.dayFlags} max={2} size="xs" /></span> : <span className="text-xs text-muted-foreground">{t('notes.dayUnknown')}</span>}
                       {n.firstInAt || n.lastOutAt ? <span className="mt-0.5 block text-xs text-muted-foreground tnum" dir="ltr">{fmtTime(n.firstInAt, n.timezone ?? 'UTC')} – {fmtTime(n.lastOutAt, n.timezone ?? 'UTC')}</span> : null}
                     </TableCell>
-                    <TableCell className="max-w-[340px] text-sm">
-                      <span className="block text-xs text-muted-foreground">{t(`categories.${n.category}`)}</span>
-                      <span className="block truncate" title={n.note} dir="auto">{n.note}</span>
-                      {n.status === 'info_requested' && n.infoRequestMessage ? <span className="block truncate text-xs text-blue-700 dark:text-blue-300" title={n.infoRequestMessage}>{t('notes.asked', { question: n.infoRequestMessage })}</span> : null}
-                      {n.reviewReason && n.status !== 'pending' && n.status !== 'info_requested' ? <span className="block truncate text-xs text-muted-foreground" title={n.reviewReason}>{n.reviewedByName ? `${n.reviewedByName}: ` : ''}{n.reviewReason}</span> : null}
+                    <TableCell className="text-sm">
+                      {/* capped here, not on the cell: a table sizes a column by its content, and a one-line truncation still counts the whole note */}
+                      <div className="max-w-[18rem]">
+                        <span className="block text-xs text-muted-foreground">{t(`categories.${n.category}`)}</span>
+                        <span className="block truncate" title={n.note} dir="auto">{n.note}</span>
+                        {n.status === 'info_requested' && n.infoRequestMessage ? <span className="block truncate text-xs text-blue-700 dark:text-blue-300" title={n.infoRequestMessage}>{t('notes.asked', { question: n.infoRequestMessage })}</span> : null}
+                        {n.reviewReason && n.status !== 'pending' && n.status !== 'info_requested' ? <span className="block truncate text-xs text-muted-foreground" title={n.reviewReason}>{n.reviewedByName ? `${n.reviewedByName}: ` : ''}{n.reviewReason}</span> : null}
+                      </div>
                     </TableCell>
                     <TableCell>
                       <Badge variant={NOTE_TONE[n.status]} dot>{t(`notes.status.${n.status}`)}</Badge>
                       {n.status === 'rejected' && (n.payEffectDays ?? 0) > 0 ? <span className="block text-xs text-destructive">{n.lossOfPay ? t('notes.lop', { days: n.payEffectDays }) : n.deductedLeaveTypeName ? t('notes.deducted', { days: n.payEffectDays, type: n.deductedLeaveTypeName }) : t('notes.charged', { days: n.payEffectDays })}</span> : null}
                     </TableCell>
-                    <TableCell className="text-end">
+                    <TableCell className={STICKY_END_CELL}>
                       {n.canReview ? (
                         <span className="inline-flex flex-wrap justify-end gap-1">
                           <Button size="sm" onClick={() => setDeciding({ note: n, decision: 'approve' })}><Check /> {t('review.actions.approve')}</Button>

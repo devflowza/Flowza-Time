@@ -139,18 +139,24 @@ export async function getAttendanceMonth(deps: ApiDeps, actor: Actor, orgId: str
     const days = await ownRecords(trx, orgId, scope.employeeId, from, to);
     const leaveByDate: SelfAttendanceMonthDto['leaveByDate'] = {};
     if (canSeeOwnLeave(scope)) {
-      const leave = await trx.selectFrom('leaveRecords as l').innerJoin('leaveTypes as t', 't.id', 'l.leaveTypeId').select(['l.startDate', 'l.endDate', 'l.isHalfDay', 't.name', 't.color'])
+      const leave = await trx.selectFrom('leaveRecords as l').innerJoin('leaveTypes as t', 't.id', 'l.leaveTypeId').select(['l.startDate', 'l.endDate', 'l.isHalfDay', 't.name', 't.nameAr', 't.color'])
         .where('l.organizationId', '=', orgId).where('l.employeeId', '=', scope.employeeId).where('l.status', '=', 'APPROVED').where('l.startDate', '<=', dv(to)).where('l.endDate', '>=', dv(from)).execute();
       for (const l of leave) {
         for (let d = DateTime.fromISO(isoDate(l.startDate), { zone: 'utc' }); d.toISODate()! <= isoDate(l.endDate); d = d.plus({ days: 1 })) {
           const iso = d.toISODate()!;
-          if (iso >= from && iso <= to) leaveByDate[iso] = { leaveTypeName: l.name, color: l.color, isHalfDay: l.isHalfDay };
+          if (iso >= from && iso <= to) leaveByDate[iso] = { leaveTypeName: l.name, leaveTypeNameAr: l.nameAr, color: l.color, isHalfDay: l.isHalfDay };
         }
       }
     }
-    const holidaysByDate: Record<string, string> = {};
-    for (const h of await loadHolidays(trx, orgId, ctx, from, to)) for (const d of holidayDates([h])) if (d >= from && d <= to) holidaysByDate[d] = h.name;
-    return { month, days, totals: monthTotals(days, todayIn(ctx.timezone)), leaveByDate, holidaysByDate };
+    const holidaysByDate: Record<string, string> = {}; const holidaysByDateAr: Record<string, string> = {};
+    for (const h of await loadHolidays(trx, orgId, ctx, from, to)) {
+      for (const d of holidayDates([h])) {
+        if (d < from || d > to) continue;
+        holidaysByDate[d] = h.name;
+        if (h.nameAr) holidaysByDateAr[d] = h.nameAr; else delete holidaysByDateAr[d];
+      }
+    }
+    return { month, days, totals: monthTotals(days, todayIn(ctx.timezone)), leaveByDate, holidaysByDate, holidaysByDateAr };
   });
 }
 

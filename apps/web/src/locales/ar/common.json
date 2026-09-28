@@ -28,7 +28,7 @@
     "status": "الحالة", "name": "الاسم", "code": "الرمز", "branch": "الفرع", "department": "القسم", "date": "التاريخ", "from": "من", "to": "إلى",
     "today": "اليوم", "refresh": "تحديث", "export": "تصدير", "import": "استيراد", "download": "تنزيل", "upload": "رفع", "retry": "إعادة المحاولة",
     "details": "التفاصيل", "view": "عرض", "more": "المزيد", "optional": "اختياري", "required": "مطلوب", "unknown": "غير معروف", "notAvailable": "—",
-    "rowsPerPage": "الصفوف في الصفحة", "pageOf": "صفحة {{page}} من {{total}}", "selected": "تم تحديد {{count}}", "results": "{{count}} نتيجة",
+    "columns": "الأعمدة", "selectAll": "تحديد الكل", "selectRow": "تحديد الصف", "rowsPerPage": "الصفوف في الصفحة", "pageOf": "صفحة {{page}} من {{total}}", "selected": "تم تحديد {{count}}", "results": "{{count}} نتيجة",
     "noResults": "لا توجد نتائج", "noResultsHint": "جرّب تعديل البحث أو عوامل التصفية.", "error": "حدث خطأ ما", "errorHint": "يرجى المحاولة مرة أخرى. إذا استمرت المشكلة، تواصل مع الدعم مع رقم الطلب {{requestId}}.", "offlineHint": "تعذّر الوصول إلى واجهة البرمجة. تحقق من اتصالك — وإذا استمرت المشكلة فقد تكون الخدمة متوقفة.",
     "queued": "تمت الإضافة إلى قائمة الانتظار بنجاح", "queuedHint": "تابع التقدم في مهام المزامنة.", "copy": "نسخ", "copied": "تم النسخ", "timezone": "المنطقة الزمنية",
     "createdAt": "تاريخ الإنشاء", "updatedAt": "آخر تحديث", "language": "اللغة", "theme": "المظهر", "light": "فاتح", "dark": "داكن", "system": "النظام",

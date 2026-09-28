@@ -1,4 +1,4 @@
-import type { CompOffBalanceDto, LeaveWarningDto, SelfLeaveBalanceDto, SelfLeaveDto, SelfLeaveEditInput, SelfLeaveRecordDto, SelfLeaveRequestInput, SelfLeaveTotalsDto, SelfLeaveTypeDto, TeamLeaveDto } from '@flowza/contracts';
+import type { CompOffBalanceDto, LeaveWarningDto, SelfLeaveBalanceDto, SelfLeaveDto, SelfLeaveEditInput, SelfLeaveRecordDto, SelfLeaveRequestInput, SelfLeaveTotalsDto, SelfLeaveTypeDto, SelfOverviewDto, TeamLeaveDto } from '@flowza/contracts';
 import { COMP_OFF_SYSTEM_KEY, emitDomainEvent, loadEmployeeWorkingCalendars, loadLeaveBalances, loadLeaveTypePolicies, loadWorkingCalendars, type LeaveTypePolicy, type Trx } from '@flowza/database';
 import { clampToYear, countLeaveDaysByMode, leaveTypeAppliesTo, type LeaveBalance, type MembershipGrant, type WorkingCalendar } from '@flowza/domain';
 import { errors } from '@flowza/shared';
@@ -46,12 +46,12 @@ async function ownEmployee(trx: Trx, orgId: string, scope: SelfScope): Promise<L
 // ----- own rows ------------------------------------------------------------------------------------------------------------
 
 type OwnLeaveRow = {
-  id: string; leaveTypeId: string; code: string; name: string; color: string | null; isPaid: boolean; systemKey: string | null; countMode: string; startDate: Date | string; endDate: Date | string; isHalfDay: boolean; halfDayPart: string | null;
+  id: string; leaveTypeId: string; code: string; name: string; nameAr: string | null; color: string | null; isPaid: boolean; systemKey: string | null; countMode: string; startDate: Date | string; endDate: Date | string; isHalfDay: boolean; halfDayPart: string | null;
   reason: string | null; status: SelfLeaveRecordDto['status']; decisionNote: string | null; approvedBy: string | null; approvedAt: Date | null; approvalRequestId: string | null; days: unknown; withdrawnAt: Date | null; editedAt: Date | null; createdAt: Date; updatedAt: Date;
   /** Who filed the request: the employee (portal) or HR on their behalf. */
   createdBy: string | null;
 };
-const OWN_COLUMNS = ['l.id', 'l.leaveTypeId', 't.code', 't.name', 't.color', 't.isPaid', 't.systemKey', 't.countMode', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.reason', 'l.status', 'l.decisionNote', 'l.approvedBy', 'l.approvedAt', 'l.approvalRequestId', 'l.days', 'l.withdrawnAt', 'l.editedAt', 'l.createdAt', 'l.updatedAt', 'l.createdBy'] as const;
+const OWN_COLUMNS = ['l.id', 'l.leaveTypeId', 't.code', 't.name', 't.nameAr', 't.color', 't.isPaid', 't.systemKey', 't.countMode', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.reason', 'l.status', 'l.decisionNote', 'l.approvedBy', 'l.approvedAt', 'l.approvalRequestId', 'l.days', 'l.withdrawnAt', 'l.editedAt', 'l.createdAt', 'l.updatedAt', 'l.createdBy'] as const;
 
 async function ownLeaveRows(trx: Trx, orgId: string, employeeId: string, filter: { from?: string; to?: string; id?: string } = {}): Promise<OwnLeaveRow[]> {
   let q = trx.selectFrom('leaveRecords as l').innerJoin('leaveTypes as t', 't.id', 'l.leaveTypeId').select(OWN_COLUMNS).where('l.organizationId', '=', orgId).where('l.employeeId', '=', employeeId);
@@ -93,7 +93,7 @@ async function toSelfLeaveDtos(trx: Trx, orgId: string, employeeId: string, rows
     const undecided = UNDECIDED_LEAVE.includes(r.status);
     const days = r.days !== null && r.days !== undefined ? Number(r.days) : ref.cal ? countLeaveDaysByMode(range, ref.cal, r.countMode === 'calendar' ? 'calendar' : 'working') : 0;
     return {
-      id: r.id, leaveTypeId: r.leaveTypeId, leaveTypeCode: String(r.code), leaveTypeName: r.name, color: r.color, isPaid: r.isPaid, ...range, halfDayPart: r.halfDayPart, days,
+      id: r.id, leaveTypeId: r.leaveTypeId, leaveTypeCode: String(r.code), leaveTypeName: r.name, leaveTypeNameAr: r.nameAr, color: r.color, isPaid: r.isPaid, ...range, halfDayPart: r.halfDayPart, days,
       reason: r.reason, status: r.status, decisionNote: r.decisionNote, approvedByName: r.approvedBy ? nameOf.get(r.approvedBy) ?? null : null, approvedAt: isoDateTimeOrNull(r.approvedAt), createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt),
       approvalRequestId: r.approvalRequestId, approvalStatus: req ? (req.status as SelfLeaveRecordDto['approvalStatus']) : null, approvalCurrentStep: req ? req.currentStep : null, approvalStepCount: req ? Number(ref.counts.find((c) => c.requestId === req.id)?.n ?? 0) : null,
       withdrawnAt: isoDateTimeOrNull(r.withdrawnAt), editedAt: isoDateTimeOrNull(r.editedAt),
@@ -347,12 +347,12 @@ export async function replyLeave(deps: ApiDeps, actor: Actor, orgId: string, id:
  * The balances / upcoming leave block of the portal home (GET /me/overview): tracked types and anything used or requested
  * this year, through the one balance function; upcoming = approved or undecided leave ending today or later.
  */
-export async function overviewLeave(trx: Trx, orgId: string, employeeId: string, grant: MembershipGrant, userId: string): Promise<{ balances: Array<SelfLeaveBalanceDto & { name: string; code: string; color: string | null }>; upcomingLeave: SelfLeaveRecordDto[]; pendingLeave: number }> {
+export async function overviewLeave(trx: Trx, orgId: string, employeeId: string, grant: MembershipGrant, userId: string): Promise<{ balances: SelfOverviewDto['balances']; upcomingLeave: SelfLeaveRecordDto[]; pendingLeave: number }> {
   const emp = await loadLeaveEmployee(trx, orgId, employeeId);
   if (!emp) return { balances: [], upcomingLeave: [], pendingLeave: 0 };
   const view = await loadLeaveView(trx, orgId, emp);
   const today = await withSystemScope(trx, orgId, (t) => orgToday(t, orgId));
-  const balances = view.offered.map((t) => ({ ...toSelfBalanceDto(t, view.balances.get(t.id)!), name: t.name, code: t.code, color: t.color }))
+  const balances = view.offered.map((t) => ({ ...toSelfBalanceDto(t, view.balances.get(t.id)!), name: t.name, nameAr: t.nameAr, code: t.code, color: t.color }))
     .filter((b) => b.allowanceDays !== null || b.usedDays > 0 || b.pendingDays > 0);
   const rows = await ownLeaveRows(trx, orgId, employeeId, { from: today });
   const active = rows.filter((r) => r.status === 'APPROVED' || UNDECIDED_LEAVE.includes(r.status)).sort((a, b) => isoDate(a.startDate).localeCompare(isoDate(b.startDate)));
@@ -371,7 +371,7 @@ export async function getTeamLeave(deps: ApiDeps, actor: Actor, orgId: string): 
   return runUser(deps.db, actor, async (trx) => {
     const today = await withSystemScope(trx, orgId, (t) => orgToday(t, orgId));
     const rows = await trx.selectFrom('leaveRecords as l').innerJoin('leaveTypes as t', 't.id', 'l.leaveTypeId')
-      .select(['l.id', 'l.employeeId', 'l.leaveTypeId', 't.name as leaveTypeName', 't.code as leaveTypeCode', 't.color', 't.countMode', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.days', 'l.status'])
+      .select(['l.id', 'l.employeeId', 'l.leaveTypeId', 't.name as leaveTypeName', 't.nameAr as leaveTypeNameAr', 't.code as leaveTypeCode', 't.color', 't.countMode', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.days', 'l.status'])
       .where('l.organizationId', '=', orgId).where('l.employeeId', 'in', grant.teamEmployeeIds).where('l.status', 'in', ['APPROVED', 'PENDING', 'INFO_REQUESTED']).where('l.endDate', '>=', dv(today))
       .orderBy('l.startDate', 'asc').orderBy('l.id').limit(20).execute();
     if (!rows.length) return [];
@@ -380,7 +380,7 @@ export async function getTeamLeave(deps: ApiDeps, actor: Actor, orgId: string): 
     // review P2-8: a leave stored without `days` (before leave v2) shows its days, computed as the balances count them
     const days = await leaveDaysOf(trx, orgId, rows);
     return rows.map((r) => ({
-      id: r.id, employeeId: r.employeeId, employeeName: byId.get(r.employeeId)?.displayName ?? '', employeeNumber: byId.get(r.employeeId)?.employeeNumber ?? '', leaveTypeId: r.leaveTypeId, leaveTypeName: r.leaveTypeName, leaveTypeCode: String(r.leaveTypeCode), color: r.color,
+      id: r.id, employeeId: r.employeeId, employeeName: byId.get(r.employeeId)?.displayName ?? '', employeeNumber: byId.get(r.employeeId)?.employeeNumber ?? '', leaveTypeId: r.leaveTypeId, leaveTypeName: r.leaveTypeName, leaveTypeNameAr: r.leaveTypeNameAr, leaveTypeCode: String(r.leaveTypeCode), color: r.color,
       startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isHalfDay: r.isHalfDay, halfDayPart: r.halfDayPart, days: days.get(r.id)?.days ?? null, status: r.status,
     }));
   });

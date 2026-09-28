@@ -66,15 +66,15 @@ const a = () => h.tdb.adminDb;
 async function setConfig(patch: Record<string, unknown>): Promise<void> {
   await a().updateTable('devices').set({ config: JSON.stringify({ ...BASE_CONFIG(), ...patch }) }).where('id', '=', CONNECTOR).execute();
 }
-async function itemJob(operation: 'PULL_ATTENDANCE' | 'PUSH_ATTENDANCE', options: Record<string, unknown> = {}) {
+async function itemJob(operation: 'PULL_ATTENDANCE' | 'PUSH_ATTENDANCE', options: Record<string, unknown> = {}, trigger: 'MANUAL' | 'SCHEDULED' = 'MANUAL') {
   const prefix = operation === 'PUSH_ATTENDANCE' ? 'finance-push' : 'pull';
   await sql`delete from jobs.queue where dedupe_key = ${`${prefix}:${CONNECTOR}`}`.execute(a());
-  const created = await withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => createSyncJob(trx, h.deps.queue, { organizationId: ORG, jobType: operation, trigger: 'MANUAL', items: [{ deviceId: CONNECTOR, operation, options }] }));
+  const created = await withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => createSyncJob(trx, h.deps.queue, { organizationId: ORG, jobType: operation, trigger, items: [{ deviceId: CONNECTOR, operation, options }] }));
   const item = await a().selectFrom('syncJobItems').select(['id', 'queueJobId']).where('syncJobId', '=', created.syncJobId).executeTakeFirstOrThrow();
   const ctx: JobContext = { job: { id: String(item.queueJobId ?? ++seq), queueName: 'sync', jobType: operation, organizationId: ORG, payload: { syncJobId: created.syncJobId, syncJobItemId: item.id, organizationId: ORG, deviceId: CONNECTOR, employeeId: null, operation, options }, priority: 5, attempts: 1, maxAttempts: 6, correlationId: 'c', lockedBy: 'test', runAt: new Date() }, log: h.deps.log, deps: h.deps, signal: new AbortController().signal };
   return { syncJobId: created.syncJobId, itemId: item.id, ctx };
 }
-const push = async (options: Record<string, unknown> = {}) => pushAttendance((await itemJob('PUSH_ATTENDANCE', { settleSeconds: 0, ...options })).ctx);
+const push = async (options: Record<string, unknown> = {}, trigger: 'MANUAL' | 'SCHEDULED' = 'MANUAL') => pushAttendance((await itemJob('PUSH_ATTENDANCE', { settleSeconds: 0, ...options }, trigger)).ctx);
 const pull = async (options: Record<string, unknown> = {}) => pullAttendance((await itemJob('PULL_ATTENDANCE', options)).ctx).catch((e: unknown) => ({ threw: e }));
 const state = () => a().selectFrom('financeSyncState').selectAll().where('deviceId', '=', CONNECTOR).executeTakeFirstOrThrow();
 const ledger = (eventId: string) => a().selectFrom('financePushedEvents').selectAll().where('deviceId', '=', CONNECTOR).where('eventId', '=', eventId).executeTakeFirst();
@@ -163,20 +163,61 @@ describe('D4 — events committed late', () => {
 });
 
 describe('D11 — one push per connector at a time', () => {
-  it('W9: two concurrent runs send every punch once (the second run is a no-op)', async () => {
+  /**
+   * Starts a push whose ingest answer Finance holds back, and resolves once that run is inside the connector lock (its request
+   * reached Finance). The run that competes with it is prepared BEFORE (its sync job created), so it reaches the lock within
+   * the hold even on a busy machine.
+   */
+  async function runInProgress(holdMs: number): Promise<{ run: Promise<Record<string, unknown>> }> {
+    const requestsBefore = ingestRequests();
+    server.delayNext(holdMs, 'attendance-ingest');
+    const run = push();
+    const deadline = Date.now() + 10_000;
+    while (ingestRequests() === requestsBefore && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
+    return { run }; // wrapped: an async function returning the promise itself would wait for the run to finish
+  }
+  const pushJob = async (options: Record<string, unknown> = {}, trigger: 'MANUAL' | 'SCHEDULED' = 'MANUAL') => (await itemJob('PUSH_ATTENDANCE', { settleSeconds: 0, ...options }, trigger)).ctx;
+
+  it('W9: two concurrent runs send every punch once (a scheduled second run is a no-op)', async () => {
     await drain();
     const times = ['2026-04-04T04:00:00Z', '2026-04-04T05:00:00Z', '2026-04-04T06:00:00Z'];
     for (const t of times) await insertEvent({ punchedAt: t });
     const requestsBefore = ingestRequests();
-    server.delayNext(800, 'attendance-ingest');
-    const first = push();
-    const deadline = Date.now() + 10_000;
-    while (ingestRequests() === requestsBefore && Date.now() < deadline) await new Promise((r) => setTimeout(r, 20));
-    const second = await push();
+    const secondJob = await pushJob({}, 'SCHEDULED');
+    const { run: first } = await runInProgress(2_500);
+    const second = await pushAttendance(secondJob);
     expect(second).toMatchObject({ status: 'SUCCESS', skipped: 'already_running' });
     expect(await first).toMatchObject({ status: 'SUCCESS', pushed: 3 });
     expect(ingestRequests()).toBe(requestsBefore + 1);
     for (const t of times) expect(sentTimes().filter((x) => x === new Date(t).toISOString())).toHaveLength(1);
+  });
+
+  it('Prompt 11 (matrix flow 10): "Sync now" during a run waits for it, then pushes the punches the running run could not see — once', async () => {
+    await drain();
+    const early = '2026-04-05T04:00:00Z';
+    await insertEvent({ punchedAt: early });
+    const secondJob = await pushJob(); // MANUAL, as POST …/integrations/finance/sync-now queues it
+    const { run: first } = await runInProgress(2_500);
+    // a punch recorded while the first run is in progress: after that run's window was fixed, so it is not in it
+    const late = '2026-04-05T05:00:00Z';
+    await insertEvent({ employeeId: EMP.e101, punchedAt: late });
+    const second = await pushAttendance(secondJob); // waits for the run in progress instead of reporting SUCCESS with nothing pushed
+    expect(await first).toMatchObject({ status: 'SUCCESS', pushed: 1 });
+    expect(second).toMatchObject({ status: 'SUCCESS', pushed: 1 });
+    expect(second['skipped']).toBeUndefined();
+    expect(second['waitedMs']).toBeGreaterThan(0);
+    for (const t of [early, late]) expect(sentTimes().filter((x) => x === new Date(t).toISOString())).toHaveLength(1);
+  });
+
+  it('the wait is bounded: a manual run that outlasts it still exits as already_running', async () => {
+    await drain();
+    await insertEvent({ punchedAt: '2026-04-06T04:00:00Z' });
+    const secondJob = await pushJob({ lockWaitMs: 300 });
+    const { run: first } = await runInProgress(2_500);
+    const second = await pushAttendance(secondJob);
+    expect(second).toMatchObject({ status: 'SUCCESS', skipped: 'already_running' });
+    expect(second['waitedMs']).toBeGreaterThanOrEqual(300);
+    expect(await first).toMatchObject({ status: 'SUCCESS', pushed: 1 });
   });
 });
 

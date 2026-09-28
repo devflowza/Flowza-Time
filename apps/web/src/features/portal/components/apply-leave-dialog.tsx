@@ -8,6 +8,7 @@ import type { z } from 'zod';
 import { HALF_DAY_PARTS, selfLeaveRequestSchema, type SelfLeaveDto, type SelfLeaveEditInput, type SelfLeaveRecordDto, type SelfLeaveRequestInput } from '@flowza/contracts';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Textarea } from '@/components/ui';
 import { todayIso } from '@/lib/format';
+import { useLocalName } from '@/lib/local-name';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useOrgTimezone } from '@/features/me/use-me';
@@ -43,11 +44,12 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
   const compOffMode = !!compOff || !!record?.compOff;
   const compOffTypeId = data?.compOff?.leaveTypeId ?? (record?.compOff ? record.leaveTypeId : null);
 
+  const ln = useLocalName();
   const types = useMemo<TypePolicy[]>(() => {
-    const ordinary = (data?.types ?? []).filter((x) => !x.compOff).map((x) => ({ id: x.id, name: x.name, color: x.color, isPaid: x.isPaid, countMode: (x.countMode ?? 'working') as CountMode, allowHalfDay: x.allowHalfDay ?? true, advanceNoticeDays: x.advanceNoticeDays ?? 0, maxConsecutiveDays: x.maxConsecutiveDays ?? null, compOff: false }));
+    const ordinary = (data?.types ?? []).filter((x) => !x.compOff).map((x) => ({ id: x.id, name: ln(x.name, x.nameAr), color: x.color, isPaid: x.isPaid, countMode: (x.countMode ?? 'working') as CountMode, allowHalfDay: x.allowHalfDay ?? true, advanceNoticeDays: x.advanceNoticeDays ?? 0, maxConsecutiveDays: x.maxConsecutiveDays ?? null, compOff: false }));
     // the comp-off type is not in the ordinary list: it is used from the comp-off card (its policy: working days, half days allowed)
     return compOffTypeId ? [...ordinary, { id: compOffTypeId, name: tl('compOff.typeName'), color: record?.compOff ? record.color : '#6941c6', isPaid: true, countMode: 'working', allowHalfDay: true, advanceNoticeDays: 0, maxConsecutiveDays: null, compOff: true }] : ordinary;
-  }, [data, compOffTypeId, record, tl]);
+  }, [data, compOffTypeId, record, tl, ln]);
 
   const form = useForm<FormValues, unknown, SelfLeaveRequestInput>({
     resolver: zodResolver(selfLeaveRequestSchema),
@@ -183,7 +185,7 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
                 <p>{days === 0 ? t('apply.previewNone') : type?.countMode === 'calendar' ? tl('apply.previewCalendar', { count: days, days: fmtDays(days) }) : t('apply.preview', { count: days, days: fmtDays(days) })}</p>
                 {type && remainingAfter !== null ? <p className="text-xs">{overBalance ? t('apply.overBalance', { type: type.name, count: available ?? 0, remaining: fmtDays(available ?? 0) }) : type.compOff ? tl('compOff.after', { count: remainingAfter, days: fmtDays(remainingAfter) }) : t('apply.balanceAfter', { type: type.name, count: remainingAfter, remaining: fmtDays(remainingAfter) })}</p> : null}
                 {blocking.map((i) => <p key={i.code} className="text-xs font-medium" data-issue={i.code}>{issueText(i)}</p>)}
-                {clash ? <p className="text-xs font-medium" data-issue="OVERLAP">{tl('apply.issues.overlap', { type: clash.leaveTypeName, from: clash.startDate, to: clash.endDate, status: tl(`status.${clash.status}`, { defaultValue: clash.status }) })}</p> : null}
+                {clash ? <p className="text-xs font-medium" data-issue="OVERLAP">{tl('apply.issues.overlap', { type: ln(clash.leaveTypeName, clash.leaveTypeNameAr ?? data?.types.find((x) => x.id === clash.leaveTypeId)?.nameAr), from: clash.startDate, to: clash.endDate, status: tl(`status.${clash.status}`, { defaultValue: clash.status }) })}</p> : null}
               </div>
             </div>
           ) : null}

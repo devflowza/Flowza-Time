@@ -1,9 +1,14 @@
 import * as React from 'react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { Check } from 'lucide-react';
+import { useUiDirection } from '@/lib/direction';
 import { cn } from '@/lib/utils';
 
-export const DropdownMenu = DropdownMenuPrimitive.Root;
+/** A menu laid out in the UI language's direction: item order, submenu side and arrow keys (see lib/direction). */
+export function DropdownMenu({ dir, ...props }: React.ComponentProps<typeof DropdownMenuPrimitive.Root>) {
+  const uiDir = useUiDirection();
+  return <DropdownMenuPrimitive.Root dir={dir ?? uiDir} {...props} />;
+}
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
 export const DropdownMenuGroup = DropdownMenuPrimitive.Group;
 export const DropdownMenuSub = DropdownMenuPrimitive.Sub;

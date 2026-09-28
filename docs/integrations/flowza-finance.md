@@ -55,6 +55,8 @@ In **FlowZa Time**: **Settings → Integrations**.
 
 Click **Test connection**. It asks Finance for one punch and shows Finance's clock and the date of the first punch Finance holds
 (or "No punches in Finance yet"). Then **Save**, and **Sync now** if you do not want to wait for the first scheduled run.
+Only one push runs per connector at a time: a **Sync now** that finds a push already running waits for it (up to two minutes)
+and then sends what that run could not see, so a punch recorded a moment ago is not left for the next scheduled run.
 
 **Changing the start date later.** Moving it **earlier** re-reads Finance and re-sends FlowZa Time's punches from the new date;
 both systems skip the punches they already hold, so nothing is duplicated. Moving it **later** only narrows what is synchronised

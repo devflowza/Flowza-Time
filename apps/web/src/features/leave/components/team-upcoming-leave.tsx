@@ -2,6 +2,7 @@ import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Card, CardContent, ErrorState, Skeleton } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
+import { useLocalName } from '@/lib/local-name';
 import { useActiveMembership, useCan } from '@/features/me/use-me';
 import { useTeamLeave } from '@/features/portal/leave-api';
 import { fmtLeaveDays } from '../model';
@@ -18,6 +19,7 @@ export function TeamUpcomingLeave() {
   const membership = useActiveMembership();
   const visible = !!membership?.isManager && can('leave.view_team');
   const q = useTeamLeave(visible);
+  const ln = useLocalName();
   if (!visible) return null;
   if (q.isSuccess && (q.data?.length ?? 0) === 0) return null;
   return (
@@ -33,7 +35,7 @@ export function TeamUpcomingLeave() {
               <li key={l.id} className="flex items-center justify-between gap-2 py-2.5 first:pt-0">
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium">{l.employeeName}</p>
-                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground tnum"><LeaveTypeDot color={l.color} />{l.leaveTypeName} · {l.startDate === l.endDate ? fmtDate(l.startDate, 'EEE dd MMM') : `${fmtDate(l.startDate, 'dd MMM')} → ${fmtDate(l.endDate, 'dd MMM')}`}{l.days !== null ? ` · ${t('team.days', { count: l.days, days: fmtLeaveDays(l.days) })}` : ''}</p>
+                  <p className="flex items-center gap-1.5 text-xs text-muted-foreground tnum"><LeaveTypeDot color={l.color} />{ln(l.leaveTypeName, l.leaveTypeNameAr)} · {l.startDate === l.endDate ? fmtDate(l.startDate, 'EEE dd MMM') : `${fmtDate(l.startDate, 'dd MMM')} → ${fmtDate(l.endDate, 'dd MMM')}`}{l.days !== null ? ` · ${t('team.days', { count: l.days, days: fmtLeaveDays(l.days) })}` : ''}</p>
                 </div>
                 <LeaveStatusBadge status={l.status} />
               </li>

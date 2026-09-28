@@ -207,6 +207,8 @@ export interface TeamLeaveDto {
   employeeNumber: string;
   leaveTypeId: string;
   leaveTypeName: string;
+  /** The type's Arabic name, where the reader shows it (the manager's view on /my; absent elsewhere and from older API builds). */
+  leaveTypeNameAr?: string | null;
   leaveTypeCode: string;
   color: string | null;
   startDate: string;

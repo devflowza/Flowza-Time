@@ -6,6 +6,7 @@ import type { SelfLeaveRecordDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, EmptyState, ErrorState, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton } from '@/components/ui';
 import { fmtDate, fmtDateTime, todayIso } from '@/lib/format';
+import { useLocalName } from '@/lib/local-name';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { LeaveStatusBadge } from '@/features/leave/components/leave-status';
 import { RequestDialog } from '@/features/approvals/components/request-detail';
@@ -87,6 +88,9 @@ export default function MyLeavePage() {
   const [timeline, setTimeline] = useState<string | null>(null);
   const data = q.data;
   const typeById = new Map((data?.types ?? []).map((x) => [x.id, x]));
+  const ln = useLocalName();
+  // the type's name in the UI language (older API builds send no Arabic name on the record: the type list has it)
+  const typeName = (r: SelfLeaveRecordDto) => ln(r.leaveTypeName, r.leaveTypeNameAr ?? typeById.get(r.leaveTypeId)?.nameAr);
   const balances = (data?.balances ?? []).filter((b) => (b.tracked ?? b.allowanceDays !== null) || b.usedDays > 0 || b.pendingDays > 0);
   const questions = (data?.records ?? []).filter((r) => r.status === 'INFO_REQUESTED');
   const years = Array.from({ length: 7 }, (_, i) => thisYear + 1 - i);
@@ -112,7 +116,7 @@ export default function MyLeavePage() {
             <ul className="space-y-2" aria-label={t('leave.infoRequested')}>
               {questions.map((r) => (
                 <li key={r.id} className="flex flex-wrap items-center justify-between gap-3 rounded-md border border-indigo-300 bg-indigo-50 p-3 text-sm text-indigo-950 dark:border-indigo-800 dark:bg-indigo-950/40 dark:text-indigo-100" role="status">
-                  <span className="flex min-w-0 items-start gap-2"><HelpCircle className="mt-0.5 size-4 shrink-0" aria-hidden /><span className="min-w-0"><span className="block font-medium">{t('leave.infoRequested')} · {r.leaveTypeName} · <Dates r={r} /></span>{r.infoRequest ? <span className="block truncate" dir="auto" title={r.infoRequest.message}>{r.infoRequest.message}</span> : null}</span></span>
+                  <span className="flex min-w-0 items-start gap-2"><HelpCircle className="mt-0.5 size-4 shrink-0" aria-hidden /><span className="min-w-0"><span className="block font-medium">{t('leave.infoRequested')} · {typeName(r)} · <Dates r={r} /></span>{r.infoRequest ? <span className="block truncate" dir="auto" title={r.infoRequest.message}>{r.infoRequest.message}</span> : null}</span></span>
                   <Button size="sm" onClick={() => setConversation(r)}><MessageSquareReply /> {tl('portal.reply')}</Button>
                 </li>
               ))}
@@ -123,7 +127,7 @@ export default function MyLeavePage() {
             <SectionTitle title={t('leave.balances', { year })} />
             {q.isLoading ? <Skeleton className="h-28 w-full" /> : balances.length ? (
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                {balances.map((b) => { const lt = typeById.get(b.leaveTypeId); return <LeaveTypeBalanceCard key={b.leaveTypeId} b={b} name={lt?.name ?? ''} color={lt?.color ?? null} />; })}
+                {balances.map((b) => { const lt = typeById.get(b.leaveTypeId); return <LeaveTypeBalanceCard key={b.leaveTypeId} b={b} name={lt ? ln(lt.name, lt.nameAr) : ''} color={lt?.color ?? null} />; })}
               </div>
             ) : <p className="px-5 text-sm text-muted-foreground">{t('home.balancesEmpty')}</p>}
           </section>
@@ -142,7 +146,7 @@ export default function MyLeavePage() {
                         <TableBody>
                           {data.records.map((r) => (
                             <TableRow key={r.id} data-testid={`leave-row-${r.id}`}>
-                              <TableCell><span className="flex items-center gap-2 whitespace-nowrap text-sm font-medium"><TypeDot color={r.color} />{r.leaveTypeName}{!r.isPaid ? <Badge variant="outline">{t('leave.unpaid')}</Badge> : null}</span></TableCell>
+                              <TableCell><span className="flex items-center gap-2 whitespace-nowrap text-sm font-medium"><TypeDot color={r.color} />{typeName(r)}{!r.isPaid ? <Badge variant="outline">{t('leave.unpaid')}</Badge> : null}</span></TableCell>
                               <TableCell><Dates r={r} /></TableCell>
                               <TableCell className="text-sm tnum">{fmtDays(r.days)}</TableCell>
                               <TableCell className="max-w-[220px] text-xs"><span className="block truncate" title={r.reason ?? undefined}>{r.reason ?? '—'}</span></TableCell>
@@ -159,7 +163,7 @@ export default function MyLeavePage() {
                     <ul className="space-y-2 p-3 md:hidden">
                       {data.records.map((r) => (
                         <li key={r.id} className="rounded-lg border p-3">
-                          <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-2 font-medium"><TypeDot color={r.color} />{r.leaveTypeName}</span><LeaveStatusBadge status={r.status} /></div>
+                          <div className="flex items-center justify-between gap-2"><span className="flex items-center gap-2 font-medium"><TypeDot color={r.color} />{typeName(r)}</span><LeaveStatusBadge status={r.status} /></div>
                           <p className="mt-1 text-xs text-muted-foreground"><Dates r={r} /> · {fmtDays(r.days)}d</p>
                           {r.reason ? <p className="mt-1 text-xs">{r.reason}</p> : null}
                           {r.decisionNote ? <p className="mt-1 text-xs text-muted-foreground">{r.decisionNote}</p> : null}

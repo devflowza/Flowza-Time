@@ -94,6 +94,61 @@ export const financeIntegrationFixture = (): FinanceIntegrationDto => ({
   syncFrom: new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10), hasToken: false, tokenMasked: null, connectionStatus: null, lastErrorCode: null, lastError: null, updatedAt: null,
 });
 
+/** The push token the Finance double accepts; any other token is an AUTH_FAILED test result. */
+export const FINANCE_GOOD_TOKEN = 'fin-e2e-token-0123456789';
+/**
+ * Stateful Settings → Integrations → Flowza Finance double: save (PUT; a new connector needs a token, the token is only ever
+ * returned masked), test connection (POST …/test; the typed values, else the stored ones), status, sync now, and disconnect
+ * (DELETE: disabled, token deleted, settings kept) — the shape of the real endpoints; their rules are covered by the API suite.
+ */
+export function financeIntegrationHandlers(): { get: NonNullable<MockBackendOptions['get']>; post: NonNullable<MockBackendOptions['post']>; put: NonNullable<MockBackendOptions['put']>; del: NonNullable<MockBackendOptions['del']>; state: { integration: FinanceIntegrationDto; token: string | null } } {
+  const st = { integration: financeIntegrationFixture(), token: null as string | null };
+  const status = (): FinanceIntegrationStatusDto => ({
+    configured: st.integration.configured, enabled: st.integration.enabled, deviceId: st.integration.deviceId, connectionStatus: st.integration.connectionStatus,
+    state: st.integration.configured ? { lastPushedEventId: null, lastPushedEventAt: null, pushPositionAt: null, pushRetryAttempts: 0, lastPushAt: null, lastPushCount: 0, nextPushAt: null, lastPullAt: null, lastPullCount: 0, lastError: null, lastErrorAt: null, consecutiveFailures: 0, updatedAt: nowIso() } : null,
+    cursor: null, circuit: null, unmatchedCount: 0, pendingCount: 0, lastJobs: [],
+  });
+  const invalid = (message: string) => ({ status: 400, body: { code: 'VALIDATION_ERROR', message, requestId: 'e2e-request' } });
+  return {
+    state: st,
+    get: {
+      [`/orgs/${ORG_ID}/integrations/finance`]: () => ({ data: st.integration }),
+      [`/orgs/${ORG_ID}/integrations/finance/status`]: () => ({ data: status() }),
+    },
+    put: {
+      [`/orgs/${ORG_ID}/integrations/finance`]: (body) => {
+        const b = body as { enabled?: boolean; baseUrl?: string; deviceSerial?: string; token?: string; direction?: FinanceIntegrationDto['direction']; pinKey?: FinanceIntegrationDto['pinKey']; pollMinutes?: number; syncFrom?: string };
+        if (!b.token && !st.token) return invalid('A push token is required to set up the connector.');
+        if (b.token) st.token = b.token;
+        st.integration = {
+          ...st.integration, configured: true, enabled: b.enabled ?? true, deviceId: '12121212-1212-4121-8121-000000000001', branchId: BRANCH_A, baseUrl: b.baseUrl ?? st.integration.baseUrl, deviceSerial: b.deviceSerial ?? st.integration.deviceSerial,
+          direction: b.direction ?? 'both', pinKey: b.pinKey ?? 'employee_number', pollMinutes: b.pollMinutes ?? 10, syncFrom: b.syncFrom ?? st.integration.syncFrom, hasToken: true, tokenMasked: `****${(st.token ?? '').slice(-4)}`,
+          connectionStatus: 'unknown', lastErrorCode: null, lastError: null, updatedAt: nowIso(),
+        };
+        return { body: { data: st.integration } };
+      },
+    },
+    post: {
+      [`/orgs/${ORG_ID}/integrations/finance/test`]: (body) => {
+        const b = (body ?? {}) as { baseUrl?: string; deviceSerial?: string; token?: string };
+        const token = b.token ?? st.token;
+        const serial = b.deviceSerial ?? st.integration.deviceSerial;
+        if (!token || !serial) return invalid('Enter the Finance device serial and push token to test the connection.');
+        const ok = token === FINANCE_GOOD_TOKEN;
+        return { body: { data: { ok, message: ok ? `Connected to Flowza Finance as ${serial}` : 'Flowza Finance rejected the device credential (unknown serial, wrong token or the device is disabled)', latencyMs: 84, code: ok ? null : 'AUTH_FAILED', retryable: false, serverTime: ok ? nowIso() : null, firstPunchAt: ok ? '2026-09-01T04:00:00.000Z' : null, usedStoredCredentials: !b.token } } };
+      },
+      [`/orgs/${ORG_ID}/integrations/finance/sync-now`]: () => ({ status: 202, body: { data: { pullJobId: '13131313-1313-4131-8131-000000000001', pushJobId: '13131313-1313-4131-8131-000000000002', message: 'Queued Flowza Finance pull and push.' } } }),
+    },
+    del: {
+      [`/orgs/${ORG_ID}/integrations/finance`]: () => {
+        st.token = null;
+        st.integration = { ...st.integration, enabled: false, hasToken: false, tokenMasked: null, updatedAt: nowIso() };
+        return { body: { data: st.integration } };
+      },
+    },
+  };
+}
+
 export const branchesFixture = [
   { id: BRANCH_A, organizationId: ORG_ID, code: 'MCT', name: 'Muscat HQ', nameAr: 'مسقط', countryCode: 'OM', city: 'Muscat', address: {}, timezone: 'Asia/Muscat', latitude: null, longitude: null, geofenceRadiusM: null, contact: {}, weeklyOffDays: null, holidayCalendarId: null, status: 'active', employeeCount: 2, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
   { id: BRANCH_B, organizationId: ORG_ID, code: 'SOH', name: 'Sohar Plant', nameAr: 'صحار', countryCode: 'OM', city: 'Sohar', address: {}, timezone: 'Asia/Muscat', latitude: null, longitude: null, geofenceRadiusM: null, contact: {}, weeklyOffDays: null, holidayCalendarId: null, status: 'active', employeeCount: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
@@ -395,6 +450,8 @@ export interface MockBackendOptions {
   /** PATCH / PUT handlers, as `post` (the leave endpoints answer by default — see leaveRoute) */
   patch?: Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }>;
   put?: Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }>;
+  /** DELETE handlers, as `post` */
+  del?: Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }>;
   /** reject the password grant (wrong credentials) */
   rejectSignIn?: boolean;
   /** reject sign-up (address already registered) */
@@ -420,6 +477,11 @@ export const PORTAL_EMPLOYEE_ID = employeesFixture[1]!.id;
 export const HQ_FENCE = { id: '99999999-9999-4999-8999-000000000001', name: 'Muscat HQ', latitude: 23.588, longitude: 58.3829, radiusM: 150, hasPolygon: false, enforcement: 'soft_warn' as const, scope: 'org' as const };
 
 const CORS: Record<string, string> = { 'access-control-allow-origin': '*' };
+/**
+ * Preflight answer. `Authorization` must be listed by name (a `*` never covers it), so the double also serves a page loaded from
+ * another port than the one the bundle calls (playwright.config.ts `E2E_WEB_PORT`).
+ */
+const PREFLIGHT: Record<string, string> = { ...CORS, 'access-control-allow-headers': 'authorization, apikey, content-type, x-client-info, x-supabase-api-version, idempotency-key, accept-language, *', 'access-control-allow-methods': 'GET, POST, PUT, PATCH, DELETE, OPTIONS' };
 const json = (route: Route, status: number, body: unknown, headers: Record<string, string> = {}) => route.fulfill({ status, headers: { 'content-type': 'application/json', ...CORS, ...headers }, body: JSON.stringify(body) });
 const apiError = (route: Route, status: number, code: string, message: string) => json(route, status, { code, message, requestId: 'e2e-request' });
 
@@ -465,7 +527,7 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
   await page.route('**/supabase/auth/v1/**', async (route) => {
     const req = route.request();
     const url = new URL(req.url());
-    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { ...CORS, 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: PREFLIGHT });
     if (url.pathname.endsWith('/token')) {
       const grant = url.searchParams.get('grant_type');
       if (grant === 'password' && opts.rejectSignIn) return json(route, 400, { error: 'invalid_grant', error_description: 'Invalid login credentials', code: 'invalid_credentials', msg: 'Invalid login credentials' });
@@ -489,7 +551,7 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
     const req = route.request();
     const url = new URL(req.url());
     const path = url.pathname.replace(/^.*\/api\/v1/, '');
-    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: { ...CORS, 'access-control-allow-headers': '*', 'access-control-allow-methods': '*' } });
+    if (req.method() === 'OPTIONS') return route.fulfill({ status: 204, headers: PREFLIGHT });
     if (!req.headers()['authorization']?.startsWith('Bearer ')) return apiError(route, 401, 'UNAUTHENTICATED', 'Missing bearer token');
     let body: unknown; try { body = req.postDataJSON(); } catch { body = req.postData(); }
     state.calls.push({ method: req.method(), path, body });
@@ -503,8 +565,8 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
       // unknown list endpoints (filter option sources etc.) answer with an empty page so screens render their empty states
       return json(route, 200, page_([]));
     }
-    // POST: the portal double + the scenario's own handlers; PATCH / PUT: the scenario's handlers; then the leave double
-    const custom = req.method() === 'POST' ? postHandlers[path] : req.method() === 'PATCH' ? opts.patch?.[path] : req.method() === 'PUT' ? putHandlers[path] : undefined;
+    // POST: the portal double + the scenario's own handlers; PATCH / PUT / DELETE: the scenario's handlers; then the leave double
+    const custom = req.method() === 'POST' ? postHandlers[path] : req.method() === 'PATCH' ? opts.patch?.[path] : req.method() === 'PUT' ? putHandlers[path] : req.method() === 'DELETE' ? opts.del?.[path] : undefined;
     if (custom) { const r = custom(body, url); return json(route, r.status ?? 200, r.body); }
     const leaveAnswer = leaveRoute(leave, req.method(), path, body, url);
     if (leaveAnswer) return json(route, leaveAnswer.status ?? 200, leaveAnswer.body);
@@ -672,6 +734,103 @@ export function teamHandlers(): { get: NonNullable<MockBackendOptions['get']>; p
         const b = body as { decision: string; payEffectDays?: number };
         if (b.decision === 'reject') rejected = true;
         return { body: { data: { note: note(), requestStatus: null, terminal: true, charge: { outcome: 'charged_leave', payEffectDays: b.payEffectDays ?? 0, leaveTypeCode: 'AL' } } } };
+      },
+    },
+  };
+}
+
+// ---- HR oversight of attendance reasons (HR portal Prompt 4 / 11) ---------------------------------------------------------------
+export const HR_NOTE_ID = 'cdcdcdcd-cdcd-4dcd-8dcd-000000000001';
+export const HR_NOTE_REQUEST_ID = 'cdcdcdcd-cdcd-4dcd-8dcd-0000000000aa';
+/** The line manager whose seat an HR override fills (the request's level-1 approver). */
+export const NOTE_MANAGER = { userId: 'dddddddd-dddd-4ddd-8ddd-000000000001', userName: 'Khalid Manager' };
+
+/**
+ * Stateful handlers of /attendance/notes seen by HR (organisation-wide oversight): one reason routed to the employee's line
+ * manager, which HR sees as oversight and decides as an override that fills the manager's seat (the note's approval request
+ * says so: decideVia override, one waiting seat). A decided reason leaves the "Waiting" filter, like the real API.
+ */
+export function hrNotesHandlers(opts: { note?: string } = {}): { get: NonNullable<MockBackendOptions['get']>; post: NonNullable<MockBackendOptions['post']>; reviews: unknown[] } {
+  const maryam = employeesFixture[1]!;
+  const text = opts.note ?? 'My child was admitted to hospital overnight';
+  const date = new Date(Date.now() - 2 * 86_400_000).toISOString().slice(0, 10);
+  const reviews: unknown[] = [];
+  let decision: { status: 'approved' | 'excused' | 'rejected'; reason: string | null } | null = null;
+  const note = () => ({
+    id: HR_NOTE_ID, employeeId: maryam.id, attendanceDate: date, category: 'absence_reason', note: text, status: decision?.status ?? 'pending', submittedAt: `${date}T09:30:00Z`,
+    reviewedBy: decision ? USER_ID : null, reviewedByName: decision ? 'Aisha Al Balushi' : null, reviewedAt: decision ? nowIso() : null, reviewReason: decision?.reason ?? null, reviewVia: decision ? 'override' : null,
+    infoRequestMessage: null, infoRequestedAt: null, payEffectDays: null, lossOfPay: false, deductedLeaveTypeCode: null, deductedLeaveTypeName: null,
+    approvalRequestId: HR_NOTE_REQUEST_ID, approvalStatus: decision ? 'APPROVED' : 'PENDING', approvalCurrentStep: 1, approvalStepCount: 1, excusedAt: decision?.status === 'excused' ? nowIso() : null, createdAt: `${date}T09:30:00Z`, updatedAt: nowIso(),
+    employeeName: maryam.displayName, employeeNumber: maryam.employeeNumber, branchId: maryam.branchId, branchName: maryam.branchName, dayStatus: 'ABSENT', dayFlags: [], firstInAt: null, lastOutAt: null, timezone: 'Asia/Muscat',
+    excusedCountYear: decision?.status === 'excused' ? 1 : 0, isOversight: true, canReview: !decision,
+  });
+  const request = (): ApprovalRequestDto => {
+    const base = approvalRequestFixture();
+    const managerSeat = { userId: NOTE_MANAGER.userId, userName: NOTE_MANAGER.userName, viaDelegationOf: null, viaDelegationOfName: null, onBehalfOfUserId: null, onBehalfOfName: null, resolutionPath: 'primary', decision: 'PENDING' as const, decidedAt: null, comment: null };
+    return {
+      ...base, id: HR_NOTE_REQUEST_ID, entityType: 'ATTENDANCE_NOTE', entityId: HR_NOTE_ID, employeeId: maryam.id, employeeName: maryam.displayName, employeeNumber: maryam.employeeNumber, currentStep: 1, stepCount: 1, units: null,
+      steps: [{ ...base.steps[0]!, requestId: HR_NOTE_REQUEST_ID, status: 'PENDING', actedBy: null, actedByName: null, actedAt: null, comment: null, actors: [managerSeat], pendingSeats: [{ userId: NOTE_MANAGER.userId, userName: NOTE_MANAGER.userName }] }],
+      context: { kind: 'ATTENDANCE_NOTE', summary: null, note: { id: HR_NOTE_ID, attendanceDate: date, category: 'absence_reason', note: text, status: 'pending', dayStatus: 'ABSENT', dayFlags: [], excusedCountYear: 0, payEffectDays: null, lossOfPay: false, infoRequestMessage: null } },
+      abilities: { canDecide: true, canCancel: false, canReassign: true, canBypass: true, canRequestInfo: true, canAnswerInfo: false, actingAsDelegateOf: null, decideVia: 'override', mustChooseSeat: false },
+    };
+  };
+  return {
+    reviews,
+    get: {
+      [`/orgs/${ORG_ID}/attendance/notes`]: (url: URL) => {
+        const status = url.searchParams.get('status');
+        const n = note();
+        const open = n.status === 'pending';
+        const keep = url.searchParams.get('open') === 'true' ? open : status ? n.status === status : true;
+        return page(keep ? [n] : []);
+      },
+      [`/orgs/${ORG_ID}/approvals/${HR_NOTE_REQUEST_ID}`]: () => ({ data: request() }),
+    },
+    post: {
+      [`/orgs/${ORG_ID}/attendance/notes/${HR_NOTE_ID}/review`]: (body) => {
+        reviews.push(body);
+        const b = body as { decision: 'approve' | 'excuse' | 'reject' | 'request_info'; reason?: string };
+        if (b.decision !== 'request_info') decision = { status: b.decision === 'approve' ? 'approved' : b.decision === 'excuse' ? 'excused' : 'rejected', reason: b.reason ?? null };
+        return { body: { data: { note: note(), requestStatus: decision ? 'APPROVED' : 'PENDING', terminal: !!decision, charge: null } } };
+      },
+    },
+  };
+}
+
+// ---- the employee's own regularisations (/my/requests, HR portal Prompt 4 / 11) -------------------------------------------------
+export const REGULARISATION_ID = 'efefefef-efef-4fef-8fef-000000000001';
+/**
+ * Stateful /me/regularisations: a request filed in the browser is listed on the next GET (pending, level 1 of 2 — a manager →
+ * HR workflow) and can be withdrawn. The API suite covers the real validation and the approval engine.
+ */
+export function portalRequestsHandlers(): { get: NonNullable<MockBackendOptions['get']>; post: NonNullable<MockBackendOptions['post']>; created: unknown[] } {
+  const created: unknown[] = [];
+  const rows: Array<Record<string, unknown>> = [];
+  const me = `/orgs/${ORG_ID}/me`;
+  return {
+    created,
+    get: {
+      [`${me}/regularisations`]: () => ({ data: [...rows].reverse() }),
+      [`${me}/shift-swaps`]: { data: [] },
+      [`${me}/selfie-checkins`]: { data: [] },
+    },
+    post: {
+      [`${me}/regularisations`]: (body) => {
+        created.push(body);
+        const b = body as { date: string; type: string; reason: string; proposedInAt?: string; proposedOutAt?: string };
+        const row = {
+          id: REGULARISATION_ID, employeeId: PORTAL_EMPLOYEE_ID, attendanceDate: b.date, type: b.type, proposedInAt: b.proposedInAt ?? null, proposedOutAt: b.proposedOutAt ?? null, reason: b.reason, status: 'pending',
+          approvalRequestId: 'efefefef-efef-4fef-8fef-0000000000aa', approvalStatus: 'PENDING', approvalCurrentStep: 1, approvalStepCount: 2, appliedCorrectionId: null, appliedAt: null, decidedByName: null, decidedAt: null, decisionNote: null,
+          createdAt: nowIso(), updatedAt: nowIso(),
+        };
+        rows.push(row);
+        return { status: 201, body: { data: row } };
+      },
+      [`${me}/regularisations/${REGULARISATION_ID}/cancel`]: () => {
+        const row = rows.find((r) => r['id'] === REGULARISATION_ID);
+        if (!row) return { status: 404, body: { code: 'NOT_FOUND', message: 'Regularisation not found', requestId: 'e2e-request' } };
+        Object.assign(row, { status: 'cancelled', approvalStatus: 'CANCELLED', updatedAt: nowIso() });
+        return { body: { data: row } };
       },
     },
   };

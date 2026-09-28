@@ -4,6 +4,7 @@ import { CalendarCheck, CalendarClock, CalendarRange, Hourglass, Wallet } from '
 import type { SelfLeaveBalanceDto, SelfLeaveDto, SelfLeaveRecordDto } from '@flowza/contracts';
 import { Button, Card, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, StatCard, Textarea } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
+import { useLocalName } from '@/lib/local-name';
 import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { toastMutationError } from '@/features/attendance/period-locked';
@@ -106,13 +107,14 @@ export function WithdrawLeaveDialog({ record, onClose }: { record: SelfLeaveReco
 export function LeaveConversationDialog({ record, onClose }: { record: SelfLeaveRecordDto | null; onClose: () => void }) {
   const { t } = useTranslation('leave');
   const { reply } = useSelfLeaveActions();
+  const ln = useLocalName();
   const r = record;
   return (
     <Dialog open={!!r} onOpenChange={(o) => !o && onClose()}>
       <DialogContent size="lg">
         <DialogHeader>
           <DialogTitle>{t('portal.conversationTitle')}</DialogTitle>
-          <DialogDescription>{r ? `${r.leaveTypeName} · ${r.startDate === r.endDate ? fmtDate(r.startDate) : `${fmtDate(r.startDate, 'dd MMM')} → ${fmtDate(r.endDate)}`}` : null}</DialogDescription>
+          <DialogDescription>{r ? `${ln(r.leaveTypeName, r.leaveTypeNameAr)} · ${r.startDate === r.endDate ? fmtDate(r.startDate) : `${fmtDate(r.startDate, 'dd MMM')} → ${fmtDate(r.endDate)}`}` : null}</DialogDescription>
         </DialogHeader>
         {r ? (
           <div className="space-y-4">

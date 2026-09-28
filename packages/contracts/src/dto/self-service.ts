@@ -72,7 +72,14 @@ export interface SelfMonthTotals {
 
 export type SelfDayDto = AttendanceDailyRecordDto & { branchName: string | null; departmentName: string | null };
 
-export interface SelfAttendanceMonthDto { month: string; days: SelfDayDto[]; totals: SelfMonthTotals; leaveByDate: Record<string, { leaveTypeName: string; color: string | null; isHalfDay: boolean }>; holidaysByDate: Record<string, string> }
+export interface SelfAttendanceMonthDto {
+  month: string; days: SelfDayDto[]; totals: SelfMonthTotals;
+  /** `leaveTypeNameAr`: the type's Arabic name, shown in Arabic when the organisation gave one (absent from older API builds). */
+  leaveByDate: Record<string, { leaveTypeName: string; leaveTypeNameAr?: string | null; color: string | null; isHalfDay: boolean }>;
+  holidaysByDate: Record<string, string>;
+  /** The Arabic names of the holidays in `holidaysByDate` that have one (absent from older API builds). */
+  holidaysByDateAr?: Record<string, string>;
+}
 
 export interface SelfLeaveTypeDto {
   id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; color: string | null; annualAllowanceDays: number | null;
@@ -88,6 +95,8 @@ export interface SelfLeaveTypeDto {
 export interface SelfLeaveBalanceDto extends Partial<Omit<LeaveBalanceDto, 'leaveTypeId'>> { leaveTypeId: string; allowanceDays: number | null; usedDays: number; pendingDays: number; remainingDays: number | null }
 export interface SelfLeaveRecordDto {
   id: string; leaveTypeId: string; leaveTypeCode: string; leaveTypeName: string; color: string | null; isPaid: boolean;
+  /** The type's Arabic name, shown in Arabic when the organisation gave one (absent from older API builds). */
+  leaveTypeNameAr?: string | null;
   startDate: string; endDate: string; isHalfDay: boolean; halfDayPart: string | null; days: number;
   reason: string | null; status: LeaveStatus; decisionNote: string | null; approvedByName: string | null; approvedAt: string | null; createdAt: string; updatedAt: string;
   /** The engine request behind the leave (null for leave recorded before the approval engine, or by HR directly without a workflow). */
@@ -143,7 +152,8 @@ export interface SelfOverviewDto {
   today: SelfDayDto | null;
   month: { month: string; totals: SelfMonthTotals };
   recent: SelfDayDto[];
-  balances: Array<SelfLeaveBalanceDto & { name: string; code: string; color: string | null }>;
+  /** `nameAr`: the type's Arabic name (absent from older API builds). */
+  balances: Array<SelfLeaveBalanceDto & { name: string; nameAr?: string | null; code: string; color: string | null }>;
   upcomingLeave: SelfLeaveRecordDto[];
   pendingLeave: number;
   pendingCorrections: number;

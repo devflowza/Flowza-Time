@@ -1,3 +1,4 @@
+import { setTimeout as sleep } from 'node:timers/promises';
 import { sql } from 'kysely';
 import { FINANCE_PIN_KEYS, FINANCE_POLL_MINUTES, FINANCE_PUSH_BATCH_MAX_ATTEMPTS, FINANCE_SYNC_DIRECTIONS, type AttendanceEventType, type FinancePinKey, type FinanceSyncDirection, type VerificationMethod } from '@flowza/contracts';
 import { withContext, type Database, type Trx } from '@flowza/database';
@@ -145,13 +146,36 @@ export function rejectedPunches(sent: number, res: Pick<FinancePushResult, 'inge
  * run (the run spans several transactions and HTTP calls). A second run that finds it taken exits as a no-op. A crashed worker's
  * connection closes and releases the lock.
  */
-async function withConnectorLock<T>(db: Database, deviceId: string, fn: () => Promise<T>): Promise<{ acquired: true; value: T } | { acquired: false }> {
+/**
+ * How long a MANUAL push ("Sync now") waits for a run of the same connector that is already in progress (HR portal Prompt 11,
+ * end-to-end matrix flow 10). The running run's window ended when that run started, so the punches that made somebody press
+ * "Sync now" are not in it: exiting at once reported SUCCESS with nothing pushed and left them for the next scheduled run — up
+ * to the poll interval, 60 minutes at most. Waiting keeps D11's rule (one run per connector at a time, nothing sent twice —
+ * the ledger filters what the first run delivered); the wait is bounded, and a SCHEDULED run still exits at once (the
+ * scheduler plans the next one, and the running run leaves the connector due immediately when it is cut by the batch cap).
+ */
+export const FINANCE_PUSH_MANUAL_WAIT_MS = 120_000;
+const CONNECTOR_LOCK_POLL_MS = 250;
+
+/**
+ * One push per connector at a time: a session-level advisory lock on a dedicated connection, held for the whole run (a crashed
+ * worker's connection releases it). `wait` retries the lock for a bounded time (manual runs); without it a busy lock is
+ * reported at once.
+ */
+async function withConnectorLock<T>(db: Database, deviceId: string, fn: () => Promise<T>, wait: { ms: number; signal: AbortSignal } | null = null): Promise<{ acquired: true; value: T; waitedMs: number } | { acquired: false; waitedMs: number }> {
   const key = `finance-push:${deviceId}`;
   return db.connection().execute(async (conn) => {
-    const got = await sql<{ locked: boolean }>`select pg_try_advisory_lock(hashtextextended(${key}, 0)) as locked`.execute(conn);
-    if (got.rows[0]?.locked !== true) return { acquired: false as const };
+    const started = Date.now();
+    for (;;) {
+      const got = await sql<{ locked: boolean }>`select pg_try_advisory_lock(hashtextextended(${key}, 0)) as locked`.execute(conn);
+      if (got.rows[0]?.locked === true) break;
+      const left = wait ? started + wait.ms - Date.now() : 0;
+      if (left <= 0 || wait?.signal.aborted) return { acquired: false as const, waitedMs: Date.now() - started };
+      await sleep(Math.min(CONNECTOR_LOCK_POLL_MS, left), undefined, { signal: wait!.signal }).catch(() => undefined);
+    }
+    const waitedMs = Date.now() - started;
     try {
-      return { acquired: true as const, value: await fn() };
+      return { acquired: true as const, value: await fn(), waitedMs };
     } finally {
       await sql`select pg_advisory_unlock(hashtextextended(${key}, 0))`.execute(conn).catch(() => undefined);
     }
@@ -183,10 +207,13 @@ export async function pushAttendance(ctx: JobContext) {
       if (settings.direction === 'pull') return { skip: 'direction_pull' as const };
       const built = await buildProviderContext(trx, deps, device, ctx.job.id, ctx.signal, { log, provider });
       await ensureFinanceState(trx, device);
-      return { skip: null, device, settings, built: { ...built, provider } };
+      // who asked: "Sync now" (MANUAL) waits for a run in progress, anything else exits at once (FINANCE_PUSH_MANUAL_WAIT_MS)
+      const trigger = (await trx.selectFrom('syncJobs').select('trigger').where('id', '=', item.syncJobId).executeTakeFirst())?.trigger ?? null;
+      return { skip: null, device, settings, trigger, built: { ...built, provider } };
     });
     if (prep.skip) return { result: { skipped: prep.skip, direction: 'pull' } };
     const { device, settings, built } = prep;
+    const lockWait = prep.trigger === 'MANUAL' ? { ms: num(payload.options['lockWaitMs'], FINANCE_PUSH_MANUAL_WAIT_MS, 0, 10 * 60_000), signal: ctx.signal } : null;
     const generation = device.generation;
     const inDevice = <T>(fn: (trx: Trx) => Promise<T>) => sys(device.organizationId, fn);
     try {
@@ -202,10 +229,14 @@ export async function pushAttendance(ctx: JobContext) {
         });
         if (!start.circuit.allow) throw circuitOpenError(start.circuit.halfOpenAt, deps.now());
         return runPush(start.st ?? { position: null, retryEventId: null, retryAttempts: 0, upper: new Date().toISOString() });
-      });
+      }, lockWait);
       if (!locked.acquired) {
-        log.info(event('finance_push_already_running', { deviceId: device.id }));
-        return { result: { skipped: 'already_running' } };
+        log.info(event('finance_push_already_running', { deviceId: device.id, trigger: prep.trigger, waitedMs: locked.waitedMs }));
+        return { result: { skipped: 'already_running', ...(lockWait ? { waitedMs: locked.waitedMs } : {}) } };
+      }
+      if (locked.waitedMs >= CONNECTOR_LOCK_POLL_MS) {
+        log.info(event('finance_push_waited_for_running_push', { deviceId: device.id, waitedMs: locked.waitedMs }));
+        return { ...locked.value, result: { ...locked.value.result, waitedMs: locked.waitedMs } };
       }
       return locked.value;
     } finally {

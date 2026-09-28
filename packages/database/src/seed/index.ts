@@ -177,6 +177,11 @@ async function seedEmployees(db: Database, rng: Prng, ids: Ids, today: string): 
   const lineManagerUser = ids.users['manager@albahja.example']!;
   await db.updateTable('employees').set({ userId: lineManagerUser, displayName: 'Nasser Al Maskari', firstName: 'Nasser', lastName: 'Al Maskari' }).where('id', '=', lineManager.id).execute();
   await db.updateTable('orgMemberships').set({ employeeId: lineManager.id }).where('userId', '=', lineManagerUser).execute();
+  // the self-service login reports to the line-manager login, as on the hosted demo tenant (Priya → manager@flowza.ai): the
+  // portal's approval flows (reasons, regularisations, leave, swaps) then reach a manager who can sign in — the end-to-end
+  // matrix (scripts/e2e-hosted) drives them with these two logins. No random draw is consumed, so the rest is unchanged.
+  await db.updateTable('employees').set({ managerEmployeeId: lineManager.id, secondaryManagerEmployeeId: null }).where('id', '=', target.id).execute();
+  await db.updateTable('employmentHistory').set({ managerEmployeeId: lineManager.id }).where('employeeId', '=', target.id).where('effectiveTo', 'is', null).execute();
   return rows;
 }
 
