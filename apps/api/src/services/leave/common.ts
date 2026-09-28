@@ -95,6 +95,9 @@ export interface EvaluatedLeave {
   compOff: boolean;
 }
 
+/** Days in a message: "3", "0.5" (as the domain's rule messages write them). */
+const fmtDays = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(1));
+
 export interface EvaluateLeaveInput {
   employee: LeaveEmployee;
   leaveTypeId: string;
@@ -140,8 +143,14 @@ export async function evaluateLeaveRequest(trx: Trx, orgId: string, input: Evalu
       availableAfterPendingDays: available,
     });
     if (result.errors.length) {
-      const first = result.errors[0]!;
-      throw errors.validation(first.message, { issues: result.errors.map((e) => ({ path: e.path, message: e.message, code: e.code, params: e.params })) });
+      // comp-off: when credits usable today do not reach these dates, say why (they expire before the leave), rather than
+      // leave the employee comparing "0 available" with the balance their comp-off card shows
+      const today0 = compOff && balance ? balance.availableAfterPendingDays : null;
+      const issues = result.errors.map((e) => (e.code === 'COMP_OFF_BALANCE' && today0 !== null && today0 > (available ?? 0)
+        ? { ...e, message: `Not enough comp-off credit for these dates: ${fmtDays(Math.max(0, available ?? 0))} day(s) of your credits are still valid on them (${fmtDays(today0)} available today — the rest expire before the leave), this request needs ${fmtDays(days)}.`, params: { ...e.params, availableToday: today0 } }
+        : e));
+      const first = issues[0]!;
+      throw errors.validation(first.message, { issues: issues.map((e) => ({ path: e.path, message: e.message, code: e.code, params: e.params })) });
     }
     return { type, days, warnings: result.warnings.map((w) => ({ code: w.code, message: w.message, params: w.params })), balance, today, compOff };
   });

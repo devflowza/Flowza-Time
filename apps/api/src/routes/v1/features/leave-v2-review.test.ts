@@ -358,6 +358,8 @@ describe('7-P2-4 comp-off credits pay only for leave dated on or before their ex
     const late = await h.request('POST', `${base()}/me/leave`, { token: f.employeeUser, body: { leaveTypeId: T['CO'], ...range, reason: 'Comp-off' } });
     expect(late.status).toBe(400);
     expect(codes(late.body)).toContain('COMP_OFF_BALANCE');
+    // the answer says why: the credit usable today expires before the leave
+    expect(late.body.message).toBe('Not enough comp-off credit for these dates: 0 day(s) of your credits are still valid on them (1 available today — the rest expire before the leave), this request needs 1.');
     // a credit valid through the date pays for it
     await h.admin.updateTable('compOffCredits').set({ expiresOn: range.startDate }).where('employeeId', '=', f.e1).where('status', '=', 'approved').execute();
     const ok = await h.request('POST', `${base()}/me/leave`, { token: f.employeeUser, body: { leaveTypeId: T['CO'], ...range, reason: 'Comp-off' } });
