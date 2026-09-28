@@ -1,25 +1,19 @@
 import type { ApprovalContextDto } from '@flowza/contracts';
-import { COMP_OFF_SYSTEM_KEY, consumeCompOffCredits, emitDomainEvent, loadLeaveBalances, loadLeaveTypePolicies, loadWorkingCalendars, releaseCompOffCredits, type Trx } from '@flowza/database';
-import { countLeaveDays, countLeaveDaysByMode, type WorkingCalendar } from '@flowza/domain';
+import { COMP_OFF_SYSTEM_KEY, compOffLeaveDemand, consumeCompOffCredits, emitDomainEvent, loadLeaveBalances, loadLeaveTypePolicies, loadWorkingCalendars, releaseCompOffCredits, type Trx } from '@flowza/database';
+import { countLeaveDaysByMode, type WorkingCalendar } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../../deps.js';
 import { hasPermission } from '../../../lib/authorize.js';
 import { isoDate } from '../../../lib/mappers.js';
 import { enqueueRecalculation, orgToday } from '../../features/recalc.js';
-import type { EntityHook, HookContext } from './index.js';
+import type { EntityHook, HookContext, InfoClosedContext } from './index.js';
 
 /**
- * The working calendar of one employee (same precedence as the engine and the portal: employee → branch → organisation
- * weekly offs; the branch's holiday calendar, else the default one; branch-limited holidays honoured). System scope.
+ * The working calendar of one employee — the per-date working calendar the attendance engine uses (leave v2 review P1-1 /
+ * P1-2: the branch in force on each date, its weekly offs and holiday calendar, rotation off days). System scope.
  */
 export async function leaveWorkingCalendar(trx: Trx, orgId: string, employeeId: string, from: string, to: string): Promise<WorkingCalendar> {
   return (await loadWorkingCalendars(trx, orgId, [employeeId], from, to)).get(employeeId) ?? { weeklyOffDays: [], holidays: new Set() };
-}
-
-/** Units of a leave request for tiers and balances: working days charged (half day = 0.5). */
-export async function leaveUnits(trx: Trx, orgId: string, employeeId: string, range: { startDate: string; endDate: string; isHalfDay: boolean }): Promise<number> {
-  const cal = await leaveWorkingCalendar(trx, orgId, employeeId, range.startDate, range.endDate);
-  return countLeaveDays(range, cal);
 }
 
 async function subjectUser(trx: Trx, orgId: string, employeeId: string): Promise<string | null> {
@@ -30,20 +24,16 @@ async function subjectUser(trx: Trx, orgId: string, employeeId: string): Promise
 const UNDECIDED = ['PENDING', 'INFO_REQUESTED'] as const;
 
 /**
- * Consume the comp-off credits of an approved comp-off leave (earliest expiry first). A shortfall — credits expired or
- * were used since the request was filed — refuses the approval: a comp-off leave never overdraws (Finance B-60).
+ * Consume the comp-off credits of an approved comp-off leave (earliest expiry first; review P2-4: each date of the leave
+ * only from a credit still valid on that date). A shortfall — credits expired, were used since the request was filed, or
+ * expire before the leave — refuses the approval: a comp-off leave never overdraws (Finance B-60).
  */
 async function consumeForLeave(trx: Trx, orgId: string, l: { id: string; employeeId: string; leaveTypeId: string; startDate: Date | string; endDate: Date | string; isHalfDay: boolean; days: unknown }): Promise<void> {
   const type = await trx.selectFrom('leaveTypes').select(['systemKey', 'countMode']).where('id', '=', l.leaveTypeId).executeTakeFirst();
   if (type?.systemKey !== COMP_OFF_SYSTEM_KEY) return;
-  const today = await orgToday(trx, orgId);
-  let days = l.days === null || l.days === undefined ? null : Number(l.days);
-  if (days === null) {
-    const range = { startDate: isoDate(l.startDate), endDate: isoDate(l.endDate), isHalfDay: l.isHalfDay };
-    days = countLeaveDaysByMode(range, await leaveWorkingCalendar(trx, orgId, l.employeeId, range.startDate, range.endDate), type.countMode === 'calendar' ? 'calendar' : 'working');
-  }
-  const res = await consumeCompOffCredits(trx, { organizationId: orgId, employeeId: l.employeeId, leaveRecordId: l.id, days, asOf: today });
-  if (res.shortfallDays > 0) throw errors.conflict(`Not enough comp-off credit to approve this leave: ${res.shortfallDays} day(s) are missing (credits expired or were used since it was requested).`, { shortfallDays: res.shortfallDays });
+  const demand = await compOffLeaveDemand(trx, orgId, { employeeId: l.employeeId, startDate: isoDate(l.startDate), endDate: isoDate(l.endDate), isHalfDay: l.isHalfDay, days: l.days === null || l.days === undefined ? null : Number(l.days) }, type.countMode === 'calendar' ? 'calendar' : 'working');
+  const res = await consumeCompOffCredits(trx, { organizationId: orgId, employeeId: l.employeeId, leaveRecordId: l.id, demand });
+  if (res.shortfallDays > 0) throw errors.conflict(`Not enough comp-off credit to approve this leave: ${res.shortfallDays} day(s) are missing (credits expired, were used since it was requested, or expire before the leave's dates).`, { shortfallDays: res.shortfallDays });
 }
 
 /**
@@ -135,6 +125,16 @@ export const leaveHook: EntityHook = {
       payload: { userIds, employeeId: l.employeeId, leaveRecordId: l.id, approvalRequestId: ctx.requestId, leaveTypeName: type?.name ?? null, startDate: isoDate(l.startDate), endDate: isoDate(l.endDate), question },
       actorUserId: ctx.actor.userId, requestId: ctx.actor.requestId,
     });
+  },
+  /**
+   * Review P2-3: the level that asked the question was decided and the request moved on (the engine cleared the open
+   * question) — the leave returns from INFO_REQUESTED to PENDING, and the thread says why, so the next level sees a request
+   * waiting for them and the employee is not asked a question nobody is waiting on.
+   */
+  async onInfoClosed(trx: Trx, ctx: InfoClosedContext) {
+    const l = await trx.updateTable('leaveRecords').set({ status: 'PENDING' }).where('organizationId', '=', ctx.orgId).where('id', '=', ctx.entityId).where('status', '=', 'INFO_REQUESTED').returning('id').executeTakeFirst();
+    if (!l) return;
+    await trx.insertInto('leaveRequestComments').values({ organizationId: ctx.orgId, leaveRecordId: l.id, authorUserId: ctx.actorUserId, body: `Level ${ctx.fromStepNo} was approved, so its question is closed; the request moved to level ${ctx.stepNo}.`, kind: 'system' }).execute();
   },
   async onInfoAnswered(_deps: ApiDeps, trx: Trx, ctx: HookContext) {
     const exists = await trx.selectFrom('leaveRecords').select('id').where('organizationId', '=', ctx.orgId).where('id', '=', ctx.entityId).executeTakeFirst();

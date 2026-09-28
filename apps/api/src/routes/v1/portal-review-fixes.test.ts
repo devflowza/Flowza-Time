@@ -413,6 +413,27 @@ describe('4-P1-5 editing a reason sends it back for review', () => {
   });
 });
 
+describe('integration: a note whose level is approved over an open question', () => {
+  let g: OrgFixture;
+  beforeAll(async () => { g = await seedOrg(h.admin, 'noteclose'); });
+  it('7-P2-3 (notes) the request moves on without the question and the note is pending again, not waiting on an answer', async () => {
+    const wf = await createWorkflow(g, 'ATTENDANCE_NOTE', [{ order: 1, approverType: 'MANAGER' }, { order: 2, approverType: 'HR_ADMIN' }]);
+    try {
+      const d = isoToday(-23);
+      await seedDay(g.orgId, g.e1, g.branchA, d, 'ABSENT');
+      const r = await note(g, d, { note: 'I was stuck at the border crossing' });
+      const id = r.body.data.id as string;
+      const [req] = await requestsOf(id);
+      expect((await h.request('POST', `${base(g.orgId)}/approvals/${req!.id}/request-info`, { token: g.managerUser, body: { comment: 'Which crossing?' } })).status).toBe(200);
+      expect((await h.admin.selectFrom('attendanceNotes').select('status').where('id', '=', id).executeTakeFirstOrThrow()).status).toBe('info_requested');
+      expect((await decide(g.orgId, req!.id, { stepNo: 1, decision: 'APPROVE' }, g.managerUser)).status).toBe(200);
+      const after = await h.admin.selectFrom('approvalRequests').select(['status', 'currentStep', 'infoRequestedAt']).where('id', '=', req!.id).executeTakeFirstOrThrow();
+      expect([after.status, after.currentStep, after.infoRequestedAt]).toEqual(['PENDING', 2, null]);
+      expect((await h.admin.selectFrom('attendanceNotes').select('status').where('id', '=', id).executeTakeFirstOrThrow()).status).toBe('pending');
+    } finally { await dropWorkflow(g, wf); }
+  });
+});
+
 // ----- seat choice on the note review ---------------------------------------------------------------------------------------------------
 
 describe('4-seat-choice the HR note review names the seat an override fills (engine §9.8)', () => {

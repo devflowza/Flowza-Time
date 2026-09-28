@@ -1,8 +1,8 @@
 import { DateTime } from 'luxon';
 import type { EmployeeLeaveBalancesDto, LeaveAllocationDto, LeaveAllocationGenerateResultDto, LeaveAllocationListQuery, LeaveAllocationRowInput, LeaveAllocationUpsertResultDto, LeaveBalancesQuery, LeaveCalendarDto, LeaveCalendarQuery, LeaveYearCloseQueuedDto } from '@flowza/contracts';
 import { LEAVE_YEAR_CLOSE_JOB_TYPE, leaveYearCloseDedupeKey, loadLeaveBalances, loadLeaveTypePolicies, type Trx } from '@flowza/database';
-import { clampToYear, leaveTypeApplies, prorateAllowance } from '@flowza/domain';
-import { errors } from '@flowza/shared';
+import { clampToYear, leaveTypeAppliesTo, prorateAllowance } from '@flowza/domain';
+import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireAnyPermission, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
@@ -12,7 +12,7 @@ import { toCsvDocument } from '../../lib/csv.js';
 import { enqueueJob } from '../../lib/jobs.js';
 import { orgToday } from '../features/recalc.js';
 import { dv } from '../features/sql-helpers.js';
-import { isCompOffType, toBalanceDto } from './common.js';
+import { isCompOffType, leaveDaysOf, ownRowWrite, toBalanceDto } from './common.js';
 
 /**
  * HR leave balances and allocations (leave v2, HR portal Prompt 7): the allocation rows HR keeps per employee × type × year
@@ -92,6 +92,13 @@ export async function upsertAllocations(deps: ApiDeps, actor: Actor, orgId: stri
       else if (isCompOffType(t)) issues.push({ path: `rows.${i}.leaveTypeId`, message: 'Comp-off is balanced from its credits, not allocations' });
     });
     if (issues.length) throw errors.validation('Some allocation rows are invalid.', { issues });
+    // review P0-2: nobody allocates leave to themselves; the organisation owner is the one exception (logged)
+    const isOwner = grant.roleKey === 'owner';
+    const own = (employeeId: string) => !!grant.employeeId && grant.employeeId === employeeId;
+    if (!isOwner) {
+      input.rows.forEach((r, i) => { if (own(r.employeeId)) issues.push({ path: `rows.${i}.employeeId`, message: 'Your own allocation: another HR user sets it' }); });
+      if (issues.length) throw new AppError('FORBIDDEN', 'You cannot set your own leave allocation; ask another HR user.', { details: { issues } });
+    }
     const existing = await trx.selectFrom('leaveAllocations').selectAll().where('organizationId', '=', orgId).where('employeeId', 'in', employeeIds).where('year', 'in', [...new Set(input.rows.map((r) => r.year))]).execute();
     const existingByKey = new Map(existing.map((a) => [keyOf(a), a]));
     let created = 0; let updated = 0; let unchanged = 0;
@@ -100,19 +107,23 @@ export async function upsertAllocations(deps: ApiDeps, actor: Actor, orgId: stri
       const values = allocationValues(r);
       const before = existingByKey.get(keyOf(r));
       const branchId = empById.get(r.employeeId)!.branchId;
+      // the owner's own row: in the system context (the database refuses it from their session), audited as the exception
+      const write = <T,>(fn: (t: Trx) => Promise<T>): Promise<T> => ownRowWrite(trx, orgId, own(r.employeeId), fn);
+      let changedId: string | null = null;
       if (before) {
         ids.push(before.id);
         const old = comparable(before);
         if (JSON.stringify(old) === JSON.stringify(comparable(values))) { unchanged += 1; continue; }
-        await trx.updateTable('leaveAllocations').set({ ...values, branchId, updatedBy: actor.userId }).where('id', '=', before.id).execute();
+        await write((t) => t.updateTable('leaveAllocations').set({ ...values, branchId, updatedBy: actor.userId }).where('id', '=', before.id).execute());
         await audit(trx, actor, orgId, 'leave_allocation.updated', 'leave_allocation', { entityId: before.id, branchId, oldValue: { ...old, employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, year: r.year }, newValue: { ...comparable(values), employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, year: r.year } });
-        updated += 1;
+        updated += 1; changedId = before.id;
       } else {
-        const row = await trx.insertInto('leaveAllocations').values({ organizationId: orgId, employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, branchId, year: r.year, ...values, createdBy: actor.userId, updatedBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
+        const row = await write((t) => t.insertInto('leaveAllocations').values({ organizationId: orgId, employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, branchId, year: r.year, ...values, createdBy: actor.userId, updatedBy: actor.userId }).returning('id').executeTakeFirstOrThrow());
         ids.push(row.id);
         await audit(trx, actor, orgId, 'leave_allocation.created', 'leave_allocation', { entityId: row.id, branchId, newValue: { ...comparable(values), employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, year: r.year } });
-        created += 1;
+        created += 1; changedId = row.id;
       }
+      if (own(r.employeeId)) await audit(trx, actor, orgId, 'leave.sod_owner_bypass', 'leave_allocation', { entityId: changedId, branchId, newValue: { action: 'allocate', employeeId: r.employeeId, leaveTypeId: r.leaveTypeId, year: r.year }, reason: 'the organisation owner set their own leave allocation' });
     }
     const rows = (await allocationQuery(trx, orgId).select(ALLOCATION_COLUMNS).where('a.id', 'in', ids).orderBy('e.displayName').orderBy('t.name').execute()) as AllocationRow[];
     return { created, updated, unchanged, allocations: rows.map(toAllocationDto) };
@@ -133,35 +144,46 @@ export async function generateAllocations(deps: ApiDeps, actor: Actor, orgId: st
       if (unknown.length) throw errors.validation('Unknown, archived or comp-off leave types.', { issues: unknown.map((id) => ({ path: 'leaveTypeIds', message: `Not allocatable: ${id}` })) });
     }
     const types = all.filter((t) => !isCompOffType(t) && t.annualAllowanceDays !== null && (!input.leaveTypeIds || input.leaveTypeIds.includes(t.id)));
-    let q = trx.selectFrom('employees').select(['id', 'branchId', 'gender', 'joiningDate']).where('organizationId', '=', orgId).where('deletedAt', 'is', null)
+    let q = trx.selectFrom('employees').select(['id', 'branchId', 'gender', 'employmentType', 'joiningDate']).where('organizationId', '=', orgId).where('deletedAt', 'is', null)
       .where('employmentStatus', 'not in', ['resigned', 'terminated']).where('joiningDate', '<=', dv(`${input.year}-12-31`))
       .where((eb) => eb.or([eb('exitDate', 'is', null), eb('exitDate', '>=', dv(`${input.year}-01-01`))]));
     if (!grant.allBranches) q = q.where('branchId', 'in', grant.branchIds.length ? grant.branchIds : ['00000000-0000-0000-0000-000000000000']);
     const employees = await q.execute();
     if (!types.length || !employees.length) return { year: input.year, created: 0, skipped: 0, employees: employees.length, leaveTypes: types.length };
     const existing = new Set((await trx.selectFrom('leaveAllocations').select(['employeeId', 'leaveTypeId']).where('organizationId', '=', orgId).where('year', '=', input.year).where('leaveTypeId', 'in', types.map((t) => t.id)).execute()).map((a) => `${a.employeeId}|${a.leaveTypeId}`));
-    const values: Array<{ organizationId: string; employeeId: string; leaveTypeId: string; branchId: string; year: number; allocatedDays: number; notes: string; createdBy: string; updatedBy: string }> = [];
-    let skipped = 0;
+    type NewAllocation = { organizationId: string; employeeId: string; leaveTypeId: string; branchId: string; year: number; allocatedDays: number; notes: string; createdBy: string; updatedBy: string };
+    const values: NewAllocation[] = [];
+    const ownValues: NewAllocation[] = [];
+    // review P0-2: nobody allocates leave to themselves — the caller's own rows are left for another HR user (counted in
+    // `skippedOwn`); the organisation owner is the one exception, written in the system context and logged
+    const isOwner = grant.roleKey === 'owner';
+    let skipped = 0; let skippedOwn = 0;
     for (const e of employees) {
+      const own = !!grant.employeeId && grant.employeeId === e.id;
       for (const t of types) {
-        if (existing.has(`${e.id}|${t.id}`) || !leaveTypeApplies(t.applicableGender, e.gender)) { skipped += 1; continue; }
-        values.push({ organizationId: orgId, employeeId: e.id, leaveTypeId: t.id, branchId: e.branchId, year: input.year, allocatedDays: prorateAllowance(t.annualAllowanceDays!, input.year, isoDate(e.joiningDate)), notes: 'Generated from the yearly allowance', createdBy: actor.userId, updatedBy: actor.userId });
+        // the one applicability rule (review P1-3): gender and employment type
+        if (existing.has(`${e.id}|${t.id}`) || !leaveTypeAppliesTo(t, e)) { skipped += 1; continue; }
+        if (own && !isOwner) { skipped += 1; skippedOwn += 1; continue; }
+        (own ? ownValues : values).push({ organizationId: orgId, employeeId: e.id, leaveTypeId: t.id, branchId: e.branchId, year: input.year, allocatedDays: prorateAllowance(t.annualAllowanceDays!, input.year, isoDate(e.joiningDate)), notes: 'Generated from the yearly allowance', createdBy: actor.userId, updatedBy: actor.userId });
       }
     }
+    const insert = (t: Trx, rows: NewAllocation[]) => t.insertInto('leaveAllocations').values(rows).onConflict((oc) => oc.columns(['organizationId', 'employeeId', 'leaveTypeId', 'year']).doNothing()).returning('id').execute();
     let created = 0;
-    for (let i = 0; i < values.length; i += 500) {
-      const res = await trx.insertInto('leaveAllocations').values(values.slice(i, i + 500)).onConflict((oc) => oc.columns(['organizationId', 'employeeId', 'leaveTypeId', 'year']).doNothing()).returning('id').execute();
+    for (let i = 0; i < values.length; i += 500) created += (await insert(trx, values.slice(i, i + 500))).length;
+    if (ownValues.length) {
+      const res = await ownRowWrite(trx, orgId, true, (t) => insert(t, ownValues));
       created += res.length;
+      if (res.length) await audit(trx, actor, orgId, 'leave.sod_owner_bypass', 'leave_allocation', { newValue: { action: 'generate', employeeId: grant.employeeId, year: input.year, allocationIds: res.map((r) => r.id) }, reason: 'the organisation owner generated their own leave allocation' });
     }
-    skipped += values.length - created;
-    await audit(trx, actor, orgId, 'leave_allocation.generated', 'leave_allocation', { newValue: { year: input.year, created, skipped, employees: employees.length, leaveTypes: types.map((t) => t.code) } });
-    return { year: input.year, created, skipped, employees: employees.length, leaveTypes: types.length };
+    skipped += values.length + ownValues.length - created;
+    await audit(trx, actor, orgId, 'leave_allocation.generated', 'leave_allocation', { newValue: { year: input.year, created, skipped, skippedOwn, employees: employees.length, leaveTypes: types.map((t) => t.code) } });
+    return { year: input.year, created, skipped, employees: employees.length, leaveTypes: types.length, ...(skippedOwn ? { skippedOwn } : {}) };
   });
 }
 
 // ----- balances ------------------------------------------------------------------------------------------------------------------
 
-type EmployeeRow = { id: string; employeeNumber: string; displayName: string; branchId: string | null; departmentId: string | null; joiningDate: Date | string; gender: string };
+type EmployeeRow = { id: string; employeeNumber: string; displayName: string; branchId: string | null; departmentId: string | null; joiningDate: Date | string; gender: string; employmentType: string };
 
 function employeeQuery(trx: Trx, orgId: string, grant: ReturnType<typeof requirePermission>, q: Pick<LeaveBalancesQuery, 'branchId' | 'employeeId' | 'departmentId' | 'search'>) {
   const scope = branchFilter(grant, q.branchId);
@@ -172,7 +194,7 @@ function employeeQuery(trx: Trx, orgId: string, grant: ReturnType<typeof require
   if (q.search) { const like = likeContains(q.search); base = base.where((eb) => eb.or([eb('e.displayName', 'ilike', like), eb('e.employeeNumber', 'ilike', like)])); }
   return base;
 }
-const EMPLOYEE_COLUMNS = ['e.id', 'e.employeeNumber', 'e.displayName', 'e.branchId', 'e.departmentId', 'e.joiningDate', 'e.gender'] as const;
+const EMPLOYEE_COLUMNS = ['e.id', 'e.employeeNumber', 'e.displayName', 'e.branchId', 'e.departmentId', 'e.joiningDate', 'e.gender', 'e.employmentType'] as const;
 
 /** Balances of a page of employees: one row per employee, one balance per active type that applies to them (or that they used). */
 async function balancesFor(trx: Trx, orgId: string, rows: EmployeeRow[], year: number | undefined): Promise<EmployeeLeaveBalancesDto[]> {
@@ -187,7 +209,7 @@ async function balancesFor(trx: Trx, orgId: string, rows: EmployeeRow[], year: n
       return {
         employeeId: e.id, employeeNumber: e.employeeNumber, employeeName: e.displayName, branchId: e.branchId, departmentId: e.departmentId, joiningDate: isoDate(e.joiningDate), year: y, asOf: clampToYear(today, y),
         balances: types.map((type, i) => ({ type, b: list[i]! }))
-          .filter(({ type, b }) => !!b && (leaveTypeApplies(type.applicableGender, e.gender) || b.takenDays > 0 || b.pendingDays > 0))
+          .filter(({ type, b }) => !!b && (leaveTypeAppliesTo(type, e) || b.takenDays > 0 || b.pendingDays > 0))
           .map(({ type, b }) => toBalanceDto(type, b)),
       };
     });
@@ -269,12 +291,15 @@ export async function leaveCalendar(deps: ApiDeps, actor: Actor, orgId: string, 
     const truncated = employeeRows.length > LEAVE_CALENDAR_MAX_EMPLOYEES;
     const employees = employeeRows.slice(0, LEAVE_CALENDAR_MAX_EMPLOYEES);
     const entries = employees.length ? await base.where('l.employeeId', 'in', employees.map((e) => e.id))
-      .select(['l.id', 'l.employeeId', 'e.displayName', 'e.employeeNumber', 'l.leaveTypeId', 't.name as leaveTypeName', 't.code as leaveTypeCode', 't.color', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.days', 'l.status'])
+      .select(['l.id', 'l.employeeId', 'e.displayName', 'e.employeeNumber', 'l.leaveTypeId', 't.name as leaveTypeName', 't.code as leaveTypeCode', 't.color', 't.countMode', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.days', 'l.status'])
       .orderBy('l.startDate').orderBy('l.id').execute() : [];
+    // review P2-8: days computed on read for leave stored without them (as the balances count them), and the days inside
+    // this month — the calendar's totals sum `daysInPeriod`, never the full days of a leave that merely overlaps the month
+    const days = await leaveDaysOf(trx, orgId, entries, { from, to });
     return {
       month: q.month, from, to, truncated,
       employees: employees.map((e) => ({ employeeId: e.id, employeeName: e.displayName, employeeNumber: e.employeeNumber, branchId: e.branchId, departmentId: e.departmentId })),
-      entries: entries.map((r) => ({ id: r.id, employeeId: r.employeeId, employeeName: r.displayName, employeeNumber: r.employeeNumber, leaveTypeId: r.leaveTypeId, leaveTypeName: r.leaveTypeName, leaveTypeCode: String(r.leaveTypeCode), color: r.color, startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isHalfDay: r.isHalfDay, halfDayPart: r.halfDayPart, days: r.days === null ? null : Number(r.days), status: r.status })),
+      entries: entries.map((r) => ({ id: r.id, employeeId: r.employeeId, employeeName: r.displayName, employeeNumber: r.employeeNumber, leaveTypeId: r.leaveTypeId, leaveTypeName: r.leaveTypeName, leaveTypeCode: String(r.leaveTypeCode), color: r.color, startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isHalfDay: r.isHalfDay, halfDayPart: r.halfDayPart, days: days.get(r.id)?.days ?? null, daysInPeriod: days.get(r.id)?.daysInPeriod ?? 0, status: r.status })),
     };
   });
 }

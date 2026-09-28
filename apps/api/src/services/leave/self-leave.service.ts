@@ -1,6 +1,6 @@
 import type { CompOffBalanceDto, LeaveWarningDto, SelfLeaveBalanceDto, SelfLeaveDto, SelfLeaveEditInput, SelfLeaveRecordDto, SelfLeaveRequestInput, SelfLeaveTotalsDto, SelfLeaveTypeDto, TeamLeaveDto } from '@flowza/contracts';
-import { COMP_OFF_SYSTEM_KEY, emitDomainEvent, loadLeaveBalances, loadLeaveTypePolicies, loadWorkingCalendars, type LeaveTypePolicy, type Trx } from '@flowza/database';
-import { clampToYear, countLeaveDaysByMode, leaveTypeApplies, type LeaveBalance, type MembershipGrant, type WorkingCalendar } from '@flowza/domain';
+import { COMP_OFF_SYSTEM_KEY, emitDomainEvent, loadEmployeeWorkingCalendars, loadLeaveBalances, loadLeaveTypePolicies, loadWorkingCalendars, type LeaveTypePolicy, type Trx } from '@flowza/database';
+import { clampToYear, countLeaveDaysByMode, leaveTypeAppliesTo, type LeaveBalance, type MembershipGrant, type WorkingCalendar } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { hasPermission, requireAnyPermission, requireMembership } from '../../lib/authorize.js';
@@ -10,7 +10,7 @@ import { orgToday } from '../features/recalc.js';
 import { dv } from '../features/sql-helpers.js';
 import { systemStep } from '../features/context.js';
 import { answerInfo, cancelForEntity, submit } from '../approvals/engine.js';
-import { assertNoOverlap, checkLeaveRangeLock, evaluateLeaveRequest, isCompOffType, loadLeaveEmployee, toBalanceDto, type LeaveEmployee } from './common.js';
+import { assertNoOverlap, checkLeaveRangeLock, evaluateLeaveRequest, isCompOffType, leaveDaysOf, loadLeaveEmployee, lockEmployeeLeave, toBalanceDto, type LeaveEmployee } from './common.js';
 import { UNDECIDED_LEAVE, recalcLeaveRange, resubmitLeave } from './lifecycle.js';
 
 /**
@@ -116,21 +116,28 @@ export interface LeaveView {
   compOffType: LeaveTypePolicy | null;
   balances: Map<string, LeaveBalance>;
   calendar: WorkingCalendar;
+  /** The calendar's window (the year and the next) and — review P1-1 / P1-2 — its non-working dates by the per-date calendar. */
+  calendarFrom: string;
+  calendarTo: string;
+  offDates: () => string[];
 }
 
 /** Types, balances (the one balance function) and the working calendar of one employee for a year (system scope). */
-export async function loadLeaveView(trx: Trx, orgId: string, emp: Pick<LeaveEmployee, 'id' | 'gender'>, year?: number): Promise<LeaveView> {
+export async function loadLeaveView(trx: Trx, orgId: string, emp: Pick<LeaveEmployee, 'id' | 'gender' | 'employmentType'>, year?: number): Promise<LeaveView> {
   return withSystemScope(trx, orgId, async (t) => {
     const today = await orgToday(t, orgId);
     const y = year ?? Number(today.slice(0, 4));
     const types = await loadLeaveTypePolicies(t, orgId);
     const compOffType = types.find(isCompOffType) ?? null;
-    const offered = types.filter((x) => !isCompOffType(x) && x.portalVisible && leaveTypeApplies(x.applicableGender, emp.gender));
+    // review P1-3: the one applicability rule (gender and employment type) — the API refuses the others with NOT_APPLICABLE
+    const offered = types.filter((x) => !isCompOffType(x) && x.portalVisible && leaveTypeAppliesTo(x, emp));
     const balanceTypes = compOffType ? [...offered, compOffType] : offered;
     const computed = (await loadLeaveBalances(t, orgId, [emp.id], { year: y, asOf: today, types: balanceTypes })).get(emp.id) ?? [];
     // next year's calendar too: a request made in December often ends in January
-    const calendar = (await loadWorkingCalendars(t, orgId, [emp.id], `${y}-01-01`, `${y + 1}-12-31`)).get(emp.id) ?? { weeklyOffDays: [], holidays: new Set<string>() };
-    return { year: y, asOf: clampToYear(today, y), offered, compOffType, balances: new Map(computed.map((b) => [b.leaveTypeId, b])), calendar };
+    const calendarFrom = `${y}-01-01`; const calendarTo = `${y + 1}-12-31`;
+    const resolved = (await loadEmployeeWorkingCalendars(t, orgId, [emp.id], { from: calendarFrom, to: calendarTo })).calendars.get(emp.id);
+    const calendar = resolved?.calendar ?? { weeklyOffDays: [], holidays: new Set<string>() };
+    return { year: y, asOf: clampToYear(today, y), offered, compOffType, balances: new Map(computed.map((b) => [b.leaveTypeId, b])), calendar, calendarFrom, calendarTo, offDates: () => resolved?.offDates() ?? [] };
   });
 }
 
@@ -170,7 +177,8 @@ export async function getLeave(deps: ApiDeps, actor: Actor, orgId: string, q: { 
       types: view.offered.map(toSelfTypeDto),
       balances: view.offered.map((t) => toSelfBalanceDto(t, view.balances.get(t.id)!)).filter((b) => !!b),
       records: await toSelfLeaveDtos(trx, orgId, emp.id, rows, scope.grant, actor.userId),
-      calendar: { weeklyOffDays: [...view.calendar.weeklyOffDays], holidays: [...view.calendar.holidays].sort() },
+      // offDates (review P1-1 / P1-2): the per-date working calendar — the apply form counts with it; older clients keep the rest
+      calendar: { weeklyOffDays: [...view.calendar.weeklyOffDays], holidays: [...view.calendar.holidays].sort(), offDates: view.offDates(), from: view.calendarFrom, to: view.calendarTo },
       asOf: view.asOf, totals: selfTotals(view), compOff: selfCompOffBalance(view),
     };
   });
@@ -196,13 +204,15 @@ export async function applyLeave(deps: ApiDeps, actor: Actor, orgId: string, inp
     const ev = await evaluateLeaveRequest(trx, orgId, { employee: emp, leaveTypeId: input.leaveTypeId, startDate: input.startDate, endDate: input.endDate, isHalfDay, asHr: false });
     assertPortalType(ev.type);
     const lock = await checkLeaveRangeLock(trx, orgId, emp.branchId, input.startDate, input.endDate, scope.grant);
+    // review P2-11: a double click / two tabs — the second application waits for the first and gets the overlap 409
+    await lockEmployeeLeave(trx, emp.id);
     await assertNoOverlap(trx, orgId, emp.id, { startDate: input.startDate, endDate: input.endDate, isHalfDay, halfDayPart });
-    const row = await trx.insertInto('leaveRecords').values({
+    // review P2-10 / P0-2: validated above (applicability, half day, notice, locks, overlap), written with its server-computed
+    // `days` in the system context — the database refuses a direct insert of one's own leave
+    const row = await systemStep(trx, orgId, (t) => t.insertInto('leaveRecords').values({
       organizationId: orgId, employeeId: emp.id, branchId: emp.branchId, leaveTypeId: input.leaveTypeId, startDate: input.startDate, endDate: input.endDate,
-      isHalfDay, halfDayPart, reason: input.reason, status: 'PENDING', source: 'INTERNAL', createdBy: actor.userId,
-    }).returning('id').executeTakeFirstOrThrow();
-    // `days` is server-computed: the self-service insert policy refuses it from a client, the system context stores it
-    await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ days: ev.days }).where('organizationId', '=', orgId).where('id', '=', row.id).execute());
+      isHalfDay, halfDayPart, reason: input.reason, status: 'PENDING', source: 'INTERNAL', createdBy: actor.userId, days: ev.days,
+    }).returning('id').executeTakeFirstOrThrow());
     await audit(trx, actor, orgId, 'leave.requested', 'leave_record', { entityId: row.id, branchId: emp.branchId, newValue: { ...input, isHalfDay, days: ev.days, ...(ev.warnings.length ? { warnings: ev.warnings.map((w) => w.code) } : {}) }, ...(lock.lockedOverride ? { reason: 'locked period (attendance.lock_period)' } : {}) });
     // the approval engine routes it (the workflow for LEAVE, else the leave.approve holders in reach of the employee —
     // never approved by the employee); units = the days it charges, for workflow tiers
@@ -247,6 +257,7 @@ export async function editLeave(deps: ApiDeps, actor: Actor, orgId: string, id: 
     assertPortalType(ev.type);
     const lockA = await checkLeaveRangeLock(trx, orgId, emp.branchId, beforeStart, beforeEnd, scope.grant);
     const lockB = await checkLeaveRangeLock(trx, orgId, emp.branchId, next.startDate, next.endDate, scope.grant);
+    await lockEmployeeLeave(trx, emp.id); // review P2-11
     await assertNoOverlap(trx, orgId, emp.id, { startDate: next.startDate, endDate: next.endDate, isHalfDay: next.isHalfDay, halfDayPart }, id);
     // validated above (own filing, still undecided, the matrix, locks, overlap): written in the system context — a client's
     // own session may only withdraw (RLS + guard), so the dates and `days` cannot be changed around this validation
@@ -292,7 +303,10 @@ export async function withdrawLeave(deps: ApiDeps, actor: Actor, orgId: string, 
     const before = await ownRow(trx, orgId, emp.id, id);
     if (before.status === 'APPROVED') throw errors.invalidState('Approved leave can only be cancelled by HR. Contact HR to cancel it.');
     assertOwnFiling(before, actor);
-    if (!UNDECIDED_LEAVE.includes(before.status)) throw errors.invalidState(`Only a pending request can be withdrawn (current: ${before.status}). Ask HR to change approved leave.`);
+    // review P2-12: withdrawing twice (a double click, a stale page) is not an error — the request is already withdrawn
+    if (before.status === 'CANCELLED') return { ...(await toSelfLeaveDtos(trx, orgId, emp.id, [before], scope.grant, actor.userId))[0]!, alreadyWithdrawn: true };
+    if (before.status === 'REJECTED') throw errors.invalidState('This request was rejected, so there is nothing to withdraw.');
+    if (!UNDECIDED_LEAVE.includes(before.status)) throw errors.invalidState(`Only a pending request can be withdrawn (current: ${before.status}).`);
     const lock = await checkLeaveRangeLock(trx, orgId, emp.branchId, isoDate(before.startDate), isoDate(before.endDate), scope.grant);
     const why = reason?.trim() || DEFAULT_WITHDRAW_REASON;
     const res = await trx.updateTable('leaveRecords').set({ status: 'CANCELLED', withdrawnAt: new Date() })
@@ -363,9 +377,11 @@ export async function getTeamLeave(deps: ApiDeps, actor: Actor, orgId: string): 
     if (!rows.length) return [];
     const employees = await withSystemScope(trx, orgId, (t) => t.selectFrom('employees').select(['id', 'displayName', 'employeeNumber']).where('organizationId', '=', orgId).where('id', 'in', [...new Set(rows.map((r) => r.employeeId))]).execute());
     const byId = new Map(employees.map((e) => [e.id, e]));
+    // review P2-8: a leave stored without `days` (before leave v2) shows its days, computed as the balances count them
+    const days = await leaveDaysOf(trx, orgId, rows);
     return rows.map((r) => ({
       id: r.id, employeeId: r.employeeId, employeeName: byId.get(r.employeeId)?.displayName ?? '', employeeNumber: byId.get(r.employeeId)?.employeeNumber ?? '', leaveTypeId: r.leaveTypeId, leaveTypeName: r.leaveTypeName, leaveTypeCode: String(r.leaveTypeCode), color: r.color,
-      startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isHalfDay: r.isHalfDay, halfDayPart: r.halfDayPart, days: r.days === null ? null : Number(r.days), status: r.status,
+      startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isHalfDay: r.isHalfDay, halfDayPart: r.halfDayPart, days: days.get(r.id)?.days ?? null, status: r.status,
     }));
   });
 }

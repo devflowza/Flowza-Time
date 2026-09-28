@@ -88,7 +88,9 @@ export function LeaveCalendarTab() {
                 <tbody>
                   {q.data.employees.map((emp) => {
                     const own = byEmployee.get(emp.employeeId) ?? [];
-                    const total = own.reduce((a, e) => a + (e.days ?? 0), 0);
+                    // review P2-8: the days INSIDE this month (computed by the API with the balances' counting rule, also for
+                    // leave stored without days) — never the full days of a leave that merely overlaps it
+                    const total = Math.round(own.reduce((a, e) => a + (e.daysInPeriod ?? e.days ?? 0), 0) * 2) / 2;
                     return (
                       <tr key={emp.employeeId} className="border-b last:border-0">
                         <th scope="row" className="sticky start-0 z-10 bg-card px-3 py-1.5 text-start font-normal"><span className="block truncate font-medium">{emp.employeeName}</span><span className="font-mono text-[11px] text-muted-foreground" dir="ltr">{emp.employeeNumber}</span></th>

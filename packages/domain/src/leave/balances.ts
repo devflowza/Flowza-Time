@@ -1,5 +1,5 @@
 import { DateTime } from 'luxon';
-import { countLeaveDaysByMode, type LeaveCountMode, type LeaveRangeLike, type WorkingCalendar } from './days.js';
+import { chargedLeaveDates, leaveDaysInWindow, type LeaveCountMode, type StoredLeaveRange, type WorkingCalendar } from './days.js';
 
 /**
  * Leave balances — THE one source of truth (HR portal Prompt 7, Finance parity A10 / B-42). Pure: every screen, the API
@@ -8,9 +8,11 @@ import { countLeaveDaysByMode, type LeaveCountMode, type LeaveRangeLike, type Wo
  *
  *   entitlement = allocation row (allocated + counted carry-forward + opening + adjustment), or — without a row — the
  *                 type's `annual_allowance_days`, prorated from the joining date in the joining year;
- *   taken       = APPROVED leave days in the year, counted by the type's count mode through the working calendar
- *                 (a range crossing the year boundary is clipped to the year);
- *   pending     = PENDING + INFO_REQUESTED days in the year (same counting);
+ *   taken       = APPROVED leave days in the year (`leaveDaysInWindow`, leave v2 review P1-2): a leave inside the year
+ *                 charges its stored `days` — the value at submission, so a later transfer or calendar change never moves
+ *                 history; a leave without stored days, or one crossing the year boundary (clipped to the year), is
+ *                 counted by the type's count mode through the per-date working calendar;
+ *   pending     = PENDING + INFO_REQUESTED days in the year (same rule);
  *   accrued     = monthly accrual only: the allocation (or prorated allowance) spread evenly over the service months of
  *                 the year, earned in proportion to the days elapsed up to `asOf`, floored to half days, plus the counted
  *                 carry-forward, the opening balance and the adjustment (they are available at once);
@@ -45,7 +47,8 @@ export interface BalanceAllocationInput {
   adjustmentDays: number;
 }
 
-export interface BalanceRecordInput extends LeaveRangeLike { leaveTypeId: string; status: string }
+/** A leave of the employee: its range, type, status and — when stored — its `days` (the value at submission). */
+export interface BalanceRecordInput extends StoredLeaveRange { leaveTypeId: string; status: string }
 
 export interface BalanceCreditInput { status: string; daysEarned: number; usedDays: number; expiresOn: string | null }
 
@@ -175,7 +178,7 @@ export function computeLeaveBalances(input: ComputeBalancesInput): LeaveBalance[
   const allocationByType = new Map(input.allocations.filter((a) => a.year === undefined || a.year === year).map((a) => [a.leaveTypeId, a]));
   return input.types.map((t): LeaveBalance => {
     const own = input.records.filter((r) => r.leaveTypeId === t.leaveTypeId);
-    const count = (r: BalanceRecordInput, until?: string) => countLeaveDaysByMode(r, calendar, t.countMode, until ? { from: clip.from, to: until < clip.to ? until : clip.to } : clip);
+    const count = (r: BalanceRecordInput, until?: string) => leaveDaysInWindow(r, calendar, t.countMode, until ? { from: clip.from, to: until < clip.to ? until : clip.to } : clip);
     let taken = 0; let pending = 0;
     for (const r of own) {
       if (r.status === 'APPROVED') taken += count(r);
@@ -227,7 +230,7 @@ export function computeLeaveBalances(input: ComputeBalancesInput): LeaveBalance[
 // ----- legacy shape (portal before leave v2; kept so older callers read through the same function) -----------------------
 
 export interface LeaveBalanceInput { leaveTypeId: string; allowanceDays: number | null }
-export interface LeaveBalanceRecord extends LeaveRangeLike { leaveTypeId: string; status: string }
+export interface LeaveBalanceRecord extends StoredLeaveRange { leaveTypeId: string; status: string }
 export interface LegacyLeaveBalance { leaveTypeId: string; allowanceDays: number | null; usedDays: number; pendingDays: number; remainingDays: number | null }
 
 /**
@@ -241,4 +244,70 @@ export function leaveBalances(types: readonly LeaveBalanceInput[], records: read
     types: types.map((t) => ({ leaveTypeId: t.leaveTypeId, annualAllowanceDays: t.allowanceDays, countMode: 'working', accrual: 'none' })),
   });
   return computed.map((b) => ({ leaveTypeId: b.leaveTypeId, allowanceDays: b.entitlementDays, usedDays: b.takenDays, pendingDays: b.pendingDays, remainingDays: b.availableAfterPendingDays }));
+}
+
+// ----- comp-off: credits against the dates they pay for (leave v2 review P2-4) --------------------------------------------
+
+/** A usable credit: what is still free on it and the last date it may pay for (its expiry). */
+export interface CompOffCreditSlot { id: string; freeDays: number; expiresOn: string; workedOn?: string | null }
+/** One date a comp-off leave charges (1, or 0.5 for a half day). */
+export interface CompOffDemandDay { date: string; days: number; /** Which request the date belongs to (reservations of other requests). */ key?: string }
+export interface CompOffAllocation {
+  /** Days taken per credit (the usage rows), per request key ('' when none). */
+  usages: Array<{ creditId: string; days: number; key: string }>;
+  /** Days no credit could pay for, per request key. */
+  shortfall: Map<string, number>;
+}
+
+/**
+ * The dates a comp-off leave asks credits for: its charged dates (per-date calendar, the type's count mode). When the stored
+ * `days` (the document) no longer match those dates — the calendar changed since submission — the stored figure is asked for
+ * on the leave's LAST date, so every credit used must still be valid at the end of the leave (never looser than the dates).
+ */
+export function compOffDemandOf(range: StoredLeaveRange, cal: WorkingCalendar, mode: LeaveCountMode, key?: string): CompOffDemandDay[] {
+  const dates = chargedLeaveDates(range, cal, mode);
+  const counted = roundHalf(dates.reduce((a, d) => a + d.days, 0));
+  const tag = key === undefined ? {} : { key };
+  if (range.days !== null && range.days !== undefined && Number.isFinite(range.days) && roundHalf(range.days) !== counted) {
+    return range.days > 0 ? [{ date: range.endDate, days: roundHalf(range.days), ...tag }] : [];
+  }
+  return dates.map((d) => ({ ...d, ...tag }));
+}
+
+/**
+ * Pay comp-off leave dates from credits (Finance parity B-60 with review P2-4): a credit pays only for leave dated ON OR
+ * BEFORE its expiry. Dates are served in date order, each from the eligible credit expiring first (then the earliest worked
+ * day) — the earliest-deadline-first greedy, which never leaves a date unpaid that some assignment could have paid. With
+ * `lastKey` (an application being checked) the other requests' dates are served first — they reserve their credits — and
+ * the application's dates take what is left. Pure; half days in 0.5 steps.
+ */
+export function allocateCompOffCredits(credits: readonly CompOffCreditSlot[], demand: readonly CompOffDemandDay[], opts: { lastKey?: string } = {}): CompOffAllocation {
+  const order = [...credits].sort((a, b) => a.expiresOn.localeCompare(b.expiresOn) || (a.workedOn ?? '').localeCompare(b.workedOn ?? '') || a.id.localeCompare(b.id));
+  const free = new Map(order.map((c) => [c.id, roundHalf(Math.max(0, c.freeDays))]));
+  const used = new Map<string, number>();
+  const shortfall = new Map<string, number>();
+  const serve = (days: readonly CompOffDemandDay[]): void => {
+    for (const d of [...days].sort((a, b) => a.date.localeCompare(b.date))) {
+      const key = d.key ?? '';
+      let need = roundHalf(d.days);
+      for (const c of order) {
+        if (need <= 0) break;
+        if (c.expiresOn < d.date) continue;
+        const left = free.get(c.id) ?? 0;
+        if (left <= 0) continue;
+        const take = roundHalf(Math.min(left, need));
+        free.set(c.id, roundHalf(left - take));
+        need = roundHalf(need - take);
+        used.set(`${key}\u0000${c.id}`, roundHalf((used.get(`${key}\u0000${c.id}`) ?? 0) + take));
+      }
+      if (need > 0) shortfall.set(key, roundHalf((shortfall.get(key) ?? 0) + need));
+    }
+  };
+  if (opts.lastKey === undefined) serve(demand);
+  else {
+    serve(demand.filter((d) => (d.key ?? '') !== opts.lastKey));
+    serve(demand.filter((d) => (d.key ?? '') === opts.lastKey));
+  }
+  const usages = [...used.entries()].map(([k, v]) => { const [key, creditId] = k.split('\u0000') as [string, string]; return { creditId, days: v, key }; });
+  return { usages, shortfall };
 }

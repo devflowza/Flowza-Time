@@ -42,6 +42,9 @@ export interface HookContext {
   system?: boolean;
 }
 
+/** What the engine hands `onInfoClosed`: the request moved from level `fromStepNo` (approved) to `stepNo`. */
+export interface InfoClosedContext { orgId: string; requestId: string; entityId: string; fromStepNo: number; stepNo: number; actorUserId: string | null }
+
 /**
  * Per-entity behaviour the generic engine cannot know: which permission decides it, what the inbox shows, and what
  * happens to the document on approval / rejection / cancellation. Later prompts register notes, swaps, comp-off,
@@ -79,6 +82,11 @@ export interface EntityHook {
   onInfoRequested?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   /** The requester / subject answered (leave v2: leave → PENDING); `ctx.comment` is the answer. */
   onInfoAnswered?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
+  /**
+   * An open question was closed without an answer because its level was approved and the request moved to the next level
+   * (leave v2 review P2-3: leave → PENDING). Runs inside the engine's system step.
+   */
+  onInfoClosed?(trx: Trx, ctx: InfoClosedContext): Promise<void>;
   /** Inbox / detail context for a page of requests (system scope; ids the caller could already see). */
   loadContexts(trx: Trx, orgId: string, entityIds: string[]): Promise<Map<string, ApprovalContextDto>>;
   /** A one-line description for notifications. */

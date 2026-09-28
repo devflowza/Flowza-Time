@@ -179,6 +179,7 @@
     "reassigned": "Reassigned",
     "info_requested": "Asked for information",
     "info_answered": "Answered",
+    "info_request_closed": "Open question closed — its level was approved",
     "override": "Decided by an authorised approver",
     "sod_owner_bypass": "The owner decided a request about themselves",
     "escalated": "Escalated — the level was overdue",

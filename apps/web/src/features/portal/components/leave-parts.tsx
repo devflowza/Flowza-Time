@@ -58,12 +58,12 @@ export function LeaveTypeBalanceCard({ b, name, color }: { b: SelfLeaveBalanceDt
             <dt className="text-muted-foreground">{tp('leave.pending')}</dt><dd className="text-end">{fmtDays(b.pendingDays)}</dd>
             {b.accrual === 'monthly' && b.accruedToDateDays !== null && b.accruedToDateDays !== undefined ? <><dt className="text-muted-foreground">{t('portal.accruedToDate')}</dt><dd className="text-end">{fmtDays(b.accruedToDateDays)}</dd></> : null}
           </dl>
-          <p className={cn('text-[11px] tnum', over ? 'font-medium text-destructive' : 'text-muted-foreground')}>{tp('leave.remainingOf', { remaining: fmtDays(b.remainingDays ?? 0), allowance: fmtDays(b.allowanceDays ?? 0) })}</p>
-          {b.carriedForwardDays ? <p className="text-[11px] text-muted-foreground">{b.carriedForwardExpiresOn ? t('portal.carriedExpiring', { days: fmtDays(b.carriedForwardDays), date: fmtDate(b.carriedForwardExpiresOn) }) : t('portal.carried', { days: fmtDays(b.carriedForwardDays) })}</p> : null}
-          {b.carriedForwardExpiredDays ? <p className="text-[11px] text-muted-foreground">{t('portal.carriedExpired', { days: fmtDays(b.carriedForwardExpiredDays) })}</p> : null}
+          <p className={cn('text-[11px] tnum', over ? 'font-medium text-destructive' : 'text-muted-foreground')}>{tp('leave.remainingOf', { count: b.allowanceDays ?? 0, remaining: fmtDays(b.remainingDays ?? 0), allowance: fmtDays(b.allowanceDays ?? 0) })}</p>
+          {b.carriedForwardDays ? <p className="text-[11px] text-muted-foreground">{b.carriedForwardExpiresOn ? t('portal.carriedExpiring', { count: b.carriedForwardDays, days: fmtDays(b.carriedForwardDays), date: fmtDate(b.carriedForwardExpiresOn) }) : t('portal.carried', { count: b.carriedForwardDays, days: fmtDays(b.carriedForwardDays) })}</p> : null}
+          {b.carriedForwardExpiredDays ? <p className="text-[11px] text-muted-foreground">{t('portal.carriedExpired', { count: b.carriedForwardExpiredDays, days: fmtDays(b.carriedForwardExpiredDays) })}</p> : null}
         </>
       ) : (
-        <p className="flex flex-wrap gap-x-1 text-xs text-muted-foreground tnum"><span>{tp('leave.notTracked')}</span><span aria-hidden>·</span><span>{tp('leave.usedOnly', { days: fmtDays(b.usedDays) })}</span>{b.pendingDays > 0 ? <span>· {tp('leave.pending')}: {fmtDays(b.pendingDays)}</span> : null}</p>
+        <p className="flex flex-wrap gap-x-1 text-xs text-muted-foreground tnum"><span>{tp('leave.notTracked')}</span><span aria-hidden>·</span><span>{tp('leave.usedOnly', { count: b.usedDays, days: fmtDays(b.usedDays) })}</span>{b.pendingDays > 0 ? <span>· {tp('leave.pending')}: {fmtDays(b.pendingDays)}</span> : null}</p>
       )}
     </Card>
   );
@@ -80,7 +80,8 @@ export function WithdrawLeaveDialog({ record, onClose }: { record: SelfLeaveReco
   const close = () => { setReason(''); onClose(); };
   const submit = () => {
     if (!record || !valid) return;
-    withdraw.mutate({ id: record.id, reason: reason.trim() }, { onSuccess: () => { toast.success(tp('leave.withdrawn')); close(); }, onError: (e) => toastMutationError(e) });
+    // review P2-12: withdrawing twice (a stale page, a double click) is not an error — the API answers "already withdrawn"
+    withdraw.mutate({ id: record.id, reason: reason.trim() }, { onSuccess: (res) => { if (res.alreadyWithdrawn) toast.info(t('portal.alreadyWithdrawn')); else toast.success(tp('leave.withdrawn')); close(); }, onError: (e) => toastMutationError(e) });
   };
   return (
     <Dialog open={!!record} onOpenChange={(o) => !o && close()}>

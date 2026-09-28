@@ -6,6 +6,8 @@ export interface LeaveTypeDto {
   id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; treatAsPresent: boolean; color: string | null; annualAllowanceDays: number | null; status: string; createdAt: string;
   // leave v2 policy (optional: an API build from before leave v2 omits them)
   requiresApproval?: boolean; countMode?: 'working' | 'calendar'; maxConsecutiveDays?: number | null; advanceNoticeDays?: number; applicableGender?: 'all' | 'male' | 'female'; accrual?: 'none' | 'monthly';
+  /** Leave v2 review (B-41): the employment types the type applies to; null = every type. */
+  applicableEmploymentTypes?: string[] | null;
   carryForwardMaxDays?: number; carryForwardExpiryMonths?: number | null; isSpecial?: boolean; allowHalfDay?: boolean; portalVisible?: boolean; systemKey?: string | null;
   /** The organisation's comp-off type: managed by the system (always active, no allowance, redeemed from credits). */
   compOff?: boolean;

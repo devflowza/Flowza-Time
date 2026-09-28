@@ -215,7 +215,7 @@ describe('comp-off in the portal', () => {
     fireEvent.change(within(dialog).getByLabelText(/From/), { target: { value: '2026-11-01' } });
     fireEvent.change(within(dialog).getByLabelText(/^To/), { target: { value: '2026-11-01' } });
     fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'Rest after the shutdown' } });
-    expect(within(dialog).getByTestId('leave-preview')).toHaveTextContent('1 comp-off days left after this request.');
+    expect(within(dialog).getByTestId('leave-preview')).toHaveTextContent('1 comp-off day left after this request.');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Send request' }));
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/me/leave', { leaveTypeId: CO, startDate: '2026-11-01', endDate: '2026-11-01', isHalfDay: false, reason: 'Rest after the shutdown' }, expect.objectContaining({ idempotencyKey: expect.any(String) })));
   });

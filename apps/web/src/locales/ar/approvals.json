@@ -183,6 +183,7 @@
     "reassigned": "أعيد إسناده",
     "info_requested": "طُلبت معلومات",
     "info_answered": "تم الرد",
+    "info_request_closed": "أُغلق السؤال المفتوح — تمت الموافقة على مستواه",
     "override": "قرار معتمد مخوّل",
     "sod_owner_bypass": "قرّر المالك طلبًا يخصّه",
     "escalated": "صُعّد — تأخر البت في المستوى",

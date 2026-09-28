@@ -9,7 +9,9 @@ import type { Trx } from '../context.js';
  * the date. Null when the employee is unknown or deleted. Runs under whatever context the caller established (the portal
  * reads it in the organisation's system scope for an already authorised employee).
  *
- * Shared by the employee portal's shift tab / swap rules (HR portal Prompt 4 review, P2-13) and leave day counting (Prompt 7).
+ * Shared by the employee portal's shift tab / swap rules (HR portal Prompt 4 review, P2-13) and, through `historyRowOn` in
+ * `attendance/working-calendar.ts` (the same rule applied to pre-loaded rows), by the per-date working calendar of leave
+ * counting, balances, the comp-off preview and the attendance input loader (Prompt 7 review, P1-1/P1-2).
  */
 export async function effectiveBranchIdOn(trx: Trx, orgId: string, employeeId: string, date: string /* YYYY-MM-DD */): Promise<string | null> {
   const hist = await trx.selectFrom('employmentHistory').select('branchId')

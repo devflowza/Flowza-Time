@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSIGNMENT_TARGETS, HOLIDAY_TYPES, LEAVE_ACCRUALS, LEAVE_APPLICABLE_GENDERS, LEAVE_COUNT_MODES, RECORD_STATUSES, SHIFT_TYPES } from './enums.js';
+import { ASSIGNMENT_TARGETS, EMPLOYMENT_TYPES, HOLIDAY_TYPES, LEAVE_ACCRUALS, LEAVE_APPLICABLE_GENDERS, LEAVE_COUNT_MODES, RECORD_STATUSES, SHIFT_TYPES } from './enums.js';
 import { codeSchema, isoDateSchema, timeSchema, uuidSchema } from './common.js';
 import { shiftBreakSchema } from './attendance.js';
 
@@ -89,6 +89,13 @@ export const leaveTypeInputSchema = z.object({
   advanceNoticeDays: z.number().int().min(0).max(365).default(0),
   /** Who may take it: everyone, or only employees whose gender on file matches. */
   applicableGender: z.enum(LEAVE_APPLICABLE_GENDERS).default('all'),
+  /**
+   * Leave v2 review (Finance parity B-41): only employees of these employment types may take it (their employment type on
+   * file); null / absent = every employment type. Checked with the gender by the one applicability rule (portal, API,
+   * unexcused-day charger, year close, allocation generation).
+   */
+  applicableEmploymentTypes: z.array(z.enum(EMPLOYMENT_TYPES)).min(1).max(EMPLOYMENT_TYPES.length)
+    .refine((a) => new Set(a).size === a.length, { message: 'Each employment type once' }).nullable().optional(),
   /** monthly: the yearly entitlement is earned month by month (accrued to date). */
   accrual: z.enum(LEAVE_ACCRUALS).default('none'),
   /** Unused days carried into the next year at year close (0 = none). */

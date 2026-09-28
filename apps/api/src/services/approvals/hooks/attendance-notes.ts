@@ -1,7 +1,7 @@
 import type { ApiDeps } from '../../../deps.js';
 import type { Trx } from '@flowza/database';
 import { applyNoteDecision, applyNoteInfoAnswered, applyNoteInfoRequest, noteContexts } from '../../portal/note-effects.js';
-import type { EntityHook, HookContext } from './index.js';
+import type { EntityHook, HookContext, InfoClosedContext } from './index.js';
 
 /**
  * Attendance notes (the employee's reason for a day — HR portal Prompt 4). Decided by the line manager seated on the
@@ -29,6 +29,11 @@ export const attendanceNoteHook: EntityHook = {
     await applyNoteInfoRequest(trx, ctx);
   },
   async onInfoAnswered(_deps: ApiDeps, trx: Trx, ctx: HookContext) {
+    await applyNoteInfoAnswered(trx, ctx.orgId, ctx.entityId);
+  },
+  // the level that asked was approved and the request moved on (the engine closed the question, leave v2 review P2-3): the note
+  // is pending for the next level, not waiting on an answer nobody needs any more; the question stays on the note for the record
+  async onInfoClosed(trx: Trx, ctx: InfoClosedContext) {
     await applyNoteInfoAnswered(trx, ctx.orgId, ctx.entityId);
   },
   loadContexts: noteContexts,

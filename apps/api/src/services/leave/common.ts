@@ -1,12 +1,14 @@
+import { sql } from 'kysely';
 import type { LeaveBalanceDto, LeaveWarningDto } from '@flowza/contracts';
-import { COMP_OFF_SYSTEM_KEY, loadLeaveBalances, loadLeaveTypePolicies, loadWorkingCalendars, type LeaveTypePolicy, type Trx } from '@flowza/database';
-import { checkLeaveRequest, countLeaveDaysByMode, type LeaveBalance, type MembershipGrant } from '@flowza/domain';
+import { COMP_OFF_SYSTEM_KEY, compOffCoverage, loadLeaveBalances, loadLeaveTypePolicies, loadWorkingCalendars, type LeaveTypePolicy, type Trx } from '@flowza/database';
+import { checkLeaveRequest, countLeaveDaysByMode, leaveDaysInWindow, type LeaveBalance, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import { hasPermission } from '../../lib/authorize.js';
 import { withSystemScope } from '../../lib/service.js';
 import { isoDate, isoDateOrNull } from '../../lib/mappers.js';
 import { orgToday } from '../features/recalc.js';
 import { dv } from '../features/sql-helpers.js';
+import { systemStep } from '../features/context.js';
 
 /**
  * Leave v2 rules shared by HR's "record leave", the self-service apply / edit and the comp-off redemption (HR portal
@@ -16,16 +18,62 @@ import { dv } from '../features/sql-helpers.js';
  * for the employee first, and a branch-scoped or team-scoped reader must see exactly the figures HR sees.
  */
 
-export interface LeaveEmployee { id: string; branchId: string; departmentId: string | null; gender: string; joiningDate: string; exitDate: string | null; displayName: string; employeeNumber: string }
+export interface LeaveEmployee { id: string; branchId: string; departmentId: string | null; gender: string; employmentType: string; joiningDate: string; exitDate: string | null; displayName: string; employeeNumber: string }
 
 /** The employee as the caller's RLS sees it (null when invisible or archived). */
 export async function loadLeaveEmployee(trx: Trx, orgId: string, employeeId: string): Promise<LeaveEmployee | null> {
-  const e = await trx.selectFrom('employees').select(['id', 'branchId', 'departmentId', 'gender', 'joiningDate', 'exitDate', 'displayName', 'employeeNumber'])
+  const e = await trx.selectFrom('employees').select(['id', 'branchId', 'departmentId', 'gender', 'employmentType', 'joiningDate', 'exitDate', 'displayName', 'employeeNumber'])
     .where('organizationId', '=', orgId).where('id', '=', employeeId).where('deletedAt', 'is', null).executeTakeFirst();
-  return e ? { id: e.id, branchId: e.branchId, departmentId: e.departmentId, gender: e.gender, joiningDate: isoDate(e.joiningDate), exitDate: isoDateOrNull(e.exitDate), displayName: e.displayName, employeeNumber: e.employeeNumber } : null;
+  return e ? { id: e.id, branchId: e.branchId, departmentId: e.departmentId, gender: e.gender, employmentType: e.employmentType, joiningDate: isoDate(e.joiningDate), exitDate: isoDateOrNull(e.exitDate), displayName: e.displayName, employeeNumber: e.employeeNumber } : null;
 }
 
 export const isCompOffType = (t: Pick<LeaveTypePolicy, 'systemKey'>): boolean => t.systemKey === COMP_OFF_SYSTEM_KEY;
+
+/**
+ * Review P2-11: one writer of an employee's leave at a time (transaction-scoped advisory lock). Taken before the overlap
+ * check, it makes a concurrent twin wait for the first request to commit and then meet the friendly overlap 409, instead of
+ * dying on the exclusion constraint or a deadlock ("concurrent change, retry").
+ */
+export async function lockEmployeeLeave(trx: Trx, employeeId: string): Promise<void> {
+  await sql`select pg_advisory_xact_lock(hashtextextended(${`flowza:leave:${employeeId}`}, 0))`.execute(trx);
+}
+
+/**
+ * Review P0-2: the database refuses, from a user's own session, every write to leave rows about that user (decisions,
+ * `days`, creates…) — `app.leave_subject_write_guard`. The API performs such a write, after its own checks (segregation of
+ * duties, validation), in the organisation's system context; a row about somebody else is written under the caller's RLS.
+ */
+export async function ownRowWrite<T>(trx: Trx, orgId: string, own: boolean, fn: (t: Trx) => Promise<T>): Promise<T> {
+  return own ? systemStep(trx, orgId, fn) : fn(trx);
+}
+
+/** A stored leave row as the list / calendar readers select it. */
+export interface StoredLeaveRow { id: string; employeeId: string; startDate: Date | string; endDate: Date | string; isHalfDay: boolean; days: unknown; countMode: string }
+
+/**
+ * Review P2-8 — the days of stored leave rows, read the way the balances read them (`leaveDaysInWindow`): the stored `days`
+ * (the value at submission), computed on read for a row stored without them (recorded before leave v2) with the per-date
+ * working calendar; with a `window`, also the days inside it (a calendar month: its total sums these, never the full days
+ * of a leave that merely overlaps the month). Calendars are read in the organisation's system scope for the rows the
+ * caller could already see.
+ */
+export async function leaveDaysOf(trx: Trx, orgId: string, rows: readonly StoredLeaveRow[], window?: { from: string; to: string }): Promise<Map<string, { days: number; daysInPeriod: number | null }>> {
+  const out = new Map<string, { days: number; daysInPeriod: number | null }>();
+  if (!rows.length) return out;
+  const storedOf = (r: StoredLeaveRow): number | null => (r.days === null || r.days === undefined ? null : Number(r.days));
+  const rangeOf = (r: StoredLeaveRow) => ({ startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isHalfDay: r.isHalfDay });
+  const needs = rows.filter((r) => { const x = rangeOf(r); return storedOf(r) === null || (!!window && (x.startDate < window.from || x.endDate > window.to)); });
+  const cals = needs.length
+    ? await withSystemScope(trx, orgId, (t) => loadWorkingCalendars(t, orgId, [...new Set(needs.map((r) => r.employeeId))], needs.map((r) => rangeOf(r).startDate).sort()[0]!, needs.map((r) => rangeOf(r).endDate).sort().pop()!))
+    : new Map();
+  for (const r of rows) {
+    const range = { ...rangeOf(r), days: storedOf(r) };
+    const cal = cals.get(r.employeeId) ?? { weeklyOffDays: [], holidays: new Set<string>() };
+    const mode = r.countMode === 'calendar' ? 'calendar' : 'working';
+    out.set(r.id, { days: leaveDaysInWindow(range, cal, mode), daysInPeriod: window ? leaveDaysInWindow(range, cal, mode, window) : null });
+  }
+  return out;
+}
 
 export function toBalanceDto(t: LeaveTypePolicy, b: LeaveBalance): LeaveBalanceDto {
   return {
@@ -46,6 +94,9 @@ export interface EvaluatedLeave {
   today: string;
   compOff: boolean;
 }
+
+/** Days in a message: "3", "0.5" (as the domain's rule messages write them). */
+const fmtDays = (n: number): string => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
 export interface EvaluateLeaveInput {
   employee: LeaveEmployee;
@@ -80,14 +131,26 @@ export async function evaluateLeaveRequest(trx: Trx, orgId: string, input: Evalu
     const balance = (await loadLeaveBalances(t, orgId, [employee.id], { year, asOf: today, types: [type], ...(input.excludeRecordId ? { excludeRecordIds: [input.excludeRecordId] } : {}) })).get(employee.id)?.[0] ?? null;
     // a request crossing into the next year: the balance check covers the start year (its days are charged there first)
     const compOff = isCompOffType(type);
+    // comp-off (review P2-4): a credit pays only for leave dated on or before its expiry — what the credits can pay for THESE
+    // dates, after the other undecided comp-off requests, is what the rule compares with (the balance shown is as of today)
+    const available = compOff
+      ? (await compOffCoverage(t, orgId, employee.id, { startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, days, countMode: type.countMode }, input.excludeRecordId ? { excludeRecordId: input.excludeRecordId } : {})).coverableDays
+      : balance && balance.tracked ? balance.availableAfterPendingDays : null;
     const result = checkLeaveRequest({
-      type: { name: type.name, applicableGender: type.applicableGender, allowHalfDay: type.allowHalfDay, advanceNoticeDays: type.advanceNoticeDays, maxConsecutiveDays: type.maxConsecutiveDays, compOff },
-      employeeGender: employee.gender, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, days, today, asHr: input.asHr,
-      availableAfterPendingDays: balance && balance.tracked ? balance.availableAfterPendingDays : null,
+      // applicability (review P1-3): gender and employment type — the one rule the portal, the charger and the year close use
+      type: { name: type.name, applicableGender: type.applicableGender, applicableEmploymentTypes: type.applicableEmploymentTypes, allowHalfDay: type.allowHalfDay, advanceNoticeDays: type.advanceNoticeDays, maxConsecutiveDays: type.maxConsecutiveDays, compOff },
+      employeeGender: employee.gender, employeeEmploymentType: employee.employmentType, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, days, today, asHr: input.asHr,
+      availableAfterPendingDays: available,
     });
     if (result.errors.length) {
-      const first = result.errors[0]!;
-      throw errors.validation(first.message, { issues: result.errors.map((e) => ({ path: e.path, message: e.message, code: e.code, params: e.params })) });
+      // comp-off: when credits usable today do not reach these dates, say why (they expire before the leave), rather than
+      // leave the employee comparing "0 available" with the balance their comp-off card shows
+      const today0 = compOff && balance ? balance.availableAfterPendingDays : null;
+      const issues = result.errors.map((e) => (e.code === 'COMP_OFF_BALANCE' && today0 !== null && today0 > (available ?? 0)
+        ? { ...e, message: `Not enough comp-off credit for these dates: ${fmtDays(Math.max(0, available ?? 0))} day(s) of your credits are still valid on them (${fmtDays(today0)} available today — the rest expire before the leave), this request needs ${fmtDays(days)}.`, params: { ...e.params, availableToday: today0 } }
+        : e));
+      const first = issues[0]!;
+      throw errors.validation(first.message, { issues: issues.map((e) => ({ path: e.path, message: e.message, code: e.code, params: e.params })) });
     }
     return { type, days, warnings: result.warnings.map((w) => ({ code: w.code, message: w.message, params: w.params })), balance, today, compOff };
   });

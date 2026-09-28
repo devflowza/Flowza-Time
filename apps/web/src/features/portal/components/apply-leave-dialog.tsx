@@ -12,7 +12,8 @@ import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { toastMutationError } from '@/features/attendance/period-locked';
-import { checkLeaveApplication, findOwnOverlap, previewLeaveDaysByMode, type CountMode, type LeaveIssue } from '@/features/leave/model';
+import { checkLeaveApplication, findOwnOverlap, previewCalendarOf, previewLeaveDaysByMode, type CountMode, type LeaveIssue } from '@/features/leave/model';
+import { useSelfLeave } from '../api';
 import { useSelfLeaveActions } from '../leave-api';
 import { fmtDays } from '../model';
 import { TypeDot } from './parts';
@@ -57,18 +58,31 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
   const { register, control, setValue, formState: { errors, isSubmitting } } = form;
   const [leaveTypeId, startDate, endDate, isHalfDay] = useWatch({ control, name: ['leaveTypeId', 'startDate', 'endDate', 'isHalfDay'] });
 
-  const calendar = useMemo(() => ({ weeklyOffDays: data?.calendar.weeklyOffDays ?? [], holidays: new Set(data?.calendar.holidays ?? []) }), [data]);
+  // review P2-9: the API checks a request against the balance of its START year — when the dates leave the year on screen,
+  // the dialog loads that year (balances, calendar, requests) and shows no balance line until it has it
+  const startYear = startDate && /^\d{4}-\d{2}-\d{2}$/.test(startDate) ? Number(startDate.slice(0, 4)) : null;
+  const otherYear = !!data && startYear !== null && startYear !== data.year;
+  const otherYearQuery = useSelfLeave(otherYear ? startYear! : data?.year ?? Number(today.slice(0, 4)), { enabled: open && otherYear, keepPrevious: false });
+  const yearData: SelfLeaveDto | undefined = otherYear ? (otherYearQuery.isPlaceholderData ? undefined : otherYearQuery.data) : data;
+  // the per-date working calendar when the API sends it (review P1-1 / P1-2: the branch of each date, rotation off days);
+  // older API builds send only the current weekly offs and holidays
+  const calendar = useMemo(() => previewCalendarOf(yearData?.calendar ?? data?.calendar), [yearData, data]);
   const type = types.find((x) => x.id === leaveTypeId);
   const days = startDate && endDate ? previewLeaveDaysByMode(startDate, endDate, !!isHalfDay, calendar, type?.countMode ?? 'working') : 0;
-  // what is left after the other pending requests; an edited request's own days are already counted there
-  const ownDays = record && record.leaveTypeId === leaveTypeId ? record.days : 0;
-  const balance = data?.balances.find((b) => b.leaveTypeId === leaveTypeId);
+  // what is left after the other pending requests; an edited request's own days are already counted there (in its own start year)
+  const ownDays = record && record.leaveTypeId === leaveTypeId && yearData && Number(record.startDate.slice(0, 4)) === yearData.year ? record.days : 0;
+  const balance = yearData?.balances.find((b) => b.leaveTypeId === leaveTypeId);
   const tracked = balance ? balance.tracked ?? balance.allowanceDays !== null : false;
-  const baseAvailable = type?.compOff ? data?.compOff?.availableAfterPendingDays ?? null : tracked ? balance?.availableAfterPendingDays ?? balance?.remainingDays ?? null : null;
+  const baseAvailable = type?.compOff ? yearData?.compOff?.availableAfterPendingDays ?? null : tracked ? balance?.availableAfterPendingDays ?? balance?.remainingDays ?? null : null;
   const available = baseAvailable === null || baseAvailable === undefined ? null : baseAvailable + ownDays;
   const issues: LeaveIssue[] = type && startDate && endDate && endDate >= startDate ? checkLeaveApplication({ type, isHalfDay: !!isHalfDay, days, startDate, today, availableAfterPendingDays: available }) : [];
-  // B-47: a date already on leave (own pending / approved requests of the year shown) is refused before sending
-  const clash = startDate && endDate && endDate >= startDate ? findOwnOverlap(data?.records ?? [], { startDate, endDate }, record?.id) : null;
+  // B-47: a date already on leave (own pending / approved requests of the years loaded) is refused before sending
+  const knownRecords = useMemo(() => {
+    const seen = new Map<string, SelfLeaveRecordDto>();
+    for (const r of [...(data?.records ?? []), ...(otherYear ? yearData?.records ?? [] : [])]) seen.set(r.id, r);
+    return [...seen.values()];
+  }, [data, yearData, otherYear]);
+  const clash = startDate && endDate && endDate >= startDate ? findOwnOverlap(knownRecords, { startDate, endDate }, record?.id) : null;
   const blocking = issues.filter((i) => i.blocking && i.code !== 'NO_DAYS');
   const overBalance = issues.find((i) => i.code === 'OVER_BALANCE');
   const remainingAfter = available !== null && days > 0 ? available - days : null;
@@ -79,7 +93,7 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
       case 'HALF_DAY_NOT_ALLOWED': return tl('apply.issues.halfDay', { type: name });
       case 'ADVANCE_NOTICE': return tl('apply.issues.notice', { type: name, count: i.params['required'], date: earliestStart(today, i.params['required'] ?? 0) });
       case 'MAX_CONSECUTIVE': return tl('apply.issues.maxConsecutive', { type: name, count: i.params['max'] });
-      case 'COMP_OFF_BALANCE': return tl('apply.issues.compOff', { available: fmtDays(i.params['available'] ?? 0) });
+      case 'COMP_OFF_BALANCE': return tl('apply.issues.compOff', { count: i.params['available'] ?? 0, available: fmtDays(i.params['available'] ?? 0) });
       default: return '';
     }
   };
@@ -116,7 +130,7 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
         <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{hint}</DialogDescription></DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
           {compOffMode ? (
-            <p className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-sm"><TypeDot color={type?.color ?? '#6941c6'} /><span className="font-medium">{tl('compOff.typeName')}</span>{available !== null ? <span className="text-xs text-muted-foreground tnum">· {tl('compOff.availableDays', { days: fmtDays(Math.max(0, available)) })}</span> : null}</p>
+            <p className="flex items-center gap-2 rounded-md border bg-muted/30 p-3 text-sm"><TypeDot color={type?.color ?? '#6941c6'} /><span className="font-medium">{tl('compOff.typeName')}</span>{available !== null ? <span className="text-xs text-muted-foreground tnum">· {tl('compOff.availableDays', { count: Math.max(0, available), days: fmtDays(Math.max(0, available)) })}</span> : null}</p>
           ) : (
             <FormField label={t('apply.type')} htmlFor="al-type" required error={errors.leaveTypeId?.message}>
               <Controller control={control} name="leaveTypeId" render={({ field }) => (
@@ -124,10 +138,10 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
                   <SelectTrigger id="al-type" aria-invalid={!!errors.leaveTypeId}><SelectValue placeholder={t('apply.selectType')} /></SelectTrigger>
                   <SelectContent>
                     {types.filter((x) => !x.compOff).map((lt) => {
-                      const b = data?.balances.find((x) => x.leaveTypeId === lt.id);
+                      const b = yearData?.balances.find((x) => x.leaveTypeId === lt.id);
                       return (
                         <SelectItem key={lt.id} value={lt.id}>
-                          <span className="flex items-center gap-2"><TypeDot color={lt.color} />{lt.name}{!lt.isPaid ? <span className="text-xs text-muted-foreground">· {t('leave.unpaid')}</span> : null}{b?.remainingDays !== null && b?.remainingDays !== undefined ? <span className="text-xs text-muted-foreground tnum">· {t('leave.remainingOf', { remaining: fmtDays(b.remainingDays), allowance: fmtDays(b.allowanceDays ?? 0) })}</span> : null}</span>
+                          <span className="flex items-center gap-2"><TypeDot color={lt.color} />{lt.name}{!lt.isPaid ? <span className="text-xs text-muted-foreground">· {t('leave.unpaid')}</span> : null}{b?.remainingDays !== null && b?.remainingDays !== undefined ? <span className="text-xs text-muted-foreground tnum">· {t('leave.remainingOf', { count: b.allowanceDays ?? 0, remaining: fmtDays(b.remainingDays), allowance: fmtDays(b.allowanceDays ?? 0) })}</span> : null}</span>
                         </SelectItem>
                       );
                     })}
@@ -167,7 +181,7 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
               {warn ? <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden /> : <CalendarCheck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />}
               <div className="space-y-0.5">
                 <p>{days === 0 ? t('apply.previewNone') : type?.countMode === 'calendar' ? tl('apply.previewCalendar', { count: days, days: fmtDays(days) }) : t('apply.preview', { count: days, days: fmtDays(days) })}</p>
-                {type && remainingAfter !== null ? <p className="text-xs">{overBalance ? t('apply.overBalance', { type: type.name, remaining: fmtDays(available ?? 0) }) : type.compOff ? tl('compOff.after', { days: fmtDays(remainingAfter) }) : t('apply.balanceAfter', { type: type.name, remaining: fmtDays(remainingAfter) })}</p> : null}
+                {type && remainingAfter !== null ? <p className="text-xs">{overBalance ? t('apply.overBalance', { type: type.name, count: available ?? 0, remaining: fmtDays(available ?? 0) }) : type.compOff ? tl('compOff.after', { count: remainingAfter, days: fmtDays(remainingAfter) }) : t('apply.balanceAfter', { type: type.name, count: remainingAfter, remaining: fmtDays(remainingAfter) })}</p> : null}
                 {blocking.map((i) => <p key={i.code} className="text-xs font-medium" data-issue={i.code}>{issueText(i)}</p>)}
                 {clash ? <p className="text-xs font-medium" data-issue="OVERLAP">{tl('apply.issues.overlap', { type: clash.leaveTypeName, from: clash.startDate, to: clash.endDate, status: tl(`status.${clash.status}`, { defaultValue: clash.status }) })}</p> : null}
               </div>

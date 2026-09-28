@@ -1,10 +1,11 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, resolveAttendanceSettings, shiftBreakSchema, type AttendanceRules, type AttendanceSettings, type EmploymentStatus, type ShiftBreak } from '@flowza/contracts';
-import { addDays, dayOfWeek, errors, isValidTimezone, localDateTime } from '@flowza/shared';
-import { resolveRuleSet, resolveShift, type DailyCalculationInput, type EngineDayMark, type EngineEvent, type EngineHoliday, type EngineLeave, type EnginePunchPayload, type EngineRuleSet, type EngineShift, type EngineShiftAssignment, type EngineShiftPattern, type EmployeeScope } from '@flowza/domain';
+import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, resolveAttendanceSettings, shiftBreakSchema, type AttendanceRules, type AttendanceSettings, type ShiftBreak } from '@flowza/contracts';
+import { addDays, errors, isValidTimezone, localDateTime } from '@flowza/shared';
+import { resolveRuleSet, type DailyCalculationInput, type EngineDayMark, type EngineEvent, type EngineHoliday, type EngineLeave, type EnginePunchPayload, type EngineRuleSet, type EngineShift } from '@flowza/domain';
 import type { Trx } from '../context.js';
 import { activeMarksOn } from './day-marks.js';
+import { loadEmployeeWorkingCalendars } from './working-calendar.js';
 
 /*
  * The pure engine's input for one (employee, date), loaded from the database. Moved here from the worker
@@ -28,9 +29,6 @@ function isoDate(v: Date | string): string {
   return DateTime.fromJSDate(v).toISODate() ?? v.toISOString().slice(0, 10);
 }
 const asDate = (date: string) => sql<Date>`${date}::date`;
-function historyOn<T extends { effectiveFrom: string; effectiveTo: string | null }>(rows: readonly T[], date: string): T | undefined {
-  return rows.find((h) => h.effectiveFrom <= date && (h.effectiveTo === null || date < h.effectiveTo));
-}
 /** The organisation's effective attendance settings (`organization_settings.attendance`, defaults filled in; never throws). */
 async function loadAttendanceSettings(trx: Trx, organizationId: string): Promise<AttendanceSettings> {
   const row = await trx.selectFrom('organizationSettings').select('attendance').where('organizationId', '=', organizationId).executeTakeFirst();
@@ -73,8 +71,6 @@ export interface LoadedDailyInputs {
   settings: AttendanceSettings;
 }
 
-interface HistoryRow { branchId: string; departmentId: string | null; employmentStatus: EmploymentStatus; effectiveFrom: string; effectiveTo: string | null }
-
 /** `time` columns arrive as `HH:mm:ss`; the engine speaks `HH:mm`. */
 const hhmm = (t: string | null): string | null => (t === null ? null : t.slice(0, 5));
 
@@ -93,19 +89,8 @@ export function toEngineShift(row: { id: string; code: string; name: string; typ
   };
 }
 
-/** `shift_patterns.sequence` is stored as `[{"day":0,"shift_id":"…"},{"day":3,"off":true}]` (snake or camel case). */
-export function toEnginePattern(row: { id: string; cycleLengthDays: number; anchorDate: Date | string; sequence: unknown }): EngineShiftPattern {
-  const sequence: EngineShiftPattern['sequence'] = [];
-  for (const raw of asArray(row.sequence)) {
-    const o = asObject(raw);
-    const day = Number(o['day']);
-    if (!Number.isInteger(day)) continue;
-    const shiftId = o['shiftId'] ?? o['shift_id'];
-    if (o['off'] === true || typeof shiftId !== 'string') sequence.push({ day, off: true });
-    else sequence.push({ day, shiftId });
-  }
-  return { id: row.id, cycleLengthDays: row.cycleLengthDays, anchorDate: isoDate(row.anchorDate), sequence };
-}
+// The rotation-pattern mapper moved to the per-date working calendar (leave v2 review P1-1); re-exported for existing importers.
+export { toEnginePattern } from './working-calendar.js';
 
 /** `ramadan_mode` jsonb tolerates the snake_case keys documented in the migration. */
 export function normaliseRamadanMode(raw: unknown): Record<string, unknown> {
@@ -149,55 +134,31 @@ export function toAttendanceRules(row: RuleSetRow): AttendanceRules {
  */
 export async function loadDailyInputs(trx: Trx, organizationId: string, employeeId: string, date: string, now: Date): Promise<LoadedDailyInputs | null> {
   const employee = await trx.selectFrom('employees')
-    .select(['id', 'branchId', 'departmentId', 'joiningDate', 'exitDate', 'employmentStatus', 'weeklyOffDays', 'customFields', 'deletedAt'])
+    .select(['id', 'joiningDate', 'exitDate', 'customFields', 'deletedAt'])
     .where('organizationId', '=', organizationId).where('id', '=', employeeId).executeTakeFirst();
   if (!employee || employee.deletedAt) return null;
 
-  const historyRows = await trx.selectFrom('employmentHistory').select(['branchId', 'departmentId', 'employmentStatus', 'effectiveFrom', 'effectiveTo'])
-    .where('organizationId', '=', organizationId).where('employeeId', '=', employeeId).orderBy('effectiveFrom', 'desc').execute();
-  const history: HistoryRow[] = historyRows.map((h) => ({ branchId: h.branchId, departmentId: h.departmentId, employmentStatus: h.employmentStatus, effectiveFrom: isoDate(h.effectiveFrom), effectiveTo: h.effectiveTo === null ? null : isoDate(h.effectiveTo) }));
-  const placement = (d: string): { branchId: string; departmentId: string | null; status: EmploymentStatus } => {
-    const h = historyOn(history, d);
-    return h ? { branchId: h.branchId, departmentId: h.departmentId, status: h.employmentStatus } : { branchId: employee.branchId, departmentId: employee.departmentId, status: employee.employmentStatus };
-  };
-  const today = placement(date);
-  const previous = placement(addDays(date, -1));
-  const next = placement(addDays(date, 1));
-
-  const [org, branches, teamRows, settings] = await Promise.all([
-    trx.selectFrom('organizations').select(['weeklyOffDays', 'timezone']).where('id', '=', organizationId).executeTakeFirstOrThrow(),
-    trx.selectFrom('branches').select(['id', 'timezone', 'weeklyOffDays', 'holidayCalendarId']).where('organizationId', '=', organizationId)
-      .where('id', 'in', [...new Set([today.branchId, previous.branchId, next.branchId])]).execute(),
-    trx.selectFrom('teamMembers').select('teamId').where('organizationId', '=', organizationId).where('employeeId', '=', employeeId).execute(),
+  // Placement, shift assignment, weekly offs and the holiday of D−1, D and D+1 come from THE per-date working calendar
+  // (leave v2 review P1-1 / P1-2): leave day counting, balances and the comp-off preview read the same resolver, so leave
+  // and attendance agree on every date — the branch in force on the date (employment history), its weekly offs and holiday
+  // calendar, and a rotation pattern's off days.
+  const [{ calendars, context }, settings] = await Promise.all([
+    loadEmployeeWorkingCalendars(trx, organizationId, [employeeId], { from: addDays(date, -1), to: addDays(date, 1) }),
     loadAttendanceSettings(trx, organizationId),
   ]);
-  const branch = branches.find((b) => b.id === today.branchId);
+  const calendar = calendars.get(employeeId);
+  if (!calendar) return null;
+  const day = calendar.day(date);
+  const today = day.placement;
+  const branch = context.branches.get(today.branchId);
   if (!branch) throw errors.notFound('Branch', today.branchId);
-  const timezone = isValidTimezone(branch.timezone) ? branch.timezone : isValidTimezone(org.timezone) ? org.timezone : 'UTC';
-  const teamIds = teamRows.map((t) => t.teamId);
+  const orgTimezone = context.organization.timezone;
+  const timezone = isValidTimezone(branch.timezone) ? branch.timezone : isValidTimezone(orgTimezone) ? orgTimezone : 'UTC';
 
   // Shift resolution for D−1, D, D+1 (adjacent windows matter for cross-midnight attribution, §G.3).
-  const branchIds = [...new Set([today.branchId, previous.branchId, next.branchId])];
-  const departmentIds = [...new Set([today.departmentId, previous.departmentId, next.departmentId].filter((d): d is string => d !== null))];
-  const assignmentRows = await trx.selectFrom('shiftAssignments').select(['id', 'targetType', 'targetId', 'shiftId', 'shiftPatternId', 'effectiveFrom', 'effectiveTo'])
-    .where('organizationId', '=', organizationId)
-    .where((eb) => eb.or([
-      eb.and([eb('targetType', '=', 'EMPLOYEE'), eb('targetId', '=', employeeId)]),
-      ...(teamIds.length ? [eb.and([eb('targetType', '=', 'TEAM'), eb('targetId', 'in', teamIds)])] : []),
-      ...(departmentIds.length ? [eb.and([eb('targetType', '=', 'DEPARTMENT'), eb('targetId', 'in', departmentIds)])] : []),
-      eb.and([eb('targetType', '=', 'BRANCH'), eb('targetId', 'in', branchIds)]),
-      eb.and([eb('targetType', '=', 'ORGANIZATION'), eb('targetId', '=', organizationId)]),
-    ]))
-    .execute();
-  const assignments: EngineShiftAssignment[] = assignmentRows.map((a) => ({ id: a.id, targetType: a.targetType, targetId: a.targetId, shiftId: a.shiftId, shiftPatternId: a.shiftPatternId, effectiveFrom: isoDate(a.effectiveFrom), effectiveTo: a.effectiveTo === null ? null : isoDate(a.effectiveTo) }));
-  const patternIds = [...new Set(assignments.map((a) => a.shiftPatternId).filter((p): p is string => p !== null))];
-  const patterns: EngineShiftPattern[] = patternIds.length
-    ? (await trx.selectFrom('shiftPatterns').select(['id', 'cycleLengthDays', 'anchorDate', 'sequence']).where('organizationId', '=', organizationId).where('id', 'in', patternIds).execute()).map(toEnginePattern)
-    : [];
-  const scopeFor = (p: { branchId: string; departmentId: string | null }): EmployeeScope => ({ employeeId, teamIds, departmentId: p.departmentId, branchId: p.branchId, organizationId });
-  const resolved = resolveShift(assignments, patterns, scopeFor(today), date);
-  const resolvedPrev = resolveShift(assignments, patterns, scopeFor(previous), addDays(date, -1));
-  const resolvedNext = resolveShift(assignments, patterns, scopeFor(next), addDays(date, 1));
+  const resolved = day.shift;
+  const resolvedPrev = calendar.day(addDays(date, -1)).shift;
+  const resolvedNext = calendar.day(addDays(date, 1)).shift;
   // `settings.attendance.defaultShiftId` applies wherever no assignment resolves (today and the neighbouring dates) — it is an
   // organisation-wide fallback, not an assignment, so `shiftAssignmentId` stays null. A rotation pattern's off day resolves
   // to "no shift on purpose" and must not fall back either.
@@ -219,24 +180,10 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   const ruleSet = resolveRuleSet(ruleSets, date, today.branchId);
   const rules = ruleSet ? toAttendanceRules(ruleSet.row) : DEFAULT_ATTENDANCE_RULES;
 
-  // Weekly off: employee → branch → organisation; a rotation pattern off-day counts as a weekly off for this date.
-  let weeklyOffDays = (employee.weeklyOffDays ?? branch.weeklyOffDays ?? org.weeklyOffDays ?? []).map(Number);
-  if (resolved.isPatternOff && !weeklyOffDays.includes(dayOfWeek(date))) weeklyOffDays = [...weeklyOffDays, dayOfWeek(date)];
-
-  // Holidays from the branch calendar (or the organisation default calendar).
-  let calendarId = branch.holidayCalendarId;
-  if (!calendarId) calendarId = (await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', organizationId).where('isDefault', '=', true).executeTakeFirst())?.id ?? null;
-  let holiday: EngineHoliday | null = null;
-  if (calendarId) {
-    const h = await trx.selectFrom('holidays').select(['id', 'name', 'isHalfDay'])
-      .where('organizationId', '=', organizationId).where('calendarId', '=', calendarId)
-      .where('date', '<=', asDate(date))
-      .where(sql<boolean>`coalesce(end_date, date) >= ${date}::date`)
-      .where(sql<boolean>`(branch_ids is null or ${today.branchId}::uuid = any(branch_ids))`)
-      .orderBy('isHalfDay', 'asc').orderBy('date', 'desc').orderBy('id', 'asc')
-      .executeTakeFirst();
-    if (h) holiday = { id: h.id, name: h.name, isHalfDay: h.isHalfDay };
-  }
+  // Weekly off: employee → branch → organisation; a rotation pattern off-day counts as a weekly off for this date. Holiday:
+  // the branch calendar (or the organisation default calendar). Both from the per-date working calendar above.
+  const weeklyOffDays = day.weeklyOffDays;
+  const holiday: EngineHoliday | null = day.holiday;
 
   // Approved leave covering the date.
   const leaveRow = await trx.selectFrom('leaveRecords as l').innerJoin('leaveTypes as t', 't.id', 'l.leaveTypeId')

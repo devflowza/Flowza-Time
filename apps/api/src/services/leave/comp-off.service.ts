@@ -1,7 +1,6 @@
-import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { resolveAttendanceSettings, resolveLeaveSettings, type CompOffCreditDto, type CompOffPreviewDto, type CompOffWorkedOnType, type SelfCompOffDto, type SelfCompOffRequestInput } from '@flowza/contracts';
-import { compOffLeaveType, loadWorkingCalendars, type Trx } from '@flowza/database';
+import { compOffLeaveType, loadEmployeeWorkingCalendars, type Trx } from '@flowza/database';
 import { compOffDaysEarned, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
@@ -80,14 +79,16 @@ export async function getSelfCompOff(deps: ApiDeps, actor: Actor, orgId: string)
 
 interface WorkedDay { workedOnType: CompOffWorkedOnType | null; holidayName: string | null; recordedMinutes: number | null; alreadyRequested: boolean; reason: string | null }
 
-/** What the worked date is (weekly off / holiday per the employee's calendar), what the daily record says, and why it cannot earn a credit (null = it can). System scope. */
+/**
+ * What the worked date is (weekly off / holiday per the employee's working calendar ON THAT DATE — review P1-1 / P1-2: the
+ * branch the employee was placed in then, its holiday calendar, and a rotation pattern's off days, exactly as the attendance
+ * engine sees the day), what the daily record says, and why it cannot earn a credit (null = it can). System scope.
+ */
 async function assessWorkedDay(t: Trx, orgId: string, emp: LeaveEmployee, workedOn: string, today: string, rules: CompOffRules): Promise<WorkedDay> {
-  const cal = (await loadWorkingCalendars(t, orgId, [emp.id], workedOn, workedOn)).get(emp.id);
-  const weekday = DateTime.fromISO(workedOn, { zone: 'utc' }).weekday % 7;
-  const holiday = cal?.holidays.has(workedOn) ?? false;
-  const weeklyOff = cal?.weeklyOffDays.includes(weekday) ?? false;
-  const holidayName = holiday ? (await t.selectFrom('holidays').select('name').where('organizationId', '=', orgId).where('date', '<=', dv(workedOn)).where((eb) => eb.or([eb('endDate', '>=', dv(workedOn)), eb.and([eb('endDate', 'is', null), eb('date', '=', dv(workedOn))])]))
-    .where(sql<boolean>`(branch_ids is null or ${emp.branchId}::uuid = any(branch_ids))`).orderBy('isHalfDay').executeTakeFirst())?.name ?? null : null;
+  const day = (await loadEmployeeWorkingCalendars(t, orgId, [emp.id], { from: workedOn, to: workedOn })).calendars.get(emp.id)?.day(workedOn);
+  const holiday = !!day?.holiday;
+  const weeklyOff = !!day && day.weeklyOffDays.includes(DateTime.fromISO(workedOn, { zone: 'utc' }).weekday % 7);
+  const holidayName = day?.holiday?.name ?? null;
   const record = await t.selectFrom('attendanceDailyRecords').select('workedMinutes').where('organizationId', '=', orgId).where('employeeId', '=', emp.id).where('attendanceDate', '=', dv(workedOn)).executeTakeFirst();
   const already = await t.selectFrom('compOffCredits').select('id').where('organizationId', '=', orgId).where('employeeId', '=', emp.id).where('workedOn', '=', dv(workedOn)).where('status', 'not in', ['rejected', 'cancelled']).executeTakeFirst();
   const workedOnType: CompOffWorkedOnType | null = holiday ? 'holiday' : weeklyOff ? 'weekly_off' : null;
@@ -146,10 +147,12 @@ export async function requestCompOff(deps: ApiDeps, actor: Actor, orgId: string,
     if (day.reason) throw errors.validation(REASON_MESSAGES[day.reason] ?? 'This date cannot earn a comp-off credit.', { issues: [{ path: 'workedOn', message: day.reason, code: day.reason.toUpperCase() }] });
     const daysEarned = compOffDaysEarned(input.workedMinutes, rules.fullDayHours);
     if (daysEarned === 0) throw errors.validation(`Comp-off needs at least ${rules.halfDayHours} hour(s) of work for half a day.`, { issues: [{ path: 'workedMinutes', message: 'Below half a day', code: 'BELOW_HALF_DAY' }] });
-    const row = await trx.insertInto('compOffCredits').values({
+    // review P2-10 / P0-2: validated above (the day type from the calendar, the minutes, one request per date), written in the
+    // system context — the database refuses a credit written from the person's own session
+    const row = await systemStep(trx, orgId, (t) => t.insertInto('compOffCredits').values({
       organizationId: orgId, employeeId: emp.id, branchId: emp.branchId, workedOn: input.workedOn, workedOnType: day.workedOnType!, workedMinutes: input.workedMinutes, daysEarned,
       location: input.location, summary: input.summary, status: 'pending_approval', createdBy: actor.userId,
-    }).returning('id').executeTakeFirstOrThrow();
+    }).returning('id').executeTakeFirstOrThrow());
     const submitted = await submit(deps, trx, actor, orgId, {
       entityType: 'COMP_OFF', entityId: row.id, employeeId: emp.id, branchId: emp.branchId, departmentId: emp.departmentId, units: daysEarned, requestedBy: actor.userId,
       noWorkflow: { kind: 'PERMISSION', permission: 'leave.approve' },

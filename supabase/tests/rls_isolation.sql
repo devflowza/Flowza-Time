@@ -213,8 +213,9 @@ select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at
 -- self-service leave (migration 20260927000100)
 select pg_temp.assert_eq((select count(*) from public.leave_types), 1, 'employee sees active leave types only');
 select pg_temp.assert_eq((select count(*) from public.leave_records), 2, 'employee sees only own leave');
-select pg_temp.assert_rows($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by, reason)
-  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-11-01', '2026-11-02', 'PENDING', 'a0000000-0000-0000-0000-000000000003', 'Trip') $q$, 1, 'employee may request own leave (PENDING)');
+-- leave v2 review P2-10 (migration 20260928000850): no direct self-service insert; the API validates a request and writes it in the system context
+select pg_temp.assert_raises($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by, reason)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-11-01', '2026-11-02', 'PENDING', 'a0000000-0000-0000-0000-000000000003', 'Trip') $q$, 'employee cannot insert own leave directly, even PENDING (creates go through the API)');
 select pg_temp.assert_raises($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by)
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-11-08', '2026-11-08', 'APPROVED', 'a0000000-0000-0000-0000-000000000003') $q$, 'employee cannot insert approved leave');
 select pg_temp.assert_raises($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by)

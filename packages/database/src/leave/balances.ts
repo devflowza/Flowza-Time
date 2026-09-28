@@ -1,7 +1,8 @@
 import { sql } from 'kysely';
-import { computeLeaveBalances, holidayDates, type BalanceCreditInput, type LeaveBalance, type LeaveCountMode, type LeaveAccrual, type WorkingCalendar } from '@flowza/domain';
+import { computeLeaveBalances, type BalanceCreditInput, type LeaveBalance, type LeaveCountMode, type LeaveAccrual, type WorkingCalendar } from '@flowza/domain';
 import type { Trx } from '../context.js';
 import { isoDateOf } from '../attendance/day-marks.js';
+import { loadEmployeeWorkingCalendars } from '../attendance/working-calendar.js';
 
 /**
  * Leave v2 read primitives shared by the API and the worker (HR portal Prompt 7): the policy of the leave types, the
@@ -30,6 +31,8 @@ export interface LeaveTypePolicy {
   maxConsecutiveDays: number | null;
   advanceNoticeDays: number;
   applicableGender: 'all' | 'male' | 'female';
+  /** Leave v2 review (B-41): the employment types the type applies to; null = every type. Read with `leaveTypeAppliesTo`. */
+  applicableEmploymentTypes: string[] | null;
   accrual: LeaveAccrual;
   carryForwardMaxDays: number;
   carryForwardExpiryMonths: number | null;
@@ -44,16 +47,17 @@ const num = (v: unknown): number => (v === null || v === undefined ? 0 : Number(
 const numOrNull = (v: unknown): number | null => (v === null || v === undefined ? null : Number(v));
 const dv = (date: string) => sql<Date>`${date}::date`;
 
-type RawTypeRow = { id: string; code: string; name: string; nameAr: string | null; color: string | null; isPaid: boolean; treatAsPresent: boolean; annualAllowanceDays: unknown; status: string; requiresApproval: boolean; countMode: string; maxConsecutiveDays: number | null; advanceNoticeDays: number; applicableGender: string; accrual: string; carryForwardMaxDays: unknown; carryForwardExpiryMonths: number | null; isSpecial: boolean; allowHalfDay: boolean; portalVisible: boolean; systemKey: string | null; createdAt: Date };
+type RawTypeRow = { id: string; code: string; name: string; nameAr: string | null; color: string | null; isPaid: boolean; treatAsPresent: boolean; annualAllowanceDays: unknown; status: string; requiresApproval: boolean; countMode: string; maxConsecutiveDays: number | null; advanceNoticeDays: number; applicableGender: string; applicableEmploymentTypes: string[] | null; accrual: string; carryForwardMaxDays: unknown; carryForwardExpiryMonths: number | null; isSpecial: boolean; allowHalfDay: boolean; portalVisible: boolean; systemKey: string | null; createdAt: Date };
 export function toLeaveTypePolicy(t: RawTypeRow): LeaveTypePolicy {
   return {
     id: t.id, code: String(t.code), name: t.name, nameAr: t.nameAr, color: t.color, isPaid: t.isPaid, treatAsPresent: t.treatAsPresent, annualAllowanceDays: numOrNull(t.annualAllowanceDays), status: t.status,
     requiresApproval: t.requiresApproval, countMode: t.countMode === 'calendar' ? 'calendar' : 'working', maxConsecutiveDays: t.maxConsecutiveDays, advanceNoticeDays: t.advanceNoticeDays,
-    applicableGender: t.applicableGender === 'male' || t.applicableGender === 'female' ? t.applicableGender : 'all', accrual: t.accrual === 'monthly' ? 'monthly' : 'none',
+    applicableGender: t.applicableGender === 'male' || t.applicableGender === 'female' ? t.applicableGender : 'all',
+    applicableEmploymentTypes: Array.isArray(t.applicableEmploymentTypes) && t.applicableEmploymentTypes.length > 0 ? [...t.applicableEmploymentTypes] : null, accrual: t.accrual === 'monthly' ? 'monthly' : 'none',
     carryForwardMaxDays: num(t.carryForwardMaxDays), carryForwardExpiryMonths: t.carryForwardExpiryMonths, isSpecial: t.isSpecial, allowHalfDay: t.allowHalfDay, portalVisible: t.portalVisible, systemKey: t.systemKey, createdAt: t.createdAt,
   };
 }
-export const LEAVE_TYPE_COLUMNS = ['id', 'code', 'name', 'nameAr', 'color', 'isPaid', 'treatAsPresent', 'annualAllowanceDays', 'status', 'requiresApproval', 'countMode', 'maxConsecutiveDays', 'advanceNoticeDays', 'applicableGender', 'accrual', 'carryForwardMaxDays', 'carryForwardExpiryMonths', 'isSpecial', 'allowHalfDay', 'portalVisible', 'systemKey', 'createdAt'] as const;
+export const LEAVE_TYPE_COLUMNS = ['id', 'code', 'name', 'nameAr', 'color', 'isPaid', 'treatAsPresent', 'annualAllowanceDays', 'status', 'requiresApproval', 'countMode', 'maxConsecutiveDays', 'advanceNoticeDays', 'applicableGender', 'applicableEmploymentTypes', 'accrual', 'carryForwardMaxDays', 'carryForwardExpiryMonths', 'isSpecial', 'allowHalfDay', 'portalVisible', 'systemKey', 'createdAt'] as const;
 
 /** Leave types of the organisation with their v2 policy (active ones unless `includeInactive`), ordered by name. */
 export async function loadLeaveTypePolicies(trx: Trx, organizationId: string, opts: { includeInactive?: boolean } = {}): Promise<LeaveTypePolicy[]> {
@@ -63,35 +67,17 @@ export async function loadLeaveTypePolicies(trx: Trx, organizationId: string, op
 }
 
 /**
- * Working calendars of several employees for [from, to] in a handful of queries: weekly offs employee → branch →
- * organisation, holidays of the branch's calendar (else the organisation's default), branch-limited holidays honoured —
- * the same precedence as the attendance engine and the portal.
+ * Leave-counting calendars of several employees for [from, to] — the per-date working calendar (leave v2 review P1-1 /
+ * P1-2, `loadEmployeeWorkingCalendars`): each date uses the branch the employee was placed in on that date, its weekly offs
+ * and holiday calendar (branch-limited holidays honoured, else the organisation's default calendar) and the rotation
+ * pattern's off days — exactly what the attendance engine uses, so a rostered-off day or a pre-transfer weekly off is never
+ * charged as leave. `weeklyOffDays` / `holidays` of the result describe the current placement (display).
  */
 export async function loadWorkingCalendars(trx: Trx, organizationId: string, employeeIds: readonly string[], from: string, to: string): Promise<Map<string, WorkingCalendar>> {
   const out = new Map<string, WorkingCalendar>();
   if (employeeIds.length === 0) return out;
-  const ids = [...new Set(employeeIds)];
-  const employees = await trx.selectFrom('employees').select(['id', 'branchId', 'weeklyOffDays']).where('organizationId', '=', organizationId).where('id', 'in', ids).execute();
-  const branchIds = [...new Set(employees.map((e) => e.branchId).filter((b): b is string => !!b))];
-  const [org, branches, defaultCalendar] = await Promise.all([
-    trx.selectFrom('organizations').select('weeklyOffDays').where('id', '=', organizationId).executeTakeFirst(),
-    branchIds.length ? trx.selectFrom('branches').select(['id', 'weeklyOffDays', 'holidayCalendarId']).where('organizationId', '=', organizationId).where('id', 'in', branchIds).execute() : Promise.resolve([]),
-    trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', organizationId).where('isDefault', '=', true).executeTakeFirst(),
-  ]);
-  const nums = (v: unknown): number[] | null => (Array.isArray(v) ? v.map(Number) : null);
-  const branchById = new Map(branches.map((b) => [b.id, b]));
-  const calendarIds = [...new Set([...branches.map((b) => b.holidayCalendarId ?? defaultCalendar?.id ?? null), defaultCalendar?.id ?? null].filter((c): c is string => !!c))];
-  const holidays = calendarIds.length
-    ? await trx.selectFrom('holidays').select(['calendarId', 'date', 'endDate', 'branchIds']).where('organizationId', '=', organizationId).where('calendarId', 'in', calendarIds)
-      .where('date', '<=', dv(to)).where(sql<boolean>`coalesce(end_date, date) >= ${from}::date`).execute()
-    : [];
-  for (const e of employees) {
-    const branch = e.branchId ? branchById.get(e.branchId) : undefined;
-    const calendarId = branch?.holidayCalendarId ?? defaultCalendar?.id ?? null;
-    const applicable = holidays.filter((h) => h.calendarId === calendarId && (!h.branchIds || h.branchIds.includes(e.branchId)))
-      .map((h) => ({ date: isoDateOf(h.date), endDate: h.endDate === null ? null : isoDateOf(h.endDate) }));
-    out.set(e.id, { weeklyOffDays: nums(e.weeklyOffDays) ?? nums(branch?.weeklyOffDays) ?? nums(org?.weeklyOffDays) ?? [], holidays: holidayDates(applicable) });
-  }
+  const { calendars } = await loadEmployeeWorkingCalendars(trx, organizationId, employeeIds, { from, to });
+  for (const [id, c] of calendars) out.set(id, c.calendar);
   return out;
 }
 
@@ -112,7 +98,7 @@ export async function loadLeaveBalances(trx: Trx, organizationId: string, employ
   if (ids.length === 0) return out;
   const types = opts.types ?? await loadLeaveTypePolicies(trx, organizationId);
   const from = `${opts.year}-01-01`; const to = `${opts.year}-12-31`;
-  let records = trx.selectFrom('leaveRecords').select(['id', 'employeeId', 'leaveTypeId', 'status', 'startDate', 'endDate', 'isHalfDay'])
+  let records = trx.selectFrom('leaveRecords').select(['id', 'employeeId', 'leaveTypeId', 'status', 'startDate', 'endDate', 'isHalfDay', 'days'])
     .where('organizationId', '=', organizationId).where('employeeId', 'in', ids).where('status', 'in', ['APPROVED', 'PENDING', 'INFO_REQUESTED'])
     .where('startDate', '<=', dv(to)).where('endDate', '>=', dv(from));
   if (opts.excludeRecordIds?.length) records = records.where('id', 'not in', [...opts.excludeRecordIds]);
@@ -132,7 +118,8 @@ export async function loadLeaveBalances(trx: Trx, organizationId: string, employ
     out.set(e.id, computeLeaveBalances({
       year: opts.year, asOf: opts.asOf, joiningDate: isoDateOf(e.joiningDate), types: typeInputs,
       allocations: allocations.filter((a) => a.employeeId === e.id).map((a) => ({ leaveTypeId: a.leaveTypeId, allocatedDays: num(a.allocatedDays), carriedForwardDays: num(a.carriedForwardDays), carriedForwardExpiresOn: a.carriedForwardExpiresOn === null ? null : isoDateOf(a.carriedForwardExpiresOn), openingBalanceDays: num(a.openingBalanceDays), adjustmentDays: num(a.adjustmentDays) })),
-      records: recordRows.filter((r) => r.employeeId === e.id).map((r) => ({ leaveTypeId: r.leaveTypeId, status: r.status, startDate: isoDateOf(r.startDate), endDate: isoDateOf(r.endDate), isHalfDay: r.isHalfDay })),
+      // stored `days` (the value at submission) count for a leave inside the year; a transfer never moves history (review P1-2)
+      records: recordRows.filter((r) => r.employeeId === e.id).map((r) => ({ leaveTypeId: r.leaveTypeId, status: r.status, startDate: isoDateOf(r.startDate), endDate: isoDateOf(r.endDate), isHalfDay: r.isHalfDay, days: r.days === null ? null : Number(r.days) })),
       credits: creditRows,
       calendar: calendars.get(e.id) ?? { weeklyOffDays: [], holidays: new Set() },
     }));
