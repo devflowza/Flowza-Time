@@ -24,7 +24,8 @@ export const PERIOD_RULES_BY_CADENCE: Record<ReportScheduleCadence, readonly Rep
 };
 export const REPORT_DELIVERY_CHANNELS = ['in_app', 'email'] as const;
 export type ReportDeliveryChannel = (typeof REPORT_DELIVERY_CHANNELS)[number];
-export const REPORT_DELIVERY_STATUSES = ['queued', 'delivered', 'skipped', 'failed'] as const;
+/** `cancelled`: the recipient cancelled their queued copy (HR portal Prompt 6a review — minor 14). */
+export const REPORT_DELIVERY_STATUSES = ['queued', 'delivered', 'skipped', 'failed', 'cancelled'] as const;
 export type ReportDeliveryStatus = (typeof REPORT_DELIVERY_STATUSES)[number];
 export const REPORT_DELIVERY_MODES = ['schedule', 'manual', 'send_now'] as const;
 export type ReportDeliveryMode = (typeof REPORT_DELIVERY_MODES)[number];
@@ -198,9 +199,13 @@ export interface ReportDeliveryDto {
   deliveredAt: string | null;
 }
 
-/** Recipient picker: members (with the facts the UI groups by) and the roles of the organisation. */
+/**
+ * Recipient picker: members (with the facts the UI groups by) and the roles of the organisation. A branch-scoped caller gets the
+ * members whose access or employee record touches one of their branches; `email` is null unless the caller holds user.view
+ * (HR portal Prompt 6a review — minor 12).
+ */
 export interface ReportRecipientOptionsDto {
-  users: Array<{ userId: string; displayName: string; email: string; roleKey: string; roleName: string; isManager: boolean; branchCount: number | null }>;
+  users: Array<{ userId: string; displayName: string; email: string | null; roleKey: string; roleName: string; isManager: boolean; branchCount: number | null }>;
   roles: Array<{ key: string; name: string; members: number }>;
 }
 

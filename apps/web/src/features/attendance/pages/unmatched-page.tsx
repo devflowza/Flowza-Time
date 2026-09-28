@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import { Link } from 'react-router';
-import { ArrowLeft, EyeOff, RotateCcw, UserCheck, X } from 'lucide-react';
+import { ArrowLeft, EyeOff, Info, RotateCcw, UserCheck, X } from 'lucide-react';
 import type { UnmatchedPunchGroupDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
@@ -99,9 +99,24 @@ function IgnoreDialog({ group, onClose }: { group: Group; onClose: () => void })
 }
 
 /**
+ * Why Assign cannot help for a group, and what to do instead (review defect 4): the Flowza Finance connector matches punches by
+ * employee number, the self-service device by the member's linked employee — a device mapping would never be read.
+ */
+function AssignBlocked({ reason, compact = false }: { reason: string; compact?: boolean }) {
+  const { t } = useTranslation('attendanceWorkspace');
+  return (
+    <p className={compact ? 'flex items-start gap-1 text-xs text-muted-foreground' : 'flex max-w-xs items-start gap-1 text-xs text-muted-foreground'} data-testid="assign-blocked">
+      <Info className="mt-px size-3.5 shrink-0" aria-hidden />
+      <span>{t(`unmatched.assignBlocked.${reason}`)} <Link to="/attendance?tab=raw" className="font-medium text-brand-700 underline-offset-2 hover:underline dark:text-brand-300" onClick={(e) => e.stopPropagation()}>{t('unmatched.openRaw')}</Link></span>
+    </p>
+  );
+}
+
+/**
  * /attendance/unmatched (HR portal Prompt 6a): device punches the normaliser could not attribute to an employee, grouped by
  * device and device user id. Assign maps the id to an employee on that device and re-queues the punches; Ignore sets them aside
  * with a reason (raw rows stay — only their processing status changes, audited); Restore puts ignored punches back in triage.
+ * On a connector / self-service device Assign is replaced by the guidance that fixes the match (the API refuses it too).
  */
 export default function UnmatchedPunchesPage() {
   const { t } = useTranslation('attendanceWorkspace');
@@ -128,12 +143,13 @@ export default function UnmatchedPunchesPage() {
     { id: 'deviceEmployeeId', header: ta('raw.deviceEmployeeId'), enableSorting: false, cell: ({ row }) => <span className="font-mono text-sm" dir="ltr">{row.original.deviceEmployeeId}</span> },
     { id: 'count', header: t('unmatched.punches'), enableSorting: false, cell: ({ row }) => <Badge variant={status === 'ignored' ? 'neutral' : 'danger'} className="tnum">{fmtNumber(row.original.count)}</Badge> },
     { id: 'range', header: t('unmatched.seen'), enableSorting: false, cell: ({ row }) => <div className="text-xs tnum"><p>{fmtDateTime(row.original.firstPunchAt, tz)}</p><p className="text-muted-foreground">→ {fmtDateTime(row.original.lastPunchAt, tz)}</p></div> },
-    { id: 'suggestions', header: t('unmatched.suggested'), enableSorting: false, cell: ({ row }) => row.original.suggestions.length ? <span className="flex flex-wrap gap-1">{row.original.suggestions.map((s) => <Badge key={s.employeeId} variant="info" title={t(`unmatched.reason.${s.reason}`)}>{s.displayName}</Badge>)}</span> : <span className="text-xs text-muted-foreground">—</span> },
+    { id: 'suggestions', header: t('unmatched.suggested'), enableSorting: false, cell: ({ row }) => row.original.assignBlockedReason && status === 'unmatched' ? <AssignBlocked reason={row.original.assignBlockedReason} />
+      : row.original.suggestions.length ? <span className="flex flex-wrap gap-1">{row.original.suggestions.map((s) => <Badge key={s.employeeId} variant="info" title={t(`unmatched.reason.${s.reason}`)}>{s.displayName}</Badge>)}</span> : <span className="text-xs text-muted-foreground">—</span> },
     { id: 'actions', header: '', enableSorting: false, enableHiding: false, cell: ({ row }) => !canAct ? null : (
       <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
         {status === 'unmatched' ? (
           <>
-            <Button size="sm" onClick={() => setAssigning(row.original)}><UserCheck /> {t('unmatched.assign')}</Button>
+            {row.original.assignBlockedReason ? null : <Button size="sm" onClick={() => setAssigning(row.original)}><UserCheck /> {t('unmatched.assign')}</Button>}
             <Button size="sm" variant="ghost" onClick={() => setIgnoring(row.original)}><EyeOff /> {t('unmatched.ignore')}</Button>
           </>
         ) : <Button size="sm" variant="outline" onClick={() => setRestoring(row.original)}><RotateCcw /> {t('unmatched.restore')}</Button>}
@@ -170,8 +186,9 @@ export default function UnmatchedPunchesPage() {
           <div className="space-y-1.5">
             <div className="flex items-center justify-between gap-2"><span className="font-mono text-sm" dir="ltr">{g.deviceEmployeeId}</span><Badge variant={status === 'ignored' ? 'neutral' : 'danger'}>{t('unmatched.count', { count: g.count })}</Badge></div>
             <p className="truncate text-xs text-muted-foreground">{g.deviceName ?? '—'} · {fmtDateTime(g.lastPunchAt, tz)}</p>
+            {g.assignBlockedReason && status === 'unmatched' ? <AssignBlocked reason={g.assignBlockedReason} compact /> : null}
             {canAct ? (status === 'unmatched'
-              ? <div className="flex gap-2"><Button size="sm" onClick={(e) => { e.stopPropagation(); setAssigning(g); }}><UserCheck /> {t('unmatched.assign')}</Button><Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setIgnoring(g); }}><EyeOff /> {t('unmatched.ignore')}</Button></div>
+              ? <div className="flex gap-2">{g.assignBlockedReason ? null : <Button size="sm" onClick={(e) => { e.stopPropagation(); setAssigning(g); }}><UserCheck /> {t('unmatched.assign')}</Button>}<Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setIgnoring(g); }}><EyeOff /> {t('unmatched.ignore')}</Button></div>
               : <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setRestoring(g); }}><RotateCcw /> {t('unmatched.restore')}</Button>) : null}
           </div>
         )}

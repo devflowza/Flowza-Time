@@ -158,6 +158,8 @@ export function hrWorkspaceHandlers(): { get: NonNullable<MockBackendOptions['ge
     post: {
       [`/orgs/${ORG_ID}/attendance/preview`]: (body) => ({ body: previewFixture(body as Parameters<typeof previewFixture>[0]) }),
       [`/orgs/${ORG_ID}/attendance/record-edits`]: () => ({ status: 201, body: { data: { corrections: [{ id: 'c-in', type: 'ADD_PUNCH', status: 'APPROVED', approval: 'AUTO_APPROVED' }, { id: 'c-out', type: 'ADD_PUNCH', status: 'APPROVED', approval: 'AUTO_APPROVED' }], applied: true, failed: null, unchanged: 0 } } }),
+      // the summary export is a queued monthly_summary report (Prompt 6a review, defect 10)
+      [`/orgs/${ORG_ID}/attendance/summary/export`]: () => ({ status: 202, body: { data: { reportId: 'e2e-summary-report', jobId: '501', status: 'QUEUED', reportType: 'monthly_summary', rowCount: employeesFixture.length } } }),
     },
   };
 }

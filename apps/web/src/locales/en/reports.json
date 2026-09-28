@@ -17,7 +17,7 @@
   "types": {
     "daily_attendance": {
       "name": "Daily Report",
-      "description": "Every employee on one day, grouped by department: attendance code, IN/OUT, worked, base and overtime hours."
+      "description": "Every employee on one day — or on each day of a range of up to 62 days — grouped by department: attendance code, IN/OUT, worked, base and overtime hours."
     },
     "monthly_attendance": {
       "name": "Monthly Attendance Report",
@@ -79,6 +79,10 @@
       "name": "Summary Report",
       "description": "One row per employee for the period: days per attendance code grouped into present, leave and absent totals, with OT1, OT2 and under time."
     },
+    "monthly_summary": {
+      "name": "Monthly Attendance Summary",
+      "description": "One row per employee for a month: present (a half day counts ½), late, half days, leave, absent, missed punch, holidays, weekly offs, days worked, worked and overtime hours, loss of pay and unexcused days, with a total row."
+    },
     "weekly_attendance": {
       "name": "Weekly Report",
       "description": "The week containing the chosen date: first IN and last OUT per employee per day."
@@ -97,6 +101,8 @@
     "parametersFor": "Parameters — {{name}}",
     "required": "Required",
     "toBeforeFrom": "Must be on or after the start date",
+    "dailyRangeHint": "Leave To empty for one day; a range lists each day, at most {{max}} days.",
+    "dailyRangeTooLong": "The Daily Report covers at most {{max}} days.",
     "month": "Month",
     "shift": "Shift",
     "allBranches": "All branches",

@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Link, useSearchParams } from 'react-router';
-import { ArrowLeft, ChevronLeft, ChevronRight, PencilLine, Printer } from 'lucide-react';
+import { ArrowLeft, ChevronLeft, ChevronRight, Lock, PencilLine, Printer } from 'lucide-react';
 import { Button, EmptyState, ErrorState, Skeleton } from '@/components/ui';
 import { fmtDate, fmtDateTime, fmtMinutes, fmtTime, todayIso } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { useActiveMembership, useOrgTimezone } from '@/features/me/use-me';
+import { useActiveMembership, useCan, useOrgTimezone } from '@/features/me/use-me';
 import '../workspace-i18n';
 import { useAttendanceCalendar, useAttendanceSummary } from '../workspace-api';
 import { fmtDays, fmtHm, shiftMonth } from '../status';
@@ -13,17 +13,25 @@ import { monthWeeks } from '../workspace-utils';
 
 /** While this page is mounted, printing drops the app chrome (sidebar, top bar, toasts) so the statement prints alone. */
 const PRINT_CSS = '@media print { aside, header, [data-sonner-toaster], [data-print-hide] { display: none !important; } main { padding: 0 !important; } body { background: #fff !important; } }';
+/** Without report.export the statement is a screen view: the browser's own print command prints a notice instead of it. */
+const SCREEN_ONLY_CSS = '@media print { [data-testid="print-sheet"] { display: none !important; } [data-print-denied] { display: block !important; } }';
 
 /**
  * /attendance/print?employeeId=&month= (HR portal Prompt 6a): a print-friendly monthly attendance statement of one employee —
  * every day with status, in / out, worked, late, early and overtime, the month totals and signature lines. Opened from the
  * employee profile and the summary page; the browser's print dialog saves it as PDF.
+ *
+ * Printing / saving it is an EXPORT (review minor 11): the Print button is for report.export holders. Without it (a line
+ * manager reading a team member's month from the summary) the statement is a screen view, and the page's print stylesheet
+ * replaces it with a notice — a UX guard, not a security boundary (the figures are on screen either way).
  */
 export default function AttendancePrintPage() {
   const { t } = useTranslation('attendanceWorkspace');
   const { t: ta } = useTranslation('attendance');
   const tz = useOrgTimezone();
   const org = useActiveMembership()?.organization;
+  const can = useCan();
+  const canPrint = can('report.export');
   const [params, setParams] = useSearchParams();
   const employeeId = params.get('employeeId') ?? '';
   const currentMonth = todayIso(tz).slice(0, 7);
@@ -41,7 +49,8 @@ export default function AttendancePrintPage() {
   if (!enabled) return <div className="page-container"><EmptyState title={t('print.noEmployee')} description={t('print.noEmployeeHint')} /></div>;
   return (
     <div className="page-container space-y-4 print:space-y-3" data-testid="print-page">
-      <style>{PRINT_CSS}</style>
+      <style>{canPrint ? PRINT_CSS : `${PRINT_CSS} ${SCREEN_ONLY_CSS}`}</style>
+      {!canPrint ? <p className="hidden text-sm" data-print-denied>{t('print.notAllowed')}</p> : null}
       <div className="flex flex-wrap items-center gap-2 print:hidden" data-print-hide>
         <Button asChild variant="ghost" size="sm"><Link to={`/employees/${employeeId}`}><ArrowLeft className="rtl:rotate-180" /> {t('print.back')}</Link></Button>
         <div className="flex items-center gap-1 rounded-md border bg-card p-0.5">
@@ -49,7 +58,9 @@ export default function AttendancePrintPage() {
           <span className="px-2 text-sm tnum">{fmtDate(`${month}-01`, 'MMMM yyyy')}</span>
           <Button variant="ghost" size="icon" className="size-8" aria-label={ta('monthly.nextMonth')} onClick={() => setMonth(shiftMonth(month, 1))}><ChevronRight className="rtl:rotate-180" /></Button>
         </div>
-        <Button size="sm" className="ms-auto" onClick={() => window.print()} disabled={!row}><Printer /> {t('print.print')}</Button>
+        {canPrint
+          ? <Button size="sm" className="ms-auto" onClick={() => window.print()} disabled={!row} data-testid="print-button"><Printer /> {t('print.print')}</Button>
+          : <span className="ms-auto inline-flex items-center gap-1 text-xs text-muted-foreground" data-testid="print-locked"><Lock className="size-3" /> {t('print.screenOnly')}</span>}
       </div>
       {cal.isError ? <ErrorState error={cal.error} onRetry={() => void cal.refetch()} />
         : cal.isLoading ? <div className="space-y-2"><Skeleton className="h-16 w-full" /><Skeleton className="h-96 w-full" /></div>

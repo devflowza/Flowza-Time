@@ -19,6 +19,7 @@ import { dv } from './sql-helpers.js';
 import { canCancel, cancelForEntity, decideWithin, submit } from '../approvals/engine.js';
 import { listInbox, requestDtoWithin } from '../approvals/queries.js';
 import * as approvalWorkflows from '../approvals/workflows.js';
+import { preValidateCorrection } from '../attendance/correction-guards.js';
 
 type EventsQuery = z.infer<typeof attendanceEventsQuerySchema>;
 type Decision = z.infer<typeof approvalDecisionSchema>;
@@ -371,6 +372,8 @@ function correctionAccess(actor: Actor, orgId: string, input: CreateCorrectionIn
 }
 
 export async function createCorrection(deps: ApiDeps, actor: Actor, orgId: string, input: CreateCorrectionInput): Promise<CorrectionDto & { approval: 'AUTO_APPROVED' | 'PENDING'; approvalRequestId: string | null }> {
+  // HR portal Prompt 6a review: the branch that OWNED the day (D2) and the date inside today / employment (D6), for every door
+  await preValidateCorrection(deps, actor, orgId, input);
   const { grant, mode } = correctionAccess(actor, orgId, input);
   return runUser(deps.db, actor, async (trx) => {
     if (mode === 'self' && !hasPermission(grant, 'attendance.correct')) {

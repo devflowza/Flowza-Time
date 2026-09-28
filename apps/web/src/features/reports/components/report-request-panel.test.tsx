@@ -79,6 +79,30 @@ describe('ReportRequestPanel', () => {
     expect((body.parameters as Record<string, unknown>).leaveTypeCode).toBe('CL');
   });
 
+  it('6a-ATT21 the Daily Report is one day by default and takes an optional range of at most 62 days', async () => {
+    mockGet({
+      '/report-types': { data: [{ key: 'daily_attendance', name: 'Daily Report', description: 'Every employee on one day.', requiredParameters: ['from'], optionalParameters: ['to', 'branchId', 'departmentId'], permissions: ['report.view', 'attendance.view'], formats: ['csv', 'xlsx', 'pdf'], allowed: true, status: 'available', orientation: 'portrait', defaultFormat: 'pdf' }] },
+      '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]), '/orgs/org-1/employees': page([]), '/orgs/org-1/shifts': page([]), '/orgs/org-1/devices': page([]),
+    });
+    apiMock.post.mockResolvedValue({ data: { id: 'rep-3', status: 'QUEUED', jobId: 'job-3' } });
+    renderWithProviders(<ReportRequestPanel onQueued={() => {}} />);
+    fireEvent.click(await screen.findByRole('radio', { name: /Daily Report/ }));
+    const from = await screen.findByLabelText(/^From/) as HTMLInputElement;
+    const to = screen.getByLabelText(/^To/) as HTMLInputElement;
+    expect(from.value).toMatch(/^\d{4}-\d{2}-\d{2}$/);
+    expect(to.value).toBe(''); // one day unless a range is asked for
+    expect(screen.getByText(/at most 62 days/)).toBeInTheDocument();
+    fireEvent.change(from, { target: { value: '2026-06-01' } });
+    fireEvent.change(to, { target: { value: '2026-08-02' } }); // 63 days
+    fireEvent.click(screen.getByRole('button', { name: 'Queue report' }));
+    expect(await screen.findByText('The Daily Report covers at most 62 days.')).toBeInTheDocument();
+    expect(apiMock.post).not.toHaveBeenCalled();
+    fireEvent.change(from, { target: { value: '2026-06-02' } }); // 62 days
+    fireEvent.click(screen.getByRole('button', { name: 'Queue report' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
+    expect((apiMock.post.mock.calls[0] as [string, Record<string, unknown>])[1]).toMatchObject({ reportType: 'daily_attendance', parameters: { from: '2026-06-02', to: '2026-08-02' } });
+  });
+
   it('shows a month picker for month-based reports', async () => {
     renderWithProviders(<ReportRequestPanel onQueued={() => {}} />);
     fireEvent.click(await screen.findByRole('radio', { name: /Monthly Attendance Report/ }));

@@ -35,7 +35,7 @@
     "title": "سجل الإرسال", "when": "الوقت", "report": "التقرير", "recipient": "المستلم", "status": "الحالة", "scope": "النطاق",
     "empty": "لم يُرسل شيء بعد", "emptyHint": "يُدرج هنا كل تشغيل مجدول وكل تقرير أُرسل من هذه الصفحة، بصف لكل مستلم."
   },
-  "deliveryStatus": { "queued": "قيد الإنشاء", "delivered": "تم التسليم", "skipped": "تم التخطي", "failed": "فشل" },
+  "deliveryStatus": { "queued": "قيد الإنشاء", "delivered": "تم التسليم", "skipped": "تم التخطي", "failed": "فشل", "cancelled": "ألغاه المستلم" },
   "mode": { "schedule": "جدول", "manual": "تشغيل يدوي", "send_now": "إرسال يدوي" },
   "scope": { "organization": "المنظمة بأكملها", "branches": "فروع: {{count}}", "team": "فريقه ({{count}})" },
   "skip": {

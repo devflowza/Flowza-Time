@@ -2,7 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { defaultRegistry } from '@flowza/device-providers';
+import { attendanceSummaryRows, withContext, type AttendanceSummaryDbFigures, type AttendanceSummaryScope } from '@flowza/database';
 import { createHarness, fakeJob, type TestHarness } from '../../test/harness.js';
+import { loadReportContext } from './context.js';
+import { REPORT_DEFINITIONS } from './definitions/index.js';
 import { exportEmployeesHandler, generateReportHandler } from './generate.js';
 
 const ORG = '0b000000-0000-4000-a000-000000000001';
@@ -420,5 +423,94 @@ describe('Phase 3 · Audit Trail', () => {
     expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }))).status).toBe('COMPLETED');
     const lines = csvLines(`${ORG}/${id}.csv`);
     expect(lines.some((l) => l.startsWith('attendance_correction c-1,attendance.correction_applied,"{""status"":""APPROVED""}","{""status"":""APPLIED""}",Owner,21-Nov-2017 09:10'))).toBe(true);
+  });
+});
+
+describe('HR portal Prompt 6a review — the summary report, the daily range, month to date', () => {
+  const csvLines = (path: string) => fileText(path).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
+  const MONTH = '2017-11';
+  const generate = async (reportType: string, format: 'csv' | 'xlsx' | 'pdf', parameters: Record<string, unknown>) => {
+    const id = await request(reportType, format, parameters);
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    return { id, res };
+  };
+  const build = (parameters: Record<string, unknown>) => withContext(h.tdb.workerDb, { kind: 'system', organizationId: ORG }, async (trx) =>
+    REPORT_DEFINITIONS.monthly_summary!.build(trx, await loadReportContext(trx, ORG, { parameters, format: 'csv' }, NOW)));
+  const shared = (scope: Partial<AttendanceSummaryScope> = {}) => withContext(h.tdb.workerDb, { kind: 'system', organizationId: ORG }, (trx) =>
+    attendanceSummaryRows(trx, ORG, { from: '2017-11-01', to: '2017-11-30' }, { employeeBranchIds: null, recordBranchIds: null, departmentId: null, employeeIds: null, search: null, includeFinalized: false, ...scope }, null));
+  const figureValues = (f: AttendanceSummaryDbFigures) => [
+    f.presentDays, f.lateDays, f.halfDays, f.leaveDays, f.absentDays, f.missingPunchDays, f.holidayDays, f.weeklyOffDays, f.daysWorked,
+    Math.round((f.workedMinutes / 60) * 100) / 100, Math.round((f.overtimeMinutes / 60) * 100) / 100, Math.round((f.averageWorkedMinutes / 60) * 100) / 100, f.lopDays, f.unexcusedDays,
+  ];
+  const dataRows = (doc: Awaited<ReturnType<typeof build>>) => doc.sections.flatMap((sec) => sec.rows).filter((r) => (r.kind ?? 'data') === 'data');
+
+  it('6a-D10 monthly_summary: the file carries exactly the shared summary figures, one row per employee, total in printed layouts', async () => {
+    const doc = await build({ month: MONTH, finalizedFigures: false });
+    const expected = await shared();
+    expect(expected.map((r) => r.employeeNumber)).toEqual(['2010', '2328', '2011', '2192', '2076']); // by name: ABDUL, Chrishantha, FAISAL, Masoom, SALEH
+    const rows = dataRows(doc);
+    expect(rows.map((r) => r.cells[0]!.text)).toEqual(expected.map((r) => r.employeeNumber));
+    for (const [i, r] of rows.entries()) expect(r.cells.slice(4, 18).map((c) => c.number)).toEqual(figureValues(expected[i]!));
+    expect(doc.sections[0]!.rows.at(-1)).toMatchObject({ kind: 'total' });
+    const { id, res } = await generate('monthly_summary', 'csv', { month: MONTH, finalizedFigures: false });
+    expect(res).toMatchObject({ status: 'COMPLETED', rowCount: 5 });
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toMatch(/^Employee No\.,Employee,Branch,Department,Present,/);
+    expect(lines).toHaveLength(1 + 5); // a spreadsheet recomputes the total; the file carries data rows only
+    expect(lines.some((l) => l.includes('Left Already'))).toBe(false); // exited before the month
+    const pdf = await generate('monthly_summary', 'pdf', { month: MONTH, finalizedFigures: false });
+    expect(pdf.res.status).toBe('COMPLETED');
+    expect(fileText(`${ORG}/${pdf.id}.pdf`)).toContain('class="total"');
+  });
+
+  it('6a-D10 monthly_summary honours the scope written into the request: branches (records too), employees, search', async () => {
+    const branchOnly = dataRows(await build({ month: MONTH, branchIds: [BRANCH_B], branchScope: [BRANCH_B], finalizedFigures: false }));
+    expect(branchOnly.map((r) => r.cells[0]!.text)).toEqual(['2328']);
+    const team = dataRows(await build({ month: MONTH, employeeIds: [E3, E1], finalizedFigures: false }));
+    expect(team.map((r) => r.cells[0]!.text)).toEqual(['2010', '2011']);
+    const expected = await shared({ employeeIds: [E3, E1] });
+    for (const [i, r] of team.entries()) expect(r.cells.slice(4, 18).map((c) => c.number)).toEqual(figureValues(expected[i]!));
+    const search = dataRows(await build({ month: MONTH, search: 'faisal', finalizedFigures: false }));
+    expect(search.map((r) => r.cells[0]!.text)).toEqual(['2011']);
+  });
+
+  it('6a-D10 finalised period counts only when the requester may read them (finalizedFigures)', async () => {
+    const fin = await h.tdb.adminDb.insertInto('attendancePeriodSummaries').values({ organizationId: ORG, employeeId: E3, branchId: BRANCH, periodStart: '2017-11-01', periodEnd: '2017-11-30', presentDays: '20', absentDays: '1', leaveDays: '2', status: 'finalized', finalizedAt: NOW }).returning('id').executeTakeFirstOrThrow();
+    try {
+      const faisal = async (finalizedFigures: boolean) => dataRows(await build({ month: MONTH, employeeIds: [E3], finalizedFigures }))[0]!;
+      const withFinal = await faisal(true);
+      expect(withFinal.cells[4]!.number).toBe(20);
+      expect(withFinal.cells.at(-1)!.text).toBe('Finalised');
+      const live = await faisal(false);
+      expect(live.cells[4]!.number).toBe((await shared({ employeeIds: [E3] }))[0]!.presentDays);
+      expect(live.cells.at(-1)!.text).toBe('Live');
+    } finally {
+      await h.tdb.adminDb.deleteFrom('attendancePeriodSummaries').where('id', '=', fin.id).execute();
+    }
+  });
+
+  it('6a-ATT21 the Daily Report covers each day of a range (≤ 62 days) with the date as a column in spreadsheets', async () => {
+    const { id, res } = await generate('daily_attendance', 'csv', { from: DATE, to: '2017-11-02' });
+    expect(res).toMatchObject({ status: 'COMPLETED', rowCount: 8 }); // the six rows of the 1st, FAISAL and ABDUL SATTHAR on the 2nd
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toBe('Date,Department,Emp ID,Emp Name,Desg,Att Code,IN Time,OUT Time,Wrk Hrs,Tot Hrs,Base Hrs,OT1,OT2,UT');
+    expect(lines.filter((l) => l.includes('1 November, 2017'))).toHaveLength(6);
+    expect(lines.filter((l) => l.includes('2 November, 2017'))).toHaveLength(2);
+    const one = await generate('daily_attendance', 'csv', { from: DATE });
+    expect(csvLines(`${ORG}/${one.id}.csv`)[0]).toBe('Department,Emp ID,Emp Name,Desg,Att Code,IN Time,OUT Time,Wrk Hrs,Tot Hrs,Base Hrs,OT1,OT2,UT'); // one day: unchanged
+    const tooLong = await generate('daily_attendance', 'csv', { from: '2017-09-01', to: '2017-11-02' });
+    expect(tooLong.res.status).toBe('FAILED');
+    expect((await row(tooLong.id)).error).toBe('The Daily Report covers at most 62 days.');
+  });
+
+  it('6a-M13 a whole-month report asked for month to date stops at the period, never the rest of the month', async () => {
+    const { id, res } = await generate('monthly_attendance', 'csv', { month: MONTH, from: '2017-11-01', to: '2017-11-05' });
+    expect(res.status).toBe('COMPLETED');
+    expect(csvLines(`${ORG}/${id}.csv`)[0]).toBe('Emp ID,Emp Name,1,2,3,4,5,Abs,LOP');
+    const pdf = await generate('monthly_attendance', 'pdf', { month: MONTH, from: '2017-11-01', to: '2017-11-05' });
+    expect(fileText(`${ORG}/${pdf.id}.pdf`)).toContain('For the Period : 01-Nov-2017 To 05-Nov-2017');
+    const summary = dataRows(await build({ month: MONTH, from: '2017-11-01', to: '2017-11-01', employeeIds: [E3], finalizedFigures: false }));
+    expect(summary[0]!.cells[4]!.number).toBe(1); // FAISAL present on the 1st only; the late 2nd is outside the period
+    expect(summary[0]!.cells[5]!.number).toBe(0);
   });
 });

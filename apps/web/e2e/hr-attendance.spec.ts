@@ -6,7 +6,7 @@ const onScreen = (page: Page, text: string | RegExp) => page.getByText(text).loc
 
 /**
  * HR portal Prompt 6a — the HR attendance workspace: the calendar register, adding a missing day through the policy preview,
- * and the monthly summary with its CSV export.
+ * and the monthly summary with its export (a queued report since the review, defect 10).
  */
 test.describe('HR attendance workspace', () => {
   test.beforeEach(async ({ page }) => { await signInDirectly(page); });
@@ -54,5 +54,12 @@ test.describe('HR attendance workspace', () => {
     await expect(onScreen(page, salim.displayName)).toBeVisible();
     await expect(page.getByTestId('summary-totals')).toContainText('36');
     await expect(page.getByTestId('summary-export')).toBeVisible();
+    await expect(page.getByRole('columnheader', { name: 'Unexcused' })).toBeAttached();
+    // the export queues a report in the chosen format and points at Reports — no file is built in the browser
+    await page.getByTestId('summary-export').click();
+    await page.getByTestId('summary-export-xlsx').click();
+    await expect(page.getByText('Queued successfully')).toBeVisible();
+    const exported = backend.calls.find((c) => c.method === 'POST' && c.path === `/orgs/${ORG_ID}/attendance/summary/export`);
+    expect(exported?.body).toMatchObject({ month: '2026-09', format: 'xlsx' });
   });
 });

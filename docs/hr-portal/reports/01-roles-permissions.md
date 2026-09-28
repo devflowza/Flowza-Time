@@ -54,7 +54,7 @@
 | shift.request_swap | ✓ | ✓ | | | ✓ | | | ✓ | ✓ | |
 | approval.manage | ✓ | ✓ | ✓ | | | | | | | |
 | approval.delegate | ✓ | ✓ | ✓ | | | | | | ✓ | |
-| report.schedule | ✓ | ✓ | | | | | ✓ | | | |
+| report.schedule *(hr_admin since the Prompt 6a review, migration 20260928000820)* | ✓ | ✓ | ✓ | | | | ✓ | | | |
 | integration.manage | ✓ | ✓ | | | | | | | | |
 | employee.view_team *(review fix D)* | ✓ | ✓ | ✓ | ✓ | ✓ | | | | ✓ | |
 

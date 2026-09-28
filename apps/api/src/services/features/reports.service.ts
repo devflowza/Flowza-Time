@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { REPORT_TYPE_DEFINITIONS, type CreateReportRequest, type PayrollPeriodActionInput, type PayrollPeriodDto, type ReportRequestDto, type ReportTypeDefinition } from '@flowza/contracts';
+import { DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, REPORT_TYPE_DEFINITIONS, type CreateReportRequest, type PayrollPeriodActionInput, type PayrollPeriodDto, type ReportRequestDto, type ReportTypeDefinition } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { AppError, errors } from '@flowza/shared';
@@ -46,8 +46,14 @@ export async function createReport(deps: ApiDeps, actor: Actor, orgId: string, i
   const missing = def.requiredParameters.filter((p) => (input.parameters as Record<string, unknown>)[p] === undefined);
   if (missing.length) throw errors.validation('Missing report parameters.', { issues: missing.map((m) => ({ path: `parameters.${m}`, message: 'Required' })) });
   if (input.parameters.from && input.parameters.to && input.parameters.to < input.parameters.from) throw errors.validation('to must be on/after from.');
+  // the Daily Report over a range (HR portal Prompt 6a review, ATT-21): each day of at most DAILY_REPORT_MAX_DAYS
+  if (input.reportType === 'daily_attendance' && dailyReportRangeTooLong(input.parameters)) {
+    throw errors.validation(`The Daily Report covers at most ${DAILY_REPORT_MAX_DAYS} days.`, { issues: [{ path: 'parameters.to', message: `At most ${DAILY_REPORT_MAX_DAYS} days` }] });
+  }
   requireBranchAccess(grant, input.parameters.branchId);
   const parameters: Record<string, unknown> = { ...input.parameters };
+  // the monthly summary uses a finalised payroll period's day counts only for payroll.view holders — as the summary page does
+  if (input.reportType === 'monthly_summary') parameters['finalizedFigures'] = hasPermission(grant, 'payroll.view');
   let branchId: string | null = input.parameters.branchId ?? null;
   if (!grant.allBranches) {
     // branch scope is injected server-side so a restricted caller can never widen the report
@@ -135,6 +141,8 @@ export async function cancelReport(deps: ApiDeps, actor: Actor, orgId: string, i
     if (r.status !== 'QUEUED') throw errors.invalidState(`Only queued reports can be cancelled (current: ${r.status}).`);
     if (r.queueJobId !== null) await cancelQueueJob(trx, String(r.queueJobId));
     await trx.updateTable('reportRequests').set({ status: 'CANCELLED', completedAt: new Date() }).where('id', '=', id).execute();
+    // a shared / scheduled copy the recipient cancelled settles its delivery (the trail is system-written; review minor 14)
+    await systemStep(trx, orgId, (t) => t.updateTable('reportDeliveries').set({ status: 'cancelled' }).where('organizationId', '=', orgId).where('reportRequestId', '=', id).where('status', '=', 'queued').execute());
     await audit(trx, actor, orgId, 'report.cancelled', 'report_request', { entityId: id, branchId: r.branchId });
     return toReportDto(await loadReport(trx, actor, orgId, id, grant));
   });

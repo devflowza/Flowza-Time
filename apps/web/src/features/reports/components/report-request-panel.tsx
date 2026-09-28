@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { BarChart3, Lock, Send, Share2 } from 'lucide-react';
-import { createReportRequestSchema, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
+import { createReportRequestSchema, DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
 import type { z } from 'zod';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, ErrorState, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@/components/ui';
 import { Combobox } from '@/components/forms';
@@ -51,12 +51,14 @@ function ReportForm({ def, onQueued, onShare }: { def: ReportTypeDef; onQueued: 
   const schema = useMemo(() => createReportRequestSchema.superRefine((v, ctx) => {
     for (const p of def.requiredParameters) if (isEmpty((v.parameters as Record<string, unknown> | undefined)?.[p])) ctx.addIssue({ code: 'custom', path: ['parameters', p], message: t('request.required') });
     if (v.parameters?.from && v.parameters?.to && v.parameters.to < v.parameters.from) ctx.addIssue({ code: 'custom', path: ['parameters', 'to'], message: t('request.toBeforeFrom') });
+    // the Daily Report over a range (HR portal Prompt 6a review, ATT-21): the same limit the API and the worker apply
+    else if (def.key === 'daily_attendance' && dailyReportRangeTooLong(v.parameters ?? {})) ctx.addIssue({ code: 'custom', path: ['parameters', 'to'], message: t('request.dailyRangeTooLong', { max: DAILY_REPORT_MAX_DAYS }) });
   }), [def, t]);
   const today = todayIso(tz);
   const form = useForm<FormValues, unknown, CreateReportRequest>({
     resolver: zodResolver(schema),
     // the catalogue names the format its layout was designed for (the sample reports are print documents → PDF)
-    defaultValues: { reportType: def.key, format: def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: params.has('to') ? today.slice(0, 8) + '01' : today, ...(params.has('to') ? { to: today } : {}) } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}), ...(params.has('employmentStatus') ? { employmentStatus: 'active' as const } : {}), ...(params.has('scope') ? { scope: 'attendance' as const } : {}) } },
+    defaultValues: { reportType: def.key, format: def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: required.has('to') ? today.slice(0, 8) + '01' : today, ...(required.has('to') ? { to: today } : {}) } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}), ...(params.has('employmentStatus') ? { employmentStatus: 'active' as const } : {}), ...(params.has('scope') ? { scope: 'attendance' as const } : {}) } },
   });
   const { register, control, formState: { errors, isSubmitting } } = form;
   const branchId = useWatch({ control, name: 'parameters.branchId' });
@@ -82,7 +84,7 @@ function ReportForm({ def, onQueued, onShare }: { def: ReportTypeDef; onQueued: 
       <div className="grid gap-4 sm:grid-cols-2">
         {params.has('from') ? <>
           <FormField label={params.has('to') ? tc('common.from') : def.key.startsWith('weekly') ? t('request.weekOf') : tc('common.date')} htmlFor="rp-from" required={required.has('from')} error={pErr?.['from']?.message}><Input id="rp-from" type="date" dir="ltr" {...register('parameters.from', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['from']} /></FormField>
-          {params.has('to') ? <FormField label={tc('common.to')} htmlFor="rp-to" required={required.has('to')} error={pErr?.['to']?.message}><Input id="rp-to" type="date" dir="ltr" {...register('parameters.to', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['to']} /></FormField> : null}
+          {params.has('to') ? <FormField label={tc('common.to')} htmlFor="rp-to" required={required.has('to')} optional={!required.has('to')} hint={def.key === 'daily_attendance' ? t('request.dailyRangeHint', { max: DAILY_REPORT_MAX_DAYS }) : undefined} error={pErr?.['to']?.message}><Input id="rp-to" type="date" dir="ltr" {...register('parameters.to', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['to']} /></FormField> : null}
         </> : null}
         {params.has('month') ? <FormField label={t('request.month')} htmlFor="rp-month" required={required.has('month')} error={pErr?.['month']?.message}><Input id="rp-month" type="month" dir="ltr" {...register('parameters.month', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['month']} /></FormField> : null}
         {params.has('branchId') ? <FormField label={tc('common.branch')} htmlFor="rp-branch" required={required.has('branchId')} optional={!required.has('branchId')} error={pErr?.['branchId']?.message}>

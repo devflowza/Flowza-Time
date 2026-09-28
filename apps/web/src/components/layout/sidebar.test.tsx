@@ -66,6 +66,22 @@ describe('Sidebar', () => {
     expect(screen.getByRole('link', { name: 'Devices' })).not.toHaveAttribute('aria-current');
   });
 
+  it('6a-M15a keeps Attendance active on its own sub-pages (the print view) and yields to the nested workspace items', () => {
+    const attendance = () => screen.getByRole('link', { name: 'Attendance' });
+    const summary = () => screen.getByRole('link', { name: 'Attendance summary' });
+    let r = renderWithProviders(<Sidebar />, { route: '/attendance/print?employeeId=e1&month=2026-08' });
+    expect(attendance()).toHaveAttribute('aria-current', 'page');
+    expect(summary()).not.toHaveAttribute('aria-current');
+    r.unmount();
+    r = renderWithProviders(<Sidebar />, { route: '/attendance/summary' });
+    expect(summary()).toHaveAttribute('aria-current', 'page');
+    expect(attendance()).not.toHaveAttribute('aria-current');
+    r.unmount();
+    renderWithProviders(<Sidebar />, { route: '/attendance' });
+    expect(attendance()).toHaveAttribute('aria-current', 'page');
+    expect(summary()).not.toHaveAttribute('aria-current');
+  });
+
   it('shows Approvals to approvers of attendance or leave, approval admins and line managers — nobody else', () => {
     const approvalsLink = () => screen.queryByRole('link', { name: 'Approvals' });
     grant('dashboard.view');

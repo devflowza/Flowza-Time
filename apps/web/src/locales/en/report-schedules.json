@@ -35,7 +35,7 @@
     "title": "Delivery log", "when": "When", "report": "Report", "recipient": "Recipient", "status": "Status", "scope": "Scope",
     "empty": "Nothing sent yet", "emptyHint": "Every scheduled run and every report sent from this page is listed here, one row per recipient."
   },
-  "deliveryStatus": { "queued": "Generating", "delivered": "Delivered", "skipped": "Skipped", "failed": "Failed" },
+  "deliveryStatus": { "queued": "Generating", "delivered": "Delivered", "skipped": "Skipped", "failed": "Failed", "cancelled": "Cancelled by the recipient" },
   "mode": { "schedule": "Schedule", "manual": "Run now", "send_now": "Sent manually" },
   "scope": { "organization": "Whole organisation", "branches": "{{count}} branch(es)", "team": "Their team ({{count}})" },
   "skip": {

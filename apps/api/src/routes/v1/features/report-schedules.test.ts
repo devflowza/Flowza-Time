@@ -1,16 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { DateTime } from 'luxon';
+import { withContext, type Trx } from '@flowza/database';
 import { auditRows, createApiHarness, queueJobs, seedMembership, seedOrg, seedUser, uuid, ROLE, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
 
 /**
  * Report sharing and schedules (HR portal Prompt 6a): CRUD (report.view read, report.schedule write), validation, the next run
- * in the organisation's zone (Asia/Muscat), run-now, Send now, the delivery trail and the recipient picker.
+ * in the organisation's zone (Asia/Muscat), run-now, Send now, the delivery trail and the recipient picker. Tests named `6a-…`
+ * are the regressions of the adversarial review (docs/hr-portal/reviews/06a-hr-attendance-workspace-review.md).
  */
 let h: ApiHarness; let f: OrgFixture;
 let restrictedScheduler: string; // payroll role limited to branch B
 let lineManager: string;         // role manager linked to e3 (manages e1)
+let branchBScheduleId: string;   // the restricted scheduler's own branch-B schedule
 
 const schedule = (extra: Record<string, unknown> = {}) => ({
   name: 'Monthly late report', reportType: 'late_report', format: 'csv', cadence: 'monthly', runDay: 1, runTime: '07:00', periodRule: 'previous_month',
@@ -78,8 +81,9 @@ describe('report schedules — CRUD and permissions', () => {
     const hrAdminList = await h.request('GET', `${base()}/report-schedules`, { token: f.hrAdmin });
     expect(hrAdminList.status).toBe(200);
     expect(hrAdminList.body.data.length).toBeGreaterThan(0);
-    const hrAdminCreate = await h.request('POST', `${base()}/report-schedules`, { token: f.hrAdmin, body: schedule() });
-    expect(hrAdminCreate.status).toBe(403);
+    // hr_user holds report.view without report.schedule
+    const hrUserCreate = await h.request('POST', `${base()}/report-schedules`, { token: f.hrUser, body: schedule() });
+    expect(hrUserCreate.status).toBe(403);
     const employee = await h.request('GET', `${base()}/report-schedules`, { token: f.employeeUser });
     expect(employee.status).toBe(403);
     // payroll holds report.schedule but not audit.view: it may not distribute the audit trail
@@ -89,7 +93,16 @@ describe('report schedules — CRUD and permissions', () => {
     expect(outsider.status).toBe(403);
   });
 
-  it('a branch-scoped scheduler must pick one of their branches, and sees only those schedules', async () => {
+  it('6a-P report.schedule is held by owner, org_admin, hr_admin and payroll — hr_admin now schedules and shares', async () => {
+    const holders = (await h.admin.selectFrom('rolePermissions as rp').innerJoin('roles as r', 'r.id', 'rp.roleId').select('r.key')
+      .where('r.isSystem', '=', true).where('r.organizationId', 'is', null).where('rp.permissionKey', '=', 'report.schedule').execute()).map((r) => r.key).sort();
+    expect(holders).toEqual(['hr_admin', 'org_admin', 'owner', 'payroll']);
+    const created = await h.request('POST', `${base()}/report-schedules`, { token: f.hrAdmin, body: schedule({ name: 'HR monthly' }) });
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({ createdBy: f.hrAdmin, branchId: null });
+  });
+
+  it('6a-D3 a branch-scoped scheduler must pick one of their branches, and sees only those schedules', async () => {
     const noBranch = await h.request('POST', `${base()}/report-schedules`, { token: restrictedScheduler, body: schedule() });
     expect(noBranch.status).toBe(403);
     const otherBranch = await h.request('POST', `${base()}/report-schedules`, { token: restrictedScheduler, body: schedule({ filters: { branchId: f.branchA } }) });
@@ -97,11 +110,47 @@ describe('report schedules — CRUD and permissions', () => {
     const own = await h.request('POST', `${base()}/report-schedules`, { token: restrictedScheduler, body: schedule({ name: 'Branch B', filters: { branchId: f.branchB } }) });
     expect(own.status).toBe(201);
     expect(own.body.data.branchId).toBe(f.branchB);
+    branchBScheduleId = own.body.data.id;
     const list = await h.request('GET', `${base()}/report-schedules`, { token: restrictedScheduler });
-    // organisation-wide schedules (branch null) stay readable; branch A ones would not
-    expect(list.body.data.every((s: { branchId: string | null }) => s.branchId === null || s.branchId === f.branchB)).toBe(true);
+    // organisation-wide schedules (branch null) are for unrestricted memberships only; branch A ones never
+    expect(list.body.data.map((s: { id: string }) => s.id)).toEqual([branchBScheduleId]);
+    expect((await h.request('GET', `${base()}/report-schedules/${id}`, { token: restrictedScheduler })).status).toBe(404);
     const cannotEditOrgWide = await h.request('PATCH', `${base()}/report-schedules/${id}`, { token: restrictedScheduler, body: { name: 'hijack' } });
     expect(cannotEditOrgWide.status).toBe(403);
+  });
+
+  it('6a-D3 branch scheduler cannot re-point, run or delete an organisation-wide schedule (review probe B)', async () => {
+    const stored = async (scheduleId: string) => h.admin.selectFrom('reportSchedules').selectAll().where('id', '=', scheduleId).executeTakeFirstOrThrow();
+    const before = await stored(id);
+    const jobsBefore = (await queueJobs(h.admin, 'RUN_REPORT_SCHEDULE')).length;
+    // the probe: re-point the owner's organisation-wide schedule to the scheduler's own branch with themselves as the recipient
+    const repoint = await h.request('PATCH', `${base()}/report-schedules/${id}`, { token: restrictedScheduler, body: { filters: { branchId: f.branchB }, recipients: { userIds: [restrictedScheduler], roleKeys: [] } } });
+    expect(repoint.status).toBe(403);
+    expect((await h.request('POST', `${base()}/report-schedules/${id}/run-now`, { token: restrictedScheduler })).status).toBe(403);
+    expect((await h.request('DELETE', `${base()}/report-schedules/${id}`, { token: restrictedScheduler })).status).toBe(403);
+    expect(await stored(id)).toEqual(before);
+    expect((await queueJobs(h.admin, 'RUN_REPORT_SCHEDULE')).length).toBe(jobsBefore);
+    // another branch's schedule is not theirs either
+    const branchA = await h.request('POST', `${base()}/report-schedules`, { token: f.owner, body: schedule({ name: 'Branch A', filters: { branchId: f.branchA } }) });
+    expect(branchA.status).toBe(201);
+    expect((await h.request('PATCH', `${base()}/report-schedules/${branchA.body.data.id}`, { token: restrictedScheduler, body: { filters: { branchId: f.branchB } } })).status).toBe(403);
+    expect((await h.request('DELETE', `${base()}/report-schedules/${branchA.body.data.id}`, { token: restrictedScheduler })).status).toBe(403);
+    // their own branch's schedule stays theirs: rename, run now
+    const renamed = await h.request('PATCH', `${base()}/report-schedules/${branchBScheduleId}`, { token: restrictedScheduler, body: { name: 'Branch B late' } });
+    expect(renamed.status).toBe(200);
+    expect(renamed.body.data).toMatchObject({ name: 'Branch B late', branchId: f.branchB });
+    expect((await h.request('POST', `${base()}/report-schedules/${branchBScheduleId}/run-now`, { token: restrictedScheduler })).status).toBe(202);
+  });
+
+  it('6a-D3 schedules are written by the service only: a direct client write (PostgREST) raises, next_run_at cannot be rewound', async () => {
+    const asUser = <T>(userId: string, fn: (trx: Trx) => Promise<T>) => withContext(h.tdb.db, { kind: 'user', userId, requestId: `probe-${userId}` }, fn);
+    const rewind = new Date(Date.now() - 60_000);
+    await expect(asUser(restrictedScheduler, (trx) => trx.updateTable('reportSchedules').set({ nextRunAt: rewind }).where('id', '=', branchBScheduleId).execute())).rejects.toThrow(/permission denied/);
+    await expect(asUser(f.owner, (trx) => trx.updateTable('reportSchedules').set({ nextRunAt: rewind }).where('id', '=', id).execute())).rejects.toThrow(/permission denied/);
+    await expect(asUser(restrictedScheduler, (trx) => trx.deleteFrom('reportSchedules').where('id', '=', id).execute())).rejects.toThrow(/permission denied/);
+    await expect(asUser(restrictedScheduler, (trx) => trx.insertInto('reportSchedules').values({ organizationId: f.orgId, name: 'direct', reportType: 'late_report', format: 'csv', filters: '{}', branchId: null, cadence: 'monthly', runDay: 1, runTime: '07:00', periodRule: 'previous_month', recipients: JSON.stringify({ userIds: [restrictedScheduler], roleKeys: [] }), channels: ['in_app'], isActive: true, nextRunAt: rewind }).execute())).rejects.toThrow(/permission denied/);
+    const row = await h.admin.selectFrom('reportSchedules').select('nextRunAt').where('id', '=', branchBScheduleId).executeTakeFirstOrThrow();
+    expect(new Date(row.nextRunAt!).getTime()).toBeGreaterThan(Date.now());
   });
 
   it('validates cadence / period / parameters / recipients', async () => {
@@ -133,8 +182,8 @@ describe('report schedules — CRUD and permissions', () => {
     expect(job?.queueName).toBe('reports');
     const today = DateTime.now().setZone('Asia/Muscat');
     expect(run.body.data.period.from).toBe(today.startOf('month').minus({ months: 1 }).toISODate());
-    const hrAdmin = await h.request('POST', `${base()}/report-schedules/${id}/run-now`, { token: f.hrAdmin });
-    expect(hrAdmin.status).toBe(403);
+    const hrUser = await h.request('POST', `${base()}/report-schedules/${id}/run-now`, { token: f.hrUser });
+    expect(hrUser.status).toBe(403);
     const del = await h.request('DELETE', `${base()}/report-schedules/${id}`, { token: f.owner });
     expect(del.status).toBe(204);
     expect((await h.request('GET', `${base()}/report-schedules/${id}`, { token: f.owner })).status).toBe(404);
@@ -152,8 +201,11 @@ describe('Send now, deliveries and the recipient picker', () => {
     expect((await auditRows(h.admin, 'report.shared'))[0]?.newValue).toMatchObject({ resolvedRecipients: 3, reportType: 'late_report' });
     const missing = await h.request('POST', `${base()}/reports/share`, { token: f.owner, body: { reportType: 'late_report', format: 'csv', parameters: { from: '2026-08-01' }, recipients: { userIds: [f.hrUser] } } });
     expect(missing.status).toBe(400);
+    const hrUser = await h.request('POST', `${base()}/reports/share`, { token: f.hrUser, body: { reportType: 'late_report', format: 'csv', parameters: { from: '2026-08-01', to: '2026-08-31' }, recipients: { userIds: [f.owner] } } });
+    expect(hrUser.status).toBe(403);
+    // hr_admin holds report.schedule since the review
     const hrAdmin = await h.request('POST', `${base()}/reports/share`, { token: f.hrAdmin, body: { reportType: 'late_report', format: 'csv', parameters: { from: '2026-08-01', to: '2026-08-31' }, recipients: { userIds: [f.hrUser] } } });
-    expect(hrAdmin.status).toBe(403);
+    expect(hrAdmin.status).toBe(202);
     const stranger = await h.request('POST', `${base()}/reports/share`, { token: f.owner, body: { reportType: 'late_report', format: 'csv', parameters: { from: '2026-08-01', to: '2026-08-31' }, recipients: { userIds: [f.outsider] } } });
     expect(stranger.status).toBe(400);
   });
@@ -176,15 +228,65 @@ describe('Send now, deliveries and the recipient picker', () => {
     expect(employee.status).toBe(403);
   });
 
+  it('6a-D3 a branch-scoped scheduler sees what they sent, received or scheduled for their branches — not the organisation trail', async () => {
+    const orgWide = await h.request('POST', `${base()}/report-schedules`, { token: f.owner, body: schedule({ name: 'Org-wide absences', reportType: 'absence_report' }) });
+    expect(orgWide.status).toBe(201);
+    const key = () => `probe:${uuid('7')}`;
+    const rows = [
+      { organizationId: f.orgId, runKey: key(), mode: 'schedule', reportType: 'absence_report', format: 'csv', scheduleId: orgWide.body.data.id, recipientUserId: f.hrUser, sentBy: null, status: 'delivered' }, // org-wide schedule
+      { organizationId: f.orgId, runKey: key(), mode: 'schedule', reportType: 'late_report', format: 'csv', scheduleId: branchBScheduleId, recipientUserId: lineManager, sentBy: null, status: 'delivered' }, // their branch's schedule
+      { organizationId: f.orgId, runKey: key(), mode: 'send_now', reportType: 'late_report', format: 'csv', scheduleId: null, recipientUserId: f.hrUser, sentBy: restrictedScheduler, status: 'queued' }, // they sent it
+      { organizationId: f.orgId, runKey: key(), mode: 'send_now', reportType: 'late_report', format: 'csv', scheduleId: null, recipientUserId: restrictedScheduler, sentBy: f.owner, status: 'queued' }, // they received it
+      { organizationId: f.orgId, runKey: key(), mode: 'send_now', reportType: 'late_report', format: 'csv', scheduleId: null, recipientUserId: f.hrUser, sentBy: f.owner, status: 'queued' }, // somebody else's
+    ];
+    const ids = (await h.admin.insertInto('reportDeliveries').values(rows).returning('id').execute()).map((r) => r.id);
+    const seen = async (token: string) => new Set((await h.request('GET', `${base()}/report-deliveries?pageSize=200`, { token })).body.data.map((d: { id: string }) => d.id));
+    const restricted = await seen(restrictedScheduler);
+    expect(ids.map((i) => restricted.has(i))).toEqual([false, true, true, true, false]);
+    // RLS applies the same rule to a direct read (PostgREST)
+    const direct = await withContext(h.tdb.db, { kind: 'user', userId: restrictedScheduler, requestId: 'probe-deliveries' }, (trx) => trx.selectFrom('reportDeliveries').select('id').where('id', 'in', ids).execute());
+    expect(ids.map((i) => direct.some((d) => d.id === i))).toEqual([false, true, true, true, false]);
+    const hrAdmin = await seen(f.hrAdmin); // unrestricted report.schedule: the whole trail
+    expect(ids.every((i) => hrAdmin.has(i))).toBe(true);
+    const recipient = await seen(f.hrUser); // no report.schedule: their own rows
+    expect(ids.map((i) => recipient.has(i))).toEqual([true, false, true, false, true]);
+  });
+
   it('the picker lists members (manager flag, branch scope) and roles for report.schedule holders only', async () => {
     const res = await h.request('GET', `${base()}/report-recipients`, { token: f.owner });
     expect(res.status).toBe(200);
     const manager = res.body.data.users.find((u: { userId: string }) => u.userId === lineManager);
-    expect(manager).toMatchObject({ roleKey: 'manager', isManager: true, branchCount: null });
+    expect(manager).toMatchObject({ roleKey: 'manager', isManager: true, branchCount: null, email: 'line-manager-rsched@test.local' });
     expect(res.body.data.users.find((u: { userId: string }) => u.userId === f.branchManagerB)).toMatchObject({ branchCount: 1, isManager: false });
     expect(res.body.data.roles.find((r: { key: string }) => r.key === 'hr_admin')).toMatchObject({ members: 1 });
     expect(res.body.data.users.some((u: { userId: string }) => u.userId === f.outsider)).toBe(false);
-    const hrAdmin = await h.request('GET', `${base()}/report-recipients`, { token: f.hrAdmin });
-    expect(hrAdmin.status).toBe(403);
+    const hrUser = await h.request('GET', `${base()}/report-recipients`, { token: f.hrUser });
+    expect(hrUser.status).toBe(403);
+  });
+
+  it('6a-M12 the picker is scoped to the caller\'s branches and shows e-mail addresses to user.view holders only', async () => {
+    const branchAOnly = uuid('c'); await seedUser(h.admin, branchAOnly, 'branch-a-only-rsched@test.local', 'Branch A only'); await seedMembership(h.admin, f.orgId, branchAOnly, ROLE.hr_user, { branchIds: [f.branchA] });
+    const users = async (token: string) => (await h.request('GET', `${base()}/report-recipients`, { token })).body.data as { users: Array<{ userId: string; email: string | null; displayName: string }>; roles: Array<{ key: string; members: number }> };
+    const owner = await users(f.owner);
+    expect(owner.users.find((u) => u.userId === branchAOnly)).toMatchObject({ email: 'branch-a-only-rsched@test.local', displayName: 'Branch A only' });
+    expect(owner.roles.find((r) => r.key === 'hr_user')?.members).toBe(3);
+    // hr_admin holds user.view: e-mail addresses
+    expect((await users(f.hrAdmin)).users.find((u) => u.userId === lineManager)?.email).toBe('line-manager-rsched@test.local');
+    // payroll schedules reports without user.view: names only, never an address
+    const payroll = await users(f.payrollUser);
+    expect(payroll.users.length).toBeGreaterThan(0);
+    expect(payroll.users.every((u) => u.email === null)).toBe(true);
+    expect(payroll.users.find((u) => u.userId === lineManager)?.displayName).toBe('Line Manager');
+    // a branch-B scheduler: members whose access reaches branch B, never a branch-A-only member; role counts over that set
+    const restricted = await users(restrictedScheduler);
+    expect(restricted.users.some((u) => u.userId === branchAOnly)).toBe(false);
+    expect(restricted.users.some((u) => u.userId === f.branchManagerB)).toBe(true);
+    expect(restricted.users.some((u) => u.userId === f.owner)).toBe(true);
+    expect(restricted.users.every((u) => u.email === null)).toBe(true);
+    expect(restricted.roles.find((r) => r.key === 'hr_user')?.members).toBe(2);
+    // … and a Send now to such a member is refused like an unknown recipient
+    const share = (userIds: string[]) => h.request('POST', `${base()}/reports/share`, { token: restrictedScheduler, body: { reportType: 'late_report', format: 'csv', parameters: { from: '2026-08-01', to: '2026-08-31', branchId: f.branchB }, recipients: { userIds } } });
+    expect((await share([branchAOnly])).status).toBe(400);
+    expect((await share([f.branchManagerB])).status).toBe(202);
   });
 });

@@ -102,6 +102,20 @@ describe('periodParameters', () => {
     expect(periodParameters('weekly_attendance', { from: '2026-09-20', to: '2026-09-26' })).toEqual({ from: '2026-09-20' });
     expect(periodParameters('employee_directory', p)).toEqual({});
   });
+
+  it('6a-M13 a whole-month type asked for month to date gets the exact days, never the rest of the month', () => {
+    // a run on the 15th: month to date = the 1st up to yesterday
+    const mtd = schedulePeriod({ periodRule: 'month_to_date' }, at('2026-10-15T03:00:00Z'), 'Asia/Muscat');
+    expect(mtd).toEqual({ from: '2026-10-01', to: '2026-10-14' });
+    expect(periodParameters('monthly_attendance', mtd)).toEqual({ month: '2026-10', from: '2026-10-01', to: '2026-10-14' });
+    expect(periodParameters('monthly_summary', mtd)).toEqual({ month: '2026-10', from: '2026-10-01', to: '2026-10-14' });
+    // a run on the 1st covers the whole previous month: the month alone, as before
+    const onFirst = schedulePeriod({ periodRule: 'month_to_date' }, at('2026-11-01T03:00:00Z'), 'Asia/Muscat');
+    expect(periodParameters('monthly_attendance', onFirst)).toEqual({ month: '2026-10' });
+    // February and a leap year: the month's real last day
+    expect(periodParameters('monthly_summary', { from: '2028-02-01', to: '2028-02-29' })).toEqual({ month: '2028-02' });
+    expect(periodParameters('monthly_summary', { from: '2028-02-01', to: '2028-02-28' })).toEqual({ month: '2028-02', from: '2028-02-01', to: '2028-02-28' });
+  });
 });
 
 describe('scopeReportForRecipient', () => {

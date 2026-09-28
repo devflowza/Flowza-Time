@@ -72,16 +72,27 @@ beforeAll(async () => {
 });
 afterAll(async () => { await h?.close(); });
 
+const runJobs = () => h.tdb.adminDb.selectFrom('jobs.queue').select(['id', 'jobType', 'payload', 'dedupeKey', 'queueName', 'status']).where('jobType', '=', 'RUN_REPORT_SCHEDULE').execute();
+
 describe('reports.schedules scheduler task', () => {
   it('admits a due occurrence once (dedupe on the occurrence) and ignores schedules not yet due', async () => {
     clock = new Date('2026-09-01T02:59:00Z');
-    expect(await scheduleDueReports(h.deps)).toEqual({ due: 0, enqueued: 0 });
+    expect(await scheduleDueReports(h.deps)).toEqual({ due: 0, enqueued: 0, alreadyQueued: 0 });
     clock = new Date('2026-09-01T03:04:00Z');
-    await scheduleDueReports(h.deps);
-    await scheduleDueReports(h.deps);
-    const jobs = await h.tdb.adminDb.selectFrom('jobs.queue').select(['jobType', 'payload', 'dedupeKey', 'queueName']).where('jobType', '=', 'RUN_REPORT_SCHEDULE').execute();
+    expect(await scheduleDueReports(h.deps)).toEqual({ due: 1, enqueued: 1, alreadyQueued: 0 });
+    // 6a-M15b: the next tick meets the occurrence still waiting — reported as already queued, not as a new enqueue
+    expect(await scheduleDueReports(h.deps)).toEqual({ due: 1, enqueued: 0, alreadyQueued: 1 });
+    const jobs = await runJobs();
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({ queueName: 'reports', dedupeKey: `report-schedule:${SCHEDULE}:${FIRST_RUN}`, payload: { mode: 'schedule', scheduleId: SCHEDULE, scheduledFor: FIRST_RUN } });
+  });
+
+  it('6a-M15b an occurrence whose job is running is neither enqueued again nor counted as enqueued', async () => {
+    // the queue's dedupe covers pending jobs only: a running job used to be enqueued a second time on every tick
+    await h.tdb.adminDb.updateTable('jobs.queue').set({ status: 'running', lockedAt: clock, lockedBy: 'probe' }).where('jobType', '=', 'RUN_REPORT_SCHEDULE').execute();
+    expect(await scheduleDueReports(h.deps)).toEqual({ due: 1, enqueued: 0, alreadyQueued: 1 });
+    expect(await runJobs()).toHaveLength(1);
+    await h.tdb.adminDb.updateTable('jobs.queue').set({ status: 'pending', lockedAt: null, lockedBy: null }).where('jobType', '=', 'RUN_REPORT_SCHEDULE').execute();
   });
 });
 
@@ -146,6 +157,19 @@ describe('RUN_REPORT_SCHEDULE', () => {
   });
 });
 
+describe('6a-M14 a recipient cancelled their copy', () => {
+  it('6a-M14 the worker settles the delivery as cancelled and notifies nobody', async () => {
+    const d = (await deliveries('manual:once')).find((r) => r.recipientUserId === LEAD)!;
+    expect(d.status).toBe('queued');
+    // what POST /reports/:id/cancel leaves behind when the worker meets the job later (the API also settles it at once)
+    await h.tdb.adminDb.updateTable('reportRequests').set({ status: 'CANCELLED', completedAt: clock }).where('id', '=', d.reportRequestId!).execute();
+    const res = await generateReportRequest(h.deps, h.deps.log, fakeJob('GENERATE_REPORT', {}, ORG), ORG, d.reportRequestId!);
+    expect(res).toMatchObject({ status: 'SKIPPED', reason: 'CANCELLED' });
+    expect((await deliveries('manual:once')).find((r) => r.recipientUserId === LEAD)).toMatchObject({ status: 'cancelled', deliveredAt: null, error: null });
+    expect(await h.tdb.adminDb.selectFrom('domainEvents').select('eventType').where('aggregateId', '=', d.reportRequestId!).execute()).toEqual([]);
+  });
+});
+
 describe('completion → notification', () => {
   it('marks the delivery delivered and notifies the recipient in-app only (channels) instead of report.ready', async () => {
     const d = (await deliveries(`schedule:${SCHEDULE}:${FIRST_RUN}`)).find((r) => r.recipientUserId === OWNER)!;
@@ -181,5 +205,24 @@ describe('completion → notification', () => {
     expect(after).toMatchObject({ status: 'failed', error: 'boom' });
     const failed = await h.tdb.adminDb.selectFrom('domainEvents').select('payload').where('eventType', '=', 'report.failed').where('aggregateId', '=', d.reportRequestId!).executeTakeFirstOrThrow();
     expect(failed.payload).toMatchObject({ userId: OWNER, error: 'boom' });
+  });
+});
+
+describe('6a-D3 nextRunAbuse (review worker probe): next_run_at is server-computed', () => {
+  it('6a-D3 a scheduler cannot rewind next_run_at from a user session, so later ticks admit nothing extra', async () => {
+    clock = new Date('2026-09-15T05:09:00Z');
+    const before = await scheduleRow();
+    const jobsBefore = (await runJobs()).length;
+    const requestsBefore = (await h.tdb.adminDb.selectFrom('reportRequests').select('id').where('organizationId', '=', ORG).execute()).length;
+    for (const at of ['2026-09-15T05:10:00Z', '2026-09-15T05:15:00Z', '2026-09-15T05:20:00Z']) {
+      clock = new Date(at);
+      // the probe's write: one minute before "now", as the schedule's owner (report.schedule) through the API role (PostgREST)
+      await expect(withContext(h.tdb.db, { kind: 'user', userId: OWNER, requestId: 'probe' }, (trx) =>
+        trx.updateTable('reportSchedules').set({ nextRunAt: new Date(clock.getTime() - 60_000) }).where('id', '=', SCHEDULE).execute())).rejects.toThrow(/permission denied/);
+      expect(await scheduleDueReports(h.deps)).toEqual({ due: 0, enqueued: 0, alreadyQueued: 0 });
+    }
+    expect((await runJobs()).length).toBe(jobsBefore);
+    expect((await h.tdb.adminDb.selectFrom('reportRequests').select('id').where('organizationId', '=', ORG).execute()).length).toBe(requestsBefore);
+    expect((await scheduleRow()).nextRunAt).toEqual(before.nextRunAt);
   });
 });

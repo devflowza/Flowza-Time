@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router';
+import { NavLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, LayoutDashboard, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
 import type { Permission } from '@flowza/contracts';
@@ -53,6 +53,7 @@ export function Sidebar() {
   const { data: me } = useMe();
   const employeeId = useEmployeeId();
   const membership = useActiveMembership();
+  const { pathname } = useLocation();
   // Direct reports (/me: isManager) is a reporting RELATIONSHIP. The approval engine routes MANAGER steps to it whatever
   // the manager's role, and the inbox is actor-scoped (membership only), so it alone opens Approvals.
   const hasDirectReports = membership?.isManager ?? false;
@@ -112,8 +113,10 @@ export function Sidebar() {
     ] },
   ];
   if (me?.user.isPlatformAdmin) sections.push({ items: [{ to: '/platform', label: t('nav.platform'), icon: Network }] });
-  // an item with its own nested items (/attendance → /attendance/summary) is active on its exact path only
+  // An item with nested items of its own (/attendance → /attendance/summary) yields to the nested item on that item's paths and
+  // stays active on its other sub-paths (/attendance/print is still Attendance) — HR portal Prompt 6a review, minor 15a.
   const navPaths = sections.flatMap((s) => s.items.map((it) => it.to));
+  const nestedItemMatches = (to: string) => navPaths.some((p) => p !== to && p.startsWith(`${to}/`) && (pathname === p || pathname.startsWith(`${p}/`)));
 
   return (
     <aside
@@ -139,7 +142,7 @@ export function Sidebar() {
               <ul className="space-y-px">
                 {items.map((item) => {
                   const link = (
-                    <NavLink to={item.to} end={item.to === '/' || item.to === '/my' || navPaths.some((p) => p.startsWith(`${item.to}/`))} className={itemClass(collapsed)}>
+                    <NavLink to={item.to} end={item.to === '/' || item.to === '/my' || nestedItemMatches(item.to)} className={itemClass(collapsed)}>
                       <item.icon className={iconClass} aria-hidden />
                       {collapsed ? <span className="sr-only">{item.label}</span> : <span className="truncate">{item.label}</span>}
                     </NavLink>

@@ -126,14 +126,25 @@ export function schedulePeriod(rule: SchedulePeriodRule, scheduledFor: Date, tim
   }
 }
 
+/** True when the period is exactly one calendar month (the 1st to the month's last day). */
+export function isWholeMonth(period: ReportPeriod): boolean {
+  const start = DateTime.fromISO(period.from, { zone: 'utc' });
+  return start.isValid && start.day === 1 && period.to === start.endOf('month').toISODate();
+}
+
 /**
  * The report's period parameters for a period: whole-month types get `month`, one-week types the week's first day in
- * `from`, range types `from`/`to`; types without a period (the employee directory) get none.
+ * `from`, range types `from`/`to`; types without a period (the employee directory) get none. A whole-month type asked for
+ * PART of a month (month to date) gets the month AND the exact `from`/`to`, so the report stops at the period's last complete
+ * day instead of covering the rest of the month (HR portal Prompt 6a review — minor 13: Decision 9, never a half-computed day).
  */
 export function periodParameters(reportType: ReportType, period: ReportPeriod): Record<string, string> {
   const def = REPORT_TYPE_DEFINITIONS.find((d) => d.key === reportType);
   if (!def) return {};
-  if (MONTH_PARAMETER_REPORT_TYPES.includes(reportType)) return { month: period.from.slice(0, 7) };
+  if (MONTH_PARAMETER_REPORT_TYPES.includes(reportType)) {
+    const month = period.from.slice(0, 7);
+    return isWholeMonth(period) ? { month } : { month, from: period.from, to: period.to };
+  }
   if (WEEK_PARAMETER_REPORT_TYPES.includes(reportType)) return { from: period.from };
   const out: Record<string, string> = {};
   if (def.requiredParameters.includes('from') || def.optionalParameters.includes('from')) out['from'] = period.from;
@@ -193,7 +204,9 @@ export function scopeReportForRecipient(
     return { ok: false, reason: `missing_permission:${p}` };
   }
   const out: Record<string, unknown> = { ...parameters };
-  delete out['branchScope']; delete out['branchIds'];
+  delete out['branchScope']; delete out['branchIds']; delete out['finalizedFigures'];
+  // the monthly summary shows a finalised payroll period's day counts only to payroll.view holders — as the summary page does
+  if (reportType === 'monthly_summary') out['finalizedFigures'] = grant.permissions.includes('payroll.view');
   let branchId = typeof out['branchId'] === 'string' ? (out['branchId'] as string) : null;
   const requested = Array.isArray(out['employeeIds']) ? (out['employeeIds'] as unknown[]).filter((x): x is string => typeof x === 'string') : [];
   for (const id of requested) if (!employeeBranches.has(id)) return { ok: false, reason: 'outside_scope:employees' };
