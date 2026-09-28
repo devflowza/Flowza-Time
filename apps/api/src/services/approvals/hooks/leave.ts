@@ -75,15 +75,20 @@ async function assertApprovalUnlocked(trx: Trx, ctx: HookContext): Promise<void>
 }
 
 /**
- * Who may withdraw a leave or comp-off request (Finance B-98, review P2-4): the requester, the employee themselves, or a
- * `leave.manage` holder within branch scope. An approver who is merely seated on the request — a line manager, an HR
- * approver without leave.manage — decides it; withdrawing somebody's leave is not theirs to do.
+ * Who may withdraw a leave or comp-off request (Finance B-97/B-98, review P2-4) — the approval engine's withdrawal rule for
+ * the leave family: the requester (the employee who filed it); the owner or an approval.manage holder; or a holder of
+ * leave.manage WITH the organisation-wide leave.view (branch scope applies). An approver who is merely seated on it (a line
+ * manager, an HR approver without leave.manage) decides it but cannot withdraw it, and the person a request is about but
+ * did not file (HR filed it for them) cannot withdraw it either — the owner excepted.
  */
-export function mayWithdrawLeave(grant: MembershipGrant, userId: string, req: { requestedBy: string | null; employeeId: string | null; branchId: string | null }): boolean {
+export function mayWithdrawLeave(grant: MembershipGrant, userId: string, req: { requestedBy: string | null; subjectUserId: string | null; employeeId: string | null; branchId: string | null }): boolean {
   if (req.requestedBy === userId) return true;
-  if (grant.employeeId && req.employeeId && grant.employeeId === req.employeeId) return true;
+  const isOwner = grant.roleKey === 'owner';
+  const isSubject = (!!grant.employeeId && !!req.employeeId && grant.employeeId === req.employeeId) || (!!req.subjectUserId && req.subjectUserId === userId);
+  if (isSubject && !isOwner) return false;
   if (!grant.allBranches && req.branchId && !grant.branchIds.includes(req.branchId)) return false;
-  return hasPermission(grant, 'leave.manage');
+  if (isOwner || hasPermission(grant, 'approval.manage')) return true;
+  return hasPermission(grant, 'leave.manage') && hasPermission(grant, 'leave.view');
 }
 
 /**

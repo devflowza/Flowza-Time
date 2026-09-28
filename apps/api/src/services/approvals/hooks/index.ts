@@ -59,8 +59,11 @@ export interface EntityHook {
   notifiesSubject?: boolean;
   /**
    * Who may withdraw the entity's pending request, when the entity has its own rule. Leave and comp-off (leave v2, Finance
-   * B-98): the requester, the employee themselves, or a `leave.manage` holder within branch scope — never an approver who
-   * is merely seated on it. Without it the engine's generic rule applies.
+   * B-97/B-98, review P2-4): the requester; the owner or approval.manage; or a `leave.manage` holder WITH the
+   * organisation-wide `leave.view` (branch scope applies) — never an approver who is merely seated on it, and never the
+   * person a request is about when HR filed it for them (the owner excepted). This is the integrated engine's
+   * `canCancel` with `managePermission: 'leave.manage'`; on merge, keep the engine's rule and drop this hook field.
+   * Without it the engine's generic rule applies.
    */
   mayCancel?(grant: MembershipGrant, userId: string, req: { requestedBy: string | null; subjectUserId: string | null; employeeId: string | null; branchId: string | null }): boolean;
 }

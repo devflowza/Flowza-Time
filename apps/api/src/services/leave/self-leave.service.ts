@@ -48,8 +48,10 @@ async function ownEmployee(trx: Trx, orgId: string, scope: SelfScope): Promise<L
 type OwnLeaveRow = {
   id: string; leaveTypeId: string; code: string; name: string; color: string | null; isPaid: boolean; systemKey: string | null; countMode: string; startDate: Date | string; endDate: Date | string; isHalfDay: boolean; halfDayPart: string | null;
   reason: string | null; status: SelfLeaveRecordDto['status']; decisionNote: string | null; approvedBy: string | null; approvedAt: Date | null; approvalRequestId: string | null; days: unknown; withdrawnAt: Date | null; editedAt: Date | null; createdAt: Date; updatedAt: Date;
+  /** Who filed the request: the employee (portal) or HR on their behalf. */
+  createdBy: string | null;
 };
-const OWN_COLUMNS = ['l.id', 'l.leaveTypeId', 't.code', 't.name', 't.color', 't.isPaid', 't.systemKey', 't.countMode', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.reason', 'l.status', 'l.decisionNote', 'l.approvedBy', 'l.approvedAt', 'l.approvalRequestId', 'l.days', 'l.withdrawnAt', 'l.editedAt', 'l.createdAt', 'l.updatedAt'] as const;
+const OWN_COLUMNS = ['l.id', 'l.leaveTypeId', 't.code', 't.name', 't.color', 't.isPaid', 't.systemKey', 't.countMode', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.reason', 'l.status', 'l.decisionNote', 'l.approvedBy', 'l.approvedAt', 'l.approvalRequestId', 'l.days', 'l.withdrawnAt', 'l.editedAt', 'l.createdAt', 'l.updatedAt', 'l.createdBy'] as const;
 
 async function ownLeaveRows(trx: Trx, orgId: string, employeeId: string, filter: { from?: string; to?: string; id?: string } = {}): Promise<OwnLeaveRow[]> {
   let q = trx.selectFrom('leaveRecords as l').innerJoin('leaveTypes as t', 't.id', 'l.leaveTypeId').select(OWN_COLUMNS).where('l.organizationId', '=', orgId).where('l.employeeId', '=', employeeId);
@@ -65,7 +67,7 @@ async function ownRow(trx: Trx, orgId: string, employeeId: string, id: string): 
 }
 
 /** The DTOs of the caller's own rows: the engine request (status, level), the thread (count, the open question) and what they may do. */
-async function toSelfLeaveDtos(trx: Trx, orgId: string, employeeId: string, rows: OwnLeaveRow[], grant: MembershipGrant): Promise<SelfLeaveRecordDto[]> {
+async function toSelfLeaveDtos(trx: Trx, orgId: string, employeeId: string, rows: OwnLeaveRow[], grant: MembershipGrant, userId: string): Promise<SelfLeaveRecordDto[]> {
   if (!rows.length) return [];
   const mayRequest = hasPermission(grant, 'leave.request');
   const ids = rows.map((r) => r.id);
@@ -95,7 +97,9 @@ async function toSelfLeaveDtos(trx: Trx, orgId: string, employeeId: string, rows
       reason: r.reason, status: r.status, decisionNote: r.decisionNote, approvedByName: r.approvedBy ? nameOf.get(r.approvedBy) ?? null : null, approvedAt: isoDateTimeOrNull(r.approvedAt), createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt),
       approvalRequestId: r.approvalRequestId, approvalStatus: req ? (req.status as SelfLeaveRecordDto['approvalStatus']) : null, approvalCurrentStep: req ? req.currentStep : null, approvalStepCount: req ? Number(ref.counts.find((c) => c.requestId === req.id)?.n ?? 0) : null,
       withdrawnAt: isoDateTimeOrNull(r.withdrawnAt), editedAt: isoDateTimeOrNull(r.editedAt),
-      canEdit: mayRequest && undecided, canWithdraw: mayRequest && undecided, canReply: mayRequest && r.status === 'INFO_REQUESTED',
+      // editing and withdrawing belong to whoever filed the request (a request HR filed for the employee is HR's to change —
+      // the engine's withdrawal rule, review P2-4); anybody the request is about may answer an approver's question
+      canEdit: mayRequest && undecided && r.createdBy === userId, canWithdraw: mayRequest && undecided && r.createdBy === userId, canReply: mayRequest && r.status === 'INFO_REQUESTED',
       infoRequest: question ? { message: question.body, askedAt: isoDateTime(question.createdAt), askedByName: question.authorUserId ? nameOf.get(question.authorUserId) ?? null : null } : null,
       commentCount: own.length, compOff: r.systemKey === COMP_OFF_SYSTEM_KEY,
     };
@@ -165,7 +169,7 @@ export async function getLeave(deps: ApiDeps, actor: Actor, orgId: string, q: { 
       year: view.year,
       types: view.offered.map(toSelfTypeDto),
       balances: view.offered.map((t) => toSelfBalanceDto(t, view.balances.get(t.id)!)).filter((b) => !!b),
-      records: await toSelfLeaveDtos(trx, orgId, emp.id, rows, scope.grant),
+      records: await toSelfLeaveDtos(trx, orgId, emp.id, rows, scope.grant, actor.userId),
       calendar: { weeklyOffDays: [...view.calendar.weeklyOffDays], holidays: [...view.calendar.holidays].sort() },
       asOf: view.asOf, totals: selfTotals(view), compOff: selfCompOffBalance(view),
     };
@@ -195,8 +199,10 @@ export async function applyLeave(deps: ApiDeps, actor: Actor, orgId: string, inp
     await assertNoOverlap(trx, orgId, emp.id, { startDate: input.startDate, endDate: input.endDate, isHalfDay, halfDayPart });
     const row = await trx.insertInto('leaveRecords').values({
       organizationId: orgId, employeeId: emp.id, branchId: emp.branchId, leaveTypeId: input.leaveTypeId, startDate: input.startDate, endDate: input.endDate,
-      isHalfDay, halfDayPart, days: ev.days, reason: input.reason, status: 'PENDING', source: 'INTERNAL', createdBy: actor.userId,
+      isHalfDay, halfDayPart, reason: input.reason, status: 'PENDING', source: 'INTERNAL', createdBy: actor.userId,
     }).returning('id').executeTakeFirstOrThrow();
+    // `days` is server-computed: the self-service insert policy refuses it from a client, the system context stores it
+    await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ days: ev.days }).where('organizationId', '=', orgId).where('id', '=', row.id).execute());
     await audit(trx, actor, orgId, 'leave.requested', 'leave_record', { entityId: row.id, branchId: emp.branchId, newValue: { ...input, isHalfDay, days: ev.days, ...(ev.warnings.length ? { warnings: ev.warnings.map((w) => w.code) } : {}) }, ...(lock.lockedOverride ? { reason: 'locked period (attendance.lock_period)' } : {}) });
     // the approval engine routes it (the workflow for LEAVE, else the leave.approve holders in reach of the employee —
     // never approved by the employee); units = the days it charges, for workflow tiers
@@ -207,7 +213,7 @@ export async function applyLeave(deps: ApiDeps, actor: Actor, orgId: string, inp
     await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ approvalRequestId: submitted.requestId }).where('id', '=', row.id).execute());
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'leave.requested', aggregateType: 'leave_record', aggregateId: row.id, payload: { employeeId: emp.id, employeeName: emp.displayName, leaveTypeName: ev.type.name, startDate: input.startDate, endDate: input.endDate, approvalRequestId: submitted.requestId }, actorUserId: actor.userId, requestId: actor.requestId });
     if (submitted.autoApproved) await recalcLeaveRange(deps, trx, actor, orgId, input.startDate, input.endDate, { branchId: emp.branchId, employeeIds: [emp.id], reason: 'leave approved (no approval required)' });
-    const [dto] = await toSelfLeaveDtos(trx, orgId, emp.id, [await ownRow(trx, orgId, emp.id, row.id)], scope.grant);
+    const [dto] = await toSelfLeaveDtos(trx, orgId, emp.id, [await ownRow(trx, orgId, emp.id, row.id)], scope.grant, actor.userId);
     return { ...dto!, warnings: ev.warnings };
   });
 }
@@ -223,6 +229,7 @@ export async function editLeave(deps: ApiDeps, actor: Actor, orgId: string, id: 
   return runUser(deps.db, actor, async (trx) => {
     const emp = await ownEmployee(trx, orgId, scope);
     const before = await ownRow(trx, orgId, emp.id, id);
+    assertOwnFiling(before, actor);
     if (!UNDECIDED_LEAVE.includes(before.status)) throw errors.invalidState(`Only a pending request can be changed (current: ${before.status}). Ask HR to change decided leave.`);
     const beforeStart = isoDate(before.startDate); const beforeEnd = isoDate(before.endDate);
     const next = {
@@ -235,14 +242,16 @@ export async function editLeave(deps: ApiDeps, actor: Actor, orgId: string, id: 
     const halfDayPart = next.isHalfDay ? (input.halfDayPart ?? before.halfDayPart ?? 'FIRST_HALF') as 'FIRST_HALF' | 'SECOND_HALF' : null;
     if (next.isHalfDay && next.startDate !== next.endDate) throw errors.validation('A half day is a single date.', { issues: [{ path: 'endDate', message: 'Must equal startDate' }] });
     const changed = next.leaveTypeId !== before.leaveTypeId || next.startDate !== beforeStart || next.endDate !== beforeEnd || next.isHalfDay !== before.isHalfDay || halfDayPart !== before.halfDayPart || next.reason !== before.reason;
-    if (!changed) return (await toSelfLeaveDtos(trx, orgId, emp.id, [before], scope.grant))[0]!;
+    if (!changed) return (await toSelfLeaveDtos(trx, orgId, emp.id, [before], scope.grant, actor.userId))[0]!;
     const ev = await evaluateLeaveRequest(trx, orgId, { employee: emp, leaveTypeId: next.leaveTypeId, startDate: next.startDate, endDate: next.endDate, isHalfDay: next.isHalfDay, asHr: false, excludeRecordId: id });
     assertPortalType(ev.type);
     const lockA = await checkLeaveRangeLock(trx, orgId, emp.branchId, beforeStart, beforeEnd, scope.grant);
     const lockB = await checkLeaveRangeLock(trx, orgId, emp.branchId, next.startDate, next.endDate, scope.grant);
     await assertNoOverlap(trx, orgId, emp.id, { startDate: next.startDate, endDate: next.endDate, isHalfDay: next.isHalfDay, halfDayPart }, id);
-    const res = await trx.updateTable('leaveRecords').set({ leaveTypeId: next.leaveTypeId, startDate: next.startDate, endDate: next.endDate, isHalfDay: next.isHalfDay, halfDayPart, reason: next.reason, days: ev.days, editedAt: new Date(), status: 'PENDING' })
-      .where('organizationId', '=', orgId).where('id', '=', id).where('employeeId', '=', emp.id).where('status', 'in', ['PENDING', 'INFO_REQUESTED']).executeTakeFirst();
+    // validated above (own filing, still undecided, the matrix, locks, overlap): written in the system context — a client's
+    // own session may only withdraw (RLS + guard), so the dates and `days` cannot be changed around this validation
+    const res = await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ leaveTypeId: next.leaveTypeId, startDate: next.startDate, endDate: next.endDate, isHalfDay: next.isHalfDay, halfDayPart, reason: next.reason, days: ev.days, editedAt: new Date(), status: 'PENDING' })
+      .where('organizationId', '=', orgId).where('id', '=', id).where('employeeId', '=', emp.id).where('status', 'in', ['PENDING', 'INFO_REQUESTED']).executeTakeFirst());
     if (Number(res.numUpdatedRows) !== 1) throw errors.conflict('The request changed meanwhile. Please refresh.');
     const pending = await withSystemScope(trx, orgId, (t) => t.selectFrom('approvalRequests').select(['id', 'requestedBy']).where('organizationId', '=', orgId).where('entityType', '=', 'LEAVE').where('entityId', '=', id).where('status', '=', 'PENDING').executeTakeFirst());
     if (before.status === 'INFO_REQUESTED') await withSystemScope(trx, orgId, (t) => t.insertInto('leaveRequestComments').values({ organizationId: orgId, leaveRecordId: id, authorUserId: actor.userId, body: 'The request was changed and submitted again.', kind: 'system' }).execute());
@@ -255,12 +264,20 @@ export async function editLeave(deps: ApiDeps, actor: Actor, orgId: string, id: 
       ...(lockA.lockedOverride || lockB.lockedOverride ? { reason: 'locked period (attendance.lock_period)' } : {}),
     });
     if (resubmitted.autoApproved) await recalcLeaveRange(deps, trx, actor, orgId, next.startDate, next.endDate, { branchId: emp.branchId, employeeIds: [emp.id], reason: 'leave approved (no approval required)' });
-    const [dto] = await toSelfLeaveDtos(trx, orgId, emp.id, [after], scope.grant);
+    const [dto] = await toSelfLeaveDtos(trx, orgId, emp.id, [after], scope.grant, actor.userId);
     return { ...dto!, warnings: ev.warnings as LeaveWarningDto[] };
   });
 }
 
 export const DEFAULT_WITHDRAW_REASON = 'Withdrawn by the requester';
+
+/**
+ * Edit and withdraw belong to whoever filed the request (Finance B-98, review P2-4): a request HR filed for the employee is
+ * HR's to change or withdraw — the employee is told so. The same rule as the approval engine's withdrawal.
+ */
+function assertOwnFiling(row: OwnLeaveRow, actor: Actor): void {
+  if (row.createdBy !== actor.userId) throw errors.forbidden('HR filed this leave request for you; ask HR to change or withdraw it.');
+}
 
 /**
  * Withdraw one's own request while it is still PENDING or INFO_REQUESTED (Finance B-98: the requester withdraws, with a
@@ -274,6 +291,7 @@ export async function withdrawLeave(deps: ApiDeps, actor: Actor, orgId: string, 
     const emp = await ownEmployee(trx, orgId, scope);
     const before = await ownRow(trx, orgId, emp.id, id);
     if (before.status === 'APPROVED') throw errors.invalidState('Approved leave can only be cancelled by HR. Contact HR to cancel it.');
+    assertOwnFiling(before, actor);
     if (!UNDECIDED_LEAVE.includes(before.status)) throw errors.invalidState(`Only a pending request can be withdrawn (current: ${before.status}). Ask HR to change approved leave.`);
     const lock = await checkLeaveRangeLock(trx, orgId, emp.branchId, isoDate(before.startDate), isoDate(before.endDate), scope.grant);
     const why = reason?.trim() || DEFAULT_WITHDRAW_REASON;
@@ -283,7 +301,7 @@ export async function withdrawLeave(deps: ApiDeps, actor: Actor, orgId: string, 
     // withdrawing the leave withdraws its approval request (the approvers are told; the timeline records the reason)
     await systemStep(trx, orgId, (t) => cancelForEntity(deps, t, actor, orgId, 'LEAVE', id, why, { source: 'self_service' }));
     await audit(trx, actor, orgId, 'leave.withdrawn', 'leave_record', { entityId: id, branchId: emp.branchId, oldValue: { status: before.status }, newValue: { status: 'CANCELLED' }, reason: lock.lockedOverride ? `${why}; locked period (attendance.lock_period)` : why });
-    const [dto] = await toSelfLeaveDtos(trx, orgId, emp.id, [await ownRow(trx, orgId, emp.id, id)], scope.grant);
+    const [dto] = await toSelfLeaveDtos(trx, orgId, emp.id, [await ownRow(trx, orgId, emp.id, id)], scope.grant, actor.userId);
     return dto!;
   });
 }
@@ -306,7 +324,7 @@ export async function replyLeave(deps: ApiDeps, actor: Actor, orgId: string, id:
     const pending = await withSystemScope(trx, orgId, (t) => t.selectFrom('approvalRequests').select('id').where('organizationId', '=', orgId).where('entityType', '=', 'LEAVE').where('entityId', '=', id).where('status', '=', 'PENDING').executeTakeFirst());
     if (!pending) throw errors.invalidState('The approval request of this leave is no longer open. Please refresh.');
     await answerInfo(deps, trx, actor, orgId, pending.id, body.trim());
-    const [dto] = await toSelfLeaveDtos(trx, orgId, emp.id, [await ownRow(trx, orgId, emp.id, id)], scope.grant);
+    const [dto] = await toSelfLeaveDtos(trx, orgId, emp.id, [await ownRow(trx, orgId, emp.id, id)], scope.grant, actor.userId);
     return dto!;
   });
 }
@@ -315,7 +333,7 @@ export async function replyLeave(deps: ApiDeps, actor: Actor, orgId: string, id:
  * The balances / upcoming leave block of the portal home (GET /me/overview): tracked types and anything used or requested
  * this year, through the one balance function; upcoming = approved or undecided leave ending today or later.
  */
-export async function overviewLeave(trx: Trx, orgId: string, employeeId: string, grant: MembershipGrant): Promise<{ balances: Array<SelfLeaveBalanceDto & { name: string; code: string; color: string | null }>; upcomingLeave: SelfLeaveRecordDto[]; pendingLeave: number }> {
+export async function overviewLeave(trx: Trx, orgId: string, employeeId: string, grant: MembershipGrant, userId: string): Promise<{ balances: Array<SelfLeaveBalanceDto & { name: string; code: string; color: string | null }>; upcomingLeave: SelfLeaveRecordDto[]; pendingLeave: number }> {
   const emp = await loadLeaveEmployee(trx, orgId, employeeId);
   if (!emp) return { balances: [], upcomingLeave: [], pendingLeave: 0 };
   const view = await loadLeaveView(trx, orgId, emp);
@@ -324,7 +342,7 @@ export async function overviewLeave(trx: Trx, orgId: string, employeeId: string,
     .filter((b) => b.allowanceDays !== null || b.usedDays > 0 || b.pendingDays > 0);
   const rows = await ownLeaveRows(trx, orgId, employeeId, { from: today });
   const active = rows.filter((r) => r.status === 'APPROVED' || UNDECIDED_LEAVE.includes(r.status)).sort((a, b) => isoDate(a.startDate).localeCompare(isoDate(b.startDate)));
-  const upcomingLeave = await toSelfLeaveDtos(trx, orgId, employeeId, active.slice(0, 5), grant);
+  const upcomingLeave = await toSelfLeaveDtos(trx, orgId, employeeId, active.slice(0, 5), grant, userId);
   const pendingLeave = (await ownLeaveRows(trx, orgId, employeeId, { from: `${view.year}-01-01` })).filter((r) => UNDECIDED_LEAVE.includes(r.status)).length;
   return { balances, upcomingLeave, pendingLeave };
 }

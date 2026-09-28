@@ -1,5 +1,5 @@
 -- Leave v2 RLS (migration 20260928000700): leave allocations, the append-only comment thread, comp-off credits and their
--- usage, the self-service edit / withdraw policy + guard on leave records and the half-day aware overlap constraint. Who
+-- usage, the self-service withdraw policy + guard on leave records (edits are the API's) and the half-day aware overlap constraint. Who
 -- reads what: the employee their own rows, a line manager their direct reports' (leave.view_team), HR the organisation
 -- (branch-scoped), the auditor read-only, an approval assignee the thread of the leave routed to them — and nobody anything
 -- of another tenant. Runs after rls_isolation.sql and rls_approvals.sql (their fixtures are committed) as superuser.
@@ -79,8 +79,12 @@ select pg_temp.assert_raises($q$ insert into public.comp_off_credits (organizati
 select pg_temp.assert_raises($q$ insert into public.comp_off_credits (organization_id, employee_id, branch_id, worked_on, worked_on_type, worked_minutes, days_earned, location, summary, status, created_by) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '2026-09-18', 'weekly_off', 480, 1, 'Site', 'Twice', 'pending_approval', 'a0000000-0000-0000-0000-000000000003') $q$, 'one active credit per worked day');
 select pg_temp.assert_rows($q$ update public.comp_off_credits set used_days = 0, status = 'approved' where id = '0a000000-0000-0000-0000-0000000007e3' $q$, 0, 'employee cannot restore a used credit');
 select pg_temp.assert_raises($q$ insert into public.comp_off_usages (organization_id, employee_id, branch_id, credit_id, leave_record_id, days) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000007e3', '0a000000-0000-0000-0000-0000000001b3', 1) $q$, 'usages are written by the system only');
--- self-service edit / withdraw (policy leave_records_self_update + guard)
-select pg_temp.assert_rows($q$ update public.leave_records set end_date = '2026-10-13', days = 3, edited_at = now() where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 1, 'employee edits the dates of own pending request');
+-- self-service withdraw (policy leave_records_self_update + guard); edits go through the API (validated, days recomputed,
+-- resubmitted, written in the system context) — a client write could otherwise move the dates or forge `days`
+select pg_temp.assert_raises($q$ update public.leave_records set end_date = '2026-10-13', days = 3, edited_at = now() where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'a client cannot edit its own request directly (the API does, after validation)');
+select pg_temp.assert_raises($q$ update public.leave_records set days = 0.5 where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'a client cannot forge the days a request charges');
+select pg_temp.assert_raises($q$ update public.leave_records set status = 'CANCELLED', days = 0.5 where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'a withdrawal cannot carry other changes');
+select pg_temp.assert_raises($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by, reason, days) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-0000000001a1', '2026-12-06', '2026-12-10', 'PENDING', 'a0000000-0000-0000-0000-000000000003', 'Forged days', 0.5) $q$, 'a client insert cannot set the server-computed days');
 select pg_temp.assert_raises($q$ update public.leave_records set approval_request_id = null, decision_note = 'self-approved' where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'an edit cannot touch the decision or the approval link');
 select pg_temp.assert_raises($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'employee cannot approve through an edit');
 select pg_temp.assert_rows($q$ update public.leave_records set status = 'CANCELLED', withdrawn_at = now() where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 1, 'employee withdraws own pending request (with the withdrawal stamp)');

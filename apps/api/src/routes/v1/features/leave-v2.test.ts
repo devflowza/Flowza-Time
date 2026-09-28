@@ -356,6 +356,38 @@ describe('separation of duties', () => {
   });
 });
 
+describe('own filings (review P2-4, B-98)', () => {
+  it('a request HR filed for the employee is HR\'s to change or withdraw — the portal says so and refuses', async () => {
+    await clearWorkflows();
+    await workflow([{ order: 1, approverType: 'MANAGER' }]);
+    const range = nextRange(1);
+    const filed = await h.request('POST', `${base()}/leave-records`, { token: f.hrAdmin, body: { employeeId: e5, leaveTypeId: T['CL'], ...range, reason: 'Recorded by HR' } });
+    expect(filed.status).toBe(201);
+    expect(filed.body.data.status).toBe('PENDING');
+    const mine = (await h.request('GET', `${base()}/me/leave?year=${range.startDate.slice(0, 4)}`, { token: staff5 })).body.data.records.find((r: { id: string }) => r.id === filed.body.data.id);
+    expect(mine).toMatchObject({ status: 'PENDING', canEdit: false, canWithdraw: false });
+    expect((await h.request('PATCH', `${base()}/me/leave/${filed.body.data.id}`, { token: staff5, body: { reason: 'Changed by me' } })).status).toBe(403);
+    expect((await h.request('POST', `${base()}/me/leave/${filed.body.data.id}/withdraw`, { token: staff5, body: { reason: 'Not needed' } })).status).toBe(403);
+    expect((await h.request('POST', `${base()}/me/leave/${filed.body.data.id}/cancel`, { token: staff5 })).status).toBe(403);
+    // the engine agrees: the person a request is about but did not file cannot withdraw it there either
+    expect((await h.request('POST', `${base()}/approvals/${filed.body.data.approvalRequestId}/cancel`, { token: staff5, body: { reason: 'Not needed' } })).status).toBe(403);
+    expect((await leaveRow(filed.body.data.id)).status).toBe('PENDING');
+    // HR withdraws it
+    expect((await h.request('DELETE', `${base()}/leave-records/${filed.body.data.id}`, { token: f.hrAdmin })).status).toBe(200);
+    expect((await leaveRow(filed.body.data.id)).status).toBe('CANCELLED');
+  });
+
+  it('the portal stores the server-computed days even though a client insert may not set them', async () => {
+    await clearWorkflows();
+    const r = await applyAs(staff5, { leaveTypeId: T['CL'], ...nextRange(3) });
+    expect(r.status).toBe(201);
+    expect(Number((await leaveRow(r.body.data.id)).days)).toBe(3);
+    const e = await h.request('PATCH', `${base()}/me/leave/${r.body.data.id}`, { token: staff5, body: { endDate: addDays(r.body.data.startDate, 1) } });
+    expect(e.status).toBe(200);
+    expect(Number((await leaveRow(r.body.data.id)).days)).toBe(2);
+  });
+});
+
 describe('corrections and locked periods', () => {
   it('a decided leave changed by HR is a correction, re-days itself and recomputes the past', async () => {
     await clearWorkflows();
@@ -478,7 +510,7 @@ describe('comp-off', () => {
     expect((await h.request('POST', `${base()}/me/comp-off`, { token: staff5, body: { workedOn: friday, workedOnType: 'weekly_off', workedMinutes: 480, location: 'HQ', summary: 'Again' } })).status).toBe(409);
     const ctx = await h.request('GET', `${base()}/approvals/${creditRequest}`, { token: f.hrAdmin });
     expect(ctx.body.data.context).toMatchObject({ kind: 'COMP_OFF', compOff: { workedOn: friday, daysEarned: 1 } });
-    expect((await h.request('POST', `${base()}/approvals/${creditRequest}/decide`, { token: staff5, body: { decision: 'APPROVE' } })).status).toBe(403);
+    expect((await h.request('POST', `${base()}/approvals/${creditRequest}/decide`, { token: staff5, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(403);
     const ok = await h.request('POST', `${base()}/approvals/${creditRequest}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } });
     expect(ok.status).toBe(200);
     const credit = await h.admin.selectFrom('compOffCredits').selectAll().where('id', '=', creditId).executeTakeFirstOrThrow();

@@ -212,7 +212,7 @@ export async function getOverview(deps: ApiDeps, actor: Actor, orgId: string): P
 
     let balances: SelfOverviewDto['balances'] = []; let upcomingLeave: SelfLeaveRecordDto[] = []; let pendingLeave = 0;
     // tracked types and anything already used or requested this year, through the one balance function (leave v2)
-    if (leave) ({ balances, upcomingLeave, pendingLeave } = await overviewLeave(trx, orgId, scope.employeeId, scope.grant));
+    if (leave) ({ balances, upcomingLeave, pendingLeave } = await overviewLeave(trx, orgId, scope.employeeId, scope.grant, actor.userId));
 
     return {
       date: today, timezone: ctx.timezone,

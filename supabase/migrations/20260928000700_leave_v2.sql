@@ -24,8 +24,11 @@
 --    explicitly BEFORE the constraint is added: the weaker request (PENDING < INFO_REQUESTED < APPROVED, then the newer)
 --    is CANCELLED with a decision note, its pending approval request cancelled with a timeline line, and a cancelled
 --    APPROVED row queues the recompute of its past days. The migration reports how many rows it resolved.
--- 7. Self-service RLS: an employee may edit their own PENDING / INFO_REQUESTED request (type, dates, half day, reason) and
---    withdraw it; the guard trigger freezes every other column (approval stamps, decision note, employee, branch, source).
+-- 7. Self-service RLS: an employee may withdraw their own PENDING / INFO_REQUESTED request (status → CANCELLED + the
+--    withdrawal stamp; the guard trigger freezes every other column). Editing one is NOT a client write: the API validates
+--    the change, recomputes `days` and resubmits the request, then writes it in the system context — a direct write could
+--    otherwise change the dates or forge `days` (which feeds the balances) without the approvers seeing a new request. For
+--    the same reason a direct self-service insert cannot set `days` (the API stores it in the system context).
 -- 8. `organization_settings.leave` — the leave settings group (contracts `leaveSettingsSchema`: compOffExpiryDays …).
 -- 9. The comp-off leave type (code CO, system_key COMP_OFF, special, not offered in the ordinary apply form) for every
 --    organisation; an organisation that already has a type coded CO has that type adopted as its comp-off type.
@@ -281,7 +284,7 @@ begin
   ) where (status in ('PENDING', 'APPROVED', 'INFO_REQUESTED'));
 end $$;
 
--- 7. Self-service: edit / withdraw one's own pending request -------------------------------------------------------------
+-- 7. Self-service: withdraw one's own pending request (edits go through the API) -------------------------------------------
 drop policy if exists leave_records_self_cancel on public.leave_records;
 drop policy if exists leave_records_self_update on public.leave_records;
 create policy leave_records_self_update on public.leave_records for update to authenticated using (
@@ -291,35 +294,37 @@ create policy leave_records_self_update on public.leave_records for update to au
 ) with check (
   organization_id = any ((select app.org_ids_with_permission('leave.request'))::uuid[])
   and employee_id = any ((select app.own_employee_ids())::uuid[])
-  and status in ('PENDING', 'CANCELLED')
+  and status = 'CANCELLED'
 );
 
--- A user without leave.manage who reaches an update through the self-service policy may: withdraw (→ CANCELLED, status and
--- the withdrawal stamp only) or edit (→ PENDING: type, dates, half day, reason, days, edit stamp). Approval stamps, the
--- decision note, the employee, the branch, the source and the approval link are never theirs to change. Only user
--- sessions (role authenticated) are checked: system steps, the worker and admin seeds run as other roles.
+-- the self-service insert (the portal's apply) may not set the server-computed `days`, nor any v2 stamp
+drop policy if exists leave_records_self_request on public.leave_records;
+create policy leave_records_self_request on public.leave_records for insert to authenticated with check (
+  organization_id = any ((select app.org_ids_with_permission('leave.request'))::uuid[])
+  and employee_id = any ((select app.own_employee_ids())::uuid[])
+  and status = 'PENDING' and source = 'INTERNAL' and approved_by is null and approved_at is null and decision_note is null
+  and days is null and withdrawn_at is null and edited_at is null and approval_request_id is null
+  and created_by = (select app.uid())
+  and exists (select 1 from public.employees e where e.id = leave_records.employee_id and e.organization_id = leave_records.organization_id
+              and e.deleted_at is null and e.branch_id is not distinct from leave_records.branch_id)
+);
+
+-- A user without leave.manage who reaches an update through the self-service policy may only withdraw (→ CANCELLED: the
+-- status and the withdrawal stamp). Every other change — the dates, the type, `days`, the approval stamps, the decision
+-- note, the employee, the branch, the source, the approval link — is refused. Only user sessions (role authenticated) are
+-- checked: system steps (the API's validated edit included), the worker and admin seeds run as other roles.
 create or replace function app.leave_records_self_service_guard() returns trigger language plpgsql set search_path = '' as $$
 begin
   if current_user::text <> 'authenticated' or app.has_permission(new.organization_id, 'leave.manage') then
     return new;
   end if;
-  if old.status::text not in ('PENDING', 'INFO_REQUESTED') then
-    raise exception 'self-service may only change a leave request that is still pending' using errcode = '42501';
+  if old.status::text not in ('PENDING', 'INFO_REQUESTED') or new.status::text <> 'CANCELLED' then
+    raise exception 'self-service may only withdraw a leave request that is still pending; changes go through the API' using errcode = '42501';
   end if;
-  if new.status::text = 'CANCELLED' then
-    if (to_jsonb(new) - array['status', 'updated_at', 'withdrawn_at']) is distinct from (to_jsonb(old) - array['status', 'updated_at', 'withdrawn_at']) then
-      raise exception 'withdrawing a leave request may change its status only' using errcode = '42501';
-    end if;
-    return new;
+  if (to_jsonb(new) - array['status', 'updated_at', 'withdrawn_at']) is distinct from (to_jsonb(old) - array['status', 'updated_at', 'withdrawn_at']) then
+    raise exception 'withdrawing a leave request may change its status only' using errcode = '42501';
   end if;
-  if new.status::text = 'PENDING' then
-    if (to_jsonb(new) - array['status', 'updated_at', 'leave_type_id', 'start_date', 'end_date', 'is_half_day', 'half_day_part', 'reason', 'days', 'edited_at'])
-       is distinct from (to_jsonb(old) - array['status', 'updated_at', 'leave_type_id', 'start_date', 'end_date', 'is_half_day', 'half_day_part', 'reason', 'days', 'edited_at']) then
-      raise exception 'self-service may only change the type, dates, half day and reason of a pending request' using errcode = '42501';
-    end if;
-    return new;
-  end if;
-  raise exception 'self-service may only edit or withdraw a pending leave request' using errcode = '42501';
+  return new;
 end $$;
 drop trigger if exists leave_records_self_service_guard on public.leave_records;
 create trigger leave_records_self_service_guard before update on public.leave_records for each row execute function app.leave_records_self_service_guard();
@@ -366,11 +371,14 @@ begin
   select string_agg(t, ', ') into v_missing from unnest(array['leave_allocations', 'leave_request_comments', 'comp_off_credits', 'comp_off_usages']) t
   where not exists (select 1 from pg_class c join pg_namespace n on n.oid = c.relnamespace where n.nspname = 'public' and c.relname = t and c.relrowsecurity);
   if v_missing is not null then raise exception 'tables missing or without RLS: %', v_missing; end if;
-  select string_agg(p, ', ') into v_missing from unnest(array['leave_allocations_select', 'leave_allocations_insert', 'leave_request_comments_select', 'leave_request_comments_insert', 'comp_off_credits_select', 'comp_off_credits_self_request', 'comp_off_usages_select', 'comp_off_usages_system_write', 'leave_records_self_update']) p
+  select string_agg(p, ', ') into v_missing from unnest(array['leave_allocations_select', 'leave_allocations_insert', 'leave_request_comments_select', 'leave_request_comments_insert', 'comp_off_credits_select', 'comp_off_credits_self_request', 'comp_off_usages_select', 'comp_off_usages_system_write', 'leave_records_self_update', 'leave_records_self_request']) p
   where not exists (select 1 from pg_policies where schemaname = 'public' and policyname = p);
   if v_missing is not null then raise exception 'policies missing: %', v_missing; end if;
   if exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'leave_request_comments' and cmd in ('UPDATE', 'DELETE', 'ALL') and 'authenticated' = any (roles)) then
     raise exception 'leave_request_comments must not be updatable or deletable by clients';
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'leave_records' and policyname = 'leave_records_self_request' and with_check like '%days IS NULL%') then
+    raise exception 'leave_records_self_request must keep days server-computed';
   end if;
   if exists (select 1 from public.organizations o where not exists (select 1 from public.leave_types t where t.organization_id = o.id and t.system_key = 'COMP_OFF')) then
     raise exception 'an organisation has no comp-off leave type';
