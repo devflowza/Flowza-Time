@@ -357,7 +357,7 @@ export async function pushEmployees(ctx: JobContext) {
     if (employeeIds) empQ = empQ.where('id', 'in', employeeIds.length > 0 ? employeeIds : ['00000000-0000-0000-0000-000000000000']);
     if (branchId) empQ = empQ.where('branchId', '=', branchId);
     const employees = await empQ.execute();
-    let devQ = trx.selectFrom('devices').select(['id', 'branchId', 'providerKey', 'capabilities']).where('organizationId', '=', organizationId).where('status', '=', 'active');
+    let devQ = trx.selectFrom('devices').select(['id', 'branchId', 'providerKey', 'capabilities']).where('organizationId', '=', organizationId).where('status', '=', 'active').where('providerKey', '!=', 'self_service');
     if (deviceIds) devQ = devQ.where('id', 'in', deviceIds.length > 0 ? deviceIds : ['00000000-0000-0000-0000-000000000000']);
     const devices = (await devQ.execute()).filter((d) => { const p = deps.providers.tryGet(d.providerKey); return p ? capabilitiesOf(d, p).employeePush : false; });
     const existingItems = await trx.selectFrom('syncJobItems').select(['deviceId', 'employeeId']).where('syncJobId', '=', syncJobId).execute();

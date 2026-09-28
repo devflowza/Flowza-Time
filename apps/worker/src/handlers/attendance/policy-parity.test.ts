@@ -132,7 +132,7 @@ describe('assessDay', () => {
 describe('day-close sweep', () => {
   it('marks unexplained days past the grace period, skips leave / locked / excused / recent days and notifies the employee and the line manager', async () => {
     const summary = await sweep();
-    expect(summary).toEqual({ asOf: '2026-03-12', cutoff: '2026-03-09', fromDate: '2026-02-06', candidates: 6, marked: 3, chargedLeave: 0, lop: 0, alreadyMarked: 1, skippedLocked: 1, skippedLeave: 1, skippedDisabled: 0, errors: 0, employees: 2, capped: false });
+    expect(summary).toEqual({ asOf: '2026-03-12', cutoff: '2026-03-09', fromDate: '2026-02-06', candidates: 6, marked: 3, chargedLeave: 0, lop: 0, alreadyMarked: 1, skippedLocked: 1, skippedLeave: 1, skippedNote: 0, skippedDisabled: 0, errors: 0, employees: 2, capped: false });
     const e1 = await marksOf(E1);
     expect(e1.map((m) => [m.date, m.kind, m.payEffectDays, m.source, m.createdBy])).toEqual([['2026-03-02', 'UNEXCUSED', 1, 'SWEEP', null], ['2026-03-03', 'UNEXCUSED', 0.5, 'SWEEP', null]]);
     expect(e1[0]!.reason).toMatch(/^Day close: absent on 2026-03-02 left unexplained after 3 day\(s\)$/);

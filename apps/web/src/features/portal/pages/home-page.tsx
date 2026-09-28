@@ -12,6 +12,7 @@ import { useSelfLeave, useSelfOverview, useSelfProfile } from '../api';
 import { fmtDays } from '../model';
 import { ApplyLeaveDialog } from '../components/apply-leave-dialog';
 import { BalanceRow, LeaveStatusBadge, SectionTitle, TypeDot } from '../components/parts';
+import { HomePunchCard, PendingSelfItems } from '../components/home-attendance';
 
 function TodayCard() {
   const { t } = useTranslation('portal');
@@ -89,6 +90,9 @@ export default function PortalHomePage() {
           {d.pendingCorrections > 0 ? <Link to="/my/attendance?tab=corrections"><Badge variant="warning" dot>{t('home.pendingCorrections', { count: d.pendingCorrections })}</Badge></Link> : null}
         </div>
       ) : null}
+
+      <PendingSelfItems overview={d} />
+      <HomePunchCard overview={d} />
 
       <TodayCard />
 

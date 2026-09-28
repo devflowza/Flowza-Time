@@ -11,6 +11,8 @@ import employeesEn from '@/locales/en/employees.json';
 import employeesAr from '@/locales/ar/employees.json';
 import { RequireEmployeeLink } from './components/parts';
 import { MyAttendancePage, MyLeavePage, MyProfilePage, PageFallback, PortalHomePage } from './pages/lazy';
+import { CheckInPage, MyRequestsPage, MyShiftPage } from './pages/lazy';
+import './attendance-i18n';
 
 registerNamespace('portal', en, ar);
 // the portal reuses the attendance badges / record dialog, the leave labels and the employee activity view
@@ -29,4 +31,8 @@ export const portalRoutes: RouteObject[] = [
   { path: 'my/attendance', element: page(<MyAttendancePage />) },
   { path: 'my/leave', element: page(<MyLeavePage />) },
   { path: 'my/profile', element: page(<MyProfilePage />) },
+  // HR portal Prompt 4: check-in / out (geofence, selfie, offline queue), requests (reasons, regularisations, swaps, selfies), shift
+  { path: 'my/checkin', element: page(<CheckInPage />) },
+  { path: 'my/requests', element: page(<MyRequestsPage />) },
+  { path: 'my/shift', element: page(<MyShiftPage />) },
 ];

@@ -7,6 +7,10 @@ import { toast, toastError } from '@/lib/toast';
 import { useApprovalMutations, type DecisionKind } from '../api';
 import { decisionToast, firstWaitingSeatName } from '../labels';
 import { ApprovalContext, EntityIcon } from './parts';
+import { useActiveMembership } from '@/features/me/use-me';
+import { PayEffectChoice } from '@/features/attendance-review/components/pay-effect-choice';
+import { defaultPayEffect, type PayEffect } from '@/features/attendance-review/model';
+import type { AttendanceSettings } from '@flowza/contracts';
 
 export type Decision = DecisionKind;
 
@@ -17,12 +21,16 @@ export function DecisionDialog({ request, decision, timezone, onClose }: { reque
   const { decide } = useApprovalMutations();
   const [comment, setComment] = useState('');
   const reject = decision === 'REJECT';
+  // rejecting a reason (HR portal Prompt 4) names its pay effect, proposed from the kind of day and the organisation's defaults
+  const noteContext = request?.context.kind === 'ATTENDANCE_NOTE' ? request.context.note : null;
+  const unexcused = (useActiveMembership()?.settings.attendance as Partial<AttendanceSettings> | undefined)?.unexcused;
+  const [payEffect, setPayEffect] = useState<PayEffect>(() => (noteContext ? defaultPayEffect(noteContext.dayStatus, noteContext.dayFlags, unexcused) : 0));
   const missing = reject && comment.trim().length === 0;
   const via = request?.abilities.decideVia ?? null;
   const seatName = request && (via === 'override' || via === 'escalated') ? firstWaitingSeatName(request) ?? '—' : null;
   const submit = () => {
     if (!request || missing) return;
-    decide.mutate({ requestId: request.id, stepNo: request.currentStep, decision, comment: comment.trim() || undefined }, {
+    decide.mutate({ requestId: request.id, stepNo: request.currentStep, decision, comment: comment.trim() || undefined, ...(reject && noteContext ? { payEffectDays: payEffect } : {}) }, {
       onSuccess: (res) => { toast.success(decisionToast(t, res, decision, request.currentStep)); onClose(); },
       onError: toastError,
     });
@@ -45,6 +53,7 @@ export function DecisionDialog({ request, decision, timezone, onClose }: { reque
           </div>
         ) : null}
         {seatName ? <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100" role="note" data-testid="decision-seat-hint">{via === 'override' ? t('decision.overrideHint', { name: seatName }) : t('decision.escalatedHint', { name: seatName })}</p> : null}
+        {reject && noteContext ? <PayEffectChoice value={payEffect} onChange={setPayEffect} name="dec-pay-effect" /> : null}
         <FormField label={t('decision.comment')} htmlFor="dec-comment" required={reject} optional={!reject}>
           <Textarea id="dec-comment" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={reject ? t('decision.rejectPlaceholder') : t('decision.approvePlaceholder')} aria-invalid={missing || undefined} />
           {missing ? <p className="text-xs text-muted-foreground">{t('decision.commentRequired')}</p> : null}

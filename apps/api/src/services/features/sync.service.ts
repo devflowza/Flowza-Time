@@ -1,6 +1,7 @@
 import { sql } from 'kysely';
-import { FLOWZA_FINANCE_PROVIDER_KEY } from '@flowza/contracts';
+import { FLOWZA_FINANCE_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY } from '@flowza/contracts';
 import type { DeviceReconciliationDto, SyncAttendanceRequest, SyncDeviceScope, SyncEmployeesRequest, SyncJobAcceptedDto, SyncJobDto, SyncJobItemDto, SyncReconcileRequest, syncJobListQuerySchema } from '@flowza/contracts';
+import { refuseSelfServiceDevices } from './self-service-device-guard.js';
 import type { Trx } from '@flowza/database';
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
@@ -21,7 +22,9 @@ interface DeviceTarget { id: string; branchId: string; providerKey: string; capa
 /** Resolve devices by ids / branch / group / all within the caller's branch scope; only active devices are eligible. */
 async function resolveDevices(trx: Trx, orgId: string, grant: MembershipGrant, scope: { deviceIds?: string[]; branchId?: string; groupId?: string; all?: boolean }): Promise<DeviceTarget[]> {
   const branchScope = branchFilter(grant, scope.branchId);
-  let q = trx.selectFrom('devices').select(['id', 'branchId', 'providerKey', 'capabilities', 'integrationType', 'config']).where('organizationId', '=', orgId).where('status', '=', 'active');
+  // the portal's virtual self-service device is not a terminal: named explicitly it is refused (409), otherwise never selected
+  await refuseSelfServiceDevices(trx, orgId, scope.deviceIds);
+  let q = trx.selectFrom('devices').select(['id', 'branchId', 'providerKey', 'capabilities', 'integrationType', 'config']).where('organizationId', '=', orgId).where('status', '=', 'active').where('providerKey', '!=', SELF_SERVICE_PROVIDER_KEY);
   if (branchScope) q = q.where('branchId', 'in', branchScope);
   if (scope.deviceIds && scope.deviceIds.length) q = q.where('id', 'in', [...new Set(scope.deviceIds)]);
   if (scope.groupId) q = q.where('id', 'in', trx.selectFrom('deviceGroupMembers').select('deviceId').where('groupId', '=', scope.groupId));
@@ -224,7 +227,7 @@ export async function reconciliationSummary(deps: ApiDeps, actor: Actor, orgId: 
   const grant = requirePermission(actor.principal, orgId, 'device.view');
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    let dq = trx.selectFrom('devices').select(['id', 'code', 'name', 'branchId']).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned');
+    let dq = trx.selectFrom('devices').select(['id', 'code', 'name', 'branchId']).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned').where('providerKey', '!=', SELF_SERVICE_PROVIDER_KEY);
     if (scope) dq = dq.where('branchId', 'in', scope);
     if (q.deviceId) dq = dq.where('id', '=', q.deviceId);
     const devices = await dq.orderBy('name').execute();

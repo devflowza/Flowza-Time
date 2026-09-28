@@ -50,7 +50,8 @@ export async function applyApprovedCorrection(trx: Trx, correctionId: string, op
 
   const insertEvent = async (punchedAt: Date, eventType: NonNullable<typeof c.proposedEventType>): Promise<string> => {
     const row = await trx.insertInto('attendanceEvents').values({
-      organizationId: c.organizationId, employeeId: c.employeeId, branchId: c.branchId, deviceId: null, rawTransactionId: null, source: 'CORRECTION', eventType, punchedAt,
+      // a portal regularisation's correction carries the self-service device (HR portal Prompt 4); others have none
+      organizationId: c.organizationId, employeeId: c.employeeId, branchId: c.branchId, deviceId: c.deviceId ?? null, rawTransactionId: null, source: 'CORRECTION', eventType, punchedAt,
       verificationMethod: 'manual', correctionId: c.id, note: c.reason, createdBy: opts.appliedBy ?? c.requestedBy ?? null,
     }).returning('id').executeTakeFirstOrThrow();
     dates.add(localDateOf(punchedAt, tz));

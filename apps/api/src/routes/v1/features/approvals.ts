@@ -20,7 +20,7 @@ export const APPROVAL_EMAIL_ACTION_LIMIT = { windowMs: 60_000, max: 20 } as cons
 export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const emailActionByIp = rateLimit({ name: 'approval-email-ip', ...APPROVAL_EMAIL_ACTION_LIMIT, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' });
   const emailActionByUser = rateLimit({ name: 'approval-email-user', ...APPROVAL_EMAIL_ACTION_LIMIT, keyFn: (c) => c.get('principal')?.userId ?? 'anon' });
-  const decideAndReturn = async (c: Context<AppEnv>, input: { stepNo?: number | undefined; decision: 'APPROVE' | 'REJECT'; comment?: string | undefined; onBehalfOfUserId?: string | undefined }) => {
+  const decideAndReturn = async (c: Context<AppEnv>, input: { stepNo?: number | undefined; decision: 'APPROVE' | 'REJECT'; comment?: string | undefined; onBehalfOfUserId?: string | undefined; payEffectDays?: 0 | 0.5 | 1 | undefined }) => {
     const actor = actorOf(c, deps); const orgId = param(c, 'orgId'); const id = param(c, 'requestId');
     const dto = await runUser(deps.db, actor, async (trx) => {
       const outcome = await approvals.decideWithin(deps, trx, actor, orgId, id, input);

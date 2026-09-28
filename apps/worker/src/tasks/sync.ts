@@ -37,7 +37,7 @@ export async function pollDueDevices(deps: WorkerDeps, opts: TickOptions = {}): 
                row_number() over (partition by d.organization_id order by d.next_attendance_sync_at asc nulls first, d.id) as rn
         from public.devices d
         join public.organizations o on o.id = d.organization_id
-        where d.status = 'active' and d.auto_sync_enabled and d.integration_type <> 'DEVICE_PUSH'
+        where d.status = 'active' and d.auto_sync_enabled and d.integration_type <> 'DEVICE_PUSH' and d.provider_key <> 'self_service'
           -- a push-only Flowza Finance connector is never pulled (its auto-sync flag is off anyway; this guards an old row)
           and not (d.provider_key = 'flowza_finance' and coalesce(d.config->>'direction', 'both') = 'push')
           and (d.next_attendance_sync_at is null or d.next_attendance_sync_at <= ${now})
@@ -89,7 +89,7 @@ export async function scheduleHealthChecks(deps: WorkerDeps, opts: TickOptions =
                  order by coalesce(greatest(d.last_successful_communication_at, d.last_heartbeat_at, d.last_error_at), d.created_at) asc, d.id) as rn
         from public.devices d
         join public.organizations o on o.id = d.organization_id
-        where d.status = 'active' and o.status in ('active', 'trial')
+        where d.status = 'active' and o.status in ('active', 'trial') and d.provider_key <> 'self_service'
           and coalesce(d.last_successful_communication_at, 'epoch'::timestamptz) < ${now}::timestamptz - make_interval(mins => d.offline_threshold_minutes)
           and coalesce(d.last_heartbeat_at, 'epoch'::timestamptz) < ${now}::timestamptz - make_interval(mins => d.offline_threshold_minutes)
           and not exists (
@@ -125,7 +125,7 @@ export async function scheduleReconciliation(deps: WorkerDeps): Promise<{ organi
     const res = await sql<{ organizationId: string; ageSeconds: number | null }>`
       select o.id as "organizationId", (select extract(epoch from now() - max(j.created_at)) from public.sync_jobs j where j.organization_id = o.id and j.job_type = 'RECONCILIATION')::float8 as "ageSeconds"
       from public.organizations o
-      where o.status in ('active', 'trial') and exists (select 1 from public.devices d where d.organization_id = o.id and d.status = 'active')`.execute(trx);
+      where o.status in ('active', 'trial') and exists (select 1 from public.devices d where d.organization_id = o.id and d.status = 'active' and d.provider_key <> 'self_service')`.execute(trx);
     return res.rows;
   });
   const jobs: string[] = [];
@@ -134,8 +134,9 @@ export async function scheduleReconciliation(deps: WorkerDeps): Promise<{ organi
       const jobId = await withContext(deps.db, { kind: 'system', organizationId: o.organizationId }, async (trx) => {
         const settings = await loadOrgSyncSettings(trx, o.organizationId);
         if (o.ageSeconds !== null && o.ageSeconds < settings.reconciliationIntervalHours * 3_600) return null;
-        // the Flowza Finance connector holds no device user list, so there is nothing to reconcile on it
-        const devices = await trx.selectFrom('devices').select(['id', 'branchId']).where('organizationId', '=', o.organizationId).where('status', '=', 'active').where('providerKey', '!=', 'flowza_finance').execute();
+        // the Flowza Finance connector holds no device user list, and the portal's virtual self-service device (HR portal
+        // Prompt 4) is not a terminal: there is nothing to reconcile on either
+        const devices = await trx.selectFrom('devices').select(['id', 'branchId']).where('organizationId', '=', o.organizationId).where('status', '=', 'active').where('providerKey', 'not in', ['flowza_finance', 'self_service']).execute();
         if (devices.length === 0) return null;
         return (await createSyncJob(trx, deps.queue, {
           organizationId: o.organizationId, jobType: 'RECONCILIATION', trigger: 'SCHEDULED', priority: 3, scope: { scheduled: true, intervalHours: settings.reconciliationIntervalHours },

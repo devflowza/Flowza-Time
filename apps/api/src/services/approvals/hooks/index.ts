@@ -4,6 +4,9 @@ import type { ApiDeps } from '../../../deps.js';
 import type { Actor } from '../../../lib/service.js';
 import { correctionHook } from './corrections.js';
 import { leaveHook } from './leave.js';
+import { attendanceNoteHook } from './attendance-notes.js';
+import { regularisationHook } from './regularisations.js';
+import { shiftSwapHook } from './shift-swaps.js';
 
 /** What the engine hands an entity hook when a request reaches a terminal state. Runs inside the engine's system step. */
 export interface HookContext {
@@ -20,6 +23,12 @@ export interface HookContext {
    * caller already owns the side effects it always had (response fields, recalculation), so a hook only applies the outcome.
    */
   auto?: boolean;
+  /**
+   * What the decision carried besides approve / reject (HR portal Prompt 4): the engine's own decision detail (`via`,
+   * `stepNo`, …) plus the caller's extras — a note rejection's `payEffectDays`, a note review's `outcome: 'excuse'`.
+   * Absent for auto-approvals, bypasses and cancellations.
+   */
+  detail?: Record<string, unknown>;
 }
 
 /**
@@ -38,15 +47,21 @@ export interface EntityHook {
   approvePermission: Permission;
   /** Org-wide read key: an approve-key holder who also holds it (branch scope applies) may decide as an organisation-wide override. */
   viewPermission: Permission;
+  /** Further keys that decide like `approvePermission` (attendance notes: `attendance.review_notes` OR `attendance.approve`). */
+  alsoApprovePermissions?: Permission[];
   /**
-   * Who may withdraw somebody else's request of this entity (with the org-wide view key, Finance B-98), besides the requester
-   * and approval.manage. Optional: without it the entity family's key applies (leave.manage for leave / comp-off,
-   * attendance.correct for the attendance family).
+   * Who may withdraw somebody else's request of this entity (with the org-wide view key, Finance B-98), besides the requester,
+   * the subject and approval.manage / owner. Optional: without it the entity family's key applies (leave.manage for leave /
+   * comp-off, attendance.correct for the attendance family). Declared by the portal hooks (HR portal Prompt 4).
    */
   managePermission?: Permission;
   onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onRejected(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onCancelled?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
+  /** An approver asked for more information (the request stays pending); `ctx.comment` is the question. */
+  onInfoRequested?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
+  /** The requester / subject answered; `ctx.comment` is the answer. */
+  onInfoAnswered?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   /** Inbox / detail context for a page of requests (system scope; ids the caller could already see). */
   loadContexts(trx: Trx, orgId: string, entityIds: string[]): Promise<Map<string, ApprovalContextDto>>;
   /** A one-line description for notifications. */
@@ -61,6 +76,9 @@ export interface EntityHook {
 export const entityHooks: Partial<Record<ApprovalEntity, EntityHook>> = {
   ATTENDANCE_CORRECTION: correctionHook,
   LEAVE: leaveHook,
+  ATTENDANCE_NOTE: attendanceNoteHook,
+  REGULARISATION: regularisationHook,
+  SHIFT_SWAP: shiftSwapHook,
 };
 
 /** Fallback for entity types without a registered hook: decisions still need a permission — the attendance one, like every other request. */
@@ -87,4 +105,13 @@ export function viewPermissionFor(entityType: ApprovalEntity): Permission {
 /** The key that lets somebody other than the requester withdraw a request of this entity (with the org-wide view key). */
 export function managePermissionFor(entityType: ApprovalEntity): Permission {
   return hookFor(entityType)?.managePermission ?? familyKeys(entityType).manage;
+}
+/** Every key that decides the entity's requests: `approvePermission` plus the hook's `alsoApprovePermissions`. */
+export function approvePermissionsFor(entityType: ApprovalEntity): Permission[] {
+  const hook = hookFor(entityType);
+  return hook ? [hook.approvePermission, ...(hook.alsoApprovePermissions ?? [])] : [GENERIC_APPROVE_PERMISSION];
+}
+/** True when the membership holds one of the entity's approve keys. */
+export function holdsApprovePermission(grant: { permissions: readonly string[] }, entityType: ApprovalEntity): boolean {
+  return approvePermissionsFor(entityType).some((p) => grant.permissions.includes(p));
 }

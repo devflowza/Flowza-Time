@@ -12,6 +12,6 @@ export * from './queries.js';
 export * from './workflows.js';
 export * from './delegations.js';
 export * from './email-tokens.js';
-export { entityHooks, hookFor, approvePermissionFor, viewPermissionFor, type EntityHook, type HookContext } from './hooks/index.js';
+export { entityHooks, hookFor, approvePermissionFor, approvePermissionsFor, holdsApprovePermission, viewPermissionFor, type EntityHook, type HookContext } from './hooks/index.js';
 export { leaveUnits, leaveWorkingCalendar } from './hooks/leave.js';
 export { hydrateRequests } from './dto.js';

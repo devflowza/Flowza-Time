@@ -59,7 +59,8 @@ export type VerificationMethod = (typeof VERIFICATION_METHODS)[number];
 export const PUNCH_DIRECTIONS = ['in', 'out', 'break_out', 'break_in', 'overtime_in', 'overtime_out', 'unknown'] as const;
 export type PunchDirection = (typeof PUNCH_DIRECTIONS)[number];
 
-export const RAW_SOURCES = ['POLL', 'WEBHOOK', 'DEVICE_PUSH', 'IMPORT', 'MANUAL'] as const;
+/** SELF_SERVICE = web / mobile check-ins and approved selfie check-ins of the employee portal (virtual device `self_service`). */
+export const RAW_SOURCES = ['POLL', 'WEBHOOK', 'DEVICE_PUSH', 'IMPORT', 'MANUAL', 'SELF_SERVICE'] as const;
 export type RawSource = (typeof RAW_SOURCES)[number];
 
 export const EVENT_SOURCES = ['DEVICE', 'MANUAL', 'CORRECTION', 'IMPORT', 'MOBILE'] as const;
@@ -176,3 +177,39 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 /** Queue names used by the worker; each has its own concurrency budget. */
 export const QUEUE_NAMES = ['sync', 'processing', 'reports', 'notifications', 'maintenance'] as const;
 export type QueueName = (typeof QUEUE_NAMES)[number];
+
+// ----- employee portal attendance (HR portal Prompt 4) -----------------------------------------------------------------------
+
+/** Provider key of the per-organisation virtual device that owns self-service punches (never listed with the terminals). */
+export const SELF_SERVICE_PROVIDER_KEY = 'self_service';
+/** What an employee's reason for a day is about. */
+export const ATTENDANCE_NOTE_CATEGORIES = ['client_visit', 'field_work', 'late_reason', 'absence_reason', 'wfh', 'other'] as const;
+export type AttendanceNoteCategory = (typeof ATTENDANCE_NOTE_CATEGORIES)[number];
+/** Note lifecycle: pending → approved | rejected | excused | info_requested (→ pending again when the employee answers). */
+export const ATTENDANCE_NOTE_STATUSES = ['pending', 'approved', 'rejected', 'excused', 'info_requested'] as const;
+export type AttendanceNoteStatus = (typeof ATTENDANCE_NOTE_STATUSES)[number];
+/** What a reviewer does with a note. */
+export const NOTE_REVIEW_DECISIONS = ['approve', 'reject', 'excuse', 'request_info'] as const;
+export type NoteReviewDecision = (typeof NOTE_REVIEW_DECISIONS)[number];
+export const REGULARISATION_TYPES = ['missed_punch', 'wrong_punch', 'wfh_unmarked', 'system_downtime'] as const;
+export type RegularisationType = (typeof REGULARISATION_TYPES)[number];
+export const REGULARISATION_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'] as const;
+export type RegularisationStatus = (typeof REGULARISATION_STATUSES)[number];
+export const SELFIE_CHECKIN_STATUSES = ['pending', 'approved', 'rejected'] as const;
+export type SelfieCheckinStatus = (typeof SELFIE_CHECKIN_STATUSES)[number];
+export const SHIFT_SWAP_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'] as const;
+export type ShiftSwapStatus = (typeof SHIFT_SWAP_STATUSES)[number];
+/** Per-fence enforcement when a punch is outside it (capped by `attendance.selfService.requireGeofence`). */
+export const GEOFENCE_ENFORCEMENTS = ['hard_block', 'soft_warn', 'advisory_log'] as const;
+export type GeofenceEnforcement = (typeof GEOFENCE_ENFORCEMENTS)[number];
+/** Who a fence applies to; the most specific scope that has an applicable fence wins (employee > team > department > branch > org). */
+export const GEOFENCE_SCOPES = ['org', 'branch', 'department', 'team', 'employee'] as const;
+export type GeofenceScope = (typeof GEOFENCE_SCOPES)[number];
+/** Outcome of a geofence evaluation: no fence applies, inside, outside (flagged / logged), refused (outside or mock location). */
+export const GEOFENCE_VERDICTS = ['no_fence', 'allowed', 'flagged', 'logged', 'denied_outside', 'denied_mock'] as const;
+export type GeofenceVerdict = (typeof GEOFENCE_VERDICTS)[number];
+/** Self-service punch channel (web browser or the mobile app); each has its own switch in the attendance settings. */
+export const SELF_PUNCH_CHANNELS = ['web', 'mobile'] as const;
+export type SelfPunchChannel = (typeof SELF_PUNCH_CHANNELS)[number];
+export const SELF_PUNCH_DIRECTIONS = ['in', 'out'] as const;
+export type SelfPunchDirection = (typeof SELF_PUNCH_DIRECTIONS)[number];

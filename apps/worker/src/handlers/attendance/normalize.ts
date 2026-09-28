@@ -2,7 +2,7 @@ import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
 import type { AttendanceEventType, PunchDirection, VerificationMethod } from '@flowza/contracts';
-import { uuidSchema } from '@flowza/contracts';
+import { SELF_SERVICE_PROVIDER_KEY, uuidSchema } from '@flowza/contracts';
 import { addDays, event, isValidTimezone, localDateOf, timeToMinutes } from '@flowza/shared';
 import { withContext, type EventSource, type RawSource, type Trx } from '@flowza/database';
 import type { HandlerRegistry, JobContext } from '../types.js';
@@ -26,16 +26,22 @@ export function eventTypeForDirection(direction: PunchDirection): AttendanceEven
   }
 }
 
-/** Raw row origin → event source: imported / manually entered raw punches are not device punches (§G.1). */
+/**
+ * Raw row origin → event source: imported / manually entered raw punches are not device punches (§G.1); a self-service
+ * check-in from the employee portal (web / mobile / approved selfie — HR portal Prompt 4) is a MOBILE event.
+ */
 export function eventSourceForRaw(source: RawSource): EventSource {
   switch (source) {
     case 'IMPORT': return 'IMPORT';
     case 'MANUAL': return 'MANUAL';
+    case 'SELF_SERVICE': return 'MOBILE';
     default: return 'DEVICE';
   }
 }
 
-interface RawRow { id: string; deviceId: string; providerKey: string; deviceEmployeeId: string; punchedAt: Date; verificationMethod: VerificationMethod; direction: PunchDirection; source: RawSource }
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+interface RawRow { id: string; deviceId: string; providerKey: string; deviceEmployeeId: string; employeeId: string | null; punchedAt: Date; verificationMethod: VerificationMethod; direction: PunchDirection; source: RawSource }
 interface HistoryRow { employeeId: string; branchId: string; effectiveFrom: string; effectiveTo: string | null }
 
 export interface NormalizeBatchResult { fetched: number; normalized: number; unmatched: number; events: number; recomputeJobs: number }
@@ -90,7 +96,7 @@ export async function loadNeighbourReach(trx: Trx, organizationId: string): Prom
  */
 export async function normalizeBatch(trx: Trx, organizationId: string, now: Date, queue: JobContext['deps']['queue']): Promise<NormalizeBatchResult> {
   const rows = (await trx.selectFrom('attendanceRawTransactions')
-    .select(['id', 'deviceId', 'providerKey', 'deviceEmployeeId', 'punchedAt', 'verificationMethod', 'direction', 'source'])
+    .select(['id', 'deviceId', 'providerKey', 'deviceEmployeeId', 'employeeId', 'punchedAt', 'verificationMethod', 'direction', 'source'])
     .where('organizationId', '=', organizationId)
     .where('processingStatus', '=', 'pending')
     .orderBy('punchedAt', 'asc').orderBy('id', 'asc')
@@ -127,6 +133,14 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
   const finance = await buildFinanceIdentityResolver(trx, organizationId, devices, rows);
 
   const resolveEmployee = (r: RawRow): string | null => {
+    // A self-service punch names the employee itself (the API wrote the caller's own employee id as the device user id and
+    // stamped employee_id): it never goes through the device-user maps — a PIN that happens to equal a uuid cannot hijack it.
+    // Both markers must agree: only the API writes SELF_SERVICE rows, and only on the organisation's `self_service` device.
+    if (r.source === 'SELF_SERVICE' || r.providerKey === SELF_SERVICE_PROVIDER_KEY) {
+      return r.source === 'SELF_SERVICE' && r.providerKey === SELF_SERVICE_PROVIDER_KEY ? r.employeeId ?? (UUID_RE.test(r.deviceEmployeeId) ? r.deviceEmployeeId : null) : null;
+    }
+    // Flowza Finance connector punches resolve ONLY by Finance's employee number (connector review D7) — never through the
+    // device-user maps, so a mapping written for the connector device can never re-attribute a pulled punch.
     if (finance.deviceIds.has(r.deviceId)) return finance.resolve(r.deviceId, r.deviceEmployeeId);
     return stateMap.get(`${r.deviceId}|${r.deviceEmployeeId}`) ?? identityMap.get(`${r.providerKey}|${r.deviceEmployeeId}`) ?? deviceUserMap.get(r.deviceEmployeeId) ?? null;
   };

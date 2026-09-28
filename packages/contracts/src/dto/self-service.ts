@@ -102,4 +102,17 @@ export interface SelfOverviewDto {
   pendingLeave: number;
   pendingCorrections: number;
   upcomingHolidays: SelfHolidayDto[];
+  /** Today's check-in state (HR portal Prompt 4; absent from API versions before it). */
+  punch?: { lastDirection: 'in' | 'out' | null; lastPunchAt: string | null; punchesToday: number; canCheckIn: boolean; canCheckOut: boolean; checkInEnabled: boolean };
+  /** Own attendance reasons waiting for a review, and those where the reviewer asked for more information. */
+  pendingNotes?: number;
+  infoRequestedNotes?: number;
+  pendingRegularisations?: number;
+  /** Shift swaps I filed that wait for a decision, and swaps colleagues filed that name me. */
+  pendingSwaps?: number;
+  /**
+   * Days of the last 30 (before today) the organisation requires a reason for (`attendance.notes.requireReasonForLate` /
+   * `requireReasonForAbsent`) and that carry none; absent when neither requirement is on.
+   */
+  reasonsRequired?: number;
 }

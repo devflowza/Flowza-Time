@@ -15,7 +15,7 @@ export type DecisionKind = 'APPROVE' | 'REJECT';
 const INBOX = 'approvals-inbox';
 const REQUEST = 'approval-request';
 const MINE = 'approvals-mine';
-const DOCUMENTS = ['attendance-corrections', 'attendance-records', 'attendance-daily', 'attendance-monthly', 'leave-records', 'self-service'];
+const DOCUMENTS = ['attendance-corrections', 'attendance-records', 'attendance-daily', 'attendance-monthly', 'leave-records', 'self-service', 'attendance-notes', 'selfie-checkins'];
 /**
  * Everything a decision can move: the approval views, the documents behind them, the dashboard (its pending count) and
  * /me (`approvals.actionable`, which opens the Approvals navigation for members without an approve key).
@@ -47,8 +47,11 @@ export function useApprovalMutations() {
   const qc = useQueryClient();
   const invalidate = () => invalidateApprovalViews(qc, orgId);
   const post = async <T,>(path: string, body: unknown) => (await api.post<Envelope<T>>(`/orgs/${orgId}/approvals/${path}`, body)).data;
-  /** Decides the level the caller saw (`stepNo` is required: a level that moved on meanwhile is refused, never re-targeted). */
-  const decide = useMutation({ mutationFn: ({ requestId, stepNo, decision, comment, onBehalfOfUserId }: { requestId: string; stepNo: number; decision: DecisionKind; comment?: string; onBehalfOfUserId?: string }) => post<ApprovalDecideResultDto>(`${requestId}/decide`, { stepNo, decision, comment: comment || undefined, onBehalfOfUserId }), onSuccess: invalidate });
+  /**
+   * Decides the level the caller saw (`stepNo` is required: a level that moved on meanwhile is refused, never re-targeted).
+   * payEffectDays: an ATTENDANCE_NOTE rejection's pay effect (0 / 0.5 / 1 day); ignored by every other entity.
+   */
+  const decide = useMutation({ mutationFn: ({ requestId, stepNo, decision, comment, onBehalfOfUserId, payEffectDays }: { requestId: string; stepNo: number; decision: DecisionKind; comment?: string; onBehalfOfUserId?: string; payEffectDays?: 0 | 0.5 | 1 }) => post<ApprovalDecideResultDto>(`${requestId}/decide`, { stepNo, decision, comment: comment || undefined, onBehalfOfUserId, payEffectDays }), onSuccess: invalidate });
   /** Withdrawing a request always says why (at least 3 characters, Finance B-98). */
   const cancel = useMutation({ mutationFn: ({ requestId, reason }: { requestId: string; reason: string }) => post<ApprovalRequestDto>(`${requestId}/cancel`, { reason }), onSuccess: invalidate });
   const reassign = useMutation({ mutationFn: ({ requestId, userId, reason, stepNo }: { requestId: string; userId: string; reason: string; stepNo?: number }) => post<ApprovalRequestDto>(`${requestId}/reassign`, { userId, reason, stepNo }), onSuccess: invalidate });

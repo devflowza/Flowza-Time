@@ -2,7 +2,8 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
 import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCredentialsInput, DeviceGroupDto, DeviceGroupInput, DeviceListQuery, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
 import type { DeviceSummaryDto, DeviceSummaryQuery } from '@flowza/contracts';
-import { CONNECTOR_MANAGED_IN_INTEGRATIONS, FLOWZA_FINANCE_PROVIDER_KEY } from '@flowza/contracts';
+import { CONNECTOR_MANAGED_IN_INTEGRATIONS, FLOWZA_FINANCE_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY } from '@flowza/contracts';
+import { refuseSelfServiceDevices, refuseSelfServiceProvider } from './self-service-device-guard.js';
 import { emitDomainEvent, maskCredentials, type Trx } from '@flowza/database';
 import { createThrottler, hostnameBlockReason, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
 import { AppError, errors, sha256Hex } from '@flowza/shared';
@@ -48,7 +49,8 @@ export async function listProviders(deps: ApiDeps, actor: Actor, orgId: string |
 
 export async function listModels(deps: ApiDeps, actor: Actor, providerKey: string | undefined): Promise<DeviceModelDto[]> {
   return runUser(deps.db, actor, async (trx) => {
-    let q = trx.selectFrom('deviceModels').selectAll().orderBy('vendor').orderBy('model');
+    // the self-service virtual device's model is reference data for that row only, never a terminal to pick
+    let q = trx.selectFrom('deviceModels').selectAll().where('providerKey', '!=', SELF_SERVICE_PROVIDER_KEY).orderBy('vendor').orderBy('model');
     if (providerKey) q = q.where('providerKey', '=', providerKey);
     return (await q.execute()).map((m) => ({ id: m.id, providerKey: m.providerKey, vendor: m.vendor, model: m.model, family: m.family, capabilities: jsonObject(m.capabilities) as DeviceModelDto['capabilities'], verification: m.verification, notes: m.notes }));
   });
@@ -145,8 +147,12 @@ async function assertProviderEnabled(trx: Trx, orgId: string, def: ProviderDefin
 
 const DEVICE_SORT = { name: 'd.name', code: 'd.code', status: 'd.status', connectionStatus: 'd.connection_status', branch: 'b.name', provider: 'd.provider_key', lastHeartbeatAt: 'd.last_heartbeat_at', createdAt: 'd.created_at', updatedAt: 'd.updated_at' } as const;
 
+/**
+ * Every device read of this service. The organisation's virtual self-service device (provider `self_service`, HR portal
+ * Prompt 4) is not a terminal: it is hidden from lists, details and every mutation (404), like it never counts as a seat.
+ */
 function deviceQuery(trx: Trx, orgId: string) {
-  return trx.selectFrom('devices as d').innerJoin('branches as b', 'b.id', 'd.branchId').leftJoin('deviceProviders as p', 'p.key', 'd.providerKey').where('d.organizationId', '=', orgId);
+  return trx.selectFrom('devices as d').innerJoin('branches as b', 'b.id', 'd.branchId').leftJoin('deviceProviders as p', 'p.key', 'd.providerKey').where('d.organizationId', '=', orgId).where('d.providerKey', '!=', SELF_SERVICE_PROVIDER_KEY);
 }
 async function employeeCounts(trx: Trx, orgId: string, deviceIds: string[]): Promise<Map<string, number>> {
   if (deviceIds.length === 0) return new Map();
@@ -164,7 +170,7 @@ export async function summarizeDevices(deps: ApiDeps, actor: Actor, orgId: strin
   const grant = requirePermission(actor.principal, orgId, 'device.view');
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    let base = trx.selectFrom('devices as d').where('d.organizationId', '=', orgId);
+    let base = trx.selectFrom('devices as d').where('d.organizationId', '=', orgId).where('d.providerKey', '!=', SELF_SERVICE_PROVIDER_KEY);
     if (scope) base = base.where('d.branchId', 'in', scope);
     if (!q.includeDecommissioned) base = base.where('d.status', '!=', 'decommissioned');
     const rows = await base.select(['d.status', 'd.connectionStatus', (eb) => eb.fn.countAll().as('n')]).groupBy(['d.status', 'd.connectionStatus']).execute();
@@ -224,8 +230,8 @@ async function insertDevice(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string
     const model = await trx.selectFrom('deviceModels').select(['id', 'providerKey']).where('id', '=', input.modelId).executeTakeFirst();
     if (!model || model.providerKey !== def.key) throw errors.validation('Model does not belong to this provider.', { issues: [{ path: 'modelId', message: 'Unknown model' }] });
   }
-  // the Flowza Finance connector is plumbing, not a terminal: it does not consume a plan device seat
-  const activeCount = toCount((await trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned').where('providerKey', '!=', CONNECTOR_PROVIDER_KEY).executeTakeFirst())?.n);
+  // the Flowza Finance connector and the self-service virtual device are plumbing, not terminals: they consume no plan device seat
+  const activeCount = toCount((await trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned').where('providerKey', 'not in', [CONNECTOR_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY]).executeTakeFirst())?.n);
   await assertWithinLimit(trx, orgId, 'devices', activeCount);
   const settings = await loadSettings(trx, orgId);
   const row = await trx.insertInto('devices').values({
@@ -376,6 +382,7 @@ export const TEST_CONNECTION_TIMEOUT_MS = 10_000;
 export async function testConnection(deps: ApiDeps, actor: Actor, orgId: string, input: TestConnectionInput): Promise<TestConnectionResultDto> {
   const grant = requireMembership(actor.principal, orgId);
   if (!hasPermission(grant, 'device.create') && !hasPermission(grant, 'device.update') && !hasPermission(grant, 'device.manage')) throw errors.forbidden('Missing permission: device.create or device.update.');
+  refuseSelfServiceProvider(input.providerKey);
   const provider = getProvider(deps, input.providerKey);
   const def = provider.definition;
   // the connector is tested only through Settings → Integrations (integration.manage): the generic endpoint would otherwise send
@@ -391,7 +398,7 @@ export async function testConnection(deps: ApiDeps, actor: Actor, orgId: string,
   let endpointUrl: string | null = typeof requestConfig.endpointUrl === 'string' ? requestConfig.endpointUrl : null;
   let serialNumber: string | null = typeof requestConfig.serialNumber === 'string' ? requestConfig.serialNumber : null;
   if (input.deviceId) {
-    const device = await runUser(deps.db, actor, async (trx) => { const d = await loadDeviceRow(trx, orgId, input.deviceId!); requireBranchAccess(grant, d.branchId); return d; });
+    const device = await runUser(deps.db, actor, async (trx) => { await refuseSelfServiceDevices(trx, orgId, [input.deviceId!]); const d = await loadDeviceRow(trx, orgId, input.deviceId!); requireBranchAccess(grant, d.branchId); return d; });
     if (device.providerKey !== def.key) throw errors.validation('providerKey does not match the stored device.', { issues: [{ path: 'providerKey', message: 'Mismatch' }] });
     const storedConfig = jsonObject(device.config);
     // stored credentials may only be reused for the *unchanged* endpoint (AGENTS.md service-level rules): generic endpoint keys
@@ -483,6 +490,7 @@ export type DeviceAction = 'sync-attendance' | 'sync-employees' | 'health-check'
 export async function runDeviceAction(deps: ApiDeps, actor: Actor, orgId: string, id: string, action: DeviceAction): Promise<CreatedSyncJob> {
   const grant = requirePermission(actor.principal, orgId, 'device.sync');
   return runUser(deps.db, actor, async (trx) => {
+    await refuseSelfServiceDevices(trx, orgId, [id]);
     const device = await loadDeviceRow(trx, orgId, id); requireBranchAccess(grant, device.branchId);
     const connector = device.providerKey === CONNECTOR_PROVIDER_KEY;
     // reconciliation compares device users with employees: the connector has none, and it is not a terminal (review D13)
@@ -592,7 +600,7 @@ export async function setGroupMembers(deps: ApiDeps, actor: Actor, orgId: string
   return runUser(deps.db, actor, async (trx) => {
     const g = await loadGroup(trx, orgId, id); requireBranchAccess(grant, g.branchId);
     const unique = [...new Set(deviceIds)];
-    const devices = await trx.selectFrom('devices').select(['id', 'branchId']).where('organizationId', '=', orgId).where('id', 'in', unique).execute();
+    const devices = await trx.selectFrom('devices').select(['id', 'branchId']).where('organizationId', '=', orgId).where('id', 'in', unique).where('providerKey', '!=', SELF_SERVICE_PROVIDER_KEY).execute();
     if (devices.length !== unique.length) throw errors.validation('One or more devices were not found.', { missing: unique.filter((d) => !devices.some((x) => x.id === d)) });
     for (const d of devices) { requireBranchAccess(grant, d.branchId); if (g.branchId && d.branchId !== g.branchId) throw errors.validation('Devices must belong to the group branch.', { deviceId: d.id }); }
     if (mode === 'add') await trx.insertInto('deviceGroupMembers').values(unique.map((deviceId) => ({ organizationId: orgId, groupId: id, deviceId }))).onConflict((oc) => oc.doNothing()).execute();

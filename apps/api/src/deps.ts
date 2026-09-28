@@ -54,4 +54,10 @@ export interface RealtimePublisher {
 /** Creates short-lived signed URLs for tenant-scoped storage objects. */
 export interface StorageSigner {
   signedUrl(bucket: string, path: string, expiresInSeconds?: number): Promise<string | null>;
+  /**
+   * Stores an object server-side (the employee portal's selfie check-ins, HR portal Prompt 4). Optional: an environment
+   * without storage (no service-role key, the plain test harness) omits it and the upload surfaces as 503. Returns false
+   * when the storage refused the object.
+   */
+  upload?(bucket: string, path: string, body: Uint8Array, contentType: string): Promise<boolean>;
 }

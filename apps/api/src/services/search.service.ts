@@ -1,5 +1,6 @@
 import { sql } from 'kysely';
 import type { SearchResult, SearchResultItem, SearchResultType } from '@flowza/contracts';
+import { SELF_SERVICE_PROVIDER_KEY } from '@flowza/contracts';
 import type { ApiDeps } from '../deps.js';
 import { branchFilter, hasPermission, requireMembership } from '../lib/authorize.js';
 import { type Actor, runUser } from '../lib/service.js';
@@ -24,7 +25,7 @@ export async function search(deps: ApiDeps, actor: Actor, orgId: string, q: stri
       out.employees = rows.map((r): SearchResultItem => ({ type: 'employee', id: r.id, title: r.displayName, subtitle: String(r.employeeNumber), branchId: r.branchId, status: r.employmentStatus }));
     }
     if (wanted.has('device') && hasPermission(grant, 'device.view')) {
-      let base = trx.selectFrom('devices as d').where('d.organizationId', '=', orgId);
+      let base = trx.selectFrom('devices as d').where('d.organizationId', '=', orgId).where('d.providerKey', '!=', SELF_SERVICE_PROVIDER_KEY);
       if (scope) base = base.where('d.branchId', 'in', scope);
       const rows = await base.select(['d.id', 'd.name', 'd.code', 'd.serialNumber', 'd.branchId', 'd.connectionStatus'])
         .where((eb) => eb.or([eb('d.name', 'ilike', like), eb(sql`d.code::text`, 'ilike', like), eb('d.serialNumber', 'ilike', like)]))

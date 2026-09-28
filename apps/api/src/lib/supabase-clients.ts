@@ -33,6 +33,11 @@ export function createSupabasePlatformClients(opts: { url: string; serviceRoleKe
         if (error) { opts.log.warn({ event: 'storage_sign_failed', bucket, err: error.message }); return null; }
         return data.signedUrl;
       },
+      async upload(bucket, path, body, contentType) {
+        const { error } = await client.storage.from(bucket).upload(path, body, { contentType, upsert: false });
+        if (error) { opts.log.warn({ event: 'storage_upload_failed', bucket, err: error.message }); return false; }
+        return true;
+      },
     },
   };
 }

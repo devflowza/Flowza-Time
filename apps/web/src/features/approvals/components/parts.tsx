@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { CalendarOff, Clock, FileQuestion } from 'lucide-react';
+import { ArrowLeftRight, CalendarOff, Clock, FileQuestion, MessageSquareText } from 'lucide-react';
 import type { ApprovalContextDto, ApprovalEntity, ApprovalRequestDto, ApprovalRequestStatus, ApprovalStepDto } from '@flowza/contracts';
 import { Badge } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -7,6 +7,9 @@ import { fmtDate } from '@/lib/format';
 import { CorrectionTypeBadge } from '@/features/attendance/components/badges';
 import { CorrectionSummary } from '@/features/attendance/components/record-dialog';
 import { modeText } from '../labels';
+import { AR_NS } from '@/features/attendance-review/i18n';
+import { AttendanceStatusBadge, FlagChips } from '@/features/attendance/components/badges';
+import { fmtTime } from '@/lib/format';
 
 const STATUS_TONE: Record<string, 'warning' | 'success' | 'danger' | 'neutral'> = { PENDING: 'warning', APPROVED: 'success', REJECTED: 'danger', CANCELLED: 'neutral', INVALIDATED: 'neutral', SKIPPED: 'neutral' };
 
@@ -16,7 +19,8 @@ export function RequestStatusBadge({ status }: { status: ApprovalRequestStatus |
 }
 
 export function EntityIcon({ entityType, className }: { entityType: ApprovalEntity; className?: string }) {
-  const Icon = entityType === 'LEAVE' || entityType === 'COMP_OFF' ? CalendarOff : entityType === 'ATTENDANCE_CORRECTION' || entityType === 'MISSING_PUNCH' || entityType === 'REGULARISATION' ? Clock : FileQuestion;
+  const Icon = entityType === 'LEAVE' || entityType === 'COMP_OFF' ? CalendarOff : entityType === 'ATTENDANCE_CORRECTION' || entityType === 'MISSING_PUNCH' || entityType === 'REGULARISATION' ? Clock
+    : entityType === 'ATTENDANCE_NOTE' ? MessageSquareText : entityType === 'SHIFT_SWAP' ? ArrowLeftRight : FileQuestion;
   const tone = entityType === 'LEAVE' || entityType === 'COMP_OFF' ? 'bg-chart-leave/12 text-chart-leave' : 'bg-chart-late/12 text-chart-late';
   return <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-lg', tone, className)} aria-hidden><Icon className="size-4" /></span>;
 }
@@ -63,5 +67,42 @@ export function ApprovalContext({ context, timezone, compact = false }: { contex
       </div>
     );
   }
+  if (context.kind === 'ATTENDANCE_NOTE' || context.kind === 'REGULARISATION' || context.kind === 'SHIFT_SWAP') return <PortalRequestContext context={context} timezone={timezone} compact={compact} />;
   return <p className="text-sm text-muted-foreground">{context.summary ?? t('context.noDetails')}</p>;
+}
+
+type PortalContext = Extract<ApprovalContextDto, { kind: 'ATTENDANCE_NOTE' | 'REGULARISATION' | 'SHIFT_SWAP' }>;
+
+/** HR portal Prompt 4 requests: a reason given for a day (with the engine's verdict and the year's excused count), a regularisation, a shift swap. */
+function PortalRequestContext({ context, timezone, compact }: { context: PortalContext; timezone: string; compact: boolean }) {
+  const { t } = useTranslation(AR_NS);
+  const clip = cn('text-xs text-muted-foreground', compact && 'max-w-[260px] truncate');
+  if (context.kind === 'ATTENDANCE_NOTE') {
+    const n = context.note;
+    return (
+      <div className="min-w-0 space-y-1 text-sm" data-testid="context-note">
+        <p className="flex flex-wrap items-center gap-2"><span className="tnum">{fmtDate(n.attendanceDate)}</span>{n.dayStatus ? <AttendanceStatusBadge status={n.dayStatus} /> : null}<FlagChips flags={n.dayFlags} max={2} size="xs" /><Badge variant="outline">{t(`categories.${n.category}`, { defaultValue: n.category })}</Badge>{n.excusedCountYear > 0 ? <Badge variant="secondary">{t('notes.excusedBadge', { count: n.excusedCountYear })}</Badge> : null}</p>
+        <p className={clip} title={n.note} dir="auto">{n.note}</p>
+        {n.infoRequestMessage ? <p className={cn(clip, 'text-blue-700 dark:text-blue-300')} title={n.infoRequestMessage}>{t('notes.asked', { question: n.infoRequestMessage })}</p> : null}
+      </div>
+    );
+  }
+  if (context.kind === 'REGULARISATION') {
+    const r = context.regularisation;
+    const tz = r.timezone ?? timezone;
+    return (
+      <div className="min-w-0 space-y-1 text-sm" data-testid="context-regularisation">
+        <p className="flex flex-wrap items-center gap-2"><span className="tnum">{fmtDate(r.attendanceDate)}</span><Badge variant="outline">{t(`approvalContext.regularisationTypes.${r.type}`, { defaultValue: r.type })}</Badge>{r.proposedInAt || r.proposedOutAt ? <span className="text-xs tnum" dir="ltr">{fmtTime(r.proposedInAt, tz)} – {fmtTime(r.proposedOutAt, tz)}</span> : null}</p>
+        <p className={clip} title={r.reason} dir="auto">{r.reason}</p>
+      </div>
+    );
+  }
+  const w = context.swap;
+  return (
+    <div className="min-w-0 space-y-1 text-sm" data-testid="context-swap">
+      <p className="flex flex-wrap items-center gap-2"><span className="tnum">{fmtDate(w.swapDate)}</span><span>{t('approvalContext.swapBetween', { a: w.requesterName ?? '—', b: w.targetName ?? '—' })}</span></p>
+      <p className="text-xs">{w.requesterShiftName ?? '—'} ⇄ {w.targetShiftName ?? '—'}</p>
+      <p className={clip} title={w.reason} dir="auto">{w.reason}</p>
+    </div>
+  );
 }

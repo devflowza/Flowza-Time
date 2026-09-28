@@ -120,5 +120,8 @@ export const DOMAIN_EVENT_TYPES = [
   'sync.finance.failed',
   // report sharing / schedules (HR portal Prompt 6a): one event per delivered recipient report; targeted via payload.userIds
   'report.scheduled_delivery',
+  // employee portal attendance (HR portal Prompt 4): targeted via payload.userIds
+  'attendance.note_submitted', 'attendance.note_decided', 'attendance.note_info_requested', 'attendance.selfie_submitted', 'attendance.selfie_decided',
+  'attendance.punch_flagged', 'attendance.regularisation_decided', 'shift.swap_requested', 'shift.swap_decided',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];

@@ -23,6 +23,10 @@ export type AssignmentTarget = "BRANCH" | "DEPARTMENT" | "EMPLOYEE" | "ORGANIZAT
 
 export type AttendanceEventType = "BREAK_END" | "BREAK_START" | "PUNCH" | "PUNCH_IN" | "PUNCH_OUT";
 
+export type AttendanceNoteCategory = "absence_reason" | "client_visit" | "field_work" | "late_reason" | "other" | "wfh";
+
+export type AttendanceNoteStatus = "approved" | "excused" | "info_requested" | "pending" | "rejected";
+
 export type AttendanceStatus = "ABSENT" | "EXITED" | "HALF_DAY" | "HOLIDAY" | "LEAVE" | "MISSING_PUNCH" | "NOT_JOINED" | "PENDING" | "PRESENT" | "WEEKLY_OFF";
 
 export type AuditActorType = "API_KEY" | "DEVICE" | "PLATFORM_ADMIN" | "SYSTEM" | "USER";
@@ -56,6 +60,10 @@ export type Gender = "female" | "male" | "other" | "unspecified";
 export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
+
+export type GeofenceEnforcement = "advisory_log" | "hard_block" | "soft_warn";
+
+export type GeofenceScope = "branch" | "department" | "employee" | "org" | "team";
 
 export type GrantAccessLevel = "read" | "write";
 
@@ -119,7 +127,7 @@ export type PunchInterpretation = "DIRECTIONAL" | "FIRST_LAST" | "PAIRED";
 
 export type RawProcessingStatus = "error" | "held" | "ignored" | "normalized" | "pending" | "quarantined" | "unmatched";
 
-export type RawSource = "DEVICE_PUSH" | "IMPORT" | "MANUAL" | "POLL" | "WEBHOOK";
+export type RawSource = "DEVICE_PUSH" | "IMPORT" | "MANUAL" | "POLL" | "SELF_SERVICE" | "WEBHOOK";
 
 export type RecalculationStatus = "CANCELLED" | "COMPLETED" | "FAILED" | "QUEUED" | "RUNNING";
 
@@ -127,11 +135,19 @@ export type RecordHistoryReason = "CORRECTION" | "HOLIDAY_CHANGE" | "INITIAL" | 
 
 export type RecordStatus = "active" | "archived" | "inactive";
 
+export type RegularisationStatus = "approved" | "cancelled" | "pending" | "rejected";
+
+export type RegularisationType = "missed_punch" | "system_downtime" | "wfh_unmarked" | "wrong_punch";
+
 export type ReportFormat = "csv" | "pdf" | "xlsx";
 
 export type ReportStatus = "CANCELLED" | "COMPLETED" | "EXPIRED" | "FAILED" | "QUEUED" | "RUNNING";
 
 export type RoundingMode = "DOWN" | "NEAREST" | "NONE" | "UP";
+
+export type SelfieCheckinStatus = "approved" | "pending" | "rejected";
+
+export type ShiftSwapStatus = "approved" | "cancelled" | "pending" | "rejected";
 
 export type ShiftType = "FIXED" | "FLEXIBLE";
 
@@ -306,6 +322,7 @@ export interface AttendanceCorrections {
   attendanceDate: Timestamp;
   branchId: string;
   createdAt: Generated<Timestamp>;
+  deviceId: string | null;
   employeeId: string;
   id: Generated<string>;
   organizationId: string;
@@ -409,6 +426,35 @@ export interface AttendanceEvents {
   voidedByCorrectionId: string | null;
 }
 
+export interface AttendanceNotes {
+  approvalRequestId: string | null;
+  attendanceDate: Timestamp;
+  branchId: string | null;
+  category: Generated<AttendanceNoteCategory>;
+  createdAt: Generated<Timestamp>;
+  dayMarkId: string | null;
+  deductedLeaveRecordId: string | null;
+  employeeId: string;
+  excusedAt: Timestamp | null;
+  excusedBy: string | null;
+  id: Generated<string>;
+  infoRequestedAt: Timestamp | null;
+  infoRequestedBy: string | null;
+  infoRequestMessage: string | null;
+  lossOfPay: Generated<boolean>;
+  note: string;
+  organizationId: string;
+  payEffectDays: Numeric | null;
+  reviewedAt: Timestamp | null;
+  reviewedBy: string | null;
+  reviewReason: string | null;
+  reviewVia: string | null;
+  status: Generated<AttendanceNoteStatus>;
+  submittedAt: Generated<Timestamp>;
+  submittedBy: string | null;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface AttendancePeriodLocks {
   branchId: string | null;
   id: Generated<string>;
@@ -502,6 +548,28 @@ export interface AttendanceRecalculationRequests {
   status: Generated<RecalculationStatus>;
   summary: Json | null;
   toDate: Timestamp;
+}
+
+export interface AttendanceRegularisationRequests {
+  appliedAt: Timestamp | null;
+  appliedCorrectionId: string | null;
+  approvalRequestId: string | null;
+  attendanceDate: Timestamp;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  decidedAt: Timestamp | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  employeeId: string;
+  id: Generated<string>;
+  organizationId: string;
+  proposedInAt: Timestamp | null;
+  proposedOutAt: Timestamp | null;
+  reason: string;
+  status: Generated<RegularisationStatus>;
+  type: RegularisationType;
+  updatedAt: Generated<Timestamp>;
 }
 
 export interface AttendanceRuleSets {
@@ -789,6 +857,17 @@ export interface DomainEvents {
   requestId: string | null;
 }
 
+export interface EmployeeAttendanceGrants {
+  createdAt: Generated<Timestamp>;
+  employeeId: string;
+  grantedAt: Generated<Timestamp>;
+  grantedBy: string | null;
+  openAttendance: Generated<boolean>;
+  organizationId: string;
+  selfieRequired: Generated<boolean>;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface EmployeeIdentityDocuments {
   branchId: string | null;
   createdAt: Generated<Timestamp>;
@@ -930,6 +1009,40 @@ export interface FinanceSyncState {
    * First event of a batch Finance answered with per-punch errors; retried until push_retry_attempts reaches 5, then skipped.
    */
   pushRetryEventId: string | null;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface GeofenceAssignments {
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  geofenceId: string;
+  id: Generated<string>;
+  organizationId: string;
+  priority: Generated<number>;
+  requireOnCheckIn: Generated<boolean>;
+  requireOnCheckOut: Generated<boolean>;
+  scope: GeofenceScope;
+  targetId: string | null;
+}
+
+export interface Geofences {
+  accuracyThresholdM: Generated<number>;
+  activeFrom: Timestamp | null;
+  activeTo: Timestamp | null;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  enforcement: Generated<GeofenceEnforcement>;
+  graceM: Generated<number>;
+  id: Generated<string>;
+  isActive: Generated<boolean>;
+  latitude: number;
+  longitude: number;
+  name: string;
+  organizationId: string;
+  polygon: Json | null;
+  radiusM: number;
+  timeWindows: Json | null;
   updatedAt: Generated<Timestamp>;
 }
 
@@ -1390,6 +1503,29 @@ export interface Roles {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface SelfieCheckins {
+  accuracyM: number | null;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  direction: string;
+  employeeId: string;
+  id: Generated<string>;
+  latitude: number | null;
+  longitude: number | null;
+  organizationId: string;
+  photoPath: string;
+  photoSha256: string | null;
+  punchedAt: Generated<Timestamp>;
+  rawTransactionId: Int8 | null;
+  reviewedAt: Timestamp | null;
+  reviewedBy: string | null;
+  reviewReason: string | null;
+  status: Generated<SelfieCheckinStatus>;
+  updatedAt: Generated<Timestamp>;
+  verdict: string | null;
+}
+
 export interface ShiftAssignments {
   branchId: string | null;
   createdAt: Generated<Timestamp>;
@@ -1439,6 +1575,28 @@ export interface Shifts {
   startTime: string | null;
   status: Generated<RecordStatus>;
   type: Generated<ShiftType>;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface ShiftSwapRequests {
+  approvalRequestId: string | null;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  decidedAt: Timestamp | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  id: Generated<string>;
+  organizationId: string;
+  reason: string;
+  requesterAssignmentId: string | null;
+  requesterEmployeeId: string;
+  requesterShiftId: string;
+  status: Generated<ShiftSwapStatus>;
+  swapDate: Timestamp;
+  targetAssignmentId: string | null;
+  targetEmployeeId: string;
+  targetShiftId: string;
   updatedAt: Generated<Timestamp>;
 }
 
@@ -1618,10 +1776,12 @@ export interface DB {
   attendanceDailyRecords: AttendanceDailyRecords;
   attendanceDayMarks: AttendanceDayMarks;
   attendanceEvents: AttendanceEvents;
+  attendanceNotes: AttendanceNotes;
   attendancePeriodLocks: AttendancePeriodLocks;
   attendancePeriodSummaries: AttendancePeriodSummaries;
   attendanceRawTransactions: AttendanceRawTransactions;
   attendanceRecalculationRequests: AttendanceRecalculationRequests;
+  attendanceRegularisationRequests: AttendanceRegularisationRequests;
   attendanceRuleSets: AttendanceRuleSets;
   "audit.logs": AuditLogs;
   branches: Branches;
@@ -1638,6 +1798,7 @@ export interface DB {
   deviceProviders: DeviceProviders;
   devices: Devices;
   domainEvents: DomainEvents;
+  employeeAttendanceGrants: EmployeeAttendanceGrants;
   employeeIdentityDocuments: EmployeeIdentityDocuments;
   employeeProviderIdentities: EmployeeProviderIdentities;
   employees: Employees;
@@ -1646,6 +1807,8 @@ export interface DB {
   featureFlags: FeatureFlags;
   financePushedEvents: FinancePushedEvents;
   financeSyncState: FinanceSyncState;
+  geofenceAssignments: GeofenceAssignments;
+  geofences: Geofences;
   holidayCalendars: HolidayCalendars;
   holidays: Holidays;
   importJobRows: ImportJobRows;
@@ -1677,9 +1840,11 @@ export interface DB {
   reportSchedules: ReportSchedules;
   rolePermissions: RolePermissions;
   roles: Roles;
+  selfieCheckins: SelfieCheckins;
   shiftAssignments: ShiftAssignments;
   shiftPatterns: ShiftPatterns;
   shifts: Shifts;
+  shiftSwapRequests: ShiftSwapRequests;
   subscriptions: Subscriptions;
   syncAttempts: SyncAttempts;
   syncCursors: SyncCursors;

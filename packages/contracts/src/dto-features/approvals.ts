@@ -125,6 +125,8 @@ export const approvalDecideSchema = z.object({
   decision: z.enum(APPROVAL_DECISIONS),
   comment: z.string().trim().max(1000).optional(),
   onBehalfOfUserId: uuidSchema.optional(),
+  /** ATTENDANCE_NOTE rejections only: the pay effect of the day (0 = none, the default; 0.5 / 1 = half / full day charged). */
+  payEffectDays: z.union([z.literal(0), z.literal(0.5), z.literal(1)]).optional(),
 });
 export type ApprovalDecideInput = z.infer<typeof approvalDecideSchema>;
 /** POST /orgs/:orgId/approvals/bulk-decide — the same decision on several requests' current levels (Finance ATT-95: through the engine, one request at a time, never client-side). */
@@ -198,6 +200,10 @@ export interface ApprovalTimelineEventDto { id: string; at: string; actorUserId:
 export type ApprovalContextDto =
   | { kind: 'ATTENDANCE_CORRECTION'; correction: { id: string; attendanceDate: string; type: string; originalPunchedAt: string | null; proposedPunchedAt: string | null; proposedEventType: string | null; proposedStatus: string | null; reason: string; status: string; requestedBy: string | null; rejectionReason: string | null } }
   | { kind: 'LEAVE'; leave: { id: string; leaveTypeId: string; leaveTypeName: string; startDate: string; endDate: string; isHalfDay: boolean; halfDayPart: string | null; days: number | null; reason: string | null; status: string; balanceRemainingDays: number | null; allowanceDays: number | null } }
+  // HR portal Prompt 4 — every new kind carries `summary` too, so an inbox that predates it falls back to the text
+  | { kind: 'ATTENDANCE_NOTE'; summary: string | null; note: { id: string; attendanceDate: string; category: string; note: string; status: string; dayStatus: string | null; dayFlags: string[]; excusedCountYear: number; payEffectDays: number | null; lossOfPay: boolean; infoRequestMessage: string | null } }
+  | { kind: 'REGULARISATION'; summary: string | null; regularisation: { id: string; attendanceDate: string; type: string; proposedInAt: string | null; proposedOutAt: string | null; reason: string; status: string; timezone: string | null } }
+  | { kind: 'SHIFT_SWAP'; summary: string | null; swap: { id: string; swapDate: string; requesterName: string | null; targetName: string | null; requesterShiftName: string | null; targetShiftName: string | null; reason: string; status: string } }
   | { kind: 'GENERIC'; entityType: ApprovalEntity; summary: string | null };
 
 /**
