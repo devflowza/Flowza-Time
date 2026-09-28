@@ -12,6 +12,8 @@ import { registerIntegrationRoutes } from './integrations.js';
 import { registerHrAttendanceRoutes } from './hr-attendance.js';
 import { registerReportScheduleRoutes } from './report-schedules.js';
 import { registerLeaveRoutes } from './leave.js';
+import { registerAttendanceAdminRoutes } from './attendance-admin.js';
+import { registerRosterRoutes } from './roster.js';
 
 /**
  * Feature modules: devices (+ groups, pending), sync, attendance (+ corrections, recalculation, period locks, day marks),
@@ -31,4 +33,6 @@ export function registerFeatureRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   registerHrAttendanceRoutes(v1, deps);
   registerReportScheduleRoutes(v1, deps);
   registerLeaveRoutes(v1, deps);
+  registerAttendanceAdminRoutes(v1, deps);
+  registerRosterRoutes(v1, deps);
 }

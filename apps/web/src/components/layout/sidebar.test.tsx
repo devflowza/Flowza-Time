@@ -105,6 +105,20 @@ describe('Sidebar', () => {
     expect(approvalsLink()).not.toBeInTheDocument();
   });
 
+  it('HR portal Prompt 6b: lists the regularisation register for approvers and reviewers only', () => {
+    const item = () => screen.queryByRole('link', { name: 'Regularisations' });
+    grant('dashboard.view', 'attendance.view');
+    let r = renderWithProviders(<Sidebar />);
+    expect(item()).not.toBeInTheDocument();
+    r.unmount();
+    for (const key of ['attendance.approve', 'attendance.review_notes'] as const) {
+      grant('dashboard.view', key);
+      r = renderWithProviders(<Sidebar />);
+      expect(item()).toHaveAttribute('href', '/attendance/regularisations');
+      r.unmount();
+    }
+  });
+
   it('hides the platform entry from an ordinary tenant user', () => {
     renderWithProviders(<Sidebar />);
     expect(screen.queryByRole('link', { name: 'Platform admin' })).not.toBeInTheDocument();

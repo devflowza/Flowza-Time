@@ -15,7 +15,9 @@ export type DecisionKind = 'APPROVE' | 'REJECT';
 const INBOX = 'approvals-inbox';
 const REQUEST = 'approval-request';
 const MINE = 'approvals-mine';
-const DOCUMENTS = ['attendance-corrections', 'attendance-records', 'attendance-daily', 'attendance-monthly', 'leave-records', 'self-service', 'attendance-notes', 'selfie-checkins', 'leave-comments', 'leave-balances', 'leave-calendar'];
+const DOCUMENTS = ['attendance-corrections', 'attendance-records', 'attendance-daily', 'attendance-monthly', 'leave-records', 'self-service', 'attendance-notes', 'selfie-checkins', 'leave-comments', 'leave-balances', 'leave-calendar',
+  // HR portal Prompt 6b: the HR regularisation register and the comments & approvals report
+  'attendance-regularisations', 'attendance-notes-report'];
 /**
  * Everything a decision can move: the approval views, the documents behind them, the dashboard (its pending count) and
  * /me (`approvals.actionable`, which opens the Approvals navigation for members without an approve key).

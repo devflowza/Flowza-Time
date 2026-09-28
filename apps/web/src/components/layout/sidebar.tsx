@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, LayoutDashboard, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, LayoutDashboard, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
 import type { Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -13,11 +13,15 @@ import portalAttendanceEn from '@/locales/en/portal-attendance.json';
 import portalAttendanceAr from '@/locales/ar/portal-attendance.json';
 import attendanceReviewEn from '@/locales/en/attendance-review.json';
 import attendanceReviewAr from '@/locales/ar/attendance-review.json';
+import attendanceAdminEn from '@/locales/en/attendance-admin.json';
+import attendanceAdminAr from '@/locales/ar/attendance-admin.json';
 
 registerNamespace('portal', portalEn, portalAr);
 // HR portal Prompt 4: check-in / requests / shift entries and the reasons / geofences review pages
 registerNamespace('portal-attendance', portalAttendanceEn, portalAttendanceAr);
 registerNamespace('attendance-review', attendanceReviewEn, attendanceReviewAr);
+// HR portal Prompt 6b: the regularisation register and the comments & approvals report
+registerNamespace('attendance-admin', attendanceAdminEn, attendanceAdminAr);
 
 interface NavItem { to: string; label: string; icon: LucideIcon; permissions?: Permission[]; any?: boolean; /** Overrides `permissions` when set (e.g. any of several keys, or line-manager status). */ visible?: boolean }
 interface NavSection { label?: string; items: NavItem[] }
@@ -92,6 +96,8 @@ export function Sidebar() {
       // HR portal Prompt 4: reasons (line managers review their team's, HR organisation-wide) and the geofences
       { to: '/attendance/notes', label: t('attendance-review:nav.notes'), icon: MessageSquareText, visible: can('attendance.review_notes') || can('attendance.approve') || hasDirectReports },
       { to: '/attendance/geofences', label: t('attendance-review:nav.geofences'), icon: MapPinned, permissions: ['attendance.manage_geofences'] },
+      // HR portal Prompt 6b: the regularisation register (approvers and reviewers; RLS scopes the rows to their branches)
+      { to: '/attendance/regularisations', label: t('attendance-admin:nav.regularisations'), icon: ClipboardCheck, permissions: ['attendance.approve', 'attendance.review_notes'], any: true },
     ] },
     { label: t('nav.sections.devices'), items: [
       { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'] },

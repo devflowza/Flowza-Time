@@ -6,13 +6,17 @@ import { ShiftsTab } from '../components/tabs/shifts-tab';
 import { PatternsTab } from '../components/tabs/patterns-tab';
 import { AssignmentsTab } from '../components/tabs/assignments-tab';
 import { RuleSetsTab } from '../components/tabs/rule-sets-tab';
+// HR portal Prompt 6b (Finance ATT-105): the monthly roster
+import { AA_NS } from '@/features/attendance-admin/i18n';
+import { RosterTab } from '@/features/attendance-admin/components/roster-tab';
 
-const TABS = ['shifts', 'patterns', 'assignments', 'rules'] as const;
+const TABS = ['shifts', 'patterns', 'assignments', 'rules', 'roster'] as const;
 type Tab = (typeof TABS)[number];
 
-/** /shifts?tab=shifts|patterns|assignments|rules */
+/** /shifts?tab=shifts|patterns|assignments|rules|roster */
 export default function ShiftsPage() {
   const { t } = useTranslation('schedule');
+  const { t: ta } = useTranslation(AA_NS);
   const [params, setParams] = useSearchParams();
   const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'shifts';
   return (
@@ -20,12 +24,13 @@ export default function ShiftsPage() {
       <PageHeader title={t('title')} description={t('subtitle')} />
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
         <TabsList aria-label={t('title')} className="max-w-full overflow-x-auto">
-          {TABS.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`tabs.${tb}`)}</TabsTrigger>)}
+          {TABS.map((tb) => <TabsTrigger key={tb} value={tb}>{tb === 'roster' ? ta('roster.tab') : t(`tabs.${tb}`)}</TabsTrigger>)}
         </TabsList>
         <TabsContent value="shifts">{tab === 'shifts' ? <ShiftsTab /> : null}</TabsContent>
         <TabsContent value="patterns">{tab === 'patterns' ? <PatternsTab /> : null}</TabsContent>
         <TabsContent value="assignments">{tab === 'assignments' ? <AssignmentsTab /> : null}</TabsContent>
         <TabsContent value="rules">{tab === 'rules' ? <RuleSetsTab /> : null}</TabsContent>
+        <TabsContent value="roster">{tab === 'roster' ? <RosterTab /> : null}</TabsContent>
       </Tabs>
     </div>
   );

@@ -8,3 +8,5 @@ export * from './reports.js';
 export * from './hr-workspace.js';
 export * from './report-schedules.js';
 export * from './leave.js';
+export * from './attendance-admin.js';
+export * from './roster.js';
