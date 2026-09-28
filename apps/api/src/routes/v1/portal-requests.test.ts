@@ -166,6 +166,24 @@ describe('attendance notes — the reviewer side', () => {
     expect((await marks(f.e1, D.absent2)).filter((x) => x.revokedAt === null).map((x) => `${x.kind}:${x.source}`)).toEqual(['UNEXCUSED:HR']);
   });
 
+  it('an inbox that predates the pay-effect choice still decides a reason: no pay effect sent = no charge', async () => {
+    // outside the 30-day statistics window used further down, so no other assertion counts this day
+    const day = isoToday(-40);
+    await seedDay(f.e1, day, 'ABSENT');
+    const n = await note(day);
+    expect(n.status).toBe(201);
+    const [req] = await requestOf(n.body.data.id);
+    // the decide body of the web built before this prompt: decision + comment, no payEffectDays
+    const r = await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.managerUser, body: { decision: 'REJECT', comment: 'No proof given' } });
+    expect(r.status).toBe(200);
+    expect(r.body.data).toMatchObject({ id: req!.id, status: 'REJECTED' });
+    const after = await h.admin.selectFrom('attendanceNotes').selectAll().where('id', '=', n.body.data.id).executeTakeFirstOrThrow();
+    expect(after).toMatchObject({ status: 'rejected', lossOfPay: false, deductedLeaveRecordId: null, reviewReason: 'No proof given', reviewVia: 'manager' });
+    expect(Number(after.payEffectDays)).toBe(0);
+    expect((await marks(f.e1, day)).filter((x) => x.revokedAt === null).map((x) => `${x.kind}:${x.source}:${Number(x.payEffectDays ?? 0)}`)).toEqual(['UNEXCUSED:NOTE_REVIEW:0']);
+    expect(await h.admin.selectFrom('leaveRecords').select('id').where('employeeId', '=', f.e1).where('source', '=', 'INTERNAL').where('startDate', '=', sql<Date>`${day}::date`).execute()).toHaveLength(0);
+  });
+
   it('the secondary manager stands in for the primary: one seat, so a rejection by either is final', async () => {
     await h.admin.updateTable('employees').set({ secondaryManagerEmployeeId: e4 }).where('id', '=', f.e1).execute();
     try {
