@@ -5,9 +5,8 @@ import { hasPermission } from '../../lib/authorize.js';
 import { isoDateTime, isoDateTimeOrNull, jsonObject, numberOrNull } from '../../lib/mappers.js';
 import type { Actor } from '../../lib/service.js';
 import { withSystemScope } from '../../lib/service.js';
-import { orgToday } from '../features/recalc.js';
 import { loadDelegationMap } from './context.js';
-import { approvePermissionFor, assessDecider, canBypass, canCancel, hookFor, viewPermissionFor } from './engine.js';
+import { approvalToday, approvePermissionFor, assessDecider, canBypass, canCancel, decideViaOf, hookFor, isRequestSubject, viewPermissionFor } from './engine.js';
 
 type RequestRow = {
   id: string; organizationId: string; workflowId: string | null; entityType: ApprovalEntity; entityId: string; branchId: string | null; departmentId: string | null; employeeId: string | null; units: string | number | null;
@@ -17,7 +16,7 @@ type StepRow = {
   id: string; requestId: string; stepNo: number; approverType: ApproverType; approverRoleId: string | null; approverUserId: string | null; permissionKey: string | null; mode: string; requiredCount: number | null; status: string;
   resolutionPath: string | null; resolutionReason: string | null; activatedAt: Date | null; dueAt: Date | null; escalateTo: string | null; escalatedAt: Date | null; remindedAt: Date | null; actedBy: string | null; actedAt: Date | null; comment: string | null;
 };
-type ActorRow = { id: string; stepId: string; userId: string; viaDelegationOf: string | null; resolutionPath: string | null; decision: string; decidedAt: Date | null; comment: string | null };
+type ActorRow = { id: string; stepId: string; userId: string; viaDelegationOf: string | null; onBehalfOfUserId: string | null; resolutionPath: string | null; decision: string; decidedAt: Date | null; comment: string | null };
 type EventRow = { id: string | number; requestId: string; at: Date; actorUserId: string | null; kind: string; detail: unknown };
 
 export interface HydrateOptions { withEvents?: boolean }
@@ -32,13 +31,13 @@ export async function hydrateRequests(trx: Trx, actor: Actor, grant: MembershipG
   const ids = rows.map((r) => r.id);
   return withSystemScope(trx, orgId, async (t) => {
     const steps = (await t.selectFrom('approvalSteps').selectAll().where('requestId', 'in', ids).orderBy('stepNo').execute()) as StepRow[];
-    const actors = steps.length ? ((await t.selectFrom('approvalStepActors').selectAll().where('stepId', 'in', steps.map((s) => s.id)).orderBy('createdAt').execute()) as ActorRow[]) : [];
+    const actors = steps.length ? ((await t.selectFrom('approvalStepActors').selectAll().where('stepId', 'in', steps.map((s) => s.id)).orderBy('createdAt').orderBy('id').execute()) as ActorRow[]) : [];
     const events = opts.withEvents ? ((await t.selectFrom('approvalRequestEvents').selectAll().where('requestId', 'in', ids).orderBy('at').orderBy('id').execute()) as EventRow[]) : [];
     const workflowIds = [...new Set(rows.map((r) => r.workflowId).filter((x): x is string => !!x))];
-    const workflows = workflowIds.length ? await t.selectFrom('approvalWorkflows').select(['id', 'name', 'allowSelfApproval']).where('id', 'in', workflowIds).execute() : [];
+    const workflows = workflowIds.length ? await t.selectFrom('approvalWorkflows').select(['id', 'name']).where('id', 'in', workflowIds).execute() : [];
     const employeeIds = [...new Set(rows.map((r) => r.employeeId).filter((x): x is string => !!x))];
     const employees = employeeIds.length ? await t.selectFrom('employees').select(['id', 'displayName', 'employeeNumber']).where('organizationId', '=', orgId).where('id', 'in', employeeIds).execute() : [];
-    const userIds = [...new Set([...rows.flatMap((r) => [r.requestedBy, r.decidedBy, r.subjectUserId]), ...steps.map((s) => s.actedBy), ...actors.flatMap((a) => [a.userId, a.viaDelegationOf]), ...events.map((e) => e.actorUserId)].filter((x): x is string => !!x))];
+    const userIds = [...new Set([...rows.flatMap((r) => [r.requestedBy, r.decidedBy, r.subjectUserId]), ...steps.map((s) => s.actedBy), ...actors.flatMap((a) => [a.userId, a.viaDelegationOf, a.onBehalfOfUserId]), ...events.map((e) => e.actorUserId)].filter((x): x is string => !!x))];
     const users = userIds.length ? await t.selectFrom('userProfiles').select(['id', 'fullName', 'email']).where('id', 'in', userIds).execute() : [];
     const nameOf = new Map(users.map((u) => [u.id, u.fullName || u.email]));
     const name = (id: string | null): string | null => (id ? nameOf.get(id) ?? null : null);
@@ -53,13 +52,14 @@ export async function hydrateRequests(trx: Trx, actor: Actor, grant: MembershipG
       if (!hook) continue;
       for (const [id, c] of await hook.loadContexts(t, orgId, [...new Set(entityIds)])) contexts.set(`${type}:${id}`, c);
     }
-    const today = await orgToday(t, orgId);
+    // the organisation's date, the one definition of "today" for delegations (review P2-1)
+    const today = await approvalToday(t, orgId);
     const delegatorsByType = new Map<ApprovalEntity, Set<string>>();
     for (const type of byType.keys()) {
       const map = await loadDelegationMap(t, orgId, type, today);
       delegatorsByType.set(type, new Set([...map.entries()].filter(([, d]) => d === actor.userId).map(([k]) => k)));
     }
-    const toActor = (a: ActorRow): ApprovalActorDto => ({ userId: a.userId, userName: name(a.userId), viaDelegationOf: a.viaDelegationOf, viaDelegationOfName: name(a.viaDelegationOf), resolutionPath: a.resolutionPath, decision: a.decision as ApprovalActorDto['decision'], decidedAt: isoDateTimeOrNull(a.decidedAt), comment: a.comment });
+    const toActor = (a: ActorRow): ApprovalActorDto => ({ userId: a.userId, userName: name(a.userId), viaDelegationOf: a.viaDelegationOf, viaDelegationOfName: name(a.viaDelegationOf), onBehalfOfUserId: a.onBehalfOfUserId, onBehalfOfName: name(a.onBehalfOfUserId), resolutionPath: a.resolutionPath, decision: a.decision as ApprovalActorDto['decision'], decidedAt: isoDateTimeOrNull(a.decidedAt), comment: a.comment });
     const toStep = (s: StepRow): ApprovalStepDto => ({
       id: s.id, requestId: s.requestId, stepNo: s.stepNo, approverType: s.approverType, approverRoleId: s.approverRoleId, approverUserId: s.approverUserId, permissionKey: s.permissionKey,
       mode: s.mode as ApprovalStepMode, requiredCount: s.requiredCount, status: s.status as ApprovalStepDto['status'], resolutionPath: s.resolutionPath, resolutionReason: s.resolutionReason,
@@ -74,15 +74,21 @@ export async function hydrateRequests(trx: Trx, actor: Actor, grant: MembershipG
       const emp = r.employeeId ? employeeById.get(r.employeeId) : undefined;
       const context: ApprovalContextDto = contexts.get(`${r.entityType}:${r.entityId}`) ?? { kind: 'GENERIC', entityType: r.entityType, summary: null };
       const pending = r.status === 'PENDING';
-      const check = assessDecider({ grant, userId: actor.userId, request: { entityType: r.entityType, requestedBy: r.requestedBy, subjectUserId: r.subjectUserId, employeeId: r.employeeId, branchId: r.branchId, allowSelfApproval: wf?.allowSelfApproval ?? false }, stepActors: current?.actors.map((a) => ({ userId: a.userId, viaDelegationOf: a.viaDelegationOf, decision: a.decision })) ?? [], delegators: delegatorsByType.get(r.entityType) ?? new Set() });
+      // the same rule the engine applies to a decision (review P0-1): the UI never offers a button the API refuses
+      const check = assessDecider({ grant, userId: actor.userId, request: { entityType: r.entityType, requestedBy: r.requestedBy, subjectUserId: r.subjectUserId, employeeId: r.employeeId, branchId: r.branchId }, stepActors: current?.actors.map((a) => ({ userId: a.userId, viaDelegationOf: a.viaDelegationOf, onBehalfOfUserId: a.onBehalfOfUserId, resolutionPath: a.resolutionPath, decision: a.decision })) ?? [], delegators: delegatorsByType.get(r.entityType) ?? new Set() });
+      const levelOpen = pending && current?.status === 'PENDING';
+      const canDecide = levelOpen && check.ok && !check.alreadyDecided;
+      const isOwner = grant.roleKey === 'owner';
+      const involved = isRequestSubject(grant, actor.userId, r) || r.requestedBy === actor.userId;
       const abilities: ApprovalAbilitiesDto = {
-        canDecide: pending && check.ok && current?.status === 'PENDING',
+        canDecide,
         canCancel: pending && canCancel(grant, actor.userId, r),
-        canReassign: pending && (hasPermission(grant, 'approval.manage') || grant.roleKey === 'owner') && !check.branchBlocked,
+        canReassign: pending && (hasPermission(grant, 'approval.manage') || isOwner) && !check.branchBlocked && (isOwner || !involved),
         canBypass: pending && canBypass(grant, actor.userId, r),
-        canRequestInfo: pending && !!check.via && !check.branchBlocked,
-        canAnswerInfo: pending && (r.requestedBy === actor.userId || (r.subjectUserId !== null && r.subjectUserId === actor.userId)),
+        canRequestInfo: levelOpen && !!check.via && check.sodBlocked === null && !(check.override && check.branchBlocked),
+        canAnswerInfo: pending && !!r.infoRequestedAt && (r.requestedBy === actor.userId || isRequestSubject(grant, actor.userId, r)),
         actingAsDelegateOf: check.via === 'delegate' ? check.delegateOf : null,
+        decideVia: canDecide ? decideViaOf(check) : null,
       };
       return {
         id: r.id, organizationId: r.organizationId, workflowId: r.workflowId, workflowName: wf?.name ?? null, entityType: r.entityType, entityId: r.entityId,

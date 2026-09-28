@@ -344,6 +344,12 @@ export const meDtoSchema = z.object({
     isManager: z.boolean().default(false),
     /** Number of direct reports (defaults keep a /me document cached before this field existed parseable). */
     teamSize: z.number().int().min(0).default(0),
+    /**
+     * The caller's own approval work in the organisation: `actionable` = pending seats waiting for them (theirs, or of
+     * somebody who delegates to them today) — exactly what the Approvals inbox lists under "Mine"; `delegatedToMe` = a
+     * delegation to them is in force today. Opens the Approvals navigation for people who hold no approve key.
+     */
+    approvals: z.object({ actionable: z.number().int().min(0), delegatedToMe: z.boolean() }).default({ actionable: 0, delegatedToMe: false }),
     featureFlags: z.record(z.string(), z.boolean()),
     settings: organizationSettingsSchema,
   })),

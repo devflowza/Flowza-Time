@@ -3,7 +3,8 @@
   "subtitle": "Requests waiting for your decision — attendance corrections, leave and more — and what was decided.",
   "view": {
     "pending": "Pending",
-    "history": "History"
+    "history": "History",
+    "requests": "My requests"
   },
   "scope": {
     "label": "Show",
@@ -44,6 +45,8 @@
     "allEmpty": "No pending requests",
     "historyEmpty": "No decided requests yet",
     "historyEmptyHint": "Requests you decided, withdrew or were involved in appear here.",
+    "requestsEmpty": "You have no requests",
+    "requestsEmptyHint": "Requests you filed, or that are about you, appear here with where they stand.",
     "ownRequest": "Your request",
     "ownRequestHint": "You cannot approve or reject your own request. Withdraw it instead.",
     "aboutYou": "About you",
@@ -135,7 +138,9 @@
     "rejected": "Request rejected",
     "approvalRecorded": "Approval recorded — waiting for the other approvers",
     "rejectionRecorded": "Rejection recorded — the other approvers can still approve",
-    "noop": "You had already decided this level"
+    "noop": "You had already decided this level",
+    "overrideHint": "You are not an approver of this level: your decision is an organisation-wide override that fills the seat of {{name}}, and it is logged. The level’s rule still applies — when everyone must approve, the others still decide.",
+    "escalatedHint": "You were added when this level became overdue: your decision fills the seat of {{name}}."
   },
   "detail": {
     "title": "Request",
@@ -151,7 +156,8 @@
     "invalidationReason": "Superseded: {{reason}}",
     "system": "System",
     "nobody": "—",
-    "noEvents": "No events yet"
+    "noEvents": "No events yet",
+    "onBehalfOf": "In the seat of {{name}}"
   },
   "timeline": {
     "submitted": "Submitted",
@@ -194,8 +200,9 @@
   },
   "withdraw": {
     "title": "Withdraw this request?",
-    "hint": "The approvers are told; the document goes back to where it was before the request.",
-    "reason": "Reason (optional)",
+    "hint": "The approvers are told why; the document goes back to where it was before the request.",
+    "reason": "Reason",
+    "reasonPlaceholder": "Why is this request withdrawn?",
     "done": "Request withdrawn"
   },
   "delegations": {
@@ -264,8 +271,6 @@
     "appliesBranches": "Branches",
     "appliesDepartments": "Departments",
     "appliesHint": "Optional: narrow the workflow to some branches or departments.",
-    "allowSelfApproval": "Allow self-approval",
-    "allowSelfApprovalHint": "Off by default. When on, the person a request is about may approve it — only for trusted, low-risk requests.",
     "steps": "Levels",
     "stepsCount": "{{count}} of {{max}}",
     "approverType": "Approver",
@@ -282,6 +287,7 @@
     "chainLevel": "Levels up",
     "mode": "Decision",
     "requiredCount": "Approvals needed",
+    "singleSeatQuorum": "This approver type is one person: it cannot require more than 1 approval.",
     "escalation": "Escalate",
     "escalateAfterHours": "After (hours)",
     "escalateTo": "To",
@@ -314,8 +320,7 @@
     "deleteTitle": "Delete “{{name}}”?",
     "deleteHint": "Pending requests already routed through this workflow keep their levels.",
     "tier": "From {{n}} units",
-    "scoped": "Narrowed",
-    "self": "Self-approval allowed"
+    "scoped": "Narrowed"
   },
   "recordStatus": {
     "active": "Active",

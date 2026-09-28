@@ -20,6 +20,17 @@ import { updateSchemaOf } from './devices.js';
  * `mode` decides how many of the resolved approvers must approve; `escalateAfterHours`/`escalateTo` add approvers when
  * the level is overdue (the original approvers keep their seat).
  */
+/**
+ * Approver types that resolve to ONE seat — one person (their delegate acts in the same seat): the manager, the secondary
+ * manager, the manager N levels up, the department head and a named user. A quorum above 1 (or ALL with a count above 1)
+ * can never be reached on them, so the workflow is refused when it is saved rather than every request failing later.
+ */
+export const SINGLE_SEAT_APPROVER_TYPES = ['MANAGER', 'SECONDARY_MANAGER', 'MANAGER_CHAIN', 'DEPARTMENT_HEAD', 'USER'] as const satisfies readonly ApproverType[];
+export function isSingleSeatApproverType(type: ApproverType): boolean {
+  return (SINGLE_SEAT_APPROVER_TYPES as readonly string[]).includes(type);
+}
+export const SINGLE_SEAT_QUORUM_MESSAGE = 'This approver type resolves to one approver: it cannot require more than 1 approval';
+
 export const approvalWorkflowStepSchema = z.object({
   order: z.number().int().min(1).max(5),
   approverType: z.enum(APPROVER_TYPES),
@@ -35,6 +46,8 @@ export const approvalWorkflowStepSchema = z.object({
   if (v.approverType === 'ROLE' && !v.roleId && !v.permission) ctx.addIssue({ code: 'custom', path: ['roleId'], message: 'A ROLE step names a role or a permission' });
   if (v.approverType === 'USER' && !v.userId) ctx.addIssue({ code: 'custom', path: ['userId'], message: 'Required for USER steps' });
   if (v.mode === 'QUORUM' && !v.requiredCount) ctx.addIssue({ code: 'custom', path: ['requiredCount'], message: 'A quorum needs the number of approvals required' });
+  // a single-seat approver can never give 2 approvals: saving it would make every submission fail (review P2-7)
+  if (isSingleSeatApproverType(v.approverType) && (v.mode === 'QUORUM' || v.mode === 'ALL') && (v.requiredCount ?? 1) > 1) ctx.addIssue({ code: 'custom', path: ['requiredCount'], message: SINGLE_SEAT_QUORUM_MESSAGE });
   if ((v.escalateAfterHours === undefined) !== (v.escalateTo === undefined)) ctx.addIssue({ code: 'custom', path: ['escalateTo'], message: 'Escalation needs both a delay and a target' });
 });
 export type ApprovalWorkflowStep = z.infer<typeof approvalWorkflowStepSchema>;
@@ -57,7 +70,8 @@ export const approvalWorkflowInputSchema = z.object({
   appliesTo: approvalAppliesToSchema.default({}),
   /** Tier threshold in the entity's units (leave days, overtime minutes): the workflow applies from this size up; the highest applicable minimum wins. */
   minUnits: z.number().min(0).max(1_000_000).nullable().optional(),
-  allowSelfApproval: z.boolean().default(false),
+  // No self-approval switch (review P0-3): segregation of duties is not configurable. The only exception is the
+  // organisation owner deciding their own request, which the engine logs as `sod_owner_bypass`.
 });
 export type ApprovalWorkflowInput = z.infer<typeof approvalWorkflowInputSchema>;
 /** PATCH body: no defaults, so a rename never flips isDefault/status/entityType (AGENTS.md Zod 4 pitfall). */
@@ -65,7 +79,10 @@ export const approvalWorkflowUpdateSchema = updateSchemaOf<ApprovalWorkflowInput
 
 export interface ApprovalWorkflowDto {
   id: string; organizationId: string; entityType: ApprovalEntity; name: string; branchId: string | null; steps: ApprovalWorkflowStep[];
-  appliesTo: ApprovalAppliesTo; minUnits: number | null; allowSelfApproval: boolean; isDefault: boolean; status: string; createdAt: string; updatedAt: string;
+  appliesTo: ApprovalAppliesTo; minUnits: number | null;
+  /** Always false: self-approval is not configurable (review P0-3); kept so existing clients keep parsing the shape. */
+  allowSelfApproval: boolean;
+  isDefault: boolean; status: string; createdAt: string; updatedAt: string;
 }
 
 // ----- queries and commands -----------------------------------------------------------------------------------------------
@@ -97,22 +114,32 @@ export const myApprovalsQuerySchema = paginationQuerySchema.extend({
 });
 export type MyApprovalsQuery = z.infer<typeof myApprovalsQuerySchema>;
 
+/**
+ * POST /orgs/:orgId/approvals/:id/decide. `stepNo` is REQUIRED and must be the level the caller saw (review P1-2): a
+ * level that is no longer current is refused (409), never re-targeted to the next one; an actor repeating their own
+ * decision is a no-op. `onBehalfOfUserId` lets an organisation-wide approver (or an escalated one) name which pending
+ * seat of the level their decision fills — by default the first pending seat (one seat per call, review P0-1).
+ */
 export const approvalDecideSchema = z.object({
-  /** The step being decided; defaults to the request's current step. A step that is no longer current is refused (409); an actor repeating their own decision is a no-op. */
-  stepNo: z.number().int().min(1).max(5).optional(),
+  stepNo: z.number().int().min(1).max(5),
   decision: z.enum(APPROVAL_DECISIONS),
   comment: z.string().trim().max(1000).optional(),
+  onBehalfOfUserId: uuidSchema.optional(),
 });
 export type ApprovalDecideInput = z.infer<typeof approvalDecideSchema>;
 /** POST /orgs/:orgId/approvals/bulk-decide — the same decision on several requests' current levels (Finance ATT-95: through the engine, one request at a time, never client-side). */
 export const APPROVAL_BULK_DECIDE_MAX = 100;
+/** One line of a bulk decision: the request and the level the caller saw (review P1-2 — never re-targeted to a later level). */
+export const approvalBulkDecideItemSchema = z.object({ requestId: uuidSchema, stepNo: z.number().int().min(1).max(5) });
 export const approvalBulkDecideSchema = z.object({
-  requestIds: z.array(uuidSchema).min(1).max(APPROVAL_BULK_DECIDE_MAX),
+  items: z.array(approvalBulkDecideItemSchema).min(1).max(APPROVAL_BULK_DECIDE_MAX),
   decision: z.enum(APPROVAL_DECISIONS),
   comment: z.string().trim().max(1000).optional(),
-}).refine((v) => v.decision !== 'REJECT' || !!v.comment, { message: 'A comment is required when rejecting.', path: ['comment'] });
+}).refine((v) => v.decision !== 'REJECT' || !!v.comment, { message: 'A comment is required when rejecting.', path: ['comment'] })
+  .refine((v) => new Set(v.items.map((i) => i.requestId)).size === v.items.length, { message: 'Each request can appear once.', path: ['items'] });
 export type ApprovalBulkDecideInput = z.infer<typeof approvalBulkDecideSchema>;
-export const approvalCancelSchema = z.object({ reason: z.string().trim().max(500).optional() });
+/** POST /orgs/:orgId/approvals/:id/cancel — withdrawing a request always says why (Finance B-98). */
+export const approvalCancelSchema = z.object({ reason: z.string().trim().min(3).max(500) });
 export const approvalReassignSchema = z.object({
   stepNo: z.number().int().min(1).max(5).optional(),
   userId: uuidSchema,
@@ -151,6 +178,11 @@ export const approvalDelegationListQuerySchema = z.object({
 
 export interface ApprovalActorDto {
   userId: string; userName: string | null; viaDelegationOf: string | null; viaDelegationOfName: string | null;
+  /**
+   * The seat an override or an escalated approver decided for (they fill exactly one pending seat of the level). Always
+   * sent by the API (null when the row is the person's own seat); optional in the type so older fixtures keep compiling.
+   */
+  onBehalfOfUserId?: string | null; onBehalfOfName?: string | null;
   resolutionPath: string | null; decision: ApprovalStatus; decidedAt: string | null; comment: string | null;
 }
 export interface ApprovalStepDto {
@@ -168,8 +200,14 @@ export type ApprovalContextDto =
   | { kind: 'LEAVE'; leave: { id: string; leaveTypeId: string; leaveTypeName: string; startDate: string; endDate: string; isHalfDay: boolean; halfDayPart: string | null; days: number | null; reason: string | null; status: string; balanceRemainingDays: number | null; allowanceDays: number | null } }
   | { kind: 'GENERIC'; entityType: ApprovalEntity; summary: string | null };
 
+/**
+ * How the caller would decide the current level: in their own seat (`actor`), in the seat of somebody who delegates to them
+ * (`delegate`), as an approver added by escalation (`escalated`), or as an organisation-wide approver / the owner
+ * (`override`). `escalated` and `override` fill ONE pending seat of the level (the first, unless the call names another).
+ */
+export type ApprovalDecideVia = 'actor' | 'delegate' | 'escalated' | 'override';
 /** What the caller may do with the request right now (the API enforces every one of these again). */
-export interface ApprovalAbilitiesDto { canDecide: boolean; canCancel: boolean; canReassign: boolean; canBypass: boolean; canRequestInfo: boolean; canAnswerInfo: boolean; actingAsDelegateOf: string | null }
+export interface ApprovalAbilitiesDto { canDecide: boolean; canCancel: boolean; canReassign: boolean; canBypass: boolean; canRequestInfo: boolean; canAnswerInfo: boolean; actingAsDelegateOf: string | null; decideVia?: ApprovalDecideVia | null }
 
 export interface ApprovalRequestDto {
   id: string; organizationId: string; workflowId: string | null; workflowName: string | null; entityType: ApprovalEntity; entityId: string;
@@ -200,5 +238,8 @@ export interface ApprovalDecideResultDto extends ApprovalRequestDto {
 export interface ApprovalBulkDecideItemDto { requestId: string; ok: boolean; status: ApprovalRequestStatus | null; noop: boolean; code: string | null; message: string | null }
 export interface ApprovalBulkDecideResultDto { results: ApprovalBulkDecideItemDto[]; succeeded: number; failed: number }
 
-/** Legacy alias kept for the attendance service: v1 decision body ({ comment }) on /approve and /reject. */
-export const approvalLegacyDecisionSchema = z.object({ comment: z.string().max(1000).optional() });
+/**
+ * Legacy aliases /approve and /reject: v1 decision body ({ comment }) plus an optional `stepNo`. Without it the caller may
+ * decide only a seat they hold on the current level — never an organisation-wide override (review P1-2).
+ */
+export const approvalLegacyDecisionSchema = z.object({ comment: z.string().max(1000).optional(), stepNo: z.number().int().min(1).max(5).optional() });

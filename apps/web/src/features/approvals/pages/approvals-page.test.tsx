@@ -13,6 +13,7 @@ import arAtt from '@/locales/ar/attendance.json';
 import en from '@/locales/en/approvals.json';
 import ar from '@/locales/ar/approvals.json';
 import ApprovalsPage from './approvals-page';
+import { InboxRoute } from '../components/route-guards';
 import { approvalRequest, approvalStep, leaveContext } from '../test-fixtures';
 
 registerNamespace('attendance', enAtt, arAtt);
@@ -20,14 +21,15 @@ registerNamespace('approvals', en, ar);
 
 const decidable = approvalRequest({ id: 'r1', employeeName: 'Ali', requestedBy: 'u2', requestedByName: 'Sara' });
 // the test harness signs in as `u1`: this one is the caller's own request (not decidable, withdraw instead)
-const own = approvalRequest({ id: 'r2', employeeName: 'Mona', requestedBy: 'u1', requestedByName: 'Dev', abilities: { canDecide: false, canCancel: true, canReassign: false, canBypass: false, canRequestInfo: false, canAnswerInfo: false, actingAsDelegateOf: null } });
+const own = approvalRequest({ id: 'r2', employeeName: 'Mona', requestedBy: 'u1', requestedByName: 'Dev', currentStep: 2, stepCount: 2, abilities: { canDecide: false, canCancel: true, canReassign: false, canBypass: false, canRequestInfo: false, canAnswerInfo: false, actingAsDelegateOf: null } });
 const decided = approvalRequest({ id: 'r3', entityType: 'LEAVE', employeeName: 'Omar', status: 'APPROVED', completedAt: '2024-03-03T09:00:00Z', context: leaveContext(), steps: [approvalStep({ requestId: 'r3', status: 'APPROVED' })], abilities: { canDecide: false, canCancel: false, canReassign: false, canBypass: false, canRequestInfo: false, canAnswerInfo: false, actingAsDelegateOf: null } });
 
 describe('ApprovalsPage — unified inbox', () => {
   beforeEach(() => {
-    resetApiMock(); grantAll(); testState.teamSize = 0; testState.employeeId = null;
+    resetApiMock(); grantAll(); testState.teamSize = 0; testState.employeeId = null; testState.approvals = { actionable: 0, delegatedToMe: false };
     mockGet({
       '/orgs/org-1/approvals': (q: Record<string, unknown> | undefined) => page(q?.['view'] === 'history' ? [decided] : [decidable, own]),
+      '/orgs/org-1/approvals/mine': page([own, decided]),
       '/orgs/org-1/approval-delegations': { data: [] },
       '/orgs/org-1/branches': page([]),
     });
@@ -71,7 +73,7 @@ describe('ApprovalsPage — unified inbox', () => {
     expect(screen.getByRole('button', { name: 'Everyone' })).toBeInTheDocument();
   });
 
-  it('approves several selected requests in one call — the API decides each one and reports refusals', async () => {
+  it('P1-2 approves several selected requests in one call, each line naming the level it was on — the API decides each one and reports refusals', async () => {
     apiMock.post.mockResolvedValue({ data: { results: [{ requestId: 'r1', ok: true, status: 'APPROVED', noop: false, code: null, message: null }, { requestId: 'r2', ok: false, status: null, noop: false, code: 'FORBIDDEN', message: 'You cannot approve or reject your own request; cancel it instead.' }], succeeded: 1, failed: 1 } });
     renderWithProviders(<ApprovalsPage />, { route: '/approvals' });
     await screen.findAllByText('Ali');
@@ -79,8 +81,30 @@ describe('ApprovalsPage — unified inbox', () => {
     fireEvent.click(boxes[0]!);
     fireEvent.click(boxes[1]!);
     fireEvent.click(await screen.findByRole('button', { name: /Approve selected/ }));
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/bulk-decide', { requestIds: ['r1', 'r2'], decision: 'APPROVE', comment: undefined }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/bulk-decide', { items: [{ requestId: 'r1', stepNo: 1 }, { requestId: 'r2', stepNo: 2 }], decision: 'APPROVE', comment: undefined }));
     await waitFor(() => expect(screen.queryByRole('button', { name: /Approve selected/ })).toBeNull());
+  });
+
+  it('P1-6 opens the inbox to a member who holds no approve key, and lists what waits for them', async () => {
+    grant('dashboard.view'); // an employee-role delegate / named approver: no approve key, no reports
+    testState.approvals = { actionable: 1, delegatedToMe: true };
+    renderWithProviders(<InboxRoute />, { route: '/approvals' });
+    expect((await screen.findAllByText('Ali')).length).toBeGreaterThan(0);
+    expect(screen.queryByText('You do not have permission to view this page.')).toBeNull();
+    expect(screen.getAllByRole('button', { name: /Approve/ }).length).toBeGreaterThan(0);
+  });
+
+  it('P1-6 lists "My requests" — what the caller filed or what is about them — from /approvals/mine', async () => {
+    grant('dashboard.view');
+    renderWithProviders(<ApprovalsPage />, { route: '/approvals' });
+    await screen.findAllByText('Ali');
+    fireEvent.mouseDown(screen.getByRole('tab', { name: /My requests/ }));
+    fireEvent.click(screen.getByRole('tab', { name: /My requests/ }));
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/approvals/mine', expect.objectContaining({ page: 1 })));
+    expect((await screen.findAllByText('Omar')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Mona').length).toBeGreaterThan(0);
+    expect(screen.queryByPlaceholderText('Search employee name or number')).toBeNull();
+    expect(screen.queryByRole('checkbox', { name: 'Select row' })).toBeNull();
   });
 
   it('filters by request type with chips and searches by employee name or number', async () => {

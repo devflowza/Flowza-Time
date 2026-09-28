@@ -4,7 +4,7 @@ import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { env } from '@/lib/env';
 import { qk } from '@/lib/query-keys';
 import { supabase } from '@/lib/supabase';
-import { useActiveMembership, useCan, useOrgId } from '@/features/me/use-me';
+import { meQueryKey, useActiveMembership, useCan, useOrgId } from '@/features/me/use-me';
 
 export type ListQuery = Record<string, string | number | boolean | undefined>;
 export type { ApprovalRequestDto, ApprovalWorkflowDto, ApprovalDelegationDto };
@@ -16,10 +16,14 @@ const INBOX = 'approvals-inbox';
 const REQUEST = 'approval-request';
 const MINE = 'approvals-mine';
 const DOCUMENTS = ['attendance-corrections', 'attendance-records', 'attendance-daily', 'attendance-monthly', 'leave-records', 'self-service'];
-/** Everything a decision can move: the approval views, the documents behind them and the dashboard (its pending count). */
+/**
+ * Everything a decision can move: the approval views, the documents behind them, the dashboard (its pending count) and
+ * /me (`approvals.actionable`, which opens the Approvals navigation for members without an approve key).
+ */
 export function invalidateApprovalViews(qc: ReturnType<typeof useQueryClient>, orgId: string) {
   for (const e of [INBOX, REQUEST, MINE, ...DOCUMENTS]) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) });
   void qc.invalidateQueries({ queryKey: ['dashboard', orgId] });
+  void qc.invalidateQueries({ queryKey: meQueryKey });
 }
 
 export interface InboxQuery { scope: ApprovalInboxScope; view: InboxView; entityType?: ApprovalEntity | undefined; search?: string | undefined; page: number; pageSize: number }
@@ -43,15 +47,20 @@ export function useApprovalMutations() {
   const qc = useQueryClient();
   const invalidate = () => invalidateApprovalViews(qc, orgId);
   const post = async <T,>(path: string, body: unknown) => (await api.post<Envelope<T>>(`/orgs/${orgId}/approvals/${path}`, body)).data;
-  const decide = useMutation({ mutationFn: ({ requestId, stepNo, decision, comment }: { requestId: string; stepNo?: number; decision: DecisionKind; comment?: string }) => post<ApprovalDecideResultDto>(`${requestId}/decide`, { stepNo, decision, comment: comment || undefined }), onSuccess: invalidate });
-  const cancel = useMutation({ mutationFn: ({ requestId, reason }: { requestId: string; reason?: string }) => post<ApprovalRequestDto>(`${requestId}/cancel`, { reason: reason || undefined }), onSuccess: invalidate });
+  /** Decides the level the caller saw (`stepNo` is required: a level that moved on meanwhile is refused, never re-targeted). */
+  const decide = useMutation({ mutationFn: ({ requestId, stepNo, decision, comment, onBehalfOfUserId }: { requestId: string; stepNo: number; decision: DecisionKind; comment?: string; onBehalfOfUserId?: string }) => post<ApprovalDecideResultDto>(`${requestId}/decide`, { stepNo, decision, comment: comment || undefined, onBehalfOfUserId }), onSuccess: invalidate });
+  /** Withdrawing a request always says why (at least 3 characters, Finance B-98). */
+  const cancel = useMutation({ mutationFn: ({ requestId, reason }: { requestId: string; reason: string }) => post<ApprovalRequestDto>(`${requestId}/cancel`, { reason }), onSuccess: invalidate });
   const reassign = useMutation({ mutationFn: ({ requestId, userId, reason, stepNo }: { requestId: string; userId: string; reason: string; stepNo?: number }) => post<ApprovalRequestDto>(`${requestId}/reassign`, { userId, reason, stepNo }), onSuccess: invalidate });
   const requestInfo = useMutation({ mutationFn: ({ requestId, comment }: { requestId: string; comment: string }) => post<ApprovalRequestDto>(`${requestId}/request-info`, { comment }), onSuccess: invalidate });
   const answerInfo = useMutation({ mutationFn: ({ requestId, comment }: { requestId: string; comment: string }) => post<ApprovalRequestDto>(`${requestId}/answer-info`, { comment }), onSuccess: invalidate });
   /** approval.manage: approve as an exception (every open level skipped), the reason is mandatory. */
   const bypass = useMutation({ mutationFn: ({ requestId, reason }: { requestId: string; reason: string }) => post<ApprovalRequestDto>(`${requestId}/bypass`, { reason }), onSuccess: invalidate });
-  /** The same decision on several requests; the API decides each one through the engine and reports one line per request. */
-  const bulkDecide = useMutation({ mutationFn: async ({ requestIds, decision, comment }: { requestIds: string[]; decision: DecisionKind; comment?: string }) => (await api.post<Envelope<ApprovalBulkDecideResultDto>>(`/orgs/${orgId}/approvals/bulk-decide`, { requestIds, decision, comment: comment || undefined })).data, onSuccess: invalidate });
+  /**
+   * The same decision on several requests; the API decides each one through the engine and reports one line per request.
+   * Each line names the level the caller saw on that row, so a late click never closes the next level.
+   */
+  const bulkDecide = useMutation({ mutationFn: async ({ items, decision, comment }: { items: Array<{ requestId: string; stepNo: number }>; decision: DecisionKind; comment?: string }) => (await api.post<Envelope<ApprovalBulkDecideResultDto>>(`/orgs/${orgId}/approvals/bulk-decide`, { items, decision, comment: comment || undefined })).data, onSuccess: invalidate });
   return { decide, cancel, reassign, bypass, requestInfo, answerInfo, bulkDecide };
 }
 
@@ -127,15 +136,25 @@ export function useDelegationMutations() {
 export const ORG_WIDE_APPROVAL_KEYS = ['attendance.view', 'leave.view', 'approval.manage'] as const;
 export const TEAM_APPROVAL_KEYS = ['attendance.view_team', 'leave.view_team'] as const;
 
-/** Who sees the Approvals inbox: approvers (attendance / leave), approval admins and line managers (a team of their own). */
+/**
+ * What the approvals screens offer the caller. The inbox itself is open to every active member (the API scopes its rows):
+ * a delegate, a named USER approver or an escalated approver may hold no approve key at all (review P1-6). `nav` decides
+ * whether the Approvals item is worth showing: an approve key or approval.manage, direct reports, or /me reporting
+ * approvals waiting for them / a delegation to them in force today.
+ */
 export function useApprovalAccess() {
   const can = useCan();
   const m = useActiveMembership();
   const any = (keys: readonly string[]) => keys.some((k) => can(k as never));
   const approver = any(['attendance.approve', 'leave.approve', 'approval.manage']);
   const manager = m?.isManager ?? false;
+  // a /me cached before the field existed has no `approvals`: treat it as nothing waiting
+  const signal = m?.approvals as { actionable?: number; delegatedToMe?: boolean } | undefined;
+  const waitingForMe = (signal?.actionable ?? 0) > 0 || signal?.delegatedToMe === true;
   return {
-    inbox: approver || manager,
+    inbox: !!m,
+    nav: approver || manager || waitingForMe,
+    waitingForMe,
     orgWide: any(ORG_WIDE_APPROVAL_KEYS),
     team: any(TEAM_APPROVAL_KEYS) || any(ORG_WIDE_APPROVAL_KEYS),
     manage: any(['approval.manage']),

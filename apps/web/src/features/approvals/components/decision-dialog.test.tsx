@@ -14,7 +14,7 @@ import en from '@/locales/en/approvals.json';
 import ar from '@/locales/ar/approvals.json';
 import { decisionToast } from '../labels';
 import { DecisionDialog } from './decision-dialog';
-import { approvalRequest, leaveContext } from '../test-fixtures';
+import { approvalRequest, approvalStep, leaveContext } from '../test-fixtures';
 
 registerNamespace('attendance', enAtt, arAtt);
 registerNamespace('approvals', en, ar);
@@ -49,6 +49,26 @@ describe('DecisionDialog', () => {
     expect(approve).toBeEnabled();
     fireEvent.click(approve);
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/req-1/decide', { stepNo: 1, decision: 'APPROVE', comment: undefined }));
+  });
+
+  it('P0-1 tells an organisation-wide approver that the decision is an override filling one seat, and names it', async () => {
+    apiMock.post.mockResolvedValue({ data: { ...approvalRequest(), noop: false, terminal: false } });
+    const request = approvalRequest({
+      abilities: { canDecide: true, canCancel: false, canReassign: false, canBypass: false, canRequestInfo: true, canAnswerInfo: false, actingAsDelegateOf: null, decideVia: 'override' },
+      steps: [approvalStep({ mode: 'ALL', actors: [
+        { userId: 'u7', userName: 'Fatma HR', viaDelegationOf: null, viaDelegationOfName: null, onBehalfOfUserId: null, onBehalfOfName: null, resolutionPath: 'hr_admin', decision: 'PENDING', decidedAt: null, comment: null },
+        { userId: 'u8', userName: 'Salim HR', viaDelegationOf: null, viaDelegationOfName: null, onBehalfOfUserId: null, onBehalfOfName: null, resolutionPath: 'hr_admin', decision: 'PENDING', decidedAt: null, comment: null },
+      ] })],
+    });
+    renderWithProviders(<DecisionDialog request={request} decision="APPROVE" timezone="Asia/Muscat" onClose={() => {}} />);
+    expect(screen.getByTestId('decision-seat-hint')).toHaveTextContent(/organisation-wide override that fills the seat of Fatma HR/);
+    fireEvent.click(screen.getByRole('button', { name: 'Approve' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/req-1/decide', { stepNo: 1, decision: 'APPROVE', comment: undefined }));
+  });
+
+  it('P0-1 shows no override note to a seated approver', () => {
+    renderWithProviders(<DecisionDialog request={approvalRequest({ abilities: { canDecide: true, canCancel: false, canReassign: false, canBypass: false, canRequestInfo: true, canAnswerInfo: false, actingAsDelegateOf: null, decideVia: 'actor' } })} decision="APPROVE" timezone="Asia/Muscat" onClose={() => {}} />);
+    expect(screen.queryByTestId('decision-seat-hint')).toBeNull();
   });
 
   it('says what the decision did: the request, the level, or only this vote', () => {

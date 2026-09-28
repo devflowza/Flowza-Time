@@ -1,3 +1,4 @@
+import { sql } from 'kysely';
 import type { ApprovalDelegationDto, ApprovalDelegationInput, ApprovalEntity } from '@flowza/contracts';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
@@ -6,7 +7,6 @@ import { enumArrayOrNull, isoDate, isoDateTime, isoDateTimeOrNull } from '../../
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
 import { likeContains } from '../../lib/pagination.js';
 import { systemStep } from '../features/context.js';
-import { dv } from '../features/sql-helpers.js';
 
 type Row = { id: string; organizationId: string; delegatorUserId: string; delegateUserId: string; entityTypes: unknown; startsOn: Date | string; endsOn: Date | string; isActive: boolean; reason: string | null; createdAt: Date; revokedAt: Date | null };
 
@@ -25,7 +25,8 @@ export async function listDelegations(deps: ApiDeps, actor: Actor, orgId: string
   return runUser(deps.db, actor, async (trx) => {
     let base = trx.selectFrom('approvalDelegations').selectAll().where('organizationId', '=', orgId);
     if (q.scope === 'mine') base = base.where((eb) => eb.or([eb('delegatorUserId', '=', actor.userId), eb('delegateUserId', '=', actor.userId)]));
-    if (q.activeOnly) base = base.where('isActive', '=', true).where('endsOn', '>=', dv(new Date().toISOString().slice(0, 10)));
+    // "still active" by the organisation's date, the one "today" of delegations (review P2-1)
+    if (q.activeOnly) base = base.where('isActive', '=', true).where(sql<boolean>`ends_on >= app.org_today(${orgId}::uuid)`);
     const rows = await base.orderBy('isActive', 'desc').orderBy('startsOn', 'desc').orderBy('createdAt', 'desc').execute();
     return toDtos(trx, orgId, rows as Row[]);
   });

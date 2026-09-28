@@ -18,17 +18,14 @@ const NIL = '00000000-0000-0000-0000-000000000000';
 
 type RB = ExpressionBuilder<DB, 'approvalRequests'>;
 
-/** `mine`: a pending actor row for me on the current step, or a pending actor who delegates to me today for the entity type. */
-function mineCurrentStep(eb: RB, userId: string) {
-  return eb.exists(
-    eb.selectFrom('approvalSteps as s').innerJoin('approvalStepActors as a', 'a.stepId', 's.id').select(sql`1`.as('x'))
-      .whereRef('s.requestId', '=', 'approvalRequests.id').whereRef('s.stepNo', '=', 'approvalRequests.currentStep').where('a.decision', '=', 'PENDING')
-      .where((e) => e.or([
-        e('a.userId', '=', userId),
-        e.exists(e.selectFrom('approvalDelegations as d').select(sql`1`.as('y')).whereRef('d.delegatorUserId', '=', 'a.userId').where('d.delegateUserId', '=', userId).where('d.isActive', '=', true)
-          .where(sql<boolean>`current_date between d.starts_on and d.ends_on`).where(sql<boolean>`(d.entity_types is null or approval_requests.entity_type = any (d.entity_types))`)),
-      ])),
-  );
+/**
+ * `mine`, pending: the requests waiting for the caller on their current level — their own pending seat (a stamped delegate
+ * seat only while that delegation is still in force; an escalation seat included) or the pending seat of somebody who
+ * delegates to them today, by the ORGANISATION's date. `app.approval_actionable_request_ids` is the one definition, shared
+ * with the dashboard count and /me `approvals.actionable` (review P2-1 / P2-11).
+ */
+function mineCurrentStep(orgId: string) {
+  return sql<boolean>`approval_requests.id in (select app.approval_actionable_request_ids(${orgId}::uuid))`;
 }
 /** History for `mine`: any decision or seat of mine on any step, or a request I closed. */
 function mineInvolved(eb: RB, userId: string) {
@@ -50,11 +47,13 @@ async function inboxQuery(trx: Trx, actor: Actor, grant: MembershipGrant, orgId:
   const teamKey = TEAM_KEYS.some((p) => hasPermission(grant, p));
   if (q.scope === 'all' && !orgWide) throw errors.forbidden('Missing permission: attendance.view, leave.view or approval.manage.');
   if (q.scope === 'team' && !teamKey && !orgWide) throw errors.forbidden('Missing permission: attendance.view_team or leave.view_team.');
-  const scope = branchFilter(grant, q.branchId);
+  // A seat is its own authority: the caller's queue is never narrowed by their branch scope, only by an explicit filter
+  // (a branch manager named on another branch's request still sees it — the count on /me and the dashboard agree).
+  const scope = q.scope === 'mine' ? (q.branchId ? [q.branchId] : null) : branchFilter(grant, q.branchId);
   let base = trx.selectFrom('approvalRequests').where('approvalRequests.organizationId', '=', orgId);
   if (q.view === 'pending') base = base.where('approvalRequests.status', '=', 'PENDING');
   else base = q.status && q.status !== 'PENDING' ? base.where('approvalRequests.status', '=', q.status) : base.where('approvalRequests.status', '!=', 'PENDING');
-  if (q.scope === 'mine') base = q.view === 'pending' ? base.where((eb) => mineCurrentStep(eb, actor.userId)) : base.where((eb) => mineInvolved(eb, actor.userId));
+  if (q.scope === 'mine') base = q.view === 'pending' ? base.where(mineCurrentStep(orgId)) : base.where((eb) => mineInvolved(eb, actor.userId));
   else if (q.scope === 'team') base = base.where('approvalRequests.employeeId', 'in', grant.teamEmployeeIds.length ? grant.teamEmployeeIds : [NIL]);
   if (scope) base = base.where((eb) => eb.or([eb('approvalRequests.branchId', 'is', null), eb('approvalRequests.branchId', 'in', scope)]));
   if (q.entityType) base = base.where('approvalRequests.entityType', '=', q.entityType);
@@ -118,10 +117,12 @@ export async function getRequest(deps: ApiDeps, actor: Actor, orgId: string, id:
   return runUser(deps.db, actor, async (trx) => {
     const row = await trx.selectFrom('approvalRequests').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!row) throw errors.notFound('Approval request', id);
-    if (!grant.allBranches && row.branchId && !grant.branchIds.includes(row.branchId) && row.requestedBy !== actor.userId && row.subjectUserId !== actor.userId) {
-      // an assignee outside the branch still sees the request they were routed (RLS admitted it); anyone else is refused
-      const assigned = await trx.selectFrom('approvalSteps as s').innerJoin('approvalStepActors as a', 'a.stepId', 's.id').select('s.id').where('s.requestId', '=', id).where('a.userId', '=', actor.userId).executeTakeFirst();
-      if (!assigned) throw errors.forbidden('This request is outside your branch scope.');
+    const aboutMe = row.subjectUserId === actor.userId || (!!grant.employeeId && grant.employeeId === row.employeeId);
+    if (!grant.allBranches && row.branchId && !grant.branchIds.includes(row.branchId) && row.requestedBy !== actor.userId && !aboutMe) {
+      // an assignee outside the branch (a seat, or a pending seat they cover through a delegation in force today) still
+      // sees the request they were routed — the same rule as the read policy's assignee branch; anyone else is refused
+      const { rows } = await sql<{ assigned: boolean }>`select app.approval_request_assigned(${id}::uuid, ${orgId}::uuid, ${row.entityType}::public.approval_entity) as assigned`.execute(trx);
+      if (!rows[0]?.assigned) throw errors.forbidden('This request is outside your branch scope.');
     }
     const [dto] = await hydrateRequests(trx, actor, grant, orgId, [row], { withEvents: true });
     return dto!;

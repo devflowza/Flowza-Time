@@ -67,7 +67,8 @@ function useTiles(d: DashboardData): Record<TileKey, KpiTileProps> {
     devicesOnline: { label: t('kpi.devicesOnline'), value: n(s?.devicesOnline), icon: Cpu, tone: 'success', loading, percent: percent(s?.devicesOnline, devices), hint: ofDevices(s?.devicesOnline), to: d.can('device.view') ? '/devices' : undefined },
     devicesOffline: { label: t('kpi.devicesOffline'), value: n(s?.devicesOffline), icon: WifiOff, tone: s && s.devicesOffline > 0 ? 'danger' : 'neutral', loading, percent: percent(s?.devicesOffline, devices), hint: ofDevices(s?.devicesOffline), to: d.can('device.view') ? '/devices' : undefined },
     syncFailures: { label: t('kpi.syncFailures'), value: n(s?.syncFailures24h), icon: AlertTriangle, tone: s && s.syncFailures24h > 0 ? 'danger' : 'neutral', loading, to: d.can('device.view') ? '/sync' : undefined },
-    pendingApprovals: { label: t('kpi.pendingApprovals'), value: n(s?.pendingApprovals), icon: ClipboardCheck, tone: 'info', loading, to: d.can('attendance.approve') ? '/approvals' : undefined },
+    // the caller's own queue (review P2-11): every member reaches /approvals
+    pendingApprovals: { label: t('kpi.pendingApprovals'), value: n(s?.pendingApprovals), icon: ClipboardCheck, tone: 'info', loading, to: '/approvals' },
     attendanceRate: { label: t('kpi.attendanceRate'), value: s ? `${pct(s.presentToday, employees)}%` : '—', icon: Gauge, tone: 'present', loading, hint: s ? `${fmtNumber(s.presentToday)} / ${fmtNumber(employees)} ${t('kpi.ofEmployees')}` : undefined, delta: delta('present', true), spark: spark('present') },
   };
 }

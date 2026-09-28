@@ -292,7 +292,8 @@ describe('search & dashboard', () => {
   it('dashboard summary/trends/branches aggregate the seeded records', async () => {
     const res = await api.request('GET', `/orgs/${F.orgA}/dashboard/summary?date=${F.RECORD_DATE}`, { user: F.ownerA });
     expect(res.status).toBe(200);
-    expect(res.json.data).toMatchObject({ date: F.RECORD_DATE, employees: 2, presentToday: 1, absent: 1, late: 1, overtimeMinutes: 30, devicesOnline: 1, devicesOffline: 0, syncFailures24h: 1, pendingApprovals: 1 });
+    // pendingApprovals counts what waits for the CALLER (their seats — review P2-11): the seeded request seats nobody
+    expect(res.json.data).toMatchObject({ date: F.RECORD_DATE, employees: 2, presentToday: 1, absent: 1, late: 1, overtimeMinutes: 30, devicesOnline: 1, devicesOffline: 0, syncFailures24h: 1, pendingApprovals: 0 });
     const scoped = await api.request('GET', `/orgs/${F.orgA}/dashboard/summary?date=${F.RECORD_DATE}`, { user: F.branchManagerA });
     expect(scoped.json.data).toMatchObject({ employees: 1, presentToday: 0, absent: 1, devicesOnline: 0, syncFailures24h: 0, pendingApprovals: 0 });
     const trends = await api.request('GET', `/orgs/${F.orgA}/dashboard/trends?from=2026-08-31&to=2026-09-02`, { user: F.ownerA });

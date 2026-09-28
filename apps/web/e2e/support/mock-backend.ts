@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import type { DashboardSummary, DeviceDto, EmployeeDto, FinanceIntegrationDto, FinanceIntegrationStatusDto, MeDto, Permission } from '@flowza/contracts';
+import type { ApprovalDelegationDto, ApprovalRequestDto, ApprovalWorkflowDto, DashboardSummary, DeviceDto, EmployeeDto, FinanceIntegrationDto, FinanceIntegrationStatusDto, MeDto, Permission } from '@flowza/contracts';
 
 /**
  * Backend double for the UI end-to-end suite.
@@ -47,7 +47,7 @@ export function meFixture(overrides: Partial<MeDto['memberships'][number]> = {})
     user: { id: USER_ID, email: OWNER.email, fullName: 'Aisha Al Balushi', avatarUrl: null, locale: 'en', mfaEnrolled: false, isPlatformAdmin: false },
     memberships: [{
       membershipId: '66666666-6666-4666-8666-666666666666', organization: organization as MeDto['memberships'][number]['organization'], roleId: '10000000-0000-0000-0000-000000000001', roleKey: 'owner', roleName: 'Owner',
-      permissions: [...ALL_PERMISSIONS], allBranches: true, branchIds: [], employeeId: null, isManager: false, teamSize: 0, featureFlags: {},
+      permissions: [...ALL_PERMISSIONS], allBranches: true, branchIds: [], employeeId: null, isManager: false, teamSize: 0, approvals: { actionable: 0, delegatedToMe: false }, featureFlags: {},
       settings: { general: {}, attendance: {}, sync: {}, notifications: {}, security: {}, integrations: {} } as MeDto['memberships'][number]['settings'],
       ...overrides,
     }],
@@ -158,6 +158,85 @@ export function hrWorkspaceHandlers(): { get: NonNullable<MockBackendOptions['ge
     post: {
       [`/orgs/${ORG_ID}/attendance/preview`]: (body) => ({ body: previewFixture(body as Parameters<typeof previewFixture>[0]) }),
       [`/orgs/${ORG_ID}/attendance/record-edits`]: () => ({ status: 201, body: { data: { corrections: [{ id: 'c-in', type: 'ADD_PUNCH', status: 'APPROVED', approval: 'AUTO_APPROVED' }, { id: 'c-out', type: 'ADD_PUNCH', status: 'APPROVED', approval: 'AUTO_APPROVED' }], applied: true, failed: null, unchanged: 0 } } }),
+    },
+  };
+}
+
+// ---- approval engine v2 (review fixes: P2-12) ------------------------------------------------------------------------------------
+export const APPROVAL_ID = 'aaaaaaaa-aaaa-4aaa-8aaa-000000000001';
+export const COLLEAGUE = { userId: 'bbbbbbbb-bbbb-4bbb-8bbb-000000000001', fullName: 'Salma Al Hinai', email: 'salma@albahja.example' };
+const REPORT_USER = 'bbbbbbbb-bbbb-4bbb-8bbb-000000000002';
+/** A two-level leave request waiting for the signed-in owner at level 2 (level 1 approved by the manager). */
+export function approvalRequestFixture(over: Partial<ApprovalRequestDto> = {}): ApprovalRequestDto {
+  const salim = employeesFixture[0]!;
+  const actor = (userId: string, userName: string, decision: 'PENDING' | 'APPROVED', path: string, decidedAt: string | null = null, comment: string | null = null) => ({ userId, userName, viaDelegationOf: null, viaDelegationOfName: null, onBehalfOfUserId: null, onBehalfOfName: null, resolutionPath: path, decision, decidedAt, comment });
+  const step = (stepNo: number, status: 'PENDING' | 'APPROVED', approverType: 'MANAGER' | 'USER', actors: ReturnType<typeof actor>[]) => ({
+    id: `step-${stepNo}`, requestId: APPROVAL_ID, stepNo, approverType, approverRoleId: null, approverUserId: actors[0]!.userId, permissionKey: null, mode: 'ANY' as const, requiredCount: 1, status,
+    resolutionPath: actors[0]!.resolutionPath, resolutionReason: null, activatedAt: '2026-09-20T05:00:00Z', dueAt: null, escalateTo: null, escalatedAt: null, remindedAt: null,
+    actedBy: status === 'APPROVED' ? actors[0]!.userId : null, actedByName: status === 'APPROVED' ? actors[0]!.userName : null, actedAt: status === 'APPROVED' ? '2026-09-20T06:00:00Z' : null, comment: status === 'APPROVED' ? 'Fine by me' : null, actors,
+  });
+  return {
+    id: APPROVAL_ID, organizationId: ORG_ID, workflowId: null, workflowName: 'Leave: manager then owner', entityType: 'LEAVE', entityId: 'cccccccc-cccc-4ccc-8ccc-000000000001', branchId: BRANCH_A, departmentId: null,
+    employeeId: salim.id, employeeName: salim.displayName, employeeNumber: salim.employeeNumber, units: 2, currentStep: 2, stepCount: 2, status: 'PENDING', requestedBy: REPORT_USER, requestedByName: salim.displayName, subjectUserId: REPORT_USER,
+    infoRequestedAt: null, completedAt: null, decidedBy: null, decidedByName: null, cancelReason: null, invalidationReason: null, createdAt: '2026-09-20T05:00:00Z', updatedAt: '2026-09-20T06:00:00Z',
+    steps: [step(1, 'APPROVED', 'MANAGER', [actor('dddddddd-dddd-4ddd-8ddd-000000000001', 'Khalid Manager', 'APPROVED', 'primary', '2026-09-20T06:00:00Z', 'Fine by me')]), step(2, 'PENDING', 'USER', [actor(USER_ID, 'Aisha Al Balushi', 'PENDING', 'user')])],
+    context: { kind: 'LEAVE', leave: { id: 'cccccccc-cccc-4ccc-8ccc-000000000001', leaveTypeId: 'lt-annual', leaveTypeName: 'Annual Leave', startDate: '2026-10-04', endDate: '2026-10-05', isHalfDay: false, halfDayPart: null, days: 2, reason: 'Family wedding', status: 'PENDING', balanceRemainingDays: 18, allowanceDays: 30 } },
+    abilities: { canDecide: true, canCancel: false, canReassign: true, canBypass: true, canRequestInfo: true, canAnswerInfo: false, actingAsDelegateOf: null, decideVia: 'actor' },
+    events: [
+      { id: '1', at: '2026-09-20T05:00:00Z', actorUserId: REPORT_USER, actorName: salim.displayName, kind: 'submitted', detail: {} },
+      { id: '2', at: '2026-09-20T06:00:00Z', actorUserId: 'dddddddd-dddd-4ddd-8ddd-000000000001', actorName: 'Khalid Manager', kind: 'step_approved', detail: { stepNo: 1, comment: 'Fine by me' } },
+      { id: '3', at: '2026-09-20T06:00:00Z', actorUserId: 'dddddddd-dddd-4ddd-8ddd-000000000001', actorName: 'Khalid Manager', kind: 'advanced', detail: { stepNo: 2 } },
+    ],
+    ...over,
+  };
+}
+/** The token of the one-click e-mail link the e-mail scenario opens (the double accepts only this one). */
+export const EMAIL_TOKEN = 'e2e-email-token-0123456789abcdef';
+/**
+ * Stateful handlers of the approvals screens: the inbox (the request leaves the queue once decided), one request, the
+ * decision, the one-click e-mail action, the delegations list (a created delegation appears in it), the colleague picker
+ * and the workflow editor.
+ */
+export function approvalsHandlers(): { get: NonNullable<MockBackendOptions['get']>; post: NonNullable<MockBackendOptions['post']> } {
+  let decided: ApprovalRequestDto | null = null;
+  const delegations: ApprovalDelegationDto[] = [];
+  const workflows: ApprovalWorkflowDto[] = [];
+  const pending = () => (decided ? [] : [approvalRequestFixture()]);
+  return {
+    get: {
+      [`/orgs/${ORG_ID}/approvals`]: (url: URL) => page(url.searchParams.get('view') === 'history' ? (decided ? [decided] : []) : pending()),
+      [`/orgs/${ORG_ID}/approvals/${APPROVAL_ID}`]: () => ({ data: decided ?? approvalRequestFixture() }),
+      [`/orgs/${ORG_ID}/approval-delegations`]: { data: delegations },
+      [`/orgs/${ORG_ID}/approval-delegations/candidates`]: { data: [COLLEAGUE] },
+      [`/orgs/${ORG_ID}/approval-workflows`]: { data: workflows },
+      [`/orgs/${ORG_ID}/roles`]: { data: [] },
+      [`/orgs/${ORG_ID}/members`]: page([]),
+    },
+    post: {
+      [`/orgs/${ORG_ID}/approvals/${APPROVAL_ID}/decide`]: (body) => {
+        const b = body as { stepNo: number; decision: 'APPROVE' | 'REJECT'; comment?: string };
+        const base = approvalRequestFixture();
+        decided = { ...base, status: b.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED', completedAt: nowIso(), decidedBy: USER_ID, decidedByName: 'Aisha Al Balushi', abilities: { ...base.abilities, canDecide: false, decideVia: null } };
+        return { body: { data: { ...decided, noop: false, terminal: true } } };
+      },
+      [`/orgs/${ORG_ID}/approvals/email-action`]: (body) => {
+        const b = body as { token: string; action: 'APPROVE' | 'REJECT'; comment?: string };
+        if (b.token !== EMAIL_TOKEN) return { status: 404, body: { code: 'NOT_FOUND', message: 'Approval link not found' } };
+        const base = approvalRequestFixture();
+        decided = { ...base, status: b.action === 'APPROVE' ? 'APPROVED' : 'REJECTED', completedAt: nowIso(), decidedBy: USER_ID, decidedByName: 'Aisha Al Balushi', abilities: { ...base.abilities, canDecide: false, decideVia: null } };
+        return { body: { data: { ...decided, noop: false, terminal: true } } };
+      },
+      [`/orgs/${ORG_ID}/approval-delegations`]: (body) => {
+        const b = body as { delegateUserId: string; startsOn: string; endsOn: string; entityTypes?: ApprovalDelegationDto['entityTypes']; reason?: string };
+        const created: ApprovalDelegationDto = { id: `eeeeeeee-eeee-4eee-8eee-${String(delegations.length + 1).padStart(12, '0')}`, organizationId: ORG_ID, delegatorUserId: USER_ID, delegatorName: 'Aisha Al Balushi', delegateUserId: b.delegateUserId, delegateName: COLLEAGUE.fullName, entityTypes: b.entityTypes ?? null, startsOn: b.startsOn, endsOn: b.endsOn, isActive: true, reason: b.reason ?? null, createdAt: nowIso(), revokedAt: null };
+        delegations.push(created);
+        return { status: 201, body: { data: created } };
+      },
+      [`/orgs/${ORG_ID}/approval-workflows`]: (body) => {
+        const created = { ...(body as ApprovalWorkflowDto), id: 'ffffffff-ffff-4fff-8fff-000000000001', organizationId: ORG_ID, allowSelfApproval: false, createdAt: nowIso(), updatedAt: nowIso() } as ApprovalWorkflowDto;
+        workflows.push(created);
+        return { status: 201, body: { data: created } };
+      },
     },
   };
 }

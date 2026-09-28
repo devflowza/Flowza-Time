@@ -69,4 +69,33 @@ describe('RequestDetail — one request', () => {
     await screen.findByText(/Employee 9/);
     expect(screen.queryByRole('button', { name: /Approve as exception/ })).toBeNull();
   });
+
+  it('P2-4 withdrawing always says why (at least 3 characters), and the reason reaches /cancel', async () => {
+    apiMock.post.mockResolvedValue({ data: { ...twoLevels, status: 'CANCELLED', cancelReason: 'Plans changed' } });
+    renderWithProviders(<RequestDetail requestId="r7" />);
+    fireEvent.click(await screen.findByRole('button', { name: /Withdraw/ }));
+    const dialog = await screen.findByRole('dialog');
+    const confirm = Array.from(dialog.querySelectorAll('button')).find((b) => /Withdraw/.test(b.textContent ?? ''))!;
+    expect(confirm).toBeDisabled();
+    fireEvent.change(dialog.querySelector('textarea')!, { target: { value: 'no' } });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(dialog.querySelector('textarea')!, { target: { value: 'Plans changed' } });
+    expect(confirm).not.toBeDisabled();
+    fireEvent.click(confirm);
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/approvals/r7/cancel', { reason: 'Plans changed' }));
+  });
+
+  it('P0-1 shows whose seat an override filled', async () => {
+    const overridden = {
+      ...twoLevels,
+      steps: [twoLevels.steps[0]!, approvalStep({ id: 's2', requestId: 'r7', stepNo: 2, approverType: 'HR_ADMIN', mode: 'ALL', resolutionPath: 'hr_admin', actors: [
+        { userId: 'u7', userName: 'Fatma HR', viaDelegationOf: null, viaDelegationOfName: null, onBehalfOfUserId: null, onBehalfOfName: null, resolutionPath: 'hr_admin', decision: 'SKIPPED', decidedAt: null, comment: null },
+        { userId: 'u8', userName: 'Owner One', viaDelegationOf: null, viaDelegationOfName: null, onBehalfOfUserId: 'u7', onBehalfOfName: 'Fatma HR', resolutionPath: 'override', decision: 'APPROVED', decidedAt: '2024-03-03T08:00:00Z', comment: 'Covering' },
+      ] })],
+    };
+    mockGet({ '/orgs/org-1/approvals/r7': { data: overridden } });
+    renderWithProviders(<RequestDetail requestId="r7" />);
+    expect(await screen.findByText('In the seat of Fatma HR')).toBeInTheDocument();
+    expect(screen.getByText('Authorised override')).toBeInTheDocument();
+  });
 });

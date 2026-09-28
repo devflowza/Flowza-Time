@@ -140,9 +140,46 @@ describe('resolveStepActors — segregation of duties', () => {
     const noSubject = ctx({ requestedBy: U.owner, subjectEmployeeId: null, subjectUserId: null, hrAdminUserIds: [], ownerUserIds: [U.owner] });
     expect(resolveStepActors(step({ approverType: 'HR_ADMIN' }), noSubject)).toMatchObject({ path: 'unresolved', unresolved: true });
   });
-  it('allowSelfApproval lifts the exclusion', () => {
-    const r = resolveStepActors(step({ approverType: 'USER', userId: U.subject }), ctx({ allowSelfApproval: true }));
-    expect(users(r)).toEqual([U.subject]);
+  it('P0-3 no switch lifts the exclusion: a workflow flag passed along is ignored and the subject is never seated', () => {
+    // a v1-era caller that still passes the removed flag gets exactly the default behaviour
+    const legacy = { ...ctx(), allowSelfApproval: true } as ResolutionContext;
+    const r = resolveStepActors(step({ approverType: 'USER', userId: U.subject }), legacy);
+    expect(users(r)).not.toContain(U.subject);
+    expect(r.path).toBe('hr_admin');
+    expect(r.reason).toMatch(/subject excluded/);
+  });
+  it('P1-7 seats the subject when they are the organisation\'s only owner and nobody else can decide (owner bypass)', () => {
+    // a single-owner organisation, no HR admin: the owner's own leave or correction
+    const single = ctx({ subjectUserId: U.owner, requestedBy: U.owner, hrAdminUserIds: [], ownerUserIds: [U.owner], chain: [], permissionHolderUserIds: (p) => (p === 'leave.approve' ? [U.owner] : []) });
+    const own = resolveStepActors(step({ approverType: 'ROLE', permission: 'leave.approve' }), single);
+    expect(own.actors).toEqual([{ userId: U.owner, viaDelegationOf: null }]);
+    expect(own.path).toBe('owner');
+    expect(own.reason).toMatch(/subject kept/);
+    // HR recorded it for the owner (the requester is somebody else, and not an owner): still the owner, never unresolved
+    const filedByHr = resolveStepActors(step({ approverType: 'HR_ADMIN' }), { ...single, requestedBy: U.hr1 });
+    expect(users(filedByHr)).toEqual([U.owner]);
+    // the owner's delegate never acts for them on a request about them
+    const withDelegate = resolveStepActors(step({ approverType: 'HR_ADMIN' }), { ...single, delegateOf: (u) => (u === U.owner ? U.delegate : null) });
+    expect(withDelegate.actors).toEqual([{ userId: U.owner, viaDelegationOf: null }]);
+    // a second owner exists: that owner decides, the subject stays excluded
+    const two = resolveStepActors(step({ approverType: 'HR_ADMIN' }), { ...single, ownerUserIds: [U.owner, U.head] });
+    expect(users(two)).toEqual([U.head]);
+    // a subject who is not an owner is never kept
+    const notOwner = resolveStepActors(step({ approverType: 'HR_ADMIN' }), ctx({ hrAdminUserIds: [], ownerUserIds: [U.owner], requestedBy: U.owner, subjectUserId: U.subject }));
+    expect(users(notOwner)).not.toContain(U.subject);
+  });
+  it('P2-5 reports a suspended manager as such, not as "no linked login"', () => {
+    const suspended = resolveStepActors(step(), ctx({ chain: [{ primary: { employeeId: 'e-m', userId: U.gone, absent: true, absentReason: 'membership suspended' }, secondary: cand(U.secondary) }] }));
+    expect(suspended.path).toBe('secondary');
+    expect(suspended.reason).toMatch(/primary manager: membership suspended/);
+    expect(suspended.reason).not.toMatch(/no linked login/);
+    const unlinked = resolveStepActors(step(), ctx({ chain: [{ primary: cand(null), secondary: cand(U.secondary) }] }));
+    expect(unlinked.reason).toMatch(/primary manager: no linked login/);
+  });
+  it('keeps one row per person per level: an approver who is also another approver\'s delegate sits in their own seat', () => {
+    const r = resolveStepActors(step({ approverType: 'HR_ADMIN', mode: 'ALL' }), ctx({ delegateOf: (u) => (u === U.hr1 ? U.hr2 : null) }));
+    expect(r.actors).toEqual([{ userId: U.hr1, viaDelegationOf: null }, { userId: U.hr2, viaDelegationOf: null }]);
+    expect(r.seatCount).toBe(2);
   });
   it('counts seats, not rows, for quorum requirements', () => {
     const r = resolveStepActors(step({ approverType: 'ROLE', roleId: 'role-hr', mode: 'QUORUM', requiredCount: 2 }), ctx({ delegateOf: (u) => (u === U.hr1 ? U.delegate : null) }));

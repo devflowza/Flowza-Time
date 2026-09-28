@@ -70,8 +70,9 @@ export async function summary(deps: ApiDeps, actor: Actor, orgId: string, q: { d
              att.present, att.absent, att.late, att.on_leave, att.early_departure, att.overtime_minutes, att.missing_punch,
              dev.online, dev.unknown, dev.total,
              (select count(*) from public.sync_job_items s where s.organization_id = ${orgId} and s.status = 'FAILED' and s.updated_at >= now() - interval '24 hours' ${scoped('s.branch_id')}) as sync_failures,
-             (select count(*) from public.approval_requests a where a.organization_id = ${orgId} and a.status = 'PENDING'
-                ${scope ? sql`and (a.branch_id is null or a.branch_id = any(${scope}::uuid[]))` : sql``}) as pending_approvals
+             -- what is waiting for the caller: exactly the Approvals card's "mine" queue (review P2-11), not every pending
+             -- request the caller can read; it follows the person, not the branch filter
+             (select count(*) from app.approval_actionable_request_ids(${orgId}::uuid)) as pending_approvals
       from day, att, dev`.execute(trx);
     const r = row.rows[0];
     if (!r) throw errors.notFound('Organisation not found.');

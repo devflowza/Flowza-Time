@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Check, Download, History, Inbox, Settings2, UserRoundCheck, X } from 'lucide-react';
+import { Check, Download, FileText, History, Inbox, Settings2, UserRoundCheck, X } from 'lucide-react';
 import { APPROVAL_ENTITIES, type ApprovalEntity, type ApprovalInboxScope, type ApprovalRequestDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
@@ -15,12 +15,14 @@ import { useCan, useMe, useOrgId, useOrgTimezone } from '@/features/me/use-me';
 import { SearchBox } from '@/features/organization/components/search-box';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useServerTable } from '@/hooks/use-server-table';
-import { downloadApprovalHistory, useApprovalAccess, useApprovalInbox, useApprovalMutations, useDelegations, type DecisionKind, type InboxView } from '../api';
+import { downloadApprovalHistory, useApprovalAccess, useApprovalInbox, useApprovalMutations, useDelegations, useMyApprovalRequests, type DecisionKind, type InboxView } from '../api';
 import { DecisionDialog } from '../components/decision-dialog';
 import { RequestDialog } from '../components/request-detail';
 import { ApprovalContext, EntityIcon, LevelLabel, RequestStatusBadge } from '../components/parts';
 
-const VIEWS: readonly InboxView[] = ['pending', 'history'];
+/** Pending and History are the approver's inbox; "My requests" lists what the caller filed or what is about them. */
+type PageView = InboxView | 'requests';
+const VIEWS: readonly PageView[] = ['pending', 'history', 'requests'];
 const SCOPES: readonly ApprovalInboxScope[] = ['mine', 'team', 'all'];
 /** Entity types with a live document behind them today; the others appear only once a request of theirs exists. */
 const FILTER_TYPES: readonly ApprovalEntity[] = ['ATTENDANCE_CORRECTION', 'LEAVE'];
@@ -30,9 +32,10 @@ function Chip({ active, onClick, children }: { active: boolean; onClick: () => v
 }
 
 /**
- * /approvals — the unified inbox (engine v2). Pending | History; scope Mine (my queue: levels waiting for me or for the
- * approvers I cover for), My team (my direct reports' requests — team keys), Everyone (organisation-wide keys); a type
- * filter; a request opens in a side panel with its levels and timeline (deep link: ?request=<id>).
+ * /approvals — the unified inbox (engine v2), open to every active member (the API scopes the rows). Pending | History |
+ * My requests; scope Mine (my queue: levels waiting for me or for the approvers I cover for), My team (my direct reports'
+ * requests — team keys), Everyone (organisation-wide keys); a type filter; a request opens in a side panel with its levels
+ * and timeline (deep link: ?request=<id>).
  */
 export default function ApprovalsPage() {
   const { t } = useTranslation('approvals');
@@ -42,13 +45,17 @@ export default function ApprovalsPage() {
   const branches = useBranchOptions();
   const table = useServerTable({ pageSize: 25 });
   const f = table.state.filters;
-  const view: InboxView = (VIEWS as readonly string[]).includes(f['view'] ?? '') ? (f['view'] as InboxView) : 'pending';
+  const view: PageView = (VIEWS as readonly string[]).includes(f['view'] ?? '') ? (f['view'] as PageView) : 'pending';
+  const requestsView = view === 'requests';
+  const inboxView: InboxView = view === 'history' ? 'history' : 'pending';
   const allowedScopes = SCOPES.filter((s) => s === 'mine' || (s === 'team' && access.team) || (s === 'all' && access.orgWide));
   const scope: ApprovalInboxScope = (allowedScopes as readonly string[]).includes(f['scope'] ?? '') ? (f['scope'] as ApprovalInboxScope) : 'mine';
   const entityType = (APPROVAL_ENTITIES as readonly string[]).includes(f['entityType'] ?? '') ? (f['entityType'] as ApprovalEntity) : undefined;
   const search = f['search'] || undefined;
   const openId = f['request'] ?? null;
-  const q = useApprovalInbox({ scope, view, entityType, search, page: table.state.page, pageSize: table.state.pageSize });
+  const inbox = useApprovalInbox({ scope, view: inboxView, entityType, search, page: table.state.page, pageSize: table.state.pageSize }, !requestsView);
+  const myRequests = useMyApprovalRequests({ page: table.state.page, pageSize: table.state.pageSize, entityType }, requestsView);
+  const q = requestsView ? myRequests : inbox;
   const orgId = useOrgId();
   const can = useCan();
   const [exporting, setExporting] = useState(false);
@@ -62,7 +69,8 @@ export default function ApprovalsPage() {
   const [selectionFor, setSelectionFor] = useState(selectionKey);
   if (selectionFor !== selectionKey) { setSelectionFor(selectionKey); setSelection({}); }
   const { bulkDecide } = useApprovalMutations();
-  const approveSelected = (ids: string[]) => bulkDecide.mutate({ requestIds: ids, decision: 'APPROVE' }, {
+  // each line names the level the caller saw on that row (review P1-2): a level that moved on meanwhile is refused
+  const approveSelected = (ids: string[]) => bulkDecide.mutate({ items: ids.flatMap((id) => { const row = q.data?.data.find((r) => r.id === id); return row ? [{ requestId: id, stepNo: row.currentStep }] : []; }), decision: 'APPROVE' }, {
     onSuccess: (res) => {
       setSelection({});
       if (res.succeeded) toast.success(t('bulk.approved', { count: res.succeeded }));
@@ -85,7 +93,7 @@ export default function ApprovalsPage() {
     { id: 'details', header: t('columns.details'), cell: ({ row }) => <ApprovalContext context={row.original.context} timezone={tzOf(row.original.branchId)} compact /> },
     { id: 'requester', header: t('columns.requester'), cell: ({ row }) => <div className="text-xs"><p>{row.original.requestedByName ?? '—'}</p><p className="text-muted-foreground tnum">{fmtDateTime(row.original.createdAt, tz)}</p></div> },
     { id: 'level', header: t('columns.level'), cell: ({ row }) => <div className="space-y-1"><LevelLabel request={row.original} />{row.original.infoRequestedAt && row.original.status === 'PENDING' ? <Badge variant="warning">{t('inbox.waitingForAnswer')}</Badge> : null}</div> },
-    ...(view === 'history' ? [
+    ...(view !== 'pending' ? [
       { id: 'status', header: t('columns.status'), cell: ({ row }) => <RequestStatusBadge status={row.original.status} /> } as ColumnDef<ApprovalRequestDto, unknown>,
       { id: 'decided', header: t('columns.decided'), cell: ({ row }) => <span className="whitespace-nowrap text-xs tnum">{row.original.completedAt ? fmtDateTime(row.original.completedAt, tz) : '—'}</span> } as ColumnDef<ApprovalRequestDto, unknown>,
     ] : []),
@@ -104,7 +112,8 @@ export default function ApprovalsPage() {
     ); } },
   ], [t, tz, tzOf, view, scope, myId, setDecision]);
 
-  const emptyTitle = view === 'history' ? t('inbox.historyEmpty') : scope === 'team' ? t('inbox.teamEmpty') : scope === 'all' ? t('inbox.allEmpty') : t('inbox.empty');
+  const emptyTitle = requestsView ? t('inbox.requestsEmpty') : view === 'history' ? t('inbox.historyEmpty') : scope === 'team' ? t('inbox.teamEmpty') : scope === 'all' ? t('inbox.allEmpty') : t('inbox.empty');
+  const emptyDescription = requestsView ? t('inbox.requestsEmptyHint') : view === 'history' ? t('inbox.historyEmptyHint') : t('inbox.emptyHint');
   return (
     <div className="page-container space-y-4">
       <PageHeader title={t('title')} description={t('subtitle')} actions={
@@ -119,9 +128,10 @@ export default function ApprovalsPage() {
           <TabsList aria-label={t('title')}>
             <TabsTrigger value="pending"><Inbox className="me-1.5 size-4" /> {t('view.pending')}</TabsTrigger>
             <TabsTrigger value="history"><History className="me-1.5 size-4" /> {t('view.history')}</TabsTrigger>
+            <TabsTrigger value="requests"><FileText className="me-1.5 size-4" /> {t('view.requests')}</TabsTrigger>
           </TabsList>
         </Tabs>
-        {allowedScopes.length > 1 ? (
+        {allowedScopes.length > 1 && !requestsView ? (
           <div className="flex items-center gap-1.5" role="group" aria-label={t('scope.label')}>
             {allowedScopes.map((s) => <Chip key={s} active={scope === s} onClick={() => table.setFilter('scope', s === 'mine' ? undefined : s)}>{t(`scope.${s}`)}</Chip>)}
           </div>
@@ -130,7 +140,7 @@ export default function ApprovalsPage() {
           <Chip active={!entityType} onClick={() => table.setFilter('entityType', undefined)}>{t('entityFilter.all')}</Chip>
           {APPROVAL_ENTITIES.filter((e) => FILTER_TYPES.includes(e) || e === entityType).map((e) => <Chip key={e} active={entityType === e} onClick={() => table.setFilter('entityType', e)}>{t(`entity.${e}`)}</Chip>)}
         </div>
-        <SearchBox id="approvals-search" value={f['search']} onChange={(v) => table.setFilter('search', v)} placeholder={t('inbox.searchPlaceholder')} className="relative w-full sm:ms-auto sm:w-64" />
+        {!requestsView ? <SearchBox id="approvals-search" value={f['search']} onChange={(v) => table.setFilter('search', v)} placeholder={t('inbox.searchPlaceholder')} className="relative w-full sm:ms-auto sm:w-64" /> : null}
         {view === 'history' && can('report.export') ? <Button size="sm" variant="outline" loading={exporting} onClick={exportCsv}><Download /> {t('actions.exportCsv')}</Button> : null}
       </div>
       <DataTable
@@ -139,10 +149,10 @@ export default function ApprovalsPage() {
         onRowClick={(r) => table.update({ filters: { request: r.id } }, false)}
         getRowId={(r) => r.id}
         {...(view === 'pending' ? { selection, onSelectionChange: setSelection, bulkActions: (ids: string[]) => <Button size="sm" loading={bulkDecide.isPending} onClick={() => approveSelected(ids)}><Check /> {t('bulk.approveSelected')}</Button> } : {})}
-        emptyTitle={emptyTitle} emptyDescription={view === 'history' ? t('inbox.historyEmptyHint') : t('inbox.emptyHint')}
+        emptyTitle={emptyTitle} emptyDescription={emptyDescription}
         renderCard={(r) => (
           <div className="space-y-2">
-            <div className="flex items-center justify-between gap-2"><span className="flex min-w-0 items-center gap-2"><EntityIcon entityType={r.entityType} /><span className="truncate font-medium">{r.employeeName ?? '—'}</span></span>{view === 'history' ? <RequestStatusBadge status={r.status} /> : <LevelLabel request={r} />}</div>
+            <div className="flex items-center justify-between gap-2"><span className="flex min-w-0 items-center gap-2"><EntityIcon entityType={r.entityType} /><span className="truncate font-medium">{r.employeeName ?? '—'}</span></span>{view !== 'pending' ? <RequestStatusBadge status={r.status} /> : <LevelLabel request={r} />}</div>
             <ApprovalContext context={r.context} timezone={tzOf(r.branchId)} compact />
             {r.abilities.canDecide ? <div className="flex gap-2"><Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setDecision({ request: r, kind: 'REJECT' }); }}><X /> {t('actions.reject')}</Button><Button size="sm" onClick={(e) => { e.stopPropagation(); setDecision({ request: r, kind: 'APPROVE' }); }}><Check /> {t('actions.approve')}</Button></div>
               : r.status === 'PENDING' && r.requestedBy === myId ? <p className="text-xs text-muted-foreground">{t('inbox.ownRequestHint')}</p> : null}

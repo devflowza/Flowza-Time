@@ -20,7 +20,11 @@ export interface ApprovalStepSpec {
   escalateTo?: ApprovalEscalationSpec | undefined;
 }
 
-/** A person in the reporting line considered as an approver. `absent` = on approved leave today (membership is checked separately). */
+/**
+ * A person in the reporting line considered as an approver. `absent` = on approved leave today (membership is checked
+ * separately). `absentReason` also names why a linked login cannot hold a seat when its membership is not active
+ * ("membership suspended"), so the resolution trail never reads "no linked login" for somebody who has one.
+ */
 export interface ApproverCandidate { employeeId: string | null; userId: string | null; absent: boolean; absentReason: string | null }
 /** Rung k of the subject's chain: the primary manager at that level and the secondary manager of the same employee record (the substitute). */
 export interface ChainRung { primary: ApproverCandidate | null; secondary: ApproverCandidate | null }
@@ -44,8 +48,6 @@ export interface ResolutionContext {
   permissionHolderUserIds: (permission: string) => readonly string[];
   /** The colleague an approver delegates to today (entity type already applied), or null. */
   delegateOf: (userId: string) => string | null;
-  /** Workflow flag: the subject may decide their own request (off by default). */
-  allowSelfApproval?: boolean;
 }
 
 export interface ResolvedActor { userId: string; viaDelegationOf: string | null }

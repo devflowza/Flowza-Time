@@ -44,7 +44,6 @@ export default function WorkflowsPage() {
                     <div className="mt-1 flex flex-wrap gap-1">
                       {w.minUnits !== null ? <Badge variant="outline">{t('workflows.tier', { n: w.minUnits })}</Badge> : null}
                       {w.appliesTo.branchIds?.length || w.appliesTo.departmentIds?.length ? <Badge variant="outline">{t('workflows.scoped')}</Badge> : null}
-                      {w.allowSelfApproval ? <Badge variant="warning">{t('workflows.self')}</Badge> : null}
                     </div>
                   </div>
                   {canManage ? <div className="flex shrink-0 gap-1"><Button variant="ghost" size="icon" className="size-8" aria-label={tc('common.edit')} onClick={() => setDialog({ open: true, workflow: w })}><Pencil /></Button><Button variant="ghost" size="icon" className="size-8 text-destructive" aria-label={tc('common.delete')} onClick={() => setDeleting(w)}><Trash2 /></Button></div> : null}

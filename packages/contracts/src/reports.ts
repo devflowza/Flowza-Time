@@ -64,6 +64,7 @@ export const dashboardSummarySchema = z.object({
   devicesOffline: z.number().int(),
   devicesUnknown: z.number().int(),
   syncFailures24h: z.number().int(),
+  /** Approvals waiting for the CALLER (their pending seats, or of somebody who delegates to them today) — the Approvals card's "mine" queue. */
   pendingApprovals: z.number().int(),
 });
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;
