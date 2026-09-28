@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { dayOfWeek } from '@flowza/shared';
-import { createApiHarness, domainEvents, isoToday, queueJobs, ROLE, seedEmployee, seedMembership, seedOrg, seedUser, uuid, type ApiHarness, type OrgFixture } from '../../test/features-harness.js';
+import { createApiHarness, domainEvents, isoToday, isoTodayIn, queueJobs, ROLE, seedEmployee, seedMembership, seedOrg, seedUser, uuid, type ApiHarness, type OrgFixture } from '../../test/features-harness.js';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
 let h: ApiHarness; let f: OrgFixture;
@@ -367,11 +367,11 @@ describe('statistics and the portal home', () => {
   });
 
   it('counts the recent days that need a reason once the organisation requires one, until one is given', async () => {
-    const days = { absent: isoToday(-3), late: isoToday(-2), present: isoToday(-1) };
+    const days = { absent: isoTodayIn('Asia/Muscat', -3), late: isoTodayIn('Asia/Muscat', -2), present: isoTodayIn('Asia/Muscat', -1) };
     await seedDay(e4, days.absent, 'ABSENT');
     await seedDay(e4, days.late, 'PRESENT', ['LATE']);
     await seedDay(e4, days.present, 'PRESENT');
-    await seedDay(e4, isoToday(0), 'ABSENT'); // today is still running: never counted
+    await seedDay(e4, isoTodayIn('Asia/Muscat', 0), 'ABSENT'); // the organisation's today is still running: never counted
     const setNotes = async (notes: { requireReasonForLate: boolean; requireReasonForAbsent: boolean }) => {
       const row = await h.admin.selectFrom('organizationSettings').select('attendance').where('organizationId', '=', f.orgId).executeTakeFirstOrThrow();
       const att = (typeof row.attendance === 'string' ? JSON.parse(row.attendance) : row.attendance ?? {}) as Record<string, unknown>;

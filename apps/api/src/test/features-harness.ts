@@ -172,3 +172,10 @@ export function isoToday(offsetDays = 0): string {
   const d = new Date(); d.setUTCDate(d.getUTCDate() + offsetDays);
   return d.toISOString().slice(0, 10);
 }
+
+/** Today in a time zone (the organisation's working day), shifted by whole days. Use it where "today" is the org's calendar day. */
+export function isoTodayIn(timeZone: string, offsetDays = 0): string {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
