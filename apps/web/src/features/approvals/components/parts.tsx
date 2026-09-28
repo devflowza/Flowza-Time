@@ -7,6 +7,7 @@ import { fmtDate } from '@/lib/format';
 import { CorrectionTypeBadge } from '@/features/attendance/components/badges';
 import { CorrectionSummary } from '@/features/attendance/components/record-dialog';
 import { modeText } from '../labels';
+import { CompOffApprovalContext } from '@/features/leave/components/comp-off-context';
 
 const STATUS_TONE: Record<string, 'warning' | 'success' | 'danger' | 'neutral'> = { PENDING: 'warning', APPROVED: 'success', REJECTED: 'danger', CANCELLED: 'neutral', INVALIDATED: 'neutral', SKIPPED: 'neutral' };
 
@@ -63,5 +64,7 @@ export function ApprovalContext({ context, timezone, compact = false }: { contex
       </div>
     );
   }
+  // leave v2: a comp-off credit request (the day worked, hours claimed vs recorded, days earned)
+  if (context.kind === 'COMP_OFF') return <CompOffApprovalContext c={context.compOff} compact={compact} />;
   return <p className="text-sm text-muted-foreground">{context.summary ?? t('context.noDetails')}</p>;
 }

@@ -92,9 +92,13 @@ describe('MyLeavePage', () => {
     expect(screen.getByText('3 of 30 days left')).toBeInTheDocument();
     expect(screen.getByText('2 days taken')).toBeInTheDocument();
     fireEvent.click(screen.getAllByRole('button', { name: /Withdraw/ })[0]!);
-    const dialog = await screen.findByRole('alertdialog').catch(() => screen.findByRole('dialog'));
-    fireEvent.click(within(dialog).getByRole('button', { name: /Withdraw/ }));
-    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/me/leave/l1/cancel'));
+    const dialog = await screen.findByRole('dialog');
+    // leave v2 (B-98): a withdrawal carries a reason for the approvers — the button waits for one
+    const confirm = within(dialog).getByRole('button', { name: /Withdraw/ });
+    expect(confirm).toBeDisabled();
+    fireEvent.change(within(dialog).getByLabelText(/Why are you withdrawing it/), { target: { value: 'Plans changed' } });
+    fireEvent.click(confirm);
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/me/leave/l1/withdraw', { reason: 'Plans changed' }));
   });
 });
 

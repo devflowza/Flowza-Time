@@ -12,7 +12,8 @@
     "security": "Security",
     "subscription": "Subscription",
     "reports": "Reports",
-    "dashboard": "Dashboard"
+    "dashboard": "Dashboard",
+    "leave": "Leave"
   },
   "orgStatus": {
     "trial": "Trial",

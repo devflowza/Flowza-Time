@@ -4,13 +4,13 @@ import { RequirePermission } from '@/components/layout/protected-route';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/settings.json';
 import ar from '@/locales/ar/settings.json';
-import { AttendanceSection, DashboardSection, GeneralSection, IntegrationsSection, NotificationsSection, PageFallback, RegionalSection, ReportsSection, SectionFallback, SecuritySection, SettingsLayout, SubscriptionSection, SyncSection } from './pages/lazy';
+import { AttendanceSection, DashboardSection, GeneralSection, IntegrationsSection, LeaveSection, NotificationsSection, PageFallback, RegionalSection, ReportsSection, SectionFallback, SecuritySection, SettingsLayout, SubscriptionSection, SyncSection } from './pages/lazy';
 
 registerNamespace('settings', en, ar);
 
 const section = (node: React.ReactNode) => <Suspense fallback={<SectionFallback />}>{node}</Suspense>;
 
-/** Routes for the settings feature: /settings/<general|dashboard|regional|attendance|sync|integrations|reports|notifications|security|subscription> */
+/** Routes for the settings feature: /settings/<general|dashboard|regional|attendance|sync|integrations|reports|notifications|security|subscription|leave> */
 export const settingsRoutes: RouteObject[] = [
   {
     path: 'settings',
@@ -28,6 +28,7 @@ export const settingsRoutes: RouteObject[] = [
       { path: 'notifications', element: section(<NotificationsSection />) },
       { path: 'security', element: section(<SecuritySection />) },
       { path: 'subscription', element: section(<SubscriptionSection />) },
+      { path: 'leave', element: section(<LeaveSection />) },
     ],
   },
 ];

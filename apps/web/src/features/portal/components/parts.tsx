@@ -2,17 +2,13 @@ import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { UserX } from 'lucide-react';
 import type { SelfLeaveBalanceDto } from '@flowza/contracts';
-import { Badge, EmptyState } from '@/components/ui';
+import { EmptyState } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useEmployeeId } from '@/features/me/use-me';
 import { balanceShares, fmtDays } from '../model';
 
-const LEAVE_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = { APPROVED: 'success', PENDING: 'warning', REJECTED: 'danger', CANCELLED: 'neutral' };
-
-export function LeaveStatusBadge({ status }: { status: string }) {
-  const { t } = useTranslation('leave');
-  return <Badge variant={LEAVE_TONE[status] ?? 'neutral'} dot>{t(`status.${status}`, { defaultValue: status })}</Badge>;
-}
+// one colour per leave status everywhere (INFO_REQUESTED indigo): the leave feature owns the badge
+export { LeaveStatusBadge } from '@/features/leave/components/leave-status';
 
 /** The leave type's own colour; types without one fall back to a neutral token. */
 export function TypeDot({ color, className }: { color: string | null | undefined; className?: string }) {
