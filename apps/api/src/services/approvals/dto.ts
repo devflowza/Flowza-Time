@@ -6,11 +6,13 @@ import { isoDateTime, isoDateTimeOrNull, jsonObject, numberOrNull } from '../../
 import type { Actor } from '../../lib/service.js';
 import { withSystemScope } from '../../lib/service.js';
 import { loadDelegationMap } from './context.js';
-import { approvalToday, approvePermissionFor, assessDecider, canBypass, canCancel, decideViaOf, hookFor, isRequestSubject, viewPermissionFor } from './engine.js';
+import { approvalToday, approvePermissionFor, assessDecider, canBypass, canCancel, decideViaOf, hookFor, isPrimarySubject, isRequestSubject, viewPermissionFor } from './engine.js';
 
 type RequestRow = {
   id: string; organizationId: string; workflowId: string | null; entityType: ApprovalEntity; entityId: string; branchId: string | null; departmentId: string | null; employeeId: string | null; units: string | number | null;
   currentStep: number; status: string; requestedBy: string | null; subjectUserId: string | null; infoRequestedAt: Date | null; completedAt: Date | null; decidedBy: string | null; cancelReason: string | null; invalidationReason: string | null; createdAt: Date; updatedAt: Date;
+  /** Other people the request is about (HR portal Prompt 4 review, P0-2); absent on rows of an older schema. */
+  coSubjectEmployeeIds?: string[] | null; coSubjectUserIds?: string[] | null;
 };
 type StepRow = {
   id: string; requestId: string; stepNo: number; approverType: ApproverType; approverRoleId: string | null; approverUserId: string | null; permissionKey: string | null; mode: string; requiredCount: number | null; status: string;
@@ -81,7 +83,7 @@ export async function hydrateRequests(trx: Trx, actor: Actor, grant: MembershipG
       const context: ApprovalContextDto = contexts.get(`${r.entityType}:${r.entityId}`) ?? { kind: 'GENERIC', entityType: r.entityType, summary: null };
       const pending = r.status === 'PENDING';
       // the same rule the engine applies to a decision (review P0-1): the UI never offers a button the API refuses
-      const check = assessDecider({ grant, userId: actor.userId, request: { entityType: r.entityType, requestedBy: r.requestedBy, subjectUserId: r.subjectUserId, employeeId: r.employeeId, branchId: r.branchId }, stepActors: current?.actors.map((a) => ({ userId: a.userId, viaDelegationOf: a.viaDelegationOf, onBehalfOfUserId: a.onBehalfOfUserId, resolutionPath: a.resolutionPath, decision: a.decision })) ?? [], delegators: delegatorsByType.get(r.entityType) ?? new Set() });
+      const check = assessDecider({ grant, userId: actor.userId, request: { entityType: r.entityType, requestedBy: r.requestedBy, subjectUserId: r.subjectUserId, employeeId: r.employeeId, branchId: r.branchId, coSubjectEmployeeIds: r.coSubjectEmployeeIds ?? null, coSubjectUserIds: r.coSubjectUserIds ?? null }, stepActors: current?.actors.map((a) => ({ userId: a.userId, viaDelegationOf: a.viaDelegationOf, onBehalfOfUserId: a.onBehalfOfUserId, resolutionPath: a.resolutionPath, decision: a.decision })) ?? [], delegators: delegatorsByType.get(r.entityType) ?? new Set() });
       const levelOpen = pending && current?.status === 'PENDING';
       const canDecide = levelOpen && check.ok && !check.alreadyDecided;
       const isOwner = grant.roleKey === 'owner';
@@ -92,7 +94,7 @@ export async function hydrateRequests(trx: Trx, actor: Actor, grant: MembershipG
         canReassign: pending && (hasPermission(grant, 'approval.manage') || isOwner) && !check.branchBlocked && (isOwner || !involved),
         canBypass: pending && canBypass(grant, actor.userId, r),
         canRequestInfo: levelOpen && !!check.via && check.sodBlocked === null && !(check.override && check.branchBlocked),
-        canAnswerInfo: pending && !!r.infoRequestedAt && (r.requestedBy === actor.userId || isRequestSubject(grant, actor.userId, r)),
+        canAnswerInfo: pending && !!r.infoRequestedAt && (r.requestedBy === actor.userId || isPrimarySubject(grant, actor.userId, r)),
         actingAsDelegateOf: check.via === 'delegate' ? check.delegateOf : null,
         decideVia: canDecide ? decideViaOf(check) : null,
         // the engine's rule: an override / escalated decision on an ALL / QUORUM level with several seats waiting names its seat

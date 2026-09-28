@@ -189,3 +189,57 @@ describe('resolveStepActors — segregation of duties', () => {
     expect(resolveStepActors(step({ approverType: 'ROLE', roleId: 'role-hr', mode: 'ALL' }), ctx()).requiredCount).toBeNull();
   });
 });
+
+/**
+ * HR portal Prompt 4 review, P0-2: the colleague on the other side of a shift swap is a CO-SUBJECT of the request. They never
+ * decide it, whichever rung of the ladder they sit on (primary / secondary manager, HR admin, role, delegate); the rung falls
+ * through to the next one; the owner exception applies to them exactly as to the subject.
+ */
+describe('resolveStepActors — co-subjects (4-P0-2)', () => {
+  const colleague = { employeeId: 'e-colleague', userId: 'u-colleague' };
+  const withColleague = (over: Partial<ResolutionContext> = {}) => ctx({ coSubjectEmployeeIds: [colleague.employeeId], coSubjectUserIds: [colleague.userId], activeUserIds: new Set([...Object.values(U), colleague.userId]), ...over });
+
+  it('4-P0-2 the swapped colleague is never seated as the primary manager: the secondary manager stands in', () => {
+    const r = resolveStepActors(step(), withColleague({ chain: [{ primary: cand(colleague.userId, colleague.employeeId), secondary: cand(U.secondary) }] }));
+    expect(users(r)).toEqual([U.secondary]);
+    expect(r.path).toBe('secondary');
+    expect(r.reason).toMatch(/party to the request/);
+  });
+  it('4-P0-2 the swapped colleague is never seated as the secondary stand-in: the ladder falls through to the HR admins', () => {
+    const r = resolveStepActors(step(), withColleague({ chain: [{ primary: cand(null), secondary: cand(colleague.userId, colleague.employeeId) }] }));
+    expect(users(r)).toEqual([U.hr1, U.hr2]);
+    expect(r.path).toBe('hr_admin');
+  });
+  it('4-P0-2 a colleague linked by login only (another employee record) is still recognised, and no delegate acts in their seat', () => {
+    const byLogin = resolveStepActors(step(), withColleague({ chain: [{ primary: cand(colleague.userId, 'e-other-record'), secondary: null }], delegateOf: (u) => (u === colleague.userId ? U.delegate : null) }));
+    expect(users(byLogin)).toEqual([U.hr1, U.hr2]);
+    // an absent colleague-manager whose delegate would normally stand in: still nobody in their seat
+    const absent = resolveStepActors(step(), withColleague({ chain: [{ primary: cand(colleague.userId, colleague.employeeId, true, 'on approved leave'), secondary: null }], delegateOf: (u) => (u === colleague.userId ? U.delegate : null) }));
+    expect(users(absent)).not.toContain(U.delegate);
+    expect(users(absent)).toEqual([U.hr1, U.hr2]);
+  });
+  it('4-P0-2 the colleague is dropped from HR admins, roles and permission holders — and so is anybody acting as their delegate', () => {
+    const hr = resolveStepActors(step({ approverType: 'HR_ADMIN' }), withColleague({ hrAdminUserIds: [colleague.userId, U.hr1] }));
+    expect(users(hr)).toEqual([U.hr1]);
+    expect(hr.reason).toMatch(/party to the request excluded/);
+    const delegateOfColleague = resolveStepActors(step({ approverType: 'HR_ADMIN' }), withColleague({ hrAdminUserIds: [U.hr1], delegateOf: (u) => (u === U.hr1 ? colleague.userId : null) }));
+    expect(delegateOfColleague.actors).toEqual([{ userId: U.hr1, viaDelegationOf: null }]);
+    const perm = resolveStepActors(step({ approverType: 'ROLE', permission: 'leave.approve' }), withColleague({ permissionHolderUserIds: () => [colleague.userId, U.manager] }));
+    expect(users(perm)).toEqual([U.manager]);
+  });
+  it('4-P0-2 only HR admins who are the colleague: the owner decides; a colleague who is the only owner is kept as the owner of last resort', () => {
+    const onlyColleague = resolveStepActors(step({ approverType: 'HR_ADMIN' }), withColleague({ hrAdminUserIds: [colleague.userId] }));
+    expect(users(onlyColleague)).toEqual([U.owner]);
+    const ownerIsColleague = resolveStepActors(step({ approverType: 'HR_ADMIN' }), withColleague({ hrAdminUserIds: [], ownerUserIds: [colleague.userId] }));
+    expect(users(ownerIsColleague)).toEqual([colleague.userId]);
+    expect(ownerIsColleague.path).toBe('owner');
+    expect(ownerIsColleague.reason).toMatch(/party to the request kept/);
+    // another owner exists: that owner decides
+    const twoOwners = resolveStepActors(step({ approverType: 'HR_ADMIN' }), withColleague({ hrAdminUserIds: [], ownerUserIds: [colleague.userId, U.owner] }));
+    expect(users(twoOwners)).toEqual([U.owner]);
+  });
+  it('4-P0-2 without co-subjects nothing changes (the colleague as manager is seated when the request is not about them)', () => {
+    const r = resolveStepActors(step(), ctx({ chain: [{ primary: cand(colleague.userId, colleague.employeeId), secondary: cand(U.secondary) }], activeUserIds: new Set([...Object.values(U), colleague.userId]) }));
+    expect(users(r)).toEqual([colleague.userId]);
+  });
+});

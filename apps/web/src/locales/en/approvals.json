@@ -184,7 +184,8 @@
     "escalated": "Escalated — the level was overdue",
     "reminded": "Reminder sent",
     "unknown": "Updated",
-    "bypassed": "Approved as an exception — the open levels were skipped"
+    "bypassed": "Approved as an exception — the open levels were skipped",
+    "system_rejected": "Rejected automatically — it can no longer be approved"
   },
   "info": {
     "askTitle": "Ask for information",

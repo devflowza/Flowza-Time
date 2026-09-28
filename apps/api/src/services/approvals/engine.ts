@@ -33,6 +33,14 @@ export interface SubmitInput {
    * request at once whatever the workflows say; the hook sees `notRequired` (nobody decided).
    */
   notRequired?: boolean;
+  /**
+   * Other employees the request is ABOUT besides `employeeId` (HR portal Prompt 4 review, P0-2 — the colleague on the other
+   * side of a shift swap). Persisted on the request with every login linked to them; segregation of duties treats them
+   * exactly like the subject: the resolver drops them from every rung (the rung falls through to the next), and they may
+   * not decide, bypass, ask for information on, be reassigned or withdraw the request on anybody's behalf (the owner
+   * excepted, logged).
+   */
+  coSubjectEmployeeIds?: readonly string[];
 }
 export interface SubmitResult { requestId: string; status: 'PENDING' | 'APPROVED'; autoApproved: boolean; stepCount: number; firstStepActorIds: string[] }
 
@@ -64,6 +72,12 @@ export interface DecideOutcome {
   via?: ApprovalDecideVia;
   /** The seat an override / escalated decision filled. */
   onBehalfOfUserId?: string | null;
+  /**
+   * The entity refused the approval (its hook's `approvalBlocker`, e.g. a swap whose colleague left — review P2-11): the
+   * request was REJECTED BY THE SYSTEM with this reason, committed with the caller's transaction. The HTTP layer answers
+   * 409 with the reason after the commit (`assertNotSystemRejected`).
+   */
+  systemRejected?: { reason: string };
 }
 
 type ActorRowLite = { userId: string; viaDelegationOf: string | null; decision: string; resolutionPath?: string | null; onBehalfOfUserId?: string | null };
@@ -88,10 +102,27 @@ export interface DeciderAssessment {
   alreadyDecided: boolean;
 }
 
-/** The person a request is about: the CURRENT link between the caller's membership and the subject employee, or the login snapshot taken at submit (review P0-4). */
-export function isRequestSubject(grant: MembershipGrant, userId: string, request: { employeeId: string | null; subjectUserId: string | null }): boolean {
+/** What segregation of duties needs to know about who a request is about. */
+export interface RequestParties { employeeId: string | null; subjectUserId: string | null; coSubjectEmployeeIds?: readonly string[] | null; coSubjectUserIds?: readonly string[] | null }
+
+/** The PRIMARY person a request is about: the CURRENT link between the caller's membership and the subject employee, or the login snapshot taken at submit (review P0-4). */
+export function isPrimarySubject(grant: MembershipGrant, userId: string, request: Pick<RequestParties, 'employeeId' | 'subjectUserId'>): boolean {
   return (!!grant.employeeId && !!request.employeeId && grant.employeeId === request.employeeId) || (!!request.subjectUserId && request.subjectUserId === userId);
 }
+
+/**
+ * A person a request is about — its subject OR one of its co-subjects (HR portal Prompt 4 review, P0-2: the colleague of a
+ * shift swap), by the caller's CURRENT employee link or the logins snapshotted at submit. Nobody the request is about decides
+ * it, bypasses it, asks for information on it or withdraws it on another's behalf; the owner is the one exception (logged).
+ */
+export function isRequestSubject(grant: MembershipGrant, userId: string, request: RequestParties): boolean {
+  if (isPrimarySubject(grant, userId, request)) return true;
+  if (grant.employeeId && request.coSubjectEmployeeIds?.includes(grant.employeeId)) return true;
+  return !!request.coSubjectUserIds?.includes(userId);
+}
+
+/** The co-subject columns of a request row, for the SoD checks (absent on rows read before the columns existed). */
+const partiesOf = (r: { coSubjectEmployeeIds?: string[] | null; coSubjectUserIds?: string[] | null }) => ({ coSubjectEmployeeIds: r.coSubjectEmployeeIds ?? null, coSubjectUserIds: r.coSubjectUserIds ?? null });
 
 const isDecided = (decision: string) => decision === 'APPROVED' || decision === 'REJECTED';
 /** An escalated approver who has not decided yet is an extra hand, not a seat of the level (the domain's rule). */
@@ -110,7 +141,7 @@ const isExtraHand = (r: ActorRowLite) => isExtraHandRow(r);
 export function assessDecider(params: {
   grant: MembershipGrant; userId: string;
   /** `allowSelfApproval` is accepted and ignored: self-approval is not configurable (review P0-3). */
-  request: { entityType: ApprovalEntity; requestedBy: string | null; subjectUserId: string | null; employeeId: string | null; branchId: string | null; allowSelfApproval?: boolean };
+  request: { entityType: ApprovalEntity; requestedBy: string | null; subjectUserId: string | null; employeeId: string | null; branchId: string | null; coSubjectEmployeeIds?: readonly string[] | null; coSubjectUserIds?: readonly string[] | null; allowSelfApproval?: boolean };
   stepActors: readonly ActorRowLite[];
   /** Approvers who delegate to the caller today (entity type already applied). */
   delegators: ReadonlySet<string>;
@@ -281,6 +312,29 @@ async function completeRejected(deps: ApiDeps, t: Trx, actor: Actor, orgId: stri
   await emitTargeted(t, orgId, 'approval.decided', req.id, decisionRecipients(req, actor.userId), { ...payload, decision: 'REJECTED', comment, decidedBy: actor.userId }, actor);
 }
 
+/**
+ * The entity refused an approval (its hook's `approvalBlocker` — HR portal Prompt 4 review, P2-11): the request is REJECTED BY
+ * THE SYSTEM with the reason — every open level skipped, nobody recorded as the decider, the hook's onRejected run with the
+ * reason (the document closes with it), the requester, the subject and the approvers still waiting told. The person whose
+ * approval triggered it is on the timeline as `attemptedBy`.
+ */
+async function completeSystemRejected(deps: ApiDeps, t: Trx, actor: Actor, orgId: string, req: RequestRow, steps: LoadedStep[], reason: string, detail: Record<string, unknown>): Promise<void> {
+  const now = new Date();
+  const waiting = (steps.find((s) => s.stepNo === req.currentStep)?.actors ?? []).filter((a) => a.decision === 'PENDING').map((a) => a.userId);
+  await skipPending(t, steps.filter((s) => s.status === 'PENDING').map((s) => s.id), `rejected by the system: ${reason}`);
+  await t.updateTable('approvalRequests').set({ status: 'REJECTED', completedAt: now, decidedBy: null, infoRequestedAt: null }).where('id', '=', req.id).execute();
+  await recordEvent(t, orgId, req.id, 'system_rejected', null, { ...detail, reason, attemptedBy: actor.userId });
+  await hookFor(req.entityType)?.onRejected(deps, t, { ...hookCtx(orgId, req, actor, reason, false, { ...detail, systemRejected: true }), system: true });
+  const payload = await requestPayload(t, orgId, req);
+  await emitTargeted(t, orgId, 'approval.decided', req.id, [...decisionRecipients(req, actor.userId), ...waiting.filter((u) => u !== actor.userId)], { ...payload, decision: 'REJECTED', comment: reason, decidedBy: null, system: true }, actor);
+}
+
+/** After the caller's transaction committed: an approval the entity refused (review P2-11) answers 409 with the system's reason. */
+export function assertNotSystemRejected(outcome: { requestId: string; systemRejected?: { reason: string } | undefined }): void {
+  if (!outcome.systemRejected) return;
+  throw new AppError('INVALID_STATE', `This request can no longer be approved and was rejected automatically: ${outcome.systemRejected.reason}`, { details: { reason: 'SYSTEM_REJECTED', systemReason: outcome.systemRejected.reason, requestId: outcome.requestId, status: 'REJECTED' } });
+}
+
 /** Make `next` the current step: activation time, escalation deadline, notification of its approvers. */
 export async function activateStep(t: Trx, orgId: string, req: { id: string; entityType: ApprovalEntity; entityId: string; employeeId: string | null; requestedBy: string | null }, next: LoadedStep, actor: { userId: string | null; requestId: string | null }, now = new Date()): Promise<void> {
   const dueAt = escalationDueAt({ escalateAfterHours: next.escalateAfterHours, escalateTo: next.escalateTo }, now);
@@ -310,10 +364,15 @@ export async function submit(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
     const row = workflow ? workflows.find((w) => w.id === workflow.id)! : null;
     const base = { organizationId: orgId, workflowId: row?.id ?? null, entityType: input.entityType, entityId: input.entityId, branchId: input.branchId, employeeId: input.employeeId, departmentId: input.departmentId ?? null, units: input.units ?? null, requestedBy: input.requestedBy };
     const subjectUserId = input.employeeId ? (await t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', input.employeeId).where('status', '=', 'active').orderBy('createdAt').orderBy('userId').executeTakeFirst())?.userId ?? null : null;
+    // co-subjects (review P0-2): their employee ids and EVERY login linked to them (any membership status — an exclusion
+    // list: a suspended login re-activated later is still the colleague)
+    const coSubjectEmployeeIds = [...new Set((input.coSubjectEmployeeIds ?? []).filter((id) => !!id && id !== input.employeeId))].sort();
+    const coSubjectUserIds = coSubjectEmployeeIds.length ? [...new Set((await t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', 'in', coSubjectEmployeeIds).execute()).map((m) => m.userId))].sort() : [];
+    const parties = coSubjectEmployeeIds.length ? { coSubjectEmployeeIds, coSubjectUserIds } : {};
 
     if (input.notRequired || (!row && input.noWorkflow.kind === 'AUTO_APPROVE')) {
       const now = new Date();
-      const req = await t.insertInto('approvalRequests').values({ ...base, workflowId: input.notRequired ? null : base.workflowId, subjectUserId, currentStep: 1, status: 'APPROVED', completedAt: now, decidedBy: input.notRequired ? null : actor.userId }).returningAll().executeTakeFirstOrThrow();
+      const req = await t.insertInto('approvalRequests').values({ ...base, ...parties, workflowId: input.notRequired ? null : base.workflowId, subjectUserId, currentStep: 1, status: 'APPROVED', completedAt: now, decidedBy: input.notRequired ? null : actor.userId }).returningAll().executeTakeFirstOrThrow();
       await recordEvent(t, orgId, req.id, 'auto_approved', actor.userId, { reason: input.notRequired ? 'no approval required for this item' : 'no workflow configured for this entity type' });
       await hookFor(input.entityType)?.onApproved(deps, t, { ...hookCtx(orgId, req, actor, null, true), notRequired: input.notRequired ?? false });
       return { requestId: req.id, status: 'APPROVED', autoApproved: true, stepCount: 0, firstStepActorIds: [] };
@@ -321,14 +380,14 @@ export async function submit(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
     const steps: ApprovalStepSpec[] = row ? parseWorkflowSteps(row.steps)
       : input.noWorkflow.kind === 'MANAGER' ? [{ order: 1, approverType: 'MANAGER', mode: 'ANY' }]
       : [{ order: 1, approverType: 'ROLE', permission: input.noWorkflow.kind === 'PERMISSION' ? input.noWorkflow.permission : 'attendance.approve', mode: 'ANY' }];
-    const ctx = await buildResolutionContext(t, orgId, { employeeId: input.employeeId, branchId: input.branchId, requestedBy: input.requestedBy, entityType: input.entityType, viewPermission: viewPermissionFor(input.entityType), today });
+    const ctx = await buildResolutionContext(t, orgId, { employeeId: input.employeeId, branchId: input.branchId, requestedBy: input.requestedBy, entityType: input.entityType, viewPermission: viewPermissionFor(input.entityType), today, coSubjectEmployeeIds, coSubjectUserIds });
     const resolved = steps.map((spec) => ({ spec, res: resolveStepActors(spec, ctx) }));
     resolved.forEach(({ spec, res }, i) => {
       if (res.unresolved) throw errors.validation(`Approval workflow level ${i + 1} has no eligible approver (${res.reason ?? 'nobody resolved'}). Ask HR to check the reporting line or the workflow.`);
       if (spec.mode === 'QUORUM' && (res.requiredCount ?? 1) > res.seatCount) throw errors.validation(`Approval workflow level ${i + 1} requires ${res.requiredCount} approvals but only ${res.seatCount} approver(s) resolved.`);
     });
     const now = new Date();
-    const req = await t.insertInto('approvalRequests').values({ ...base, subjectUserId, currentStep: 1, status: 'PENDING' }).returningAll().executeTakeFirstOrThrow();
+    const req = await t.insertInto('approvalRequests').values({ ...base, ...parties, subjectUserId, currentStep: 1, status: 'PENDING' }).returningAll().executeTakeFirstOrThrow();
     let firstActors: ResolvedActor[] = [];
     let firstStepId: string | null = null;
     for (const [i, { spec, res }] of resolved.entries()) {
@@ -375,7 +434,7 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
     const step = steps.find((s) => s.stepNo === req.currentStep && s.status === 'PENDING');
     if (!step) throw errors.invalidState('The request has no pending step.');
     const delegators = await delegatorsOf(t, orgId, req.entityType, actor.userId);
-    const check = assessDecider({ grant, userId: actor.userId, request: { entityType: req.entityType, requestedBy: req.requestedBy, subjectUserId: req.subjectUserId, employeeId: req.employeeId, branchId: req.branchId }, stepActors: step.actors, delegators });
+    const check = assessDecider({ grant, userId: actor.userId, request: { entityType: req.entityType, requestedBy: req.requestedBy, subjectUserId: req.subjectUserId, employeeId: req.employeeId, branchId: req.branchId, ...partiesOf(req) }, stepActors: step.actors, delegators });
     const base = { requestId: req.id, stepNo: step.stepNo, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId };
     if (check.sodBlocked === 'subject') throw errors.forbidden('Self-approval is not permitted: this request is about you.');
     if (check.sodBlocked === 'requester') throw errors.forbidden('You cannot approve or reject your own request; cancel it instead.');
@@ -400,6 +459,15 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
       } else {
         target = open[0] ?? null;
         if (!target) throw errors.invalidState('Every approver of this level has already decided.');
+      }
+    }
+    // the entity may refuse the approval outright (review P2-11: a swap whose colleague is no longer employed that day) — only
+    // for an authorised decider (every check above passed): the request is then rejected by the system, never approved
+    if (input.decision === 'APPROVE') {
+      const blocker = await hookFor(req.entityType)?.approvalBlocker?.(deps, t, hookCtx(orgId, req, actor, comment));
+      if (blocker) {
+        await completeSystemRejected(deps, t, actor, orgId, req, steps, blocker, { stepNo: step.stepNo, attemptedDecision: 'APPROVED' });
+        return { ...base, status: 'REJECTED', noop: false, terminal: true, systemRejected: { reason: blocker } };
       }
     }
     const now = new Date();
@@ -461,6 +529,10 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
     await completeApproved(deps, t, actor, orgId, req, comment, eventDetail);
     return { ...base, status: 'APPROVED', noop: false, terminal: true, via, onBehalfOfUserId };
   });
+  if (outcome.systemRejected) {
+    await audit(trx, actor, orgId, 'approval.system_rejected', 'approval_request', { entityId: requestId, branchId: outcome.branchId, reason: outcome.systemRejected.reason, newValue: { stepNo: outcome.stepNo, entityType: outcome.entityType, entityId: outcome.entityId, attemptedDecision: input.decision, viaEmailToken: input.viaEmailToken ?? false } });
+    return outcome;
+  }
   if (!outcome.noop) {
     const action = input.decision === 'APPROVE' ? (outcome.status === 'APPROVED' ? 'approval.approved' : 'approval.step_approved') : (outcome.terminal ? 'approval.rejected' : 'approval.step_rejected');
     const detail = { stepNo: outcome.stepNo, comment, entityType: outcome.entityType, entityId: outcome.entityId, viaEmailToken: input.viaEmailToken ?? false, via: outcome.via ?? null, onBehalfOfUserId: outcome.onBehalfOfUserId ?? null, ownerBypass: bypassed };
@@ -488,10 +560,13 @@ export async function bulkDecide(deps: ApiDeps, actor: Actor, orgId: string, inp
     seen.add(item.requestId);
     try {
       const out = await runUser(deps.db, actor, (trx) => decideWithin(deps, trx, actor, orgId, item.requestId, { stepNo: item.stepNo, decision: input.decision, comment: input.comment, ...(item.onBehalfOfUserId ? { onBehalfOfUserId: item.onBehalfOfUserId } : {}) }));
+      assertNotSystemRejected(out);
       results.push({ requestId: item.requestId, ok: true, status: out.status as ApprovalRequestStatus, noop: out.noop, code: null, message: null });
     } catch (err) {
       if (!(err instanceof AppError)) throw err;
-      results.push({ requestId: item.requestId, ok: false, status: null, noop: false, code: err.code, message: err.message });
+      // a request the system rejected instead (review P2-11) did change: say so with its new status
+      const systemRejected = err.details?.['reason'] === 'SYSTEM_REJECTED';
+      results.push({ requestId: item.requestId, ok: false, status: systemRejected ? 'REJECTED' : null, noop: false, code: err.code, message: err.message });
     }
   }
   const succeeded = results.filter((r) => r.ok).length;
@@ -500,7 +575,7 @@ export async function bulkDecide(deps: ApiDeps, actor: Actor, orgId: string, inp
 
 // ----- cancel / invalidate / reassign / info ------------------------------------------------------------------------------------
 
-export interface CloseOutcome { requestId: string; entityType: ApprovalEntity; entityId: string; branchId: string | null; status: string }
+export interface CloseOutcome { requestId: string; entityType: ApprovalEntity; entityId: string; branchId: string | null; status: string; /** An exception approval the entity refused (review P2-11): rejected by the system instead. */ systemRejected?: { reason: string } }
 
 /** The reason stored when an internal caller withdraws without one (the HTTP route always requires one — Finance B-98). */
 export const DEFAULT_WITHDRAW_REASON = 'Withdrawn by the requester';
@@ -553,7 +628,7 @@ export async function invalidateForEntity(t: Trx, actor: Actor, orgId: string, e
  * (branch scope applies). An approver who is only seated on it cannot withdraw it, and the person a request is about but
  * did not file (HR recorded it for them) cannot withdraw it either — the owner excepted (logged).
  */
-export function canCancel(grant: MembershipGrant, userId: string, req: { entityType: ApprovalEntity; requestedBy: string | null; subjectUserId: string | null; employeeId: string | null; branchId: string | null }): boolean {
+export function canCancel(grant: MembershipGrant, userId: string, req: { entityType: ApprovalEntity; requestedBy: string | null; subjectUserId: string | null; employeeId: string | null; branchId: string | null; coSubjectEmployeeIds?: readonly string[] | null; coSubjectUserIds?: readonly string[] | null }): boolean {
   if (req.requestedBy === userId) return true;
   const isOwner = grant.roleKey === 'owner';
   if (isRequestSubject(grant, userId, req) && !isOwner) return false;
@@ -603,6 +678,8 @@ export async function reassignRequest(deps: ApiDeps, trx: Trx, actor: Actor, org
     if (!member) throw errors.validation('The new approver is not an active member of this organisation.', { userId: input.userId });
     if (input.userId === req.requestedBy) throw errors.validation('The person who filed the request cannot be its approver.', { issues: [{ path: 'userId', message: 'The requester' }] });
     if (input.userId === req.subjectUserId || (!!member.employeeId && member.employeeId === req.employeeId)) throw errors.validation('The person a request is about cannot be its approver.', { issues: [{ path: 'userId', message: 'The subject' }] });
+    // the request's other parties (a swap's colleague — review P0-2) never approve it either
+    if (req.coSubjectUserIds?.includes(input.userId) || (!!member.employeeId && !!req.coSubjectEmployeeIds?.includes(member.employeeId))) throw errors.validation('A person this request is about cannot be its approver.', { issues: [{ path: 'userId', message: 'A party to the request' }] });
     const seatRows = step.actors.filter((a) => !isExtraHand(a));
     // their own decision at this level, or their seat already decided for them (a delegate, an override): it stands
     const decidedHere = step.actors.some((a) => a.userId === input.userId && isDecided(a.decision)) || seatRows.some((a) => seatOfRow(a) === input.userId && isDecided(a.decision));
@@ -629,11 +706,11 @@ export async function reassignRequest(deps: ApiDeps, trx: Trx, actor: Actor, org
  * request they filed or that is about them (current membership link or submit-time snapshot) — except the owner, which is
  * logged.
  */
-export function canBypass(grant: MembershipGrant, userId: string, req: { requestedBy: string | null; subjectUserId: string | null; branchId: string | null; employeeId?: string | null }): boolean {
+export function canBypass(grant: MembershipGrant, userId: string, req: { requestedBy: string | null; subjectUserId: string | null; branchId: string | null; employeeId?: string | null; coSubjectEmployeeIds?: readonly string[] | null; coSubjectUserIds?: readonly string[] | null }): boolean {
   const isOwner = grant.roleKey === 'owner';
   if (!isOwner && !hasPermission(grant, 'approval.manage')) return false;
   if (!grant.allBranches && req.branchId && !grant.branchIds.includes(req.branchId)) return false;
-  return isOwner || (!isRequestSubject(grant, userId, { employeeId: req.employeeId ?? null, subjectUserId: req.subjectUserId }) && req.requestedBy !== userId);
+  return isOwner || (!isRequestSubject(grant, userId, { employeeId: req.employeeId ?? null, subjectUserId: req.subjectUserId, coSubjectEmployeeIds: req.coSubjectEmployeeIds ?? null, coSubjectUserIds: req.coSubjectUserIds ?? null }) && req.requestedBy !== userId);
 }
 
 /**
@@ -654,6 +731,12 @@ export async function bypassRequest(deps: ApiDeps, trx: Trx, actor: Actor, orgId
       await recordOwnerBypass(t, actor, orgId, req, { stepNo: req.currentStep, decision: 'APPROVED', exception: true });
     }
     const steps = await loadSteps(t, req.id);
+    // an exception approval is still an approval: the entity may refuse it (review P2-11) — rejected by the system instead
+    const blocker = await hookFor(req.entityType)?.approvalBlocker?.(deps, t, hookCtx(orgId, req, actor, reason));
+    if (blocker) {
+      await completeSystemRejected(deps, t, actor, orgId, req, steps, blocker, { stepNo: req.currentStep, attemptedDecision: 'APPROVED', exception: true });
+      return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: 'REJECTED', systemRejected: { reason: blocker } };
+    }
     const open = steps.filter((s) => s.status === 'PENDING');
     const waiting = [...new Set(open.filter((s) => s.stepNo === req.currentStep).flatMap((s) => s.actors.filter((a) => a.decision === 'PENDING').map((a) => a.userId)))];
     await skipPending(t, open.map((s) => s.id), `approved as an exception: ${reason}`);
@@ -665,6 +748,10 @@ export async function bypassRequest(deps: ApiDeps, trx: Trx, actor: Actor, orgId
     await emitTargeted(t, orgId, 'approval.decided', req.id, decisionRecipients(req, actor.userId), { ...payload, decision: 'APPROVED', comment: reason, decidedBy: actor.userId, exception: true }, actor);
     return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: 'APPROVED' };
   });
+  if (out.systemRejected) {
+    await audit(trx, actor, orgId, 'approval.system_rejected', 'approval_request', { entityId: requestId, branchId: out.branchId, reason: out.systemRejected.reason, newValue: { entityType: out.entityType, entityId: out.entityId, attemptedDecision: 'APPROVE', exception: true } });
+    return out;
+  }
   await audit(trx, actor, orgId, 'approval.bypassed', 'approval_request', { entityId: requestId, branchId: out.branchId, reason, newValue: { entityType: out.entityType, entityId: out.entityId } });
   return out;
 }
@@ -681,7 +768,7 @@ export async function requestInfo(deps: ApiDeps, trx: Trx, actor: Actor, orgId: 
     const steps = await loadSteps(t, req.id);
     const step = steps.find((s) => s.stepNo === req.currentStep && s.status === 'PENDING');
     const delegators = await delegatorsOf(t, orgId, req.entityType, actor.userId);
-    const check = assessDecider({ grant, userId: actor.userId, request: { entityType: req.entityType, requestedBy: req.requestedBy, subjectUserId: req.subjectUserId, employeeId: req.employeeId, branchId: req.branchId }, stepActors: step?.actors ?? [], delegators });
+    const check = assessDecider({ grant, userId: actor.userId, request: { entityType: req.entityType, requestedBy: req.requestedBy, subjectUserId: req.subjectUserId, employeeId: req.employeeId, branchId: req.branchId, ...partiesOf(req) }, stepActors: step?.actors ?? [], delegators });
     if (check.sodBlocked === 'subject') throw errors.forbidden('You cannot ask for information on a request about you.');
     if (check.sodBlocked === 'requester') throw errors.forbidden('You filed this request; answer questions on it instead of asking them.');
     if (!check.via || (check.override && check.branchBlocked)) throw errors.forbidden('You are not an approver of the current step.');
@@ -706,7 +793,8 @@ export async function answerInfo(deps: ApiDeps, trx: Trx, actor: Actor, orgId: s
   const out = await systemStep(trx, orgId, async (t) => {
     const req = await lockRequest(t, orgId, requestId);
     if (req.status !== 'PENDING') throw errors.invalidState(`The request is already ${req.status}.`);
-    if (req.requestedBy !== actor.userId && !isRequestSubject(grant, actor.userId, req)) throw errors.forbidden('Only the requester or the person concerned can answer.');
+    // the requester or the PRIMARY subject answers; a co-subject (a swap's colleague) is not the one being asked
+    if (req.requestedBy !== actor.userId && !isPrimarySubject(grant, actor.userId, req)) throw errors.forbidden('Only the requester or the person concerned can answer.');
     if (!req.infoRequestedAt) throw errors.invalidState('No question is waiting for an answer on this request.');
     const steps = await loadSteps(t, req.id);
     const step = steps.find((s) => s.stepNo === req.currentStep && s.status === 'PENDING');

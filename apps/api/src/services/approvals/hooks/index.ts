@@ -35,6 +35,11 @@ export interface HookContext {
    * a hook records no approver.
    */
   notRequired?: boolean;
+  /**
+   * The request was closed by the SYSTEM (HR portal Prompt 4 review, P2-11: the entity's `approvalBlocker` refused an
+   * approval): nobody decided — `actor` is the person whose approval attempt triggered it, `comment` the system's reason.
+   */
+  system?: boolean;
 }
 
 /**
@@ -61,6 +66,12 @@ export interface EntityHook {
    * comp-off, attendance.correct for the attendance family). Declared by the portal hooks (HR portal Prompt 4).
    */
   managePermission?: Permission;
+  /**
+   * Why the document can no longer be approved, checked by the engine before an APPROVE decision or an exception approval
+   * is recorded (HR portal Prompt 4 review, P2-11 — a swap whose colleague is no longer employed on the swap day). A reason
+   * makes the engine reject the request BY THE SYSTEM with it (onRejected runs with `system: true`); null = go ahead.
+   */
+  approvalBlocker?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<string | null>;
   onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onRejected(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onCancelled?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;

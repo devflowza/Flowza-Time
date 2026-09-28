@@ -22,11 +22,13 @@ export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const emailActionByUser = rateLimit({ name: 'approval-email-user', ...APPROVAL_EMAIL_ACTION_LIMIT, keyFn: (c) => c.get('principal')?.userId ?? 'anon' });
   const decideAndReturn = async (c: Context<AppEnv>, input: { stepNo?: number | undefined; decision: 'APPROVE' | 'REJECT'; comment?: string | undefined; onBehalfOfUserId?: string | undefined; payEffectDays?: 0 | 0.5 | 1 | undefined }) => {
     const actor = actorOf(c, deps); const orgId = param(c, 'orgId'); const id = param(c, 'requestId');
-    const dto = await runUser(deps.db, actor, async (trx) => {
-      const outcome = await approvals.decideWithin(deps, trx, actor, orgId, id, input);
+    const { dto, outcome } = await runUser(deps.db, actor, async (trx) => {
+      const decided = await approvals.decideWithin(deps, trx, actor, orgId, id, input);
       const request = await approvals.requestDtoWithin(trx, actor, orgId, id, { withEvents: true });
-      return { ...request, noop: outcome.noop, terminal: outcome.terminal };
+      return { dto: { ...request, noop: decided.noop, terminal: decided.terminal }, outcome: decided };
     });
+    // committed: an approval the entity refused was rejected by the system (review P2-11) — the caller hears it as 409
+    approvals.assertNotSystemRejected(outcome);
     return ok(c, dto);
   };
 
@@ -45,6 +47,7 @@ export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.post('/orgs/:orgId/approvals/email-action', emailActionByIp, emailActionByUser, async (c) => {
     const input = await body(c, approvalEmailActionSchema); const actor = actorOf(c, deps); const orgId = param(c, 'orgId');
     const outcome = await approvals.redeemEmailToken(deps, actor, orgId, input);
+    approvals.assertNotSystemRejected(outcome);
     return ok(c, await approvals.getRequest(deps, actor, orgId, outcome.requestId).then((r) => ({ ...r, noop: outcome.noop, terminal: outcome.terminal })));
   });
   v1.post('/orgs/:orgId/approvals/bulk-decide', async (c) => ok(c, await approvals.bulkDecide(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, approvalBulkDecideSchema))));
@@ -62,7 +65,9 @@ export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   });
   v1.post('/orgs/:orgId/approvals/:requestId/bypass', async (c) => {
     const actor = actorOf(c, deps); const orgId = param(c, 'orgId'); const id = param(c, 'requestId'); const input = await body(c, approvalBypassSchema);
-    return ok(c, await runUser(deps.db, actor, async (trx) => { await approvals.bypassRequest(deps, trx, actor, orgId, id, input.reason); return approvals.requestDtoWithin(trx, actor, orgId, id, { withEvents: true }); }));
+    const { dto, outcome } = await runUser(deps.db, actor, async (trx) => { const out = await approvals.bypassRequest(deps, trx, actor, orgId, id, input.reason); return { dto: await approvals.requestDtoWithin(trx, actor, orgId, id, { withEvents: true }), outcome: out }; });
+    approvals.assertNotSystemRejected(outcome);
+    return ok(c, dto);
   });
   v1.post('/orgs/:orgId/approvals/:requestId/request-info', async (c) => {
     const actor = actorOf(c, deps); const orgId = param(c, 'orgId'); const id = param(c, 'requestId'); const input = await body(c, approvalInfoSchema);

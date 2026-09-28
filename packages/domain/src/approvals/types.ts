@@ -36,6 +36,15 @@ export interface ResolutionContext {
   subjectUserId: string | null;
   /** Who filed the request (excluded unless nobody else can decide and the request has a subject). */
   requestedBy: string | null;
+  /**
+   * Other people the request is about (HR portal Prompt 4 review, P0-2 — the colleague of a shift swap): their employee
+   * records and every login linked to them. A co-subject never decides the request, exactly like the subject: a rung of the
+   * reporting line held by one is unusable (the rung falls through to its secondary manager, then the next rung of the
+   * ladder), and they are dropped from HR admins, roles, permission holders and owners (the owner exception applies as for
+   * the subject). Optional: absent = none.
+   */
+  coSubjectEmployeeIds?: readonly string[];
+  coSubjectUserIds?: readonly string[];
   /** chain[0] = the subject's own managers, chain[1] = the managers of chain[0].primary's employee record, … (primary links only). */
   chain: readonly ChainRung[];
   departmentHead: ApproverCandidate | null;
