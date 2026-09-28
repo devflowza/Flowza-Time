@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen } from '@testing-library/react';
+import { screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('@/lib/api-client', async () => (await import('@/features/employees/test-mocks')).apiClientModule);
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
@@ -7,7 +7,7 @@ vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks'
 vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/test-mocks')).useMeModule);
 
 import { renderWithProviders } from '@/features/employees/test-utils';
-import { grant, grantAll, testState } from '@/features/employees/test-mocks';
+import { apiMock, grant, grantAll, resetApiMock, testState } from '@/features/employees/test-mocks';
 import { Sidebar } from './sidebar';
 
 describe('Sidebar', () => {
@@ -103,6 +103,39 @@ describe('Sidebar', () => {
     testState.approvals = { actionable: 0, delegatedToMe: false };
     renderWithProviders(<Sidebar />);
     expect(approvalsLink()).not.toBeInTheDocument();
+  });
+
+  it('HR portal Prompt 5: the Approvals item carries what waits for the member — /me first, then the fresher badge query', async () => {
+    resetApiMock();
+    grant('dashboard.view', 'attendance.approve');
+    testState.approvals = { actionable: 4, delegatedToMe: false };
+    let resolve: (v: unknown) => void = () => undefined;
+    apiMock.get.mockImplementation((path: string) => (path === '/orgs/org-1/team/pending-counts' ? new Promise((r) => { resolve = r; }) : Promise.reject(new Error('not mocked'))));
+    renderWithProviders(<Sidebar />);
+    // the accessible name stays the label; the count describes it
+    const link = screen.getByRole('link', { name: 'Approvals' });
+    expect(within(link).getByTestId('nav-badge-/approvals')).toHaveTextContent('4');
+    resolve({ data: { approvals: 5, notes: 1, total: 6 } });
+    await waitFor(() => expect(within(link).getByTestId('nav-badge-/approvals')).toHaveTextContent('5'));
+    expect(link).toHaveAccessibleDescription('5 items waiting for you');
+    testState.approvals = { actionable: 0, delegatedToMe: false };
+  });
+
+  it('HR portal Prompt 5: a team attendance or leave key opens the team workspace too — always with direct reports', () => {
+    const team = () => screen.queryByRole('link', { name: 'Team overview' });
+    testState.employeeId = 'e1';
+    testState.teamSize = 2;
+    for (const key of ['attendance.view_team', 'leave.view_team'] as const) {
+      grant('dashboard.view', key);
+      const r = renderWithProviders(<Sidebar />);
+      expect(team()).toHaveAttribute('href', '/team');
+      r.unmount();
+    }
+    // the key alone (an HR admin without reports) would only ever open an empty workspace
+    testState.teamSize = 0;
+    grant('dashboard.view', 'attendance.view_team');
+    renderWithProviders(<Sidebar />);
+    expect(team()).not.toBeInTheDocument();
   });
 
   it('HR portal Prompt 6b: lists the regularisation register for approvers and reviewers only', () => {

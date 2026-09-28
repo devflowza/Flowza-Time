@@ -1,5 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 import type { DashboardSummary } from '@flowza/contracts';
 
 vi.mock('@/lib/api-client', async () => (await import('@/features/employees/test-mocks')).apiClientModule);
@@ -18,6 +18,8 @@ import enSync from '@/locales/en/sync.json';
 import arSync from '@/locales/ar/sync.json';
 import DashboardPage from './dashboard-page';
 import { shiftDate } from './model';
+import { approvalRequest } from '@/features/approvals/test-fixtures';
+import { teamMember, teamSummary } from '@/features/team/test-fixtures';
 
 registerNamespace('attendance', enAttendance, arAttendance);
 registerNamespace('approvals', enApprovals, arApprovals);
@@ -69,7 +71,7 @@ describe('DashboardPage', () => {
     expect(await screen.findByText('Muscat HQ')).toBeInTheDocument();
     expect(screen.getByText('252 / 300')).toBeInTheDocument();
     // the side rail
-    expect(screen.getByText('Pending approvals')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting your approval')).toBeInTheDocument();
     expect(await screen.findByText('National Day')).toBeInTheDocument();
     expect(screen.getByText('In 3 days')).toBeInTheDocument();
     expect(await screen.findByText('Salim Al Harthy')).toBeInTheDocument();
@@ -98,7 +100,7 @@ describe('DashboardPage', () => {
     expect(await screen.findByText('Attendance rate')).toBeInTheDocument();
     expect(screen.getByText('431 / 512 of employees')).toBeInTheDocument();
     // the executive layout has no rail
-    expect(screen.queryByText('Pending approvals')).not.toBeInTheDocument();
+    expect(screen.queryByText('Awaiting your approval')).not.toBeInTheDocument();
     expect(screen.queryByText('Quote of the day')).not.toBeInTheDocument();
     expect(screen.getByRole('combobox', { name: 'Range' })).toHaveTextContent('Last 7 days');
   });
@@ -107,7 +109,7 @@ describe('DashboardPage', () => {
     grant('dashboard.view', 'attendance.view', 'leave.approve');
     renderWithProviders(<DashboardPage />);
     await screen.findByText('431');
-    expect(screen.getByText('Pending approvals')).toBeInTheDocument();
+    expect(screen.getByText('Awaiting your approval')).toBeInTheDocument();
     await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/approvals', expect.objectContaining({ scope: 'mine', view: 'pending' })));
   });
 
@@ -115,7 +117,7 @@ describe('DashboardPage', () => {
     grant('dashboard.view', 'attendance.view');
     renderWithProviders(<DashboardPage />);
     await screen.findByText('431');
-    expect(screen.queryByText('Pending approvals')).not.toBeInTheDocument();
+    expect(screen.queryByText('Awaiting your approval')).not.toBeInTheDocument();
     expect(screen.queryByText('Upcoming holidays')).not.toBeInTheDocument();
     expect(screen.getByRole('link', { name: /Explore reports/ })).toHaveAttribute('href', '/attendance');
     expect(apiMock.get.mock.calls.some((c) => c[0] === '/orgs/org-1/approvals')).toBe(false);
@@ -142,5 +144,69 @@ describe('DashboardPage', () => {
     expect(screen.getByText('Recent attendance')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: /Sync now/ })).toBeInTheDocument();
     expect(screen.queryByText('Upcoming holidays')).toBeInTheDocument(); // the rail stays
+  });
+});
+
+describe('DashboardPage — team widgets (HR portal Prompt 5)', () => {
+  beforeEach(() => {
+    resetApiMock(); testState.settings = {}; testState.employeeId = null; testState.teamSize = 0;
+  });
+  afterEach(() => { testState.teamSize = 0; testState.employeeId = null; });
+
+  it('shows a line manager what awaits them (count + the 5 oldest with their age), who is on leave and who came in late', async () => {
+    testState.employeeId = 'e4'; testState.teamSize = 3;
+    // the Line Manager role: team keys, no approve key
+    grant('dashboard.view', 'attendance.view_team', 'leave.view_team', 'employee.view_team');
+    const members = [
+      teamMember({ employeeId: 'e5', employeeName: 'Salma', status: 'late', lateMinutes: 12, firstInAt: `${today}T04:12:00Z` }),
+      teamMember({ employeeId: 'e6', employeeName: 'Yousuf', status: 'on_leave', liveState: 'NONE', leave: { leaveTypeName: 'Annual Leave', leaveTypeCode: 'AL', color: '#16a34a', isHalfDay: false, halfDayPart: null, status: 'APPROVED' } }),
+      teamMember({ employeeId: 'e7', employeeName: 'Huda', status: 'present' }),
+    ];
+    mockDashboard({
+      '/orgs/org-1/team/summary': { data: teamSummary(members) },
+      '/orgs/org-1/team/pending-counts': { data: { approvals: 1, notes: 2, total: 3 } },
+      '/orgs/org-1/approvals': page([approvalRequest({ id: 'req-9', employeeName: 'Salma', createdAt: new Date(Date.now() - 3 * 86_400_000).toISOString() })]),
+    });
+    renderWithProviders(<DashboardPage />);
+    expect(await screen.findByText('Awaiting your approval')).toBeInTheDocument();
+    expect(await screen.findByTestId('awaiting-count')).toHaveTextContent('3');
+    expect(await screen.findByText('3 days ago')).toBeInTheDocument();
+    // a line manager without an approve key works their queue on /team (Finance B-66)
+    expect(screen.getByRole('link', { name: /2 attendance reasons to review/ })).toHaveAttribute('href', '/team?tab=approvals');
+    expect(screen.getByRole('link', { name: /Attendance correction/ })).toHaveAttribute('href', '/team?tab=approvals');
+    const leave = await screen.findByTestId('team-on-leave');
+    expect(within(leave).getByText('Yousuf')).toBeInTheDocument();
+    expect(within(leave).getByText(/Annual Leave/)).toBeInTheDocument();
+    const late = await screen.findByTestId('team-late');
+    expect(within(late).getByText('Salma')).toBeInTheDocument();
+    expect(within(late).getByText('12m late')).toBeInTheDocument();
+    expect(within(late).queryByText('Huda')).not.toBeInTheDocument();
+    expect(screen.getByText('Team on leave today')).toBeInTheDocument();
+    expect(screen.getByText('Team late today')).toBeInTheDocument();
+    // the two team cards share ONE board request
+    expect(apiMock.get.mock.calls.filter((c) => c[0] === '/orgs/org-1/team/summary')).toHaveLength(1);
+  });
+
+  it('routes an approver\'s rows to the request panel, and shows no team cards without direct reports', async () => {
+    grant('dashboard.view', 'attendance.view', 'attendance.approve');
+    mockDashboard({
+      '/orgs/org-1/team/pending-counts': { data: { approvals: 1, notes: 0, total: 1 } },
+      '/orgs/org-1/approvals': page([approvalRequest({ id: 'req-9' })]),
+    });
+    renderWithProviders(<DashboardPage />);
+    expect(await screen.findByRole('link', { name: /Attendance correction/ })).toHaveAttribute('href', '/approvals?request=req-9');
+    expect(screen.queryByText('Team on leave today')).not.toBeInTheDocument();
+    expect(screen.queryByText('Team late today')).not.toBeInTheDocument();
+    expect(apiMock.get.mock.calls.some((c) => c[0] === '/orgs/org-1/team/summary')).toBe(false);
+  });
+
+  it('keeps every layout unchanged for a member with neither reports nor approve keys (no team request at all)', async () => {
+    grant('dashboard.view', 'attendance.view', 'holiday.view');
+    mockDashboard();
+    renderWithProviders(<DashboardPage />);
+    await screen.findByText('431');
+    expect(screen.queryByText('Awaiting your approval')).not.toBeInTheDocument();
+    expect(screen.getByText('Upcoming holidays')).toBeInTheDocument();
+    expect(apiMock.get.mock.calls.some((c) => String(c[0]).includes('/team/'))).toBe(false);
   });
 });

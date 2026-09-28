@@ -60,3 +60,26 @@ export const firstName = (fullName: string | null | undefined): string => (fullN
 
 /** Same quote for everyone on a given day, a different one the next day. */
 export const quoteIndex = (isoDate: string, count: number): number => (count > 0 ? DateTime.fromISO(isoDate).ordinal % count : 0);
+
+// ----- team widgets (HR portal Prompt 5) -----------------------------------------------------------------------------------------
+
+/** Who is looking at the dashboard, as far as the team widgets care. */
+export interface DashboardViewer {
+  /** The member's employee record has direct reports (/me: isManager). */
+  hasReports: boolean;
+  /** attendance.approve, leave.approve or approval.manage. */
+  approver: boolean;
+  /** A key that reads the team's attendance board (attendance.view_team or attendance.view). */
+  teamAttendance: boolean;
+}
+export type TeamWidgetKey = 'awaitingApproval' | 'teamOnLeave' | 'teamLate';
+/**
+ * The widget registry of the team workspace: each widget with the rule that shows it. Only members with direct reports or an
+ * approve key ever see one, so every other dashboard (and every layout) renders exactly as before.
+ */
+export const TEAM_WIDGETS: ReadonlyArray<{ key: TeamWidgetKey; visible: (v: DashboardViewer) => boolean }> = [
+  { key: 'awaitingApproval', visible: (v) => v.hasReports || v.approver },
+  { key: 'teamOnLeave', visible: (v) => v.hasReports && v.teamAttendance },
+  { key: 'teamLate', visible: (v) => v.hasReports && v.teamAttendance },
+];
+export const visibleTeamWidgets = (v: DashboardViewer): TeamWidgetKey[] => TEAM_WIDGETS.filter((w) => w.visible(v)).map((w) => w.key);

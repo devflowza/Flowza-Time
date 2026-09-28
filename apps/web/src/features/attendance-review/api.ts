@@ -17,8 +17,8 @@ export const GRANTS = 'attendance-grants';
 function useInvalidateReview() {
   const orgId = useOrgId();
   const qc = useQueryClient();
-  // (+ HR portal Prompt 6b: the comments report)
-  return () => { for (const e of [NOTES, SELFIES, 'approvals-inbox', 'approval-request', 'approvals-mine', 'self-service', 'attendance-daily', 'attendance-records', 'attendance-monthly', 'attendance-notes-report']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
+  // (+ HR portal Prompt 5: the team board and the counts behind the manager badge; Prompt 6b: the comments report)
+  return () => { for (const e of [NOTES, SELFIES, 'approvals-inbox', 'approval-request', 'approvals-mine', 'self-service', 'attendance-daily', 'attendance-records', 'attendance-monthly', 'team-summary', 'team-pending-counts', 'attendance-notes-report']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
 }
 
 export interface NotesQuery { scope: NoteListScope; status?: AttendanceNoteStatus | undefined; open?: boolean | undefined; page: number; pageSize: number }

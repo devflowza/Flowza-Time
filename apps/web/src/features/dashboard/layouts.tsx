@@ -4,12 +4,13 @@ import type { DashboardBranchRow, DashboardSummary, DashboardTrendRange, Permiss
 import { fmtMinutes, fmtNumber } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { DashboardSettings } from './theme';
-import { deltaVsLastWeek, pct, sparkValues, type TrendKey, type TrendPoint } from './model';
+import { deltaVsLastWeek, pct, sparkValues, visibleTeamWidgets, type DashboardViewer, type TrendKey, type TrendPoint } from './model';
 import { KpiTile, type KpiDelta, type KpiTileProps } from './widgets/kpi-tile';
 import { TrendCard } from './widgets/trend-card';
 import { TodayCard } from './widgets/today-card';
 import { BranchesCard } from './widgets/branches-card';
-import { ApprovalsCard } from './widgets/approvals-card';
+import { AwaitingApprovalCard } from './widgets/approvals-card';
+import { TeamLateCard, TeamOnLeaveCard } from './widgets/team-cards';
 import { HolidaysCard } from './widgets/holidays-card';
 import { ActivityCard, RecentAttendanceCard } from './widgets/activity-card';
 import { DevicesCard } from './widgets/devices-card';
@@ -35,6 +36,8 @@ export interface DashboardData {
   settings: DashboardSettings;
   can: (...perms: Permission[]) => boolean;
   rtl: boolean;
+  /** Direct reports and approve keys decide the team widgets (HR portal Prompt 5). */
+  viewer: DashboardViewer;
 }
 
 type TileKey = 'employees' | 'present' | 'absent' | 'onLeave' | 'late' | 'earlyDeparture' | 'overtime' | 'missingPunch' | 'devicesOnline' | 'devicesOffline' | 'syncFailures' | 'pendingApprovals' | 'attendanceRate';
@@ -81,21 +84,26 @@ function TileGrid({ tiles, keys, spark, size, className, rtl }: { tiles: Record<
   );
 }
 
-/** The approval queue card: whoever can decide something (engine v2 routes corrections and leave to their approvers). */
-const approves = (d: DashboardData) => d.can('attendance.approve') || d.can('leave.approve') || d.can('approval.manage');
-
+/**
+ * The side rail. The team widgets come from the model's registry (visible only to members with direct reports or an approve
+ * key): "Awaiting your approval" (the member's queue — engine v2 routes corrections, leave and reasons to their approvers),
+ * "Team on leave today" and "Team late today".
+ */
 function Rail({ d, className }: { d: DashboardData; className?: string }) {
-  const { settings, can, summary } = d;
+  const { settings, can } = d;
+  const team = visibleTeamWidgets(d.viewer);
   const items = [
     settings.showHighlight ? <HighlightCard key="highlight" to={can('report.view') ? '/reports' : '/attendance'} /> : null,
-    approves(d) ? <ApprovalsCard key="approvals" pending={summary?.pendingApprovals} enabled /> : null,
+    team.includes('awaitingApproval') ? <AwaitingApprovalCard key="awaiting" enabled approver={d.viewer.approver} hasReports={d.viewer.hasReports} /> : null,
+    team.includes('teamOnLeave') ? <TeamOnLeaveCard key="team-leave" date={d.date} isToday={d.isToday} /> : null,
+    team.includes('teamLate') ? <TeamLateCard key="team-late" date={d.date} isToday={d.isToday} /> : null,
     can('holiday.view') ? <HolidaysCard key="holidays" date={d.date} enabled /> : null,
     settings.showQuote ? <QuoteCard key="quote" date={d.date} /> : null,
   ].filter(Boolean);
   if (items.length === 0) return null;
   return <aside className={cn('min-w-0 space-y-4', className)}>{items}</aside>;
 }
-const railIsEmpty = (d: DashboardData) => !d.settings.showHighlight && !d.settings.showQuote && !approves(d) && !d.can('holiday.view');
+const railIsEmpty = (d: DashboardData) => !d.settings.showHighlight && !d.settings.showQuote && visibleTeamWidgets(d.viewer).length === 0 && !d.can('holiday.view');
 
 /** Balanced: today's numbers, the trend, who is where, branches and recent activity, with approvals and holidays on the side. */
 export function OverviewLayout({ d }: { d: DashboardData }) {
