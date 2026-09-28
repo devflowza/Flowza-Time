@@ -7,13 +7,28 @@ import { isoDateTime, jsonObject, numberOrNull } from '../../lib/mappers.js';
 import { type Actor, audit, runUser } from '../../lib/service.js';
 import { parseWorkflowSteps } from './engine.js';
 
-type WorkflowRow = { id: string; organizationId: string; entityType: ApprovalWorkflowDto['entityType']; name: string; branchId: string | null; steps: unknown; appliesTo: unknown; minUnits: string | number | null; allowSelfApproval: boolean; isDefault: boolean; status: string; createdAt: Date; updatedAt: Date };
+type WorkflowRow = { id: string; organizationId: string; entityType: ApprovalWorkflowDto['entityType']; name: string; branchId: string | null; steps: unknown; appliesTo: unknown; minUnits: string | number | null; isDefault: boolean; status: string; createdAt: Date; updatedAt: Date };
+
+/**
+ * `appliesTo` as stored: each id list sorted, de-duplicated and lower-cased, empty lists dropped — the same form the
+ * database trigger writes and the default-uniqueness index hashes, so `[B, A]` and `[A, B, A]` are one scope (review P2-8).
+ */
+export function canonicalAppliesTo(appliesTo: ApprovalAppliesTo | undefined): ApprovalAppliesTo {
+  const norm = (ids: readonly string[] | undefined): string[] | undefined => {
+    const out = [...new Set((ids ?? []).map((id) => id.toLowerCase()))].sort();
+    return out.length ? out : undefined;
+  };
+  const branchIds = norm(appliesTo?.branchIds);
+  const departmentIds = norm(appliesTo?.departmentIds);
+  return { ...(branchIds ? { branchIds } : {}), ...(departmentIds ? { departmentIds } : {}) };
+}
 
 export function toWorkflowDto(w: WorkflowRow): ApprovalWorkflowDto {
   const a = jsonObject(w.appliesTo);
   const ids = (v: unknown): string[] | undefined => (Array.isArray(v) && v.length ? v.map(String) : undefined);
-  const appliesTo: ApprovalAppliesTo = { ...(ids(a['branchIds']) ? { branchIds: ids(a['branchIds']) } : {}), ...(ids(a['departmentIds']) ? { departmentIds: ids(a['departmentIds']) } : {}) };
-  return { id: w.id, organizationId: w.organizationId, entityType: w.entityType, name: w.name, branchId: w.branchId, steps: parseWorkflowSteps(w.steps).map((s) => ({ ...s, permission: s.permission && (PERMISSIONS as readonly string[]).includes(s.permission) ? (s.permission as Permission) : undefined })), appliesTo, minUnits: numberOrNull(w.minUnits), allowSelfApproval: w.allowSelfApproval, isDefault: w.isDefault, status: w.status, createdAt: isoDateTime(w.createdAt), updatedAt: isoDateTime(w.updatedAt) };
+  const appliesTo = canonicalAppliesTo({ ...(ids(a['branchIds']) ? { branchIds: ids(a['branchIds']) } : {}), ...(ids(a['departmentIds']) ? { departmentIds: ids(a['departmentIds']) } : {}) });
+  // allowSelfApproval: always false — self-approval is not configurable (review P0-3; the column carries a CHECK)
+  return { id: w.id, organizationId: w.organizationId, entityType: w.entityType, name: w.name, branchId: w.branchId, steps: parseWorkflowSteps(w.steps).map((s) => ({ ...s, permission: s.permission && (PERMISSIONS as readonly string[]).includes(s.permission) ? (s.permission as Permission) : undefined })), appliesTo, minUnits: numberOrNull(w.minUnits), allowSelfApproval: false, isDefault: w.isDefault, status: w.status, createdAt: isoDateTime(w.createdAt), updatedAt: isoDateTime(w.updatedAt) };
 }
 
 /** Configuring workflows: approval.manage (the HR admin) or organization.manage (as before). */
@@ -55,8 +70,9 @@ export async function createWorkflow(deps: ApiDeps, actor: Actor, orgId: string,
   return runUser(deps.db, actor, async (trx) => {
     await validateSteps(trx, orgId, input.steps);
     await validateAppliesTo(trx, orgId, input.appliesTo);
-    const row = await trx.insertInto('approvalWorkflows').values({ organizationId: orgId, entityType: input.entityType, name: input.name, branchId: input.branchId ?? null, steps: stepsJson(input.steps), appliesTo: JSON.stringify(input.appliesTo ?? {}), minUnits: input.minUnits ?? null, allowSelfApproval: input.allowSelfApproval, isDefault: input.isDefault, status: input.status }).returningAll().executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'approval_workflow.created', 'approval_workflow', { entityId: row.id, branchId: input.branchId ?? null, newValue: input });
+    const appliesTo = canonicalAppliesTo(input.appliesTo);
+    const row = await trx.insertInto('approvalWorkflows').values({ organizationId: orgId, entityType: input.entityType, name: input.name, branchId: input.branchId ?? null, steps: stepsJson(input.steps), appliesTo: JSON.stringify(appliesTo), minUnits: input.minUnits ?? null, isDefault: input.isDefault, status: input.status }).returningAll().executeTakeFirstOrThrow();
+    await audit(trx, actor, orgId, 'approval_workflow.created', 'approval_workflow', { entityId: row.id, branchId: input.branchId ?? null, newValue: { ...input, appliesTo } });
     return toWorkflowDto(row as WorkflowRow);
   });
 }
@@ -73,7 +89,7 @@ export async function updateWorkflow(deps: ApiDeps, actor: Actor, orgId: string,
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(input)) {
       if (v === undefined) continue;
-      patch[k] = k === 'steps' ? stepsJson(v as ApprovalWorkflowInput['steps']) : k === 'appliesTo' ? JSON.stringify(v) : v;
+      patch[k] = k === 'steps' ? stepsJson(v as ApprovalWorkflowInput['steps']) : k === 'appliesTo' ? JSON.stringify(canonicalAppliesTo(v as ApprovalAppliesTo)) : v;
     }
     if (Object.keys(patch).length) await trx.updateTable('approvalWorkflows').set(patch as never).where('id', '=', id).execute();
     const after = await trx.selectFrom('approvalWorkflows').selectAll().where('id', '=', id).executeTakeFirstOrThrow();

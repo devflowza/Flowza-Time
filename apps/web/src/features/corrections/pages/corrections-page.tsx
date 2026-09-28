@@ -10,7 +10,7 @@ import { Combobox, DateRange } from '@/components/forms';
 import { useServerTable } from '@/hooks/use-server-table';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
-import { useCan, useMe, useOrgTimezone } from '@/features/me/use-me';
+import { useActiveMembership, useCan, useMe, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useEmployeeOptions } from '@/features/employees/api';
 import type { CorrectionDto } from '@/features/attendance/types';
@@ -39,12 +39,17 @@ export default function CorrectionsPage() {
   const [cancelling, setCancelling] = useState<CorrectionDto | null>(null);
   const [cancelReason, setCancelReason] = useState('');
   const hasFilters = Object.keys(f).length > 0;
-  const canApprove = can('attendance.approve');
+  // who may withdraw somebody else's correction: the approval engine's rule (Finance B-98) — approval.manage (the owner
+  // holds it) or an organisation-wide attendance.correct holder; never the person it is about, unless they are the owner
+  const membership = useActiveMembership();
+  const canWithdrawOthers = can('approval.manage') || can('attendance.correct', 'attendance.view');
+  const isOwner = membership?.roleKey === 'owner';
+  const myEmployeeId = membership?.employeeId ?? null;
   const myId = me.data?.user.id;
   const employeeOptions = useMemo(() => (f['employeeId'] && !employees.options.some((o) => o.value === f['employeeId']) ? [{ value: f['employeeId'], label: t('list.selectedEmployee') }, ...employees.options] : employees.options), [employees.options, f, t]);
 
   const columns = useMemo<ColumnDef<CorrectionDto, unknown>[]>(() => {
-    const canCancel = (c: CorrectionDto) => c.status === 'PENDING' && (canApprove || c.requestedBy === myId);
+    const canCancel = (c: CorrectionDto) => c.status === 'PENDING' && (c.requestedBy === myId || (canWithdrawOthers && (isOwner || c.employeeId !== myEmployeeId)));
     return [
     { id: 'employee', header: t('fields.employee'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.employeeName ?? '—'}</p><p className="font-mono text-xs text-muted-foreground" dir="ltr">{row.original.employeeNumber}</p></div> },
     { id: 'attendanceDate', header: t('fields.attendanceDate'), enableSorting: false, cell: ({ row }) => <span className="tnum">{fmtDate(row.original.attendanceDate)}</span> },
@@ -55,7 +60,7 @@ export default function CorrectionsPage() {
     { id: 'createdAt', header: tc('common.createdAt'), enableSorting: false, cell: ({ row }) => <span className="whitespace-nowrap text-xs tnum">{fmtDateTime(row.original.createdAt, tz)}</span> },
     { id: 'actions', header: '', enableSorting: false, cell: ({ row }) => canCancel(row.original) ? <div className="flex justify-end"><Button size="sm" variant="ghost" onClick={(e) => { e.stopPropagation(); setCancelReason(''); setCancelling(row.original); }}><Ban /> {t('list.cancel')}</Button></div> : null },
     ];
-  }, [t, tc, tz, branches.byId, canApprove, myId]);
+  }, [t, tc, tz, branches.byId, canWithdrawOthers, isOwner, myEmployeeId, myId]);
 
   return (
     <div className="page-container">

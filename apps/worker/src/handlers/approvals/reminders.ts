@@ -56,14 +56,17 @@ async function membersByRole(trx: Trx, orgId: string, roleKey: 'hr_admin' | 'own
 
 /**
  * Escalate an overdue level (B-103): its `escalateTo` target — the next level's approvers, the HR admins or the owners —
- * joins the level as ESCALATED actors (the original approvers keep their seat). An escalated actor's decision settles the
- * level on its own, like an override: escalation means somebody with more authority steps in, and under ALL / QUORUM an
- * extra seat would otherwise make the level harder to close. The subject and the requester are never added (SoD).
+ * joins the level as ESCALATED actors (the original approvers keep their seats). An escalated actor is an extra pair of
+ * hands, not an extra seat: their decision fills ONE pending seat of the level (Finance B-91 "one row per call", review
+ * P2-13) — an ANY level settles, an ALL / QUORUM level counts one approval — so escalation never makes a level harder to
+ * close and never lets one person close a level that needs several. The person the request is about (the submit-time
+ * snapshot or the CURRENT membership link, review P0-4) and the requester are never added: self-approval is not
+ * configurable (review P0-3).
  */
 async function escalate(trx: Trx, orgId: string, s: CurrentStep, now: Date): Promise<string[]> {
-  const allowSelf = s.workflowId ? (await trx.selectFrom('approvalWorkflows').select('allowSelfApproval').where('id', '=', s.workflowId).executeTakeFirst())?.allowSelfApproval ?? false : false;
   const current = new Set((await trx.selectFrom('approvalStepActors').select('userId').where('stepId', '=', s.stepId).execute()).map((a) => a.userId));
-  const eligible = (ids: string[]) => ids.filter((u) => !current.has(u) && (allowSelf || (u !== s.subjectUserId && u !== s.requestedBy)));
+  const linkedToSubject = new Set(s.employeeId ? (await trx.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', s.employeeId).execute()).map((m) => m.userId) : []);
+  const eligible = (ids: string[]) => ids.filter((u) => !current.has(u) && u !== s.subjectUserId && u !== s.requestedBy && !linkedToSubject.has(u));
   const ladder: ApprovalEscalationTarget[] = s.escalateTo === 'NEXT_STEP' ? ['NEXT_STEP', 'HR_ADMIN', 'OWNER'] : s.escalateTo === 'HR_ADMIN' ? ['HR_ADMIN', 'OWNER'] : ['OWNER'];
   let target: ApprovalEscalationTarget | null = null;
   let added: string[] = [];

@@ -158,13 +158,13 @@ describe('decisions', () => {
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ALL' }]);
     const all = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
     const allId = all.body.data.approvalRequestId as string;
-    const first = await h.request('POST', `${base()}/approvals/${allId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE' } });
+    const first = await h.request('POST', `${base()}/approvals/${allId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } });
     expect(first.status).toBe(200);
     expect(first.body.data).toMatchObject({ status: 'PENDING', terminal: false, noop: false });
     // the same actor again: a harmless no-op
-    const again = await h.request('POST', `${base()}/approvals/${allId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE' } });
+    const again = await h.request('POST', `${base()}/approvals/${allId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } });
     expect(again.body.data).toMatchObject({ status: 'PENDING', noop: true });
-    const second = await h.request('POST', `${base()}/approvals/${allId}/decide`, { token: hrLinked, body: { decision: 'APPROVE' } });
+    const second = await h.request('POST', `${base()}/approvals/${allId}/decide`, { token: hrLinked, body: { decision: 'APPROVE', stepNo: 1 } });
     expect(second.body.data).toMatchObject({ status: 'APPROVED', terminal: true });
     expect(second.body.data.context.correction.status).toBe('APPROVED');
 
@@ -172,22 +172,22 @@ describe('decisions', () => {
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ANY' }]);
     const any = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
     const anyId = any.body.data.approvalRequestId as string;
-    expect((await h.request('POST', `${base()}/approvals/${anyId}/decide`, { token: f.hrAdmin, body: { decision: 'REJECT' } })).status).toBe(400); // comment required
-    const rejected = await h.request('POST', `${base()}/approvals/${anyId}/decide`, { token: f.hrAdmin, body: { decision: 'REJECT', comment: 'Not convinced' } });
+    expect((await h.request('POST', `${base()}/approvals/${anyId}/decide`, { token: f.hrAdmin, body: { decision: 'REJECT', stepNo: 1 } })).status).toBe(400); // comment required
+    const rejected = await h.request('POST', `${base()}/approvals/${anyId}/decide`, { token: f.hrAdmin, body: { decision: 'REJECT', comment: 'Not convinced', stepNo: 1 } });
     expect(rejected.body.data).toMatchObject({ status: 'PENDING', terminal: false });
     expect(rejected.body.data.steps[0].actors.find((a: { userId: string }) => a.userId === f.hrAdmin).decision).toBe('REJECTED');
-    const approved = await h.request('POST', `${base()}/approvals/${anyId}/decide`, { token: hrLinked, body: { decision: 'APPROVE', comment: 'Checked the camera' } });
+    const approved = await h.request('POST', `${base()}/approvals/${anyId}/decide`, { token: hrLinked, body: { decision: 'APPROVE', comment: 'Checked the camera', stepNo: 1 } });
     expect(approved.body.data).toMatchObject({ status: 'APPROVED', terminal: true });
 
     await clearWorkflows();
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', permission: 'attendance.approve', mode: 'QUORUM', requiredCount: 2 }]);
     const q = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
     const qId = q.body.data.approvalRequestId as string;
-    expect((await h.request('POST', `${base()}/approvals/${qId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE' } })).body.data.status).toBe('PENDING');
-    expect((await h.request('POST', `${base()}/approvals/${qId}/decide`, { token: hrLinked, body: { decision: 'REJECT', comment: 'No' } })).body.data).toMatchObject({ status: 'PENDING', terminal: false });
-    expect((await h.request('POST', `${base()}/approvals/${qId}/decide`, { token: f.owner, body: { decision: 'APPROVE' } })).body.data.status).toBe('APPROVED');
+    expect((await h.request('POST', `${base()}/approvals/${qId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } })).body.data.status).toBe('PENDING');
+    expect((await h.request('POST', `${base()}/approvals/${qId}/decide`, { token: hrLinked, body: { decision: 'REJECT', comment: 'No', stepNo: 1 } })).body.data).toMatchObject({ status: 'PENDING', terminal: false });
+    expect((await h.request('POST', `${base()}/approvals/${qId}/decide`, { token: f.owner, body: { decision: 'APPROVE', stepNo: 1 } })).body.data.status).toBe('APPROVED');
     // a closed request is a conflict, and so is a step that is not the current one
-    expect((await h.request('POST', `${base()}/approvals/${qId}/decide`, { token: ownerLinked, body: { decision: 'APPROVE' } })).status).toBe(409);
+    expect((await h.request('POST', `${base()}/approvals/${qId}/decide`, { token: ownerLinked, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(409);
   });
 
   it('a manager-only role reads and decides the step routed to them; a stranger can neither read nor decide', async () => {
@@ -201,9 +201,9 @@ describe('decisions', () => {
     expect(got.body.data.events.map((e: { kind: string }) => e.kind)).toEqual(['submitted']);
     // the employee who is neither actor, subject, team nor org-wide reader sees nothing
     expect((await h.request('GET', `${base()}/approvals/${id}`, { token: f.employeeUser })).status).toBe(404);
-    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.employeeUser, body: { decision: 'APPROVE' } })).status).toBe(403);
-    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.payrollUser, body: { decision: 'APPROVE' } })).status).toBe(403);
-    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.outsider, body: { decision: 'APPROVE' } })).status).toBe(403);
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.employeeUser, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(403);
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.payrollUser, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(403);
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.outsider, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(403);
     const step1 = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: lineManager, body: { decision: 'APPROVE', comment: 'Fine by me', stepNo: 1 } });
     expect(step1.body.data).toMatchObject({ status: 'PENDING', currentStep: 2 });
     // an explicit stepNo that is not the current step is refused
@@ -218,21 +218,23 @@ describe('decisions', () => {
     expect(announced.map((e) => (e.payload as Record<string, unknown>)['userId'])).toEqual([staff5]);
   });
 
-  it('an attendance.approve holder with organisation-wide view may decide any step (logged override); a line manager only for their team', async () => {
+  it('an attendance.approve holder with organisation-wide view may decide a level naming it (logged override, one seat); a line manager never overrides', async () => {
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'USER', userId: f.owner }]);
     const r = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
     const id = r.body.data.approvalRequestId as string;
-    // e1 is not the line manager's report: no team reach, no organisation-wide key
-    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: lineManager, body: { decision: 'APPROVE' } })).status).toBe(403);
-    const over = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', comment: 'Owner is travelling' } });
+    // e1 is not the line manager's report, and a team-scoped key never overrides anyway
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: lineManager, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(403);
+    const over = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', comment: 'Owner is travelling', stepNo: 1 } });
     expect(over.body.data.status).toBe('APPROVED');
     expect(await eventsOf(id)).toEqual(['submitted', 'override', 'step_approved', 'approved']);
+    // the override filled the owner's seat, and says so
+    expect(over.body.data.steps[0].actors).toEqual(expect.arrayContaining([expect.objectContaining({ userId: f.hrAdmin, decision: 'APPROVED', resolutionPath: 'override', onBehalfOfUserId: f.owner, onBehalfOfName: 'owner' })]));
   });
 
   it('the person a request is about never decides it, even as HR — only the owner may, and it is logged', async () => {
     const own = await h.request('POST', `${base()}/leave-records`, { token: hrLinked, body: { employeeId: e6, leaveTypeId, ...nextRange(1) } });
     const id = (await h.admin.selectFrom('leaveRecords').select('approvalRequestId').where('id', '=', own.body.data.id).executeTakeFirstOrThrow()).approvalRequestId!;
-    const self = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: hrLinked, body: { decision: 'APPROVE' } });
+    const self = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: hrLinked, body: { decision: 'APPROVE', stepNo: 1 } });
     expect(self.status).toBe(403);
     expect(self.body.message).toMatch(/about you/);
     expect((await h.request('PATCH', `${base()}/leave-records/${own.body.data.id}`, { token: hrLinked, body: { status: 'APPROVED' } })).status).toBe(403);
@@ -241,12 +243,12 @@ describe('decisions', () => {
     const ownerLeave = await h.request('POST', `${base()}/leave-records`, { token: f.hrAdmin, body: { employeeId: e7, leaveTypeId, ...nextRange(1) } });
     expect(ownerLeave.body.data.status).toBe('PENDING');
     const oid = (await h.admin.selectFrom('leaveRecords').select('approvalRequestId').where('id', '=', ownerLeave.body.data.id).executeTakeFirstOrThrow()).approvalRequestId!;
-    const bypass = await h.request('POST', `${base()}/approvals/${oid}/decide`, { token: ownerLinked, body: { decision: 'APPROVE', comment: 'Owner decides' } });
+    const bypass = await h.request('POST', `${base()}/approvals/${oid}/decide`, { token: ownerLinked, body: { decision: 'APPROVE', comment: 'Owner decides', stepNo: 1 } });
     expect(bypass.status).toBe(200);
     expect(await eventsOf(oid)).toEqual(expect.arrayContaining(['sod_owner_bypass', 'approved']));
   });
 
-  it('an approver added by escalation settles the level on their own and never counts as an extra seat', async () => {
+  it('an approver added by escalation fills one seat of the level (never an extra seat, never the whole level)', async () => {
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ALL' }]);
     const escalateTo = async (requestId: string) => {
       const step = await h.admin.selectFrom('approvalSteps').select('id').where('requestId', '=', requestId).executeTakeFirstOrThrow();
@@ -255,21 +257,30 @@ describe('decisions', () => {
     // the original seats still close an ALL level without the escalated approver
     const a = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
     await escalateTo(a.body.data.approvalRequestId);
-    expect((await h.request('POST', `${base()}/approvals/${a.body.data.approvalRequestId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE' } })).body.data.status).toBe('PENDING');
-    expect((await h.request('POST', `${base()}/approvals/${a.body.data.approvalRequestId}/decide`, { token: hrLinked, body: { decision: 'APPROVE' } })).body.data.status).toBe('APPROVED');
-    // the escalated approver (no approve permission of their own) settles it alone
+    expect((await h.request('POST', `${base()}/approvals/${a.body.data.approvalRequestId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } })).body.data.status).toBe('PENDING');
+    expect((await h.request('POST', `${base()}/approvals/${a.body.data.approvalRequestId}/decide`, { token: hrLinked, body: { decision: 'APPROVE', stepNo: 1 } })).body.data.status).toBe('APPROVED');
+    // the escalated approver (no approve permission of their own) fills the seat they name — the level still needs the other
     const b = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
-    await escalateTo(b.body.data.approvalRequestId);
-    const settled = await h.request('POST', `${base()}/approvals/${b.body.data.approvalRequestId}/decide`, { token: f.payrollUser, body: { decision: 'APPROVE' } });
+    const bId = b.body.data.approvalRequestId as string;
+    await escalateTo(bId);
+    const one = await h.request('POST', `${base()}/approvals/${bId}/decide`, { token: f.payrollUser, body: { decision: 'APPROVE', stepNo: 1, onBehalfOfUserId: f.hrAdmin } });
+    expect(one.body.data).toMatchObject({ status: 'PENDING', terminal: false });
+    expect(one.body.data.steps[0].actors).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: f.payrollUser, decision: 'APPROVED', resolutionPath: 'escalated', onBehalfOfUserId: f.hrAdmin }),
+      expect.objectContaining({ userId: f.hrAdmin, decision: 'SKIPPED' }),
+    ]));
+    // the filled seat is spent: its holder repeating a decision is a no-op; the other seat closes the level
+    expect((await h.request('POST', `${base()}/approvals/${bId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } })).body.data).toMatchObject({ status: 'PENDING', noop: true });
+    const settled = await h.request('POST', `${base()}/approvals/${bId}/decide`, { token: hrLinked, body: { decision: 'APPROVE', stepNo: 1 } });
     expect(settled.body.data).toMatchObject({ status: 'APPROVED', terminal: true });
-    expect(await eventsOf(b.body.data.approvalRequestId)).toEqual(['submitted', 'override', 'step_approved', 'approved']);
+    expect(await eventsOf(bId)).toEqual(['submitted', 'override', 'approval_recorded', 'step_approved', 'approved']);
   });
 
   it('concurrent approvals apply once', async () => {
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'USER', userId: f.hrAdmin }]);
     const r = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
     const id = r.body.data.approvalRequestId as string;
-    const results = await Promise.all([1, 2, 3].map(() => h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE' } })));
+    const results = await Promise.all([1, 2, 3].map(() => h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } })));
     // one approval; the others either see the closed request (409) or their own recorded decision (a no-op)
     expect(results.filter((x) => x.status === 200 && x.body.data.noop === false)).toHaveLength(1);
     expect(results.every((x) => x.status === 200 || x.status === 409)).toBe(true);
@@ -293,7 +304,7 @@ describe('delegations', () => {
     ]));
     const inbox = await h.request('GET', `${base()}/approvals`, { token: delegateUser });
     expect(inbox.body.data.map((x: { id: string }) => x.id)).toContain(id);
-    const decided = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: delegateUser, body: { decision: 'APPROVE' } });
+    const decided = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: delegateUser, body: { decision: 'APPROVE', stepNo: 1 } });
     expect(decided.body.data.status).toBe('APPROVED');
     // the picker a line manager uses (no user.view): active members by name or e-mail; approval.delegate / approval.manage only
     const candidates = await h.request('GET', `${base()}/approval-delegations/candidates?search=Dep`, { token: lineManager });
@@ -334,7 +345,7 @@ describe('reassign, ask for info, cancel', () => {
     const moved = await h.request('POST', `${base()}/approvals/${id}/reassign`, { token: f.hrAdmin, body: { userId: f.payrollUser, reason: 'Owner away' } });
     expect(moved.status).toBe(200);
     expect(moved.body.data.steps[0]).toMatchObject({ approverUserId: f.payrollUser, resolutionPath: 'reassigned' });
-    const done = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.payrollUser, body: { decision: 'APPROVE' } });
+    const done = await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.payrollUser, body: { decision: 'APPROVE', stepNo: 1 } });
     expect(done.body.data.status).toBe('APPROVED');
     expect(await eventsOf(id)).toEqual(['submitted', 'reassigned', 'step_approved', 'approved']);
   });
@@ -377,7 +388,7 @@ describe('reassign, ask for info, cancel', () => {
     await workflow('ATTENDANCE_CORRECTION', [{ order: 1, approverType: 'USER', userId: f.hrAdmin }]);
     const r = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: correction(f.e1) });
     const id = r.body.data.approvalRequestId as string;
-    expect((await h.request('POST', `${base()}/approvals/${id}/cancel`, { token: f.employeeUser, body: {} })).status).toBe(403);
+    expect((await h.request('POST', `${base()}/approvals/${id}/cancel`, { token: f.employeeUser, body: { reason: 'Not mine' } })).status).toBe(403);
     const c = await h.request('POST', `${base()}/approvals/${id}/cancel`, { token: f.hrUser, body: { reason: 'Filed twice' } });
     expect(c.body.data).toMatchObject({ status: 'CANCELLED', cancelReason: 'Filed twice' });
     // the correction follows
@@ -394,8 +405,9 @@ describe('bulk decisions (ATT-95)', () => {
     const own = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrAdmin, body: correction(e6) });
     const ids = [a, b, own].map((x) => x.body.data.approvalRequestId as string);
     expect(ids.every((x) => typeof x === 'string')).toBe(true);
-    expect((await h.request('POST', `${base()}/approvals/bulk-decide`, { token: hrLinked, body: { requestIds: ids, decision: 'REJECT' } })).status).toBe(400);
-    const res = await h.request('POST', `${base()}/approvals/bulk-decide`, { token: hrLinked, body: { requestIds: ids, decision: 'APPROVE', comment: 'Checked the logs' } });
+    const items = ids.map((requestId) => ({ requestId, stepNo: 1 }));
+    expect((await h.request('POST', `${base()}/approvals/bulk-decide`, { token: hrLinked, body: { items, decision: 'REJECT' } })).status).toBe(400);
+    const res = await h.request('POST', `${base()}/approvals/bulk-decide`, { token: hrLinked, body: { items, decision: 'APPROVE', comment: 'Checked the logs' } });
     expect(res.status).toBe(200);
     expect(res.body.data).toMatchObject({ succeeded: 2, failed: 1 });
     expect(res.body.data.results.slice(0, 2)).toEqual(ids.slice(0, 2).map((requestId) => ({ requestId, ok: true, status: 'APPROVED', noop: false, code: null, message: null })));
@@ -404,9 +416,9 @@ describe('bulk decisions (ATT-95)', () => {
     expect(Object.fromEntries(statuses.map((x) => [x.id, x.status]))).toEqual({ [ids[0]!]: 'APPROVED', [ids[1]!]: 'APPROVED', [ids[2]!]: 'PENDING' });
     expect(await eventsOf(ids[0]!)).toEqual(['submitted', 'step_approved', 'approved']);
     // a closed request is refused per line, the rest of the batch is unaffected
-    const again = await h.request('POST', `${base()}/approvals/bulk-decide`, { token: hrLinked, body: { requestIds: [ids[0]], decision: 'APPROVE' } });
+    const again = await h.request('POST', `${base()}/approvals/bulk-decide`, { token: hrLinked, body: { items: [{ requestId: ids[0], stepNo: 1 }], decision: 'APPROVE' } });
     expect(again.body.data).toMatchObject({ succeeded: 0, failed: 1, results: [{ requestId: ids[0], ok: false, code: 'INVALID_STATE' }] });
-    expect((await h.request('POST', `${base()}/approvals/bulk-decide`, { token: f.employeeUser, body: { requestIds: [ids[2]], decision: 'APPROVE' } })).body.data.results[0]).toMatchObject({ ok: false, code: 'FORBIDDEN' });
+    expect((await h.request('POST', `${base()}/approvals/bulk-decide`, { token: f.employeeUser, body: { items: [{ requestId: ids[2], stepNo: 1 }], decision: 'APPROVE' } })).body.data.results[0]).toMatchObject({ ok: false, code: 'FORBIDDEN' });
   });
 });
 
@@ -492,7 +504,7 @@ describe('inbox', () => {
     expect(all.body.data.map((x: { id: string }) => x.id)).toContain(id);
     const hr = await h.request('GET', `${base()}/approvals`, { token: f.hrAdmin });
     expect(hr.body.data.map((x: { id: string }) => x.id)).toContain(id);
-    await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE' } });
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(200);
     const history = await h.request('GET', `${base()}/approvals/history`, { token: f.hrAdmin });
     expect(history.body.data.map((x: { id: string }) => x.id)).toContain(id);
     expect((await h.request('GET', `${base()}/approvals?scope=mine`, { token: f.hrAdmin })).body.data.map((x: { id: string }) => x.id)).not.toContain(id);
@@ -513,7 +525,7 @@ describe('inbox', () => {
     await seedMembership(h.admin, f.orgId, staff10, ROLE.employee, { employeeId: e10 });
     const r = await h.request('POST', `${base()}/me/leave`, { token: staff10, body: { leaveTypeId, ...nextRange(1), reason: 'Search me' } });
     const id = r.body.data.approvalRequestId as string;
-    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', comment: 'ok' } })).status).toBe(200);
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', comment: 'ok', stepNo: 1 } })).status).toBe(200);
 
     const found = await h.request('GET', `${base()}/approvals?view=history&scope=all&search=EMP10`, { token: f.hrAdmin });
     expect(found.status).toBe(200);
@@ -563,7 +575,7 @@ describe('inbox', () => {
     const team = await h.request('GET', `${base()}/approvals?scope=team&entityType=LEAVE`, { token: approverUser });
     expect(team.body.data.find((x: { id: string }) => x.id === id)).toMatchObject({ employeeName: 'Employee 9', requestedByName: 'Report Nine' });
 
-    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: approverUser, body: { decision: 'APPROVE' } })).status).toBe(200);
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: approverUser, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(200);
     const drawer = await h.request('GET', `${base()}/approvals/${id}`, { token: approverUser });
     expect(drawer.status).toBe(200);
     expect(drawer.body.data).toMatchObject({ employeeName: 'Employee 9', requestedByName: 'Report Nine' });
@@ -571,7 +583,7 @@ describe('inbox', () => {
     expect(drawer.body.data.events.find((e: { kind: string }) => e.kind === 'step_approved')).toMatchObject({ actorName: 'Team Approver' });
     expect(drawer.body.data.steps[0]).toMatchObject({ status: 'APPROVED', actedByName: 'Team Approver' });
     // HR closes level 2; the approver's history (what they took part in) keeps every name
-    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE' } })).status).toBe(200);
+    expect((await h.request('POST', `${base()}/approvals/${id}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 2 } })).status).toBe(200);
     const history = await h.request('GET', `${base()}/approvals/history`, { token: approverUser });
     const done = history.body.data.find((x: { id: string }) => x.id === id);
     expect(done).toMatchObject({ status: 'APPROVED', employeeName: 'Employee 9', requestedByName: 'Report Nine' });

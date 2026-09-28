@@ -10,6 +10,8 @@ const MAX_CHAIN = 10;
 export interface OrgDirectory {
   activeUserIds: Set<string>;
   userByEmployee: Map<string, string>;
+  /** Logins linked to an employee whose membership is NOT active (suspended, invited): reported as such, never as "no linked login". */
+  inactiveUserByEmployee?: Map<string, { userId: string; status: string }>;
   roleKeyByUser: Map<string, string>;
   roleIdByUser: Map<string, string>;
   hrAdminUserIds: string[];
@@ -31,7 +33,9 @@ export async function loadOrgDirectory(trx: Trx, orgId: string): Promise<OrgDire
   const scopedBranches = restrictedIds.length ? await trx.selectFrom('membershipBranches').select(['membershipId', 'branchId']).where('membershipId', 'in', restrictedIds).execute() : [];
   const permsByRole = new Map<string, string[]>();
   for (const p of perms) { const arr = permsByRole.get(p.roleId) ?? []; arr.push(p.permissionKey); permsByRole.set(p.roleId, arr); }
-  const dir: OrgDirectory = { activeUserIds: new Set(), userByEmployee: new Map(), roleKeyByUser: new Map(), roleIdByUser: new Map(), hrAdminUserIds: [], ownerUserIds: [], permissionHolders: new Map(), roleMembers: new Map(), branchManagers: [], branchScope: new Map() };
+  const inactive = await trx.selectFrom('orgMemberships').select(['userId', 'employeeId', 'status']).where('organizationId', '=', orgId).where('status', '!=', 'active').where('employeeId', 'is not', null).orderBy('createdAt').execute();
+  const dir: OrgDirectory = { activeUserIds: new Set(), userByEmployee: new Map(), inactiveUserByEmployee: new Map(), roleKeyByUser: new Map(), roleIdByUser: new Map(), hrAdminUserIds: [], ownerUserIds: [], permissionHolders: new Map(), roleMembers: new Map(), branchManagers: [], branchScope: new Map() };
+  for (const m of inactive) if (m.employeeId && !dir.inactiveUserByEmployee!.has(m.employeeId)) dir.inactiveUserByEmployee!.set(m.employeeId, { userId: m.userId, status: m.status });
   for (const m of members) {
     dir.activeUserIds.add(m.userId);
     if (m.employeeId && !dir.userByEmployee.has(m.employeeId)) dir.userByEmployee.set(m.employeeId, m.userId);
@@ -47,10 +51,16 @@ export async function loadOrgDirectory(trx: Trx, orgId: string): Promise<OrgDire
   return dir;
 }
 
-/** Active delegations in force on `today` for this entity type: delegator → delegate (a type-specific row beats a blanket one, newest wins). */
+/**
+ * Active delegations in force on `today` (the ORGANISATION's date — `app.org_today`, see `approvalToday`) for this entity
+ * type: delegator → delegate. A type-specific row beats a blanket one, the newest wins, and a delegator who is no longer an
+ * active member delegates nothing — exactly `app.approval_delegate_of` in the database (RLS, the inbox, the counts).
+ */
 export async function loadDelegationMap(trx: Trx, orgId: string, entityType: ApprovalEntity, today: string): Promise<Map<string, string>> {
-  const rows = await trx.selectFrom('approvalDelegations').select(['delegatorUserId', 'delegateUserId', 'entityTypes', 'createdAt'])
-    .where('organizationId', '=', orgId).where('isActive', '=', true).where('startsOn', '<=', dv(today)).where('endsOn', '>=', dv(today)).orderBy('createdAt', 'desc').execute();
+  const rows = await trx.selectFrom('approvalDelegations as d').select(['d.delegatorUserId', 'd.delegateUserId', 'd.entityTypes', 'd.createdAt'])
+    .where('d.organizationId', '=', orgId).where('d.isActive', '=', true).where('d.startsOn', '<=', dv(today)).where('d.endsOn', '>=', dv(today))
+    .where((eb) => eb.exists(eb.selectFrom('orgMemberships as dm').select('dm.id').whereRef('dm.userId', '=', 'd.delegatorUserId').where('dm.organizationId', '=', orgId).where('dm.status', '=', 'active')))
+    .orderBy('d.createdAt', 'desc').orderBy('d.id').execute();
   const out = new Map<string, { delegate: string; specific: boolean }>();
   for (const r of rows) {
     const types = enumArrayOrNull<ApprovalEntity>(r.entityTypes);
@@ -75,7 +85,7 @@ interface EmployeeLite { id: string; managerEmployeeId: string | null; secondary
  * Without it, a `manager` role holding attendance.approve would sit on every correction in the organisation instead of
  * only on their direct reports' ones.
  */
-export async function buildResolutionContext(trx: Trx, orgId: string, input: { employeeId: string | null; branchId: string | null; requestedBy: string | null; entityType: ApprovalEntity; viewPermission: string; today: string; allowSelfApproval: boolean; directory?: OrgDirectory }): Promise<ResolutionContext> {
+export async function buildResolutionContext(trx: Trx, orgId: string, input: { employeeId: string | null; branchId: string | null; requestedBy: string | null; entityType: ApprovalEntity; viewPermission: string; today: string; /** Ignored: self-approval is not configurable (review P0-3). */ allowSelfApproval?: boolean; directory?: OrgDirectory }): Promise<ResolutionContext> {
   const dir = input.directory ?? await loadOrgDirectory(trx, orgId);
   const delegations = await loadDelegationMap(trx, orgId, input.entityType, input.today);
   const employees = new Map<string, EmployeeLite>();
@@ -114,6 +124,9 @@ export async function buildResolutionContext(trx: Trx, orgId: string, input: { e
     const e = employees.get(employeeId);
     if (!e || e.deletedAt) return { employeeId, userId: null, absent: true, absentReason: 'employee record archived' };
     const userId = dir.userByEmployee.get(employeeId) ?? null;
+    // a linked login whose membership is not active: say so (review P2-5), the seat stays unusable
+    const inactive = userId ? undefined : dir.inactiveUserByEmployee?.get(employeeId);
+    if (inactive) return { employeeId, userId: inactive.userId, absent: true, absentReason: `membership ${inactive.status}` };
     if (onLeave.has(employeeId)) return { employeeId, userId, absent: true, absentReason: 'on approved leave' };
     return { employeeId, userId, absent: false, absentReason: null };
   };
@@ -136,6 +149,5 @@ export async function buildResolutionContext(trx: Trx, orgId: string, input: { e
     roleMemberUserIds: (roleId) => [...(dir.roleMembers.get(roleId) ?? [])].filter(inBranch),
     permissionHolderUserIds: (permission) => [...(dir.permissionHolders.get(permission) ?? [])].filter((u) => inBranch(u) && (viewers.has(u) || subjectManagers.has(u))),
     delegateOf: (userId) => delegations.get(userId) ?? null,
-    allowSelfApproval: input.allowSelfApproval,
   };
 }

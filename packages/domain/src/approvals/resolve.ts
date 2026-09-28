@@ -5,19 +5,24 @@ interface Partial { actors: ResolvedActor[]; path: ResolutionPath; reason: strin
 /** Seat of an actor row: a delegate sits in the seat of the approver they act for. */
 export const seatOf = (a: { userId: string; viaDelegationOf: string | null }): string => a.viaDelegationOf ?? a.userId;
 
+/**
+ * One row per PERSON per level (the database keys actors on (step, user)): a person already seated — in their own seat or
+ * as somebody's delegate — is never added twice. An HR admin who is also a colleague's delegate keeps their own seat.
+ */
 function push(out: ResolvedActor[], actor: ResolvedActor): void {
-  if (!out.some((a) => a.userId === actor.userId && a.viaDelegationOf === actor.viaDelegationOf)) out.push(actor);
+  if (!out.some((a) => a.userId === actor.userId)) out.push(actor);
 }
 
 /**
  * Turn a set of principals into actor rows: each active principal, plus their delegate (stamped `viaDelegationOf`) when
- * an active delegation exists — Finance parity: the delegate acts alongside the approver, in the approver's seat.
+ * an active delegation exists — Finance parity: the delegate acts alongside the approver, in the approver's seat. Own seats
+ * are placed first, so a person who is both an approver and another approver's delegate sits in their own seat.
  */
 function expand(userIds: readonly string[], ctx: ResolutionContext): ResolvedActor[] {
   const out: ResolvedActor[] = [];
-  for (const userId of userIds) {
-    if (!ctx.activeUserIds.has(userId)) continue;
-    push(out, { userId, viaDelegationOf: null });
+  const active = userIds.filter((u) => ctx.activeUserIds.has(u));
+  for (const userId of active) push(out, { userId, viaDelegationOf: null });
+  for (const userId of active) {
     const delegate = ctx.delegateOf(userId);
     if (delegate && delegate !== userId && ctx.activeUserIds.has(delegate)) push(out, { userId: delegate, viaDelegationOf: userId });
   }
@@ -27,11 +32,12 @@ function expand(userIds: readonly string[], ctx: ResolutionContext): ResolvedAct
 /**
  * One person of the reporting line as a seat. Absent (no linked login, no active membership, approved leave today) means the
  * seat is unusable UNLESS an active delegation substitutes the delegate — who then acts in the absent approver's seat.
+ * A linked login whose membership is not active is reported as such ("membership suspended"), never as "no linked login".
  */
 function candidate(c: ApproverCandidate | null, ctx: ResolutionContext): { actors: ResolvedActor[]; reason: string | null } {
   if (!c) return { actors: [], reason: 'not set' };
-  if (!c.userId) return { actors: [], reason: 'no linked login' };
-  if (!ctx.activeUserIds.has(c.userId)) return { actors: [], reason: 'no active membership' };
+  if (!c.userId) return { actors: [], reason: c.absentReason ?? 'no linked login' };
+  if (!ctx.activeUserIds.has(c.userId)) return { actors: [], reason: c.absentReason ?? 'no active membership' };
   const delegate = ctx.delegateOf(c.userId);
   const delegateActor: ResolvedActor | null = delegate && delegate !== c.userId && ctx.activeUserIds.has(delegate) ? { userId: delegate, viaDelegationOf: c.userId } : null;
   if (c.absent) {
@@ -98,11 +104,15 @@ function base(step: ApprovalStepSpec, ctx: ResolutionContext): Partial {
  * Segregation of duties (Finance B-87): the subject's login never decides their own request, whatever seat resolved to
  * them (a delegate acting for the subject is dropped too). The requester is dropped at every rung of the ladder — the
  * level itself, the HR admins, the owners — and is kept only as the LAST resort: nobody else at all remains AND the request
- * has a subject (HR filed it for somebody and is the organisation's only possible approver). `allowSelfApproval` on the
- * workflow lifts both rules.
+ * has a subject (HR filed it for somebody and is the organisation's only possible approver). There is no switch that lifts
+ * these rules.
+ *
+ * The one exception is the organisation's OWNER (the only role the engine lets decide about themselves, and only with a
+ * logged `sod_owner_bypass`): at the owner rung, when the subject is an owner and nobody else at all can hold the seat —
+ * a single-owner organisation with no HR admin — the subject-owner is seated in their own seat (never their delegate), so
+ * their own leave or correction can still be decided instead of being refused outright.
  */
 function segregate(actors: readonly ResolvedActor[], ctx: ResolutionContext, opts: { lastResort?: boolean } = {}): { actors: ResolvedActor[]; reason: string | null } {
-  if (ctx.allowSelfApproval) return { actors: [...actors], reason: null };
   const notes: string[] = [];
   let out = actors.filter((a) => !(ctx.subjectUserId && (a.userId === ctx.subjectUserId || a.viaDelegationOf === ctx.subjectUserId)));
   if (out.length !== actors.length) notes.push('subject excluded');
@@ -112,6 +122,10 @@ function segregate(actors: readonly ResolvedActor[], ctx: ResolutionContext, opt
       if (withoutRequestor.length > 0 || !opts.lastResort || ctx.subjectEmployeeId === null) { out = withoutRequestor; notes.push('requester excluded'); }
       else notes.push('requester kept: only resolvable approver');
     }
+  }
+  if (out.length === 0 && opts.lastResort && ctx.subjectUserId && ctx.ownerUserIds.includes(ctx.subjectUserId)) {
+    const self = actors.find((a) => a.userId === ctx.subjectUserId && a.viaDelegationOf === null);
+    if (self) { out = [self]; notes.push('subject kept: the organisation\'s only possible approver is this owner (owner bypass, logged when they decide)'); }
   }
   return { actors: out, reason: notes.length ? notes.join('; ') : null };
 }

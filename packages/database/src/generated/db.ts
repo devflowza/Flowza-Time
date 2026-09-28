@@ -244,6 +244,10 @@ export interface ApprovalStepActors {
   decidedAt: Timestamp | null;
   decision: Generated<ApprovalStatus>;
   id: Generated<string>;
+  /**
+   * The seat an organisation-wide approver's override or an escalated approver decided for: one decision fills one pending seat (Finance B-91).
+   */
+  onBehalfOfUserId: string | null;
   organizationId: string;
   resolutionPath: string | null;
   stepId: string;

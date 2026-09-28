@@ -16,7 +16,7 @@ import { systemStep } from './context.js';
 import { enqueueRecalculation } from './recalc.js';
 import { DAILY_RECORD_COLUMNS, toDailyRecordDto, toDayMarkDto, type DailyRecordRow } from './mappers.js';
 import { dv } from './sql-helpers.js';
-import { cancelForEntity, decideWithin, submit } from '../approvals/engine.js';
+import { canCancel, cancelForEntity, decideWithin, submit } from '../approvals/engine.js';
 import { listInbox, requestDtoWithin } from '../approvals/queries.js';
 import * as approvalWorkflows from '../approvals/workflows.js';
 
@@ -438,16 +438,17 @@ export async function listCorrections(deps: ApiDeps, actor: Actor, orgId: string
 }
 
 /**
- * Withdraw a pending correction: the requester, or an attendance.approve holder who can read it (RLS already scoped the read
- * to their branch / team). The correction and its approval request close together, in system context (clients cannot
- * write corrections' status under RLS since the engine v2 migration).
+ * Withdraw a pending correction: the engine's withdrawal rule (Finance B-98, review P2-4) — the requester, approval.manage
+ * or the owner, or an attendance.correct holder with the organisation-wide attendance.view (branch scope applies); an
+ * approver who is only seated on it cannot. The correction and its approval request close together, in system context
+ * (clients cannot write corrections' status under RLS since the engine v2 migration).
  */
 export async function cancelCorrection(deps: ApiDeps, actor: Actor, orgId: string, id: string, reason: string | undefined): Promise<CorrectionDto> {
   const grant = requireMembership(actor.principal, orgId);
   return runUser(deps.db, actor, async (trx) => {
     const c = await trx.selectFrom('attendanceCorrections').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!c) throw errors.notFound('Correction', id);
-    if (c.requestedBy !== actor.userId && !hasPermission(grant, 'attendance.approve')) throw errors.forbidden('Only the requester or an approver can cancel a correction.');
+    if (!canCancel(grant, actor.userId, { entityType: 'ATTENDANCE_CORRECTION', requestedBy: c.requestedBy, subjectUserId: null, employeeId: c.employeeId, branchId: c.branchId })) throw errors.forbidden('Only the requester, approval.manage or an attendance.correct holder (organisation-wide) can cancel a correction.');
     if (c.status !== 'PENDING') throw errors.invalidState(`Only pending corrections can be cancelled (current: ${c.status}).`);
     await systemStep(trx, orgId, async (t) => {
       const res = await t.updateTable('attendanceCorrections').set({ status: 'CANCELLED', rejectionReason: reason ?? null }).where('id', '=', id).where('status', '=', 'PENDING').executeTakeFirst();

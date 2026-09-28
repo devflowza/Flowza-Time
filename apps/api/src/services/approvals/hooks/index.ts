@@ -30,10 +30,20 @@ export interface HookContext {
  */
 export interface EntityHook {
   entityType: ApprovalEntity;
-  /** Holders may decide any step of the entity's requests (Finance B-91), within their org-wide or team scope. */
+  /**
+   * Holders who also hold `viewPermission` (organisation-wide, branch scope applies) may decide a level they are not seated
+   * on — as an override that fills ONE pending seat and must name the level (Finance B-91). A holder who reaches the subject
+   * only through the reporting line (a line manager) never overrides: they decide where they are seated or delegated.
+   */
   approvePermission: Permission;
-  /** Org-wide read key: with it, a permission holder decides across the organisation; without it, only for direct reports. */
+  /** Org-wide read key: an approve-key holder who also holds it (branch scope applies) may decide as an organisation-wide override. */
   viewPermission: Permission;
+  /**
+   * Who may withdraw somebody else's request of this entity (with the org-wide view key, Finance B-98), besides the requester
+   * and approval.manage. Optional: without it the entity family's key applies (leave.manage for leave / comp-off,
+   * attendance.correct for the attendance family).
+   */
+  managePermission?: Permission;
   onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onRejected(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onCancelled?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
@@ -57,12 +67,24 @@ export const entityHooks: Partial<Record<ApprovalEntity, EntityHook>> = {
 export const GENERIC_APPROVE_PERMISSION: Permission = 'attendance.approve';
 export const GENERIC_VIEW_PERMISSION: Permission = 'attendance.view';
 
+/**
+ * Keys of an entity type without a registered hook, by family: leave and comp-off are decided with the leave keys, every
+ * other type (corrections, notes, regularisation, swaps, overtime) with the attendance keys. A hook overrides them.
+ */
+const LEAVE_FAMILY: readonly ApprovalEntity[] = ['LEAVE', 'COMP_OFF'];
+const familyKeys = (entityType: ApprovalEntity): { approve: Permission; view: Permission; manage: Permission } =>
+  LEAVE_FAMILY.includes(entityType) ? { approve: 'leave.approve', view: 'leave.view', manage: 'leave.manage' } : { approve: GENERIC_APPROVE_PERMISSION, view: GENERIC_VIEW_PERMISSION, manage: 'attendance.correct' };
+
 export function hookFor(entityType: ApprovalEntity): EntityHook | null {
   return entityHooks[entityType] ?? null;
 }
 export function approvePermissionFor(entityType: ApprovalEntity): Permission {
-  return hookFor(entityType)?.approvePermission ?? GENERIC_APPROVE_PERMISSION;
+  return hookFor(entityType)?.approvePermission ?? familyKeys(entityType).approve;
 }
 export function viewPermissionFor(entityType: ApprovalEntity): Permission {
-  return hookFor(entityType)?.viewPermission ?? GENERIC_VIEW_PERMISSION;
+  return hookFor(entityType)?.viewPermission ?? familyKeys(entityType).view;
+}
+/** The key that lets somebody other than the requester withdraw a request of this entity (with the org-wide view key). */
+export function managePermissionFor(entityType: ApprovalEntity): Permission {
+  return hookFor(entityType)?.managePermission ?? familyKeys(entityType).manage;
 }

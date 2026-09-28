@@ -21,17 +21,25 @@ export function evaluateLevel(mode: ApprovalStepModeSpec, requiredCount: number 
   return 'open';
 }
 
-export interface ActorDecisionRow { userId: string; viaDelegationOf: string | null; decision: string }
+/**
+ * One actor row as the level's evaluation sees it. `onBehalfOfUserId` names the seat a decision was taken FOR when the
+ * decider did not hold it themselves: an organisation-wide approver's override or an escalated approver fills exactly one
+ * pending seat of the level (Finance B-91: one row per call).
+ */
+export interface ActorDecisionRow { userId: string; viaDelegationOf: string | null; onBehalfOfUserId?: string | null; decision: string }
+
+/** The seat a row decides for: the seat named on an override / escalation, else the approver a delegate covers, else the person. */
+export const seatOfRow = (r: { userId: string; viaDelegationOf: string | null; onBehalfOfUserId?: string | null }): string => r.onBehalfOfUserId ?? r.viaDelegationOf ?? r.userId;
 
 /**
- * Collapse actor rows into one decision per seat: a delegate's decision counts for the approver they act for. A seat is
- * APPROVED when anybody in it approved, REJECTED when somebody rejected and nobody approved, otherwise PENDING. Seats
- * whose rows were all skipped no longer count.
+ * Collapse actor rows into one decision per seat: a delegate's decision counts for the approver they act for, and an
+ * override / escalated decision for the seat it names. A seat is APPROVED when anybody in it approved, REJECTED when
+ * somebody rejected and nobody approved, otherwise PENDING. Seats whose rows were all skipped no longer count.
  */
 export function collapseSeats(rows: readonly ActorDecisionRow[]): SeatDecision[] {
   const seats = new Map<string, SeatDecision | null>();
   for (const r of rows) {
-    const seat = r.viaDelegationOf ?? r.userId;
+    const seat = seatOfRow(r);
     const current = seats.get(seat) ?? null;
     const next: SeatDecision | null = r.decision === 'APPROVED' ? 'APPROVED' : r.decision === 'REJECTED' ? 'REJECTED' : r.decision === 'PENDING' ? 'PENDING' : null;
     if (next === null) { if (!seats.has(seat)) seats.set(seat, null); continue; }
@@ -40,6 +48,35 @@ export function collapseSeats(rows: readonly ActorDecisionRow[]): SeatDecision[]
     else seats.set(seat, 'PENDING');
   }
   return [...seats.values()].filter((d): d is SeatDecision => d !== null);
+}
+
+/**
+ * The seats of a level still waiting for a decision, in seat order (the order their first row was written, i.e. the order
+ * resolution seated them). An override or an escalated approver fills the first of these unless the call names one.
+ */
+export function pendingSeats(rows: readonly ActorDecisionRow[]): string[] {
+  const order: string[] = [];
+  const state = new Map<string, SeatDecision | null>();
+  for (const r of rows) {
+    const seat = seatOfRow(r);
+    if (!state.has(seat)) order.push(seat);
+    const [decision] = collapseSeats(rows.filter((x) => seatOfRow(x) === seat));
+    state.set(seat, decision ?? null);
+  }
+  return order.filter((s) => state.get(s) === 'PENDING');
+}
+
+/**
+ * The number of approvals a level needs after its pending seats were handed to ONE new approver (reassignment, Finance
+ * B-104). The seats that already approved still count; the reassignee is the only pending seat left, so the requirement
+ * becomes `min(required, approvals already given + 1)` — their approval always completes the level and can never turn into
+ * a rejection because the original quorum is out of reach. ALL keeps no count (every remaining seat must approve, which the
+ * reassignee's approval completes). ANY stays 1.
+ */
+export function requiredAfterReassign(mode: ApprovalStepModeSpec, requiredCount: number | null | undefined, approvedSeats: number): number | null {
+  if (mode === 'ALL') return null;
+  const required = mode === 'ANY' ? 1 : Math.max(1, Math.floor(requiredCount ?? 1));
+  return Math.max(1, Math.min(required, approvedSeats + 1));
 }
 
 /** When an activated level escalates, or null when the step has no escalation. */
