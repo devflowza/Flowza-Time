@@ -1,12 +1,13 @@
 import { expect, test, type Page } from '@playwright/test';
-import { APPROVAL_ID, approvalsHandlers, COLLEAGUE, installMockBackend, ORG_ID, signInDirectly } from './support/mock-backend';
+import { APPROVAL_ID, approvalsHandlers, COLLEAGUE, EMAIL_TOKEN, installMockBackend, ORG_ID, signInDirectly } from './support/mock-backend';
 
 /** DataTable renders a table and a card fallback; act on the copy that is on screen for this viewport. */
 const onScreen = (page: Page, text: string | RegExp) => page.getByText(text).locator('visible=true').first();
 
 /**
- * Approval engine v2 (review P2-12): the inbox with a decision and its comment, one request's levels and timeline, creating
- * and listing a delegation, and the workflow editor's validation — against the API double in support/mock-backend.ts.
+ * Approval engine v2 (review P2-12): the inbox with a decision and its comment, one request's levels and timeline, the
+ * one-click e-mail link, creating and listing a delegation, and the workflow editor's validation — against the API double
+ * in support/mock-backend.ts.
  */
 test.describe('Approvals', () => {
   test.beforeEach(async ({ page }) => { await signInDirectly(page); });
@@ -44,6 +45,23 @@ test.describe('Approvals', () => {
     await expect(panel.getByText('Submitted', { exact: true })).toBeVisible();
     await expect(panel.getByText('Level 1 approved')).toBeVisible();
     await expect(panel.getByText('Moved to level 2')).toBeVisible();
+  });
+
+  test('P2-12 e-mail link → nothing is sent on load; the approver confirms and the token is sent once', async ({ page }) => {
+    const handlers = approvalsHandlers();
+    const backend = await installMockBackend(page, { get: handlers.get, post: handlers.post });
+    const emailActions = () => backend.calls.filter((c) => c.method === 'POST' && c.path === `/orgs/${ORG_ID}/approvals/email-action`);
+    await page.goto(`/approvals/email-action?org=${ORG_ID}&action=APPROVE&token=${EMAIL_TOKEN}`);
+    await expect(page.getByRole('heading', { level: 1, name: 'Confirm your decision' })).toBeVisible();
+    await expect(page.getByText('You are about to approve the request from your e-mail.')).toBeVisible();
+    // mail scanners follow links: opening it decides nothing (settled network, still no call)
+    await page.waitForLoadState('networkidle');
+    expect(emailActions()).toHaveLength(0);
+    await page.getByRole('button', { name: 'Approve' }).click();
+    await expect(page.getByText('Done — the request is now Approved.')).toBeVisible();
+    expect(emailActions()).toHaveLength(1);
+    expect(emailActions()[0]!.body).toEqual({ token: EMAIL_TOKEN, action: 'APPROVE' });
+    await expect(page.getByRole('link', { name: 'Open the request' })).toHaveAttribute('href', new RegExp(`/approvals/requests/${APPROVAL_ID}$`));
   });
 
   test('P2-12 delegations → delegate my approvals to a colleague and see it listed', async ({ page }) => {

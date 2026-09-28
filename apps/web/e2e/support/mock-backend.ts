@@ -190,9 +190,12 @@ export function approvalRequestFixture(over: Partial<ApprovalRequestDto> = {}): 
     ...over,
   };
 }
+/** The token of the one-click e-mail link the e-mail scenario opens (the double accepts only this one). */
+export const EMAIL_TOKEN = 'e2e-email-token-0123456789abcdef';
 /**
  * Stateful handlers of the approvals screens: the inbox (the request leaves the queue once decided), one request, the
- * decision, the delegations list (a created delegation appears in it), the colleague picker and the workflow editor.
+ * decision, the one-click e-mail action, the delegations list (a created delegation appears in it), the colleague picker
+ * and the workflow editor.
  */
 export function approvalsHandlers(): { get: NonNullable<MockBackendOptions['get']>; post: NonNullable<MockBackendOptions['post']> } {
   let decided: ApprovalRequestDto | null = null;
@@ -214,6 +217,13 @@ export function approvalsHandlers(): { get: NonNullable<MockBackendOptions['get'
         const b = body as { stepNo: number; decision: 'APPROVE' | 'REJECT'; comment?: string };
         const base = approvalRequestFixture();
         decided = { ...base, status: b.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED', completedAt: nowIso(), decidedBy: USER_ID, decidedByName: 'Aisha Al Balushi', abilities: { ...base.abilities, canDecide: false, decideVia: null } };
+        return { body: { data: { ...decided, noop: false, terminal: true } } };
+      },
+      [`/orgs/${ORG_ID}/approvals/email-action`]: (body) => {
+        const b = body as { token: string; action: 'APPROVE' | 'REJECT'; comment?: string };
+        if (b.token !== EMAIL_TOKEN) return { status: 404, body: { code: 'NOT_FOUND', message: 'Approval link not found' } };
+        const base = approvalRequestFixture();
+        decided = { ...base, status: b.action === 'APPROVE' ? 'APPROVED' : 'REJECTED', completedAt: nowIso(), decidedBy: USER_ID, decidedByName: 'Aisha Al Balushi', abilities: { ...base.abilities, canDecide: false, decideVia: null } };
         return { body: { data: { ...decided, noop: false, terminal: true } } };
       },
       [`/orgs/${ORG_ID}/approval-delegations`]: (body) => {
