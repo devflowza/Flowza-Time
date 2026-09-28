@@ -10,4 +10,6 @@ psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_isolat
 psql -U flowza_worker -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_system_context.sql"
 # approval engine v2 (runs last: it commits fixtures of its own on top of the isolation ones)
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_approvals.sql"
+# leave v2 (runs after the approvals suite: the thread of a leave is readable through its approval request)
+psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_leave.sql"
 echo "RLS tests passed"
