@@ -1,11 +1,11 @@
 import { sql } from 'kysely';
 import type { AttendanceSettings, DayMarkSource } from '@flowza/contracts';
-import { holidayDates, type WorkingCalendar } from '@flowza/domain';
+import { leaveTypeAppliesTo, type WorkingCalendar } from '@flowza/domain';
 import type { Trx } from '../context.js';
 import type { JobQueue } from '../queue.js';
-import { activeMarksOn, effectiveBranchOn, isoDateOf, markDay, revokeMark, type DayMarkRow } from './day-marks.js';
+import { activeMarksOn, effectiveBranchOn, markDay, revokeMark, type DayMarkRow } from './day-marks.js';
 import { enqueueRecompute } from './recompute-queue.js';
-import { COMP_OFF_SYSTEM_KEY, loadLeaveBalances, loadLeaveTypePolicies } from '../leave/balances.js';
+import { COMP_OFF_SYSTEM_KEY, loadLeaveBalances, loadLeaveTypePolicies, loadWorkingCalendars } from '../leave/balances.js';
 
 /**
  * The pay-effect charger (HR portal Prompt 3, Finance parity `_deduct_leave_for_unexcused_note`): the ONE function through
@@ -46,24 +46,12 @@ export interface ChargeUnexcusedResult { outcome: ChargeOutcome; payEffectDays: 
 const dv = (date: string) => sql<Date>`${date}::date`;
 const normalise = (days: number): 0 | 0.5 | 1 => (!Number.isFinite(days) || days < 0.5 ? 0 : days >= 1 ? 1 : 0.5);
 
-/** The employee's working calendar (weekly off: employee → branch → organisation; holidays of the branch or default calendar) for [from, to]. */
+/**
+ * The employee's working calendar for [from, to] — the per-date working calendar (leave v2 review P1-1 / P1-2: the branch in
+ * force on each date, its weekly offs and holidays, rotation off days), the same one leave counting and the engine use.
+ */
 export async function loadWorkingCalendar(trx: Trx, organizationId: string, employeeId: string, from: string, to: string): Promise<WorkingCalendar> {
-  const emp = await trx.selectFrom('employees').select(['branchId', 'weeklyOffDays']).where('organizationId', '=', organizationId).where('id', '=', employeeId).executeTakeFirst();
-  const [org, branch] = await Promise.all([
-    trx.selectFrom('organizations').select('weeklyOffDays').where('id', '=', organizationId).executeTakeFirst(),
-    emp ? trx.selectFrom('branches').select(['weeklyOffDays', 'holidayCalendarId']).where('organizationId', '=', organizationId).where('id', '=', emp.branchId).executeTakeFirst() : Promise.resolve(undefined),
-  ]);
-  const nums = (v: unknown): number[] | null => (Array.isArray(v) ? v.map(Number) : null);
-  const weeklyOffDays = nums(emp?.weeklyOffDays) ?? nums(branch?.weeklyOffDays) ?? nums(org?.weeklyOffDays) ?? [];
-  let calendarId = branch?.holidayCalendarId ?? null;
-  if (!calendarId) calendarId = (await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', organizationId).where('isDefault', '=', true).executeTakeFirst())?.id ?? null;
-  const holidays = calendarId
-    ? (await trx.selectFrom('holidays').select(['date', 'endDate', 'branchIds']).where('organizationId', '=', organizationId).where('calendarId', '=', calendarId)
-        .where('date', '<=', dv(to)).where(sql<boolean>`coalesce(end_date, date) >= ${from}::date`).execute())
-        .filter((h) => !h.branchIds || !emp || h.branchIds.includes(emp.branchId))
-        .map((h) => ({ date: isoDateOf(h.date), endDate: h.endDate === null ? null : isoDateOf(h.endDate) }))
-    : [];
-  return { weeklyOffDays, holidays: holidayDates(holidays) };
+  return (await loadWorkingCalendars(trx, organizationId, [employeeId], from, to)).get(employeeId) ?? { weeklyOffDays: [], holidays: new Set() };
 }
 
 interface Candidate { id: string; code: string; remaining: number; priority: number }
@@ -71,16 +59,20 @@ interface Candidate { id: string; code: string; remaining: number; priority: num
 /**
  * Paid, tracked leave types that may be charged, with the available balance on the charged date, in charging order.
  * Never charged: unpaid types, untracked types (no allocation, no allowance), special types (`is_special` — sick,
- * maternity, Hajj… — leave v2), the codes in `excludeLeaveTypeCodes`, and the comp-off type (credits are earned, not
- * charged). The balance is read through the ONE balance function (leave v2: allocations, carry-forward, accrual), not
+ * maternity, Hajj… — leave v2), the codes in `excludeLeaveTypeCodes`, the comp-off type (credits are earned, not
+ * charged), and — leave v2 review P1-3 — a type that does not apply to the employee (`leaveTypeAppliesTo`: gender and
+ * employment type, the rule the portal and the API use), so an unexcused day never becomes leave the employee could never
+ * have. The balance is read through the ONE balance function (leave v2: allocations, carry-forward, accrual), not
  * recomputed here; pending requests do not reserve (decision of Prompt 3).
  */
 async function chargeableLeaveTypes(trx: Trx, organizationId: string, employeeId: string, date: string, settings: UnexcusedSettings): Promise<Candidate[]> {
   const year = Number(date.slice(0, 4));
   const excluded = new Set(settings.excludeLeaveTypeCodes.map((c) => c.toUpperCase()));
   const priority = settings.leaveTypePriority.map((c) => c.toUpperCase());
+  const employee = await trx.selectFrom('employees').select(['gender', 'employmentType']).where('organizationId', '=', organizationId).where('id', '=', employeeId).executeTakeFirst();
+  if (!employee) return [];
   const types = (await loadLeaveTypePolicies(trx, organizationId))
-    .filter((t) => t.isPaid && !t.isSpecial && t.systemKey !== COMP_OFF_SYSTEM_KEY && !excluded.has(t.code.toUpperCase()));
+    .filter((t) => t.isPaid && !t.isSpecial && t.systemKey !== COMP_OFF_SYSTEM_KEY && !excluded.has(t.code.toUpperCase()) && leaveTypeAppliesTo(t, employee));
   if (types.length === 0) return [];
   const balances = (await loadLeaveBalances(trx, organizationId, [employeeId], { year, asOf: date, types })).get(employeeId) ?? [];
   const candidates: Candidate[] = [];

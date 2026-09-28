@@ -105,14 +105,22 @@ export interface SelfLeaveRecordDto {
   compOff?: boolean;
   /** Rules the request broke that did not block it (returned by apply / edit). */
   warnings?: LeaveWarningDto[];
+  /** Returned by withdraw when the request was already withdrawn or cancelled (leave v2 review P2-12: idempotent, not an error). */
+  alreadyWithdrawn?: boolean;
 }
 export interface SelfLeaveDto {
   year: number;
   types: SelfLeaveTypeDto[];
   balances: SelfLeaveBalanceDto[];
   records: SelfLeaveRecordDto[];
-  /** What the apply form needs to preview the days a range will charge. */
-  calendar: { weeklyOffDays: number[]; holidays: string[] };
+  /**
+   * What the apply form needs to preview the days a range will charge (the year and the next): the weekly offs of the
+   * employee's current placement and the holiday dates, plus — leave v2 review P1-1 / P1-2 — `offDates`: every date of the
+   * window that is NOT a working day by the per-date working calendar (the branch effective on that date, its weekly offs and
+   * holidays, rotation-pattern off days), exactly as the attendance engine sees it. A client that knows `offDates` counts with
+   * it; older clients keep using the weekly offs and holidays.
+   */
+  calendar: { weeklyOffDays: number[]; holidays: string[]; offDates?: string[]; from?: string; to?: string };
   // ----- leave v2 (optional: older API builds omit them) -----
   /** The date balances are computed for (today in the organisation's timezone, clamped into the year). */
   asOf?: string;

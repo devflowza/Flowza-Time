@@ -525,7 +525,10 @@ describe('comp-off', () => {
     const two = await applyAs(staff5, { leaveTypeId: T['CO'], ...nextRange(2) });
     expect(two.status).toBe(400);
     expect(codes(two.body)).toContain('COMP_OFF_BALANCE');
-    const one = await applyAs(staff5, { leaveTypeId: T['CO'], ...nextRange(1) });
+    // leave v2 review P2-4: a credit pays only for leave dated on or before its expiry (worked day + 90) — so the redemption
+    // is dated soon (a Sunday one to two weeks ahead), not at the far weeks nextRange() reaches by now
+    const soon = (() => { const d = new Date(); d.setUTCDate(d.getUTCDate() + 14 - d.getUTCDay()); return d.toISOString().slice(0, 10); })();
+    const one = await applyAs(staff5, { leaveTypeId: T['CO'], startDate: soon, endDate: soon });
     expect(one.status).toBe(201);
     expect(one.body.data.compOff).toBe(true);
     const ok = await h.request('POST', `${base()}/approvals/${one.body.data.approvalRequestId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } });

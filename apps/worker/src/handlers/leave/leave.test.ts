@@ -109,8 +109,15 @@ describe('leave scheduler ticks', () => {
     expect(jobs).toHaveLength(1);
     expect(jobs[0]).toMatchObject({ organizationId: ORG, dedupeKey: `leave-year-close:${ORG}:2026` });
     expect(jobs[0]!.payload).toMatchObject({ fromYear: 2026 });
-    clock = new Date('2027-01-01T10:00:00Z'); // 14:00 local: nothing
-    expect(await leaveTasks[0]!.run(h.deps)).toMatchObject({ enqueued: 0 });
+    // review P2-2: until the close has run, later ticks keep asking for it (catch-up) — still one pending job (deduped)
+    clock = new Date('2027-01-01T10:00:00Z'); // 14:00 local
+    await leaveTasks[0]!.run(h.deps);
+    expect(await h.tdb.adminDb.selectFrom('jobs.queue').select('id').where('jobType', '=', 'LEAVE_YEAR_CLOSE').where('organizationId', '=', ORG).execute()).toHaveLength(1);
+    // once it ran (its ledger row says so), nothing more
+    await leaveYearCloseHandler(job('LEAVE_YEAR_CLOSE', { organizationId: ORG, fromYear: 2026 }));
+    await h.tdb.adminDb.deleteFrom('jobs.queue').where('jobType', '=', 'LEAVE_YEAR_CLOSE').where('organizationId', '=', ORG).execute();
+    await leaveTasks[0]!.run(h.deps);
+    expect(await h.tdb.adminDb.selectFrom('jobs.queue').select('id').where('jobType', '=', 'LEAVE_YEAR_CLOSE').where('organizationId', '=', ORG).execute()).toHaveLength(0);
   });
 
   it('enqueues the comp-off expiry once per local day', async () => {

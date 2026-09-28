@@ -12,9 +12,9 @@ import { orgToday } from '../features/recalc.js';
 import { dv } from '../features/sql-helpers.js';
 import { systemStep } from '../features/context.js';
 import { ensureCompOffTypeRow, seedDefaultLeaveTypes } from '../features/leave-defaults.js';
-import { cancelForEntity, decideWithin, submit } from '../approvals/engine.js';
+import { cancelForEntity, decideWithin, isRequestSubject, recordEvent, submit } from '../approvals/engine.js';
 import { bookCompOffForLeave } from '../approvals/hooks/leave.js';
-import { assertNoOverlap, checkLeaveRangeLock, evaluateLeaveRequest, isCompOffType, loadLeaveEmployee } from './common.js';
+import { assertNoOverlap, checkLeaveRangeLock, evaluateLeaveRequest, isCompOffType, loadLeaveEmployee, lockEmployeeLeave, ownRowWrite } from './common.js';
 import { ACTIVE_LEAVE, UNDECIDED_LEAVE, recalcLeaveRange, resubmitLeave, seatedStep, waitingForByRequest } from './lifecycle.js';
 
 /**
@@ -39,6 +39,8 @@ export interface LeaveTypeDto {
   id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; treatAsPresent: boolean; color: string | null; annualAllowanceDays: number | null; status: string; createdAt: string;
   // leave v2 policy
   requiresApproval: boolean; countMode: string; maxConsecutiveDays: number | null; advanceNoticeDays: number; applicableGender: string; accrual: string;
+  /** Leave v2 review (B-41): the employment types the type applies to; null = every type. */
+  applicableEmploymentTypes: string[] | null;
   carryForwardMaxDays: number; carryForwardExpiryMonths: number | null; isSpecial: boolean; allowHalfDay: boolean; portalVisible: boolean; systemKey: string | null;
   /** The organisation's comp-off type (managed by the system: always active, no allowance, redeemed from credits). */
   compOff: boolean;
@@ -46,7 +48,7 @@ export interface LeaveTypeDto {
 export function toLeaveTypeDto(t: LeaveTypePolicy): LeaveTypeDto {
   return {
     id: t.id, code: t.code, name: t.name, nameAr: t.nameAr, isPaid: t.isPaid, treatAsPresent: t.treatAsPresent, color: t.color, annualAllowanceDays: t.annualAllowanceDays, status: t.status, createdAt: isoDateTime(t.createdAt),
-    requiresApproval: t.requiresApproval, countMode: t.countMode, maxConsecutiveDays: t.maxConsecutiveDays, advanceNoticeDays: t.advanceNoticeDays, applicableGender: t.applicableGender, accrual: t.accrual,
+    requiresApproval: t.requiresApproval, countMode: t.countMode, maxConsecutiveDays: t.maxConsecutiveDays, advanceNoticeDays: t.advanceNoticeDays, applicableGender: t.applicableGender, applicableEmploymentTypes: t.applicableEmploymentTypes, accrual: t.accrual,
     carryForwardMaxDays: t.carryForwardMaxDays, carryForwardExpiryMonths: t.carryForwardExpiryMonths, isSpecial: t.isSpecial, allowHalfDay: t.allowHalfDay, portalVisible: t.portalVisible, systemKey: t.systemKey, compOff: isCompOffType(t),
   };
 }
@@ -93,16 +95,18 @@ export async function createLeaveType(deps: ApiDeps, actor: Actor, orgId: string
   });
 }
 
-/** What the comp-off type must keep: it is balanced from credits, always active and never offered in the ordinary form. */
-function assertCompOffTypeInvariant(patch: Partial<LeaveTypeInput> & { status?: string }): void {
-  const bad: string[] = [];
-  if (patch.status !== undefined && patch.status !== 'active') bad.push('status');
-  if (patch.annualAllowanceDays !== undefined && patch.annualAllowanceDays !== null) bad.push('annualAllowanceDays');
-  if (patch.accrual !== undefined && patch.accrual !== 'none') bad.push('accrual');
-  if (patch.carryForwardMaxDays !== undefined && patch.carryForwardMaxDays !== 0) bad.push('carryForwardMaxDays');
-  if (patch.portalVisible === true) bad.push('portalVisible');
-  if (patch.isSpecial === false) bad.push('isSpecial');
-  if (bad.length) throw errors.validation('The comp-off type is managed by the system: it stays active, has no yearly allowance, accrual or carry-forward, and is booked through "Use comp-off".', { issues: bad.map((path) => ({ path, message: 'Not allowed for the comp-off type' })) });
+/**
+ * What the comp-off type keeps (decision 11, review P2-5): it is managed by the system — balanced from credits, always
+ * active, never offered in the ordinary form, redeemed with approval as paid leave — so only its labels and colour change.
+ * Any other field that would change is refused (400); re-sending a field's current value is harmless.
+ */
+const COMP_OFF_EDITABLE: ReadonlySet<string> = new Set(['name', 'nameAr', 'color']);
+function assertCompOffTypeInvariant(before: LeaveTypePolicy, patch: Partial<LeaveTypeInput> & { status?: string }): void {
+  const current = toLeaveTypeDto(before) as unknown as Record<string, unknown>;
+  const bad = Object.entries(patch)
+    .filter(([key, value]) => value !== undefined && !COMP_OFF_EDITABLE.has(key) && JSON.stringify(current[key] ?? null) !== JSON.stringify(value))
+    .map(([key]) => key);
+  if (bad.length) throw errors.validation('The comp-off type is managed by the system: only its name, Arabic name and colour can be changed.', { issues: bad.map((path) => ({ path, message: 'Not editable for the comp-off type', code: 'COMP_OFF_MANAGED' })) });
 }
 
 export async function updateLeaveType(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<LeaveTypeInput> & { status?: string }): Promise<LeaveTypeDto> {
@@ -110,7 +114,7 @@ export async function updateLeaveType(deps: ApiDeps, actor: Actor, orgId: string
   return runUser(deps.db, actor, async (trx) => {
     const before = await oneType(trx, orgId, id);
     if (!before) throw errors.notFound('Leave type', id);
-    if (isCompOffType(before)) assertCompOffTypeInvariant(input);
+    if (isCompOffType(before)) assertCompOffTypeInvariant(before, input);
     const patch = typeValues(input);
     if (Object.keys(patch).length) await trx.updateTable('leaveTypes').set(patch as never).where('id', '=', id).execute();
     const after = (await oneType(trx, orgId, id))!;
@@ -243,10 +247,14 @@ export async function createLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     const halfDayPart = input.isHalfDay ? input.halfDayPart ?? 'FIRST_HALF' : null;
     const ev = await evaluateLeaveRequest(trx, orgId, { employee: emp, leaveTypeId: input.leaveTypeId, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, asHr: true });
     const lock = await checkLeaveRangeLock(trx, orgId, emp.branchId, input.startDate, input.endDate, grant);
+    // review P2-11: one writer of an employee's leave at a time, so a concurrent twin meets the friendly overlap 409 below
+    await lockEmployeeLeave(trx, input.employeeId);
     await assertNoOverlap(trx, orgId, input.employeeId, { startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart });
-    const row = await trx.insertInto('leaveRecords').values({ organizationId: orgId, employeeId: input.employeeId, leaveTypeId: input.leaveTypeId, branchId: emp.branchId, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart, days: ev.days, reason: input.reason ?? null, status: 'PENDING', createdBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'leave.recorded', 'leave_record', { entityId: row.id, branchId: emp.branchId, newValue: { ...input, days: ev.days, ...(ev.warnings.length ? { warnings: ev.warnings.map((w) => w.code) } : {}) }, ...(lock.lockedOverride ? { reason: 'locked period (attendance.lock_period)' } : {}) });
     const own = !!grant.employeeId && grant.employeeId === input.employeeId;
+    // review P0-2: a row about the caller is written in the system context after these checks (the database refuses it from
+    // the caller's own session); anybody else's row is written under the caller's RLS as before
+    const row = await ownRowWrite(trx, orgId, own, (t) => t.insertInto('leaveRecords').values({ organizationId: orgId, employeeId: input.employeeId, leaveTypeId: input.leaveTypeId, branchId: emp.branchId, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart, days: ev.days, reason: input.reason ?? null, status: 'PENDING', createdBy: actor.userId }).returning('id').executeTakeFirstOrThrow());
+    await audit(trx, actor, orgId, 'leave.recorded', 'leave_record', { entityId: row.id, branchId: emp.branchId, newValue: { ...input, days: ev.days, ...(ev.warnings.length ? { warnings: ev.warnings.map((w) => w.code) } : {}) }, ...(lock.lockedOverride ? { reason: 'locked period (attendance.lock_period)' } : {}) });
     const submitted = await submit(deps, trx, actor, orgId, {
       entityType: 'LEAVE', entityId: row.id, employeeId: input.employeeId, branchId: emp.branchId, departmentId: emp.departmentId, units: ev.days, requestedBy: actor.userId,
       noWorkflow: own ? { kind: 'PERMISSION', permission: 'leave.approve' } : { kind: 'AUTO_APPROVE' },
@@ -309,15 +317,37 @@ export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     const engineBacked = before.approvalRequestId !== null;
     if (statusChange && !undecided && engineBacked && status !== 'CANCELLED') throw errors.conflict(overturnMessage(before.status), { leaveRecordId: id, approvalRequestId: before.approvalRequestId });
     if (deciding && status === 'REJECTED' && !input.decisionNote) throw errors.validation('A note is required when rejecting leave.', { issues: [{ path: 'decisionNote', message: 'Required' }] });
+    // review P0-1 — segregation of duties by EVERY route: whoever a leave is about (the caller's live membership link, or the
+    // subject snapshot of its approval request) never corrects a decided leave or moves its status anywhere but CANCELLED,
+    // and never decides it (the engine refuses a decision on a request about the caller; a leave with no request is refused
+    // here). The organisation owner is the one exception, logged as `sod_owner_bypass`.
+    const ownRow = !!grant.employeeId && grant.employeeId === before.employeeId;
+    const snapshot = before.approvalRequestId ? await withSystemScope(trx, orgId, (t) => t.selectFrom('approvalRequests').select('subjectUserId').where('organizationId', '=', orgId).where('id', '=', before.approvalRequestId!).executeTakeFirst()) : undefined;
+    const subject = isRequestSubject(grant, actor.userId, { employeeId: before.employeeId, subjectUserId: snapshot?.subjectUserId ?? null });
+    const pending = await withSystemScope(trx, orgId, (t) => t.selectFrom('approvalRequests').select(['id', 'requestedBy']).where('organizationId', '=', orgId).where('entityType', '=', 'LEAVE').where('entityId', '=', id).where('status', '=', 'PENDING').executeTakeFirst());
+    if (deciding && !pending && engineBacked) throw errors.conflict('This leave\'s approval request is no longer open. Refresh the page; if the leave is still undecided, cancel it and record it again.', { leaveRecordId: id, approvalRequestId: before.approvalRequestId });
+    const selfDecision = deciding && !pending; // a leave recorded before the engine: decided here, not by the engine
+    // a decided leave's note is part of the decision: rewriting it is a correction too (a cancel may carry its own note)
+    const noteChanged = input.decisionNote !== undefined && (input.decisionNote ?? null) !== (before.decisionNote ?? null) && !(statusChange && status === 'CANCELLED');
+    const selfCorrection = !undecided && (contentChanged || noteChanged || (statusChange && status !== 'CANCELLED'));
+    let ownerBypass: 'decide' | 'correct' | null = null;
+    if (subject && (selfDecision || selfCorrection)) {
+      if (grant.roleKey !== 'owner') {
+        throw errors.forbidden(selfDecision ? 'You cannot approve or reject your own leave request.' : 'This leave is about you: another HR user must correct it or change its status. You can cancel it.');
+      }
+      ownerBypass = selfDecision ? 'decide' : 'correct';
+    }
+    // a row about the caller is written in the system context after these checks: the database refuses it from their own
+    // session (review P0-2); anybody else's row is written under the caller's RLS as before
+    const write = <T,>(fn: (t: Trx) => Promise<T>): Promise<T> => ownRowWrite(trx, orgId, ownRow, fn);
     // both the range being left and the range being entered must be open (HR unlocks first, then edits — or holds attendance.lock_period)
     const lockA = await checkLeaveRangeLock(trx, orgId, before.branchId, beforeStart, beforeEnd, grant);
     const lockB = datesChanged ? await checkLeaveRangeLock(trx, orgId, before.branchId, start, end, grant) : { lockedOverride: false };
-    const pending = await withSystemScope(trx, orgId, (t) => t.selectFrom('approvalRequests').select(['id', 'requestedBy']).where('organizationId', '=', orgId).where('entityType', '=', 'LEAVE').where('entityId', '=', id).where('status', '=', 'PENDING').executeTakeFirst());
-    if (deciding && !pending && engineBacked) throw errors.conflict('This leave\'s approval request is no longer open. Refresh the page; if the leave is still undecided, cancel it and record it again.', { leaveRecordId: id, approvalRequestId: before.approvalRequestId });
-    if (deciding && !pending && grant.employeeId === before.employeeId) throw errors.forbidden('You cannot approve or reject your own leave request.');
-    if (statusChange && status === 'APPROVED' && !deciding && grant.employeeId === before.employeeId) throw errors.forbidden('You cannot approve your own leave.');
     const becomesActive = ACTIVE_LEAVE.includes(status) && (!ACTIVE_LEAVE.includes(before.status) || datesChanged);
-    if (becomesActive) await assertNoOverlap(trx, orgId, before.employeeId, { startDate: start, endDate: end, isHalfDay, halfDayPart }, id);
+    if (becomesActive) {
+      await lockEmployeeLeave(trx, before.employeeId); // review P2-11
+      await assertNoOverlap(trx, orgId, before.employeeId, { startDate: start, endDate: end, isHalfDay, halfDayPart }, id);
+    }
 
     let warnings: LeaveWarningDto[] = [];
     let recalcFromEngine = false;
@@ -326,18 +356,19 @@ export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
       // review P1-2: the level the decider saw; a caller who does not name it may only settle a seat they hold
       const stepNo = input.stepNo ?? await seatedStep(trx, orgId, pending.id, actor.userId);
       if (stepNo === null) throw errors.forbidden('You are not an approver of the current step.');
-      await decideWithin(deps, trx, actor, orgId, pending.id, { stepNo, decision: status === 'APPROVED' ? 'APPROVE' : 'REJECT', comment: input.decisionNote ?? undefined });
+      // an override on a level waiting for several approvers names the seat it fills (engine §9.8: "Deciding for")
+      await decideWithin(deps, trx, actor, orgId, pending.id, { stepNo, decision: status === 'APPROVED' ? 'APPROVE' : 'REJECT', comment: input.decisionNote ?? undefined, ...(input.onBehalfOfUserId ? { onBehalfOfUserId: input.onBehalfOfUserId } : {}) });
       recalcFromEngine = true; // the leave hook recomputes past days on approval
     } else if (deciding) {
       // leave recorded before the engine (no request): HR decides directly, as before
       const patch: Record<string, unknown> = { status, ...(input.decisionNote !== undefined ? { decisionNote: input.decisionNote } : {}), ...(status === 'APPROVED' ? { approvedBy: actor.userId, approvedAt: new Date() } : {}) };
-      await trx.updateTable('leaveRecords').set(patch as never).where('id', '=', id).execute();
+      await write((t) => t.updateTable('leaveRecords').set(patch as never).where('id', '=', id).execute());
       if (status === 'APPROVED') await systemStep(trx, orgId, (t) => bookCompOffForLeave(t, orgId, id));
       const requester = await withSystemScope(trx, orgId, (t) => t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', before.employeeId).where('status', '=', 'active').executeTakeFirst());
       if (requester) await emitDomainEvent(trx, { organizationId: orgId, eventType: status === 'APPROVED' ? 'leave.approved' : 'leave.rejected', aggregateType: 'leave_record', aggregateId: id, payload: { userId: requester.userId, employeeId: before.employeeId, leaveTypeName: before.leaveTypeName ?? null, startDate: start, endDate: end, decisionNote: input.decisionNote ?? before.decisionNote }, actorUserId: actor.userId, requestId: actor.requestId });
     } else if (statusChange) {
       // cancelling (any leave), or a direct status change of a leave decided before the engine
-      await trx.updateTable('leaveRecords').set({ status: status as LeaveStatus, ...(status === 'APPROVED' ? { approvedBy: actor.userId, approvedAt: new Date() } : {}), ...(input.decisionNote !== undefined ? { decisionNote: input.decisionNote } : {}) }).where('id', '=', id).execute();
+      await write((t) => t.updateTable('leaveRecords').set({ status: status as LeaveStatus, ...(status === 'APPROVED' ? { approvedBy: actor.userId, approvedAt: new Date() } : {}), ...(input.decisionNote !== undefined ? { decisionNote: input.decisionNote } : {}) }).where('id', '=', id).execute());
       if (undecided && pending) await systemStep(trx, orgId, (t) => cancelForEntity(deps, t, actor, orgId, 'LEAVE', id, input.decisionNote ?? 'Leave cancelled by HR', { source: 'leave_update' }));
       if (before.status === 'APPROVED') await systemStep(trx, orgId, async (t) => releaseCompOffCredits(t, { organizationId: orgId, leaveRecordId: id, asOf: await orgToday(t, orgId) }));
       if (status === 'APPROVED') await systemStep(trx, orgId, (t) => bookCompOffForLeave(t, orgId, id));
@@ -356,7 +387,7 @@ export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
         warnings = ev.warnings; days = ev.days; requiresApproval = ev.type.requiresApproval;
         content['days'] = days; content['editedAt'] = new Date();
       } else if (contentChanged) content['editedAt'] = new Date();
-      if (Object.keys(content).length) await trx.updateTable('leaveRecords').set(content as never).where('id', '=', id).execute();
+      if (Object.keys(content).length) await write((t) => t.updateTable('leaveRecords').set(content as never).where('id', '=', id).execute());
       if (undecided && contentChanged && pending) {
         // a material edit: the approvers decide on what the leave now says (Finance B-96)
         const needsApproval = requiresApproval ?? (await oneType(trx, orgId, before.leaveTypeId))?.requiresApproval ?? true;
@@ -376,6 +407,11 @@ export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     const lockedOverride = lockA.lockedOverride || lockB.lockedOverride;
     const why = [correction ? `post-decision correction of ${before.status.toLowerCase()} leave` : null, lockedOverride ? 'locked period (attendance.lock_period)' : null].filter(Boolean).join('; ');
     await audit(trx, actor, orgId, correction ? 'leave.corrected' : 'leave.updated', 'leave_record', { entityId: id, branchId: before.branchId, ...diff, ...(why ? { reason: why } : {}) });
+    if (ownerBypass) {
+      // the one segregation-of-duties exception: in the audit trail and on the request's timeline (review P0-1)
+      await audit(trx, actor, orgId, 'leave.sod_owner_bypass', 'leave_record', { entityId: id, branchId: before.branchId, newValue: { action: ownerBypass, leaveRecordId: id, fromStatus: before.status, toStatus: after.status, approvalRequestId: before.approvalRequestId }, reason: 'the organisation owner changed leave that is about them' });
+      if (before.approvalRequestId) await systemStep(trx, orgId, (t) => recordEvent(t, orgId, before.approvalRequestId!, 'sod_owner_bypass', actor.userId, { action: ownerBypass === 'decide' ? 'decide_leave' : 'correct_leave', leaveRecordId: id }));
+    }
     // approved leave shapes the daily records: recompute when it appears, changes or disappears (the engine's hook does it for a person's approval)
     const touchesAttendance = !recalcFromEngine && (before.status === 'APPROVED' || after.status === 'APPROVED' || autoApproved);
     const recalc = touchesAttendance ? await recalcLeaveRange(deps, trx, actor, orgId, minDate(beforeStart, start), maxDate(beforeEnd, end), { branchId: before.branchId, employeeIds: [before.employeeId], reason: 'leave changed' }) : null;
@@ -391,7 +427,10 @@ export async function deleteLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     requireBranchAccess(grant, before.branchId);
     if (before.status === 'CANCELLED') throw errors.invalidState('The leave record is already cancelled.');
     const lock = await checkLeaveRangeLock(trx, orgId, before.branchId, isoDate(before.startDate), isoDate(before.endDate), grant);
-    await trx.updateTable('leaveRecords').set({ status: 'CANCELLED' }).where('id', '=', id).execute();
+    // cancelling leave about oneself is allowed (review P0-1) — through here, where the past days are recomputed: the row is
+    // written in the system context, as the database refuses it from the person's own session (review P0-2)
+    const ownRow = !!grant.employeeId && grant.employeeId === before.employeeId;
+    await ownRowWrite(trx, orgId, ownRow, (t) => t.updateTable('leaveRecords').set({ status: 'CANCELLED' }).where('id', '=', id).execute());
     if (UNDECIDED_LEAVE.includes(before.status)) await systemStep(trx, orgId, (t) => cancelForEntity(deps, t, actor, orgId, 'LEAVE', id, 'Leave cancelled by HR', { source: 'leave_delete' }));
     if (before.status === 'APPROVED') await systemStep(trx, orgId, async (t) => releaseCompOffCredits(t, { organizationId: orgId, leaveRecordId: id, asOf: await orgToday(t, orgId) }));
     const [dto] = await toLeaveDtos(trx, orgId, [before]);

@@ -1259,6 +1259,7 @@ export interface LeaveTypes {
   advanceNoticeDays: Generated<number>;
   allowHalfDay: Generated<boolean>;
   annualAllowanceDays: Numeric | null;
+  applicableEmploymentTypes: string[] | null;
   applicableGender: Generated<string>;
   carryForwardExpiryMonths: number | null;
   carryForwardMaxDays: Generated<Numeric>;
@@ -1278,6 +1279,16 @@ export interface LeaveTypes {
   status: Generated<RecordStatus>;
   systemKey: string | null;
   treatAsPresent: Generated<boolean>;
+}
+
+export interface LeaveYearCloses {
+  fromYear: number;
+  jobId: string | null;
+  organizationId: string;
+  ranAt: Generated<Timestamp>;
+  ranOn: Timestamp;
+  requestedBy: string | null;
+  summary: Generated<Json>;
 }
 
 export interface LoginHistory {
@@ -1900,6 +1911,7 @@ export interface DB {
   leaveRecords: LeaveRecords;
   leaveRequestComments: LeaveRequestComments;
   leaveTypes: LeaveTypes;
+  leaveYearCloses: LeaveYearCloses;
   loginHistory: LoginHistory;
   membershipBranches: MembershipBranches;
   notificationDeliveries: NotificationDeliveries;

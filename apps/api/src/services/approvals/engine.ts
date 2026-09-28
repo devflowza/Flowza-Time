@@ -281,11 +281,20 @@ async function completeRejected(deps: ApiDeps, t: Trx, actor: Actor, orgId: stri
   await emitTargeted(t, orgId, 'approval.decided', req.id, decisionRecipients(req, actor.userId), { ...payload, decision: 'REJECTED', comment, decidedBy: actor.userId }, actor);
 }
 
-/** Make `next` the current step: activation time, escalation deadline, notification of its approvers. */
+/**
+ * Make `next` the current step: activation time, escalation deadline, notification of its approvers. A question the level
+ * being left had open is closed with it (leave v2 review P2-3): nobody at the next level is waiting on the answer, so the
+ * request drops `info_requested_at` and the entity leaves its "information requested" state through `onInfoClosed`.
+ */
 export async function activateStep(t: Trx, orgId: string, req: { id: string; entityType: ApprovalEntity; entityId: string; employeeId: string | null; requestedBy: string | null }, next: LoadedStep, actor: { userId: string | null; requestId: string | null }, now = new Date()): Promise<void> {
   const dueAt = escalationDueAt({ escalateAfterHours: next.escalateAfterHours, escalateTo: next.escalateTo }, now);
-  await t.updateTable('approvalRequests').set({ currentStep: next.stepNo }).where('id', '=', req.id).execute();
+  const left = await t.selectFrom('approvalRequests').select(['currentStep', 'infoRequestedAt']).where('id', '=', req.id).executeTakeFirst();
+  await t.updateTable('approvalRequests').set({ currentStep: next.stepNo, infoRequestedAt: null }).where('id', '=', req.id).execute();
   await t.updateTable('approvalSteps').set({ activatedAt: now, dueAt }).where('id', '=', next.id).execute();
+  if (left?.infoRequestedAt) {
+    await recordEvent(t, orgId, req.id, 'info_request_closed', actor.userId, { fromStepNo: left.currentStep, stepNo: next.stepNo, reason: 'level approved' });
+    await hookFor(req.entityType)?.onInfoClosed?.(t, { orgId, requestId: req.id, entityId: req.entityId, fromStepNo: left.currentStep, stepNo: next.stepNo, actorUserId: actor.userId });
+  }
   await recordEvent(t, orgId, req.id, 'advanced', actor.userId, { stepNo: next.stepNo, dueAt: dueAt?.toISOString() ?? null });
   const payload = await requestPayload(t, orgId, req);
   await emitTargeted(t, orgId, 'approval.pending', req.id, next.actors.filter((a) => a.decision === 'PENDING').map((a) => a.userId), { ...payload, stepId: next.id, stepNo: next.stepNo }, actor);

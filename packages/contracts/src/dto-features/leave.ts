@@ -118,7 +118,11 @@ export const leaveAllocationGenerateSchema = z.object({
   year: yearSchema,
   leaveTypeIds: z.array(uuidSchema).min(1).max(50).optional(),
 });
-export interface LeaveAllocationGenerateResultDto { year: number; created: number; skipped: number; employees: number; leaveTypes: number }
+export interface LeaveAllocationGenerateResultDto {
+  year: number; created: number; skipped: number; employees: number; leaveTypes: number;
+  /** Leave v2 review P0-2: the caller's own rows, left for another HR user (nobody allocates leave to themselves); included in `skipped`. */
+  skippedOwn?: number;
+}
 
 export const leaveYearCloseSchema = z.object({ fromYear: yearSchema });
 export interface LeaveYearCloseQueuedDto { jobId: string; status: 'QUEUED'; fromYear: number; toYear: number }
@@ -209,7 +213,13 @@ export interface TeamLeaveDto {
   endDate: string;
   isHalfDay: boolean;
   halfDayPart: string | null;
+  /**
+   * The days the leave charges: its stored value, or — leave v2 review P2-8 — computed on read for a leave stored without
+   * one (recorded before leave v2), with the same per-date working calendar the balances use.
+   */
   days: number | null;
+  /** Leave v2 review P2-8: the days of this leave inside the period viewed (the calendar's month); totals sum this. */
+  daysInPeriod?: number;
   status: LeaveStatus;
 }
 

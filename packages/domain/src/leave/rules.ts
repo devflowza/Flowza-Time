@@ -5,8 +5,10 @@ import { DateTime } from 'luxon';
  * self-service apply / edit endpoints and HR's "record leave". Errors refuse the request; warnings travel back with the
  * saved request (`warnings[]`) and never block it (B-46: HR decides).
  *
- *   applicability     the type's applicable gender must match the employee's (strict: an employee whose gender is not on
- *                     file does not get a gender-restricted type — HR updates the profile first)       error
+ *   applicability     `leaveTypeAppliesTo`: the type's applicable gender must match the employee's and, when the type is
+ *                     limited to some employment types, the employee's employment type must be one of them (strict: an
+ *                     employee whose gender / employment type is not on file does not get a restricted type — HR
+ *                     updates the profile first)                                                        error
  *   half day          only for types that allow it                                                     error
  *   working days      a range with nothing to charge (all weekly offs / holidays)                      error
  *   advance notice    start − today ≥ the type's notice (in calendar days)          self: error / HR: warning
@@ -16,6 +18,14 @@ import { DateTime } from 'luxon';
  */
 
 export type LeaveApplicableGender = 'all' | 'male' | 'female';
+/** The employment types a leave type can be limited to — the employees' `employment_type` vocabulary (Finance parity B-41). */
+export const LEAVE_EMPLOYMENT_TYPES = ['full_time', 'part_time', 'contract', 'intern', 'temporary'] as const;
+export type LeaveEmploymentType = (typeof LEAVE_EMPLOYMENT_TYPES)[number];
+
+/** Who a leave type is for: a gender (`all` = everyone) and optionally a list of employment types (null / empty = every type). */
+export interface LeaveApplicability { applicableGender: LeaveApplicableGender; applicableEmploymentTypes?: readonly string[] | null }
+/** The employee facts applicability reads (as on file). */
+export interface LeaveApplicant { gender: string | null | undefined; employmentType?: string | null | undefined }
 
 export const LEAVE_RULE_CODES = ['NOT_APPLICABLE', 'HALF_DAY_NOT_ALLOWED', 'NO_DAYS', 'ADVANCE_NOTICE', 'MAX_CONSECUTIVE', 'COMP_OFF_BALANCE', 'OVER_BALANCE'] as const;
 export type LeaveRuleCode = (typeof LEAVE_RULE_CODES)[number];
@@ -25,6 +35,8 @@ export interface LeaveRuleIssue { code: LeaveRuleCode; path: string; message: st
 export interface LeaveRuleTypeInput {
   name: string;
   applicableGender: LeaveApplicableGender;
+  /** Leave v2 review (B-41): the employment types the type is limited to; null / absent = every employment type. */
+  applicableEmploymentTypes?: readonly string[] | null;
   allowHalfDay: boolean;
   advanceNoticeDays: number;
   maxConsecutiveDays: number | null;
@@ -36,6 +48,8 @@ export interface CheckLeaveRequestInput {
   type: LeaveRuleTypeInput;
   /** The employee's gender on file (male / female / other / unspecified). */
   employeeGender: string | null;
+  /** The employee's employment type on file (full_time, part_time, …); only read when the type is limited to some. */
+  employeeEmploymentType?: string | null;
   startDate: string;
   endDate: string;
   isHalfDay: boolean;
@@ -51,9 +65,27 @@ export interface CheckLeaveRequestInput {
 
 export interface LeaveRuleResult { errors: LeaveRuleIssue[]; warnings: LeaveRuleIssue[] }
 
-/** A gender-restricted type applies only to employees of that gender on file; `all` applies to everyone. */
+/**
+ * The gender half of applicability: a gender-restricted type applies only to employees of that gender on file; `all`
+ * applies to everyone. Callers use `leaveTypeAppliesTo`, which adds the employment type.
+ */
 export function leaveTypeApplies(applicableGender: LeaveApplicableGender, employeeGender: string | null | undefined): boolean {
   return applicableGender === 'all' || applicableGender === employeeGender;
+}
+
+/** The employment-type half: null / empty = every type; otherwise the employee's employment type on file must be listed. */
+export function leaveTypeAppliesToEmploymentType(applicableEmploymentTypes: readonly string[] | null | undefined, employmentType: string | null | undefined): boolean {
+  if (!applicableEmploymentTypes || applicableEmploymentTypes.length === 0) return true;
+  return !!employmentType && applicableEmploymentTypes.includes(employmentType);
+}
+
+/**
+ * THE applicability rule of a leave type (leave v2 review P1-3, Finance parity B-41) — one function for every place that
+ * decides whether a type is the employee's: the types the portal offers, the API's NOT_APPLICABLE refusal (apply, edit,
+ * HR recording), the unexcused-day charger, the year close and allocation generation. Gender AND employment type.
+ */
+export function leaveTypeAppliesTo(type: LeaveApplicability, employee: LeaveApplicant): boolean {
+  return leaveTypeApplies(type.applicableGender, employee.gender) && leaveTypeAppliesToEmploymentType(type.applicableEmploymentTypes, employee.employmentType);
 }
 
 /** Whole calendar days from `from` to `to` (negative when `to` is earlier). */
@@ -69,6 +101,9 @@ export function checkLeaveRequest(input: CheckLeaveRequestInput): LeaveRuleResul
   const { type } = input;
   if (!leaveTypeApplies(type.applicableGender, input.employeeGender)) {
     errors.push({ code: 'NOT_APPLICABLE', path: 'leaveTypeId', message: `${type.name} applies to ${type.applicableGender} employees only${input.employeeGender && input.employeeGender !== 'unspecified' ? '' : ' (the gender on the employee record is not set — HR updates it first)'}.`, params: { gender: type.applicableGender, employeeGender: input.employeeGender } });
+  } else if (!leaveTypeAppliesToEmploymentType(type.applicableEmploymentTypes, input.employeeEmploymentType)) {
+    const list = (type.applicableEmploymentTypes ?? []).map((x) => x.replace(/_/g, '-')).join(', ');
+    errors.push({ code: 'NOT_APPLICABLE', path: 'leaveTypeId', message: `${type.name} applies to ${list} employees only${input.employeeEmploymentType ? '' : ' (the employment type on the employee record is not set — HR updates it first)'}.`, params: { employmentTypes: (type.applicableEmploymentTypes ?? []).join(','), employeeEmploymentType: input.employeeEmploymentType ?? null } });
   }
   if (input.isHalfDay && !type.allowHalfDay) {
     errors.push({ code: 'HALF_DAY_NOT_ALLOWED', path: 'isHalfDay', message: `${type.name} cannot be taken as a half day.`, params: {} });

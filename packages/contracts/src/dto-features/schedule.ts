@@ -53,6 +53,11 @@ export const updateLeaveRecordSchema = z.object({
    * actually holds on the current level — never another level by permission.
    */
   stepNo: z.number().int().min(1).max(50).optional(),
+  /**
+   * Leave v2 review (engine §9.8 seat choice): the waiting approver whose seat an organisation-wide override fills. Required
+   * by the engine when the level is ALL / QUORUM and several approvers still wait (the request's `abilities.mustChooseSeat`).
+   */
+  onBehalfOfUserId: uuidSchema.optional(),
 });
 export type UpdateLeaveRecordInput = z.infer<typeof updateLeaveRecordSchema>;
 export const ruleSetListQuerySchema = z.object({ branchId: uuidSchema.optional(), activeOn: isoDateSchema.optional(), includeExpired: booleanQuerySchema.default(true) });
