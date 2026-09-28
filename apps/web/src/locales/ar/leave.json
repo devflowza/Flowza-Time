@@ -321,7 +321,8 @@
       "maxConsecutive_few": "تسمح {{type}} بحد أقصى {{count}} أيام للطلب الواحد.",
       "maxConsecutive_many": "تسمح {{type}} بحد أقصى {{count}} يومًا للطلب الواحد.",
       "maxConsecutive_other": "تسمح {{type}} بحد أقصى {{count}} يوم للطلب الواحد.",
-      "compOff": "رصيد الإجازة التعويضية غير كافٍ: المتاح {{available}} يوم."
+      "compOff": "رصيد الإجازة التعويضية غير كافٍ: المتاح {{available}} يوم.",
+      "overlap": "لديك بالفعل {{type}} من {{from}} إلى {{to}} ({{status}}): إجازة واحدة لكل تاريخ. عدّلها أو اسحبها أولًا."
     }
   },
   "portal": {

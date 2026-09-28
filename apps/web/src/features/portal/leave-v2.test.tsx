@@ -170,6 +170,22 @@ describe('ApplyLeaveDialog v2', () => {
   });
 });
 
+describe('ApplyLeaveDialog — one leave per date (B-47)', () => {
+  it('refuses a range that shares a date with the employee\'s own pending leave, before sending', async () => {
+    renderWithProviders(<ApplyLeaveDialog open onOpenChange={vi.fn()} data={data([rec({ startDate: '2026-11-01', endDate: '2026-11-02' })])} />);
+    fireEvent.keyDown(screen.getByRole('combobox', { name: /Leave type/ }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: /Annual Leave/ }));
+    fireEvent.change(screen.getByLabelText(/From/), { target: { value: '2026-11-02' } });
+    fireEvent.change(screen.getByLabelText(/^To/), { target: { value: '2026-11-03' } });
+    fireEvent.change(screen.getByLabelText(/Reason/), { target: { value: 'Another trip' } });
+    expect(screen.getByTestId('leave-preview').querySelector('[data-issue="OVERLAP"]')).toHaveTextContent('You already have Annual Leave from 2026-11-01 to 2026-11-02 (Pending)');
+    expect(screen.getByRole('button', { name: 'Send request' })).toBeDisabled();
+    fireEvent.change(screen.getByLabelText(/From/), { target: { value: '2026-11-03' } });
+    expect(screen.getByTestId('leave-preview').querySelector('[data-issue="OVERLAP"]')).toBeNull();
+    expect(screen.getByRole('button', { name: 'Send request' })).toBeEnabled();
+  });
+});
+
 describe('comp-off in the portal', () => {
   it('requests a credit with the day\'s preview (claimed hours from the attendance record)', async () => {
     mockPortal([]);

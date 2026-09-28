@@ -15,7 +15,7 @@ export type DecisionKind = 'APPROVE' | 'REJECT';
 const INBOX = 'approvals-inbox';
 const REQUEST = 'approval-request';
 const MINE = 'approvals-mine';
-const DOCUMENTS = ['attendance-corrections', 'attendance-records', 'attendance-daily', 'attendance-monthly', 'leave-records', 'self-service'];
+const DOCUMENTS = ['attendance-corrections', 'attendance-records', 'attendance-daily', 'attendance-monthly', 'leave-records', 'self-service', 'leave-comments', 'leave-balances', 'leave-calendar'];
 /** Everything a decision can move: the approval views, the documents behind them and the dashboard (its pending count). */
 export function invalidateApprovalViews(qc: ReturnType<typeof useQueryClient>, orgId: string) {
   for (const e of [INBOX, REQUEST, MINE, ...DOCUMENTS]) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) });

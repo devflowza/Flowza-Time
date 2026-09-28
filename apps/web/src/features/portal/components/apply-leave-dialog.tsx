@@ -12,7 +12,7 @@ import { toast } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { toastMutationError } from '@/features/attendance/period-locked';
-import { checkLeaveApplication, previewLeaveDaysByMode, type CountMode, type LeaveIssue } from '@/features/leave/model';
+import { checkLeaveApplication, findOwnOverlap, previewLeaveDaysByMode, type CountMode, type LeaveIssue } from '@/features/leave/model';
 import { useSelfLeaveActions } from '../leave-api';
 import { fmtDays } from '../model';
 import { TypeDot } from './parts';
@@ -67,6 +67,8 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
   const baseAvailable = type?.compOff ? data?.compOff?.availableAfterPendingDays ?? null : tracked ? balance?.availableAfterPendingDays ?? balance?.remainingDays ?? null : null;
   const available = baseAvailable === null || baseAvailable === undefined ? null : baseAvailable + ownDays;
   const issues: LeaveIssue[] = type && startDate && endDate && endDate >= startDate ? checkLeaveApplication({ type, isHalfDay: !!isHalfDay, days, startDate, today, availableAfterPendingDays: available }) : [];
+  // B-47: a date already on leave (own pending / approved requests of the year shown) is refused before sending
+  const clash = startDate && endDate && endDate >= startDate ? findOwnOverlap(data?.records ?? [], { startDate, endDate }, record?.id) : null;
   const blocking = issues.filter((i) => i.blocking && i.code !== 'NO_DAYS');
   const overBalance = issues.find((i) => i.code === 'OVER_BALANCE');
   const remainingAfter = available !== null && days > 0 ? available - days : null;
@@ -106,7 +108,8 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
 
   const title = editing ? tl('apply.editTitle') : compOffMode ? tl('compOff.useTitle') : t('apply.title');
   const hint = editing ? tl('apply.editHint') : compOffMode ? tl('compOff.useHint') : t('apply.hint');
-  const warn = days === 0 || blocking.length > 0 || !!overBalance;
+  const refused = blocking.length > 0 || !!clash;
+  const warn = days === 0 || refused || !!overBalance;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
@@ -160,12 +163,13 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
           </FormField>
 
           {startDate && endDate && endDate >= startDate ? (
-            <div className={cn('flex gap-2.5 rounded-md border p-3 text-sm', blocking.length ? 'border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100' : warn ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100' : 'bg-muted/40')} data-testid="leave-preview" aria-live="polite">
+            <div className={cn('flex gap-2.5 rounded-md border p-3 text-sm', refused ? 'border-red-300 bg-red-50 text-red-900 dark:border-red-800 dark:bg-red-950/40 dark:text-red-100' : warn ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-800 dark:bg-amber-950/40 dark:text-amber-100' : 'bg-muted/40')} data-testid="leave-preview" aria-live="polite">
               {warn ? <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden /> : <CalendarCheck className="mt-0.5 size-4 shrink-0 text-primary" aria-hidden />}
               <div className="space-y-0.5">
                 <p>{days === 0 ? t('apply.previewNone') : type?.countMode === 'calendar' ? tl('apply.previewCalendar', { count: days, days: fmtDays(days) }) : t('apply.preview', { count: days, days: fmtDays(days) })}</p>
                 {type && remainingAfter !== null ? <p className="text-xs">{overBalance ? t('apply.overBalance', { type: type.name, remaining: fmtDays(available ?? 0) }) : type.compOff ? tl('compOff.after', { days: fmtDays(remainingAfter) }) : t('apply.balanceAfter', { type: type.name, remaining: fmtDays(remainingAfter) })}</p> : null}
                 {blocking.map((i) => <p key={i.code} className="text-xs font-medium" data-issue={i.code}>{issueText(i)}</p>)}
+                {clash ? <p className="text-xs font-medium" data-issue="OVERLAP">{tl('apply.issues.overlap', { type: clash.leaveTypeName, from: clash.startDate, to: clash.endDate, status: tl(`status.${clash.status}`, { defaultValue: clash.status }) })}</p> : null}
               </div>
             </div>
           ) : null}
@@ -173,7 +177,7 @@ export function ApplyLeaveDialog({ open, onOpenChange, data, record, compOff }: 
 
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{tc('common.cancel')}</Button>
-            <Button type="submit" loading={isSubmitting} disabled={days === 0 || blocking.length > 0}>{editing ? tl('apply.saveEdit') : t('apply.submit')}</Button>
+            <Button type="submit" loading={isSubmitting} disabled={days === 0 || refused}>{editing ? tl('apply.saveEdit') : t('apply.submit')}</Button>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -68,6 +68,14 @@ export function checkLeaveApplication(c: LeaveApplicationCheck): LeaveIssue[] {
   return out;
 }
 
+/**
+ * The caller's own active leave (pending, info requested, approved) that shares a date with the range — the API refuses a
+ * second leave on a date already on leave (the other half of a half day included), so the form says so before sending.
+ */
+export function findOwnOverlap<T extends { id: string; status: string; startDate: string; endDate: string }>(records: readonly T[], range: { startDate: string; endDate: string }, excludeId?: string | null): T | null {
+  return records.find((r) => r.id !== excludeId && ['PENDING', 'INFO_REQUESTED', 'APPROVED'].includes(r.status) && r.startDate <= range.endDate && r.endDate >= range.startDate) ?? null;
+}
+
 /** Comp-off days a worked day earns: a full day from `fullDayHours`, half a day from half of it, nothing below. */
 export function compOffDaysEarned(workedMinutes: number, fullDayHours: number): 0 | 0.5 | 1 {
   const full = Math.max(1, fullDayHours) * 60;

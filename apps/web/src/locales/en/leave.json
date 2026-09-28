@@ -277,7 +277,8 @@
       "notice_other": "{{type}} needs {{count}} days' notice — the earliest start date is {{date}}.",
       "maxConsecutive_one": "{{type}} allows at most {{count}} day per request.",
       "maxConsecutive_other": "{{type}} allows at most {{count}} days per request.",
-      "compOff": "Not enough comp-off: {{available}} days available."
+      "compOff": "Not enough comp-off: {{available}} days available.",
+      "overlap": "You already have {{type}} from {{from}} to {{to}} ({{status}}): one leave per date. Change or withdraw it first."
     }
   },
   "portal": {

@@ -337,6 +337,25 @@ describe('review fixes (assigned from the Prompt 2 review)', () => {
   });
 });
 
+describe('separation of duties', () => {
+  it('nobody decides their own leave: not the employee, not HR recording their own (routed to the others)', async () => {
+    await clearWorkflows();
+    const r = await applyAs(staff5, { leaveTypeId: T['CL'], ...nextRange(1) });
+    expect((await h.request('POST', `${base()}/approvals/${r.body.data.approvalRequestId}/decide`, { token: staff5, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(403);
+    expect((await h.request('PATCH', `${base()}/leave-records/${r.body.data.id}`, { token: staff5, body: { status: 'APPROVED', stepNo: 1 } })).status).toBe(403);
+    expect((await leaveRow(r.body.data.id)).status).toBe('PENDING');
+    // an HR user (leave.manage) recording their OWN leave: a request for the other leave.approve holders, never auto-approved
+    const own = await h.request('POST', `${base()}/leave-records`, { token: f.managerUser, body: { employeeId: f.e3, leaveTypeId: T['CL'], ...nextRange(1) } });
+    expect(own.status).toBe(201);
+    expect(own.body.data).toMatchObject({ status: 'PENDING', approvalStatus: 'PENDING' });
+    expect((await h.request('PATCH', `${base()}/leave-records/${own.body.data.id}`, { token: f.managerUser, body: { status: 'APPROVED', stepNo: 1 } })).status).toBe(403);
+    expect((await leaveRow(own.body.data.id)).status).toBe('PENDING');
+    const other = await h.request('PATCH', `${base()}/leave-records/${own.body.data.id}`, { token: f.hrAdmin, body: { status: 'APPROVED', stepNo: 1 } });
+    expect(other.status).toBe(200);
+    expect(other.body.data.status).toBe('APPROVED');
+  });
+});
+
 describe('corrections and locked periods', () => {
   it('a decided leave changed by HR is a correction, re-days itself and recomputes the past', async () => {
     await clearWorkflows();

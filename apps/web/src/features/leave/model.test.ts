@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { checkLeaveApplication, compOffDaysEarned, daysBetween, decisionOutcome, fmtLeaveDays, monthDates, previewLeaveDaysByMode, shiftLeaveMonth, weekdayOf } from './model';
+import { checkLeaveApplication, compOffDaysEarned, daysBetween, decisionOutcome, findOwnOverlap, fmtLeaveDays, monthDates, previewLeaveDaysByMode, shiftLeaveMonth, weekdayOf } from './model';
 
 // Fridays and Saturdays off; 7 October 2026 (a Wednesday) is a holiday
 const cal = { weeklyOffDays: [5, 6], holidays: new Set(['2026-10-07']) };
@@ -27,6 +27,18 @@ describe('leave model (mirrors @flowza/domain)', () => {
     expect(checkLeaveApplication({ ...base, days: 12, availableAfterPendingDays: null })).toEqual([]);
     expect(checkLeaveApplication({ ...base, days: 2, availableAfterPendingDays: 1, type: { compOff: true } })).toEqual([{ code: 'COMP_OFF_BALANCE', blocking: true, params: { available: 1, days: 2 } }]);
     expect(checkLeaveApplication({ ...base, days: 0 })[0]).toMatchObject({ code: 'NO_DAYS', blocking: true });
+  });
+
+  it('B-47: finds the own active leave sharing a date (the edited request itself excluded)', () => {
+    const rows = [
+      { id: 'a', status: 'APPROVED', startDate: '2026-10-04', endDate: '2026-10-06' },
+      { id: 'b', status: 'CANCELLED', startDate: '2026-10-11', endDate: '2026-10-11' },
+      { id: 'c', status: 'INFO_REQUESTED', startDate: '2026-10-20', endDate: '2026-10-20' },
+    ];
+    expect(findOwnOverlap(rows, { startDate: '2026-10-06', endDate: '2026-10-08' })?.id).toBe('a');
+    expect(findOwnOverlap(rows, { startDate: '2026-10-11', endDate: '2026-10-11' })).toBeNull(); // cancelled leave frees the date
+    expect(findOwnOverlap(rows, { startDate: '2026-10-19', endDate: '2026-10-21' })?.id).toBe('c');
+    expect(findOwnOverlap(rows, { startDate: '2026-10-20', endDate: '2026-10-20' }, 'c')).toBeNull();
   });
 
   it('earns comp-off from the full-day hours: a day, half a day, nothing', () => {
