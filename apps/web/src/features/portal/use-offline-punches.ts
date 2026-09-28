@@ -13,6 +13,18 @@ import { punchQueueStore, queuedPunches, replayQueue, type QueuedPunch, type Sen
 export const isRetryable = (e: unknown): boolean => !(e instanceof ApiError) || e.status === 0 || e.status === 429 || e.status >= 500;
 
 /**
+ * How a replayed punch ended (Finance B-30). A failure nobody answered is retried later. DUPLICATE_PUNCH means the server
+ * already holds a punch of that direction inside the duplicate window (the first tap went through before the connection
+ * dropped, or the employee tapped again): the punch is on record, so it counts as sent. Any other refusal is the server's
+ * judgement of this punch (outside the fence, window closed…): it is dropped from the queue and the employee is told.
+ */
+export function sendOutcomeOf(e: unknown): SendOutcome {
+  if (isRetryable(e)) return { kind: 'retry', error: e instanceof Error ? e.message : String(e) };
+  const reason = e instanceof ApiError ? String(e.details?.['reason'] ?? e.code) : 'UNKNOWN';
+  return reason === 'DUPLICATE_PUNCH' ? { kind: 'sent' } : { kind: 'refused', reason };
+}
+
+/**
  * The organisation's queued offline punches plus the actions on them. The queue is replayed automatically when the browser
  * reports it is back online and whenever the check-in page opens; "Sync now" replays on demand.
  */
@@ -36,9 +48,7 @@ export function useOfflinePunches(orgId: string) {
           await postPunch(orgId, { direction: p.direction, lat: p.lat, lng: p.lng, accuracy: p.accuracy, clientQueuedAt: p.clientQueuedAt, idempotencyKey: p.key });
           return { kind: 'sent' };
         } catch (e) {
-          if (isRetryable(e)) return { kind: 'retry', error: e instanceof Error ? e.message : String(e) };
-          const reason = e instanceof ApiError ? String(e.details?.['reason'] ?? e.code) : 'UNKNOWN';
-          return { kind: 'refused', reason };
+          return sendOutcomeOf(e);
         }
       });
       if (result.sent > 0) toast.success(t('checkin.offline.synced', { count: result.sent }));

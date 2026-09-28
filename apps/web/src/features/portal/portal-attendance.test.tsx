@@ -20,6 +20,7 @@ import { HomePunchCard, PendingSelfItems } from './components/home-attendance';
 import { NoteDialog } from './components/note-dialog';
 import { SelfStats } from './components/self-stats';
 import { createMemoryStore, setPunchQueueStore } from './offline-queue';
+import { sendOutcomeOf } from './use-offline-punches';
 
 const EMP = '11111111-1111-4111-8111-111111111111';
 const ORG = 'org-1';
@@ -120,6 +121,17 @@ describe('CheckInPage', () => {
     fireEvent.click(within(queue).getByRole('button', { name: /Sync now/ }));
     await waitFor(() => expect(screen.queryByTestId('offline-queue')).not.toBeInTheDocument());
     expect(punches).toEqual([expect.objectContaining({ direction: 'in', clientQueuedAt: expect.any(String), idempotencyKey: expect.any(String) })]);
+  });
+});
+
+describe('offline replay outcomes', () => {
+  it('retries what nobody answered, counts a duplicate as recorded, drops a refusal', () => {
+    expect(sendOutcomeOf(new ApiError(0, 'NETWORK_ERROR', 'offline'))).toMatchObject({ kind: 'retry' });
+    expect(sendOutcomeOf(new ApiError(503, 'UNAVAILABLE', 'busy'))).toMatchObject({ kind: 'retry' });
+    expect(sendOutcomeOf(new TypeError('Failed to fetch'))).toMatchObject({ kind: 'retry' });
+    expect(sendOutcomeOf(new ApiError(409, 'CONFLICT', 'dup', undefined, { reason: 'DUPLICATE_PUNCH' }))).toEqual({ kind: 'sent' });
+    expect(sendOutcomeOf(new ApiError(403, 'FORBIDDEN', 'outside', undefined, { reason: 'OUTSIDE_GEOFENCE' }))).toEqual({ kind: 'refused', reason: 'OUTSIDE_GEOFENCE' });
+    expect(sendOutcomeOf(new ApiError(422, 'VALIDATION_FAILED', 'bad'))).toEqual({ kind: 'refused', reason: 'VALIDATION_FAILED' });
   });
 });
 
