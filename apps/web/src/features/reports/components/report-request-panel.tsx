@@ -4,7 +4,7 @@ import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { BarChart3, Lock, Send } from 'lucide-react';
+import { BarChart3, Lock, Send, Share2 } from 'lucide-react';
 import { createReportRequestSchema, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
 import type { z } from 'zod';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, ErrorState, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@/components/ui';
@@ -22,6 +22,8 @@ import { useShiftOptions } from '@/features/schedule/api';
 import { useLeaveTypes } from '@/features/leave/api';
 import { EmployeeMultiSelect } from '@/features/attendance/components/employee-multi-select';
 import { useReportMutations, useReportTypes, type ReportTypeDef } from '../api';
+import type { ShareSpec } from './share-report-dialog';
+import '../schedules-i18n';
 
 type FormValues = z.input<typeof createReportRequestSchema>;
 const isEmpty = (v: unknown) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -33,7 +35,7 @@ function useDeviceOptions() {
 }
 
 /** Parameter form for one report type. Remounted per type (key) so defaults and the type-specific required-parameter refinement reset. */
-function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: string) => void }) {
+function ReportForm({ def, onQueued, onShare }: { def: ReportTypeDef; onQueued: (id: string) => void; onShare?: (spec: ShareSpec) => void }) {
   const { t } = useTranslation('reports');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
@@ -68,6 +70,12 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
       onQueued(res.id);
     } catch (e) { toastError(e); }
   });
+
+  // Send now (HR portal Prompt 6a): the same validated parameters, distributed to recipients instead of requested for me
+  const onShareClick = onShare ? form.handleSubmit((values) => {
+    const p = Object.fromEntries(Object.entries(values.parameters ?? {}).filter(([, v]) => !isEmpty(v)));
+    onShare({ reportType: def.key, format: values.format ?? def.formats[0]!, parameters: p, title: t(`types.${def.key}.name`, { defaultValue: def.name }) });
+  }) : undefined;
 
   return (
     <form onSubmit={onSubmit} className="space-y-4" noValidate data-testid="report-form">
@@ -126,13 +134,16 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
         ); }} />
       </FormField> : null}
       <FormField label={t('request.reason')} htmlFor="rp-reason" optional hint={t('request.reasonHint')} error={errors.reason?.message}><Input id="rp-reason" {...register('reason', { setValueAs: blankToUndefined })} /></FormField>
-      <div className="flex justify-end"><Button type="submit" loading={isSubmitting} disabled={def.allowed === false}><Send /> {t('request.submit')}</Button></div>
+      <div className="flex flex-wrap justify-end gap-2">
+        {onShareClick ? <Button type="button" variant="outline" onClick={() => void onShareClick()} disabled={def.allowed === false}><Share2 /> {t('reportSchedules:share.open')}</Button> : null}
+        <Button type="submit" loading={isSubmitting} disabled={def.allowed === false}><Send /> {t('request.submit')}</Button>
+      </div>
     </form>
   );
 }
 
-/** Report catalogue (cards) + the parameter form of the selected type. */
-export function ReportRequestPanel({ onQueued }: { onQueued: (id: string) => void }) {
+/** Report catalogue (cards) + the parameter form of the selected type. `onShare` adds "Send now" (report.schedule holders). */
+export function ReportRequestPanel({ onQueued, onShare }: { onQueued: (id: string) => void; onShare?: (spec: ShareSpec) => void }) {
   const { t } = useTranslation('reports');
   const types = useReportTypes();
   const [selected, setSelected] = useState<string | null>(null);
@@ -155,7 +166,7 @@ export function ReportRequestPanel({ onQueued }: { onQueued: (id: string) => voi
               ))}
             </div>
           )}
-        {def ? <div className="rounded-lg border bg-muted/30 p-4"><h4 className="mb-3 text-sm font-semibold">{t('request.parametersFor', { name: t(`types.${def.key}.name`, { defaultValue: def.name }) })}</h4><ReportForm key={def.key} def={def} onQueued={onQueued} /></div>
+        {def ? <div className="rounded-lg border bg-muted/30 p-4"><h4 className="mb-3 text-sm font-semibold">{t('request.parametersFor', { name: t(`types.${def.key}.name`, { defaultValue: def.name }) })}</h4><ReportForm key={def.key} def={def} onQueued={onQueued} onShare={onShare} /></div>
           : types.data ? <p className="text-sm text-muted-foreground">{t('request.pickType')}</p> : null}
       </CardContent>
     </Card>

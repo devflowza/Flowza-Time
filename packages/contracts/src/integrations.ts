@@ -20,10 +20,24 @@ export const FINANCE_SYNC_DIRECTIONS = ['pull', 'push', 'both'] as const;
 export type FinanceSyncDirection = (typeof FINANCE_SYNC_DIRECTIONS)[number];
 /** Poll cadence bounds (minutes). Finance shows the connector Online below 5 min and Stale below 60 min between contacts. */
 export const FINANCE_POLL_MINUTES = { min: 5, max: 60, default: 10 } as const;
+/** Default start date of a new connector: this many days before the day it is set up (organisation timezone). */
+export const FINANCE_SYNC_FROM_DEFAULT_DAYS = 30;
+/**
+ * Attempts of a push batch Finance answers 2xx but with per-punch errors: retried (same batch, position not advanced) until this
+ * many attempts, then skipped as poison — recorded, alerted, never sent again (docs/integrations/flowza-finance.md §6).
+ */
+export const FINANCE_PUSH_BATCH_MAX_ATTEMPTS = 5;
+/**
+ * `details.reason` of the 409 the generic device endpoints answer for the connector: it is managed only in Settings → Integrations
+ * (behind integration.manage), never through device.update / device.manage / device.sync.
+ */
+export const CONNECTOR_MANAGED_IN_INTEGRATIONS = 'CONNECTOR_MANAGED_IN_INTEGRATIONS';
 
 export const financeBaseUrlSchema = z.url().max(300);
 export const financeDeviceSerialSchema = z.string().trim().min(3).max(64).regex(/^[A-Za-z0-9_.-]+$/, 'Letters, digits, - _ . only');
 export const financeTokenSchema = z.string().trim().min(8).max(256);
+/** A calendar day (`YYYY-MM-DD`) in the organisation timezone. */
+export const financeSyncFromSchema = z.iso.date();
 
 /** PUT /orgs/:orgId/integrations/finance — a full replacement, so defaults are fine here (no PATCH semantics). */
 export const financeIntegrationInputSchema = z.object({
@@ -35,6 +49,12 @@ export const financeIntegrationInputSchema = z.object({
   direction: z.enum(FINANCE_SYNC_DIRECTIONS).default('both'),
   pinKey: z.enum(FINANCE_PIN_KEYS).default('employee_number'),
   pollMinutes: z.number().int().min(FINANCE_POLL_MINUTES.min).max(FINANCE_POLL_MINUTES.max).default(FINANCE_POLL_MINUTES.default),
+  /**
+   * Start date: punches before it are never synchronised, and the first pull / first push start there instead of at the beginning
+   * of history. Omitted = keep the stored date (or, on creation, FINANCE_SYNC_FROM_DEFAULT_DAYS before today). Never in the future.
+   * Moving it EARLIER re-reads Finance and re-sends FlowZa Time punches from the new date (both sides dedupe).
+   */
+  syncFrom: financeSyncFromSchema.optional(),
   /** Branch the connector device is attached to (default: the organisation's first active branch). */
   branchId: uuidSchema.optional(),
 });
@@ -58,6 +78,8 @@ export const financeIntegrationDtoSchema = z.object({
   direction: z.enum(FINANCE_SYNC_DIRECTIONS),
   pinKey: z.enum(FINANCE_PIN_KEYS),
   pollMinutes: z.number().int(),
+  /** Start date (`YYYY-MM-DD`); for an unconfigured connector, the default a new one would get. */
+  syncFrom: z.string(),
   hasToken: z.boolean(),
   /** Masked (`****abcd`) — the token itself is never returned. */
   tokenMasked: z.string().nullable(),
@@ -90,6 +112,10 @@ export interface FinanceSyncNowDto {
 export const financeSyncStateDtoSchema = z.object({
   lastPushedEventId: uuidSchema.nullable(),
   lastPushedEventAt: isoDateTimeSchema.nullable(),
+  /** Push window anchor: every eligible event created up to this instant has been examined. */
+  pushPositionAt: isoDateTimeSchema.nullable(),
+  /** Attempts of a batch Finance answered with per-punch errors (0 = none pending; skipped after 5). */
+  pushRetryAttempts: z.number().int(),
   lastPushAt: isoDateTimeSchema.nullable(),
   lastPushCount: z.number().int(),
   nextPushAt: isoDateTimeSchema.nullable(),

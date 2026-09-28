@@ -1,4 +1,5 @@
-import { createThrottler, type DeviceProvider, type ProviderContext, type ThrottleLease, type Throttler } from '@flowza/device-providers';
+import { FLOWZA_FINANCE_PROVIDER_KEY } from '@flowza/contracts';
+import { createThrottler, financeAccountKey, type DeviceProvider, type ProviderContext, type ThrottleLease, type Throttler } from '@flowza/device-providers';
 import { sha256Hex, type Logger } from '@flowza/shared';
 import type { Trx } from '@flowza/database';
 import type { WorkerDeps } from '../../deps.js';
@@ -29,8 +30,11 @@ export function deviceConfig(device: Pick<DeviceRow, 'config'>): Record<string, 
  * Vendor account identity used for throttling and the circuit breaker: the same cloud account (base URL + app key)
  * or the same on-prem server is one account; devices without any of those fields share the provider-wide default.
  * Only a hash of the identifying fields is kept so account keys can be logged/stored safely.
+ * The Flowza Finance connector is keyed by organisation + connector device (review D12): every tenant calls the same default
+ * Finance URL, and a URL-derived key would make them share one throttle queue and one circuit breaker.
  */
-export function accountKeyFor(device: Pick<DeviceRow, 'config' | 'endpointUrl' | 'serialNumber' | 'integrationType'>): string {
+export function accountKeyFor(device: Pick<DeviceRow, 'id' | 'organizationId' | 'providerKey' | 'config' | 'endpointUrl' | 'serialNumber' | 'integrationType'>): string {
+  if (device.providerKey === FLOWZA_FINANCE_PROVIDER_KEY) return financeAccountKey(device.organizationId, device.id);
   const cfg = deviceConfig(device);
   const parts = ['baseUrl', 'appKey', 'accountId', 'tenant', 'host', 'serverUrl'].map((k) => cfg[k]).filter((v) => typeof v === 'string' && v.length > 0) as string[];
   if (device.endpointUrl) parts.push(device.endpointUrl);

@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarCheck, CalendarDays, CalendarOff, CheckSquare, ClipboardList, ContactRound, Cpu, FileText, GitCompare, House, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, Palmtree, RefreshCw, Settings, ShieldCheck, UserRound, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Building2, CalendarCheck, CalendarDays, CalendarOff, CheckSquare, ClipboardList, ContactRound, Cpu, FileText, GitCompare, House, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, Palmtree, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, UserX, Users, Wallet, type LucideIcon } from 'lucide-react';
 import type { Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -70,6 +70,9 @@ export function Sidebar() {
       // engine v2: approvers of attendance or leave, approval admins and line managers (their team's requests)
       { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || hasDirectReports },
       { to: '/leave', label: t('nav.leave'), icon: CalendarOff, permissions: ['leave.view'] },
+      // HR attendance workspace (HR portal Prompt 6a)
+      { to: '/attendance/summary', label: t('nav.attendanceSummary'), icon: Sigma, permissions: ['attendance.view', 'attendance.view_team'], any: true },
+      { to: '/attendance/unmatched', label: t('nav.unmatchedPunches'), icon: UserX, permissions: ['attendance.view_raw'] },
     ] },
     { label: t('nav.sections.devices'), items: [
       { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'] },
@@ -90,6 +93,8 @@ export function Sidebar() {
     ] },
   ];
   if (me?.user.isPlatformAdmin) sections.push({ items: [{ to: '/platform', label: t('nav.platform'), icon: Network }] });
+  // an item with its own nested items (/attendance → /attendance/summary) is active on its exact path only
+  const navPaths = sections.flatMap((s) => s.items.map((it) => it.to));
 
   return (
     <aside
@@ -103,7 +108,7 @@ export function Sidebar() {
 
       <nav className="scrollbar-thin flex-1 overflow-y-auto px-2 py-2">
         {sections.map((section, i) => {
-          const items = section.items.filter((it) => (it.visible !== undefined ? it.visible : !it.permissions || can(...it.permissions)));
+          const items = section.items.filter((it) => (it.visible !== undefined ? it.visible : !it.permissions || (it.any ? it.permissions.some((p) => can(p)) : can(...it.permissions))));
           if (items.length === 0) return null;
           return (
             <div key={i} className={i === 0 ? undefined : 'mt-3'}>
@@ -115,7 +120,7 @@ export function Sidebar() {
               <ul className="space-y-px">
                 {items.map((item) => {
                   const link = (
-                    <NavLink to={item.to} end={item.to === '/' || item.to === '/my'} className={itemClass(collapsed)}>
+                    <NavLink to={item.to} end={item.to === '/' || item.to === '/my' || navPaths.some((p) => p.startsWith(`${item.to}/`))} className={itemClass(collapsed)}>
                       <item.icon className={iconClass} aria-hidden />
                       {collapsed ? <span className="sr-only">{item.label}</span> : <span className="truncate">{item.label}</span>}
                     </NavLink>

@@ -1,12 +1,17 @@
+import { createServer, type Server } from 'node:http';
+import type { AddressInfo } from 'node:net';
 import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { rawTransactionSchema } from '@flowza/contracts';
 import { describeProviderConformance } from '../../conformance.js';
+import { hostnameBlockReason, type EgressLookup } from '../../egress.js';
 import { createTestProviderContext } from '../../testing.js';
 import { ProviderError, type ProviderContext } from '../../types.js';
 import { FLOWZA_FINANCE_DEFINITION } from './definition.js';
-import { FINANCE_STATE_BY_EVENT_TYPE, financeCursorFromTime, isPrivateHostname, mapFinancePunch, mapFinanceState, mapFinanceVerify, parseFinanceCursor, resolveFinanceBaseUrl, toFinanceVerify } from './mapping.js';
+import {
+  FINANCE_STATE_BY_EVENT_TYPE, financeAccountKey, financeCursorFromTime, financeSyncFromStart, isFinanceCursorError, mapFinancePunch, mapFinanceState, mapFinanceVerify, parseFinanceCursor, resolveFinanceBaseUrl, toFinanceVerify,
+} from './mapping.js';
 import { createMockFinanceServer, encodeFinanceCursor, financePunchFixtures, type MockFinanceServer } from './mock-finance-server.js';
-import { FlowzaFinanceProvider, hasFinancePush } from './provider.js';
+import { FlowzaFinanceProvider, hasFinanceBaseUrlVetting, hasFinancePush } from './provider.js';
 
 let server: MockFinanceServer;
 const SERIAL = 'FLOWZA-TIME-ACME';
@@ -74,9 +79,12 @@ describe('flowza_finance mapping', () => {
     expect(at('2026-09-27T04:58:31')).toBe('2026-09-27T04:58:31Z'); // no offset: UTC by contract, never the host's zone
   });
 
-  it('falls back to the device PIN and skips rows without any identity or with a bad time', () => {
+  it('D7: keeps an unattributed Finance PIN under a namespaced identity (never a bare PIN), and skips rows without any identity or with a bad time', () => {
     const [p] = financePunchFixtures(1);
-    expect(mapFinancePunch({ ...p!, employee_number: null }, SERIAL).transaction?.deviceEmployeeId).toBe('100');
+    // a terminal PIN is not one of our identities: it must never be comparable with a device user id or a card number
+    expect(mapFinancePunch({ ...p!, employee_number: null }, SERIAL).transaction?.deviceEmployeeId).toBe('pin:FIN-MOBILE:100');
+    expect(mapFinancePunch({ ...p!, employee_number: '  E0100 ' }, SERIAL).transaction?.deviceEmployeeId).toBe('E0100');
+    expect(mapFinancePunch({ ...p!, employee_number: null, device_serial: 'X'.repeat(80) }, SERIAL).transaction?.deviceEmployeeId).toMatch(/^pin:#[0-9a-f]{58}$/);
     expect(mapFinancePunch({ ...p!, employee_number: null, pin: '  ' }, SERIAL)).toEqual({ transaction: null, reason: 'no_identity' });
     expect(mapFinancePunch({ ...p!, time_utc: 'yesterday' }, SERIAL)).toEqual({ transaction: null, reason: 'bad_time' });
     expect(mapFinancePunch({ ...p!, device_timezone: 'Mars/Olympus' }, SERIAL).transaction?.deviceLocalTime).toBeNull();
@@ -89,6 +97,7 @@ describe('flowza_finance mapping', () => {
     expect(() => parseFinanceCursor({ bogus: 'cursor' })).toThrow(ProviderError);
     expect(() => parseFinanceCursor({ since: 'has spaces!' })).toThrow(ProviderError);
     expect(() => parseFinanceCursor({ since: 42 })).toThrow(ProviderError);
+    expect(isFinanceCursorError((() => { try { parseFinanceCursor({ since: 42 }); } catch (e) { return e; } })())).toBe(true);
     const rewind = financeCursorFromTime('2026-03-01T04:03:00+04:00');
     expect(Buffer.from(rewind, 'base64url').toString('utf8')).toBe('2026-03-01T00:03:00.000Z|00000000-0000-0000-0000-000000000000');
     expect(() => financeCursorFromTime('not a time')).toThrow(ProviderError);
@@ -106,13 +115,107 @@ describe('flowza_finance mapping', () => {
     expect(() => resolveFinanceBaseUrl('https://intranet/functions/v1')).toThrow(/public host/);
     expect(() => resolveFinanceBaseUrl('not a url')).toThrow(ProviderError);
     expect(resolveFinanceBaseUrl('http://127.0.0.1:9999/functions/v1', { allowPrivateHosts: true })).toBe('http://127.0.0.1:9999/functions/v1');
-    expect(isPrivateHostname('192.168.1.1')).toBe(true);
-    expect(isPrivateHostname('172.20.0.5')).toBe(true);
-    expect(isPrivateHostname('172.32.0.5')).toBe(false);
-    expect(isPrivateHostname('[::1]')).toBe(true);
-    expect(isPrivateHostname('fd00::1')).toBe(true);
-    expect(isPrivateHostname('ucjtxdmklhhhvayirwqe.supabase.co')).toBe(false);
-    expect(isPrivateHostname('8.8.8.8')).toBe(false);
+    expect(hostnameBlockReason('192.168.1.1')).toBe('private');
+    expect(hostnameBlockReason('172.20.0.5')).toBe('private');
+    expect(hostnameBlockReason('172.32.0.5')).toBeNull();
+    expect(hostnameBlockReason('[::1]')).toBe('loopback');
+    expect(hostnameBlockReason('[fd00::1]')).toBe('unique_local');
+    expect(hostnameBlockReason('ucjtxdmklhhhvayirwqe.supabase.co')).toBeNull();
+    expect(hostnameBlockReason('8.8.8.8')).toBeNull();
+  });
+
+  it('D1: the syntax half refuses trailing-dot, reserved-name and odd-spelling hosts and strips the dot of a public one', () => {
+    for (const bad of ['https://x.internal./functions/v1', 'https://intranet./functions/v1', 'https://db.internal./functions/v1', 'https://app.localhost./functions/v1', 'https://printer.local./functions/v1',
+      'https://nas.lan./functions/v1', 'https://[fec0::1]/functions/v1', 'https://[::ffff:127.0.0.1]/functions/v1', 'https://2130706433/functions/v1', 'https://0x7f.1/functions/v1']) {
+      expect(() => resolveFinanceBaseUrl(bad), bad).toThrow(/public host/);
+    }
+    expect(resolveFinanceBaseUrl('https://fdic.gov./functions/v1')).toBe('https://fdic.gov/functions/v1');
+  });
+
+  it('builds a per-tenant, per-connector account key and reads the start date in the connector timezone', () => {
+    expect(financeAccountKey('org-a', 'dev-1')).not.toBe(financeAccountKey('org-b', 'dev-1'));
+    expect(financeAccountKey('org-a', 'dev-1')).not.toBe(financeAccountKey('org-a', 'dev-2'));
+    expect(financeAccountKey('org-a', 'dev-1')).toMatch(/^[0-9a-f]{16}$/);
+    expect(financeSyncFromStart('2026-03-01', 'Asia/Muscat')).toBe('2026-02-28T20:00:00.000Z');
+    expect(financeSyncFromStart('2026-03-01', null)).toBe('2026-03-01T00:00:00.000Z');
+    expect(financeSyncFromStart('01/03/2026', 'Asia/Muscat')).toBeNull();
+    expect(financeSyncFromStart(undefined, 'Asia/Muscat')).toBeNull();
+  });
+});
+
+/** A fixed DNS table for the egress guard: nothing here depends on real resolution. */
+const fakeLookup = (table: Record<string, string>): EgressLookup & { calls: string[] } => {
+  const calls: string[] = [];
+  const fn = (async (hostname: string) => {
+    calls.push(hostname);
+    const address = table[hostname];
+    if (!address) throw Object.assign(new Error(`getaddrinfo ENOTFOUND ${hostname}`), { code: 'ENOTFOUND' });
+    return [{ address, family: address.includes(':') ? 6 : 4 }];
+  }) as EgressLookup & { calls: string[] };
+  fn.calls = calls;
+  return fn;
+};
+
+describe('flowza_finance egress (D1, D2)', () => {
+  it('refuses a public name that resolves to loopback BEFORE connecting, on save/test vetting and on every call (localtest.me, *.nip.io)', async () => {
+    let connections = 0;
+    const local: Server = createServer((_req, res) => { connections += 1; res.end('{}'); });
+    await new Promise<void>((r) => local.listen(0, '127.0.0.1', () => r()));
+    const port = (local.address() as AddressInfo).port;
+    try {
+      const lookup = fakeLookup({ 'localtest.me': '127.0.0.1', '7f000001.nip.io': '127.0.0.1', 'ucjtxdmklhhhvayirwqe.supabase.co': '104.18.38.10' });
+      const strict = new FlowzaFinanceProvider({ lookup });
+      expect(hasFinanceBaseUrlVetting(strict)).toBe(true);
+      await expect(strict.vetBaseUrl(`https://localtest.me:${port}/functions/v1`)).rejects.toMatchObject({ code: 'INVALID_CONFIG', message: 'Finance base URL must point at a public host' });
+      await expect(strict.vetBaseUrl('https://7f000001.nip.io/functions/v1')).rejects.toMatchObject({ code: 'INVALID_CONFIG' });
+      expect(await strict.vetBaseUrl('https://ucjtxdmklhhhvayirwqe.supabase.co/functions/v1/')).toBe('https://ucjtxdmklhhhvayirwqe.supabase.co/functions/v1');
+      // an unresolvable host is not refused at save time (call time decides and reports it as unreachable)
+      expect(await strict.vetBaseUrl('https://not-yet-live.example.com/functions/v1')).toBe('https://not-yet-live.example.com/functions/v1');
+      const ctx = ctxFor({ config: { baseUrl: `https://localtest.me:${port}/functions/v1`, deviceSerial: SERIAL } });
+      const test = await strict.testConnection(ctx);
+      expect(test).toMatchObject({ ok: false, details: { code: 'INVALID_CONFIG', reason: 'refused_by_policy' } });
+      await expect(strict.pullAttendance(ctx, null)).rejects.toMatchObject({ code: 'INVALID_CONFIG', retryable: false });
+      expect(connections).toBe(0);
+    } finally { await new Promise<void>((r) => local.close(() => r())); }
+  });
+
+  it('reports transport failures with generic messages — an open non-TLS port and a closed port are indistinguishable by socket code', async () => {
+    const plain: Server = createServer((_req, res) => res.end('{}'));
+    await new Promise<void>((r) => plain.listen(0, '127.0.0.1', () => r()));
+    const open = (plain.address() as AddressInfo).port;
+    const dev = new FlowzaFinanceProvider({ allowPrivateHosts: true, connectTimeoutMs: 2_000 });
+    try {
+      const tls = await dev.testConnection(ctxFor({ config: { baseUrl: `https://127.0.0.1:${open}/functions/v1`, deviceSerial: SERIAL } }));
+      const dead = await createMockFinanceServer({ serial: SERIAL, token: TOKEN });
+      const deadUrl = dead.baseUrl;
+      await dead.close();
+      const closed = await dev.testConnection(ctxFor({ config: { baseUrl: deadUrl, deviceSerial: SERIAL } }));
+      expect(tls).toMatchObject({ ok: false, details: { code: 'VENDOR_ERROR', reason: 'tls_error' } });
+      expect(closed).toMatchObject({ ok: false, message: 'Flowza Finance attendance-export is unreachable', details: { code: 'VENDOR_ERROR', reason: 'unreachable' } });
+      for (const r of [tls, closed]) expect(JSON.stringify(r)).not.toMatch(/ECONN|ERR_SSL|EPROTO|packet|refused \(/i);
+    } finally { await new Promise<void>((r) => plain.close(() => r())); }
+  });
+
+  it('aborts a 20 MB response while streaming (PROTOCOL_ERROR, not retried) instead of buffering it', async () => {
+    const MB = 1024 * 1024;
+    const chunk = Buffer.alloc(MB, 0x61);
+    const big: Server = createServer((req, res) => {
+      req.resume();
+      res.writeHead(200, { 'content-type': 'application/json' });
+      res.write('{"punches":[],"has_more":false,"next_cursor":null,"x":"');
+      let i = 0;
+      const pump = (): void => { while (i < 20) { i += 1; if (!res.write(chunk)) { res.once('drain', pump); return; } } res.end('"}'); };
+      res.on('close', () => { i = 20; });
+      pump();
+    });
+    await new Promise<void>((r) => big.listen(0, '127.0.0.1', () => r()));
+    const port = (big.address() as AddressInfo).port;
+    try {
+      const before = process.memoryUsage().rss;
+      const err = await provider().pullAttendance(ctxFor({ config: { baseUrl: `http://127.0.0.1:${port}/functions/v1`, deviceSerial: SERIAL } }), null).catch((e: unknown) => e);
+      expect(err).toMatchObject({ code: 'PROTOCOL_ERROR', retryable: false, details: { reason: 'too_large' } });
+      expect(process.memoryUsage().rss - before).toBeLessThan(64 * MB);
+    } finally { await new Promise<void>((r) => { big.closeAllConnections(); big.close(() => r()); }); }
   });
 });
 
@@ -208,7 +311,7 @@ describe('flowza_finance provider', () => {
     try {
       const r = await provider().pullAttendance(ctxFor({ config: { baseUrl: local.baseUrl, deviceSerial: SERIAL } }), null);
       expect(r.transactions).toHaveLength(2);
-      expect(r.meta?.['skipped']).toEqual({ invalid: 1, noIdentity: 1, badTime: 1 });
+      expect(r.meta?.['skipped']).toEqual({ invalid: 1, noIdentity: 1, badTime: 1, beforeSyncFrom: 0, ownPunches: 0 });
     } finally { await local.close(); }
   });
 
@@ -222,25 +325,62 @@ describe('flowza_finance provider', () => {
     const vendor = await p.pullAttendance(ctx, null).catch((e: unknown) => e);
     expect(vendor).toMatchObject({ code: 'VENDOR_ERROR', retryable: true });
     expect((vendor as Error).message).toContain('503');
+    expect((vendor as Error).message).not.toContain('upstream down'); // Finance's body is logged, never returned
     server.failNext({ status: 429, headers: { 'retry-after': '7' } });
     const limited = await p.pullAttendance(ctx, null).catch((e: unknown) => e);
     expect(limited).toMatchObject({ code: 'RATE_LIMITED', retryable: true, retryAfterMs: 7000 });
-    server.failNext({ status: 302, headers: { location: 'http://evil.example/steal' } });
-    const redirect = await p.pullAttendance(ctx, null).catch((e: unknown) => e);
-    expect(redirect).toMatchObject({ code: 'PROTOCOL_ERROR', retryable: false });
-    server.failNext({ status: 404 });
-    const missing = await p.pullAttendance(ctx, null).catch((e: unknown) => e);
-    expect(missing).toMatchObject({ code: 'INVALID_CONFIG' });
-    server.failNext({ status: 400, body: { error: 'limit must be 1..1000' } });
-    const bad = await p.pullAttendance(ctx, null).catch((e: unknown) => e);
-    expect(bad).toMatchObject({ code: 'PROTOCOL_ERROR' });
-    server.failNext({ status: 200, body: { punches: 'not-a-list' } });
-    const shape = await p.pullAttendance(ctx, null).catch((e: unknown) => e);
-    expect(shape).toMatchObject({ code: 'PROTOCOL_ERROR' });
-    for (const e of [auth, vendor, limited, redirect, missing, bad, shape]) {
+    for (const e of [auth, vendor, limited]) {
       expect(ProviderError.is(e)).toBe(true);
       expect(JSON.stringify({ m: (e as Error).message, d: (e as ProviderError).details })).not.toContain(TOKEN);
     }
+  });
+
+  it('D10: a 400 / 404 / 405 / redirect / malformed answer is a RETRYABLE vendor failure and never a cursor error (only an unreadable stored cursor is)', async () => {
+    const p = provider();
+    const stored = { since: encodeFinanceCursor(server.punches[1]!.time_utc, server.punches[1]!.id) };
+    const failures: unknown[] = [];
+    for (const fault of [{ status: 400, body: { error: 'limit must be 1..1000' } }, { status: 404 }, { status: 405 }, { status: 302, headers: { location: 'http://evil.example/steal' } }, { status: 200, body: { punches: 'not-a-list' } }, { status: 200, body: '<html>gateway</html>' }]) {
+      server.failNext(fault);
+      failures.push(await p.pullAttendance(ctxFor(), stored).catch((e: unknown) => e));
+    }
+    for (const e of failures) {
+      expect(e).toMatchObject({ code: 'VENDOR_ERROR', retryable: true });
+      expect(isFinanceCursorError(e)).toBe(false);
+      expect(JSON.stringify({ m: (e as Error).message, d: (e as ProviderError).details })).not.toMatch(/limit must be|gateway|evil\.example/);
+    }
+    const unreadable = await p.pullAttendance(ctxFor(), { since: 'has spaces!' }).catch((e: unknown) => e);
+    expect(isFinanceCursorError(unreadable)).toBe(true);
+  });
+
+  it('starts the first pull at the connector start date and drops rows punched before it (Finance\'s cursor is created_at-based)', async () => {
+    const local = await createMockFinanceServer({ serial: SERIAL, token: TOKEN, punches: [
+      ...financePunchFixtures(2, '2026-02-20T05:00:00.000Z'), // created and punched before the start date
+      { ...financePunchFixtures(1, '2026-03-02T05:00:00.000Z')[0]!, id: '00000000-0000-4000-8000-00000000aaaa', time_utc: '2026-02-25T05:00:00.000Z' }, // created after, punched before
+      { ...financePunchFixtures(1, '2026-03-03T05:00:00.000Z')[0]!, id: '00000000-0000-4000-8000-00000000bbbb' },
+    ] });
+    try {
+      const ctx = ctxFor({ timezone: 'Asia/Muscat', config: { baseUrl: local.baseUrl, deviceSerial: SERIAL, syncFrom: '2026-03-01' } });
+      const r = await provider().pullAttendance(ctx, null);
+      expect(Buffer.from(String(local.requests[0]!.body['since']), 'base64url').toString('utf8')).toBe('2026-02-28T20:00:00.000Z|00000000-0000-0000-0000-000000000000');
+      expect(r.transactions.map((t) => t.providerTransactionId)).toEqual(['00000000-0000-4000-8000-00000000bbbb']);
+      expect(r.meta?.['skipped']).toMatchObject({ beforeSyncFrom: 1 });
+      // a full re-sync never reaches back before the start date either
+      const resync = await provider().pullAttendance(ctx, null, { since: '2025-01-01T00:00:00Z' });
+      expect(Buffer.from(String(local.requests[1]!.body['since']), 'base64url').toString('utf8')).toMatch(/^2026-02-28T20:00:00\.000Z\|/);
+      expect(resync.transactions).toHaveLength(1);
+    } finally { await local.close(); }
+  });
+
+  it('D9 loop guard: never imports punches this connector pushed under an earlier serial', async () => {
+    const local = await createMockFinanceServer({ serial: SERIAL, token: TOKEN, punches: [
+      ...financePunchFixtures(2, '2026-03-01T04:00:00.000Z', { device_serial: 'FLOWZA-TIME-OLD' }),
+      ...financePunchFixtures(1, '2026-03-01T05:00:00.000Z', { device_serial: 'FIN-GATE' }).map((p) => ({ ...p, id: '00000000-0000-4000-8000-00000000cccc' })),
+    ] });
+    try {
+      const r = await provider().pullAttendance(ctxFor({ config: { baseUrl: local.baseUrl, deviceSerial: SERIAL, previousSerials: ['flowza-time-old'] } }), null);
+      expect(r.transactions.map((t) => t.providerTransactionId)).toEqual(['00000000-0000-4000-8000-00000000cccc']);
+      expect(r.meta?.['skipped']).toMatchObject({ ownPunches: 2 });
+    } finally { await local.close(); }
   });
 
   it('turns an aborted request into TIMEOUT and an unreachable host into a retryable VENDOR_ERROR', async () => {

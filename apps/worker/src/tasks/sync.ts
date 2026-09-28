@@ -38,6 +38,8 @@ export async function pollDueDevices(deps: WorkerDeps, opts: TickOptions = {}): 
         from public.devices d
         join public.organizations o on o.id = d.organization_id
         where d.status = 'active' and d.auto_sync_enabled and d.integration_type <> 'DEVICE_PUSH'
+          -- a push-only Flowza Finance connector is never pulled (its auto-sync flag is off anyway; this guards an old row)
+          and not (d.provider_key = 'flowza_finance' and coalesce(d.config->>'direction', 'both') = 'push')
           and (d.next_attendance_sync_at is null or d.next_attendance_sync_at <= ${now})
           and (d.connection_status <> 'offline' or coalesce(d.last_error_at, 'epoch'::timestamptz) < ${now}::timestamptz - make_interval(mins => d.offline_threshold_minutes))
           and o.status in ('active', 'trial')

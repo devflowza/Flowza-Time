@@ -6,6 +6,7 @@
     "approvals": "الموافقات", "reports": "التقارير", "payroll": "الرواتب", "structure": "المنظمة", "branches": "الفروع",
     "departments": "الأقسام", "users": "المستخدمون والأدوار", "settings": "الإعدادات", "audit": "سجل التدقيق", "notifications": "الإشعارات",
     "platform": "إدارة المنصة", "help": "المساعدة", "signOut": "تسجيل الخروج", "collapse": "طي الشريط الجانبي", "expand": "توسيع الشريط الجانبي", "team": "نظرة عامة على الفريق",
+    "attendanceSummary": "ملخص الحضور", "unmatchedPunches": "بصمات غير مطابقة",
     "sections": { "workforce": "القوى العاملة", "devices": "الأجهزة والمزامنة", "time": "الوقت", "admin": "الإدارة", "team": "فريقي" }
   },
   "auth": {

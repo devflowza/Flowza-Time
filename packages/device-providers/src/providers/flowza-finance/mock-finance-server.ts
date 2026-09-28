@@ -37,6 +37,8 @@ export interface MockFinanceServer {
   requests: MockFinanceRequest[];
   /** Fail the next `times` (default 1) requests with `status`; `hang` never answers (for timeout tests). */
   failNext(fault: MockFinanceFault): void;
+  /** Hold the next request to `path` (any path when omitted) for `ms` before answering it normally (concurrency tests). */
+  delayNext(ms: number, path?: 'attendance-export' | 'attendance-ingest'): void;
   /** Ingest dedupe keys seen so far (serial|pin|time|state → count). */
   dedupe: Map<string, number>;
   close(): Promise<void>;
@@ -95,6 +97,7 @@ export async function createMockFinanceServer(options: MockFinanceServerOptions 
   const requests: MockFinanceRequest[] = [];
   const dedupe = new Map<string, number>();
   const faults: MockFinanceFault[] = [];
+  const delays: Array<{ ms: number; path?: string }> = [];
 
   const server: Server = createServer(async (req, res) => {
     const url = new URL(req.url ?? '/', 'http://127.0.0.1');
@@ -102,6 +105,11 @@ export async function createMockFinanceServer(options: MockFinanceServerOptions 
     if (req.method !== 'POST') return send(res, 405, { error: 'Method not allowed' });
     const body = await readJson(req);
     requests.push({ path, body: body ?? {}, headers: req.headers });
+    const delayIdx = delays.findIndex((d) => !d.path || d.path === path);
+    if (delayIdx >= 0) {
+      const [delay] = delays.splice(delayIdx, 1);
+      await new Promise((r) => setTimeout(r, delay!.ms));
+    }
     const faultIdx = faults.findIndex((f) => !f.path || f.path === path);
     if (faultIdx >= 0) {
       const fault = faults[faultIdx]!;
@@ -160,6 +168,7 @@ export async function createMockFinanceServer(options: MockFinanceServerOptions 
     baseUrl: `http://127.0.0.1:${port}${prefix}`,
     serial, token, punches, ingested, requests, dedupe,
     failNext: (fault) => { faults.push({ ...fault }); },
+    delayNext: (ms, path) => { delays.push({ ms, ...(path ? { path } : {}) }); },
     close: () => new Promise<void>((resolveClose, reject) => { server.closeAllConnections?.(); server.close((err) => (err ? reject(err) : resolveClose())); }),
   };
 }

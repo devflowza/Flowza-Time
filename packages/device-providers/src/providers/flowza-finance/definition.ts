@@ -32,6 +32,7 @@ export const FLOWZA_FINANCE_DEFINITION = defineProvider({
       { key: 'direction', label: 'Direction', type: 'select', options: [...FINANCE_SYNC_DIRECTIONS], default: 'both', required: false, secret: false },
       { key: 'pinKey', label: 'Employee identity sent as PIN', type: 'select', options: [...FINANCE_PIN_KEYS], default: 'employee_number', required: false, secret: false, help: 'Finance maps PIN = employee number unless a PIN mapping says otherwise.' },
       { key: 'pollMinutes', label: 'Poll interval (min)', type: 'number', default: FINANCE_POLL_MINUTES.default, required: false, secret: false, help: '5–60 minutes between pulls and pushes.' },
+      { key: 'syncFrom', label: 'Synchronise from', type: 'text', required: false, secret: false, help: 'YYYY-MM-DD in the connector timezone (default: 30 days before the connector was set up). Punches before it are never synchronised; the first pull and the first push start there.' },
     ],
   },
   throttling: { maxConcurrentPerDevice: 1, maxConcurrentPerAccount: 2, requestsPerMinute: 60 },

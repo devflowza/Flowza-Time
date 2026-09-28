@@ -76,7 +76,7 @@ export default function EmployeesListPage() {
     <div className="page-container">
       <PageHeader title={t('title')} description={q.data ? t('list.subtitle', { count: q.data.meta.total }) : undefined} actions={
         <>
-          {can('employee.export') ? <Button variant="outline" size="sm" onClick={() => openBulk('export', [])}><Download /> {tc('common.export')}</Button> : null}
+          {can('employee.export', 'report.export') ? <Button variant="outline" size="sm" onClick={() => openBulk('export', [])}><Download /> {tc('common.export')}</Button> : null}
           {can('employee.import') ? <Button variant="outline" size="sm" onClick={() => navigate('/employees/import')}><FileUp /> {tc('common.import')}</Button> : null}
           {can('employee.create') ? <Button size="sm" onClick={() => navigate('/employees/new')}><Plus /> {t('list.add')}</Button> : null}
         </>
@@ -110,7 +110,7 @@ export default function EmployeesListPage() {
                 </DropdownMenu>
               ) : null}
               {can('device.sync') ? <Button size="sm" variant="outline" onClick={() => openBulk('sync_devices', ids)}><RefreshCw /> {t('bulk.syncToDevices')}</Button> : null}
-              {can('employee.export') ? <Button size="sm" variant="outline" onClick={() => openBulk('export', ids)}><Download /> {tc('common.export')}</Button> : null}
+              {can('employee.export', 'report.export') ? <Button size="sm" variant="outline" onClick={() => openBulk('export', ids)}><Download /> {tc('common.export')}</Button> : null}
               <Button size="sm" variant="ghost" onClick={() => setSelection({})}><X /> {t('bulk.clearSelection')}</Button>
             </>
           )}

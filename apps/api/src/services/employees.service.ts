@@ -446,7 +446,8 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
       });
     }
     case 'export': {
-      const grant = requirePermission(actor.principal, orgId, 'employee.export');
+      // the file lands in Reports and is downloaded with report.export — refuse up front rather than generate what cannot be fetched
+      const grant = requirePermission(actor.principal, orgId, 'employee.export', 'report.export');
       return runUser(deps.db, actor, async (trx) => {
         const ids = input.employeeIds ? await visibleEmployeeIds(trx, orgId, grant, input.employeeIds) : null;
         const jobId = await enqueueJob(deps.queue, trx, { queue: 'reports', jobType: 'EXPORT_EMPLOYEES', organizationId: orgId, payload: { employeeIds: ids, branchIds: grant.allBranches ? null : grant.branchIds, format: input.format, requestedBy: actor.userId }, correlationId: actor.requestId });

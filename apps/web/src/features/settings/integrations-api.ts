@@ -28,5 +28,7 @@ export function useFinanceIntegrationMutations() {
   const save = useMutation({ mutationFn: async (input: FinanceIntegrationInput) => (await api.put<Envelope<FinanceIntegrationDto>>(`/orgs/${orgId}/integrations/finance`, input)).data, onSuccess: invalidate });
   const test = useMutation({ mutationFn: async (input: FinanceIntegrationTestInput) => (await api.post<Envelope<FinanceIntegrationTestDto>>(`/orgs/${orgId}/integrations/finance/test`, input)).data });
   const syncNow = useMutation({ mutationFn: async () => (await api.post<Envelope<FinanceSyncNowDto>>(`/orgs/${orgId}/integrations/finance/sync-now`, {})).data, onSuccess: invalidate });
-  return { save, test, syncNow };
+  /** Disconnect: the connector stops, its token is deleted and its sync position cleared (the settings are kept for reconnecting). */
+  const disconnect = useMutation({ mutationFn: async () => (await api.delete<Envelope<FinanceIntegrationDto>>(`/orgs/${orgId}/integrations/finance`)).data, onSuccess: invalidate });
+  return { save, test, syncNow, disconnect };
 }
