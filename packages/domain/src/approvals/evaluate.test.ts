@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collapseSeats, escalationDueAt, evaluateLevel, pendingSeats, requiredAfterReassign } from './evaluate.js';
+import { collapseSeats, escalationDueAt, evaluateLevel, isExtraHandRow, pendingSeats, requiredAfterReassign, seatMustBeNamed, seatOrder, type ActorDecisionRow } from './evaluate.js';
 
 describe('evaluateLevel', () => {
   it('ANY: one approval satisfies; a rejection is terminal only when nobody is left to approve', () => {
@@ -53,17 +53,75 @@ describe('P0-1 / P2-13 one seat per decision', () => {
     expect(evaluateLevel('QUORUM', 2, collapseSeats(rows))).toBe('open');
     expect(evaluateLevel('ANY', 1, collapseSeats(rows))).toBe('satisfied');
   });
-  it('lists the seats still waiting, in seat order', () => {
-    const rows = [
-      { userId: 'm', viaDelegationOf: null, decision: 'PENDING' },
-      { userId: 'd', viaDelegationOf: 'm', decision: 'PENDING' },
-      { userId: 'a', viaDelegationOf: null, decision: 'APPROVED' },
-      { userId: 'b', viaDelegationOf: null, decision: 'PENDING' },
-      { userId: 'c', viaDelegationOf: null, decision: 'SKIPPED' },
+  it('lists the seats still waiting, in seat order: when the seat was first written, then its user id', () => {
+    const submit = '2026-09-28T08:00:00.000Z'; // every seat of a level is written by the submitting transaction
+    const rows: ActorDecisionRow[] = [
+      { userId: 'm', viaDelegationOf: null, decision: 'PENDING', createdAt: submit },
+      { userId: 'd', viaDelegationOf: 'm', decision: 'PENDING', createdAt: submit },
+      { userId: 'a', viaDelegationOf: null, decision: 'APPROVED', createdAt: submit },
+      { userId: 'b', viaDelegationOf: null, decision: 'PENDING', createdAt: submit },
+      { userId: 'c', viaDelegationOf: null, decision: 'SKIPPED', createdAt: submit },
     ];
-    expect(pendingSeats(rows)).toEqual(['m', 'b']);
+    expect(pendingSeats(rows)).toEqual(['b', 'm']);
+    expect(seatOrder(rows)).toEqual(['a', 'b', 'c', 'm']);
     // the delegate decided for m: m's seat is no longer pending
-    expect(pendingSeats([...rows.slice(0, 1), { userId: 'd', viaDelegationOf: 'm', decision: 'REJECTED' }, ...rows.slice(2)])).toEqual(['b']);
+    expect(pendingSeats([...rows.slice(0, 1), { userId: 'd', viaDelegationOf: 'm', decision: 'REJECTED', createdAt: submit }, ...rows.slice(2)])).toEqual(['b']);
+    // a seat written later (a reassignment) comes after the level's own seats, whatever its user id
+    expect(pendingSeats([...rows, { userId: '0-reassigned', viaDelegationOf: null, decision: 'PENDING', createdAt: new Date('2026-09-28T09:30:00Z') }])).toEqual(['b', 'm', '0-reassigned']);
+  });
+
+  it('P2-13 the seat order never depends on how the rows were read (rows written by one statement share their creation time)', () => {
+    const at = new Date('2026-09-28T08:00:00Z');
+    const rows: ActorDecisionRow[] = [
+      { userId: 'hr-c', viaDelegationOf: null, decision: 'PENDING', createdAt: at },
+      { userId: 'hr-a', viaDelegationOf: null, decision: 'PENDING', createdAt: at },
+      { userId: 'hr-b', viaDelegationOf: null, decision: 'PENDING', createdAt: at },
+      { userId: 'deputy', viaDelegationOf: 'hr-c', decision: 'PENDING', createdAt: at },
+    ];
+    const permutations = (xs: ActorDecisionRow[]): ActorDecisionRow[][] => (xs.length <= 1 ? [xs] : xs.flatMap((x, i) => permutations([...xs.slice(0, i), ...xs.slice(i + 1)]).map((p) => [x, ...p])));
+    const seen = new Set(permutations(rows).map((p) => pendingSeats(p).join(',')));
+    expect([...seen]).toEqual(['hr-a,hr-b,hr-c']);
+    // the same with no creation time at all: the seat's user id alone
+    expect(pendingSeats(rows.map(({ createdAt: _omit, ...r }) => r).reverse())).toEqual(['hr-a', 'hr-b', 'hr-c']);
+  });
+
+  it('never lists an extra hand (an escalated approver who has not decided); lists what is left once they fill a seat', () => {
+    const at = '2026-09-28T08:00:00.000Z';
+    const escalated = { userId: 'late', viaDelegationOf: null, resolutionPath: 'escalated', decision: 'PENDING', createdAt: '2026-09-29T08:00:00.000Z' };
+    const rows: ActorDecisionRow[] = [
+      { userId: 'hr-a', viaDelegationOf: null, resolutionPath: 'hr_admin', decision: 'PENDING', createdAt: at },
+      { userId: 'hr-b', viaDelegationOf: null, resolutionPath: 'hr_admin', decision: 'PENDING', createdAt: at },
+      escalated,
+    ];
+    expect(isExtraHandRow(escalated)).toBe(true);
+    expect(pendingSeats(rows)).toEqual(['hr-a', 'hr-b']);
+    const filled = [rows[0]!, { ...rows[1]!, decision: 'SKIPPED' }, { ...escalated, onBehalfOfUserId: 'hr-b', decision: 'APPROVED' }];
+    expect(isExtraHandRow(filled[2]!)).toBe(false);
+    expect(pendingSeats(filled)).toEqual(['hr-a']);
+  });
+
+  it('P2-13 a stand-in seated on the primary\'s seat (the secondary manager, or a delegate) is ONE seat with it, never a second one', () => {
+    const at = '2026-09-28T08:00:00.000Z';
+    const rows: ActorDecisionRow[] = [
+      { userId: 'primary', viaDelegationOf: null, resolutionPath: 'primary', decision: 'PENDING', createdAt: at },
+      { userId: 'secondary', viaDelegationOf: 'primary', resolutionPath: 'secondary', decision: 'PENDING', createdAt: at },
+    ];
+    expect(isExtraHandRow(rows[1]!)).toBe(false);
+    expect(seatOrder(rows)).toEqual(['primary']);
+    expect(pendingSeats(rows)).toEqual(['primary']);
+    // so an override on such a level has one target and needs no name, whatever the mode
+    expect(seatMustBeNamed('ALL', pendingSeats(rows).length)).toBe(false);
+    // the stand-in deciding closes the seat for both
+    expect(pendingSeats([rows[0]!, { ...rows[1]!, decision: 'APPROVED' }])).toEqual([]);
+  });
+
+  it('P2-13 an override names its seat on ALL / QUORUM levels with several waiting seats; ANY or a single seat has one target', () => {
+    expect(seatMustBeNamed('ALL', 2)).toBe(true);
+    expect(seatMustBeNamed('QUORUM', 3)).toBe(true);
+    expect(seatMustBeNamed('ALL', 1)).toBe(false);
+    expect(seatMustBeNamed('QUORUM', 1)).toBe(false);
+    expect(seatMustBeNamed('ANY', 5)).toBe(false);
+    expect(seatMustBeNamed('ALL', 0)).toBe(false);
   });
 });
 

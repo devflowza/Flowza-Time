@@ -26,14 +26,14 @@ export interface OrgDirectory {
 /** Everybody who can hold a seat in the organisation (active memberships) with their role, permissions and branch scope. One pass, system scope. */
 export async function loadOrgDirectory(trx: Trx, orgId: string): Promise<OrgDirectory> {
   const members = await trx.selectFrom('orgMemberships as m').innerJoin('roles as r', 'r.id', 'm.roleId').select(['m.id as membershipId', 'm.userId', 'm.roleId', 'r.key as roleKey', 'm.employeeId', 'm.allBranches'])
-    .where('m.organizationId', '=', orgId).where('m.status', '=', 'active').orderBy('m.createdAt').execute();
+    .where('m.organizationId', '=', orgId).where('m.status', '=', 'active').orderBy('m.createdAt').orderBy('m.userId').execute();
   const roleIds = [...new Set(members.map((m) => m.roleId))];
   const perms = roleIds.length ? await trx.selectFrom('rolePermissions').select(['roleId', 'permissionKey']).where('roleId', 'in', roleIds).execute() : [];
   const restrictedIds = members.filter((m) => !m.allBranches).map((m) => m.membershipId);
   const scopedBranches = restrictedIds.length ? await trx.selectFrom('membershipBranches').select(['membershipId', 'branchId']).where('membershipId', 'in', restrictedIds).execute() : [];
   const permsByRole = new Map<string, string[]>();
   for (const p of perms) { const arr = permsByRole.get(p.roleId) ?? []; arr.push(p.permissionKey); permsByRole.set(p.roleId, arr); }
-  const inactive = await trx.selectFrom('orgMemberships').select(['userId', 'employeeId', 'status']).where('organizationId', '=', orgId).where('status', '!=', 'active').where('employeeId', 'is not', null).orderBy('createdAt').execute();
+  const inactive = await trx.selectFrom('orgMemberships').select(['userId', 'employeeId', 'status']).where('organizationId', '=', orgId).where('status', '!=', 'active').where('employeeId', 'is not', null).orderBy('createdAt').orderBy('userId').execute();
   const dir: OrgDirectory = { activeUserIds: new Set(), userByEmployee: new Map(), inactiveUserByEmployee: new Map(), roleKeyByUser: new Map(), roleIdByUser: new Map(), hrAdminUserIds: [], ownerUserIds: [], permissionHolders: new Map(), roleMembers: new Map(), branchManagers: [], branchScope: new Map() };
   for (const m of inactive) if (m.employeeId && !dir.inactiveUserByEmployee!.has(m.employeeId)) dir.inactiveUserByEmployee!.set(m.employeeId, { userId: m.userId, status: m.status });
   for (const m of members) {

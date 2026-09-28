@@ -115,10 +115,18 @@ export const myApprovalsQuerySchema = paginationQuerySchema.extend({
 export type MyApprovalsQuery = z.infer<typeof myApprovalsQuerySchema>;
 
 /**
+ * The refusal an override (or an escalated approver) gets on an ALL / QUORUM level with several seats still waiting when it
+ * does not say whose seat it fills (issue path `onBehalfOfUserId`). Shared so every client can recognise it.
+ */
+export const APPROVAL_SEAT_CHOICE_MESSAGE = 'Choose which approver you are deciding for';
+
+/**
  * POST /orgs/:orgId/approvals/:id/decide. `stepNo` is REQUIRED and must be the level the caller saw (review P1-2): a
  * level that is no longer current is refused (409), never re-targeted to the next one; an actor repeating their own
- * decision is a no-op. `onBehalfOfUserId` lets an organisation-wide approver (or an escalated one) name which pending
- * seat of the level their decision fills — by default the first pending seat (one seat per call, review P0-1).
+ * decision is a no-op. `onBehalfOfUserId` names the pending seat an organisation-wide approver's override (or an escalated
+ * approver's decision) fills — one seat per call (review P0-1). It is REQUIRED when the level is ALL or QUORUM and more
+ * than one seat is waiting (`abilities.mustChooseSeat`; 400 `APPROVAL_SEAT_CHOICE_MESSAGE` otherwise); on an ANY level or
+ * a single waiting seat it defaults to the first seat of `pendingSeats`.
  */
 export const approvalDecideSchema = z.object({
   stepNo: z.number().int().min(1).max(5),
@@ -129,8 +137,11 @@ export const approvalDecideSchema = z.object({
 export type ApprovalDecideInput = z.infer<typeof approvalDecideSchema>;
 /** POST /orgs/:orgId/approvals/bulk-decide — the same decision on several requests' current levels (Finance ATT-95: through the engine, one request at a time, never client-side). */
 export const APPROVAL_BULK_DECIDE_MAX = 100;
-/** One line of a bulk decision: the request and the level the caller saw (review P1-2 — never re-targeted to a later level). */
-export const approvalBulkDecideItemSchema = z.object({ requestId: uuidSchema, stepNo: z.number().int().min(1).max(5) });
+/**
+ * One line of a bulk decision: the request and the level the caller saw (review P1-2 — never re-targeted to a later level),
+ * plus the seat an override fills when the level needs one named (a line that needs it and lacks it fails on its own).
+ */
+export const approvalBulkDecideItemSchema = z.object({ requestId: uuidSchema, stepNo: z.number().int().min(1).max(5), onBehalfOfUserId: uuidSchema.optional() });
 export const approvalBulkDecideSchema = z.object({
   items: z.array(approvalBulkDecideItemSchema).min(1).max(APPROVAL_BULK_DECIDE_MAX),
   decision: z.enum(APPROVAL_DECISIONS),
@@ -185,12 +196,21 @@ export interface ApprovalActorDto {
   onBehalfOfUserId?: string | null; onBehalfOfName?: string | null;
   resolutionPath: string | null; decision: ApprovalStatus; decidedAt: string | null; comment: string | null;
 }
+/** A seat of a level: the approver whose decision it is (a delegate or an override decides IN a seat). */
+export interface ApprovalSeatDto { userId: string; userName: string | null }
 export interface ApprovalStepDto {
   id: string; requestId: string; stepNo: number; approverType: ApproverType; approverRoleId: string | null; approverUserId: string | null; permissionKey: string | null;
   mode: ApprovalStepMode; requiredCount: number | null; status: ApprovalStatus; resolutionPath: string | null; resolutionReason: string | null;
   activatedAt: string | null; dueAt: string | null; escalateTo: ApprovalEscalationTarget | null; escalatedAt: string | null; remindedAt: string | null;
   actedBy: string | null; actedByName: string | null; actedAt: string | null; comment: string | null;
+  /** Actor rows in a deterministic order: when each was written, then the person's user id. */
   actors: ApprovalActorDto[];
+  /**
+   * The seats still waiting, in SEAT ORDER (when the seat's first row was written, then the approver's user id): the order
+   * an override's seat is chosen from, the first being the default target where no choice is required. Always sent by the
+   * API; optional in the type so older fixtures keep compiling.
+   */
+  pendingSeats?: ApprovalSeatDto[];
 }
 export interface ApprovalTimelineEventDto { id: string; at: string; actorUserId: string | null; actorName: string | null; kind: string; detail: Record<string, unknown> }
 
@@ -203,11 +223,16 @@ export type ApprovalContextDto =
 /**
  * How the caller would decide the current level: in their own seat (`actor`), in the seat of somebody who delegates to them
  * (`delegate`), as an approver added by escalation (`escalated`), or as an organisation-wide approver / the owner
- * (`override`). `escalated` and `override` fill ONE pending seat of the level (the first, unless the call names another).
+ * (`override`). `escalated` and `override` fill ONE pending seat of the level: the one the call names — which it must do
+ * when `mustChooseSeat` is true — else the first of the step's `pendingSeats`.
  */
 export type ApprovalDecideVia = 'actor' | 'delegate' | 'escalated' | 'override';
-/** What the caller may do with the request right now (the API enforces every one of these again). */
-export interface ApprovalAbilitiesDto { canDecide: boolean; canCancel: boolean; canReassign: boolean; canBypass: boolean; canRequestInfo: boolean; canAnswerInfo: boolean; actingAsDelegateOf: string | null; decideVia?: ApprovalDecideVia | null }
+/**
+ * What the caller may do with the request right now (the API enforces every one of these again). `mustChooseSeat`: the
+ * caller's decision is an override / escalated one on an ALL or QUORUM level with several seats waiting, so it must name
+ * the seat it fills (`onBehalfOfUserId`, one of the current step's `pendingSeats`).
+ */
+export interface ApprovalAbilitiesDto { canDecide: boolean; canCancel: boolean; canReassign: boolean; canBypass: boolean; canRequestInfo: boolean; canAnswerInfo: boolean; actingAsDelegateOf: string | null; decideVia?: ApprovalDecideVia | null; mustChooseSeat?: boolean }
 
 export interface ApprovalRequestDto {
   id: string; organizationId: string; workflowId: string | null; workflowName: string | null; entityType: ApprovalEntity; entityId: string;

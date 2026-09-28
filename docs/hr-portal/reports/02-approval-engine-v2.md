@@ -440,7 +440,7 @@ organisation reading theirs touches ≤ 200 (measured 17).
 | B-81 one active policy per entity type | ✓ (adapted) | canonical `applies_to` on write and in the index (P2-8) |
 | B-83 validation, permission, soft delete | ✓ | the single-seat quorum is refused with a field error (P2-7) |
 | B-87 subject never approver; requester excluded | ✓ | no self-approval switch (P0-3); SoD on the live link (P0-4); reassign never seats the requester or subject (P2-2) |
-| B-91 who may decide; disabled users cannot | ✓ | one seat per call; override only by an organisation-wide approve holder or the owner, naming the level; line managers never override (P0-1 / P2-13); suspended members read and decide nothing (P0-2) |
+| B-91 who may decide; disabled users cannot | ✓ | one seat per call; override only by an organisation-wide approve holder or the owner, naming the level — and naming the seat on an ALL / QUORUM level with several seats waiting (§9.8); line managers never override (P0-1 / P2-13); suspended members read and decide nothing (P0-2) |
 | B-92 deciding about oneself refused, owner logged | ✓ | live link (P0-4); single-owner organisation (P1-7) |
 | B-93 / B-94 level satisfaction, rejection terminal | ✓ | reassignment keeps the arithmetic (P1-1) |
 | B-95 non-current level / already decided ⇒ no-op | ✓ (adapted) | a decision always names its level, so no re-targeting (P1-2); a repeat on a decided seat is a no-op; closed or non-current is 409 (decision 5) |

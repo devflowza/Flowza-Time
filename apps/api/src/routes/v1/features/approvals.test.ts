@@ -64,9 +64,10 @@ function nextRange(days = 1) {
   return { startDate: start, endDate: d.toISOString().slice(0, 10) };
 }
 let correctionDay = 1;
+/** A correction on a fresh past day per call (from 2 July 2026 on, rolling into the following month — never an invalid date). */
 function correction(employeeId: string, reason = 'Forgot to punch out') {
   correctionDay += 1;
-  const day = `2026-07-${String(correctionDay).padStart(2, '0')}`;
+  const day = new Date(Date.UTC(2026, 6, correctionDay)).toISOString().slice(0, 10);
   return { employeeId, attendanceDate: day, type: 'ADD_PUNCH', proposedPunchedAt: `${day}T13:05:00Z`, reason };
 }
 

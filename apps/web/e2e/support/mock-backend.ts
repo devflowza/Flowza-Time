@@ -174,6 +174,8 @@ export function approvalRequestFixture(over: Partial<ApprovalRequestDto> = {}): 
     id: `step-${stepNo}`, requestId: APPROVAL_ID, stepNo, approverType, approverRoleId: null, approverUserId: actors[0]!.userId, permissionKey: null, mode: 'ANY' as const, requiredCount: 1, status,
     resolutionPath: actors[0]!.resolutionPath, resolutionReason: null, activatedAt: '2026-09-20T05:00:00Z', dueAt: null, escalateTo: null, escalatedAt: null, remindedAt: null,
     actedBy: status === 'APPROVED' ? actors[0]!.userId : null, actedByName: status === 'APPROVED' ? actors[0]!.userName : null, actedAt: status === 'APPROVED' ? '2026-09-20T06:00:00Z' : null, comment: status === 'APPROVED' ? 'Fine by me' : null, actors,
+    // the API's seats still waiting, in seat order
+    pendingSeats: actors.filter((a) => a.decision === 'PENDING').map((a) => ({ userId: a.userId, userName: a.userName })),
   });
   return {
     id: APPROVAL_ID, organizationId: ORG_ID, workflowId: null, workflowName: 'Leave: manager then owner', entityType: 'LEAVE', entityId: 'cccccccc-cccc-4ccc-8ccc-000000000001', branchId: BRANCH_A, departmentId: null,

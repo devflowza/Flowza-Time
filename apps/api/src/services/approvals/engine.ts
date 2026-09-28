@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
-import type { ApprovalBulkDecideItemDto, ApprovalBulkDecideResultDto, ApprovalDecideVia, ApprovalDecision, ApprovalEntity, ApprovalEscalationTarget, ApprovalRequestStatus, ApprovalStepMode, ApproverType, DomainEventType, Permission } from '@flowza/contracts';
+import { APPROVAL_SEAT_CHOICE_MESSAGE, type ApprovalBulkDecideItemDto, type ApprovalBulkDecideResultDto, type ApprovalDecideVia, type ApprovalDecision, type ApprovalEntity, type ApprovalEscalationTarget, type ApprovalRequestStatus, type ApprovalStepMode, type ApproverType, type DomainEventType, type Permission } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
-import { collapseSeats, escalationDueAt, evaluateLevel, pendingSeats, requiredAfterReassign, resolveStepActors, seatOfRow, selectWorkflow, type ApprovalStepSpec, type MembershipGrant, type ResolvedActor } from '@flowza/domain';
+import { collapseSeats, escalationDueAt, evaluateLevel, isExtraHandRow, pendingSeats, requiredAfterReassign, resolveStepActors, seatMustBeNamed, seatOfRow, selectWorkflow, type ApprovalStepSpec, type MembershipGrant, type ResolvedActor } from '@flowza/domain';
 import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { hasPermission, requireMembership } from '../../lib/authorize.js';
@@ -36,7 +36,11 @@ export interface DecideInput {
   decision: ApprovalDecision;
   comment?: string | undefined;
   viaEmailToken?: boolean;
-  /** An override / escalated decision fills this pending seat of the level (default: the first pending seat, in seat order). */
+  /**
+   * The pending seat an override / escalated decision fills. REQUIRED when the level is ALL or QUORUM and more than one seat
+   * is still waiting (the engine never picks whose seat that is); otherwise it defaults to the first pending seat in seat
+   * order (`seatOrder` in @flowza/domain — deterministic).
+   */
   onBehalfOfUserId?: string | undefined;
   /** Internal: decide only through a seat the caller holds (one-click e-mail links are minted for a seat, never an override). */
   requireSeat?: boolean;
@@ -77,8 +81,8 @@ export function isRequestSubject(grant: MembershipGrant, userId: string, request
 }
 
 const isDecided = (decision: string) => decision === 'APPROVED' || decision === 'REJECTED';
-/** An escalated approver who has not decided yet is an extra hand, not a seat of the level. */
-const isExtraHand = (r: ActorRowLite) => r.resolutionPath === 'escalated' && !r.onBehalfOfUserId;
+/** An escalated approver who has not decided yet is an extra hand, not a seat of the level (the domain's rule). */
+const isExtraHand = (r: ActorRowLite) => isExtraHandRow(r);
 
 /**
  * Who may decide the current level (review P0-1 / P2-13, Finance B-91 — one seat per call):
@@ -201,9 +205,14 @@ export async function emitTargeted(t: Trx, orgId: string, eventType: DomainEvent
   await emitDomainEvent(t, { organizationId: orgId, eventType, aggregateType: 'approval_request', aggregateId: requestId, payload: { ...payload, userIds: ids }, actorUserId: actor.userId, requestId: actor.requestId });
 }
 
+/**
+ * A request's levels with their actor rows. Rows are read in a deterministic order (written-at, then user id — rows of one
+ * statement share their creation time, so a random row id must never break the tie); whatever depends on SEAT order uses
+ * the domain's `seatOrder` / `pendingSeats`, which do not depend on the read order at all.
+ */
 async function loadSteps(t: Trx, requestId: string) {
   const steps = await t.selectFrom('approvalSteps').selectAll().where('requestId', '=', requestId).orderBy('stepNo').execute();
-  const actors = steps.length ? await t.selectFrom('approvalStepActors').selectAll().where('stepId', 'in', steps.map((s) => s.id)).orderBy('createdAt').orderBy('id').execute() : [];
+  const actors = steps.length ? await t.selectFrom('approvalStepActors').selectAll().where('stepId', 'in', steps.map((s) => s.id)).orderBy('createdAt').orderBy('userId').execute() : [];
   return steps.map((s) => ({ ...s, actors: actors.filter((a) => a.stepId === s.id) }));
 }
 type LoadedStep = Awaited<ReturnType<typeof loadSteps>>[number];
@@ -284,7 +293,7 @@ export async function submit(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
     const workflow = selectWorkflow(workflows.map((w) => ({ id: w.id, name: w.name, branchId: w.branchId, appliesTo: jsonObject(w.appliesTo) as { branchIds?: string[]; departmentIds?: string[] }, minUnits: numberOrNull(w.minUnits), isDefault: w.isDefault, status: w.status })), { branchId: input.branchId, departmentId: input.departmentId ?? null, units: input.units ?? null });
     const row = workflow ? workflows.find((w) => w.id === workflow.id)! : null;
     const base = { organizationId: orgId, workflowId: row?.id ?? null, entityType: input.entityType, entityId: input.entityId, branchId: input.branchId, employeeId: input.employeeId, departmentId: input.departmentId ?? null, units: input.units ?? null, requestedBy: input.requestedBy };
-    const subjectUserId = input.employeeId ? (await t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', input.employeeId).where('status', '=', 'active').orderBy('createdAt').executeTakeFirst())?.userId ?? null : null;
+    const subjectUserId = input.employeeId ? (await t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', input.employeeId).where('status', '=', 'active').orderBy('createdAt').orderBy('userId').executeTakeFirst())?.userId ?? null : null;
 
     if (!row && input.noWorkflow.kind === 'AUTO_APPROVE') {
       const now = new Date();
@@ -359,6 +368,22 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
       if (!explicitStep) throw errors.validation('Name the level you are deciding (stepNo): you are not one of its approvers, so your decision would count as an organisation-wide override of one of them.', { issues: [{ path: 'stepNo', message: 'Required for an override' }] });
       if (check.branchBlocked) throw errors.forbidden('This request is outside your branch scope.');
     }
+    // An override or an escalated approver fills ONE pending seat: the one the call names. On an ALL / QUORUM level with
+    // several seats still waiting the call MUST name it (the engine never guesses whose seat it takes — review P2-13
+    // follow-up); otherwise the first pending seat in seat order, which is deterministic.
+    let target: string | null = null;
+    if (check.override || check.via === 'escalated') {
+      const open = pendingSeats(step.actors);
+      if (input.onBehalfOfUserId) {
+        if (!open.includes(input.onBehalfOfUserId)) throw errors.validation('onBehalfOfUserId is not an approver still waiting at this level.', { issues: [{ path: 'onBehalfOfUserId', message: 'Not a pending seat of the level' }] });
+        target = input.onBehalfOfUserId;
+      } else if (seatMustBeNamed(step.mode as ApprovalStepMode, open.length)) {
+        throw errors.validation(`${APPROVAL_SEAT_CHOICE_MESSAGE}: this level needs ${step.mode === 'ALL' ? 'every approver' : 'several approvals'} and ${open.length} are still waiting, so your decision fills the seat of the one you choose (onBehalfOfUserId).`, { issues: [{ path: 'onBehalfOfUserId', message: APPROVAL_SEAT_CHOICE_MESSAGE }] });
+      } else {
+        target = open[0] ?? null;
+        if (!target) throw errors.invalidState('Every approver of this level has already decided.');
+      }
+    }
     const now = new Date();
     const decision = input.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
     if (check.ownerBypass) { await recordOwnerBypass(t, actor, orgId, req, { stepNo: step.stepNo, decision }); bypassed = true; }
@@ -377,10 +402,8 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
         .onConflict((oc) => oc.columns(['stepId', 'userId']).doUpdateSet({ viaDelegationOf: seat, resolutionPath: 'delegate', onBehalfOfUserId: null, decision, decidedAt: now, comment })).returning('id').executeTakeFirstOrThrow();
       decidedRowId = row.id;
     } else {
-      // escalated approver or organisation-wide override: ONE pending seat of the level (named, else the first in seat order)
-      const open = pendingSeats(step.actors.filter((a) => !isExtraHand(a)));
-      const target = input.onBehalfOfUserId ?? open[0];
-      if (!target || !open.includes(target)) throw input.onBehalfOfUserId ? errors.validation('onBehalfOfUserId is not an approver still waiting at this level.', { issues: [{ path: 'onBehalfOfUserId', message: 'Not a pending seat of the level' }] }) : errors.invalidState('Every approver of this level has already decided.');
+      // escalated approver or organisation-wide override: the ONE pending seat resolved above
+      if (!target) throw errors.internal('an override reached the decision without a target seat');
       seat = target; onBehalfOfUserId = target;
       if (check.via === 'escalated') {
         await t.updateTable('approvalStepActors').set({ decision, decidedAt: now, comment, onBehalfOfUserId: target }).where('id', '=', own!.id).execute();
@@ -433,18 +456,20 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
  * The same decision on several requests (Finance ATT-95 — bulk approval goes through the engine). Each request is decided in
  * its own transaction with every rule of a single decision (seat / delegate / override, segregation of duties, modes, hooks,
  * notifications, audit), so one refusal never undoes the others; the caller gets one line per request. `items` carry the
- * level the caller saw for each request (review P1-2); a legacy `requestIds` list decides seats the caller holds only.
+ * level the caller saw for each request (review P1-2) and, for an override on a level that waits for several approvers,
+ * the seat it fills (`onBehalfOfUserId`) — a line that needs one and lacks it fails on its own with the same message as a
+ * single decision; a legacy `requestIds` list decides seats the caller holds only.
  */
-export async function bulkDecide(deps: ApiDeps, actor: Actor, orgId: string, input: { requestIds?: readonly string[]; items?: ReadonlyArray<{ requestId: string; stepNo?: number | undefined }>; decision: ApprovalDecision; comment?: string | undefined }): Promise<ApprovalBulkDecideResultDto> {
+export async function bulkDecide(deps: ApiDeps, actor: Actor, orgId: string, input: { requestIds?: readonly string[]; items?: ReadonlyArray<{ requestId: string; stepNo?: number | undefined; onBehalfOfUserId?: string | undefined }>; decision: ApprovalDecision; comment?: string | undefined }): Promise<ApprovalBulkDecideResultDto> {
   requireMembership(actor.principal, orgId);
   const results: ApprovalBulkDecideItemDto[] = [];
-  const items = input.items ?? (input.requestIds ?? []).map((requestId) => ({ requestId, stepNo: undefined }));
+  const items: ReadonlyArray<{ requestId: string; stepNo?: number | undefined; onBehalfOfUserId?: string | undefined }> = input.items ?? (input.requestIds ?? []).map((requestId) => ({ requestId }));
   const seen = new Set<string>();
   for (const item of items) {
     if (seen.has(item.requestId)) continue;
     seen.add(item.requestId);
     try {
-      const out = await runUser(deps.db, actor, (trx) => decideWithin(deps, trx, actor, orgId, item.requestId, { stepNo: item.stepNo, decision: input.decision, comment: input.comment }));
+      const out = await runUser(deps.db, actor, (trx) => decideWithin(deps, trx, actor, orgId, item.requestId, { stepNo: item.stepNo, decision: input.decision, comment: input.comment, ...(item.onBehalfOfUserId ? { onBehalfOfUserId: item.onBehalfOfUserId } : {}) }));
       results.push({ requestId: item.requestId, ok: true, status: out.status as ApprovalRequestStatus, noop: out.noop, code: null, message: null });
     } catch (err) {
       if (!(err instanceof AppError)) throw err;
