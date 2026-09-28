@@ -12,8 +12,12 @@ import { orgMfaGate } from './middleware/mfa.js';
 import { clientIp } from './lib/http.js';
 import { healthRoutes } from './routes/health.js';
 import { registerV1Routes } from './routes/v1/index.js';
+import { registerPublicInvitationRoutes } from './routes/v1/members.js';
 import { registerInboundRoutes } from './routes/inbound/index.js';
 import { edgeGate } from './middleware/edge-gate.js';
+
+/** Invitation previews per client IP: enough for a person opening their link, far too few to guess tokens. */
+export const INVITATION_VALIDATE_LIMIT = { windowMs: 60_000, max: 20 } as const;
 
 /** Builds the Hono application. Route modules live in routes/v1/* (authenticated) and routes/inbound/* (devices/webhooks). */
 export function createApp(deps: ApiDeps) {
@@ -43,6 +47,14 @@ export function createApp(deps: ApiDeps) {
   inbound.use('*', rateLimit({ name: 'inbound', windowMs: 60_000, max: 1200, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
   registerInboundRoutes(inbound, deps);
   app.route('/', inbound);
+
+  // Public invitation preview (HR portal Prompt 6b, B-70): no session; edge-gated and limited per client IP before the
+  // authenticated router, whose middlewares therefore never see this path. It reveals a token's state and masked data only.
+  const pub = new Hono<AppEnv>();
+  pub.use('/invitations/validate', edge);
+  pub.use('/invitations/validate', rateLimit({ name: 'invitation-validate', windowMs: INVITATION_VALIDATE_LIMIT.windowMs, max: INVITATION_VALIDATE_LIMIT.max, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
+  registerPublicInvitationRoutes(pub, deps);
+  app.route('/api/v1', pub);
 
   // Authenticated API
   const v1 = new Hono<AppEnv>();

@@ -85,7 +85,7 @@ export async function deleteRole(deps: ApiDeps, actor: Actor, orgId: string, id:
     if (!role) throw errors.notFound('Role', id);
     if (role.isSystem) throw errors.invalidState('System roles cannot be deleted.');
     const inUse = toCount((await trx.selectFrom('orgMemberships').select((eb) => eb.fn.countAll().as('n')).where('roleId', '=', id).executeTakeFirst())?.n)
-      + toCount((await trx.selectFrom('invitations').select((eb) => eb.fn.countAll().as('n')).where('roleId', '=', id).where('acceptedAt', 'is', null).executeTakeFirst())?.n);
+      + toCount((await trx.selectFrom('invitations').select((eb) => eb.fn.countAll().as('n')).where('roleId', '=', id).where('acceptedAt', 'is', null).where('revokedAt', 'is', null).executeTakeFirst())?.n);
     if (inUse > 0) throw errors.conflict('The role is assigned to members or pending invitations and cannot be deleted.', { inUse });
     await trx.deleteFrom('roles').where('id', '=', id).where('organizationId', '=', orgId).execute();
     await audit(trx, actor, orgId, 'role.deleted', 'role', { entityId: id, oldValue: { key: role.key, name: role.name, permissions: role.permissions } });

@@ -52,7 +52,7 @@ function employeeQuery(trx: Trx, orgId: string) {
 async function linkedEmployeeIds(trx: Trx, orgId: string): Promise<string[]> {
   return withSystemScope(trx, orgId, async (t) => {
     const members = await t.selectFrom('orgMemberships').select('employeeId').where('organizationId', '=', orgId).where('employeeId', 'is not', null).execute();
-    const invited = await t.selectFrom('invitations').select('employeeId').where('organizationId', '=', orgId).where('employeeId', 'is not', null).where('acceptedAt', 'is', null).where('expiresAt', '>', new Date()).execute();
+    const invited = await t.selectFrom('invitations').select('employeeId').where('organizationId', '=', orgId).where('employeeId', 'is not', null).where('acceptedAt', 'is', null).where('revokedAt', 'is', null).where('expiresAt', '>', new Date()).execute();
     return [...new Set([...members, ...invited].map((r) => r.employeeId).filter((id): id is string => !!id))];
   });
 }

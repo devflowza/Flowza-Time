@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { InvitationDto, InviteMemberInput, MemberDto, PermissionDto, RoleDto, RoleInput, UpdateRoleInput } from '@flowza/contracts';
+import type { EmployeePortalAccessDto, InvitationDto, InviteMemberInput, MemberDto, PermissionDto, PortalAccessInviteInput, PortalAccessResendResultDto, RoleDto, RoleInput, UpdateRoleInput } from '@flowza/contracts';
 import type { z } from 'zod';
 import type { updateMemberSchema } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
@@ -33,7 +33,28 @@ export function useMemberMutations() {
   const suspend = useMutation({ mutationFn: async (id: string) => (await api.delete<Envelope<MemberDto>>(`/orgs/${orgId}/members/${id}`)).data, onSuccess: invalidate });
   const invite = useMutation({ mutationFn: async (input: InviteMemberInput) => (await api.post<Envelope<InvitationDto>>(`/orgs/${orgId}/invitations`, input)).data, onSuccess: invalidate });
   const revoke = useMutation({ mutationFn: (id: string) => api.delete<void>(`/orgs/${orgId}/invitations/${id}`), onSuccess: invalidate });
-  return { update, suspend, invite, revoke };
+  /** HR portal Prompt 6b (B-67/68): revokes the open token and issues a new 7-day invitation, e-mailed; the answer carries the new link once. */
+  const resend = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<InvitationDto>>(`/orgs/${orgId}/invitations/${id}/resend`)).data, onSuccess: invalidate });
+  return { update, suspend, invite, revoke, resend };
+}
+
+// ----- FlowZa Time access of one employee record (HR portal Prompt 6b, Finance B-69 / B-70 / B-74) -------------------------------
+
+const PORTAL_ACCESS = 'portal-access';
+export function usePortalAccess(employeeId: string, enabled = true) {
+  const orgId = useOrgId();
+  return useQuery({ queryKey: qk.detail(orgId, PORTAL_ACCESS, employeeId), queryFn: async () => (await api.get<Envelope<EmployeePortalAccessDto>>(`/orgs/${orgId}/employees/${employeeId}/portal-access`)).data, enabled, retry: false });
+}
+export function usePortalAccessMutations(employeeId: string) {
+  const orgId = useOrgId();
+  const qc = useQueryClient();
+  const base = `/orgs/${orgId}/employees/${employeeId}/portal-access`;
+  const invalidate = () => { for (const e of [PORTAL_ACCESS, 'members', 'invitations', 'employees']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
+  const invite = useMutation({ mutationFn: async (input: PortalAccessInviteInput) => (await api.post<Envelope<{ invitation: InvitationDto; access: EmployeePortalAccessDto }>>(`${base}/invite`, input)).data, onSuccess: invalidate });
+  const revoke = useMutation({ mutationFn: async (reason?: string) => (await api.post<Envelope<EmployeePortalAccessDto>>(`${base}/revoke`, reason ? { reason } : {})).data, onSuccess: invalidate });
+  const restore = useMutation({ mutationFn: async (reason?: string) => (await api.post<Envelope<EmployeePortalAccessDto>>(`${base}/restore`, reason ? { reason } : {})).data, onSuccess: invalidate });
+  const resend = useMutation({ mutationFn: async () => (await api.post<Envelope<PortalAccessResendResultDto>>(`${base}/resend`)).data, onSuccess: invalidate });
+  return { invite, revoke, restore, resend };
 }
 
 export function useRoleMutations() {

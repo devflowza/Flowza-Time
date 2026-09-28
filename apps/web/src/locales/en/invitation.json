@@ -1,0 +1,16 @@
+{
+  "preview": {
+    "title": "Invitation to {{org}}",
+    "for": "Sent to {{email}}",
+    "employee": "Employee record: {{name}}",
+    "expires": "Valid until {{date}}",
+    "state": { "valid": "Valid", "accepted": "Already accepted", "revoked": "Withdrawn", "expired": "Expired" },
+    "acceptedHint": "This invitation was already used. Sign in with the invited address to open {{org}}.",
+    "revokedHint": "This invitation was withdrawn or replaced by a newer one. Ask your administrator to send it again.",
+    "expiredHint": "This invitation has expired. Ask your administrator to resend it.",
+    "invalidTitle": "This invitation link is not valid",
+    "invalidHint": "The link is incomplete or unknown. Ask your administrator to send the invitation again.",
+    "checking": "Checking your invitation…",
+    "signIn": "Go to sign in"
+  }
+}

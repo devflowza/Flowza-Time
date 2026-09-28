@@ -17,6 +17,7 @@ import { DocumentsTab } from '../components/profile/documents-tab';
 import { DangerZone } from '../components/profile/danger-zone';
 import { toastJobQueued } from '../job-toast';
 import { AttendanceGrantsCard } from '@/features/attendance-review/components/attendance-grants-card';
+import { PortalAccessCard } from '@/features/users/components/portal-access-card';
 
 // The activity view is the only part of the profile that charts, and Recharts is a 118 kB (gzipped) vendor chunk:
 // loading it lazily keeps it off every other visit to a profile.
@@ -90,7 +91,7 @@ export default function EmployeeProfilePage() {
             </div>
             <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
               <TabsList className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb} className={tb === 'danger' ? 'data-[state=active]:text-destructive' : undefined}>{t(`profile.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
-              <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} />{!isOwn && !e.deletedAt ? <AttendanceGrantsCard employeeId={e.id} /> : null}</TabsContent>
+              <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} />{!isOwn && !e.deletedAt ? <AttendanceGrantsCard employeeId={e.id} /> : null}{!isOwn ? <PortalAccessCard employeeId={e.id} employeeName={e.displayName} /> : null}</TabsContent>
               <TabsContent value="history">{tab === 'history' ? <HistoryTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="devices">{tab === 'devices' ? <DevicesTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="attendance">{tab === 'attendance' ? <AttendanceTab employeeId={e.id} /> : null}</TabsContent>
