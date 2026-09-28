@@ -1,0 +1,317 @@
+{
+  "nav": {
+    "notes": "Attendance reasons",
+    "geofences": "Geofences"
+  },
+  "categories": {
+    "client_visit": "Client visit",
+    "field_work": "Field work",
+    "late_reason": "Reason for being late",
+    "absence_reason": "Reason for absence",
+    "wfh": "Worked from home",
+    "other": "Other"
+  },
+  "verdict": {
+    "no_fence": "No zone applies",
+    "allowed": "Inside the zone",
+    "flagged": "Outside — flagged",
+    "logged": "Outside — logged",
+    "denied_outside": "Outside — refused",
+    "denied_mock": "Mock location — refused"
+  },
+  "notes": {
+    "title": "Attendance reasons",
+    "subtitle": "Reasons employees gave for their days. Approve, excuse, or reject with its pay effect; ask for more information when it is unclear.",
+    "openInbox": "Approvals inbox",
+    "tabs": {
+      "reasons": "Reasons",
+      "selfies": "Selfie check-ins"
+    },
+    "scopeLabel": "Whose reasons",
+    "scope": {
+      "mine": "Assigned to me",
+      "team": "My team",
+      "all": "Organisation"
+    },
+    "statusLabel": "Status",
+    "filters": {
+      "open": "Waiting",
+      "approved": "Approved",
+      "excused": "Excused",
+      "rejected": "Rejected",
+      "all": "All"
+    },
+    "status": {
+      "pending": "Awaiting review",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "excused": "Excused",
+      "info_requested": "Information requested"
+    },
+    "columns": {
+      "employee": "Employee",
+      "date": "Day",
+      "day": "Calculated",
+      "reason": "Reason",
+      "status": "Status"
+    },
+    "excusedBadge_one": "{{count}} day excused this year",
+    "excusedBadge_other": "{{count}} days excused this year",
+    "oversightChip": "Oversight",
+    "oversightBanner": "You are reviewing as HR (organisation-wide oversight), not as the employees' line manager. Your decision overrides the manager's step and is recorded as an override.",
+    "dayUnknown": "Not calculated yet",
+    "asked": "Asked: {{question}}",
+    "deducted": "{{days}} day charged to {{type}}",
+    "charged": "{{days}} day charged",
+    "lop": "{{days}} day loss of pay",
+    "empty": "No reasons to review",
+    "emptyHint": "Reasons employees add to their days appear here while they wait for a decision.",
+    "page": "Page {{page}} of {{pages}} · {{total}} reasons",
+    "previous": "Previous page",
+    "next": "Next page"
+  },
+  "review": {
+    "titles": {
+      "approve": "Approve the reason",
+      "excuse": "Excuse the day",
+      "reject": "Reject the reason",
+      "request_info": "Ask for more information"
+    },
+    "hints": {
+      "approve": "The reason is accepted; the day stays as the engine calculated it.",
+      "excuse": "The day is excused: no deduction applies and it is counted as excused.",
+      "reject": "The day is treated as unexcused. Choose its pay effect.",
+      "request_info": "The employee is notified, answers by editing the reason, and it comes back to you."
+    },
+    "actions": {
+      "approve": "Approve",
+      "excuse": "Excuse",
+      "reject": "Reject",
+      "request_info": "Ask"
+    },
+    "payEffect": "Pay effect",
+    "payEffects": {
+      "none": "No deduction",
+      "half": "Half day",
+      "full": "Full day"
+    },
+    "payEffectHint": "Charged to a paid leave balance first, then as loss of pay (organisation rules).",
+    "comment": "Comment",
+    "commentPlaceholder": "Optional — the employee sees it",
+    "question": "Question for the employee",
+    "questionPlaceholder": "What would you like to know?",
+    "oversightNote": "You decide as HR oversight, not as the line manager.",
+    "done": {
+      "approve": "Reason approved",
+      "excuse": "Day excused",
+      "reject": "Reason rejected",
+      "request_info": "Question sent to the employee"
+    },
+    "charge": {
+      "charged_leave": "{{days}} day charged to {{type}}",
+      "lop": "{{days}} day recorded as loss of pay",
+      "already_charged": "The day was already charged",
+      "covered_by_leave": "The day is covered by leave; nothing charged",
+      "excused": "The day is excused; nothing charged",
+      "no_effect": "No deduction applied",
+      "not_applicable": "No deduction applied"
+    }
+  },
+  "selfies": {
+    "filter": "Status",
+    "status": {
+      "pending": "Awaiting review",
+      "approved": "Approved",
+      "rejected": "Rejected"
+    },
+    "direction": {
+      "in": "Check-in",
+      "out": "Check-out"
+    },
+    "columns": {
+      "employee": "Employee",
+      "time": "Taken at",
+      "direction": "Punch",
+      "location": "Location",
+      "status": "Status"
+    },
+    "noLocation": "No location",
+    "viewPhoto": "Photo",
+    "photoTitle": "Selfie of {{name}}",
+    "photoAlt": "Selfie of {{name}}",
+    "photoUnavailable": "The photo is not available.",
+    "approve": "Approve",
+    "reject": "Reject",
+    "approved": "Check-in approved and recorded",
+    "rejected": "Check-in rejected",
+    "rejectTitle": "Reject this selfie check-in",
+    "rejectHint": "No punch is recorded. The employee sees your reason.",
+    "reason": "Reason",
+    "empty": "No selfie check-ins",
+    "emptyHint": "Selfie check-ins of employees with open attendance appear here for review."
+  },
+  "grants": {
+    "title": "Portal attendance",
+    "hint": "How this employee may punch from the employee portal. Saved at once and recorded in the audit log.",
+    "openAttendance": "Open attendance (selfie check-in)",
+    "openAttendanceHint": "May check in from anywhere with a selfie that a manager reviews before it counts.",
+    "selfieRequired": "Selfie required",
+    "selfieRequiredHint": "Every portal punch of this employee must be a selfie check-in.",
+    "saved": "Portal attendance updated",
+    "changedBy": "Last changed by {{name}} on {{date}}"
+  },
+  "approvalContext": {
+    "regularisationTypes": {
+      "missed_punch": "Missed punch",
+      "wrong_punch": "Wrong punch",
+      "wfh_unmarked": "Work from home",
+      "system_downtime": "System downtime"
+    },
+    "swapBetween": "{{a}} ⇄ {{b}}"
+  },
+  "geofences": {
+    "title": "Geofences",
+    "subtitle": "Work zones portal punches are checked against. Assign each zone to the organisation, a branch, department, team or employee; the most specific scope wins.",
+    "new": "New geofence",
+    "edit": "Edit geofence",
+    "delete": "Delete",
+    "dialogHint": "A circle around the site (and, optionally, a polygon for its exact outline).",
+    "save": "Save",
+    "saved": "Geofence saved",
+    "deleted": "Geofence deleted",
+    "deleteTitle": "Delete {{name}}?",
+    "deleteHint": "Its assignments go with it. Punches already recorded keep the verdict they had.",
+    "empty": "No geofences yet",
+    "emptyHint": "Create a zone around each site employees punch from in the portal.",
+    "active": "Active",
+    "inactive": "Inactive",
+    "columns": {
+      "name": "Name",
+      "branch": "Site",
+      "shape": "Shape",
+      "enforcement": "Outside the zone",
+      "assignments": "Applies to",
+      "active": "Status"
+    },
+    "shape": {
+      "circle": "Circle, {{meters}} m",
+      "polygon": "Polygon, {{count}} points"
+    },
+    "fields": {
+      "name": "Name",
+      "branch": "Site",
+      "orgWide": "Organisation-wide",
+      "latitude": "Latitude",
+      "longitude": "Longitude",
+      "radius": "Radius (m)",
+      "polygon": "Polygon",
+      "polygonHint": "One point per line: latitude, longitude (3–100 points). Leave empty for the circle.",
+      "enforcement": "Outside the zone",
+      "accuracy": "Minimum GPS accuracy (m)",
+      "grace": "Grace distance (m)",
+      "activeFrom": "Active from",
+      "activeTo": "Active until",
+      "active": "Active",
+      "windows": "Time windows",
+      "windowsHint": "When the zone applies, in the site's local time. Leave empty to apply at all times.",
+      "addWindow": "Add a window",
+      "removeWindow": "Remove window",
+      "start": "From",
+      "end": "To"
+    },
+    "weekdays": {
+      "1": "Mon",
+      "2": "Tue",
+      "3": "Wed",
+      "4": "Thu",
+      "5": "Fri",
+      "6": "Sat",
+      "7": "Sun"
+    },
+    "enforcement": {
+      "hard_block": "Refuse the punch",
+      "soft_warn": "Record and flag",
+      "advisory_log": "Record and log only"
+    },
+    "enforcementHint": {
+      "hard_block": "A punch from outside is refused (the organisation rule may soften this to a flag).",
+      "soft_warn": "A punch from outside is recorded with the OUTSIDE_GEOFENCE flag for review.",
+      "advisory_log": "A punch from outside is recorded; the location is only logged."
+    },
+    "errors": {
+      "name": "Give the zone a name.",
+      "latitude": "Latitude between -90 and 90.",
+      "longitude": "Longitude between -180 and 180.",
+      "radius": "A whole number of metres between 30 and 5000.",
+      "accuracy": "A whole number of metres between 5 and 5000.",
+      "grace": "A whole number of metres between 0 and 1000.",
+      "polygon": "3 to 100 lines of \"latitude, longitude\".",
+      "dates": "The end date must be on or after the start date.",
+      "windows": "Every window needs at least one day, a start and an end."
+    },
+    "scope": {
+      "org": "Organisation",
+      "branch": "Branch",
+      "department": "Department",
+      "team": "Team",
+      "employee": "Employee"
+    },
+    "assignments": {
+      "button": "Applies to",
+      "title": "Who {{name}} applies to",
+      "hint": "The most specific scope with a fence wins (employee, then team, department, branch, organisation); within it the strictest verdict counts.",
+      "scope": "Scope",
+      "everyone": "Everyone in the organisation",
+      "pickTarget": "Choose…",
+      "pickEmployee": "Search an employee",
+      "priority": "Priority",
+      "onIn": "Check-in",
+      "onOut": "Check-out",
+      "remove": "Remove",
+      "add": "Add",
+      "none": "Not assigned to anyone yet — the zone applies to nobody.",
+      "noneShort": "Nobody",
+      "invalid": "Choose a target for every line; each line applies to check-ins, check-outs or both.",
+      "saved": "Assignments saved"
+    },
+    "tester": {
+      "title": "Test a location",
+      "hint": "Dry run: how would a punch by this employee at this location be judged right now? Nothing is recorded.",
+      "employee": "Employee",
+      "accuracy": "Accuracy (m)",
+      "direction": "Punch",
+      "mock": "Mock location",
+      "run": "Test",
+      "result": "Verdict",
+      "rule": "Organisation rule: {{mode}}",
+      "modes": {
+        "off": "geofence not checked",
+        "flag": "flag, never refuse",
+        "block": "refuse where the zone says so"
+      },
+      "winning": "winning scope: {{scope}}",
+      "priority": "priority {{n}}",
+      "distance": "{{meters}} m",
+      "notConsidered": "Not considered",
+      "inactive": "Inactive: {{reason}}",
+      "inactiveReasons": {
+        "inactive": "switched off",
+        "not_yet_active": "not active yet",
+        "expired": "expired",
+        "not_on_check_in": "not for check-ins",
+        "not_on_check_out": "not for check-outs",
+        "outside_time_window": "outside its time window"
+      },
+      "reasons": {
+        "inside": "inside the zone",
+        "outside": "outside the zone",
+        "gps_accuracy_too_low": "GPS accuracy too low",
+        "location_missing": "no location given",
+        "mock_location": "mock location",
+        "no_fences_assigned": "no zone assigned",
+        "geofence_off": "geofence checks are off"
+      },
+      "noFences": "No fence applies to this employee."
+    }
+  }
+}

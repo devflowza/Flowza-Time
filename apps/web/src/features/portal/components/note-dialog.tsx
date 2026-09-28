@@ -10,13 +10,6 @@ import { toastMutationError } from '@/features/attendance/period-locked';
 import { PA_NS } from '../attendance-i18n';
 import { useNoteMutations } from '../attendance-api';
 
-/** A sensible first category for a day the engine judged (late → reason for being late, absent → reason for absence). */
-export function suggestedCategory(dayStatus: string | null | undefined, flags: readonly string[] = []): AttendanceNoteCategory {
-  if (flags.includes('LATE')) return 'late_reason';
-  if (dayStatus === 'ABSENT' || dayStatus === 'MISSING_PUNCH' || dayStatus === 'HALF_DAY') return 'absence_reason';
-  return 'other';
-}
-
 /**
  * Explain a day ("Add a reason"): a category and a few words, reviewed like a request by the line manager (or HR). The same
  * dialog edits a note still waiting for review and answers a reviewer's question (the note returns to review). With no

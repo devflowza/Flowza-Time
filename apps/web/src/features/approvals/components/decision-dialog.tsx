@@ -7,6 +7,10 @@ import { toast, toastError } from '@/lib/toast';
 import { useApprovalMutations, type DecisionKind } from '../api';
 import { decisionToast } from '../labels';
 import { ApprovalContext, EntityIcon } from './parts';
+import { useActiveMembership } from '@/features/me/use-me';
+import { PayEffectChoice } from '@/features/attendance-review/components/pay-effect-choice';
+import { defaultPayEffect, type PayEffect } from '@/features/attendance-review/model';
+import type { AttendanceSettings } from '@flowza/contracts';
 
 export type Decision = DecisionKind;
 
@@ -17,10 +21,14 @@ export function DecisionDialog({ request, decision, timezone, onClose }: { reque
   const { decide } = useApprovalMutations();
   const [comment, setComment] = useState('');
   const reject = decision === 'REJECT';
+  // rejecting a reason (HR portal Prompt 4) names its pay effect, proposed from the kind of day and the organisation's defaults
+  const noteContext = request?.context.kind === 'ATTENDANCE_NOTE' ? request.context.note : null;
+  const unexcused = (useActiveMembership()?.settings.attendance as Partial<AttendanceSettings> | undefined)?.unexcused;
+  const [payEffect, setPayEffect] = useState<PayEffect>(() => (noteContext ? defaultPayEffect(noteContext.dayStatus, noteContext.dayFlags, unexcused) : 0));
   const missing = reject && comment.trim().length === 0;
   const submit = () => {
     if (!request || missing) return;
-    decide.mutate({ requestId: request.id, stepNo: request.currentStep, decision, comment: comment.trim() || undefined }, {
+    decide.mutate({ requestId: request.id, stepNo: request.currentStep, decision, comment: comment.trim() || undefined, ...(reject && noteContext ? { payEffectDays: payEffect } : {}) }, {
       onSuccess: (res) => { toast.success(decisionToast(t, res, decision, request.currentStep)); onClose(); },
       onError: toastError,
     });
@@ -42,6 +50,7 @@ export function DecisionDialog({ request, decision, timezone, onClose }: { reque
             </div>
           </div>
         ) : null}
+        {reject && noteContext ? <PayEffectChoice value={payEffect} onChange={setPayEffect} name="dec-pay-effect" /> : null}
         <FormField label={t('decision.comment')} htmlFor="dec-comment" required={reject} optional={!reject}>
           <Textarea id="dec-comment" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={reject ? t('decision.rejectPlaceholder') : t('decision.approvePlaceholder')} aria-invalid={missing || undefined} />
           {missing ? <p className="text-xs text-muted-foreground">{t('decision.commentRequired')}</p> : null}

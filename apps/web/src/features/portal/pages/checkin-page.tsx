@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
@@ -21,8 +21,9 @@ import { SelfieDialog } from '../components/selfie-dialog';
 import { SectionTitle } from '../components/parts';
 
 /** The server's clock, ticking locally from the offset measured when the status was read (display only; the API stamps punches). */
-function useServerClock(serverTime: string | undefined, timezone: string) {
-  const offset = useMemo(() => (serverTime ? Date.parse(serverTime) - Date.now() : 0), [serverTime]);
+function useServerClock(serverTime: string | undefined, receivedAt: number, timezone: string) {
+  // offset between the server's clock and this device's, measured when the status arrived (React Query's dataUpdatedAt)
+  const offset = serverTime && receivedAt ? Date.parse(serverTime) - receivedAt : 0;
   const [now, setNow] = useState(() => Date.now());
   useEffect(() => { const id = window.setInterval(() => setNow(Date.now()), 1000); return () => window.clearInterval(id); }, []);
   return DateTime.fromMillis(now + offset).setZone(timezone);
@@ -48,15 +49,14 @@ export default function CheckInPage() {
   const status = usePunchStatus('web');
   const { preview, punch } = usePunchMutations();
   const offline = useOfflinePunches(orgId);
-  const [fix, setFix] = useState<GeoFix | null>(null);
-  const [geoError, setGeoError] = useState<GeoFailureKind | null>(null);
-  const [locating, setLocating] = useState(false);
+  const [geo, setGeo] = useState<{ fix: GeoFix | null; error: GeoFailureKind | null; locating: boolean }>({ fix: null, error: null, locating: true });
+  const { fix, error: geoError, locating } = geo;
   const [previewResult, setPreviewResult] = useState<SelfPunchPreviewDto | null>(null);
   const [refusal, setRefusal] = useState<{ reason: string; message: string } | null>(null);
   const [selfieOpen, setSelfieOpen] = useState(false);
   const s = status.data;
   const tz = s?.timezone ?? 'UTC';
-  const clock = useServerClock(s?.serverTime, tz);
+  const clock = useServerClock(s?.serverTime, status.dataUpdatedAt, tz);
   const direction = nextDirection(s, offline.items);
   const selfieOnly = !!s?.blockers.includes('SELFIE_REQUIRED');
   const hardBlockers = (s?.blockers ?? []).filter((b) => b !== 'SELFIE_REQUIRED');
@@ -71,21 +71,24 @@ export default function CheckInPage() {
     });
   }, [previewMutate]);
 
+  const failure = (e: unknown): GeoFailureKind => (e instanceof GeoFailure ? e.kind : 'unavailable');
+  /** "Refresh location" (and after a punch): keeps the last fix while the new one is read. */
   const locate = useCallback(async () => {
-    setLocating(true);
-    setGeoError(null);
+    setGeo((g) => ({ ...g, error: null, locating: true }));
     try {
       const f = await getCurrentFix();
-      setFix(f);
-      return f;
+      setGeo({ fix: f, error: null, locating: false });
     } catch (e) {
-      setGeoError(e instanceof GeoFailure ? e.kind : 'unavailable');
-      return null;
-    } finally { setLocating(false); }
+      setGeo((g) => ({ fix: g.fix, error: failure(e), locating: false }));
+    }
   }, []);
 
   // read the location once on arrival; re-judge whenever the fix or the direction changes
-  useEffect(() => { void locate(); }, [locate]);
+  useEffect(() => {
+    let alive = true;
+    getCurrentFix().then((f) => { if (alive) setGeo({ fix: f, error: null, locating: false }); }, (e: unknown) => { if (alive) setGeo({ fix: null, error: failure(e), locating: false }); });
+    return () => { alive = false; };
+  }, []);
   const ready = !!s && !locating;
   useEffect(() => { if (ready) runPreview(fix, direction); }, [ready, fix, direction, runPreview]);
 
@@ -212,7 +215,7 @@ export default function CheckInPage() {
 
       <p className="text-xs text-muted-foreground">{t('checkin.footer')} <Link to="/my/requests" className="font-medium text-primary hover:underline">{t('checkin.footerLink')}</Link></p>
 
-      <SelfieDialog open={selfieOpen} onOpenChange={setSelfieOpen} direction={direction} fix={fix} onSent={() => void status.refetch()} />
+      {selfieOpen ? <SelfieDialog open onOpenChange={setSelfieOpen} direction={direction} fix={fix} onSent={() => void status.refetch()} /> : null}
     </div>
   );
 }

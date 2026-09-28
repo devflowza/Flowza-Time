@@ -91,6 +91,19 @@ describe('self-service check-in / check-out', () => {
     expect(summary.body.data.total).toBe(0);
     const search = await h.request('GET', `${base()}/search?q=Self`, { token: f.owner });
     expect(JSON.stringify(search.body.data.devices ?? [])).not.toContain(device.id);
+    // generic device operations named by id refuse it outright (409), like the Finance connector refuses generic mutations
+    for (const action of ['reconcile', 'health-check', 'sync-attendance']) {
+      const r = await h.request('POST', `${base()}/devices/${device.id}/actions/${action}`, { token: f.owner, headers: { 'Idempotency-Key': `ss-${action}-0001` } });
+      expect(r.status).toBe(409);
+      expect(r.body.code).toBe('INVALID_STATE');
+    }
+    const test = await h.request('POST', `${base()}/devices/test-connection`, { token: f.owner, body: { providerKey: 'self_service', config: {} } });
+    expect(test.status).toBe(409);
+    const testById = await h.request('POST', `${base()}/devices/test-connection`, { token: f.owner, body: { providerKey: 'mock', deviceId: device.id, config: {} } });
+    expect(testById.status).toBe(409);
+    const recon = await h.request('POST', `${base()}/sync/reconcile`, { token: f.owner, body: { deviceIds: [device.id] }, headers: { 'Idempotency-Key': 'ss-reconcile-0001' } });
+    expect(recon.status).toBe(409);
+    expect(recon.body.code).toBe('INVALID_STATE');
   });
 
   it('geofence block: outside a hard fence is refused (and the manager told), a mock location too, inside is allowed', async () => {

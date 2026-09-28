@@ -8,10 +8,7 @@ import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { PA_NS } from '../attendance-i18n';
 import { useSwapCandidates, useSwapMutations } from '../attendance-api';
-import { shiftLabel } from '../shift-format';
-
-/** Days a swap can be asked for: working days with a shift, not on leave, not already covered by a swap. */
-export const swappableDays = (days: readonly SelfShiftDayDto[]): SelfShiftDayDto[] => days.filter((d) => d.shift && !d.isOff && !d.onLeave && !d.holidayName && !d.swap);
+import { shiftLabel, swappableDays } from '../shift-format';
 
 /**
  * Ask to swap shifts with a colleague for one day: the employee works the colleague's shift and the colleague works theirs.

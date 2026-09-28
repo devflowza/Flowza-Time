@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import type { DashboardSummary, DeviceDto, EmployeeDto, MeDto, Permission } from '@flowza/contracts';
+import type { AttendanceNoteDto, DashboardSummary, DeviceDto, EmployeeDto, MeDto, Permission, SelfPunchDto, SelfPunchStatusDto } from '@flowza/contracts';
 
 /**
  * Backend double for the UI end-to-end suite.
@@ -115,7 +115,14 @@ export interface MockBackend {
   calls: Array<{ method: string; path: string; body?: unknown }>;
   /** API GET paths nobody registered (answered with an empty page) */
   unmatched: string[];
+  /** employee-portal attendance (HR portal Prompt 4): the punches and reasons the SPA recorded through the double */
+  portal: { punches: SelfPunchDto[]; notes: AttendanceNoteDto[] };
 }
+
+/** The employee record the portal scenarios link the signed-in member to. */
+export const PORTAL_EMPLOYEE_ID = employeesFixture[1]!.id;
+/** A work zone around Muscat HQ (the portal check-in scenario stands inside it). */
+export const HQ_FENCE = { id: '99999999-9999-4999-8999-000000000001', name: 'Muscat HQ', latitude: 23.588, longitude: 58.3829, radiusM: 150, hasPolygon: false, enforcement: 'soft_warn' as const, scope: 'org' as const };
 
 const CORS: Record<string, string> = { 'access-control-allow-origin': '*' };
 const json = (route: Route, status: number, body: unknown, headers: Record<string, string> = {}) => route.fulfill({ status, headers: { 'content-type': 'application/json', ...CORS, ...headers }, body: JSON.stringify(body) });
@@ -124,7 +131,8 @@ const apiError = (route: Route, status: number, code: string, message: string) =
 /** Install the backend double on `page`. Call before `page.goto`. */
 export async function installMockBackend(page: Page, opts: MockBackendOptions = {}): Promise<MockBackend> {
   const me = opts.me ?? meFixture();
-  const state: MockBackend = { calls: [], unmatched: [] };
+  const state: MockBackend = { calls: [], unmatched: [], portal: { punches: [], notes: [] } };
+  const portal = portalAttendanceDouble(state);
   const getHandlers: Record<string, unknown | ((url: URL) => unknown)> = {
     '/me': { data: me },
     '/me/notifications/unread-count': { data: { unread: 0 } },
@@ -146,8 +154,10 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
     [`/orgs/${ORG_ID}/device-groups`]: { data: [] },
     '/device-providers': { data: [] },
     [`/orgs/${ORG_ID}/search`]: (url: URL) => { const q = (url.searchParams.get('q') ?? '').toLowerCase(); return { data: { q, employees: employeesFixture.filter((e) => e.displayName.toLowerCase().includes(q)).map((e) => ({ type: 'employee', id: e.id, title: e.displayName, subtitle: e.employeeNumber, branchId: e.branchId, status: e.employmentStatus })), devices: [], branches: [], departments: [] } }; },
+    ...portal.get,
     ...opts.get,
   };
+  const postHandlers: Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }> = { ...portal.post, ...opts.post };
 
   // ---- Supabase Auth (GoTrue) -------------------------------------------------------------------------------------
   await page.route('**/supabase/auth/v1/**', async (route) => {
@@ -189,7 +199,7 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
       return json(route, 200, page_([]));
     }
     if (req.method() === 'POST') {
-      const handler = opts.post?.[path];
+      const handler = postHandlers[path];
       if (handler) { const r = handler(body, url); return json(route, r.status ?? 200, r.body); }
     }
     return apiError(route, 404, 'NOT_FOUND', `No e2e handler for ${req.method()} ${path}`);
@@ -207,3 +217,56 @@ export async function signInDirectly(page: Page): Promise<void> {
 }
 
 function page_<T>(data: T[]) { return page(data); }
+
+/**
+ * Employee-portal attendance double (HR portal Prompt 4): punch status / preview / punch and the reasons list, stateful so a
+ * scenario sees what it recorded. The server clock, the geofence verdict (inside HQ_FENCE → allowed, elsewhere → flagged) and
+ * the punch time are this double's; authorization and the real evaluation are covered by the API suite.
+ */
+function portalAttendanceDouble(state: MockBackend) {
+  const today = () => new Date().toISOString().slice(0, 10);
+  const inside = (b: { lat?: number; lng?: number }) => b.lat !== undefined && b.lng !== undefined && Math.abs(b.lat - HQ_FENCE.latitude) < 0.001 && Math.abs(b.lng - HQ_FENCE.longitude) < 0.001;
+  const verdict = (b: { lat?: number; lng?: number }) => (inside(b)
+    ? { verdict: 'allowed' as const, reason: 'inside', geofenceId: HQ_FENCE.id, geofenceName: HQ_FENCE.name, distanceM: 0, scope: 'org' as const, enforcement: 'soft_warn' as const }
+    : { verdict: 'flagged' as const, reason: 'outside', geofenceId: HQ_FENCE.id, geofenceName: HQ_FENCE.name, distanceM: 420, scope: 'org' as const, enforcement: 'soft_warn' as const });
+  const status = (): SelfPunchStatusDto => {
+    const last = state.portal.punches[state.portal.punches.length - 1];
+    const lastDirection = last?.direction === 'in' || last?.direction === 'out' ? last.direction : null;
+    return {
+      date: today(), timezone: 'Asia/Muscat', serverTime: new Date().toISOString(), punches: state.portal.punches, today: null, lastDirection,
+      canCheckIn: lastDirection !== 'in', canCheckOut: lastDirection === 'in', blockers: [],
+      policy: { webCheckIn: true, mobileCheckIn: false, requireGeofence: 'flag', allowSelfieCheckIn: false, checkInWindow: null, checkOutWindow: null, outOfWindowAction: 'flag', duplicatePunchSeconds: 60, ipRestricted: false },
+      grant: { openAttendance: false, selfieRequired: false }, selfieAvailable: false, fences: [HQ_FENCE],
+    };
+  };
+  const me = `/orgs/${ORG_ID}/me`;
+  return {
+    get: {
+      [`${me}/punch/status`]: () => ({ data: status() }),
+      [`${me}/attendance/notes`]: () => ({ data: [...state.portal.notes].reverse() }),
+    } as Record<string, (url: URL) => unknown>,
+    post: {
+      [`${me}/punch/preview`]: (body: unknown) => {
+        const b = body as { lat?: number; lng?: number };
+        return { body: { data: { verdict: verdict(b), outOfWindow: false, refusals: [], wouldBeFlagged: !inside(b) } } };
+      },
+      [`${me}/punch`]: (body: unknown) => {
+        const b = body as { direction: 'in' | 'out'; lat?: number; lng?: number; idempotencyKey: string };
+        const punch: SelfPunchDto = { id: String(state.portal.punches.length + 1), punchedAt: new Date().toISOString(), direction: b.direction, source: 'SELF_SERVICE', channel: 'web', verdict: verdict(b).verdict, deviceName: null, processingStatus: 'pending' };
+        state.portal.punches.push(punch);
+        return { status: 201, body: { data: { replayed: false, punch, verdict: verdict(b), outOfWindow: false, flagged: !inside(b) } } };
+      },
+      [`${me}/attendance/notes`]: (body: unknown) => {
+        const b = body as { date: string; category: AttendanceNoteDto['category']; note: string };
+        const at = new Date().toISOString();
+        const note: AttendanceNoteDto = {
+          id: `n${state.portal.notes.length + 1}`, employeeId: PORTAL_EMPLOYEE_ID, attendanceDate: b.date, category: b.category, note: b.note, status: 'pending', submittedAt: at,
+          reviewedBy: null, reviewedByName: null, reviewedAt: null, reviewReason: null, reviewVia: null, infoRequestMessage: null, infoRequestedAt: null, payEffectDays: null, lossOfPay: false,
+          deductedLeaveTypeCode: null, deductedLeaveTypeName: null, approvalRequestId: 'e2e-request-1', approvalStatus: 'PENDING', approvalCurrentStep: 1, approvalStepCount: 1, excusedAt: null, createdAt: at, updatedAt: at,
+        };
+        state.portal.notes.push(note);
+        return { status: 201, body: { data: note } };
+      },
+    } as Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }>,
+  };
+}

@@ -1,6 +1,6 @@
 import { NavLink } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarCheck, CalendarDays, CalendarOff, CheckSquare, ClipboardList, ContactRound, Cpu, FileText, GitCompare, House, LayoutDashboard, Network, PanelLeftClose, PanelLeftOpen, Palmtree, RefreshCw, Settings, ShieldCheck, UserRound, Users, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, LayoutDashboard, MapPinned, MessageSquareText, Network, PanelLeftClose, PanelLeftOpen, Palmtree, RefreshCw, Settings, ShieldCheck, UserRound, Users, Wallet, type LucideIcon } from 'lucide-react';
 import type { Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -9,8 +9,15 @@ import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import portalEn from '@/locales/en/portal.json';
 import portalAr from '@/locales/ar/portal.json';
+import portalAttendanceEn from '@/locales/en/portal-attendance.json';
+import portalAttendanceAr from '@/locales/ar/portal-attendance.json';
+import attendanceReviewEn from '@/locales/en/attendance-review.json';
+import attendanceReviewAr from '@/locales/ar/attendance-review.json';
 
 registerNamespace('portal', portalEn, portalAr);
+// HR portal Prompt 4: check-in / requests / shift entries and the reasons / geofences review pages
+registerNamespace('portal-attendance', portalAttendanceEn, portalAttendanceAr);
+registerNamespace('attendance-review', attendanceReviewEn, attendanceReviewAr);
 
 interface NavItem { to: string; label: string; icon: LucideIcon; permissions?: Permission[]; any?: boolean; /** Overrides `permissions` when set (e.g. any of several keys, or line-manager status). */ visible?: boolean }
 interface NavSection { label?: string; items: NavItem[] }
@@ -61,6 +68,9 @@ export function Sidebar() {
       { to: '/my/attendance', label: t('portal:nav.attendance'), icon: CalendarCheck },
       { to: '/my/leave', label: t('portal:nav.leave'), icon: Palmtree },
       { to: '/my/profile', label: t('portal:nav.profile'), icon: UserRound },
+      { to: '/my/checkin', label: t('portal-attendance:nav.checkin'), icon: Fingerprint },
+      { to: '/my/requests', label: t('portal-attendance:nav.requests'), icon: Inbox },
+      { to: '/my/shift', label: t('portal-attendance:nav.shift'), icon: CalendarClock },
     ] }] : []),
     ...(isManager ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound }] }] : []),
     { label: t('nav.sections.workforce'), items: [
@@ -70,6 +80,9 @@ export function Sidebar() {
       // engine v2: approvers of attendance or leave, approval admins and line managers (their team's requests)
       { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || hasDirectReports },
       { to: '/leave', label: t('nav.leave'), icon: CalendarOff, permissions: ['leave.view'] },
+      // HR portal Prompt 4: reasons (line managers review their team's, HR organisation-wide) and the geofences
+      { to: '/attendance/notes', label: t('attendance-review:nav.notes'), icon: MessageSquareText, visible: can('attendance.review_notes') || can('attendance.approve') || hasDirectReports },
+      { to: '/attendance/geofences', label: t('attendance-review:nav.geofences'), icon: MapPinned, permissions: ['attendance.manage_geofences'] },
     ] },
     { label: t('nav.sections.devices'), items: [
       { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'] },

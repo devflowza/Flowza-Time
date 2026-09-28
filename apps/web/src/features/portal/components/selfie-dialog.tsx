@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Camera, ImageUp, RotateCcw, Send } from 'lucide-react';
 import { SELFIE_MAX_BYTES, type SelfPunchDirection } from '@flowza/contracts';
@@ -33,30 +33,28 @@ export function SelfieDialog({ open, onOpenChange, direction, fix, onSent }: { o
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const [stream, setStream] = useState<MediaStream | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
   const [cameraFailed, setCameraFailed] = useState(false);
   const [photo, setPhoto] = useState<Blob | null>(null);
-  const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  // the preview's object URL follows the photo; it is revoked when the photo changes or the dialog unmounts
+  const previewUrl = useMemo(() => (photo ? URL.createObjectURL(photo) : null), [photo]);
+  useEffect(() => () => { if (previewUrl) URL.revokeObjectURL(previewUrl); }, [previewUrl]);
 
-  const stop = useCallback(() => { setStream((s) => { s?.getTracks().forEach((tr) => tr.stop()); return null; }); }, []);
+  const stop = useCallback(() => { streamRef.current?.getTracks().forEach((tr) => tr.stop()); streamRef.current = null; setStream(null); }, []);
   const startCamera = useCallback(async () => {
     setError(null);
     if (!navigator.mediaDevices?.getUserMedia) { setCameraFailed(true); return; }
     try {
       const s = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user', width: { ideal: 720 } }, audio: false });
+      streamRef.current = s;
       setStream(s);
     } catch { setCameraFailed(true); }
   }, []);
 
   useEffect(() => { if (videoRef.current && stream) { videoRef.current.srcObject = stream; void videoRef.current.play().catch(() => undefined); } }, [stream]);
-  useEffect(() => { if (!open) { stop(); setPhoto(null); setError(null); setCameraFailed(false); } }, [open, stop]);
-  useEffect(() => () => stop(), [stop]);
-  useEffect(() => {
-    if (!photo) { setPreviewUrl(null); return; }
-    const url = URL.createObjectURL(photo);
-    setPreviewUrl(url);
-    return () => URL.revokeObjectURL(url);
-  }, [photo]);
+  // the page mounts the dialog only while it is open: leaving it releases the camera
+  useEffect(() => () => { streamRef.current?.getTracks().forEach((tr) => tr.stop()); streamRef.current = null; }, []);
 
   const capture = async () => {
     const v = videoRef.current;

@@ -15,7 +15,7 @@ export type DecisionKind = 'APPROVE' | 'REJECT';
 const INBOX = 'approvals-inbox';
 const REQUEST = 'approval-request';
 const MINE = 'approvals-mine';
-const DOCUMENTS = ['attendance-corrections', 'attendance-records', 'attendance-daily', 'attendance-monthly', 'leave-records', 'self-service'];
+const DOCUMENTS = ['attendance-corrections', 'attendance-records', 'attendance-daily', 'attendance-monthly', 'leave-records', 'self-service', 'attendance-notes', 'selfie-checkins'];
 /** Everything a decision can move: the approval views, the documents behind them and the dashboard (its pending count). */
 export function invalidateApprovalViews(qc: ReturnType<typeof useQueryClient>, orgId: string) {
   for (const e of [INBOX, REQUEST, MINE, ...DOCUMENTS]) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) });
@@ -43,7 +43,8 @@ export function useApprovalMutations() {
   const qc = useQueryClient();
   const invalidate = () => invalidateApprovalViews(qc, orgId);
   const post = async <T,>(path: string, body: unknown) => (await api.post<Envelope<T>>(`/orgs/${orgId}/approvals/${path}`, body)).data;
-  const decide = useMutation({ mutationFn: ({ requestId, stepNo, decision, comment }: { requestId: string; stepNo?: number; decision: DecisionKind; comment?: string }) => post<ApprovalDecideResultDto>(`${requestId}/decide`, { stepNo, decision, comment: comment || undefined }), onSuccess: invalidate });
+  // payEffectDays: an ATTENDANCE_NOTE rejection's pay effect (0 / 0.5 / 1 day); ignored by every other entity
+  const decide = useMutation({ mutationFn: ({ requestId, stepNo, decision, comment, payEffectDays }: { requestId: string; stepNo?: number; decision: DecisionKind; comment?: string; payEffectDays?: 0 | 0.5 | 1 }) => post<ApprovalDecideResultDto>(`${requestId}/decide`, { stepNo, decision, comment: comment || undefined, payEffectDays }), onSuccess: invalidate });
   const cancel = useMutation({ mutationFn: ({ requestId, reason }: { requestId: string; reason?: string }) => post<ApprovalRequestDto>(`${requestId}/cancel`, { reason: reason || undefined }), onSuccess: invalidate });
   const reassign = useMutation({ mutationFn: ({ requestId, userId, reason, stepNo }: { requestId: string; userId: string; reason: string; stepNo?: number }) => post<ApprovalRequestDto>(`${requestId}/reassign`, { userId, reason, stepNo }), onSuccess: invalidate });
   const requestInfo = useMutation({ mutationFn: ({ requestId, comment }: { requestId: string; comment: string }) => post<ApprovalRequestDto>(`${requestId}/request-info`, { comment }), onSuccess: invalidate });

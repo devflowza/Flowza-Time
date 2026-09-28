@@ -1,4 +1,11 @@
-import type { AttendanceNoteDto } from '@flowza/contracts';
+import type { AttendanceNoteCategory, AttendanceNoteDto } from '@flowza/contracts';
+
+/** A sensible first category for a day the engine judged (late → reason for being late, absent → reason for absence). */
+export function suggestedCategory(dayStatus: string | null | undefined, flags: readonly string[] = []): AttendanceNoteCategory {
+  if (flags.includes('LATE')) return 'late_reason';
+  if (dayStatus === 'ABSENT' || dayStatus === 'MISSING_PUNCH' || dayStatus === 'HALF_DAY') return 'absence_reason';
+  return 'other';
+}
 
 /** Day statuses / flags that ask the employee for a reason (the "needs a reason" nudge; any day may still carry one). */
 const ASKING_STATUSES: ReadonlySet<string> = new Set(['ABSENT', 'HALF_DAY', 'MISSING_PUNCH']);

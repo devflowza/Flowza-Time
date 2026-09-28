@@ -3,6 +3,7 @@ import { sql } from 'kysely';
 import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCredentialsInput, DeviceGroupDto, DeviceGroupInput, DeviceListQuery, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
 import type { DeviceSummaryDto, DeviceSummaryQuery } from '@flowza/contracts';
 import { SELF_SERVICE_PROVIDER_KEY } from '@flowza/contracts';
+import { refuseSelfServiceDevices, refuseSelfServiceProvider } from './self-service-device-guard.js';
 import { emitDomainEvent, maskCredentials, type Trx } from '@flowza/database';
 import { createThrottler, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
 import { AppError, errors, sha256Hex } from '@flowza/shared';
@@ -376,6 +377,7 @@ export const TEST_CONNECTION_TIMEOUT_MS = 10_000;
 export async function testConnection(deps: ApiDeps, actor: Actor, orgId: string, input: TestConnectionInput): Promise<TestConnectionResultDto> {
   const grant = requireMembership(actor.principal, orgId);
   if (!hasPermission(grant, 'device.create') && !hasPermission(grant, 'device.update') && !hasPermission(grant, 'device.manage')) throw errors.forbidden('Missing permission: device.create or device.update.');
+  refuseSelfServiceProvider(input.providerKey);
   const provider = getProvider(deps, input.providerKey);
   const def = provider.definition;
   const { config: requestConfig, secrets: requestSecrets } = splitConfig(def, input.config, { requireRequired: !input.deviceId });
@@ -388,7 +390,7 @@ export async function testConnection(deps: ApiDeps, actor: Actor, orgId: string,
   let endpointUrl: string | null = typeof requestConfig.endpointUrl === 'string' ? requestConfig.endpointUrl : null;
   let serialNumber: string | null = typeof requestConfig.serialNumber === 'string' ? requestConfig.serialNumber : null;
   if (input.deviceId) {
-    const device = await runUser(deps.db, actor, async (trx) => { const d = await loadDeviceRow(trx, orgId, input.deviceId!); requireBranchAccess(grant, d.branchId); return d; });
+    const device = await runUser(deps.db, actor, async (trx) => { await refuseSelfServiceDevices(trx, orgId, [input.deviceId!]); const d = await loadDeviceRow(trx, orgId, input.deviceId!); requireBranchAccess(grant, d.branchId); return d; });
     if (device.providerKey !== def.key) throw errors.validation('providerKey does not match the stored device.', { issues: [{ path: 'providerKey', message: 'Mismatch' }] });
     const storedConfig = jsonObject(device.config);
     // stored credentials may only be reused for the *unchanged* endpoint (AGENTS.md service-level rules): generic endpoint keys
@@ -480,6 +482,7 @@ export type DeviceAction = 'sync-attendance' | 'sync-employees' | 'health-check'
 export async function runDeviceAction(deps: ApiDeps, actor: Actor, orgId: string, id: string, action: DeviceAction): Promise<CreatedSyncJob> {
   const grant = requirePermission(actor.principal, orgId, 'device.sync');
   return runUser(deps.db, actor, async (trx) => {
+    await refuseSelfServiceDevices(trx, orgId, [id]);
     const device = await loadDeviceRow(trx, orgId, id); requireBranchAccess(grant, device.branchId);
     if (device.status !== 'active') throw errors.invalidState('The device is not active.');
     const caps = jsonObject(device.capabilities) as Record<string, boolean>;

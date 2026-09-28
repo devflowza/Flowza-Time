@@ -8,8 +8,8 @@ import { fmtDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { PA_NS } from '../attendance-i18n';
 import { useMyShift, useMySwaps } from '../attendance-api';
-import { shiftLabel } from '../shift-format';
-import { SwapDialog, swappableDays } from '../components/swap-dialog';
+import { shiftLabel, swappableDays } from '../shift-format';
+import { SwapDialog } from '../components/swap-dialog';
 import { SectionTitle } from '../components/parts';
 import { SwapsTable } from '../components/swaps-table';
 

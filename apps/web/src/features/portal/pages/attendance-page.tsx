@@ -20,10 +20,10 @@ import { MonthCalendar } from '../components/month-calendar';
 import { SelfCorrectionDialog } from '../components/self-correction-dialog';
 import { PA_NS } from '../attendance-i18n';
 import { useMyNotes } from '../attendance-api';
-import { NoteDialog, suggestedCategory } from '../components/note-dialog';
+import { NoteDialog } from '../components/note-dialog';
 import { NoteStatusBadge } from '../components/attendance-badges';
 import { SelfStats } from '../components/self-stats';
-import { activeNotesByDate, needsReason } from '../notes-model';
+import { activeNotesByDate, needsReason, suggestedCategory } from '../notes-model';
 
 // HR portal Prompt 4 adds the last-30-days table (with reasons) and the employee's own statistics
 const TABS = ['calendar', 'recent', 'log', 'stats', 'activity', 'corrections'] as const;
