@@ -181,16 +181,16 @@ describe('request validation matrix', () => {
     expect(types).not.toContain('ML'); // not applicable to him
   });
 
-  it('lets a first half and a second half share a day, and nothing else', async () => {
+  it('refuses any second leave on a date already on leave — the other half too (the engine charges one leave per date)', async () => {
     const d = nextRange(1).startDate;
     const a = await applyAs(staff5, { leaveTypeId: T['CL'], startDate: d, endDate: d, isHalfDay: true, halfDayPart: 'FIRST_HALF' });
-    const b = await applyAs(staff5, { leaveTypeId: T['CL'], startDate: d, endDate: d, isHalfDay: true, halfDayPart: 'SECOND_HALF' });
-    expect([a.status, b.status]).toEqual([201, 201]);
+    expect(a.status).toBe(201);
     expect(a.body.data.days).toBe(0.5);
-    const again = await applyAs(staff5, { leaveTypeId: T['CL'], startDate: d, endDate: d, isHalfDay: true, halfDayPart: 'FIRST_HALF' });
-    expect(again.status).toBe(409);
-    const full = await applyAs(staff5, { leaveTypeId: T['CL'], startDate: d, endDate: d });
-    expect(full.status).toBe(409);
+    for (const body of [{ isHalfDay: true, halfDayPart: 'SECOND_HALF' }, { isHalfDay: true, halfDayPart: 'FIRST_HALF' }, {}]) {
+      const clash = await applyAs(staff5, { leaveTypeId: T['CL'], startDate: d, endDate: d, ...body });
+      expect(clash.status).toBe(409);
+      expect(clash.body.code).toBe('CONFLICT');
+    }
   });
 });
 
@@ -501,6 +501,22 @@ describe('comp-off', () => {
     await h.request('POST', `${base()}/approvals/${r.body.data.approvalRequestId}/decide`, { token: f.hrAdmin, body: { decision: 'REJECT', comment: 'Not approved in advance', stepNo: 1 } });
     const c = await h.admin.selectFrom('compOffCredits').selectAll().where('id', '=', r.body.data.id).executeTakeFirstOrThrow();
     expect([c.status, c.decisionNote]).toEqual(['rejected', 'Not approved in advance']);
+  });
+
+  it('Settings → Leave: the organisation\'s comp-off expiry sets how long an approved credit lasts', async () => {
+    const put = await h.request('PUT', `${base()}/settings/leave`, { token: f.owner, body: { compOffExpiryDays: 30 } });
+    expect(put.status).toBe(200);
+    expect((await h.request('GET', `${base()}/settings/leave`, { token: f.owner })).body.data).toMatchObject({ compOffExpiryDays: 30 });
+    expect((await h.request('PUT', `${base()}/settings/leave`, { token: f.owner, body: { compOffExpiryDays: 0 } })).status).toBe(400);
+    await clearWorkflows();
+    const d = pastWeekday(5, 21);
+    const r = await h.request('POST', `${base()}/me/comp-off`, { token: staff5, body: { workedOn: d, workedOnType: 'weekly_off', workedMinutes: 480, location: 'Warehouse', summary: 'Stock count' } });
+    expect(r.status).toBe(201);
+    expect((await h.request('POST', `${base()}/approvals/${r.body.data.approvalRequestId}/decide`, { token: f.hrAdmin, body: { decision: 'APPROVE', stepNo: 1 } })).status).toBe(200);
+    const credit = await h.admin.selectFrom('compOffCredits').select('expiresOn').where('id', '=', r.body.data.id).executeTakeFirstOrThrow();
+    expect(credit.expiresOn && new Date(credit.expiresOn).toISOString().slice(0, 10)).toBe(addDays(d, 30));
+    expect((await h.request('GET', `${base()}/me/comp-off`, { token: staff5 })).body.data.rules).toMatchObject({ expiryDays: 30 });
+    expect((await h.request('PUT', `${base()}/settings/leave`, { token: f.owner, body: { compOffExpiryDays: 90 } })).status).toBe(200);
   });
 });
 

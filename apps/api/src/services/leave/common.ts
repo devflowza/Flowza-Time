@@ -93,14 +93,23 @@ export async function evaluateLeaveRequest(trx: Trx, orgId: string, input: Evalu
   });
 }
 
-/** Active leave (PENDING / INFO_REQUESTED / APPROVED) that clashes with the range: dates overlap, except a FIRST_HALF and a SECOND_HALF on the same date. */
+/** Follow-up switch: a FIRST_HALF + SECOND_HALF pair on one date (see findLeaveOverlap). */
+const ALLOW_HALF_DAY_PAIRS = false;
+
+/**
+ * Active leave (PENDING / INFO_REQUESTED / APPROVED) that clashes with the range: any shared date — also the other half of a
+ * half day. The database exclusion (`leave_records_no_overlap`) admits a FIRST_HALF + SECOND_HALF pair, but the attendance
+ * day loader charges ONE leave per date, so the pair would leave the other half to be worked (and to the unexcused-day
+ * sweep). Until the loader combines both halves, the API refuses the pair: the employee asks for the full day instead.
+ * `ALLOW_HALF_DAY_PAIRS` is the switch for that follow-up.
+ */
 export async function findLeaveOverlap(trx: Trx, orgId: string, employeeId: string, range: { startDate: string; endDate: string; isHalfDay: boolean; halfDayPart: string | null }, excludeId?: string): Promise<string | null> {
   return withSystemScope(trx, orgId, async (t) => {
     let q = t.selectFrom('leaveRecords').select(['id', 'startDate', 'endDate', 'isHalfDay', 'halfDayPart']).where('organizationId', '=', orgId).where('employeeId', '=', employeeId)
       .where('status', 'in', ['PENDING', 'APPROVED', 'INFO_REQUESTED']).where('startDate', '<=', dv(range.endDate)).where('endDate', '>=', dv(range.startDate));
     if (excludeId) q = q.where('id', '!=', excludeId);
     for (const other of await q.execute()) {
-      const complementaryHalves = range.isHalfDay && other.isHalfDay && isoDate(other.startDate) === range.startDate && !!range.halfDayPart && !!other.halfDayPart && other.halfDayPart !== range.halfDayPart;
+      const complementaryHalves = ALLOW_HALF_DAY_PAIRS && range.isHalfDay && other.isHalfDay && isoDate(other.startDate) === range.startDate && !!range.halfDayPart && !!other.halfDayPart && other.halfDayPart !== range.halfDayPart;
       if (!complementaryHalves) return other.id;
     }
     return null;
