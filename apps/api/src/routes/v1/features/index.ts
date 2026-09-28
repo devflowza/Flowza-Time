@@ -9,6 +9,7 @@ import { registerReportRoutes } from './reports.js';
 import { registerDayMarkRoutes } from './day-marks.js';
 import { registerIntegrationRoutes } from './integrations.js';
 import { registerHrAttendanceRoutes } from './hr-attendance.js';
+import { registerReportScheduleRoutes } from './report-schedules.js';
 
 /**
  * Feature modules: devices (+ groups, pending), sync, attendance (+ corrections, approvals, workflows, recalculation, period
@@ -25,4 +26,5 @@ export function registerFeatureRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   registerReportRoutes(v1, deps);
   registerIntegrationRoutes(v1, deps);
   registerHrAttendanceRoutes(v1, deps);
+  registerReportScheduleRoutes(v1, deps);
 }

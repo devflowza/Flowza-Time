@@ -1188,6 +1188,29 @@ export interface ProviderWebhookEvents {
   status: Generated<WebhookEventStatus>;
 }
 
+export interface ReportDeliveries {
+  channels: Generated<string[]>;
+  createdAt: Generated<Timestamp>;
+  deliveredAt: Timestamp | null;
+  error: string | null;
+  format: ReportFormat;
+  id: Generated<string>;
+  mode: string;
+  organizationId: string;
+  periodFrom: Timestamp | null;
+  periodTo: Timestamp | null;
+  recipientUserId: string;
+  reportRequestId: string | null;
+  reportType: string;
+  runKey: string;
+  scheduleId: string | null;
+  scope: Generated<Json>;
+  sentBy: string | null;
+  skipReason: string | null;
+  status: Generated<string>;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface ReportRequests {
   branchId: string | null;
   completedAt: Timestamp | null;
@@ -1206,6 +1229,34 @@ export interface ReportRequests {
   rowCount: number | null;
   startedAt: Timestamp | null;
   status: Generated<ReportStatus>;
+}
+
+export interface ReportSchedules {
+  branchId: string | null;
+  cadence: string;
+  channels: Generated<string[]>;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  customFromDay: number | null;
+  customToDay: number | null;
+  filters: Generated<Json>;
+  format: Generated<ReportFormat>;
+  id: Generated<string>;
+  isActive: Generated<boolean>;
+  lastError: string | null;
+  lastRunAt: Timestamp | null;
+  lastStatus: string | null;
+  lastSummary: Json | null;
+  name: string;
+  nextRunAt: Timestamp | null;
+  organizationId: string;
+  periodRule: string;
+  recipients: Generated<Json>;
+  reportType: string;
+  runDay: number;
+  runTime: Generated<string>;
+  updatedAt: Generated<Timestamp>;
+  updatedBy: string | null;
 }
 
 export interface RolePermissions {
@@ -1500,7 +1551,9 @@ export interface DB {
   platformAdmins: PlatformAdmins;
   providerCircuitStates: ProviderCircuitStates;
   providerWebhookEvents: ProviderWebhookEvents;
+  reportDeliveries: ReportDeliveries;
   reportRequests: ReportRequests;
+  reportSchedules: ReportSchedules;
   rolePermissions: RolePermissions;
   roles: Roles;
   shiftAssignments: ShiftAssignments;

@@ -117,5 +117,7 @@ export const DOMAIN_EVENT_TYPES = [
   'leave.requested', 'leave.approved', 'leave.rejected',
   // Flowza Finance connector: emitted by the worker after 3 consecutive pull/push failures of a connector device.
   'sync.finance.failed',
+  // report sharing / schedules (HR portal Prompt 6a): one event per delivered recipient report; targeted via payload.userIds
+  'report.scheduled_delivery',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];

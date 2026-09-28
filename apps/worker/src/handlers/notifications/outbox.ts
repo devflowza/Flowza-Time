@@ -38,6 +38,10 @@ const ROUTING: Record<string, { category: NotificationCategory; permission: stri
   'report.failed': { category: 'SYSTEM', permission: 'report.view', recipients: 'user', title: (p) => `Report failed: ${String(p['reportTitle'] ?? p['reportType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: () => '/reports' },
   'employee.imported': { category: 'SYSTEM', permission: 'employee.import', title: (p) => `Import finished: ${String(p['imported'] ?? 0)} employees`, link: (p) => `/employees/imports/${String(p['importId'] ?? '')}` },
   'subscription.limit_reached': { category: 'SUBSCRIPTION', permission: 'organization.manage', title: (p) => `Plan limit reached: ${String(p['metric'] ?? '')}`, link: () => '/settings/subscription' },
+  // Report sharing / schedules (HR portal Prompt 6a): one event per recipient copy, generated under that recipient's own scope;
+  // payload.userIds = [recipient]. The link opens Reports, which downloads through the recipient's session (5-minute signed URL,
+  // report.export re-checked) — no bearer link is ever mailed. payload.channels chooses in-app and/or e-mail.
+  'report.scheduled_delivery': { category: 'SYSTEM', permission: 'report.view', recipients: 'users', title: (p) => `${p['mode'] === 'send_now' ? 'Report shared with you' : 'Scheduled report'}: ${String(p['reportTitle'] ?? p['reportType'] ?? '')}`, body: (p) => [p['periodFrom'] && p['periodTo'] ? `${String(p['periodFrom'])} → ${String(p['periodTo'])}` : '', p['scheduleName'] ? String(p['scheduleName']) : ''].filter(Boolean).join(' · '), link: (p) => `/reports?download=${String(p['reportId'] ?? '')}` },
 };
 
 /** Realtime channel + event for invalidation signals (payload = ids only). */
@@ -82,6 +86,7 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
             where m.organization_id = ${row.organizationId}::uuid and m.status = 'active' and rp.permission_key = ${route.permission}
             union select ${String(row.payload['userId'] ?? '00000000-0000-0000-0000-000000000000')}::uuid where ${row.payload['userId'] !== undefined}`.execute(trx);
           let created = 0;
+          const channels = channelsOf(row.payload);
           for (const r of recipients.rows) {
             // dedupe: same type + aggregate for the same user within 15 minutes (device flapping, repeated failures)
             const dup = await trx.selectFrom('notifications').select('id').where('userId', '=', r.userId).where('type', '=', row.eventType).where('createdAt', '>', new Date(deps.now().getTime() - 15 * 60_000))
@@ -90,6 +95,8 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
             const inserted = await trx.insertInto('notifications').values({
               organizationId: row.organizationId, userId: r.userId, category: route.category, type: row.eventType, title: route.title(row.payload), body: route.body?.(row.payload) ?? null,
               link: route.link?.(row.payload) ?? null, data: JSON.stringify({ aggregateType: row.aggregateType, aggregateId: row.aggregateId, ...row.payload }),
+              // e-mail-only deliveries keep the row (it is the e-mail's content and the trail) but do not raise an unread badge
+              ...(channels.inApp ? {} : { readAt: deps.now() }),
             }).returning('id').executeTakeFirstOrThrow();
             created++;
             const pref = await trx.selectFrom('notificationPreferences').select('enabled').where('userId', '=', r.userId).where('organizationId', '=', row.organizationId!).where('category', '=', route.category).where('channel', '=', 'EMAIL').executeTakeFirst();
@@ -98,7 +105,7 @@ export async function relayOutbox({ deps, log, job }: JobContext) {
             // act. Requiring a row first made the whole channel unreachable: nothing in the application writes
             // notification_preferences, so the only way to opt in was by hand in SQL. An explicit row still wins, so a
             // preferences screen can turn this off per user, per organisation, per category without touching this.
-            if (pref?.enabled ?? true) await trx.insertInto('notificationDeliveries').values({ organizationId: row.organizationId, notificationId: inserted.id, channel: 'EMAIL', status: 'pending' }).execute();
+            if ((pref?.enabled ?? true) && channels.email) await trx.insertInto('notificationDeliveries').values({ organizationId: row.organizationId, notificationId: inserted.id, channel: 'EMAIL', status: 'pending' }).execute();
           }
           return created;
         })();
@@ -143,6 +150,16 @@ export async function deliverNotifications({ deps, log, job }: JobContext) {
   if (pending.rows.length) log.info(event('notifications_delivered', { attempted: pending.rows.length, sent }));
   return { attempted: pending.rows.length, sent };
   });
+}
+
+/**
+ * Channels an event asks for (`payload.channels`, HR portal Prompt 6a report deliveries): absent = both, as every other routed
+ * event has always been delivered; the recipient's own e-mail preference still applies on top.
+ */
+export function channelsOf(payload: Record<string, unknown>): { inApp: boolean; email: boolean } {
+  const raw = payload['channels'];
+  if (!Array.isArray(raw)) return { inApp: true, email: true };
+  return { inApp: raw.includes('in_app'), email: raw.includes('email') };
 }
 
 function escapeHtml(s: string): string { return s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c); }
