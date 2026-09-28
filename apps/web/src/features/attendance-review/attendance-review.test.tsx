@@ -145,6 +145,17 @@ describe('SelfieReviewPanel', () => {
     fireEvent.click(reject);
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`/orgs/${ORG}/attendance/selfie-checkins/s1/review`, { decision: 'reject', reason: 'Face not visible' }));
   });
+
+  it('offers only what the API allows the caller (a reader sees the row, not the face; a reviewer of reasons sees, never decides)', async () => {
+    mockGet({ [`/orgs/${ORG}/attendance/selfie-checkins`]: page([selfie({ id: 's1', canReview: false, canViewPhoto: false }), selfie({ id: 's2', employeeName: 'Mona Ali', canReview: false, canViewPhoto: true })]) });
+    renderWithProviders(<SelfieReviewPanel />);
+    const [reader, hr] = await screen.findAllByTestId('selfie-review-row');
+    expect(within(reader!).queryByRole('button', { name: /Photo/ })).not.toBeInTheDocument();
+    expect(within(reader!).queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument();
+    expect(within(reader!).queryByRole('button', { name: /Reject/ })).not.toBeInTheDocument();
+    expect(within(hr!).getByRole('button', { name: /Photo/ })).toBeInTheDocument();
+    expect(within(hr!).queryByRole('button', { name: /Approve/ })).not.toBeInTheDocument();
+  });
 });
 
 describe('GeofencesPage', () => {

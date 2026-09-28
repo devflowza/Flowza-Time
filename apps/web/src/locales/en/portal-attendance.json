@@ -267,7 +267,12 @@
       "pending": "Awaiting review",
       "approved": "Approved",
       "rejected": "Rejected"
-    }
+    },
+    "viewPhoto": "View photo",
+    "photoTitle": "Your selfie check-in",
+    "photoAlt": "Your selfie",
+    "photoUnavailable": "The photo could not be loaded.",
+    "photoHint": "The link works for one minute and opening it is recorded."
   },
   "shift": {
     "title": "My shift",

@@ -51,6 +51,8 @@ export function registerPortalAttendanceRoutes(v1: Hono<AppEnv>, deps: ApiDeps):
     return created(c, await punch.submitSelfie(deps, actor, orgId, { direction: input.direction, lat: input.lat, lng: input.lng, accuracy: input.accuracy, isMock: input.isMock, image }));
   });
   v1.get('/orgs/:orgId/me/selfie-checkins', async (c) => ok(c, await punch.listMySelfies(deps, actorOf(c, deps), param(c, 'orgId'))));
+  // the photo is only ever reached through a 60-second signed URL issued here (own check-ins) or on the reviewer route below
+  v1.get('/orgs/:orgId/me/selfie-checkins/:id/photo', async (c) => ok(c, await punch.mySelfiePhotoUrl(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
 
   // ----- reasons (attendance notes)
   v1.get('/orgs/:orgId/me/attendance/notes', async (c) => ok(c, await notes.listMyNotes(deps, actorOf(c, deps), param(c, 'orgId'), query(c, selfNotesQuerySchema))));

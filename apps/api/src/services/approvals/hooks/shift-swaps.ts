@@ -13,6 +13,8 @@ export const shiftSwapHook: EntityHook = {
   approvePermission: 'shift.assign',
   // the swap carries the employee's own reason: organisation-wide reading is HR's (attendance.view), like the table's RLS
   viewPermission: 'attendance.view',
+  // the rota owner withdraws a swap on the employee's behalf
+  managePermission: 'shift.manage',
   notifiesSubject: true,
   async onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext) {
     await applySwapApproval(deps, trx, ctx);

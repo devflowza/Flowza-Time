@@ -18,7 +18,9 @@
 --      employee_attendance_grants           per-employee open (selfie) attendance / selfie-required switches
 --      selfie_checkins                      pending selfie punches (photo in the private employee-photos bucket under
 --                                           checkins/<org>/<employee>/…; the first path segment is not an organisation id,
---                                           so no client storage policy can ever match it — only the API's service client)
+--                                           so no tenant storage policy matches it, and a restrictive storage policy (4g)
+--                                           denies every client role the prefix outright — only the API's service client
+--                                           uploads, and viewers get a 60-second signed URL from the API)
 --      geofences / geofence_assignments     circle (mandatory) + optional polygon fences, assigned by scope
 --      shift_swap_requests                  shift swaps (entity SHIFT_SWAP); applied as one-day EMPLOYEE shift assignments
 --    RLS through the tenant policy generators. The self-service tables (notes, regularisations, grants, selfies, swaps) are
@@ -322,6 +324,23 @@ create policy shift_swap_requests_target_select on public.shift_swap_requests fo
 );
 call app.deny_client_writes('public.shift_swap_requests');
 
+-- 4g. selfie photos: reachable through the API only ------------------------------------------------------------------------------
+-- Selfie check-in photos live in the private employee-photos bucket under checkins/<org>/<employee>/<selfie id>.<ext>. Only the
+-- API touches them, with its service client: the upload (after its own checks) and a 60-second signed URL per permitted viewer
+-- (the employee, their primary / secondary manager, attendance reviewers in scope — every issue audited). Their first path
+-- segment is not an organisation id, so no tenant storage policy (all keyed on app.path_org_id) matches them; this restrictive
+-- policy makes that explicit and permanent: whatever a later, broader storage policy grants, no client role can list, read,
+-- write or delete an object under the prefix.
+do $$
+begin
+  if to_regclass('storage.objects') is not null then
+    execute $p$ drop policy if exists flowza_selfie_photos_deny_client on storage.objects $p$;
+    execute $p$ create policy flowza_selfie_photos_deny_client on storage.objects as restrictive for all to anon, authenticated, flowza_system
+      using (coalesce(bucket_id, '') <> 'employee-photos' or coalesce(name, '') not like 'checkins/%')
+      with check (coalesce(bucket_id, '') <> 'employee-photos' or coalesce(name, '') not like 'checkins/%') $p$;
+  end if;
+end $$;
+
 -- 5. corrections carry the device a punch stands for ---------------------------------------------------------------------------
 alter table public.attendance_corrections add column if not exists device_id uuid;
 do $$
@@ -375,5 +394,9 @@ begin
   if not exists (select 1 from pg_indexes where schemaname = 'public' and indexname = 'attendance_notes_active_idx') then raise exception 'one-active-note index missing'; end if;
   if not exists (select 1 from information_schema.columns where table_schema = 'public' and table_name = 'attendance_corrections' and column_name = 'device_id') then
     raise exception 'attendance_corrections.device_id missing';
+  end if;
+  if to_regclass('storage.objects') is not null and not exists (select 1 from pg_policies where schemaname = 'storage' and tablename = 'objects'
+       and policyname = 'flowza_selfie_photos_deny_client' and permissive = 'RESTRICTIVE' and cmd = 'ALL' and 'authenticated' = any (roles) and 'anon' = any (roles)) then
+    raise exception 'the selfie-photo storage denial is missing';
   end if;
 end $$;

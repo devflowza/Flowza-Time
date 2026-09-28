@@ -1,7 +1,8 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AttendanceNoteDto, RegularisationDto, SelfNoteInput, SelfNoteUpdateInput, SelfPunchChannel, SelfPunchDirection, SelfPunchPreviewDto, SelfPunchPreviewInput,
-  SelfPunchResultDto, SelfPunchStatusDto, SelfRegularisationInput, SelfShiftDto, SelfShiftSwapInput, SelfStatsDto, SelfieCheckinDto, ShiftSwapDto, SwapCandidateDto,
+  SelfPunchResultDto, SelfPunchStatusDto, SelfRegularisationInput, SelfShiftDto, SelfShiftSwapInput, SelfStatsDto, SelfieCheckinDto, SelfiePhotoDto, ShiftSwapDto,
+  SwapCandidateDto,
 } from '@flowza/contracts';
 import { api, type Envelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
@@ -30,6 +31,11 @@ export function useMyRegularisations(enabled = true) {
 export function useMySelfies(enabled = true) {
   const orgId = useOrgId();
   return useQuery({ queryKey: self(orgId, 'selfies'), queryFn: async () => (await api.get<Envelope<SelfieCheckinDto[]>>(`/orgs/${orgId}/me/selfie-checkins`)).data, staleTime: 30_000, enabled });
+}
+/** The photo of one of the caller's own selfie check-ins: a 60-second signed URL fetched when the dialog opens (audited). */
+export function useMySelfiePhoto(id: string | null) {
+  const orgId = useOrgId();
+  return useQuery({ queryKey: self(orgId, 'selfie-photo', { id }), queryFn: async () => (await api.get<Envelope<SelfiePhotoDto>>(`/orgs/${orgId}/me/selfie-checkins/${id}/photo`)).data, enabled: !!id, staleTime: 45_000, gcTime: 60_000, retry: false });
 }
 export function useMyShift() {
   const orgId = useOrgId();

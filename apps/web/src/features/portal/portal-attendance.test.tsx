@@ -168,6 +168,17 @@ describe('MyRequestsPage', () => {
     expect(screen.getByRole('button', { name: /Answer/ })).toBeInTheDocument();
   });
 
+  it('opens the employee\'s own selfie photo through the API, only when asked', async () => {
+    const selfie = { id: 's1', employeeId: EMP, employeeName: null, employeeNumber: null, punchedAt: '2026-09-27T04:02:00Z', direction: 'in', latitude: 23.6, longitude: 58.4, accuracyM: 20, verdict: 'allowed', status: 'pending', reviewedBy: null, reviewedByName: null, reviewedAt: null, reviewReason: null, rawTransactionId: null, createdAt: '2026-09-27T04:02:00Z', canViewPhoto: true };
+    mockGet({ [`/orgs/${ORG}/me/selfie-checkins`]: { data: [selfie] }, [`/orgs/${ORG}/me/selfie-checkins/s1/photo`]: { data: { url: 'https://signed.example/own.jpg', expiresInSeconds: 60 } } });
+    renderWithProviders(<MyRequestsPage />, { route: '/my/requests?tab=selfies' });
+    const row = await screen.findByTestId('selfie-row');
+    expect(apiMock.get).not.toHaveBeenCalledWith(`/orgs/${ORG}/me/selfie-checkins/s1/photo`);
+    fireEvent.click(within(row).getByRole('button', { name: /View photo/ }));
+    expect(await screen.findByRole('img', { name: 'Your selfie' })).toHaveAttribute('src', 'https://signed.example/own.jpg');
+    expect(screen.getByText('The link works for one minute and opening it is recorded.')).toBeInTheDocument();
+  });
+
   it('withdraws a pending regularisation', async () => {
     mockGet({ [`/orgs/${ORG}/me/regularisations`]: { data: [reg()] } });
     apiMock.post.mockResolvedValue({ data: reg({ status: 'cancelled' }) });

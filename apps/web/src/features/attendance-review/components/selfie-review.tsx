@@ -85,8 +85,9 @@ export function SelfieReviewPanel() {
                     <TableCell><Badge variant={STATUS_TONE[s.status]} dot>{t(`selfies.status.${s.status}`)}</Badge>{s.reviewReason ? <span className="block max-w-[200px] truncate text-xs text-muted-foreground" title={s.reviewReason}>{s.reviewReason}</span> : null}</TableCell>
                     <TableCell className="text-end">
                       <span className="inline-flex flex-wrap justify-end gap-1">
-                        <Button size="sm" variant="ghost" onClick={() => setViewing(s)}><Eye /> {t('selfies.viewPhoto')}</Button>
-                        {s.status === 'pending' ? <>
+                        {/* the API says what the caller may do (an API that predates the flags sends none: offer both) */}
+                        {s.canViewPhoto !== false ? <Button size="sm" variant="ghost" onClick={() => setViewing(s)}><Eye /> {t('selfies.viewPhoto')}</Button> : null}
+                        {s.status === 'pending' && s.canReview !== false ? <>
                           <Button size="sm" loading={review.isPending && review.variables?.id === s.id} onClick={() => review.mutate({ id: s.id, input: { decision: 'approve' } }, { onSuccess: () => toast.success(t('selfies.approved')), onError: toastError })}><Check /> {t('selfies.approve')}</Button>
                           <Button size="sm" variant="outline" onClick={() => setRejecting(s)}><X /> {t('selfies.reject')}</Button>
                         </> : null}

@@ -2,15 +2,15 @@ import { useState } from 'react';
 import { useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
-import { ArrowLeftRight, Camera, ClipboardList, MessageSquareText, Pencil, Plus, Undo2 } from 'lucide-react';
-import type { AttendanceNoteDto, RegularisationDto } from '@flowza/contracts';
+import { ArrowLeftRight, Camera, ClipboardList, Eye, MessageSquareText, Pencil, Plus, Undo2 } from 'lucide-react';
+import type { AttendanceNoteDto, RegularisationDto, SelfieCheckinDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
-import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
+import { Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, EmptyState, ErrorState, Skeleton, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { fmtDate, fmtDateTime, fmtTime, todayIso } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { PA_NS } from '../attendance-i18n';
-import { useMyNotes, useMyRegularisations, useMySelfies, useMySwaps, useRegularisationMutations } from '../attendance-api';
+import { useMyNotes, useMyRegularisations, useMySelfiePhoto, useMySelfies, useMySwaps, useRegularisationMutations } from '../attendance-api';
 import { fmtDays } from '../model';
 import { NoteStatusBadge, RegularisationStatusBadge, SelfieStatusBadge, VerdictChip } from '../components/attendance-badges';
 import { SwapsTable } from '../components/swaps-table';
@@ -109,9 +109,30 @@ function SwapsTab() {
   return <SwapsTable rows={rows} />;
 }
 
+/** One of the employee's own selfie photos: the API issues a 60-second signed URL when the dialog opens (and records it). */
+function MySelfiePhotoDialog({ selfie, onClose, timezone }: { selfie: SelfieCheckinDto | null; onClose: () => void; timezone: string }) {
+  const { t } = useTranslation(PA_NS);
+  const photo = useMySelfiePhoto(selfie?.id ?? null);
+  return (
+    <Dialog open={!!selfie} onOpenChange={(o) => !o && onClose()}>
+      <DialogContent size="sm">
+        <DialogHeader>
+          <DialogTitle>{t('selfies.photoTitle')}</DialogTitle>
+          <DialogDescription>{selfie ? fmtDateTime(selfie.punchedAt, timezone) : ''}</DialogDescription>
+        </DialogHeader>
+        <div className="flex aspect-[4/3] items-center justify-center overflow-hidden rounded-lg border bg-muted" data-testid="my-selfie-photo">
+          {photo.isLoading ? <Skeleton className="size-full" /> : photo.isError ? <p className="p-4 text-center text-sm text-muted-foreground">{t('selfies.photoUnavailable')}</p> : photo.data ? <img src={photo.data.url} alt={t('selfies.photoAlt')} className="size-full object-cover" /> : null}
+        </div>
+        <p className="text-xs text-muted-foreground">{t('selfies.photoHint')}</p>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
 function SelfiesTab({ timezone }: { timezone: string }) {
   const { t } = useTranslation(PA_NS);
   const q = useMySelfies();
+  const [viewing, setViewing] = useState<SelfieCheckinDto | null>(null);
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   if (q.isLoading) return <TableSkeleton cols={4} rows={3} />;
   const rows = q.data ?? [];
@@ -120,7 +141,7 @@ function SelfiesTab({ timezone }: { timezone: string }) {
     <div className="rounded-lg border bg-card shadow-card">
       <div className="overflow-x-auto">
         <Table>
-          <TableHeader><TableRow>{(['submitted', 'type', 'details', 'status', 'decision'] as const).map((c) => <TableHead key={c}>{t(`requests.columns.${c}`)}</TableHead>)}</TableRow></TableHeader>
+          <TableHeader><TableRow>{(['submitted', 'type', 'details', 'status', 'decision'] as const).map((c) => <TableHead key={c}>{t(`requests.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>
           <TableBody>
             {rows.map((s) => (
               <TableRow key={s.id} data-testid="selfie-row">
@@ -129,11 +150,13 @@ function SelfiesTab({ timezone }: { timezone: string }) {
                 <TableCell><VerdictChip verdict={s.verdict} /></TableCell>
                 <TableCell><SelfieStatusBadge status={s.status} /></TableCell>
                 <TableCell className="max-w-[240px] text-xs">{s.reviewedByName ? <span className="block">{t('notes.reviewedBy', { name: s.reviewedByName })}</span> : null}{s.reviewReason ? <span className="block truncate text-muted-foreground" title={s.reviewReason}>{s.reviewReason}</span> : null}</TableCell>
+                <TableCell className="text-end">{s.canViewPhoto !== false ? <Button size="sm" variant="ghost" onClick={() => setViewing(s)}><Eye /> {t('selfies.viewPhoto')}</Button> : null}</TableCell>
               </TableRow>
             ))}
           </TableBody>
         </Table>
       </div>
+      {viewing ? <MySelfiePhotoDialog selfie={viewing} onClose={() => setViewing(null)} timezone={timezone} /> : null}
     </div>
   );
 }

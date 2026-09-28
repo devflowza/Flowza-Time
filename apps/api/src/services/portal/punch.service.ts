@@ -39,6 +39,10 @@ import { evaluateForEmployee, fencesForEmployee, selfFences, toVerdictDto } from
  */
 
 const SELFIE_BUCKET = 'employee-photos';
+/** Lifetime of a selfie photo's signed URL (the only way anybody reaches the object — storage policies deny the prefix). */
+const PHOTO_URL_SECONDS = 60;
+/** Organisation-wide keys that open a selfie PHOTO (with attendance.view, in branch scope): the attendance reviewers. Deciding a selfie takes attendance.approve. */
+const PHOTO_OVERSIGHT_KEYS = ['attendance.approve', 'attendance.review_notes'] as const;
 /** A punch older than this no longer decides whether the next one is a check-in or a check-out (a forgotten check-out). */
 const SEQUENCE_WINDOW_MS = 20 * 3_600_000;
 /** Idempotency keys are looked up this far back (bounded partition scan; the offline queue replays within days). */
@@ -305,6 +309,20 @@ export function parseSelfieImage(input: { base64?: string | undefined; bytes?: U
 type SelfieRow = { id: string; organizationId: string; employeeId: string; branchId: string | null; punchedAt: Date; direction: string; photoPath: string; latitude: number | null; longitude: number | null; accuracyM: number | null; verdict: string | null; status: SelfieCheckinStatus; reviewedBy: string | null; reviewedAt: Date | null; reviewReason: string | null; rawTransactionId: string | null; createdAt: Date };
 const SELFIE_COLUMNS = ['id', 'organizationId', 'employeeId', 'branchId', 'punchedAt', 'direction', 'photoPath', 'latitude', 'longitude', 'accuracyM', 'verdict', 'status', 'reviewedBy', 'reviewedAt', 'reviewReason', 'rawTransactionId', 'createdAt'] as const;
 
+/**
+ * Who may SEE a selfie photo: the employee themself, their line managers (primary or secondary — the team relationship), and
+ * the attendance reviewers of the organisation (attendance.view with attendance.approve or attendance.review_notes, inside
+ * their branches). Nobody else — attendance.view alone (payroll, auditors) shows the check-in row, never the face.
+ */
+function photoViewerRole(grant: MembershipGrant, row: Pick<SelfieRow, 'employeeId' | 'branchId'>): 'self' | 'manager' | 'oversight' | null {
+  if (grant.employeeId && grant.employeeId === row.employeeId) return 'self';
+  return reviewerRole(grant, { id: row.employeeId, branchId: row.branchId }, PHOTO_OVERSIGHT_KEYS);
+}
+/** Who may DECIDE a selfie: the line manager, or an attendance approver in scope — never the employee themself. */
+function selfieReviewerRole(grant: MembershipGrant, row: Pick<SelfieRow, 'employeeId' | 'branchId'>): 'manager' | 'oversight' | null {
+  return reviewerRole(grant, { id: row.employeeId, branchId: row.branchId }, ['attendance.approve']);
+}
+
 async function selfieDtos(trx: Trx, orgId: string, grant: MembershipGrant | null, rows: SelfieRow[]): Promise<SelfieCheckinDto[]> {
   if (rows.length === 0) return [];
   const names = await withSystemScope(trx, orgId, async (t) => ({
@@ -317,7 +335,8 @@ async function selfieDtos(trx: Trx, orgId: string, grant: MembershipGrant | null
     direction: r.direction as SelfPunchDirection, latitude: r.latitude === null ? null : Number(r.latitude), longitude: r.longitude === null ? null : Number(r.longitude), accuracyM: r.accuracyM === null ? null : Number(r.accuracyM),
     verdict: isVerdict(r.verdict) ? r.verdict : null, status: r.status, reviewedBy: r.reviewedBy, reviewedByName: r.reviewedBy ? users.get(r.reviewedBy) ?? null : null, reviewedAt: isoDateTimeOrNull(r.reviewedAt),
     reviewReason: r.reviewReason, rawTransactionId: r.rawTransactionId === null ? null : String(r.rawTransactionId), createdAt: isoDateTime(r.createdAt),
-    ...(grant ? { viaManager: grant.teamEmployeeIds.includes(r.employeeId) } : {}),
+    // what the caller may do with the row (the review list hides what the API would refuse); a list of one's own is `null`
+    ...(grant ? { viaManager: grant.teamEmployeeIds.includes(r.employeeId), canReview: selfieReviewerRole(grant, r) !== null, canViewPhoto: photoViewerRole(grant, r) !== null } : { canViewPhoto: true }),
   }));
 }
 
@@ -393,21 +412,41 @@ export async function listSelfies(deps: ApiDeps, actor: Actor, orgId: string, q:
 async function loadSelfieForReview(trx: Trx, orgId: string, grant: MembershipGrant, id: string): Promise<{ row: SelfieRow; role: 'manager' | 'oversight' }> {
   const row = (await withSystemScope(trx, orgId, (t) => t.selectFrom('selfieCheckins').select(SELFIE_COLUMNS).where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst())) as SelfieRow | undefined;
   if (!row) throw errors.notFound('Selfie check-in', id);
-  const role = reviewerRole(grant, { id: row.employeeId, branchId: row.branchId }, ['attendance.approve']);
   if (grant.employeeId && grant.employeeId === row.employeeId) throw errors.forbidden('You cannot review your own check-in.');
+  const role = selfieReviewerRole(grant, row);
   if (!role) throw errors.notFound('Selfie check-in', id);
   return { row, role };
 }
 
-/** A 60-second signed URL of the photo for its reviewers (and nobody else); every issue is audited. */
+/** Sign the photo for PHOTO_URL_SECONDS and audit the issue (who, which check-in, how they were entitled). */
+async function signSelfiePhoto(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, row: Pick<SelfieRow, 'id' | 'branchId' | 'photoPath'>, via: 'self' | 'manager' | 'oversight'): Promise<SelfiePhotoDto> {
+  const url = await deps.storage.signedUrl(SELFIE_BUCKET, row.photoPath, PHOTO_URL_SECONDS);
+  if (!url) throw errors.dependency('Photo storage');
+  await audit(trx, actor, orgId, 'attendance.selfie_photo_viewed', 'selfie_checkin', { entityId: row.id, branchId: row.branchId, newValue: { via } });
+  return { url, expiresInSeconds: PHOTO_URL_SECONDS };
+}
+
+/**
+ * A short-lived signed URL of a selfie photo for its viewers (photoViewerRole) — the ONLY way to reach the object: the storage
+ * policies deny every client role the checkins/ prefix. Anybody else gets 404 (the check-in's existence is not confirmed).
+ */
 export async function selfiePhotoUrl(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<SelfiePhotoDto> {
   const grant = requireMembership(actor.principal, orgId);
   return runUser(deps.db, actor, async (trx) => {
-    const { row } = await loadSelfieForReview(trx, orgId, grant, id);
-    const url = await deps.storage.signedUrl(SELFIE_BUCKET, row.photoPath, 60);
-    if (!url) throw errors.dependency('Photo storage');
-    await audit(trx, actor, orgId, 'attendance.selfie_photo_viewed', 'selfie_checkin', { entityId: id, branchId: row.branchId });
-    return { url, expiresInSeconds: 60 };
+    const row = (await withSystemScope(trx, orgId, (t) => t.selectFrom('selfieCheckins').select(['id', 'employeeId', 'branchId', 'photoPath']).where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst()));
+    const via = row ? photoViewerRole(grant, row) : null;
+    if (!row || !via) throw errors.notFound('Selfie check-in', id);
+    return signSelfiePhoto(deps, trx, actor, orgId, row, via);
+  });
+}
+
+/** The employee's own selfie photo (My requests → Selfies); RLS reads their own rows only, so somebody else's is not found. */
+export async function mySelfiePhotoUrl(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<SelfiePhotoDto> {
+  const self = portalSelf(actor, orgId);
+  return runUser(deps.db, actor, async (trx) => {
+    const row = await trx.selectFrom('selfieCheckins').select(['id', 'employeeId', 'branchId', 'photoPath']).where('organizationId', '=', orgId).where('id', '=', id).where('employeeId', '=', self.employeeId).executeTakeFirst();
+    if (!row) throw errors.notFound('Selfie check-in', id);
+    return signSelfiePhoto(deps, trx, actor, orgId, row, 'self');
   });
 }
 

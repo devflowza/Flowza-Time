@@ -12,6 +12,8 @@ export const regularisationHook: EntityHook = {
   entityType: 'REGULARISATION',
   approvePermission: 'attendance.approve',
   viewPermission: 'attendance.view',
+  // HR oversight of employee requests (attendance.review_notes covers regularisations too) withdraws on the employee's behalf
+  managePermission: 'attendance.review_notes',
   notifiesSubject: true,
   async onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext) {
     await applyRegularisationApproval(deps, trx, ctx);

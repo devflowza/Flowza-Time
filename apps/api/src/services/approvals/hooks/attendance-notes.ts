@@ -15,6 +15,8 @@ export const attendanceNoteHook: EntityHook = {
   approvePermission: 'attendance.review_notes',
   alsoApprovePermissions: ['attendance.approve'],
   viewPermission: 'attendance.view',
+  // HR oversight of reasons withdraws one on the employee's behalf (a note has no self-withdraw: the employee edits it)
+  managePermission: 'attendance.review_notes',
   notifiesSubject: true,
   async onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext) {
     await applyNoteDecision(deps, trx, ctx, ctx.detail?.['outcome'] === 'excuse' ? 'excuse' : 'approve');

@@ -142,6 +142,13 @@ export interface SelfieCheckinDto {
   reviewedBy: string | null; reviewedByName: string | null; reviewedAt: string | null; reviewReason: string | null; rawTransactionId: string | null; createdAt: string;
   /** True when the caller reviews it as the employee's line manager (false = organisation-wide oversight). */
   viaManager?: boolean;
+  /** The caller may approve / reject it (line manager, or attendance.approve in scope); absent on the employee's own list. */
+  canReview?: boolean;
+  /**
+   * The caller may open the photo (a 60-second signed URL from the API — the only way to the object): the employee, their
+   * line managers, attendance reviewers in scope. Absent from an API that predates the flag (treat as true).
+   */
+  canViewPhoto?: boolean;
 }
 export const selfieListQuerySchema = paginationQuerySchema.extend({ status: z.enum(SELFIE_CHECKIN_STATUSES).optional(), employeeId: uuidSchema.optional() });
 export const selfieReviewSchema = z.object({ decision: z.enum(['approve', 'reject']), reason: z.string().trim().max(1000).optional() })

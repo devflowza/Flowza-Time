@@ -45,6 +45,12 @@ export interface EntityHook {
   viewPermission: Permission;
   /** Further keys that decide like `approvePermission` (attendance notes: `attendance.review_notes` OR `attendance.approve`). */
   alsoApprovePermissions?: Permission[];
+  /**
+   * The organisation-wide key that may withdraw a request on the employee's behalf (the engine's cancel rule: requester,
+   * subject, holders of this key, approval.manage / owner). Declared by the portal hooks (HR portal Prompt 4) for the
+   * corrected engine's `canCancel`.
+   */
+  managePermission?: Permission;
   onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onRejected(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onCancelled?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;

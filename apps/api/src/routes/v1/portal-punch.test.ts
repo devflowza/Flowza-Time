@@ -255,6 +255,57 @@ describe('selfie check-in and attendance grants', () => {
     expect(r.body.data).toMatchObject({ status: 'rejected', reviewReason: 'Photo does not show you', viaManager: false });
     expect((await h.admin.selectFrom('attendanceRawTransactions').select('id').where('providerTransactionId', '=', `selfie:${id}`).execute())).toHaveLength(0);
   });
+
+  it('the photo is reached only through the API: the employee, their managers and attendance reviewers — nobody else', async () => {
+    const photo = (path: string, token: string) => h.request('GET', `${base()}${path}`, { token });
+    // the employee opens their own photo from the portal (and only their own)
+    const own = await photo(`/me/selfie-checkins/${selfieId}/photo`, f.employeeUser);
+    expect(own.status).toBe(200);
+    expect(own.body.data).toMatchObject({ expiresInSeconds: 60 });
+    expect(own.body.data.url).toContain(`checkins/${f.orgId}/${f.e1}/${selfieId}`);
+    const mine = await h.request('GET', `${base()}/me/selfie-checkins`, { token: f.employeeUser });
+    expect(mine.body.data.find((x: { id: string }) => x.id === selfieId)).toMatchObject({ canViewPhoto: true });
+    expect(mine.body.data[0]).not.toHaveProperty('canReview');
+
+    // a colleague of the same organisation reaches it by neither route (and learns nothing about it: 404)
+    const colleague = uuid('c');
+    await seedUser(h.admin, colleague, 'colleague-punch@test.local', 'Colleague');
+    await seedMembership(h.admin, f.orgId, colleague, ROLE.employee, { employeeId: f.e2 });
+    expect((await photo(`/me/selfie-checkins/${selfieId}/photo`, colleague)).status).toBe(404);
+    expect((await photo(`/attendance/selfie-checkins/${selfieId}/photo`, colleague)).status).toBe(404);
+    // attendance.view alone (payroll) shows the check-in row, never the face
+    expect((await photo(`/attendance/selfie-checkins/${selfieId}/photo`, f.payrollUser)).status).toBe(404);
+    // the reviewer route does not serve the employee's own photo to a caller outside their reporting line either
+    expect((await photo(`/me/selfie-checkins/${selfieId}/photo`, f.managerUser)).status).toBe(404);
+
+    // the primary manager, the secondary manager and an attendance reviewer of the organisation (attendance.review_notes) see it
+    expect((await photo(`/attendance/selfie-checkins/${selfieId}/photo`, f.managerUser)).status).toBe(200);
+    const e7 = await seedEmployee(h.admin, f.orgId, f.branchA, 7);
+    const secondary = uuid('c');
+    await seedUser(h.admin, secondary, 'secondary-punch@test.local', 'Secondary manager');
+    await seedMembership(h.admin, f.orgId, secondary, ROLE.manager, { employeeId: e7 });
+    expect((await photo(`/attendance/selfie-checkins/${selfieId}/photo`, secondary)).status).toBe(404);
+    await h.admin.updateTable('employees').set({ secondaryManagerEmployeeId: e7 }).where('id', '=', f.e1).execute();
+    try {
+      expect((await photo(`/attendance/selfie-checkins/${selfieId}/photo`, secondary)).status).toBe(200);
+    } finally {
+      await h.admin.updateTable('employees').set({ secondaryManagerEmployeeId: null }).where('id', '=', f.e1).execute();
+    }
+    expect((await photo(`/attendance/selfie-checkins/${selfieId}/photo`, f.hrUser)).status).toBe(200);
+
+    // the review list says what each caller may do, so the screen never offers what the API would refuse
+    const flags = async (token: string) => (await h.request('GET', `${base()}/attendance/selfie-checkins`, { token })).body.data.find((x: { id: string }) => x.id === selfieId);
+    expect(await flags(f.managerUser)).toMatchObject({ canReview: true, canViewPhoto: true, viaManager: true });
+    expect(await flags(f.hrUser)).toMatchObject({ canReview: false, canViewPhoto: true, viaManager: false });
+    expect(await flags(f.payrollUser)).toMatchObject({ canReview: false, canViewPhoto: false });
+    expect(await flags(f.hrAdmin)).toMatchObject({ canReview: true, canViewPhoto: true });
+
+    // every issue is audited with how the viewer was entitled
+    const viewed = await h.admin.selectFrom('audit.logs').select(['actorUserId', 'newValue']).where('action', '=', 'attendance.selfie_photo_viewed').where('entityId', '=', selfieId).orderBy('id', 'asc').execute();
+    expect(viewed.map((a) => [a.actorUserId, (a.newValue as { via?: string } | null)?.via])).toEqual([
+      [f.managerUser, 'manager'], [f.employeeUser, 'self'], [f.managerUser, 'manager'], [secondary, 'manager'], [f.hrUser, 'oversight'],
+    ]);
+  });
 });
 
 describe('geofence administration', () => {

@@ -7,7 +7,8 @@
 -- key (attendance.view, branch-scoped where the table has a branch), by the employee's own rows and by line managers holding
 -- attendance.view_team for direct reports — and WRITTEN only by the system context (no client privilege, explicit restrictive
 -- denials that survive a later GRANT). Geofences are configuration written by attendance.manage_geofences holders. Selfie
--- photos live under employee-photos/checkins/<org>/<employee>/… where no client storage policy can match.
+-- photos live under employee-photos/checkins/<org>/<employee>/…: no tenant storage policy matches the prefix and a
+-- restrictive policy denies it to every client role, so the API's 60-second signed URL is the only way to a photo.
 \set QUIET on
 \set ON_ERROR_STOP on
 set client_min_messages = warning;
@@ -79,8 +80,12 @@ insert into public.shift_swap_requests (id, organization_id, requester_employee_
   ('0a000000-0000-0000-0000-000000000462', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e6', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000c', '2026-10-02', '0a000000-0000-0000-0000-000000000451', '0a000000-0000-0000-0000-000000000452', 'Doctor visit', 'pending'),
   ('0a000000-0000-0000-0000-000000000463', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '2026-10-03', '0a000000-0000-0000-0000-000000000452', '0a000000-0000-0000-0000-000000000451', 'Course', 'pending'),
   ('0b000000-0000-0000-0000-000000000461', '0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000e1', '0b000000-0000-0000-0000-0000000000e2', '0b000000-0000-0000-0000-00000000000b', '2026-10-01', '0b000000-0000-0000-0000-000000000451', '0b000000-0000-0000-0000-000000000452', 'Org B swap', 'pending');
--- the stored selfie object (written by the API's service client in production)
-insert into storage.objects (bucket_id, name) values ('employee-photos', 'checkins/0a000000-0000-0000-0000-000000000000/0a000000-0000-0000-0000-0000000000e3/s3.jpg');
+-- the stored selfie objects (written by the API's service client in production): S3 is emp-a's own, S1 a colleague's (e1)
+insert into storage.objects (bucket_id, name) values
+  ('employee-photos', 'checkins/0a000000-0000-0000-0000-000000000000/0a000000-0000-0000-0000-0000000000e3/s3.jpg'),
+  ('employee-photos', 'checkins/0a000000-0000-0000-0000-000000000000/0a000000-0000-0000-0000-0000000000e1/s1.jpg'),
+  -- the control: an ordinary profile photo on the tenant path, readable by employee.view holders
+  ('employee-photos', '0a000000-0000-0000-0000-000000000000/0a000000-0000-0000-0000-0000000000e1/profile.jpg');
 commit;
 
 -- ---------- schema facts ----------
@@ -90,6 +95,8 @@ select pg_temp.assert_eq((select count(*) from pg_class c join pg_namespace n on
 select pg_temp.assert_eq((select count(*) from unnest(array['attendance_notes', 'attendance_regularisation_requests', 'employee_attendance_grants', 'selfie_checkins', 'shift_swap_requests']) t
   where has_table_privilege('authenticated', 'public.' || t, 'insert') or has_table_privilege('authenticated', 'public.' || t, 'update') or has_table_privilege('authenticated', 'public.' || t, 'delete')), 0, 'no client write privilege on the RPC-only tables');
 select pg_temp.assert_eq((select count(*) from public.device_providers where key = 'self_service'), 1, 'the virtual self-service provider exists');
+select pg_temp.assert_eq((select count(*) from pg_policies where schemaname = 'storage' and tablename = 'objects' and policyname = 'flowza_selfie_photos_deny_client'
+  and permissive = 'RESTRICTIVE' and cmd = 'ALL' and roles @> array['anon', 'authenticated', 'flowza_system']::name[]), 1, 'a restrictive storage policy denies every client role the checkins/ prefix');
 select pg_temp.assert_eq((select count(*) from pg_enum e join pg_type t on t.oid = e.enumtypid where t.typname = 'raw_source' and e.enumlabel = 'SELF_SERVICE'), 1, 'raw_source carries SELF_SERVICE');
 select pg_temp.assert_raises($q$ insert into public.attendance_notes (organization_id, employee_id, branch_id, attendance_date, note, status) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '2026-09-01', 'second active note', 'pending') $q$, 'one active note per employee-day');
 select pg_temp.assert_rows($q$ insert into public.attendance_notes (organization_id, employee_id, branch_id, attendance_date, note, status) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '2026-09-01', 'rejected history', 'rejected') $q$, 1, 'a rejected note is history and does not count as active');
@@ -125,8 +132,11 @@ select pg_temp.assert_raises($q$ update public.shift_swap_requests set status = 
 select pg_temp.assert_raises($q$ insert into public.geofences (organization_id, name, latitude, longitude, radius_m) values ('0a000000-0000-0000-0000-000000000000', 'Home', 23.6, 58.4, 100) $q$, 'employee cannot create a geofence');
 select pg_temp.assert_rows($q$ update public.geofences set radius_m = 5000 where id = '0a000000-0000-0000-0000-000000000432' $q$, 0, 'employee cannot widen the fence that applies to them');
 select pg_temp.assert_rows($q$ delete from public.geofence_assignments where id = '0a000000-0000-0000-0000-000000000442' $q$, 0, 'employee cannot remove their fence assignment');
--- selfie photos: the checkins/ prefix is not an organisation id, so no client storage policy matches it
+-- selfie photos: the checkins/ prefix is not an organisation id (no tenant storage policy matches) and a restrictive policy denies it
 select pg_temp.assert_eq((select count(*) from storage.objects where bucket_id = 'employee-photos' and name like 'checkins/%'), 0, 'employee cannot list selfie photos, not even their own');
+select pg_temp.assert_eq((select count(*) from storage.objects where name = 'checkins/0a000000-0000-0000-0000-000000000000/0a000000-0000-0000-0000-0000000000e1/s1.jpg'), 0, 'a same-org employee without rights reads 0 of a colleague''s selfie objects, even by exact name');
+select pg_temp.assert_rows($q$ update storage.objects set name = name where bucket_id = 'employee-photos' and name like 'checkins/%' $q$, 0, 'employee cannot touch a selfie object');
+select pg_temp.assert_rows($q$ delete from storage.objects where bucket_id = 'employee-photos' and name like 'checkins/%' $q$, 0, 'employee cannot delete a selfie object');
 select pg_temp.assert_raises($q$ insert into storage.objects (bucket_id, name) values ('employee-photos', 'checkins/0a000000-0000-0000-0000-000000000000/0a000000-0000-0000-0000-0000000000e3/forged.jpg') $q$, 'employee cannot upload a selfie photo directly');
 rollback;
 
@@ -149,6 +159,7 @@ select pg_temp.assert_raises($q$ insert into public.attendance_notes (organizati
 select pg_temp.assert_raises($q$ update public.employee_attendance_grants set selfie_required = true where employee_id = '0a000000-0000-0000-0000-0000000000e1' $q$, 'manager cannot change a grant by UPDATE (API only)');
 select pg_temp.assert_raises($q$ update public.shift_swap_requests set status = 'approved' where id = '0a000000-0000-0000-0000-000000000462' $q$, 'manager cannot approve a swap by UPDATE');
 select pg_temp.assert_raises($q$ insert into public.geofences (organization_id, name, latitude, longitude, radius_m) values ('0a000000-0000-0000-0000-000000000000', 'Team fence', 23.6, 58.4, 100) $q$, 'manager (no attendance.manage_geofences) cannot create a geofence');
+select pg_temp.assert_eq((select count(*) from storage.objects where bucket_id = 'employee-photos' and name like 'checkins/%'), 0, 'even the direct report''s selfie photo is not readable from storage (the API signs a URL)');
 rollback;
 
 -- ---------- as Secondary Manager A (role manager, linked to e5 = secondary manager of e1) ----------
@@ -176,6 +187,7 @@ select pg_temp.assert_eq((select count(*) from public.geofences where id = '0a00
 select pg_temp.assert_raises($q$ insert into public.geofences (organization_id, branch_id, name, latitude, longitude, radius_m) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-00000000000c', 'Yard', 23.6, 58.4, 100) $q$, 'branch manager (no attendance.manage_geofences) cannot create a fence');
 select pg_temp.assert_rows($q$ update public.geofences set radius_m = 400 where id = '0a000000-0000-0000-0000-000000000432' $q$, 0, 'branch manager cannot edit a fence without attendance.manage_geofences');
 select pg_temp.assert_raises($q$ update public.selfie_checkins set status = 'approved', reviewed_at = now() where id = '0a000000-0000-0000-0000-000000000422' $q$, 'branch manager cannot approve a selfie by UPDATE (API only)');
+select pg_temp.assert_eq((select count(*) from storage.objects where bucket_id = 'employee-photos' and name like 'checkins/%'), 0, 'branch manager reads no selfie object');
 rollback;
 
 -- ---------- as Owner A (every key, organisation-wide) ----------
@@ -230,6 +242,18 @@ select pg_temp.assert_rows($q$ update public.employee_attendance_grants set open
 select pg_temp.assert_rows($q$ update public.shift_swap_requests set status = 'approved' $q$, 0, 'a re-granted UPDATE on swaps still matches no row');
 rollback;
 
+-- ---------- a later, broader storage policy cannot open the checkins/ prefix ----------
+begin;
+create policy zz_test_broad_storage on storage.objects for all to authenticated using (true) with check (true);
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000003","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from storage.objects where bucket_id = 'employee-photos' and name = '0a000000-0000-0000-0000-000000000000/0a000000-0000-0000-0000-0000000000e1/profile.jpg'), 1, 'control: the broad policy opens the tenant-path photo to a plain employee');
+select pg_temp.assert_eq((select count(*) from storage.objects where bucket_id = 'employee-photos' and name like 'checkins/%'), 0, 'the restrictive policy still hides every selfie object');
+select pg_temp.assert_rows($q$ update storage.objects set name = name where bucket_id = 'employee-photos' and name like 'checkins/%' $q$, 0, 'the restrictive policy still refuses to change a selfie object');
+select pg_temp.assert_rows($q$ delete from storage.objects where bucket_id = 'employee-photos' and name like 'checkins/%' $q$, 0, 'the restrictive policy still refuses to delete a selfie object');
+select pg_temp.assert_raises($q$ insert into storage.objects (bucket_id, name) values ('employee-photos', 'checkins/0a000000-0000-0000-0000-000000000000/0a000000-0000-0000-0000-0000000000e1/planted.jpg') $q$, 'the restrictive policy still refuses an upload into checkins/');
+rollback;
+
 -- ---------- as Auditor A (attendance.view + shift.view, organisation-wide, read-only) ----------
 begin;
 set local role authenticated;
@@ -245,6 +269,7 @@ select pg_temp.assert_raises($q$ update public.attendance_notes set status = 're
 select pg_temp.assert_raises($q$ insert into public.geofences (organization_id, name, latitude, longitude, radius_m) values ('0a000000-0000-0000-0000-000000000000', 'Audit', 23.6, 58.4, 100) $q$, 'auditor cannot create a fence');
 select pg_temp.assert_rows($q$ update public.geofences set is_active = false where id = '0a000000-0000-0000-0000-000000000431' $q$, 0, 'auditor cannot disable a fence');
 select pg_temp.assert_rows($q$ delete from public.geofence_assignments where id = '0a000000-0000-0000-0000-000000000441' $q$, 0, 'auditor cannot remove an assignment');
+select pg_temp.assert_eq((select count(*) from storage.objects where bucket_id = 'employee-photos' and name like 'checkins/%'), 0, 'the auditor reads no selfie object');
 rollback;
 
 -- ---------- as Owner B ----------
