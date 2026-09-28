@@ -17,6 +17,7 @@ import { useDeviceOptions } from '@/features/devices/api';
 import { useReconciliation, useSyncMutations } from '../api';
 import { SyncItemStatusBadge } from '../components/status-badges';
 import { toastJobAccepted } from '../job-toast';
+import '@/features/attendance/workspace-i18n';
 
 type Confirm = { kind: 'run-all' } | { kind: 'repair-all' } | { kind: 'repair'; device: DeviceReconciliationDto } | null;
 const COUNTERS = [
@@ -33,6 +34,7 @@ const isItemStatus = (s: string | null): s is SyncItemStatus => !!s && (SYNC_ITE
 
 function DeviceCard({ row, tz, branchName, onRun, onRepair, busy }: { row: DeviceReconciliationDto; tz: string; branchName: string | undefined; onRun: () => void; onRepair: () => void; busy: boolean }) {
   const { t } = useTranslation('sync');
+  const { t: tw } = useTranslation('attendanceWorkspace');
   const can = useCan();
   const s = row.summary ?? {};
   const issues = COUNTERS.reduce((acc, c) => acc + num(s[c.key]), 0);
@@ -69,6 +71,7 @@ function DeviceCard({ row, tz, branchName, onRun, onRepair, busy }: { row: Devic
           {row.summary ? <span className="tnum">{t('reconciliation.expected', { expected: fmtNumber(num(s['expected'])), onDevice: fmtNumber(num(s['onDevice'])) })}</span> : null}
           {row.syncJobId ? <Link to={`/sync/${row.syncJobId}`} className="text-primary hover:underline">{t('reconciliation.viewJob')}</Link> : null}
           {typeof s['repairJobId'] === 'string' ? <Link to={`/sync/${s['repairJobId']}`} className="text-primary hover:underline">{t('reconciliation.repairJob')}</Link> : null}
+          {num(s['unmatchedRaw']) > 0 && can('attendance.view_raw') ? <Link to={`/attendance/unmatched?deviceId=${row.deviceId}`} className="text-primary hover:underline" data-testid="triage-unmatched">{tw('unmatched.triageLink')}</Link> : null}
           {can('device.sync') ? (
             <span className="ms-auto flex gap-2">
               <Button size="sm" variant="outline" onClick={onRun} loading={busy}><GitCompare /> {t('actions.runReconciliation')}</Button>

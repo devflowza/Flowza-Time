@@ -4,3 +4,4 @@ export * from './attendance.js';
 export * from './day-marks.js';
 export * from './schedule.js';
 export * from './reports.js';
+export * from './hr-workspace.js';
