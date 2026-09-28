@@ -112,7 +112,7 @@ describe('approvals.reminders', () => {
     expect(notifs.filter((n) => n.userId === U.subject)).toHaveLength(0); // nobody routes approvals to the person concerned
     expect(notifs.filter((n) => n.userId === U.owner)).toHaveLength(0); // nor to everybody holding a permission
     const hrEscalation = notifs.find((n) => n.userId === U.hr && n.type === 'approval.escalated');
-    expect(hrEscalation).toMatchObject({ title: 'Escalated to you: Leave request — Subject One', link: `/approvals/requests/${req1}` });
+    expect(hrEscalation).toMatchObject({ title: 'Escalated to you: Leave request — Subject One', link: `/approvals?request=${req1}` });
     const digestA = notifs.find((n) => n.userId === U.a && n.type === 'approval.reminder' && n.title.includes('waiting for you') && !n.title.startsWith('Reminder'));
     expect(digestA).toMatchObject({ title: '2 approvals waiting for you', link: '/approvals' });
     expect((await h.tdb.adminDb.selectFrom('notifications').select('body').where('userId', '=', U.a).where('title', '=', '2 approvals waiting for you').executeTakeFirstOrThrow()).body).toBe('Attendance correction: 1 · Leave request: 1');
@@ -129,10 +129,10 @@ describe('approvals.reminders', () => {
     const tokensBefore = (await h.tdb.adminDb.selectFrom('approvalEmailTokens').select('id').where('userId', '=', U.b).execute()).length;
     await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
     const notice = await h.tdb.adminDb.selectFrom('notifications').select(['title', 'body', 'link']).where('userId', '=', U.b).where('type', '=', 'approval.bypassed').executeTakeFirstOrThrow();
-    expect(notice).toEqual({ title: 'Attendance correction — Subject One approved as an exception', body: 'No action needed from you. Reason: Payroll cut-off today', link: `/approvals/requests/${req2}` });
+    expect(notice).toEqual({ title: 'Attendance correction — Subject One was approved as an exception', body: 'No action is needed from you · Reason: Payroll cut-off today', link: `/approvals?request=${req2}` });
     await deliverNotifications({ job: fakeJob('DELIVER_NOTIFICATIONS'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
     expect((await h.tdb.adminDb.selectFrom('approvalEmailTokens').select('id').where('userId', '=', U.b).execute()).length).toBe(tokensBefore);
-    expect(h.emails.some((e) => e.to === `${U.b}@t.local` && e.subject.includes('approved as an exception'))).toBe(true);
+    expect(h.emails.some((e) => e.to === `${U.b}@t.local` && /approved as an exception/i.test(e.subject))).toBe(true);
   });
 
   it('P0-3 P0-4 escalation never seats the person a request is about — by the submit snapshot or by the CURRENT membership link — whatever the workflow', async () => {

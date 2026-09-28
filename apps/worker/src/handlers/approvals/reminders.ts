@@ -5,6 +5,7 @@ import { emitDomainEvent, withContext, type Trx } from '@flowza/database';
 import { event } from '@flowza/shared';
 import type { WorkerDeps } from '../../deps.js';
 import type { HandlerRegistry, JobContext } from '../types.js';
+import { approvalEntityFacts } from './facts.js';
 
 /** A current level still waiting this long after it became current gets one reminder to its pending approvers (B-102). */
 export const APPROVAL_REMINDER_AFTER_HOURS = 24;
@@ -29,9 +30,14 @@ async function pendingActorIds(trx: Trx, stepId: string): Promise<string[]> {
   return (await trx.selectFrom('approvalStepActors').select('userId').where('stepId', '=', stepId).where('decision', '=', 'PENDING').execute()).map((a) => a.userId);
 }
 
+/**
+ * The notification payload of a request: who it is about and — for every entity type with a document (B-102) — the day or
+ * the leave's dates and type (approvalEntityFacts), so the reminder / escalation texts say which request they mean.
+ */
 async function requestPayload(trx: Trx, orgId: string, s: CurrentStep): Promise<Record<string, unknown>> {
   const emp = s.employeeId ? await trx.selectFrom('employees').select(['displayName', 'employeeNumber']).where('organizationId', '=', orgId).where('id', '=', s.employeeId).executeTakeFirst() : undefined;
-  return { requestId: s.requestId, entityType: s.entityType, entityId: s.entityId, employeeId: s.employeeId, employeeName: emp?.displayName ?? null, employeeNumber: emp?.employeeNumber ?? null, requestedBy: s.requestedBy, stepId: s.stepId, stepNo: s.stepNo };
+  const facts = await approvalEntityFacts(trx, orgId, s.entityType, s.entityId);
+  return { requestId: s.requestId, entityType: s.entityType, entityId: s.entityId, employeeId: s.employeeId, employeeName: emp?.displayName ?? null, employeeNumber: emp?.employeeNumber ?? null, requestedBy: s.requestedBy, stepId: s.stepId, stepNo: s.stepNo, ...facts };
 }
 
 async function recordEvent(trx: Trx, orgId: string, requestId: string, kind: string, detail: Record<string, unknown>): Promise<void> {

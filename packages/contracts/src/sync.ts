@@ -126,5 +126,9 @@ export const DOMAIN_EVENT_TYPES = [
   // Leave v2 (HR portal Prompt 7): a comment on a leave request (targeted via payload.userIds: the other side of the
   // thread), a year close carried balances forward (HR), comp-off credits expired (the employee, payload.userId)
   'leave.comment_added', 'leave.year_closed', 'leave.comp_off_expired',
+  // Notifications & reminders (HR portal Prompt 8): an approver's question on a leave request, told to the employee
+  // (targeted via payload.userIds), and the missing check-out reminder (worker task attendance.missing-punch-reminder,
+  // one per employee-day, targeted at the employee's own login)
+  'leave.info_requested', 'punch.missing_out',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];

@@ -108,7 +108,8 @@ function toNotificationDto(n: { id: string; organizationId: string | null; categ
 export async function listNotifications(deps: ApiDeps, actor: Actor, q: NotificationListQuery): Promise<{ data: NotificationDto[]; total: number }> {
   return runUser(deps.db, actor, async (trx) => {
     const page = pageOf(q);
-    let base = trx.selectFrom('notifications').where('userId', '=', actor.userId);
+    // `in_app = false` rows are the record of an e-mail-only notice (HR portal Prompt 8), not inbox items
+    let base = trx.selectFrom('notifications').where('userId', '=', actor.userId).where('inApp', '=', true);
     if (q.unreadOnly) base = base.where('readAt', 'is', null);
     if (q.category) base = base.where('category', '=', q.category);
     if (q.organizationId) base = base.where('organizationId', '=', q.organizationId);

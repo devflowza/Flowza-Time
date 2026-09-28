@@ -107,7 +107,7 @@ export type MembershipStatus = "active" | "invited" | "suspended";
 
 export type MissingPunchBehavior = "ASSUME_SHIFT_END" | "FLAG_ONLY" | "TREAT_AS_ABSENT" | "TREAT_AS_HALF_DAY";
 
-export type NotificationCategory = "APPROVAL" | "ATTENDANCE" | "DEVICE" | "SUBSCRIPTION" | "SYSTEM";
+export type NotificationCategory = "APPROVAL" | "ATTENDANCE" | "DEVICE" | "LEAVE" | "REPORTS" | "SUBSCRIPTION" | "SYSTEM";
 
 export type NotificationChannel = "EMAIL" | "IN_APP" | "PUSH" | "SMS" | "WHATSAPP";
 
@@ -1296,12 +1296,25 @@ export interface MembershipBranches {
   membershipId: string;
 }
 
+export interface MissingPunchReminders {
+  attendanceDate: Timestamp;
+  dueAt: Timestamp;
+  employeeId: string;
+  organizationId: string;
+  recipients: Generated<number>;
+  remindedAt: Generated<Timestamp>;
+}
+
 export interface NotificationDeliveries {
   attempts: Generated<number>;
   channel: NotificationChannel;
   createdAt: Generated<Timestamp>;
   error: string | null;
   id: Generated<Int8>;
+  /**
+   * Earliest time of the next e-mail attempt after a failure (exponential back-off); null = due now.
+   */
+  nextAttemptAt: Timestamp | null;
   notificationId: string;
   organizationId: string | null;
   provider: string | null;
@@ -1325,6 +1338,10 @@ export interface Notifications {
   createdAt: Generated<Timestamp>;
   data: Generated<Json>;
   id: Generated<string>;
+  /**
+   * False for a notice stored only as the record of its e-mail (in-app off for its category, or the event asked for e-mail only); the inbox lists in_app rows only.
+   */
+  inApp: Generated<boolean>;
   link: string | null;
   organizationId: string | null;
   readAt: Timestamp | null;
@@ -1902,6 +1919,7 @@ export interface DB {
   leaveTypes: LeaveTypes;
   loginHistory: LoginHistory;
   membershipBranches: MembershipBranches;
+  missingPunchReminders: MissingPunchReminders;
   notificationDeliveries: NotificationDeliveries;
   notificationPreferences: NotificationPreferences;
   notifications: Notifications;

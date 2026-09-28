@@ -12,6 +12,7 @@ export * from './integrations.js';
 export * from './dto/structure.js';
 export * from './dto/members.js';
 export * from './dto/notifications.js';
+export * from './notifications/catalogue.js';
 export * from './dto/audit-log.js';
 export * from './dto/import-job.js';
 export * from './dto/search-result.js';

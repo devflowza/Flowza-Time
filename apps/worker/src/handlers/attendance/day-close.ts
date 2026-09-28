@@ -180,11 +180,13 @@ export async function runDayClose(trx: Trx, p: DayClosePayload, now: Date, jobId
   }
 
   summary.employees = markedByEmployee.size;
+  // the managers' notice names the employee (HR portal Prompt 8 templates); the employee's own notice does not need it
+  const names = markedByEmployee.size ? new Map((await trx.selectFrom('employees').select(['id', 'displayName']).where('organizationId', '=', organizationId).where('id', 'in', [...markedByEmployee.keys()]).execute()).map((e) => [e.id, e.displayName])) : new Map<string, string>();
   for (const [employeeId, dates] of markedByEmployee) {
     const userIds = await dayCloseRecipients(trx, organizationId, employeeId);
     await emitDomainEvent(trx, {
       organizationId, eventType: 'attendance.unexcused_marked', aggregateType: 'employee', aggregateId: employeeId,
-      payload: { employeeId, dates: dates.sort(), count: dates.length, autoDeduct: settings.unexcused.autoDeductEnabled, userIds },
+      payload: { employeeId, employeeName: names.get(employeeId) ?? null, dates: dates.sort(), count: dates.length, autoDeduct: settings.unexcused.autoDeductEnabled, userIds },
       actorUserId: null,
     });
   }

@@ -4,7 +4,7 @@ import type { ProviderRegistry } from '@flowza/device-providers';
 import type { WorkerDeps } from '../deps.js';
 import type { WorkerConfig } from '../config.js';
 
-export interface TestHarness { tdb: TestDatabase; deps: WorkerDeps; files: Map<string, Buffer>; published: Array<{ channel: string; event: string; payload: Record<string, unknown> }>; emails: Array<{ to: string; subject: string }>; close(): Promise<void> }
+export interface TestHarness { tdb: TestDatabase; deps: WorkerDeps; files: Map<string, Buffer>; published: Array<{ channel: string; event: string; payload: Record<string, unknown> }>; emails: Array<{ to: string; subject: string; html: string; text: string }>; close(): Promise<void> }
 
 export async function createHarness(name: string, providers: ProviderRegistry, now = () => new Date()): Promise<TestHarness> {
   const tdb = await createTestDatabase(name);
@@ -20,7 +20,7 @@ export async function createHarness(name: string, providers: ProviderRegistry, n
     credentials: new DeviceCredentialsStore(new SecretsCipher(config.FLOWZA_CREDENTIALS_MASTER_KEYS)),
     providers,
     realtime: { async publish(channel, event, payload) { published.push({ channel, event, payload }); } },
-    mailer: { async send(msg) { emails.push({ to: msg.to, subject: msg.subject }); return { id: 'm1', provider: 'test' }; } },
+    mailer: { async send(msg) { emails.push({ to: msg.to, subject: msg.subject, html: msg.html, text: msg.text ?? '' }); return { id: 'm1', provider: 'test' }; } },
     storage: {
       async upload(bucket, path, body) { mem.set(`${bucket}/${path}`, body); return { path, size: body.length }; },
       async download(bucket, path) { const b = mem.get(`${bucket}/${path}`); if (!b) throw new Error('not found'); return b; },

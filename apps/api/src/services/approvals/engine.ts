@@ -1,5 +1,6 @@
 import { sql } from 'kysely';
 import type { ApprovalBulkDecideItemDto, ApprovalBulkDecideResultDto, ApprovalDecideVia, ApprovalDecision, ApprovalEntity, ApprovalEscalationTarget, ApprovalRequestStatus, ApprovalStepMode, ApproverType, DomainEventType, Permission } from '@flowza/contracts';
+import { approvalContextFacts } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import { collapseSeats, escalationDueAt, evaluateLevel, pendingSeats, requiredAfterReassign, resolveStepActors, seatOfRow, selectWorkflow, type ApprovalStepSpec, type MembershipGrant, type ResolvedActor } from '@flowza/domain';
 import { AppError, errors } from '@flowza/shared';
@@ -206,8 +207,13 @@ async function requestPayload(t: Trx, orgId: string, req: { id: string; entityTy
   const emp = req.employeeId ? await t.selectFrom('employees').select(['displayName', 'employeeNumber']).where('organizationId', '=', orgId).where('id', '=', req.employeeId).executeTakeFirst() : undefined;
   const hook = hookFor(req.entityType);
   let summary: string | null = null;
-  if (hook) { const ctx = (await hook.loadContexts(t, orgId, [req.entityId])).get(req.entityId); if (ctx && hook.summary) summary = hook.summary(ctx); }
-  return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, employeeId: req.employeeId, employeeName: emp?.displayName ?? null, employeeNumber: emp?.employeeNumber ?? null, requestedBy: req.requestedBy, summary };
+  let facts = approvalContextFacts(null);
+  if (hook) {
+    const ctx = (await hook.loadContexts(t, orgId, [req.entityId])).get(req.entityId);
+    if (ctx) { if (hook.summary) summary = hook.summary(ctx); facts = approvalContextFacts(ctx); }
+  }
+  // `date` / `endDate` / `leaveTypeName`: the structured facts the notification templates render in the recipient's language
+  return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, employeeId: req.employeeId, employeeName: emp?.displayName ?? null, employeeNumber: emp?.employeeNumber ?? null, requestedBy: req.requestedBy, summary, ...facts };
 }
 
 /** Targeted notification: the relay creates one in-app notification (and e-mail per preference) per user in `userIds`. */
