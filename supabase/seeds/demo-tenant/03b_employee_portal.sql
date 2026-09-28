@@ -5,12 +5,14 @@
 --   · her own leave requests in every state — approved with HR's note, rejected with a reason, withdrawn, and two
 --     pending requests that HR sees on the Leave page (approve / reject);
 --   · her own attendance correction requests through the "Line manager → HR" workflow (pending, rejected, withdrawn);
---   · in-app notifications for her (decisions, welcome) and for HR (new requests), and the matching audit trail.
+--   · in-app notifications for her (decisions, welcome) and for HR (new requests), and the matching audit trail;
+--   · leave v2 (migration 20260928000700): her 2026 allocation rows (a carry-forward from 2025 that expired in March), an
+--     approved comp-off credit for a Friday she worked, gender-specific ML / PTL and the organisation's comp-off type.
 --
 -- Runs after 03_leave.sql and BEFORE 04_attendance.sql: approved full-day leave suppresses punches, and the only new
 -- approved leave here is in the future (1 Oct 2026), so it never lands on a day that already has terminal punches.
 -- Past additions are rejected / withdrawn requests only, which the attendance engine ignores. Idempotent (fixed ids,
--- upserts; append-only tables use `on conflict do nothing` / not-exists guards). Needs migration 20260927000100.
+-- upserts; append-only tables use `on conflict do nothing` / not-exists guards). Needs migrations 20260927000100 and 20260928000700.
 set client_min_messages = warning;
 
 create or replace function pg_temp.sid(p text) returns uuid language sql immutable as
@@ -65,7 +67,7 @@ begin
   ---------------------------------------------------------------------------------------------------------------------
   insert into public.approval_workflows (id, organization_id, entity_type, name, branch_id, steps, is_default, status, created_at)
   values (pg_temp.sid('workflow:corrections'), org, 'ATTENDANCE_CORRECTION', 'Line manager → HR', null,
-          jsonb_build_array(jsonb_build_object('order', 1, 'approverType', 'MANAGER'), jsonb_build_object('order', 2, 'approverType', 'ROLE', 'roleId', hr_role)), true, 'active', '2026-02-16 09:00:00+04')
+          jsonb_build_array(jsonb_build_object('order', 1, 'approverType', 'MANAGER', 'mode', 'ANY'), jsonb_build_object('order', 2, 'approverType', 'ROLE', 'roleId', hr_role, 'mode', 'ANY')), true, 'active', '2026-02-16 09:00:00+04')
   on conflict (id) do nothing;
 
   for c in
@@ -114,6 +116,35 @@ begin
       'Casual Leave · 2026-10-06 → 2026-10-06', jsonb_build_object('aggregateId', pg_temp.sid('leave:MG-1012:CL:2026-10-06')), '/leave?status=PENDING', null, '2026-09-24 13:30+04'),
     (pg_temp.sid('notif:hr:priya-diwali'), org, hradmin_id, 'APPROVAL', 'leave.requested', 'Leave request from Priya Sharma',
       'Annual Leave · 2026-11-08 → 2026-11-12', jsonb_build_object('aggregateId', pg_temp.sid('leave:MG-1012:AL:2026-11-08')), '/leave?status=PENDING', null, '2026-09-25 16:02+04')
+  on conflict (id) do nothing;
+
+  ---------------------------------------------------------------------------------------------------------------------
+  -- 5. Leave v2 (migration 20260928000700): gender-specific types, the comp-off type, Priya's 2026 allocation rows (with
+  --    a carry-forward from 2025 that expired at the end of March) and an approved comp-off credit for a Friday she worked
+  ---------------------------------------------------------------------------------------------------------------------
+  update public.leave_types set applicable_gender = 'female' where organization_id = org and code = 'ML';
+  update public.leave_types set applicable_gender = 'male' where organization_id = org and code = 'PTL';
+  update public.leave_types set advance_notice_days = 7, carry_forward_max_days = 10, carry_forward_expiry_months = 3 where organization_id = org and code = 'AL';
+  if not exists (select 1 from public.leave_types where organization_id = org and system_key = 'COMP_OFF') then
+    insert into public.leave_types (id, organization_id, code, name, name_ar, is_paid, color, status, is_special, portal_visible, system_key, created_at)
+    values (pg_temp.sid('leave-type:CO'), org, 'CO', 'Compensatory Off', 'إجازة تعويضية', true, '#6941c6', 'active', true, false, 'COMP_OFF', '2026-02-16 09:00+04')
+    on conflict (id) do nothing;
+  end if;
+
+  insert into public.leave_allocations (id, organization_id, employee_id, leave_type_id, branch_id, year, allocated_days, carried_forward_days, carried_forward_expires_on, opening_balance_days, adjustment_days, notes, created_by, updated_by, created_at, updated_at)
+  select pg_temp.sid('allocation:MG-1012:' || a.code || ':2026'), org, priya, t.id, priya_branch, 2026, a.allocated, a.cf, a.cf_expires::date, 0, a.adj, a.note, hradmin_id, hradmin_id, '2026-01-01 08:00+04', '2026-01-01 08:00+04'
+  from (values
+    ('AL', 30.0, 4.0, '2026-03-31', 0.0, 'Carried 4 days from 2025 (use by 31 March)'),
+    ('CL', 6.0, 0.0, null, 0.0, null),
+    ('EL', 6.0, 0.0, null, 1.0, 'One extra day for the 2025 year-end release weekend')
+  ) as a(code, allocated, cf, cf_expires, adj, note)
+  join public.leave_types t on t.organization_id = org and t.code = a.code
+  on conflict (organization_id, employee_id, leave_type_id, year) do update set allocated_days = excluded.allocated_days, carried_forward_days = excluded.carried_forward_days,
+    carried_forward_expires_on = excluded.carried_forward_expires_on, adjustment_days = excluded.adjustment_days, notes = excluded.notes, updated_at = now();
+
+  insert into public.comp_off_credits (id, organization_id, employee_id, branch_id, worked_on, worked_on_type, worked_minutes, days_earned, location, summary, status, used_days, expires_on, decision_note, created_by, created_at, updated_at)
+  values (pg_temp.sid('comp-off:MG-1012:2026-09-04'), org, priya, priya_branch, '2026-09-04', 'weekly_off', 510, 1.0, 'Head office, Muscat', 'ERP upgrade cut-over weekend — data migration checks', 'approved', 0, '2026-12-03',
+          'Thank you for covering the cut-over.', priya_user, '2026-09-06 09:10+04', '2026-09-07 10:00+04')
   on conflict (id) do nothing;
 
   insert into audit.logs (organization_id, actor_user_id, actor_type, actor_label, action, entity_type, entity_id, branch_id, old_value, new_value, reason, request_id, created_at)

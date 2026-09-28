@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Avatar, Badge, Button, ErrorState, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { toastError } from '@/lib/toast';
-import { useCan } from '@/features/me/use-me';
+import { useCan, useEmployeeId } from '@/features/me/use-me';
 import { useEmployee, useEmployeeMutations } from '../api';
 import { EmploymentStatusBadge } from '../components/employee-badges';
 import { OverviewTab } from '../components/profile/overview-tab';
@@ -16,6 +16,8 @@ import { AttendanceTab } from '../components/profile/attendance-tab';
 import { DocumentsTab } from '../components/profile/documents-tab';
 import { DangerZone } from '../components/profile/danger-zone';
 import { toastJobQueued } from '../job-toast';
+import { AttendanceGrantsCard } from '@/features/attendance-review/components/attendance-grants-card';
+import { PortalAccessCard } from '@/features/users/components/portal-access-card';
 
 // The activity view is the only part of the profile that charts, and Recharts is a 118 kB (gzipped) vendor chunk:
 // loading it lazily keeps it off every other visit to a profile.
@@ -26,15 +28,35 @@ type Tab = (typeof TABS)[number];
 
 export default function EmployeeProfilePage() {
   const { t } = useTranslation('employees');
+  const { t: tc } = useTranslation();
   const { id = '' } = useParams();
   const navigate = useNavigate();
   const can = useCan();
+  const ownEmployeeId = useEmployeeId();
   const [params, setParams] = useSearchParams();
-  const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'overview';
   const q = useEmployee(id);
   const { bulk } = useEmployeeMutations();
   const e = q.data;
-  const tabs = TABS.filter((tb) => (tb === 'documents' ? can('employee.view_sensitive') : tb === 'danger' ? can('employee.delete') : tb === 'activity' ? can('attendance.view') : true));
+  const isOwn = !!e && e.id === ownEmployeeId;
+  // A line manager (employee.view_team) opens a direct report's profile too. Tabs whose data sits behind other keys stay
+  // hidden instead of rendering an empty list — or, for attendance, the viewer's OWN month (the attendance API scopes an
+  // attendance.view_own caller to their own record whatever employee is asked for). Own record: RLS self rows apply.
+  const tabs = TABS.filter((tb) => {
+    switch (tb) {
+      case 'documents': return can('employee.view_sensitive');
+      case 'danger': return can('employee.delete');
+      case 'activity': return can('attendance.view');
+      case 'history': return can('employee.view') || isOwn;
+      case 'devices': return can('device.view') || isOwn;
+      case 'attendance': return can('attendance.view') || isOwn;
+      default: return true;
+    }
+  });
+  const requested = params.get('tab') ?? '';
+  // a line manager has no directory to go back to: the breadcrumb leads to their team instead
+  const directory = can('employee.view');
+  // a hidden tab named in the URL falls back to the overview (the API would refuse or show nothing anyway)
+  const tab: Tab = (tabs as readonly string[]).includes(requested) ? (requested as Tab) : 'overview';
 
   return (
     <div className="page-container">
@@ -42,7 +64,7 @@ export default function EmployeeProfilePage() {
         : q.isError || !e ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : (
           <>
             <PageHeader
-              breadcrumbs={<Link to="/employees" className="inline-flex items-center gap-1 hover:underline"><ArrowLeft className="size-3 rtl:rotate-180" /> {t('title')}</Link>}
+              breadcrumbs={<Link to={directory ? '/employees' : '/team'} className="inline-flex items-center gap-1 hover:underline"><ArrowLeft className="size-3 rtl:rotate-180" /> {directory ? t('title') : tc('nav.sections.team')}</Link>}
               title={e.displayName}
               description={[e.employeeNumber, e.designationName, e.departmentName, e.branchName].filter(Boolean).join(' · ')}
               actions={
@@ -57,11 +79,19 @@ export default function EmployeeProfilePage() {
             />
             <div className="mb-4 flex items-center gap-3">
               <Avatar name={e.displayName} src={e.photoUrl} className="size-12 text-base" />
-              <div className="text-sm text-muted-foreground"><p dir="ltr">{e.email ?? '—'}</p><p dir="ltr">{e.phone ?? '—'}</p></div>
+              <div className="text-sm text-muted-foreground">
+                <p dir="ltr">{e.email ?? '—'}</p><p dir="ltr">{e.phone ?? '—'}</p>
+                {/* Reporting line: the primary manager drives team visibility and approvals, the secondary is the dotted line / backup. */}
+                <p data-testid="reports-to">
+                  <span>{t('profile.reportsTo')}: </span>
+                  {e.managerEmployeeId ? <Link to={`/employees/${e.managerEmployeeId}`} className="font-medium text-foreground hover:underline">{e.managerName ?? '—'}</Link> : <span>{t('profile.noManager')}</span>}
+                  {e.secondaryManagerEmployeeId ? <> · <span>{t('profile.alsoReportsTo')} </span><Link to={`/employees/${e.secondaryManagerEmployeeId}`} className="font-medium text-foreground hover:underline">{e.secondaryManagerName ?? '—'}</Link></> : null}
+                </p>
+              </div>
             </div>
             <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
               <TabsList className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb} className={tb === 'danger' ? 'data-[state=active]:text-destructive' : undefined}>{t(`profile.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
-              <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} /></TabsContent>
+              <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} />{!isOwn && !e.deletedAt ? <AttendanceGrantsCard employeeId={e.id} /> : null}{!isOwn ? <PortalAccessCard employeeId={e.id} employeeName={e.displayName} /> : null}</TabsContent>
               <TabsContent value="history">{tab === 'history' ? <HistoryTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="devices">{tab === 'devices' ? <DevicesTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="attendance">{tab === 'attendance' ? <AttendanceTab employeeId={e.id} /> : null}</TabsContent>

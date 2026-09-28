@@ -1,9 +1,14 @@
 import * as React from 'react';
 import * as SelectPrimitive from '@radix-ui/react-select';
 import { Check, ChevronDown } from 'lucide-react';
+import { useUiDirection } from '@/lib/direction';
 import { cn } from '@/lib/utils';
 
-export const Select = SelectPrimitive.Root;
+/** A Select laid out in the UI language's direction: trigger, list, checkmarks and typeahead (see lib/direction). */
+export function Select({ dir, ...props }: React.ComponentProps<typeof SelectPrimitive.Root>) {
+  const uiDir = useUiDirection();
+  return <SelectPrimitive.Root dir={dir ?? uiDir} {...props} />;
+}
 export const SelectGroup = SelectPrimitive.Group;
 export const SelectValue = SelectPrimitive.Value;
 export const SelectTrigger = React.forwardRef<React.ElementRef<typeof SelectPrimitive.Trigger>, React.ComponentPropsWithoutRef<typeof SelectPrimitive.Trigger>>(({ className, children, ...props }, ref) => (

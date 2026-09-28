@@ -17,7 +17,7 @@ export function useCorrections(query: ListQuery, enabled = true) {
 export function useCorrectionMutations() {
   const orgId = useOrgId();
   const qc = useQueryClient();
-  const invalidate = () => { for (const e of [CORRECTIONS, 'approvals-inbox', 'attendance-records', 'attendance-daily', 'attendance-monthly']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
+  const invalidate = () => { for (const e of [CORRECTIONS, 'approvals-inbox', 'approval-request', 'approvals-mine', 'attendance-records', 'attendance-daily', 'attendance-monthly']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
   const create = useMutation({ mutationFn: async (input: CreateCorrectionInput) => (await api.post<Envelope<CorrectionCreated>>(`/orgs/${orgId}/attendance/corrections`, input, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: invalidate });
   const cancel = useMutation({ mutationFn: async ({ id, reason }: { id: string; reason?: string }) => (await api.post<Envelope<CorrectionDto>>(`/orgs/${orgId}/attendance/corrections/${id}/cancel`, { reason: reason || undefined })).data, onSuccess: invalidate });
   return { create, cancel };

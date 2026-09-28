@@ -356,8 +356,12 @@ platform: user_profiles, platform_admins, platform_access_grants, device_provide
   `proposed_punched_at`, `proposed_event_type`, `proposed_status`, `reason`, `attachment_path`,
   `requested_by`, `status` (PENDING|APPROVED|REJECTED|CANCELLED|APPLIED), `approval_request_id`,
   `applied_event_id`, `applied_at`.
-- `approval_workflows` (`entity_type`, `steps jsonb`, `is_default`, `branch_id null`),
-  `approval_requests`, `approval_steps` (`approver_type` MANAGER|ROLE|USER, `status`, `acted_by`, `comment`).
+- `approval_workflows` (`entity_type`, `steps jsonb` — v2 levels with approver type, mode, quorum, escalation —,
+  `applies_to`, `min_units` tiers, `allow_self_approval`, `is_default`, `branch_id null`), `approval_requests` (one PENDING
+  per document; subject, units, cancel / invalidation reasons), `approval_steps` (mode, quorum, resolution trail,
+  escalation, reminder stamp), `approval_step_actors` (the people of a level), `approval_delegations`,
+  `approval_request_events` (append-only timeline), `approval_email_tokens` (sha256 only), `approval_digest_runs`
+  (engine v2, migration 20260928000200; report `docs/hr-portal/reports/02-approval-engine-v2.md`).
 - `attendance_recalculation_requests` — range + scope + reason + job + summary.
 - `attendance_period_locks` — `(organization_id, branch_id null, period_start, period_end)`; locked
   records refuse recompute/correction unless unlocked with reason (audited).
@@ -671,9 +675,20 @@ No application code path uses Supabase `service_role`. Migrations/ops use it via
 
 - `permissions` are the vocabulary (`employee.view`, `attendance.correct`, `device.manage`…).
 - System roles (`owner`, `org_admin`, `hr_admin`, `hr_user`, `branch_manager`, `attendance_admin`,
-  `payroll`, `employee`) are seeded with permission sets; organisations may clone and customise roles
-  (`role.manage`).
+  `payroll`, `employee`, `manager` — line manager, team-scoped — and `auditor` — read-only) are seeded with
+  permission sets; organisations may clone and customise roles (`role.manage`).
 - A membership has one role and either `all_branches=true` or an explicit branch list.
+- **Team scope** (migration 20260928000100): a member whose linked employee record (`org_memberships.employee_id`) is
+  the `manager_employee_id` or `secondary_manager_employee_id` of other employees has those DIRECT reports as a team.
+  Holders of a team key (`employee.view_team`, `attendance.view_team`, `leave.view_team`) read their team's rows without
+  the organisation-wide key; `app.team_employee_ids()` (direct) / `app.team_employee_ids_deep()` (chain to depth 5, for
+  manager-chain approvals). The `manager` role holds `employee.view_team`, not `employee.view`: its directory is its own
+  record plus its direct reports (20260928000150). Employees who left (archived, terminated, resigned) belong to no team,
+  and a caller whose own record left has none.
+- **Leavers** (B-75, 20260928000150): terminating, resigning or archiving an employee suspends every membership linked to
+  the record (the link is kept), revokes pending invitations that would link it, ends the user's sessions
+  (`app.revoke_user_sessions`, system context only) and audits each step; re-activating the employee does not re-activate
+  the login. Reporting lines cannot form a loop (`employees_no_manager_cycle` trigger + named 400 in the API).
 - Helper functions (schema `app`, `STABLE`, `SECURITY DEFINER`, `search_path` pinned):
   - `app.uid()`, `app.claims()`, `app.is_system()`, `app.system_org_id()`
   - `app.org_ids_with_permission(perm text) → uuid[]` (memberships ∪ system org ∪ platform grants)

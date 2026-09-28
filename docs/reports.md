@@ -78,6 +78,16 @@ requester only (`payload.userId`), not every holder of `report.view`.
 | 11, 12 | Employees Report / Inactive employee | `employee_directory` (`employmentStatus`) | available (Phase 0) |
 | 13 | Audit Trail Report | `audit_report` (`scope=attendance`) | available (Phase 3) |
 | 14 | Weekly In/Out Report | `weekly_in_out` | available (Phase 2) |
+| — | Monthly Attendance Summary (the attendance summary page as a file) | `monthly_summary` | available (HR portal Prompt 6a review) |
+
+The **Daily Report** takes an optional `to` (HR portal Prompt 6a review, ATT-21): each day of a range of at most
+`DAILY_REPORT_MAX_DAYS` (62) days, the date heading each day's departments (a Date column in spreadsheets); the API, the
+worker and the form apply the one rule `dailyReportRangeTooLong` (contracts). Whole-month types (`monthly_attendance`,
+`monthly_summary`) accept `from`/`to` inside the month: a schedule's *month to date* passes the exact days, so the file stops at
+the period's last complete day. **`monthly_summary`** reads `attendanceSummaryRows` (`@flowza/database`), the one definition the
+summary page, the profile's month strip and the print statement use; its scope (the requester's branches — days included —, a
+line manager's team, the page's search) and `finalizedFigures` (payroll.view) travel in the parameters; the total row prints in
+PDF (a spreadsheet recomputes it). `POST /attendance/summary/export` queues it (202 + report id).
 
 Types not in the sample set (`branch_attendance`, `department_attendance`, `overtime_report`, `device_sync_report`,
 `device_health_report`, `payroll_summary`) are `planned`: hidden from `/report-types`, refused by `POST /reports`, and

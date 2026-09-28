@@ -52,6 +52,27 @@ describe('reports', () => {
     expect(cancelDone.status).toBe(409);
   });
 
+  it('6a-ATT21 the Daily Report takes a range of at most 62 days', async () => {
+    const over = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'daily_attendance', format: 'xlsx', parameters: { from: '2026-06-01', to: '2026-08-02' } } }); // 63 days
+    expect(over.status).toBe(400);
+    expect(over.body.message).toMatch(/at most 62 days/);
+    const ok = await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'daily_attendance', format: 'xlsx', parameters: { from: '2026-06-02', to: '2026-08-02' } } }); // 62 days
+    expect(ok.status).toBe(202);
+    expect(ok.body.data.parameters).toMatchObject({ from: '2026-06-02', to: '2026-08-02' });
+  });
+
+  it('6a-M14 a recipient cancelling their queued copy settles its delivery as cancelled', async () => {
+    const request = (await h.admin.insertInto('reportRequests').values({ organizationId: f.orgId, reportType: 'late_report', format: 'csv', parameters: JSON.stringify({ from: '2026-08-01', to: '2026-08-31' }), status: 'QUEUED', requestedBy: f.hrUser }).returning('id').executeTakeFirstOrThrow()).id;
+    const delivery = (await h.admin.insertInto('reportDeliveries').values({ organizationId: f.orgId, runKey: 'send:m14', mode: 'send_now', reportType: 'late_report', format: 'csv', recipientUserId: f.hrUser, sentBy: f.owner, status: 'queued', reportRequestId: request }).returning('id').executeTakeFirstOrThrow()).id;
+    const cancel = await h.request('POST', `${base()}/reports/${request}/cancel`, { token: f.hrUser });
+    expect(cancel.status).toBe(200);
+    expect(cancel.body.data.status).toBe('CANCELLED');
+    const row = await h.admin.selectFrom('reportDeliveries').select(['status', 'deliveredAt']).where('id', '=', delivery).executeTakeFirstOrThrow();
+    expect(row).toEqual({ status: 'cancelled', deliveredAt: null });
+    const trail = await h.request('GET', `${base()}/report-deliveries?status=cancelled`, { token: f.hrUser });
+    expect(trail.body.data.map((d: { id: string }) => d.id)).toEqual([delivery]);
+  });
+
   it('applies the per-organisation hourly quota', async () => {
     let last = 0;
     for (let i = 0; i < 20; i += 1) { last = (await h.request('POST', `${base()}/reports`, { token: f.hrAdmin, body: { reportType: 'daily_attendance', parameters: { from: '2026-08-01' } } })).status; if (last === 429) break; }

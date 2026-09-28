@@ -54,7 +54,8 @@ describe('AcceptInvitationPage', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Create account and join' }));
 
     expect(await screen.findByText('Confirm your email')).toBeInTheDocument();
-    expect(apiMock.post).not.toHaveBeenCalled();
+    // only the (read-only) validation reached the API; nothing was accepted
+    expect(apiMock.post.mock.calls.some((c) => c[0] === '/invitations/accept')).toBe(false);
   });
 
   it('asks Supabase to send the invitee back to this link after they confirm', async () => {
@@ -127,5 +128,52 @@ describe('AcceptInvitationPage', () => {
     apiMock.post.mockResolvedValue({ data: { membershipId: 'm1', organizationId: 'o1' } });
     renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/invitations/accept', { token: TOKEN }));
+  });
+
+  describe('HR portal Prompt 6b: the validate preview (Finance B-70)', () => {
+    const previewOf = (state: 'valid' | 'accepted' | 'revoked' | 'expired') => ({ data: { state, organizationName: 'Acme Trading', employeeName: 'Salma Al Harthy', emailMasked: 's***@a***.om', expiresAt: '2026-10-05T00:00:00Z' } });
+    const route = (validate: () => Promise<unknown>) => apiMock.post.mockImplementation((path: string) => (path === '/invitations/validate' ? validate() : Promise.resolve({ data: { membershipId: 'm1', organizationId: 'o1' } })));
+
+    it('shows what the invitation is before anybody signs in, and keeps the form', async () => {
+      route(() => Promise.resolve(previewOf('valid')));
+      renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+      const preview = await screen.findByTestId('invitation-preview');
+      expect(preview).toHaveTextContent('Invitation to Acme Trading');
+      expect(preview).toHaveTextContent('Sent to s***@a***.om');
+      expect(preview).toHaveTextContent('Employee record: Salma Al Harthy');
+      expect(preview).toHaveTextContent('Valid');
+      expect(apiMock.post).toHaveBeenCalledWith('/invitations/validate', { token: TOKEN });
+      expect(screen.getByLabelText('Password')).toBeInTheDocument();
+      expect(apiMock.post.mock.calls.some((c) => c[0] === '/invitations/accept')).toBe(false);
+    });
+
+    it.each([
+      ['expired', 'This invitation has expired. Ask your administrator to resend it.'],
+      ['revoked', 'This invitation was withdrawn or replaced by a newer one. Ask your administrator to send it again.'],
+      ['accepted', 'This invitation was already used. Sign in with the invited address to open Acme Trading.'],
+    ] as const)('explains a %s invitation instead of offering the form — and never tries to accept it, even when signed in', async (state, text) => {
+      h.session = { access_token: 't' };
+      route(() => Promise.resolve(previewOf(state)));
+      renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+      expect(await screen.findByText(text)).toBeInTheDocument();
+      expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+      if (state === 'accepted') expect(screen.getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/auth/sign-in');
+      await new Promise((r) => setTimeout(r, 20));
+      expect(apiMock.post.mock.calls.some((c) => c[0] === '/invitations/accept')).toBe(false);
+    });
+
+    it('reads an unknown token (404) as an invalid link', async () => {
+      route(() => Promise.reject(new ApiError(404, 'NOT_FOUND', 'Invitation not found')));
+      renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+      expect(await screen.findByText('This invitation link is not valid')).toBeInTheDocument();
+    });
+
+    it('keeps the form usable when validation itself fails (rate limit): the accept call decides', async () => {
+      route(() => Promise.reject(new ApiError(429, 'RATE_LIMITED', 'Too many requests')));
+      renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+      await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/invitations/validate', { token: TOKEN }));
+      expect(await screen.findByLabelText('Password')).toBeInTheDocument();
+      expect(screen.queryByTestId('invitation-preview')).not.toBeInTheDocument();
+    });
   });
 });

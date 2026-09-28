@@ -5,18 +5,17 @@ import { ArrowLeft, GitBranch, Pencil, Plus, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, ConfirmDialog, EmptyState, ErrorState, Skeleton } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
-import { useCan } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useMembers, useRoles } from '@/features/users/api';
-import { useWorkflowMutations, useWorkflows, type WorkflowDto } from '../api';
+import { useApprovalAccess, useWorkflowMutations, useWorkflows, type WorkflowDto } from '../api';
+import { modeText, pathText } from '../labels';
 import { WorkflowDialog } from '../components/workflow-dialog';
 
-/** /approvals/workflows — approval routing rules (steps builder). Editing requires organization.manage. */
+/** /approvals/workflows — approval routing rules (levels builder). Editing requires approval.manage (or organization.manage). */
 export default function WorkflowsPage() {
   const { t } = useTranslation('approvals');
   const { t: tc } = useTranslation();
-  const can = useCan();
-  const canManage = can('organization.manage');
+  const canManage = useApprovalAccess().configure;
   const q = useWorkflows();
   const branches = useBranchOptions();
   const roles = useRoles();
@@ -42,13 +41,20 @@ export default function WorkflowsPage() {
                   <div className="min-w-0">
                     <CardTitle className="flex flex-wrap items-center gap-2"><span className="truncate">{w.name}</span>{w.isDefault ? <Badge variant="info">{t('workflows.default')}</Badge> : null}{w.status !== 'active' ? <Badge variant="neutral">{t(`recordStatus.${w.status}`, { defaultValue: w.status })}</Badge> : null}</CardTitle>
                     <CardDescription>{t(`entity.${w.entityType}`, { defaultValue: w.entityType })} · {w.branchId ? branches.byId.get(w.branchId)?.name ?? w.branchId.slice(0, 8) : t('workflows.allBranches')}</CardDescription>
+                    <div className="mt-1 flex flex-wrap gap-1">
+                      {w.minUnits !== null ? <Badge variant="outline">{t('workflows.tier', { n: w.minUnits })}</Badge> : null}
+                      {w.appliesTo.branchIds?.length || w.appliesTo.departmentIds?.length ? <Badge variant="outline">{t('workflows.scoped')}</Badge> : null}
+                    </div>
                   </div>
                   {canManage ? <div className="flex shrink-0 gap-1"><Button variant="ghost" size="icon" className="size-8" aria-label={tc('common.edit')} onClick={() => setDialog({ open: true, workflow: w })}><Pencil /></Button><Button variant="ghost" size="icon" className="size-8 text-destructive" aria-label={tc('common.delete')} onClick={() => setDeleting(w)}><Trash2 /></Button></div> : null}
                 </CardHeader>
                 <CardContent>
                   <ol className="space-y-1.5">
                     {w.steps.map((s, i) => (
-                      <li key={i} className="flex items-center gap-2 text-sm"><Badge variant="outline" className="tnum">{i + 1}</Badge><span className="font-medium">{t(`approverType.${s.approverType}`)}</span>{s.approverType === 'ROLE' ? <span className="text-muted-foreground">· {roleName(s.roleId)}</span> : s.approverType === 'USER' ? <span className="text-muted-foreground">· {userName(s.userId)}</span> : null}</li>
+                      <li key={i} className="flex flex-wrap items-center gap-2 text-sm"><Badge variant="outline" className="tnum">{i + 1}</Badge><span className="font-medium">{t(`approverType.${s.approverType}`)}</span>
+                        {s.approverType === 'ROLE' ? <span className="text-muted-foreground">· {s.permission ?? roleName(s.roleId)}</span> : s.approverType === 'USER' ? <span className="text-muted-foreground">· {userName(s.userId)}</span> : s.approverType === 'MANAGER_CHAIN' ? <span className="text-muted-foreground">· {pathText(t, `chain_step_${s.chainLevel ?? 1}`)}</span> : null}
+                        <span className="text-xs text-muted-foreground">· {modeText(t, { mode: s.mode, requiredCount: s.requiredCount ?? null })}</span>
+                        {s.escalateTo ? <span className="text-xs text-muted-foreground">· {t('workflows.escalation')} {s.escalateAfterHours}h → {t(`workflows.escalateTarget.${s.escalateTo}`)}</span> : null}</li>
                     ))}
                   </ol>
                 </CardContent>

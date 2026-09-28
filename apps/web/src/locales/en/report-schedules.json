@@ -1,0 +1,46 @@
+{
+  "panel": {
+    "title": "Scheduled reports", "subtitle": "Reports generated and sent automatically. Each recipient receives a copy built from the data they are allowed to see.",
+    "empty": "No scheduled reports", "emptyHint": "Schedule a report to send it every month or week to managers, HR or anyone in the organisation."
+  },
+  "schedule": {
+    "newTitle": "New schedule", "editTitle": "Edit schedule", "subtitle": "Choose the report, when it runs and who receives it.", "create": "Create schedule",
+    "name": "Name", "namePlaceholder": "e.g. Monthly attendance for branch managers", "nameRequired": "Give the schedule a name.",
+    "typeInvalid": "Choose a report that can be scheduled.", "cadence": "Frequency", "runDay": "Day of the month", "runWeekday": "Day of the week",
+    "runDayInvalid": "Choose a valid day.", "runTime": "Time", "runTimeHint": "In the organisation's time zone.", "runTimeInvalid": "Enter a time (HH:MM).",
+    "period": "Period covered", "periodInvalid": "This period does not fit the report or the frequency.",
+    "customFrom": "From day (previous month)", "customTo": "To day", "customInvalid": "The period runs from a day of the previous month to an earlier day (e.g. 26 → 25).",
+    "filters": "Filters", "active": "Active", "when": "When", "nextRun": "Next run", "lastRun": "Last run", "never": "Not run yet",
+    "lastSummary": "{{queued}} sent · {{skipped}} skipped", "recipientCount": "{{users}} people · {{roles}} roles",
+    "pausedBadge": "Paused", "paused": "Schedule paused", "resumed": "Schedule resumed",
+    "runNow": "Run now", "runQueued": "Run queued", "runQueuedHint": "Covering {{from}} → {{to}}.",
+    "created": "Schedule created", "saved": "Schedule saved", "deleted": "Schedule deleted",
+    "deleteTitle": "Delete this schedule?", "deleteHint": "“{{name}}” stops running. Reports already sent stay with their recipients."
+  },
+  "cadence": { "monthly": "Monthly", "weekly": "Weekly", "monthlyOn": "Monthly on day {{day}} at {{time}}", "weeklyOn": "Every {{day}} at {{time}}" },
+  "period": { "previous_month": "Previous month", "month_to_date": "Month to date", "previous_week": "Previous week", "custom": "Custom cut-off", "customRange": "Day {{from}} → day {{to}}" },
+  "runStatus": { "success": "Sent", "partial": "Partly sent", "failed": "Failed", "skipped": "Nothing sent" },
+  "recipients": {
+    "label": "Recipients", "required": "Choose at least one recipient.", "managers": "Managers", "roles": "Roles", "people": "People",
+    "addPerson": "Add a person…", "remove": "Remove {{name}}",
+    "scopeNote": "Each recipient gets the report for the data they can access — a manager their team, a branch manager their branches. People without access to this report are skipped."
+  },
+  "channels": { "label": "Deliver by", "in_app": "In-app notification", "email": "Email", "required": "Choose at least one channel." },
+  "share": {
+    "open": "Send to…", "title": "Send report", "subtitle": "{{report}} will be generated for each recipient and sent to them.", "send": "Send",
+    "note": "Note", "notePlaceholder": "Optional message for the recipients",
+    "queued": "Sending to {{count}} recipient(s)", "queuedHint": "Each copy is generated in the background; follow them in the delivery log."
+  },
+  "log": {
+    "title": "Delivery log", "when": "When", "report": "Report", "recipient": "Recipient", "status": "Status", "scope": "Scope",
+    "empty": "Nothing sent yet", "emptyHint": "Every scheduled run and every report sent from this page is listed here, one row per recipient."
+  },
+  "deliveryStatus": { "queued": "Generating", "delivered": "Delivered", "skipped": "Skipped", "failed": "Failed", "cancelled": "Cancelled by the recipient" },
+  "mode": { "schedule": "Schedule", "manual": "Run now", "send_now": "Sent manually" },
+  "scope": { "organization": "Whole organisation", "branches": "{{count}} branch(es)", "team": "Their team ({{count}})" },
+  "skip": {
+    "missing_permission": "No access to this report ({{detail}})", "outside_scope": "The filters are outside their access", "no_branch_access": "No branch access",
+    "no_team": "No team to report on", "report_type_unavailable": "Report not available", "recipient_cap": "Over the recipient limit"
+  },
+  "download": { "noExport": "Downloading reports needs the export permission.", "locked": "Export not allowed" }
+}

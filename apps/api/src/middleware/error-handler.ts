@@ -25,6 +25,9 @@ export function errorHandler(err: unknown, c: Context<AppEnv>) {
   // Postgres RLS / constraint violations surface as generic conflicts, never as SQL text
   const body = appErr.toJSON(requestId);
   if (appErr.status >= 500) body.message = 'An unexpected error occurred.';
+  // Every 429 says when to come back (HR portal Prompt 5 review, P2-8): the per-organisation quotas (exports, reports, report
+  // shares) carry `retryAfterMs` like the IP / user limiters, which set the header themselves before throwing.
+  if (appErr.status === 429 && appErr.retryAfterMs !== undefined) c.header('Retry-After', String(Math.max(1, Math.ceil(appErr.retryAfterMs / 1000))));
   return c.json(body, appErr.status as 400);
 }
 

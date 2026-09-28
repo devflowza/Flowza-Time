@@ -1,4 +1,5 @@
 import type { MeDto, NotificationDto, NotificationListQuery, UpdateMeInput, UserProfileDto } from '@flowza/contracts';
+import { sql } from 'kysely';
 import { jsonArrayFrom, jsonObjectFrom } from 'kysely/helpers/postgres';
 import type { Trx } from '@flowza/database';
 import { errors } from '@flowza/shared';
@@ -38,10 +39,12 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
     const bundle = await trx.selectNoFrom((eb) => [
       jsonObjectFrom(eb.selectFrom('userProfiles').select(PROFILE_COLUMNS).where('id', '=', actor.userId)).as('profile'),
       jsonArrayFrom(eb.selectFrom('organizations').select(ORG_COLUMNS).where('id', 'in', orgKeys)).as('orgs'),
-      jsonArrayFrom(eb.selectFrom('organizationSettings').select(['organizationId', 'general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard']).where('organizationId', 'in', orgKeys)).as('settings'),
+      jsonArrayFrom(eb.selectFrom('organizationSettings').select(['organizationId', 'general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard', 'leave']).where('organizationId', 'in', orgKeys)).as('settings'),
       jsonArrayFrom(eb.selectFrom('roles').select(['id', 'name']).where('id', 'in', roleKeys)).as('roles'),
       jsonArrayFrom(eb.selectFrom('featureFlags').select(['key', 'defaultEnabled'])).as('flags'),
       jsonArrayFrom(eb.selectFrom('organizationFeatureFlags').select(['organizationId', 'flagKey', 'enabled']).where('organizationId', 'in', orgKeys)).as('overrides'),
+      // the caller's approval work per active membership (review P1-6 / P2-11): one indexed query, the inbox's own definition
+      jsonArrayFrom(eb.selectFrom(sql<{ organizationId: string; actionable: number; delegatedToMe: boolean }>`app.approval_inbox_summary()`.as('s')).select(['s.organizationId', 's.actionable', 's.delegatedToMe'])).as('approvals'),
     ]).executeTakeFirstOrThrow();
     // a first-time user has no profile row yet: the rare slow path creates it
     const profile = bundle.profile ? toProfileDto(bundle.profile) : await ensureProfile(trx, actor);
@@ -51,6 +54,7 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
     const orgById = new Map(bundle.orgs.map((o) => [o.id, o]));
     const settingsById = new Map(bundle.settings.map((s) => [s.organizationId, s]));
     const roleName = new Map(bundle.roles.map((r) => [r.id, r.name]));
+    const approvalsByOrg = new Map(bundle.approvals.map((a) => [a.organizationId, { actionable: Number(a.actionable) || 0, delegatedToMe: a.delegatedToMe === true }]));
     const memberships: MeDto['memberships'] = [];
     for (const m of actor.principal.memberships) {
       const org = orgById.get(m.organizationId);
@@ -65,6 +69,10 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
         allBranches: m.allBranches,
         branchIds: m.branchIds,
         employeeId: m.employeeId,
+        // line-manager semantics: direct reports come from the principal snapshot (org_memberships.employee_id link)
+        isManager: m.teamEmployeeIds.length > 0,
+        teamSize: m.teamEmployeeIds.length,
+        approvals: approvalsByOrg.get(m.organizationId) ?? { actionable: 0, delegatedToMe: false },
         featureFlags: flags.get(m.organizationId) ?? {},
         settings: parseSettings(settingsById.get(m.organizationId)),
       });
@@ -100,7 +108,8 @@ function toNotificationDto(n: { id: string; organizationId: string | null; categ
 export async function listNotifications(deps: ApiDeps, actor: Actor, q: NotificationListQuery): Promise<{ data: NotificationDto[]; total: number }> {
   return runUser(deps.db, actor, async (trx) => {
     const page = pageOf(q);
-    let base = trx.selectFrom('notifications').where('userId', '=', actor.userId);
+    // `in_app = false` rows are the record of an e-mail-only notice (HR portal Prompt 8), not inbox items
+    let base = trx.selectFrom('notifications').where('userId', '=', actor.userId).where('inApp', '=', true);
     if (q.unreadOnly) base = base.where('readAt', 'is', null);
     if (q.category) base = base.where('category', '=', q.category);
     if (q.organizationId) base = base.where('organizationId', '=', q.organizationId);

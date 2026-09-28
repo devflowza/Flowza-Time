@@ -37,7 +37,10 @@ export const createAccessGrantSchema = z.object({
   ticketRef: z.string().trim().max(100).optional(),
   /** Duration in hours (default 8, max 72 — enforced by the database as well). */
   hours: z.number().int().min(1).max(72).default(8),
-  /** Required for write grants (second approver). */
+  /**
+   * Required for write grants: the second platform administrator, who must APPROVE the grant in their own session
+   * (POST /platform/access-grants/:id/approve) before it starts — naming them approves nothing.
+   */
   approvedBy: uuidSchema.optional(),
 });
 export type CreateAccessGrantInput = z.infer<typeof createAccessGrantSchema>;
@@ -53,12 +56,22 @@ export const accessGrantDtoSchema = z.object({
   ticketRef: z.string().nullable(),
   grantedBy: uuidSchema.nullable(),
   approvedBy: uuidSchema.nullable(),
+  /** When the second approver approved a write grant (null for read grants and while pending). */
+  approvedAt: isoDateTimeSchema.nullable(),
+  /** A write grant waiting for its second approver: it grants nothing yet; its window starts on approval. */
+  pendingApproval: z.boolean(),
+  /** The caller is the named approver of this pending grant. */
+  canApprove: z.boolean(),
+  /** Requested duration of a pending write grant (hours), applied on approval. */
+  requestedHours: z.number().int().nullable(),
   startsAt: isoDateTimeSchema,
   expiresAt: isoDateTimeSchema,
   revokedAt: isoDateTimeSchema.nullable(),
   active: z.boolean(),
   createdAt: isoDateTimeSchema,
 });
+/** A pending write grant must be approved within this many hours of its request, or it lapses. */
+export const ACCESS_GRANT_APPROVAL_WINDOW_HOURS = 24;
 export type AccessGrantDto = z.infer<typeof accessGrantDtoSchema>;
 
 export const accessGrantListQuerySchema = paginationQuerySchema.extend({

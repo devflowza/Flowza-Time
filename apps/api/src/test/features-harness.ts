@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
 import pg from 'pg';
 import { createTestDatabase, DeviceCredentialsStore, PgJobQueue, SecretsCipher, type Database, type TestDatabase } from '@flowza/database';
-import { defaultRegistry } from '@flowza/device-providers';
+import { defaultRegistry, type ProviderRegistry } from '@flowza/device-providers';
 import { SYSTEM_ROLE_IDS } from '@flowza/contracts';
 import { createLogger } from '@flowza/shared';
 import type { ApiConfig } from '../config.js';
@@ -20,6 +20,8 @@ export interface ApiHarness {
   app: ReturnType<typeof createApp>;
   published: Array<{ channel: string; event: string; payload: Record<string, unknown> }>;
   signedUrls: string[];
+  /** Objects stored through `deps.storage.upload` (bucket/path → bytes). */
+  uploads: Map<string, { body: Uint8Array; contentType: string }>;
   request: (method: string, path: string, opts?: { token?: string; body?: unknown; headers?: Record<string, string>; raw?: string }) => Promise<{ status: number; body: any; text: string; headers: Headers }>;
   close: () => Promise<void>;
 }
@@ -44,10 +46,11 @@ async function createDatabaseSerialised(name: string): Promise<TestDatabase> {
   }
 }
 
-export async function createApiHarness(name: string, opts: { config?: Partial<ApiConfig> } = {}): Promise<ApiHarness> {
+export async function createApiHarness(name: string, opts: { config?: Partial<ApiConfig>; providers?: ProviderRegistry } = {}): Promise<ApiHarness> {
   const tdb = await createDatabaseSerialised(name);
   const published: ApiHarness['published'] = [];
   const signedUrls: string[] = [];
+  const uploads: ApiHarness['uploads'] = new Map();
   const config = {
     NODE_ENV: 'test', LOG_LEVEL: 'silent', API_PORT: 0, API_PUBLIC_URL: 'https://api.test', WEB_ORIGINS: 'http://web.test', SUPABASE_URL: 'https://x.supabase.co', SUPABASE_ANON_KEY: 'anon', DATABASE_URL_API: tdb.connectionString,
     DATABASE_POOL_MAX: 4, FLOWZA_CREDENTIALS_MASTER_KEYS: TEST_MASTER_KEYS, FLOWZA_DEVICE_PUSH_SECRET: 'push-secret-1', RATE_LIMIT_WINDOW_MS: 60_000, RATE_LIMIT_MAX: 10_000, TRUST_PROXY: true, webOrigins: ['http://web.test'], ...(opts.config ?? {}),
@@ -58,14 +61,18 @@ export async function createApiHarness(name: string, opts: { config?: Partial<Ap
     db: tdb.db,
     queue: new PgJobQueue(tdb.db),
     credentials: new DeviceCredentialsStore(new SecretsCipher(TEST_MASTER_KEYS)),
-    providers: defaultRegistry(),
+    providers: opts.providers ?? defaultRegistry(),
     verifyToken: async (token: string) => {
       const m = /^user:([0-9a-f-]{36})(?::(.+))?$/i.exec(token);
       if (!m) throw new Error('bad test token');
       return { sub: m[1]!, email: m[2] ?? `${m[1]}@test.local`, role: 'authenticated', raw: {} };
     },
     realtime: { async publish(channel, event, payload) { published.push({ channel, event, payload }); } },
-    storage: { async signedUrl(bucket, path, expires = 300) { if (path.includes('missing')) return null; const u = `https://storage.test/${bucket}/${path}?exp=${expires}`; signedUrls.push(u); return u; } },
+    storage: {
+      async signedUrl(bucket, path, expires = 300) { if (path.includes('missing')) return null; const u = `https://storage.test/${bucket}/${path}?exp=${expires}`; signedUrls.push(u); return u; },
+      async upload(bucket, path, body, contentType) { uploads.set(`${bucket}/${path}`, { body, contentType }); return true; },
+      async download(bucket, path) { return uploads.get(`${bucket}/${path}`)?.body ?? null; },
+    },
   };
   // the feature routes are registered by createApp → registerV1Routes → registerFeatureRoutes (same auth/MFA chain as production)
   const app = createApp(deps);
@@ -81,7 +88,7 @@ export async function createApiHarness(name: string, opts: { config?: Partial<Ap
     try { json = text ? JSON.parse(text) : null; } catch { json = null; }
     return { status: res.status, body: json, text, headers: res.headers };
   };
-  return { tdb, admin: tdb.adminDb, deps, app, published, signedUrls, request, close: () => tdb.close() };
+  return { tdb, admin: tdb.adminDb, deps, app, published, signedUrls, uploads, request, close: () => tdb.close() };
 }
 
 // ----- fixtures -------------------------------------------------------------------------------------------------------------
@@ -163,5 +170,12 @@ export async function domainEvents(admin: Database, eventType: string) {
 }
 export function isoToday(offsetDays = 0): string {
   const d = new Date(); d.setUTCDate(d.getUTCDate() + offsetDays);
+  return d.toISOString().slice(0, 10);
+}
+
+/** Today in a time zone (the organisation's working day), shifted by whole days. Use it where "today" is the org's calendar day. */
+export function isoTodayIn(timeZone: string, offsetDays = 0): string {
+  const today = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date());
+  const d = new Date(`${today}T00:00:00Z`); d.setUTCDate(d.getUTCDate() + offsetDays);
   return d.toISOString().slice(0, 10);
 }

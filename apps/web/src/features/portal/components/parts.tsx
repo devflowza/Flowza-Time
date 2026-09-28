@@ -2,17 +2,13 @@ import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { UserX } from 'lucide-react';
 import type { SelfLeaveBalanceDto } from '@flowza/contracts';
-import { Badge, EmptyState } from '@/components/ui';
+import { EmptyState } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useEmployeeId } from '@/features/me/use-me';
 import { balanceShares, fmtDays } from '../model';
 
-const LEAVE_TONE: Record<string, 'success' | 'warning' | 'danger' | 'neutral'> = { APPROVED: 'success', PENDING: 'warning', REJECTED: 'danger', CANCELLED: 'neutral' };
-
-export function LeaveStatusBadge({ status }: { status: string }) {
-  const { t } = useTranslation('leave');
-  return <Badge variant={LEAVE_TONE[status] ?? 'neutral'} dot>{t(`status.${status}`, { defaultValue: status })}</Badge>;
-}
+// one colour per leave status everywhere (INFO_REQUESTED indigo): the leave feature owns the badge
+export { LeaveStatusBadge } from '@/features/leave/components/leave-status';
 
 /** The leave type's own colour; types without one fall back to a neutral token. */
 export function TypeDot({ color, className }: { color: string | null | undefined; className?: string }) {
@@ -29,7 +25,7 @@ export function BalanceRow({ b, name, color }: { b: SelfLeaveBalanceDto; name: s
       <div className="flex items-baseline justify-between gap-2 text-sm">
         <span className="flex min-w-0 items-center gap-2 font-medium"><TypeDot color={color} /><span className="truncate">{name}</span></span>
         <span className={cn('shrink-0 text-xs tnum', over ? 'font-medium text-destructive' : 'text-muted-foreground')}>
-          {b.allowanceDays === null ? t('leave.usedOnly', { days: fmtDays(b.usedDays) }) : t('leave.remainingOf', { remaining: fmtDays(b.remainingDays ?? 0), allowance: fmtDays(b.allowanceDays) })}
+          {b.allowanceDays === null ? t('leave.usedOnly', { count: b.usedDays, days: fmtDays(b.usedDays) }) : t('leave.remainingOf', { count: b.allowanceDays, remaining: fmtDays(b.remainingDays ?? 0), allowance: fmtDays(b.allowanceDays) })}
         </span>
       </div>
       {shares ? (

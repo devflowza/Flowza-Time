@@ -154,7 +154,7 @@ begin
   ---------------------------------------------------------------------------------------------------------------------
   insert into public.approval_workflows (id, organization_id, entity_type, name, branch_id, steps, is_default, status, created_at)
   values (pg_temp.sid('workflow:corrections'), org, 'ATTENDANCE_CORRECTION', 'Line manager → HR', null,
-          jsonb_build_array(jsonb_build_object('order', 1, 'approverType', 'MANAGER'), jsonb_build_object('order', 2, 'approverType', 'ROLE', 'roleId', '10000000-0000-0000-0000-000000000003')), true, 'active', '2026-02-16 09:00:00+04')
+          jsonb_build_array(jsonb_build_object('order', 1, 'approverType', 'MANAGER', 'mode', 'ANY'), jsonb_build_object('order', 2, 'approverType', 'ROLE', 'roleId', '10000000-0000-0000-0000-000000000003', 'mode', 'ANY')), true, 'active', '2026-02-16 09:00:00+04')
   on conflict (id) do update set steps = excluded.steps, is_default = true, status = 'active', updated_at = now();
 
   for c in
@@ -200,6 +200,68 @@ begin
                               7, now() + interval '25 minutes', 'apply:' || pg_temp.sid('correction:' || c.num || ':' || c.d)::text, 5, 120, 'seed-majan');
     end if;
   end loop;
+
+  -- Approval engine v2 shape for every request the demo seeds wrote (step 3b + the loop above), so the inbox, the request
+  -- panel and the worker's reminders treat them like live ones: the subject's login (segregation of duties), the person
+  -- who decided a level as its decided actor, the approvers of each open level as pending actors (the named user; else
+  -- the role's members whose branch scope covers the request, never the requester; else the owner), the reminder clock
+  -- of the current level, and a minimal timeline. Idempotent (not-exists guards, on conflict do nothing).
+  update public.approval_requests r
+  set subject_user_id = (select m.user_id from public.org_memberships m where m.organization_id = r.organization_id and m.employee_id = r.employee_id and m.status = 'active' order by m.created_at limit 1)
+  where r.organization_id = org and r.subject_user_id is null and r.employee_id is not null;
+  insert into public.approval_step_actors (organization_id, step_id, user_id, resolution_path, decision, decided_at, comment)
+  select s.organization_id, s.id, s.acted_by, case when s.approver_user_id = s.acted_by then 'user' when s.approver_role_id is not null then 'role' else 'override' end, s.status, s.acted_at, s.comment
+  from public.approval_steps s
+  where s.organization_id = org and s.status in ('APPROVED', 'REJECTED') and s.acted_by is not null
+    and not exists (select 1 from public.approval_step_actors a where a.step_id = s.id)
+  on conflict (step_id, user_id) do nothing;
+  insert into public.approval_step_actors (organization_id, step_id, user_id, resolution_path)
+  select s.organization_id, s.id, s.approver_user_id, 'user'
+  from public.approval_steps s join public.approval_requests r on r.id = s.request_id
+  where s.organization_id = org and r.status = 'PENDING' and s.status = 'PENDING' and s.approver_user_id is not null
+    and not exists (select 1 from public.approval_step_actors a where a.step_id = s.id)
+  on conflict (step_id, user_id) do nothing;
+  insert into public.approval_step_actors (organization_id, step_id, user_id, resolution_path)
+  select s.organization_id, s.id, m.user_id, 'role'
+  from public.approval_steps s join public.approval_requests r on r.id = s.request_id
+  join public.org_memberships m on m.organization_id = s.organization_id and m.role_id = s.approver_role_id and m.status = 'active'
+  where s.organization_id = org and r.status = 'PENDING' and s.status = 'PENDING' and s.approver_role_id is not null
+    and not exists (select 1 from public.approval_step_actors a where a.step_id = s.id)
+    and (r.requested_by is null or m.user_id <> r.requested_by)
+    and (r.subject_user_id is null or m.user_id <> r.subject_user_id)
+    and (m.all_branches or r.branch_id is null or exists (select 1 from public.membership_branches mb where mb.membership_id = m.id and mb.branch_id = r.branch_id))
+  on conflict (step_id, user_id) do nothing;
+  insert into public.approval_step_actors (organization_id, step_id, user_id, resolution_path)
+  select s.organization_id, s.id, owner_id, 'owner'
+  from public.approval_steps s join public.approval_requests r on r.id = s.request_id
+  where s.organization_id = org and r.status = 'PENDING' and s.status = 'PENDING'
+    and not exists (select 1 from public.approval_step_actors a where a.step_id = s.id)
+  on conflict (step_id, user_id) do nothing;
+  update public.approval_steps s set approver_user_id = (select a.user_id from public.approval_step_actors a where a.step_id = s.id)
+  from public.approval_requests r
+  where r.id = s.request_id and s.organization_id = org and r.status = 'PENDING' and s.status = 'PENDING' and s.approver_user_id is null
+    and (select count(*) from public.approval_step_actors a where a.step_id = s.id) = 1;
+  update public.approval_steps s set activated_at = r.created_at
+  from public.approval_requests r
+  where r.id = s.request_id and s.organization_id = org and r.status = 'PENDING' and s.status = 'PENDING' and s.step_no = r.current_step and s.activated_at is null;
+  update public.approval_steps s set status = 'SKIPPED'
+  from public.approval_requests r
+  where r.id = s.request_id and s.organization_id = org and r.status <> 'PENDING' and s.status = 'PENDING';
+  insert into public.approval_request_events (organization_id, request_id, at, actor_user_id, kind, detail)
+  select r.organization_id, r.id, r.created_at, r.requested_by, 'submitted', jsonb_build_object('workflowId', r.workflow_id)
+  from public.approval_requests r
+  where r.organization_id = org and not exists (select 1 from public.approval_request_events ev where ev.request_id = r.id and ev.kind = 'submitted');
+  insert into public.approval_request_events (organization_id, request_id, at, actor_user_id, kind, detail)
+  select s.organization_id, s.request_id, s.acted_at, s.acted_by, case s.status when 'APPROVED' then 'step_approved' else 'step_rejected' end, jsonb_strip_nulls(jsonb_build_object('stepNo', s.step_no, 'comment', s.comment))
+  from public.approval_steps s
+  where s.organization_id = org and s.status in ('APPROVED', 'REJECTED') and s.acted_at is not null
+    and not exists (select 1 from public.approval_request_events ev where ev.request_id = s.request_id and ev.kind in ('step_approved', 'step_rejected') and ev.detail ->> 'stepNo' = s.step_no::text);
+  insert into public.approval_request_events (organization_id, request_id, at, actor_user_id, kind, detail)
+  select r.organization_id, r.id, r.completed_at, case when r.status = 'CANCELLED' then r.requested_by else coalesce(r.decided_by, (select s.acted_by from public.approval_steps s where s.request_id = r.id and s.acted_by is not null order by s.step_no desc limit 1)) end,
+         case r.status when 'APPROVED' then 'approved' when 'REJECTED' then 'rejected' else 'cancelled' end, '{}'::jsonb
+  from public.approval_requests r
+  where r.organization_id = org and r.status in ('APPROVED', 'REJECTED', 'CANCELLED') and r.completed_at is not null
+    and not exists (select 1 from public.approval_request_events ev where ev.request_id = r.id and ev.kind in ('approved', 'rejected', 'cancelled'));
 
   ---------------------------------------------------------------------------------------------------------------------
   -- 3. Hand over to the worker: normalise now, recalculate the whole window in 12 minutes, build payroll summaries in 30

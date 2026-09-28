@@ -35,6 +35,11 @@ export interface DataTableProps<T> {
   renderCard?: (row: T) => React.ReactNode;
 }
 
+/** The heading the column chooser names a column by: its written header, or nothing. */
+function columnLabel<T>(def: ColumnDef<T, unknown>): string {
+  return typeof def.header === 'string' ? def.header.trim() : '';
+}
+
 /**
  * Server-driven table (§58): pagination, sorting and filtering happen on the API; this component only renders one page,
  * manages selection and column visibility, and degrades to cards under 768px when a card renderer is provided.
@@ -53,12 +58,12 @@ export function DataTable<T>({ columns, data, total, page, pageSize, onPageChang
     const selectCol: ColumnDef<T, unknown> = {
       id: '__select',
       enableHiding: false,
-      header: ({ table }) => <Checkbox aria-label="Select all" checked={table.getIsAllPageRowsSelected() ? true : table.getIsSomePageRowsSelected() ? 'indeterminate' : false} onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)} />,
-      cell: ({ row }) => <Checkbox aria-label="Select row" checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)} onClick={(e) => e.stopPropagation()} />,
+      header: ({ table }) => <Checkbox aria-label={t('common.selectAll')} checked={table.getIsAllPageRowsSelected() ? true : table.getIsSomePageRowsSelected() ? 'indeterminate' : false} onCheckedChange={(v) => table.toggleAllPageRowsSelected(!!v)} />,
+      cell: ({ row }) => <Checkbox aria-label={t('common.selectRow')} checked={row.getIsSelected()} onCheckedChange={(v) => row.toggleSelected(!!v)} onClick={(e) => e.stopPropagation()} />,
       size: 32,
     };
     return [selectCol, ...columns];
-  }, [columns, selectable]);
+  }, [columns, selectable, t]);
 
   const table = useReactTable({
     data: data ?? [],
@@ -83,11 +88,12 @@ export function DataTable<T>({ columns, data, total, page, pageSize, onPageChang
           <div className="flex flex-1 flex-wrap items-center gap-2">{toolbar}</div>
           {storageKey ? (
             <DropdownMenu>
-              <DropdownMenuTrigger asChild><Button variant="outline" size="sm"><Columns3 /> <span className="hidden sm:inline">Columns</span></Button></DropdownMenuTrigger>
+              <DropdownMenuTrigger asChild><Button variant="outline" size="sm" aria-label={t('common.columns')}><Columns3 /> <span className="hidden sm:inline">{t('common.columns')}</span></Button></DropdownMenuTrigger>
               <DropdownMenuContent align="end" className="w-52">
-                <DropdownMenuLabel>Columns</DropdownMenuLabel>
-                {table.getAllLeafColumns().filter((c) => c.getCanHide()).map((c) => (
-                  <DropdownMenuCheckboxItem key={c.id} checked={c.getIsVisible()} onCheckedChange={(v) => c.toggleVisibility(!!v)}>{typeof c.columnDef.header === 'string' ? c.columnDef.header : c.id}</DropdownMenuCheckboxItem>
+                <DropdownMenuLabel>{t('common.columns')}</DropdownMenuLabel>
+                {/* only columns with a written heading: an actions column ('') or a drawn one has nothing to name it by (its id would be a raw key) */}
+                {table.getAllLeafColumns().filter((c) => c.getCanHide() && columnLabel(c.columnDef)).map((c) => (
+                  <DropdownMenuCheckboxItem key={c.id} checked={c.getIsVisible()} onCheckedChange={(v) => c.toggleVisibility(!!v)}>{columnLabel(c.columnDef)}</DropdownMenuCheckboxItem>
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>

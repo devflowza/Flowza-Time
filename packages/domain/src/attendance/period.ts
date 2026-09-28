@@ -1,4 +1,4 @@
-import type { AttendanceFlag, AttendanceStatus } from '@flowza/contracts';
+import { lopDaysOf, type AttendanceFlag, type AttendanceStatus } from '@flowza/contracts';
 import type { DailyCalculationResult } from './types.js';
 
 /** The subset of a daily record the summariser needs (works for engine results and DB rows alike). */
@@ -46,6 +46,14 @@ export interface PeriodSummary {
   /** Records still PENDING — payroll should not finalise while > 0. */
   pendingDays: number;
   recordCount: number;
+  /** Loss-of-pay days (Σ of 0.5 / 1 per LOP-marked day) — the payroll deduction basis; never priced here (§HR portal Prompt 3). */
+  lopDays: number;
+  /** Days carrying an active UNEXCUSED mark. */
+  unexcusedDays: number;
+  /** Days carrying an active EXCUSED mark (consequences waived). */
+  excusedDays: number;
+  /** Worked minutes recorded on weekly-off / holiday days (`NON_WORKING_DAY_WORK`), whatever the overtime rule made of them. */
+  nonWorkingDayWorkMinutes: number;
 }
 
 const NON_WORKING: ReadonlySet<AttendanceStatus> = new Set(['HOLIDAY', 'WEEKLY_OFF', 'NOT_JOINED', 'EXITED']);
@@ -84,12 +92,21 @@ export function summarisePeriod(records: readonly PeriodRecordLike[], opts: Peri
     earlyDepartureMinutes: 0,
     pendingDays: 0,
     recordCount: 0,
+    lopDays: 0,
+    unexcusedDays: 0,
+    excusedDays: 0,
+    nonWorkingDayWorkMinutes: 0,
   };
 
   for (const record of records) {
     if (record.attendanceDate < opts.periodStart || record.attendanceDate > opts.periodEnd) continue;
     summary.recordCount += 1;
     if (!NON_WORKING.has(record.status)) summary.workingDays += 1;
+    // policy-parity marks (HR portal Prompt 3): one rule for the figure (lopDaysOf) shared with the API and the reports
+    summary.lopDays += lopDaysOf(record.flags);
+    if (has(record.flags, 'UNEXCUSED')) summary.unexcusedDays += 1;
+    if (has(record.flags, 'EXCUSED')) summary.excusedDays += 1;
+    if (has(record.flags, 'NON_WORKING_DAY_WORK')) summary.nonWorkingDayWorkMinutes += Math.max(0, record.workedMinutes);
 
     const halfDayLeave = has(record.flags, 'HALF_DAY_LEAVE');
     const leavePaid = record.leaveIsPaid ?? defaultLeavePaid;

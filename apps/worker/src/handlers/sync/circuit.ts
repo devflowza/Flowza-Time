@@ -49,7 +49,7 @@ export async function checkCircuit(trx: Trx, key: CircuitKey, now: Date, policy:
 
 /** Devices belonging to the same vendor account (account key derived from config, so filtered in JS). */
 async function accountDeviceIds(trx: Trx, key: CircuitKey): Promise<string[]> {
-  const rows = await trx.selectFrom('devices').select(['id', 'config', 'endpointUrl', 'serialNumber', 'integrationType'])
+  const rows = await trx.selectFrom('devices').select(['id', 'organizationId', 'providerKey', 'config', 'endpointUrl', 'serialNumber', 'integrationType'])
     .where('organizationId', '=', key.organizationId).where('providerKey', '=', key.providerKey).where('status', '=', 'active').execute();
   return rows.filter((d) => accountKeyFor(d) === key.accountKey).map((d) => d.id);
 }

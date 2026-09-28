@@ -1,4 +1,5 @@
-import { deviceCapabilitiesSchema, type AttendanceDailyRecordDto, type DeviceCommandDto, type DeviceDto, type DeviceGroupDto, type DeviceLogDto, type PendingDeviceDto, type ReportRequestDto, type SyncJobDto, type SyncJobItemDto } from '@flowza/contracts';
+import { deviceCapabilitiesSchema, lopDaysOf, type AttendanceDailyRecordDto, type DayMarkDto, type DeviceCommandDto, type DeviceDto, type DeviceGroupDto, type DeviceLogDto, type PendingDeviceDto, type ReportRequestDto, type SyncJobDto, type SyncJobItemDto } from '@flowza/contracts';
+import type { DayMarkRow } from '@flowza/database';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
 
 export const DEVICE_COLUMNS = [
@@ -79,10 +80,20 @@ export interface DailyRecordRow {
   scheduledMinutes: number; firstInAt: Date | null; lastOutAt: Date | null; workedMinutes: number; breakMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; overtimeMinutes: number; overtimeCategory: string | null; status: AttendanceDailyRecordDto['status']; flags: string[]; punchCount: number; hasCorrection: boolean; calculationVersion: number; computedAt: Date; lockedAt: Date | null;
 }
 export function toDailyRecordDto(r: DailyRecordRow): AttendanceDailyRecordDto & { branchName: string | null; departmentName: string | null } {
+  const flags = jsonArray<string>(r.flags);
   return {
     id: r.id, employeeId: r.employeeId, employeeNumber: r.employeeNumber, employeeName: r.employeeName, attendanceDate: isoDate(r.attendanceDate), branchId: r.branchId, branchName: r.branchName, departmentId: r.departmentId, departmentName: r.departmentName, shiftId: r.shiftId, shiftName: r.shiftName, timezone: r.timezone,
     expectedStartAt: isoDateTimeOrNull(r.expectedStartAt), expectedEndAt: isoDateTimeOrNull(r.expectedEndAt), scheduledMinutes: r.scheduledMinutes, firstInAt: isoDateTimeOrNull(r.firstInAt), lastOutAt: isoDateTimeOrNull(r.lastOutAt), workedMinutes: r.workedMinutes, breakMinutes: r.breakMinutes, lateMinutes: r.lateMinutes,
-    earlyDepartureMinutes: r.earlyDepartureMinutes, overtimeMinutes: r.overtimeMinutes, overtimeCategory: r.overtimeCategory, status: r.status, flags: jsonArray<string>(r.flags), punchCount: r.punchCount, hasCorrection: r.hasCorrection, calculationVersion: r.calculationVersion, computedAt: isoDateTime(r.computedAt), lockedAt: isoDateTimeOrNull(r.lockedAt),
+    earlyDepartureMinutes: r.earlyDepartureMinutes, overtimeMinutes: r.overtimeMinutes, overtimeCategory: r.overtimeCategory, status: r.status, flags, punchCount: r.punchCount, hasCorrection: r.hasCorrection, calculationVersion: r.calculationVersion, computedAt: isoDateTime(r.computedAt), lockedAt: isoDateTimeOrNull(r.lockedAt),
+    // policy-parity marks (HR portal Prompt 3): derived from the flags with the same rule the engine and the reports use
+    lopDays: lopDaysOf(flags), unexcused: flags.includes('UNEXCUSED'),
+  };
+}
+
+export function toDayMarkDto(m: DayMarkRow): DayMarkDto {
+  return {
+    id: m.id, employeeId: m.employeeId, attendanceDate: m.attendanceDate, branchId: m.branchId, kind: m.kind, payEffectDays: m.payEffectDays, source: m.source, sourceId: m.sourceId, reason: m.reason,
+    createdBy: m.createdBy, createdAt: isoDateTime(m.createdAt), revokedAt: isoDateTimeOrNull(m.revokedAt), revokedBy: m.revokedBy, revokeReason: m.revokeReason,
   };
 }
 

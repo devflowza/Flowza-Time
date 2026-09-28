@@ -3,10 +3,11 @@ import { initReactI18next } from 'react-i18next';
 import LanguageDetector from 'i18next-browser-languagedetector';
 import en from '../locales/en/common.json';
 import ar from '../locales/ar/common.json';
+import { directionOf } from './direction';
 
 export const SUPPORTED_LOCALES = ['en', 'ar'] as const;
 export type Locale = (typeof SUPPORTED_LOCALES)[number];
-export const RTL_LOCALES: Locale[] = ['ar'];
+export const RTL_LOCALES: Locale[] = SUPPORTED_LOCALES.filter((l) => directionOf(l) === 'rtl');
 
 void i18n
   .use(LanguageDetector)
@@ -22,8 +23,7 @@ void i18n
   });
 
 export function applyDirection(lng: string) {
-  const dir = RTL_LOCALES.includes(lng as Locale) ? 'rtl' : 'ltr';
-  document.documentElement.setAttribute('dir', dir);
+  document.documentElement.setAttribute('dir', directionOf(lng));
   document.documentElement.setAttribute('lang', lng);
 }
 i18n.on('languageChanged', applyDirection);

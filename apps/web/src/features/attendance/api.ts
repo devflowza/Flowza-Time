@@ -6,7 +6,8 @@ import { useOrgId } from '@/features/me/use-me';
 import type { AttendanceEventDto, DailyRecord, MonthlyRow, PeriodLockDto, RawPage, RecalcAccepted, RecalculationDto, RecordDetail } from './types';
 
 export type ListQuery = Record<string, string | number | boolean | undefined>;
-export type DailyPage = PageEnvelope<DailyRecord> & { meta: { byStatus?: Record<string, number> } };
+/** `missingPunch` counts the MISSING_IN / MISSING_OUT flags (the engine never stores a MISSING_PUNCH status for them). */
+export type DailyPage = PageEnvelope<DailyRecord> & { meta: { byStatus?: Record<string, number>; missingPunch?: number } };
 export type MonthlyPage = PageEnvelope<MonthlyRow> & { meta: { month?: string; days?: string[] } };
 
 const RECORDS = 'attendance-records';

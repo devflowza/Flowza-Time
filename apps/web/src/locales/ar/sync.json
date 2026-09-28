@@ -9,7 +9,7 @@
   "columns": { "type": "النوع", "trigger": "المُشغِّل", "status": "الحالة", "progress": "التقدّم", "records": "السجلات", "requestedBy": "بطلب من", "started": "البدء", "finished": "الانتهاء", "duration": "المدة", "scope": "النطاق" },
   "status": { "PENDING": "قيد الانتظار", "QUEUED": "في الطابور", "RUNNING": "قيد التشغيل", "SUCCESS": "نجاح", "PARTIAL_SUCCESS": "نجاح جزئي", "FAILED": "فشل", "RETRYING": "إعادة المحاولة", "CANCELLED": "أُلغيت" },
   "itemStatus": { "PENDING": "قيد الانتظار", "QUEUED": "في الطابور", "RUNNING": "قيد التشغيل", "SUCCESS": "نجاح", "FAILED": "فشل", "RETRYING": "إعادة المحاولة", "OFFLINE": "الجهاز غير متصل", "UNSUPPORTED": "غير مدعوم", "CANCELLED": "أُلغي", "SKIPPED": "تم التخطي" },
-  "jobType": { "PULL_ATTENDANCE": "سحب الحضور", "PULL_EMPLOYEES": "سحب الموظفين", "PUSH_EMPLOYEE": "دفع موظف", "PUSH_EMPLOYEES": "دفع الموظفين", "DEVICE_HEALTH_CHECK": "فحص الحالة", "RECONCILIATION": "مطابقة", "TEST_CONNECTION": "اختبار الاتصال", "DELETE_EMPLOYEE": "حذف موظف" },
+  "jobType": { "PULL_ATTENDANCE": "سحب الحضور", "PULL_EMPLOYEES": "سحب الموظفين", "PUSH_EMPLOYEE": "دفع موظف", "PUSH_EMPLOYEES": "دفع الموظفين", "DEVICE_HEALTH_CHECK": "فحص الحالة", "RECONCILIATION": "مطابقة", "TEST_CONNECTION": "اختبار الاتصال", "DELETE_EMPLOYEE": "حذف موظف", "PUSH_ATTENDANCE": "إرسال الحضور" },
   "trigger": { "MANUAL": "يدوي", "SCHEDULED": "مجدول", "WEBHOOK": "ويب هوك", "SYSTEM": "النظام", "DEVICE_PUSH": "دفع من الجهاز" },
   "progress": { "label": "{{done}} / {{total}}", "success": "نجحت", "failed": "فشلت", "pending": "معلّقة" },
   "list": { "allStatuses": "كل الحالات", "allTypes": "كل الأنواع", "device": "الجهاز", "branch": "الفرع", "system": "النظام", "scheduler": "المُجدوِل", "scopeDevices": "{{count}} جهاز", "scopeEmployees": "{{count}} موظف" },

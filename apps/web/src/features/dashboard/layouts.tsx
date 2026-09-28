@@ -4,12 +4,14 @@ import type { DashboardBranchRow, DashboardSummary, DashboardTrendRange, Permiss
 import { fmtMinutes, fmtNumber } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { DashboardSettings } from './theme';
-import { deltaVsLastWeek, pct, sparkValues, type TrendKey, type TrendPoint } from './model';
+import { deltaVsLastWeek, pct, sparkValues, visibleTeamWidgets, type DashboardViewer, type TrendKey, type TrendPoint } from './model';
+import { useWaitingForYou, waitingBreakdown } from '@/features/team/waiting';
 import { KpiTile, type KpiDelta, type KpiTileProps } from './widgets/kpi-tile';
 import { TrendCard } from './widgets/trend-card';
 import { TodayCard } from './widgets/today-card';
 import { BranchesCard } from './widgets/branches-card';
-import { ApprovalsCard } from './widgets/approvals-card';
+import { AwaitingApprovalCard } from './widgets/approvals-card';
+import { TeamLateCard, TeamOnLeaveCard } from './widgets/team-cards';
 import { HolidaysCard } from './widgets/holidays-card';
 import { ActivityCard, RecentAttendanceCard } from './widgets/activity-card';
 import { DevicesCard } from './widgets/devices-card';
@@ -35,6 +37,8 @@ export interface DashboardData {
   settings: DashboardSettings;
   can: (...perms: Permission[]) => boolean;
   rtl: boolean;
+  /** Direct reports and approve keys decide the team widgets (HR portal Prompt 5). */
+  viewer: DashboardViewer;
 }
 
 type TileKey = 'employees' | 'present' | 'absent' | 'onLeave' | 'late' | 'earlyDeparture' | 'overtime' | 'missingPunch' | 'devicesOnline' | 'devicesOffline' | 'syncFailures' | 'pendingApprovals' | 'attendanceRate';
@@ -42,6 +46,9 @@ type TileKey = 'employees' | 'present' | 'absent' | 'onLeave' | 'late' | 'earlyD
 /** Every KPI the layouts can show, computed from the summary and the trend series. */
 function useTiles(d: DashboardData): Record<TileKey, KpiTileProps> {
   const { t } = useTranslation('dashboard');
+  // THE "waiting for you" number (review P2-3): the chip's, the sidebar badge's and the widget's figure; the summary's own
+  // count (the approvals half) only for a member the badge query does not run for — for whom the reasons half is empty
+  const waiting = useWaitingForYou();
   const s = d.summary;
   const loading = d.summaryLoading && !s;
   const employees = s?.employees ?? 0;
@@ -67,7 +74,10 @@ function useTiles(d: DashboardData): Record<TileKey, KpiTileProps> {
     devicesOnline: { label: t('kpi.devicesOnline'), value: n(s?.devicesOnline), icon: Cpu, tone: 'success', loading, percent: percent(s?.devicesOnline, devices), hint: ofDevices(s?.devicesOnline), to: d.can('device.view') ? '/devices' : undefined },
     devicesOffline: { label: t('kpi.devicesOffline'), value: n(s?.devicesOffline), icon: WifiOff, tone: s && s.devicesOffline > 0 ? 'danger' : 'neutral', loading, percent: percent(s?.devicesOffline, devices), hint: ofDevices(s?.devicesOffline), to: d.can('device.view') ? '/devices' : undefined },
     syncFailures: { label: t('kpi.syncFailures'), value: n(s?.syncFailures24h), icon: AlertTriangle, tone: s && s.syncFailures24h > 0 ? 'danger' : 'neutral', loading, to: d.can('device.view') ? '/sync' : undefined },
-    pendingApprovals: { label: t('kpi.pendingApprovals'), value: n(s?.pendingApprovals), icon: ClipboardCheck, tone: 'info', loading, to: d.can('attendance.approve') ? '/approvals' : undefined },
+    // the caller's own queue (review P2-11): every member reaches /approvals — or their team queue (the chip's link)
+    pendingApprovals: waiting.enabled && waiting.loaded
+      ? { label: t('kpi.pendingApprovals'), value: n(waiting.total), icon: ClipboardCheck, tone: 'info', loading: false, hint: waitingBreakdown(t, waiting) || undefined, to: waiting.to }
+      : { label: t('kpi.pendingApprovals'), value: n(s?.pendingApprovals), icon: ClipboardCheck, tone: 'info', loading, to: '/approvals' },
     attendanceRate: { label: t('kpi.attendanceRate'), value: s ? `${pct(s.presentToday, employees)}%` : '—', icon: Gauge, tone: 'present', loading, hint: s ? `${fmtNumber(s.presentToday)} / ${fmtNumber(employees)} ${t('kpi.ofEmployees')}` : undefined, delta: delta('present', true), spark: spark('present') },
   };
 }
@@ -80,18 +90,26 @@ function TileGrid({ tiles, keys, spark, size, className, rtl }: { tiles: Record<
   );
 }
 
+/**
+ * The side rail. The team widgets come from the model's registry (visible only to members with direct reports or an approve
+ * key): "Awaiting your approval" (the member's queue — engine v2 routes corrections, leave and reasons to their approvers),
+ * "Team on leave today" and "Team late today".
+ */
 function Rail({ d, className }: { d: DashboardData; className?: string }) {
-  const { settings, can, summary } = d;
+  const { settings, can } = d;
+  const team = visibleTeamWidgets(d.viewer);
   const items = [
     settings.showHighlight ? <HighlightCard key="highlight" to={can('report.view') ? '/reports' : '/attendance'} /> : null,
-    can('attendance.approve') ? <ApprovalsCard key="approvals" pending={summary?.pendingApprovals} enabled /> : null,
+    team.includes('awaitingApproval') ? <AwaitingApprovalCard key="awaiting" enabled approver={d.viewer.approver} hasReports={d.viewer.hasReports} /> : null,
+    team.includes('teamOnLeave') ? <TeamOnLeaveCard key="team-leave" date={d.date} isToday={d.isToday} /> : null,
+    team.includes('teamLate') ? <TeamLateCard key="team-late" date={d.date} isToday={d.isToday} /> : null,
     can('holiday.view') ? <HolidaysCard key="holidays" date={d.date} enabled /> : null,
     settings.showQuote ? <QuoteCard key="quote" date={d.date} /> : null,
   ].filter(Boolean);
   if (items.length === 0) return null;
   return <aside className={cn('min-w-0 space-y-4', className)}>{items}</aside>;
 }
-const railIsEmpty = (d: DashboardData) => !d.settings.showHighlight && !d.settings.showQuote && !d.can('attendance.approve') && !d.can('holiday.view');
+const railIsEmpty = (d: DashboardData) => !d.settings.showHighlight && !d.settings.showQuote && visibleTeamWidgets(d.viewer).length === 0 && !d.can('holiday.view');
 
 /** Balanced: today's numbers, the trend, who is where, branches and recent activity, with approvals and holidays on the side. */
 export function OverviewLayout({ d }: { d: DashboardData }) {

@@ -139,7 +139,9 @@ export async function createTestApi(name: string): Promise<TestApi> {
     db: tdb.db,
     queue: new PgJobQueue(tdb.db),
     credentials: new DeviceCredentialsStore(new SecretsCipher([{ id: 'k1', material: masterKey }])),
-    providers: { list: () => [] } as unknown as ProviderRegistry,
+    // no provider installed (the whole interface: a partial stub turned the routes that look one up into 500s, which the
+    // route matrix hid while an unscoped limiter answered 429 first — Prompt 10)
+    providers: { get: (key: string) => { throw new Error(`provider ${key} not installed`); }, tryGet: () => undefined, list: () => [], pushProtocols: () => [], pushProtocol: () => undefined } satisfies ProviderRegistry,
     verifyToken: async (token) => {
       // 'user:<uuid>[:aal1|aal2]' — platform admins default to aal2 (MFA) so the platform suites run; tests override explicitly.
       const [kind, sub, aal] = token.split(':');

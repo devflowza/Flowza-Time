@@ -21,6 +21,11 @@ const schema = z.object({
   WORKER_POLL_INTERVAL_MS: intFromEnv(1000),
   SCHEDULER_ENABLED: booleanFromEnv.default(true),
   SCHEDULER_TICK_MS: intFromEnv(15_000),
+  /**
+   * Local development only: lets the Flowza Finance connector call an http:// / private-host base URL (a mock Finance server).
+   * Production keeps the default: https and a public host, validated on save and on every call.
+   */
+  FLOWZA_ALLOW_PRIVATE_EGRESS: booleanFromEnv.default(false),
   EMAIL_PROVIDER: z.enum(['console', 'resend']).default('console'),
   RESEND_API_KEY: z.string().optional(),
   EMAIL_FROM: z.string().default('FlowZa Time <no-reply@flowza.example>'),

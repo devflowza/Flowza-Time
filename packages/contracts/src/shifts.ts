@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ASSIGNMENT_TARGETS, HOLIDAY_TYPES, RECORD_STATUSES, SHIFT_TYPES } from './enums.js';
+import { ASSIGNMENT_TARGETS, EMPLOYMENT_TYPES, HOLIDAY_TYPES, LEAVE_ACCRUALS, LEAVE_APPLICABLE_GENDERS, LEAVE_COUNT_MODES, RECORD_STATUSES, SHIFT_TYPES } from './enums.js';
 import { codeSchema, isoDateSchema, timeSchema, uuidSchema } from './common.js';
 import { shiftBreakSchema } from './attendance.js';
 
@@ -34,7 +34,7 @@ export const shiftPatternInputSchema = z.object({
   sequence: z.array(z.union([
     z.object({ day: z.number().int().min(0), shiftId: uuidSchema }),
     z.object({ day: z.number().int().min(0), off: z.literal(true) }),
-  ])).min(1),
+  ])).min(1).max(366),
   anchorDate: isoDateSchema,
 });
 export type ShiftPatternInput = z.infer<typeof shiftPatternInputSchema>;
@@ -57,7 +57,7 @@ export const holidayInputSchema = z.object({
   endDate: isoDateSchema.nullable().optional(),
   isHalfDay: z.boolean().default(false),
   type: z.enum(HOLIDAY_TYPES).default('PUBLIC'),
-  branchIds: z.array(uuidSchema).nullable().optional(),
+  branchIds: z.array(uuidSchema).max(200).nullable().optional(),
   isTentative: z.boolean().default(false),
 });
 export type HolidayInput = z.infer<typeof holidayInputSchema>;
@@ -78,6 +78,35 @@ export const leaveTypeInputSchema = z.object({
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
   /** Days per calendar year shown as the employee's balance in the self-service portal; null = not tracked. Informs, never blocks. */
   annualAllowanceDays: z.number().min(0).max(366).multipleOf(0.5).nullable().optional(),
+  // ----- leave v2 policy (HR portal Prompt 7); defaults = the behaviour every existing type already had -----
+  /** false: an application is approved at once (the approval request is recorded as auto-approved). */
+  requiresApproval: z.boolean().default(true),
+  /** How a range is charged: working days (weekly offs / holidays free) or every calendar day. */
+  countMode: z.enum(LEAVE_COUNT_MODES).default('working'),
+  /** At most this many days charged by one request (self-service: refused; HR: warned). */
+  maxConsecutiveDays: z.number().int().min(1).max(366).nullable().optional(),
+  /** Calendar days between the application and the first day (self-service: refused below; HR: warned). */
+  advanceNoticeDays: z.number().int().min(0).max(365).default(0),
+  /** Who may take it: everyone, or only employees whose gender on file matches. */
+  applicableGender: z.enum(LEAVE_APPLICABLE_GENDERS).default('all'),
+  /**
+   * Leave v2 review (Finance parity B-41): only employees of these employment types may take it (their employment type on
+   * file); null / absent = every employment type. Checked with the gender by the one applicability rule (portal, API,
+   * unexcused-day charger, year close, allocation generation).
+   */
+  applicableEmploymentTypes: z.array(z.enum(EMPLOYMENT_TYPES)).min(1).max(EMPLOYMENT_TYPES.length)
+    .refine((a) => new Set(a).size === a.length, { message: 'Each employment type once' }).nullable().optional(),
+  /** monthly: the yearly entitlement is earned month by month (accrued to date). */
+  accrual: z.enum(LEAVE_ACCRUALS).default('none'),
+  /** Unused days carried into the next year at year close (0 = none). */
+  carryForwardMaxDays: z.number().min(0).max(366).multipleOf(0.5).default(0),
+  /** Carried-forward days expire after this many months of the new year (null = never). */
+  carryForwardExpiryMonths: z.number().int().min(1).max(24).nullable().optional(),
+  /** Never charged automatically for unexcused days (sick, maternity, Hajj…). */
+  isSpecial: z.boolean().default(false),
+  allowHalfDay: z.boolean().default(true),
+  /** Offered in the self-service apply form. */
+  portalVisible: z.boolean().default(true),
 });
 
 /**

@@ -28,7 +28,9 @@ async function attendanceAgg(trx: Trx, orgId: string, from: string, to: string, 
     sql<string>`count(*) filter (where r.status = 'LEAVE')`.as('onLeave'),
     sql<string>`count(*) filter (where 'EARLY_DEPARTURE' = any(r.flags))`.as('earlyDeparture'),
     sql<string>`coalesce(sum(r.overtime_minutes), 0)`.as('overtimeMinutes'),
-    sql<string>`count(*) filter (where r.status = 'MISSING_PUNCH')`.as('missingPunch'),
+    // The engine never emits the MISSING_PUNCH status: a missing punch is the MISSING_IN / MISSING_OUT flag on a PRESENT,
+    // HALF_DAY or ABSENT record (missingPunchBehavior decides the status). Counting the status showed 0 forever.
+    sql<string>`count(*) filter (where r.flags && array['MISSING_IN', 'MISSING_OUT']::text[])`.as('missingPunch'),
   ]).groupBy(keyExpr).execute();
   return new Map(rows.map((r) => [groupBy ? r.key : 'all', { present: toCount(r.present), absent: toCount(r.absent), late: toCount(r.late), onLeave: toCount(r.onLeave), earlyDeparture: toCount(r.earlyDeparture), overtimeMinutes: toCount(r.overtimeMinutes), missingPunch: toCount(r.missingPunch) }]));
 }
@@ -52,7 +54,7 @@ export async function summary(deps: ApiDeps, actor: Actor, orgId: string, q: { d
                count(*) filter (where r.status = 'LEAVE') as on_leave,
                count(*) filter (where 'EARLY_DEPARTURE' = any(r.flags)) as early_departure,
                coalesce(sum(r.overtime_minutes), 0) as overtime_minutes,
-               count(*) filter (where r.status = 'MISSING_PUNCH') as missing_punch
+               count(*) filter (where r.flags && array['MISSING_IN', 'MISSING_OUT']::text[]) as missing_punch
         from public.attendance_daily_records r, day
         where r.organization_id = ${orgId} and r.attendance_date = day.d ${scoped('r.branch_id')}
       ),
@@ -68,8 +70,9 @@ export async function summary(deps: ApiDeps, actor: Actor, orgId: string, q: { d
              att.present, att.absent, att.late, att.on_leave, att.early_departure, att.overtime_minutes, att.missing_punch,
              dev.online, dev.unknown, dev.total,
              (select count(*) from public.sync_job_items s where s.organization_id = ${orgId} and s.status = 'FAILED' and s.updated_at >= now() - interval '24 hours' ${scoped('s.branch_id')}) as sync_failures,
-             (select count(*) from public.approval_requests a where a.organization_id = ${orgId} and a.status = 'PENDING'
-                ${scope ? sql`and (a.branch_id is null or a.branch_id = any(${scope}::uuid[]))` : sql``}) as pending_approvals
+             -- what is waiting for the caller: exactly the Approvals card's "mine" queue (review P2-11), not every pending
+             -- request the caller can read; it follows the person, not the branch filter
+             (select count(*) from app.approval_actionable_request_ids(${orgId}::uuid)) as pending_approvals
       from day, att, dev`.execute(trx);
     const r = row.rows[0];
     if (!r) throw errors.notFound('Organisation not found.');
@@ -110,7 +113,7 @@ export async function branches(deps: ApiDeps, actor: Actor, orgId: string, q: { 
                count(*) filter (where r.status = 'ABSENT') as absent,
                count(*) filter (where 'LATE' = any(r.flags)) as late,
                count(*) filter (where r.status = 'LEAVE') as on_leave,
-               count(*) filter (where r.status = 'MISSING_PUNCH') as missing_punch
+               count(*) filter (where r.flags && array['MISSING_IN', 'MISSING_OUT']::text[]) as missing_punch
         from public.attendance_daily_records r, day
         where r.organization_id = ${orgId} and r.attendance_date = day.d ${scoped('r.branch_id')}
         group by r.branch_id

@@ -19,6 +19,31 @@ export interface EngineShift {
   graceOutMinutes: number | null;
 }
 
+/**
+ * Facts a self-service punch carries in its raw payload (written by the check-in endpoint, HR portal Prompt 4). The
+ * engine turns them into flags: `channel` → SELF_SERVICE_PUNCH, a punch a REAL fence judged outside → OUTSIDE_GEOFENCE
+ * (see `withinGeofence`), `outOfWindow` → OUT_OF_WINDOW. Every field is optional: device punches carry none of them.
+ */
+export interface EnginePunchPayload {
+  channel?: 'web' | 'mobile' | null;
+  /**
+   * The B-36 truth table (HR portal Prompt 4 review, P2-7): true = inside the fence that judged the punch; false = a real
+   * fence was evaluated with a location and the punch failed it (outside, or a mocked location); null = cannot say (no
+   * location, a fix too imprecise to judge, no fence assigned, geofencing off). When present it alone decides
+   * OUTSIDE_GEOFENCE (only `false` flags); payloads written before it existed fall back to `geofenceVerdict` +
+   * `geofenceReason`.
+   */
+  withinGeofence?: boolean | null;
+  /** Why the verdict was given (`inside`, `outside`, `mock_location`, `location_missing`, `gps_accuracy_too_low`, `geofence_off`, `no_fences_assigned`). */
+  geofenceReason?: string | null;
+  /** Geofence verdict as the check-in endpoint evaluated it (`allowed`, `no_fence`, `flagged`, `logged`, `denied_outside`, `denied_mock`, …). */
+  geofenceVerdict?: string | null;
+  /** The device reported a mocked location. */
+  isMock?: boolean | null;
+  /** The punch fell outside the policy's check-in / check-out window. */
+  outOfWindow?: boolean | null;
+}
+
 export interface EngineEvent {
   id: string;
   punchedAt: string;              // UTC ISO
@@ -27,10 +52,33 @@ export interface EngineEvent {
   verificationMethod: VerificationMethod;
   deviceId: string | null;
   voided: boolean;
+  /** Self-service facts from the raw payload; absent for device punches. */
+  payload?: EnginePunchPayload | null;
 }
 
 export interface EngineHoliday { id: string; name: string; isHalfDay: boolean }
 export interface EngineLeave { id: string; leaveTypeCode: string; isPaid: boolean; isHalfDay: boolean; halfDayPart: 'FIRST_HALF' | 'SECOND_HALF' | null }
+
+/**
+ * An active (unrevoked) `attendance_day_marks` row for the date: a reviewed verdict the engine folds into the record.
+ *   UNEXCUSED  → flag UNEXCUSED, `unexcused = true`
+ *   EXCUSED    → flag EXCUSED; LATE / ABSENT consequences stay on the record but `lopDays = 0`
+ *   PAY_EFFECT → flag PAY_EFFECT_HALF / PAY_EFFECT_FULL (charged to paid leave: no loss of pay)
+ *   LOP        → flags LOP + PAY_EFFECT_HALF / PAY_EFFECT_FULL, `lopDays = payEffectDays`
+ */
+export interface EngineDayMark {
+  id: string;
+  kind: 'UNEXCUSED' | 'EXCUSED' | 'LOP' | 'PAY_EFFECT';
+  /** 0, 0.5 or 1. */
+  payEffectDays: number;
+  source: 'SWEEP' | 'NOTE_REVIEW' | 'HR' | 'SYSTEM';
+}
+
+/** The organisation-level policy switches the engine reads (`organization_settings.attendance`, HR portal Prompt 3). */
+export interface EngineAttendanceSettings {
+  /** Work on a weekly off / holiday: `record` keeps the minutes (status unchanged), `overtime` also counts them as overtime, `ignore` zeroes them. */
+  nonWorkingDay: { action: 'record' | 'ignore' | 'overtime' };
+}
 
 export interface DailyCalculationInput {
   employeeId: string;
@@ -48,6 +96,10 @@ export interface DailyCalculationInput {
   employment: { joiningDate: string; exitDate: string | null; status: 'active' | 'on_leave' | 'suspended' | 'terminated' | 'resigned' };
   /** Employee is subject to Ramadan hours (rules.ramadanMode decides). */
   ramadanEligible?: boolean;
+  /** Active day marks for the date (see EngineDayMark); absent = none. */
+  dayMarks?: EngineDayMark[];
+  /** Organisation policy switches; absent = the contract defaults (non-working-day work is recorded). */
+  settings?: EngineAttendanceSettings;
   now?: string;                    // UTC ISO; used to decide whether a missing OUT is "still working"
   /**
    * Shifts of the previous / next attendance date, used to build the neighbouring punch windows for
@@ -84,6 +136,10 @@ export interface DailyCalculationResult {
   overtimeCategory: 'REGULAR' | 'WEEKLY_OFF' | 'HOLIDAY' | null;
   status: AttendanceStatus;
   flags: AttendanceFlag[];
+  /** Loss-of-pay days (0 / 0.5 / 1) from an LOP mark; 0 when the day is excused or the pay effect was charged to leave. */
+  lopDays: number;
+  /** The day carries an active UNEXCUSED mark. */
+  unexcused: boolean;
   punchCount: number;
   eventIds: string[];              // events attributed to this date (for has_correction etc.)
   trace: CalculationTrace;

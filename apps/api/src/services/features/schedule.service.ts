@@ -1,20 +1,18 @@
 import { sql } from 'kysely';
-import { seedDefaultLeaveTypes } from './leave-defaults.js';
 import type { z } from 'zod';
-import type { AttendanceRuleSetInput, HolidayInput, LeaveRecordInput, ShiftAssignmentInput, ShiftInput, ShiftPatternInput, UpdateLeaveRecordInput, holidayCalendarInputSchema, leaveTypeInputSchema } from '@flowza/contracts';
-import { emitDomainEvent, type Trx } from '@flowza/database';
+import type { AttendanceRuleSetInput, HolidayInput, ShiftAssignmentInput, ShiftInput, ShiftPatternInput, holidayCalendarInputSchema } from '@flowza/contracts';
+import type { Trx } from '@flowza/database';
 import { resolveShift, resolveRuleSet, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
-import { type Actor, audit, diffObjects, runUser, withSystemScope } from '../../lib/service.js';
+import { type Actor, audit, diffObjects, runUser } from '../../lib/service.js';
 import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
-import { isoDate, isoDateOrNull, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
+import { isoDate, isoDateOrNull, isoDateTime, jsonArray, jsonObject } from '../../lib/mappers.js';
 import { enqueueRecalculation, orgToday } from './recalc.js';
 import { dv, today } from './sql-helpers.js';
 
 type HolidayCalendarInput = z.infer<typeof holidayCalendarInputSchema>;
-type LeaveTypeInput = z.infer<typeof leaveTypeInputSchema>;
 
 const minDate = (a: string, b: string) => (a < b ? a : b);
 /** Recompute the affected range only when the change touches dates up to today (future dates recompute when they arrive). */
@@ -391,156 +389,8 @@ export async function deleteHoliday(deps: ApiDeps, actor: Actor, orgId: string, 
 
 // ----- leave -----------------------------------------------------------------------------------------------------------------
 
-export interface LeaveTypeDto { id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; treatAsPresent: boolean; color: string | null; annualAllowanceDays: number | null; status: string; createdAt: string }
-const toLeaveTypeDto = (t: { id: string; code: string; name: string; nameAr: string | null; isPaid: boolean; treatAsPresent: boolean; color: string | null; annualAllowanceDays: string | number | null; status: string; createdAt: Date }): LeaveTypeDto => ({ id: t.id, code: t.code, name: t.name, nameAr: t.nameAr, isPaid: t.isPaid, treatAsPresent: t.treatAsPresent, color: t.color, annualAllowanceDays: numberOrNull(t.annualAllowanceDays), status: t.status, createdAt: isoDateTime(t.createdAt) });
-export async function listLeaveTypes(deps: ApiDeps, actor: Actor, orgId: string): Promise<LeaveTypeDto[]> {
-  requirePermission(actor.principal, orgId, 'leave.view');
-  return runUser(deps.db, actor, async (trx) => (await trx.selectFrom('leaveTypes').selectAll().where('organizationId', '=', orgId).orderBy('name').execute()).map(toLeaveTypeDto));
-}
-/** POST /leave-types/seed-defaults — adds the default set's missing codes; never touches existing types. */
-export async function seedLeaveTypes(deps: ApiDeps, actor: Actor, orgId: string): Promise<{ created: string[]; leaveTypes: LeaveTypeDto[] }> {
-  requirePermission(actor.principal, orgId, 'leave.manage');
-  return runUser(deps.db, actor, async (trx) => {
-    const created = await seedDefaultLeaveTypes(trx, orgId);
-    if (created.length) await audit(trx, actor, orgId, 'leave_type.seeded', 'leave_type', { newValue: { created } });
-    const leaveTypes = (await trx.selectFrom('leaveTypes').selectAll().where('organizationId', '=', orgId).orderBy('name').execute()).map(toLeaveTypeDto);
-    return { created, leaveTypes };
-  });
-}
-export async function createLeaveType(deps: ApiDeps, actor: Actor, orgId: string, input: LeaveTypeInput): Promise<LeaveTypeDto> {
-  requirePermission(actor.principal, orgId, 'leave.manage');
-  return runUser(deps.db, actor, async (trx) => {
-    const row = await trx.insertInto('leaveTypes').values({ organizationId: orgId, code: input.code, name: input.name, nameAr: input.nameAr ?? null, isPaid: input.isPaid, treatAsPresent: input.treatAsPresent, color: input.color ?? null, annualAllowanceDays: input.annualAllowanceDays ?? null }).returningAll().executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'leave_type.created', 'leave_type', { entityId: row.id, newValue: input });
-    return toLeaveTypeDto(row);
-  });
-}
-export async function updateLeaveType(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<LeaveTypeInput> & { status?: string }): Promise<LeaveTypeDto> {
-  requirePermission(actor.principal, orgId, 'leave.manage');
-  return runUser(deps.db, actor, async (trx) => {
-    const before = await trx.selectFrom('leaveTypes').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
-    if (!before) throw errors.notFound('Leave type', id);
-    const patch: Record<string, unknown> = {}; for (const [k, v] of Object.entries(input)) if (v !== undefined) patch[k] = v;
-    if (Object.keys(patch).length) await trx.updateTable('leaveTypes').set(patch as never).where('id', '=', id).execute();
-    const after = await trx.selectFrom('leaveTypes').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'leave_type.updated', 'leave_type', { entityId: id, oldValue: toLeaveTypeDto(before), newValue: toLeaveTypeDto(after) });
-    if (before.isPaid !== after.isPaid) {
-      const earliest = await trx.selectFrom('leaveRecords').select((eb) => eb.fn.min('startDate').as('from')).where('leaveTypeId', '=', id).where('status', '=', 'APPROVED').executeTakeFirst();
-      if (earliest?.from) await recalcIfPast(deps, trx, actor, orgId, isoDate(earliest.from as Date), null, { reason: `leave type ${after.code} paid flag changed` });
-    }
-    return toLeaveTypeDto(after);
-  });
-}
-export async function deleteLeaveType(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
-  requirePermission(actor.principal, orgId, 'leave.manage');
-  return runUser(deps.db, actor, async (trx) => {
-    const t = await trx.selectFrom('leaveTypes').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
-    if (!t) throw errors.notFound('Leave type', id);
-    const used = toCount((await trx.selectFrom('leaveRecords').select((eb) => eb.fn.countAll().as('n')).where('leaveTypeId', '=', id).executeTakeFirst())?.n);
-    if (used > 0) { await trx.updateTable('leaveTypes').set({ status: 'archived' }).where('id', '=', id).execute(); await audit(trx, actor, orgId, 'leave_type.archived', 'leave_type', { entityId: id, oldValue: { code: t.code }, reason: `${used} leave records reference it` }); return; }
-    await trx.deleteFrom('leaveTypes').where('id', '=', id).execute();
-    await audit(trx, actor, orgId, 'leave_type.deleted', 'leave_type', { entityId: id, oldValue: { code: t.code } });
-  });
-}
-
-export interface LeaveRecordDto { id: string; employeeId: string; employeeNumber?: string; employeeName?: string; leaveTypeId: string; leaveTypeName?: string; branchId: string | null; startDate: string; endDate: string; isHalfDay: boolean; halfDayPart: string | null; reason: string | null; status: string; source: string; decisionNote: string | null; approvedBy: string | null; approvedAt: string | null; createdBy: string | null; createdAt: string; updatedAt: string }
-type LeaveRow = { id: string; employeeId: string; employeeNumber?: string; employeeName?: string; leaveTypeId: string; leaveTypeName?: string; branchId: string | null; startDate: Date | string; endDate: Date | string; isHalfDay: boolean; halfDayPart: string | null; reason: string | null; status: string; source: string; decisionNote: string | null; approvedBy: string | null; approvedAt: Date | null; createdBy: string | null; createdAt: Date; updatedAt: Date };
-const toLeaveDto = (r: LeaveRow): LeaveRecordDto => ({ id: r.id, employeeId: r.employeeId, ...(r.employeeNumber ? { employeeNumber: r.employeeNumber } : {}), ...(r.employeeName ? { employeeName: r.employeeName } : {}), leaveTypeId: r.leaveTypeId, ...(r.leaveTypeName ? { leaveTypeName: r.leaveTypeName } : {}), branchId: r.branchId, startDate: isoDate(r.startDate), endDate: isoDate(r.endDate), isHalfDay: r.isHalfDay, halfDayPart: r.halfDayPart, reason: r.reason, status: r.status, source: r.source, decisionNote: r.decisionNote, approvedBy: r.approvedBy, approvedAt: isoDateTimeOrNull(r.approvedAt), createdBy: r.createdBy, createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt) });
-function leaveQuery(trx: Trx, orgId: string) {
-  return trx.selectFrom('leaveRecords as l').innerJoin('employees as e', 'e.id', 'l.employeeId').innerJoin('leaveTypes as t', 't.id', 'l.leaveTypeId').where('l.organizationId', '=', orgId);
-}
-const LEAVE_COLUMNS = ['l.id', 'l.employeeId', 'e.employeeNumber', 'e.displayName as employeeName', 'l.leaveTypeId', 't.name as leaveTypeName', 'l.branchId', 'l.startDate', 'l.endDate', 'l.isHalfDay', 'l.halfDayPart', 'l.reason', 'l.status', 'l.source', 'l.decisionNote', 'l.approvedBy', 'l.approvedAt', 'l.createdBy', 'l.createdAt', 'l.updatedAt'] as const;
-
-export async function listLeaveRecords(deps: ApiDeps, actor: Actor, orgId: string, q: { page: number; pageSize: number; employeeId?: string; branchId?: string; leaveTypeId?: string; status?: string; from?: string; to?: string }) {
-  const grant = requirePermission(actor.principal, orgId, 'leave.view');
-  const scope = branchFilter(grant, q.branchId);
-  return runUser(deps.db, actor, async (trx) => {
-    let base = leaveQuery(trx, orgId);
-    if (scope) base = base.where('l.branchId', 'in', scope);
-    if (q.employeeId) base = base.where('l.employeeId', '=', q.employeeId);
-    if (q.leaveTypeId) base = base.where('l.leaveTypeId', '=', q.leaveTypeId);
-    if (q.status) base = base.where('l.status', '=', q.status as never);
-    if (q.from) base = base.where('l.endDate', '>=', dv(q.from));
-    if (q.to) base = base.where('l.startDate', '<=', dv(q.to));
-    const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
-    const page = pageOf(q);
-    const rows = (await base.select(LEAVE_COLUMNS).orderBy('l.startDate', 'desc').orderBy('l.id').limit(page.pageSize).offset(page.offset).execute()) as LeaveRow[];
-    return { data: rows.map(toLeaveDto), total };
-  });
-}
-/** Any day of [start, end] inside an active lock for the employee's branch (or an organisation-wide lock) → PERIOD_LOCKED. */
-export async function assertLeaveRangeUnlocked(trx: Trx, orgId: string, branchId: string | null, start: string, end: string): Promise<void> {
-  const lock = await trx.selectFrom('attendancePeriodLocks').select('id').where('organizationId', '=', orgId).where('unlockedAt', 'is', null)
-    .where('periodStart', '<=', dv(end)).where('periodEnd', '>=', dv(start))
-    .where((eb) => branchId ? eb.or([eb('branchId', 'is', null), eb('branchId', '=', branchId)]) : eb('branchId', 'is', null)).executeTakeFirst();
-  if (lock) throw errors.periodLocked('The period is locked; unlock it before changing leave in this range.');
-}
-export async function assertNoLeaveOverlap(trx: Trx, orgId: string, employeeId: string, start: string, end: string, excludeId?: string): Promise<void> {
-  let q = trx.selectFrom('leaveRecords').select('id').where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('status', 'in', ['PENDING', 'APPROVED']).where('startDate', '<=', dv(end)).where('endDate', '>=', dv(start));
-  if (excludeId) q = q.where('id', '!=', excludeId);
-  const clash = await q.executeTakeFirst();
-  if (clash) throw errors.conflict('The employee already has leave in this range.', { leaveRecordId: clash.id });
-}
-export async function createLeaveRecord(deps: ApiDeps, actor: Actor, orgId: string, input: LeaveRecordInput): Promise<LeaveRecordDto & { recalculationJobId: string | null }> {
-  const grant = requirePermission(actor.principal, orgId, 'leave.manage');
-  if (input.isHalfDay && input.startDate !== input.endDate) throw errors.validation('Half-day leave must be a single day.', { issues: [{ path: 'endDate', message: 'Must equal startDate' }] });
-  return runUser(deps.db, actor, async (trx) => {
-    const emp = await trx.selectFrom('employees').select(['id', 'branchId']).where('organizationId', '=', orgId).where('id', '=', input.employeeId).where('deletedAt', 'is', null).executeTakeFirst();
-    if (!emp) throw errors.validation('Employee not found.', { issues: [{ path: 'employeeId', message: 'Unknown employee' }] });
-    requireBranchAccess(grant, emp.branchId);
-    if (!(await trx.selectFrom('leaveTypes').select('id').where('organizationId', '=', orgId).where('id', '=', input.leaveTypeId).where('status', '=', 'active').executeTakeFirst())) throw errors.validation('Leave type not found or archived.', { issues: [{ path: 'leaveTypeId', message: 'Unknown leave type' }] });
-    await assertLeaveRangeUnlocked(trx, orgId, emp.branchId, input.startDate, input.endDate);
-    await assertNoLeaveOverlap(trx, orgId, input.employeeId, input.startDate, input.endDate);
-    const row = await trx.insertInto('leaveRecords').values({ organizationId: orgId, employeeId: input.employeeId, leaveTypeId: input.leaveTypeId, branchId: emp.branchId, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart: input.isHalfDay ? input.halfDayPart ?? 'FIRST_HALF' : null, reason: input.reason ?? null, status: 'APPROVED', approvedBy: actor.userId, approvedAt: new Date(), createdBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'leave.recorded', 'leave_record', { entityId: row.id, branchId: emp.branchId, newValue: input });
-    const recalc = await recalcIfPast(deps, trx, actor, orgId, input.startDate, input.endDate, { branchId: emp.branchId, employeeIds: [input.employeeId], reason: 'leave recorded' });
-    const saved = (await leaveQuery(trx, orgId).select(LEAVE_COLUMNS).where('l.id', '=', row.id).executeTakeFirstOrThrow()) as LeaveRow;
-    return { ...toLeaveDto(saved), recalculationJobId: recalc?.jobId ?? null };
-  });
-}
-export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: UpdateLeaveRecordInput): Promise<LeaveRecordDto & { recalculationJobId: string | null }> {
-  const grant = requirePermission(actor.principal, orgId, 'leave.manage');
-  return runUser(deps.db, actor, async (trx) => {
-    const before = (await leaveQuery(trx, orgId).select(LEAVE_COLUMNS).where('l.id', '=', id).executeTakeFirst()) as LeaveRow | undefined;
-    if (!before) throw errors.notFound('Leave record', id);
-    requireBranchAccess(grant, before.branchId);
-    const start = input.startDate ?? isoDate(before.startDate); const end = input.endDate ?? isoDate(before.endDate);
-    if (end < start) throw errors.validation('endDate must be on/after startDate.', { issues: [{ path: 'endDate', message: 'Before startDate' }] });
-    // both the range being left and the range being entered must be open (HR unlocks first, then edits)
-    await assertLeaveRangeUnlocked(trx, orgId, before.branchId, isoDate(before.startDate), isoDate(before.endDate));
-    await assertLeaveRangeUnlocked(trx, orgId, before.branchId, start, end);
-    const status = input.status ?? before.status;
-    // separation of duties: nobody decides on their own leave request (the owner decides on HR's own requests)
-    if (before.status === 'PENDING' && (status === 'APPROVED' || status === 'REJECTED') && grant.employeeId === before.employeeId) throw errors.forbidden('You cannot approve or reject your own leave request.');
-    if (status === 'APPROVED' || status === 'PENDING') await assertNoLeaveOverlap(trx, orgId, before.employeeId, start, end, id);
-    const patch: Record<string, unknown> = {}; for (const [k, v] of Object.entries(input)) if (v !== undefined) patch[k] = v;
-    if (input.status === 'APPROVED' && before.status !== 'APPROVED') { patch.approvedBy = actor.userId; patch.approvedAt = new Date(); }
-    if (Object.keys(patch).length) await trx.updateTable('leaveRecords').set(patch as never).where('id', '=', id).execute();
-    const after = (await leaveQuery(trx, orgId).select(LEAVE_COLUMNS).where('l.id', '=', id).executeTakeFirstOrThrow()) as LeaveRow;
-    await audit(trx, actor, orgId, 'leave.updated', 'leave_record', { entityId: id, branchId: before.branchId, ...diffObjects(toLeaveDto(before) as unknown as Record<string, unknown>, toLeaveDto(after) as unknown as Record<string, unknown>) });
-    // A decision on a request tells the employee (in-app notification to the user linked to the employee record).
-    if (before.status === 'PENDING' && (after.status === 'APPROVED' || after.status === 'REJECTED')) {
-      const requester = await withSystemScope(trx, orgId, (t) => t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', before.employeeId).where('status', '=', 'active').executeTakeFirst());
-      if (requester) await emitDomainEvent(trx, { organizationId: orgId, eventType: after.status === 'APPROVED' ? 'leave.approved' : 'leave.rejected', aggregateType: 'leave_record', aggregateId: id, payload: { userId: requester.userId, employeeId: before.employeeId, leaveTypeName: after.leaveTypeName ?? null, startDate: isoDate(after.startDate), endDate: isoDate(after.endDate), decisionNote: after.decisionNote }, actorUserId: actor.userId, requestId: actor.requestId });
-    }
-    const recalc = await recalcIfPast(deps, trx, actor, orgId, minDate(isoDate(before.startDate), start), [isoDate(before.endDate), end].sort().pop() ?? end, { branchId: before.branchId, employeeIds: [before.employeeId], reason: 'leave changed' });
-    return { ...toLeaveDto(after), recalculationJobId: recalc?.jobId ?? null };
-  });
-}
-export async function deleteLeaveRecord(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<{ recalculationJobId: string | null }> {
-  const grant = requirePermission(actor.principal, orgId, 'leave.manage');
-  return runUser(deps.db, actor, async (trx) => {
-    const before = (await leaveQuery(trx, orgId).select(LEAVE_COLUMNS).where('l.id', '=', id).executeTakeFirst()) as LeaveRow | undefined;
-    if (!before) throw errors.notFound('Leave record', id);
-    requireBranchAccess(grant, before.branchId);
-    if (before.status === 'CANCELLED') throw errors.invalidState('The leave record is already cancelled.');
-    await assertLeaveRangeUnlocked(trx, orgId, before.branchId, isoDate(before.startDate), isoDate(before.endDate));
-    await trx.updateTable('leaveRecords').set({ status: 'CANCELLED' }).where('id', '=', id).execute();
-    await audit(trx, actor, orgId, 'leave.cancelled', 'leave_record', { entityId: id, branchId: before.branchId, oldValue: toLeaveDto(before) });
-    const recalc = before.status === 'APPROVED' ? await recalcIfPast(deps, trx, actor, orgId, isoDate(before.startDate), isoDate(before.endDate), { branchId: before.branchId, employeeIds: [before.employeeId], reason: 'leave cancelled' }) : null;
-    return { recalculationJobId: recalc?.jobId ?? null };
-  });
-}
+// Leave v2 (HR portal Prompt 7) lives in services/leave; the Leave page routes keep importing it from here.
+export { assertLeaveRangeUnlocked, assertNoLeaveOverlap, createLeaveRecord, createLeaveType, deleteLeaveRecord, deleteLeaveType, listLeaveRecords, listLeaveTypes, seedLeaveTypes, updateLeaveRecord, updateLeaveType, type LeaveRecordDto, type LeaveTypeDto } from '../leave/hr-leave.service.js';
 
 // ----- rule sets -------------------------------------------------------------------------------------------------------------
 

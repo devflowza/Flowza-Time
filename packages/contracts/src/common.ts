@@ -53,7 +53,7 @@ export const contactSchema = z.object({
   name: z.string().max(200).optional(),
   email: emailSchema.optional(),
   phone: phoneSchema.optional(),
-  website: z.url().optional(),
+  website: z.url().max(500).optional(),
 }).partial();
 export type Contact = z.infer<typeof contactSchema>;
 

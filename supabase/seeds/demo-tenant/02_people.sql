@@ -1,8 +1,10 @@
 -- FlowZa Time · demo tenant seed · Majan Gulf Trading & Contracting LLC · step 2/5: logins, employees, teams
 --
 -- Logins (all with password Test@1234): acme@flowza.ai (owner, existing) · orgadmin@ · hradmin@ · hruser@ · payroll@ ·
--- attadmin@ · brmanager@ (Sohar only) · employee@flowza.ai. Auth rows are written directly with a bcrypt hash — the
--- same shape Supabase Auth itself writes — so this file must run on the admin connection.
+-- attadmin@ · brmanager@ (Sohar only) · employee@flowza.ai · manager@flowza.ai (Line Manager = MG-1010 Arun Menon, Priya's
+-- manager) · auditor@flowza.ai (Auditor = MG-1007 Suresh Pillai). Auth rows are written directly with a bcrypt hash — the
+-- same shape Supabase Auth itself writes — so this file must run on the admin connection. Needs migration 20260928000100
+-- (manager/auditor system roles, employees.secondary_manager_employee_id).
 set client_min_messages = warning;
 
 create or replace function pg_temp.sid(p text) returns uuid language sql immutable as
@@ -29,7 +31,9 @@ begin
       ('payroll@flowza.ai',   'Maryam Al Siyabi'),
       ('attadmin@flowza.ai',  'Zainab Al Zadjali'),
       ('brmanager@flowza.ai', 'Said Al Rawahi'),
-      ('employee@flowza.ai',  'Priya Sharma')
+      ('employee@flowza.ai',  'Priya Sharma'),
+      ('manager@flowza.ai',   'Arun Menon'),
+      ('auditor@flowza.ai',   'Suresh Pillai')
     ) as v(email, full_name)
   loop
     insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, raw_app_meta_data, raw_user_meta_data, is_sso_user, is_anonymous,
@@ -76,10 +80,10 @@ begin
     ('MG-1004','Aisha','Salim','Al Rawahi','عائشة بنت سالم الرواحية','female','1994-06-30','OM','hruser@flowza.ai','+968 9944 5004','2022-02-13',null,'active','full_time','MCT-HQ','HR','HRE','MG-1003','1004','0100000004',true,false,true,'O-','single','Salim Al Rawahi','+968 9944 5104','father','S2'),
     ('MG-1005','Rajesh','Kumar','Nair','راجيش كومار ناير','male','1975-11-08','IN','rajesh.nair@majangulf.om','+968 9555 6005','2017-11-05',null,'active','full_time','MCT-HQ','FIN','FM','MG-1002','1005','0100000005',true,true,false,'AB+','married','Lakshmi Nair','+968 9555 6105','spouse','M1'),
     ('MG-1006','Maryam','Hamed','Al Siyabi','مريم بنت حمد السيابية','female','1990-03-12','OM','payroll@flowza.ai','+968 9966 7006','2021-04-18',null,'active','full_time','MCT-HQ','PAY','PAYS','MG-1005','1006','0100000006',true,true,true,'A-','married','Hamed Al Siyabi','+968 9966 7106','father','S3'),
-    ('MG-1007','Suresh',null,'Pillai','سوريش بيلاي','male','1981-07-19','IN','suresh.pillai@majangulf.om','+968 9577 8007','2020-01-12',null,'active','full_time','MCT-HQ','FIN','SACC','MG-1005','1007','0100000007',true,false,false,'B-','married','Anitha Pillai','+91 98470 22107','spouse','S3'),
+    ('MG-1007','Suresh',null,'Pillai','سوريش بيلاي','male','1981-07-19','IN','auditor@flowza.ai','+968 9577 8007','2020-01-12',null,'active','full_time','MCT-HQ','FIN','SACC','MG-1005','1007','0100000007',true,false,false,'B-','married','Anitha Pillai','+91 98470 22107','spouse','S3'),
     ('MG-1008','Noor','Yousuf','Al Kindi','نور بنت يوسف الكندية','female','1997-12-05','OM','noor.alkindi@majangulf.om','+968 9788 9008','2023-08-20',null,'active','full_time','MCT-HQ','FIN','ACC','MG-1005','1008','0100000008',true,true,true,'O+','single','Yousuf Al Kindi','+968 9788 9108','father','S2'),
     ('MG-1009','Imran','Tariq','Khan','عمران طارق خان','male','1979-02-27','PK','imran.khan@majangulf.om','+968 9199 1009','2018-10-07',null,'active','full_time','MCT-HQ','IT','ITM','MG-1002','1009','0100000009',true,true,true,'A+','married','Sadia Khan','+968 9199 1109','spouse','M1'),
-    ('MG-1010','Arun','Vijay','Menon','أرون فيجاي مينون','male','1986-05-14','IN','arun.menon@majangulf.om','+968 9211 2010','2019-02-24',null,'active','full_time','MCT-HQ','IT','TL','MG-1009','1010','0100000010',true,true,false,'O+','married','Kavya Menon','+968 9211 2110','spouse','S4'),
+    ('MG-1010','Arun','Vijay','Menon','أرون فيجاي مينون','male','1986-05-14','IN','manager@flowza.ai','+968 9211 2010','2019-02-24',null,'active','full_time','MCT-HQ','IT','TL','MG-1009','1010','0100000010',true,true,false,'O+','married','Kavya Menon','+968 9211 2110','spouse','S4'),
     ('MG-1011','Salim','Hilal','Al Hinai','سالم بن هلال الهنائي','male','1991-08-23','OM','salim.alhinai@majangulf.om','+968 9322 3011','2020-08-09',null,'active','full_time','MCT-HQ','IT','SSE','MG-1010','1011','0100000011',true,true,true,'B+','married','Hilal Al Hinai','+968 9322 3111','father','S3'),
     ('MG-1012','Priya','Ramesh','Sharma','بريا راميش شارما','female','1995-10-02','IN','employee@flowza.ai','+968 9433 4012','2022-05-15',null,'active','full_time','MCT-HQ','IT','SE','MG-1010','1012','0100000012',true,true,false,'A+','single','Ramesh Sharma','+91 98200 44012','father','S2'),
     ('MG-1013','Mohammed','Abdullah','Al Farsi','محمد بن عبدالله الفارسي','male','1998-01-17','OM','mohammed.alfarsi@majangulf.om','+968 9544 5013','2024-01-07',null,'active','full_time','MCT-HQ','IT','SE','MG-1010','1013','0100000013',true,false,true,'O-','married','Abdullah Al Farsi','+968 9544 5113','father','S1'),
@@ -231,6 +235,12 @@ begin
   select pg_temp.sid('epi:' || e.employee_number), org, e.id, 'zkteco_push', e.device_user_id, e.card_number from public.employees e where e.organization_id = org
   on conflict (organization_id, employee_id, provider_key) do update set device_user_id = excluded.device_user_id, card_number = excluded.card_number, updated_at = now();
 
+  -- Secondary (dotted-line) managers, migration 20260928000100: the IT-DEV engineers also report to the IT Manager
+  -- (Imran Khan, the team lead's own manager) and the Sohar sales executives to the Sales Manager at head office.
+  update public.employees e set secondary_manager_employee_id = pg_temp.sid('emp:' || v.mgr), updated_at = now()
+  from (values ('MG-1011', 'MG-1009'), ('MG-1012', 'MG-1009'), ('MG-1013', 'MG-1009'), ('MG-2002', 'MG-1019'), ('MG-2003', 'MG-1019')) as v(num, mgr)
+  where e.organization_id = org and e.employee_number = v.num and e.secondary_manager_employee_id is distinct from pg_temp.sid('emp:' || v.mgr);
+
   ---------------------------------------------------------------------------------------------------------------------
   -- 5. Memberships (role + branch scope + linked employee) and notification preferences
   ---------------------------------------------------------------------------------------------------------------------
@@ -245,7 +255,9 @@ begin
     ('payroll@flowza.ai',   '10000000-0000-0000-0000-000000000007', true,  'MG-1006'),
     ('attadmin@flowza.ai',  '10000000-0000-0000-0000-000000000006', true,  'MG-1016'),
     ('brmanager@flowza.ai', '10000000-0000-0000-0000-000000000005', false, 'MG-2001'),
-    ('employee@flowza.ai',  '10000000-0000-0000-0000-000000000008', true,  'MG-1012')
+    ('employee@flowza.ai',  '10000000-0000-0000-0000-000000000008', true,  'MG-1012'),
+    ('manager@flowza.ai',   '10000000-0000-0000-0000-000000000009', true,  'MG-1010'),
+    ('auditor@flowza.ai',   '10000000-0000-0000-0000-000000000010', true,  'MG-1007')
   ) as m(email, role_id, all_br, num)
   on conflict (organization_id, user_id) do update set role_id = excluded.role_id, status = 'active', all_branches = excluded.all_branches, employee_id = excluded.employee_id, joined_at = coalesce(org_memberships.joined_at, excluded.joined_at), updated_at = now();
 

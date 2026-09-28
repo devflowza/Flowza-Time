@@ -14,6 +14,7 @@ import { useMonthlyAttendance } from '../api';
 import { shiftMonth } from '../status';
 import { MonthlyGrid, MonthlyLegend } from './monthly-grid';
 import { RecordDialog, type CorrectionPreset } from './record-dialog';
+import { useWorkspaceDialogs } from './workspace-dialogs';
 
 const PAGE_SIZES = [25, 50, 100];
 
@@ -34,6 +35,7 @@ export function MonthlyView({ onRequestCorrection }: { onRequestCorrection?: (pr
   const departments = useDepartmentOptions(f['branchId']);
   const employees = useEmployeeOptions();
   const [recordId, setRecordId] = useState<string | null>(null);
+  const { openEdit, openTimeline, dialogs } = useWorkspaceDialogs();
   const hasFilters = ['employeeId', 'branchId', 'departmentId', 'search'].some((k) => !!f[k]);
   const setMonth = (m: string) => table.update({ filters: { month: m === currentMonth ? '' : m } });
   const days = q.data?.meta.days ?? [];
@@ -86,7 +88,13 @@ export function MonthlyView({ onRequestCorrection }: { onRequestCorrection?: (pr
           <Button variant="outline" size="sm" disabled={table.state.page >= totalPages} onClick={() => table.setPage(table.state.page + 1)}>{tc('common.next')}</Button>
         </div>
       </div>
-      <RecordDialog recordId={recordId} onClose={() => setRecordId(null)} onRequestCorrection={onRequestCorrection ? (p) => { setRecordId(null); onRequestCorrection(p); } : undefined} />
+      <RecordDialog
+        recordId={recordId} onClose={() => setRecordId(null)}
+        onRequestCorrection={onRequestCorrection ? (p) => { setRecordId(null); onRequestCorrection(p); } : undefined}
+        onOpenTimeline={(d) => { setRecordId(null); openTimeline(d); }}
+        onEditRecord={openEdit ? (p) => { setRecordId(null); openEdit(p); } : undefined}
+      />
+      {dialogs}
     </div>
   );
 }

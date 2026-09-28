@@ -62,7 +62,9 @@ describe('self-service leave', () => {
     const r = await h.request('GET', `${base()}/me/leave`, { token: f.employeeUser });
     expect(r.status).toBe(200);
     expect(r.body.data.types.map((x: { code: string }) => x.code)).toEqual(['AL']);
-    expect(r.body.data.balances).toEqual([{ leaveTypeId: annualId, allowanceDays: 30, usedDays: 0, pendingDays: 0, remainingDays: 30 }]);
+    // leave v2 adds the full balance to each entry; the pre-v2 fields keep their names and meaning (backward compatibility)
+    expect(r.body.data.balances).toHaveLength(1);
+    expect(r.body.data.balances[0]).toMatchObject({ leaveTypeId: annualId, allowanceDays: 30, usedDays: 0, pendingDays: 0, remainingDays: 30 });
   });
 
   let requestId: string;
@@ -127,6 +129,33 @@ describe('self-service leave', () => {
     expect(r.body.data.upcomingLeave.map((x: { id: string }) => x.id)).toContain(requestId);
     expect(r.body.data.balances[0]).toMatchObject({ code: 'AL', allowanceDays: 30 });
     expect(r.body.data.pendingLeave).toBe(0);
+  });
+
+  // Prompt 11 UI walk: the portal names types and holidays in Arabic when the organisation gave them an Arabic name, so every
+  // portal DTO that carries a type's or a holiday's name carries the Arabic one beside it
+  it('carries the Arabic names of leave types and holidays to the portal', async () => {
+    expect((await h.request('PATCH', `${base()}/leave-types/${annualId}`, { token: f.hrAdmin, body: { nameAr: 'إجازة سنوية' } })).status).toBe(200);
+    const mine = await h.request('GET', `${base()}/me/leave`, { token: f.employeeUser });
+    expect(mine.body.data.types[0]).toMatchObject({ name: 'Annual Leave', nameAr: 'إجازة سنوية' });
+    expect(mine.body.data.records.find((x: { id: string }) => x.id === requestId)).toMatchObject({ leaveTypeName: 'Annual Leave', leaveTypeNameAr: 'إجازة سنوية' });
+    const home = await h.request('GET', `${base()}/me/overview`, { token: f.employeeUser });
+    expect(home.body.data.balances[0]).toMatchObject({ name: 'Annual Leave', nameAr: 'إجازة سنوية' });
+    expect(home.body.data.upcomingLeave.find((x: { id: string }) => x.id === requestId)).toMatchObject({ leaveTypeNameAr: 'إجازة سنوية' });
+    // the manager's view on /my: the team's upcoming leave
+    const team = await h.request('GET', `${base()}/me/team/leave`, { token: f.managerUser });
+    expect(team.status).toBe(200);
+    expect(team.body.data.find((x: { id: string }) => x.id === requestId)).toMatchObject({ leaveTypeName: 'Annual Leave', leaveTypeNameAr: 'إجازة سنوية' });
+    // the month calendar: the approved leave by date, and the holidays with their Arabic names where given
+    const month = await h.request('GET', `${base()}/me/attendance?month=${start.slice(0, 7)}`, { token: f.employeeUser });
+    expect(month.body.data.leaveByDate[start]).toMatchObject({ leaveTypeName: 'Annual Leave', leaveTypeNameAr: 'إجازة سنوية' });
+    const cal = await h.request('POST', `${base()}/holiday-calendars`, { token: f.hrAdmin, body: { name: 'Portal names', isDefault: true } });
+    expect(cal.status).toBe(201);
+    for (const body of [{ name: 'National Day', nameAr: 'العيد الوطني', date: '2031-11-18', endDate: '2031-11-19' }, { name: 'Company Day', date: '2031-11-25' }]) {
+      expect((await h.request('POST', `${base()}/holidays`, { token: f.hrAdmin, body: { calendarId: cal.body.data.id, ...body } })).status).toBe(201);
+    }
+    const nov = await h.request('GET', `${base()}/me/attendance?month=2031-11`, { token: f.employeeUser });
+    expect(nov.body.data.holidaysByDate).toEqual({ '2031-11-18': 'National Day', '2031-11-19': 'National Day', '2031-11-25': 'Company Day' });
+    expect(nov.body.data.holidaysByDateAr).toEqual({ '2031-11-18': 'العيد الوطني', '2031-11-19': 'العيد الوطني' });
   });
 });
 

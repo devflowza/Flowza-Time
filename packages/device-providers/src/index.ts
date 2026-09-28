@@ -4,7 +4,7 @@ export * from './definition.js';
 export * from './registry.js';
 export * from './throttle.js';
 export * from './conformance.js';
-export * from './testing.js';
+export * from './egress.js';
 export * from './protocol-utils.js';
 export * from './providers/mock/definition.js';
 export * from './providers/mock/stream.js';
@@ -15,3 +15,7 @@ export * from './providers/zkteco/definition.js';
 export * from './providers/zkteco/push-protocol.js';
 export * from './providers/zkteco/provider.js';
 export * from './providers/placeholders.js';
+export * from './providers/flowza-finance/definition.js';
+export * from './providers/flowza-finance/mapping.js';
+export * from './providers/flowza-finance/provider.js';
+// test helpers (createTestProviderContext, the mock Finance server) live behind the `@flowza/device-providers/testing` subpath

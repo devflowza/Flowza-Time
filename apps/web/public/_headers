@@ -10,7 +10,9 @@
   X-Content-Type-Options: nosniff
   X-Frame-Options: DENY
   Referrer-Policy: strict-origin-when-cross-origin
-  Permissions-Policy: camera=(), microphone=(), geolocation=(), interest-cohort=()
+  # The employee portal checks in with the device location and, when the organisation asks for it, a selfie: camera and
+  # geolocation are allowed for this origin only (never for embedded third-party frames). Microphone stays off.
+  Permissions-Policy: camera=(self), microphone=(), geolocation=(self), interest-cohort=()
 
 # Vite emits content-hashed filenames, so these are safe to cache immutably.
 /assets/*

@@ -18,10 +18,15 @@ export function EmployeeFormFields({ form, mode, excludeEmployeeId }: { form: Us
   const { t: tc } = useTranslation();
   const { register, control, formState: { errors } } = form;
   const branchId = useWatch({ control, name: 'branchId' });
+  const managerId = useWatch({ control, name: 'managerEmployeeId' });
+  const secondaryManagerId = useWatch({ control, name: 'secondaryManagerEmployeeId' });
   const departments = useDepartmentOptions(branchId || undefined);
   const designations = useDesignationOptions();
   const managers = useEmployeeOptions();
-  const managerOptions = managers.options.filter((o) => o.value !== excludeEmployeeId);
+  const secondaryManagers = useEmployeeOptions();
+  // an employee is never their own manager, and the two managers are two different people (DB check constraint)
+  const managerOptions = managers.options.filter((o) => o.value !== excludeEmployeeId && o.value !== secondaryManagerId);
+  const secondaryManagerOptions = secondaryManagers.options.filter((o) => o.value !== excludeEmployeeId && o.value !== managerId);
 
   return (
     <div className="space-y-5">
@@ -105,8 +110,11 @@ export function EmployeeFormFields({ form, mode, excludeEmployeeId }: { form: Us
           <FormField label={t('fields.designation')} htmlFor="emp-desig" optional error={errors.designationId?.message}>
             <Controller control={control} name="designationId" render={({ field }) => <Combobox id="emp-desig" value={field.value} onChange={(v) => field.onChange(v ?? undefined)} options={designations.options} loading={designations.isLoading} clearable placeholder={tc('common.none')} />} />
           </FormField>
-          <FormField label={t('fields.manager')} htmlFor="emp-manager" optional error={errors.managerEmployeeId?.message}>
+          <FormField label={t('fields.manager')} htmlFor="emp-manager" optional error={errors.managerEmployeeId?.message} hint={t('fields.managerHint')}>
             <Controller control={control} name="managerEmployeeId" render={({ field }) => <Combobox id="emp-manager" value={field.value} onChange={(v) => field.onChange(v ?? undefined)} options={managerOptions} onSearch={managers.setSearch} loading={managers.isLoading} clearable placeholder={tc('common.none')} />} />
+          </FormField>
+          <FormField label={t('fields.secondaryManager')} htmlFor="emp-secondary-manager" optional error={errors.secondaryManagerEmployeeId?.message} hint={t('fields.secondaryManagerHint')}>
+            <Controller control={control} name="secondaryManagerEmployeeId" render={({ field }) => <Combobox id="emp-secondary-manager" value={field.value} onChange={(v) => field.onChange(v ?? undefined)} options={secondaryManagerOptions} onSearch={secondaryManagers.setSearch} loading={secondaryManagers.isLoading} clearable placeholder={tc('common.none')} />} />
           </FormField>
           <FormField label={t('fields.weeklyOffDays')} htmlFor="emp-weekly" optional hint={t('fields.weeklyOffDaysHint')} className="sm:col-span-2 lg:col-span-3">
             <Controller control={control} name="weeklyOffDays" render={({ field }) => <WeeklyOffToggles value={field.value} onChange={(days) => field.onChange(days.length ? days : undefined)} ariaLabel={t('fields.weeklyOffDays')} />} />

@@ -92,6 +92,8 @@ async function seedTenant(db: Database, rng: Prng): Promise<Ids> {
     leaveTypes.push(id);
     await db.insertInto('leaveTypes').values({ id, organizationId: ORG.id, code, name, nameAr, isPaid, status: 'active' }).execute();
   }
+  // leave v2: the organisation's comp-off type (credits are redeemed through it; hidden from the ordinary apply form)
+  await db.insertInto('leaveTypes').values({ organizationId: ORG.id, code: 'CO', name: 'Compensatory Off', nameAr: 'إجازة تعويضية', isPaid: true, color: '#6941c6', status: 'active', isSpecial: true, portalVisible: false, systemKey: 'COMP_OFF' }).execute();
   const ruleSetId = rng.uuid();
   await db.insertInto('attendanceRuleSets').values({ id: ruleSetId, organizationId: ORG.id, name: 'Company default', effectiveFrom: '2025-01-01', graceInMinutes: 10, graceOutMinutes: 5, lateThresholdMinutes: 0, minFullDayMinutes: 420, halfDayThresholdMinutes: 240, overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 15, punchInterpretation: 'FIRST_LAST', missingPunchBehavior: 'FLAG_ONLY' }).execute();
 
@@ -153,11 +155,33 @@ async function seedEmployees(db: Database, rng: Prng, ids: Ids, today: string): 
   const target = rows.find((e) => e.branchCode === 'MCT-HQ' && e.status === 'active' && !e.nightShift && !e.flexible)!;
   await db.updateTable('employees').set({ userId: selfServiceUser, displayName: 'Ahmed Al Hinai', firstName: 'Ahmed', lastName: 'Al Hinai' }).where('id', '=', target.id).execute();
   await db.updateTable('orgMemberships').set({ employeeId: target.id }).where('userId', '=', selfServiceUser).execute();
-  // managers: first employee per department manages it
+  // managers: the first active employee of each department (never the self-service employee) manages it; everybody
+  // else in the department reports to them, and about a third also get the department's deputy (its second employee)
+  // as secondary — dotted-line — manager. Reporting lines land on the current employment_history row as well.
+  const deptManagers = new Map<string, SeedEmployee>();
   for (const dep of ids.departments) {
-    const mgr = rows.find((e) => e.departmentId === dep && e.status === 'active');
-    if (mgr) await db.updateTable('departments').set({ managerEmployeeId: mgr.id }).where('id', '=', dep).execute();
+    const members = rows.filter((e) => e.departmentId === dep && e.status === 'active' && e.id !== target.id);
+    const mgr = members[0];
+    if (!mgr) continue;
+    deptManagers.set(dep, mgr);
+    const deputy = members[1] ?? null;
+    await db.updateTable('departments').set({ managerEmployeeId: mgr.id }).where('id', '=', dep).execute();
+    for (const e of rows.filter((x) => x.departmentId === dep && x.id !== mgr.id)) {
+      const secondary = deputy && e.id !== deputy.id && rng.chance(0.3) ? deputy.id : null;
+      await db.updateTable('employees').set({ managerEmployeeId: mgr.id, secondaryManagerEmployeeId: secondary }).where('id', '=', e.id).execute();
+      await db.updateTable('employmentHistory').set({ managerEmployeeId: mgr.id }).where('employeeId', '=', e.id).where('effectiveTo', 'is', null).execute();
+    }
   }
+  // the line-manager login IS the IT department's manager: their reports are visible through the team predicate only
+  const lineManager = deptManagers.get(itDept)!;
+  const lineManagerUser = ids.users['manager@albahja.example']!;
+  await db.updateTable('employees').set({ userId: lineManagerUser, displayName: 'Nasser Al Maskari', firstName: 'Nasser', lastName: 'Al Maskari' }).where('id', '=', lineManager.id).execute();
+  await db.updateTable('orgMemberships').set({ employeeId: lineManager.id }).where('userId', '=', lineManagerUser).execute();
+  // the self-service login reports to the line-manager login, as on the hosted demo tenant (Priya → manager@flowza.ai): the
+  // portal's approval flows (reasons, regularisations, leave, swaps) then reach a manager who can sign in — the end-to-end
+  // matrix (scripts/e2e-hosted) drives them with these two logins. No random draw is consumed, so the rest is unchanged.
+  await db.updateTable('employees').set({ managerEmployeeId: lineManager.id, secondaryManagerEmployeeId: null }).where('id', '=', target.id).execute();
+  await db.updateTable('employmentHistory').set({ managerEmployeeId: lineManager.id }).where('employeeId', '=', target.id).where('effectiveTo', 'is', null).execute();
   return rows;
 }
 
@@ -271,6 +295,9 @@ async function seedAttendance(db: Database, rng: Prng, ids: Ids, employees: Seed
     const half = len === 1 && rng.chance(0.3);
     const typeIdx = rng.int(0, 2);
     const id = rng.uuid();
+    // leave v2: an employee's active leave never overlaps (exclusion constraint) — a colliding pick is skipped, after the
+    // random draws so the rest of the seed stays the same
+    if (Array.from({ length: len }, (_, k) => `${e.id}|${start.plus({ days: k }).toISODate()}`).some((key) => leaves.has(key))) continue;
     await db.insertInto('leaveRecords').values({ id, organizationId: ORG.id, employeeId: e.id, branchId: e.branchId, leaveTypeId: ids.leaveTypes[typeIdx]!, startDate: start.toISODate()!, endDate: start.plus({ days: len - 1 }).toISODate()!, isHalfDay: half, halfDayPart: half ? 'SECOND_HALF' : null, status: 'APPROVED', source: 'INTERNAL', approvedBy: ids.users['hr@albahja.example']!, approvedAt: new Date(), reason: 'Seeded leave' }).execute();
     for (let k = 0; k < len; k++) leaves.set(`${e.id}|${start.plus({ days: k }).toISODate()}`, { id, code: LEAVE_TYPES[typeIdx]![0], isPaid: LEAVE_TYPES[typeIdx]![3], isHalfDay: half, halfDayPart: half ? 'SECOND_HALF' : null });
   }
@@ -409,23 +436,51 @@ async function seedSyncHistory(db: Database, rng: Prng, ids: Ids, devices: SeedD
 
 async function seedExtras(db: Database, rng: Prng, ids: Ids, employees: SeedEmployee[], today: string) {
   const hr = ids.users['hr@albahja.example']!; const owner = ids.users['owner@albahja.example']!; const bm = ids.users['sohar.manager@albahja.example']!;
-  // approval workflow + corrections
+  // approval workflow (engine v2 step shape) + corrections filed by the attendance admin, each with its levels, seated
+  // approvers and timeline exactly as the engine writes them: 3 waiting for the first level (the Sohar branch manager or
+  // the owner), 3 waiting for HR, 6 approved, 3 rejected. The request's entity is the correction itself.
+  const attendanceAdmin = ids.users['devices@albahja.example']!;
   const wfId = rng.uuid();
-  await db.insertInto('approvalWorkflows').values({ id: wfId, organizationId: ORG.id, entityType: 'ATTENDANCE_CORRECTION', name: 'Manager → HR', steps: JSON.stringify([{ order: 1, approver_type: 'MANAGER' }, { order: 2, approver_type: 'ROLE', role_id: SYSTEM_ROLE_IDS.hr_admin }]), isDefault: true, status: 'active' }).execute();
+  await db.insertInto('approvalWorkflows').values({ id: wfId, organizationId: ORG.id, entityType: 'ATTENDANCE_CORRECTION', name: 'Manager → HR', steps: JSON.stringify([{ order: 1, approverType: 'MANAGER', mode: 'ANY' }, { order: 2, approverType: 'ROLE', roleId: SYSTEM_ROLE_IDS.hr_admin, mode: 'ANY' }]), isDefault: true, status: 'active' }).execute();
   const candidates = employees.filter((e) => e.status === 'active').slice(0, 15);
+  let waitingForHr = 0;
   for (const [i, e] of candidates.entries()) {
     const date = DateTime.fromISO(today).minus({ days: rng.int(1, 10) }).toISODate()!;
     const status = i < 6 ? 'PENDING' : i < 12 ? 'APPROVED' : 'REJECTED';
+    const atHr = status === 'PENDING' && i >= 3;
+    if (atHr) waitingForHr++;
     const reqId = rng.uuid();
-    await db.insertInto('approvalRequests').values({ id: reqId, organizationId: ORG.id, workflowId: wfId, entityType: 'ATTENDANCE_CORRECTION', entityId: rng.uuid(), branchId: e.branchId, employeeId: e.id, currentStep: status === 'PENDING' ? 1 : 2, status: status === 'PENDING' ? 'PENDING' : status === 'APPROVED' ? 'APPROVED' : 'REJECTED', requestedBy: hr, completedAt: status === 'PENDING' ? null : new Date() }).execute();
-    await db.insertInto('approvalSteps').values([{ organizationId: ORG.id, requestId: reqId, stepNo: 1, approverType: 'USER', approverUserId: e.branchCode === 'SOH' ? bm : owner, status: status === 'PENDING' ? 'PENDING' : status === 'REJECTED' ? 'REJECTED' : 'APPROVED', actedBy: status === 'PENDING' ? null : owner, actedAt: status === 'PENDING' ? null : new Date(), comment: status === 'REJECTED' ? 'No supporting evidence' : null }, { organizationId: ORG.id, requestId: reqId, stepNo: 2, approverType: 'ROLE', approverRoleId: SYSTEM_ROLE_IDS.hr_admin, status: status === 'APPROVED' ? 'APPROVED' : 'PENDING', actedBy: status === 'APPROVED' ? hr : null, actedAt: status === 'APPROVED' ? new Date() : null }]).execute();
-    await db.insertInto('attendanceCorrections').values({ organizationId: ORG.id, employeeId: e.id, branchId: e.branchId, attendanceDate: date, type: 'ADD_PUNCH', proposedPunchedAt: DateTime.fromISO(`${date}T17:05`, { zone: TZ }).toUTC().toJSDate(), proposedEventType: 'PUNCH_OUT', reason: 'Forgot to punch out — left at 17:05 (confirmed by supervisor)', requestedBy: hr, status: status as never, approvalRequestId: reqId, rejectionReason: status === 'REJECTED' ? 'No supporting evidence' : null }).execute();
+    const correctionId = rng.uuid();
+    const first = e.branchCode === 'SOH' ? bm : owner;
+    const created = DateTime.fromISO(date, { zone: TZ }).plus({ days: 1, hours: 9 });
+    const firstAt = created.plus({ hours: 6 }).toJSDate();
+    const hrAt = created.plus({ days: 1, hours: 2 }).toJSDate();
+    const step1 = status === 'REJECTED' ? 'REJECTED' : status === 'PENDING' && !atHr ? 'PENDING' : 'APPROVED';
+    const step2 = status === 'APPROVED' ? 'APPROVED' : status === 'REJECTED' ? 'SKIPPED' : 'PENDING';
+    const note = status === 'REJECTED' ? 'No supporting evidence' : null;
+    await db.insertInto('approvalRequests').values({ id: reqId, organizationId: ORG.id, workflowId: wfId, entityType: 'ATTENDANCE_CORRECTION', entityId: correctionId, branchId: e.branchId, employeeId: e.id, currentStep: step1 === 'APPROVED' ? 2 : 1, status, requestedBy: attendanceAdmin, decidedBy: status === 'APPROVED' ? hr : status === 'REJECTED' ? first : null, completedAt: status === 'APPROVED' ? hrAt : status === 'REJECTED' ? firstAt : null, createdAt: created.toJSDate() }).execute();
+    const steps = await db.insertInto('approvalSteps').values([
+      { organizationId: ORG.id, requestId: reqId, stepNo: 1, approverType: 'USER', approverUserId: first, mode: 'ANY', resolutionPath: 'user', status: step1, actedBy: step1 === 'PENDING' ? null : first, actedAt: step1 === 'PENDING' ? null : firstAt, comment: note, activatedAt: created.toJSDate() },
+      { organizationId: ORG.id, requestId: reqId, stepNo: 2, approverType: 'ROLE', approverRoleId: SYSTEM_ROLE_IDS.hr_admin, approverUserId: hr, mode: 'ANY', resolutionPath: 'role', status: step2, actedBy: step2 === 'APPROVED' ? hr : null, actedAt: step2 === 'APPROVED' ? hrAt : null, activatedAt: step1 === 'APPROVED' ? firstAt : null },
+    ]).returning(['id', 'stepNo']).execute();
+    const stepId = (n: number) => steps.find((s) => s.stepNo === n)!.id;
+    await db.insertInto('approvalStepActors').values([
+      { organizationId: ORG.id, stepId: stepId(1), userId: first, resolutionPath: 'user', decision: step1, decidedAt: step1 === 'PENDING' ? null : firstAt, comment: note },
+      { organizationId: ORG.id, stepId: stepId(2), userId: hr, resolutionPath: 'role', decision: step2, decidedAt: step2 === 'APPROVED' ? hrAt : null },
+    ]).execute();
+    const events: { kind: string; at: Date; actor: string; detail: Record<string, unknown> }[] = [{ kind: 'submitted', at: created.toJSDate(), actor: attendanceAdmin, detail: { workflowId: wfId, workflowName: 'Manager → HR' } }];
+    if (step1 !== 'PENDING') events.push({ kind: step1 === 'APPROVED' ? 'step_approved' : 'step_rejected', at: firstAt, actor: first, detail: { stepNo: 1, comment: note } });
+    if (step1 === 'APPROVED') events.push({ kind: 'advanced', at: firstAt, actor: first, detail: { stepNo: 2 } });
+    if (status === 'APPROVED') events.push({ kind: 'step_approved', at: hrAt, actor: hr, detail: { stepNo: 2 } }, { kind: 'approved', at: hrAt, actor: hr, detail: { stepNo: 2 } });
+    if (status === 'REJECTED') events.push({ kind: 'rejected', at: firstAt, actor: first, detail: { stepNo: 1, comment: note } });
+    await db.insertInto('approvalRequestEvents').values(events.map((ev) => ({ organizationId: ORG.id, requestId: reqId, kind: ev.kind, at: ev.at, actorUserId: ev.actor, detail: JSON.stringify(ev.detail) }))).execute();
+    await db.insertInto('attendanceCorrections').values({ id: correctionId, organizationId: ORG.id, employeeId: e.id, branchId: e.branchId, attendanceDate: date, type: 'ADD_PUNCH', proposedPunchedAt: DateTime.fromISO(`${date}T17:05`, { zone: TZ }).toUTC().toJSDate(), proposedEventType: 'PUNCH_OUT', reason: 'Forgot to punch out — left at 17:05 (confirmed by supervisor)', requestedBy: attendanceAdmin, status: status as never, approvalRequestId: reqId, rejectionReason: note, createdAt: created.toJSDate() }).execute();
   }
   // notifications for the owner + hr
   const notif = [
     { userId: owner, category: 'DEVICE', type: 'device.offline', title: 'Device offline: Sohar Warehouse (SOH-WH-01)', body: 'No heartbeat for 3 hours.', link: '/devices' },
     { userId: owner, category: 'ATTENDANCE', type: 'sync.failed', title: 'Attendance sync failed for HQ 5th Floor', body: 'Vendor API returned HTTP 502 (attempt 3/6).', link: '/sync' },
-    { userId: hr, category: 'APPROVAL', type: 'approval.pending', title: '6 corrections awaiting approval', body: 'Corrections submitted in the last 10 days.', link: '/approvals' },
+    { userId: hr, category: 'APPROVAL', type: 'approval.pending', title: `${waitingForHr} corrections awaiting your approval`, body: 'The first level approved them; HR decides.', link: '/approvals' },
     { userId: hr, category: 'SYSTEM', type: 'report.ready', title: 'Monthly attendance report is ready', body: 'Generated for last month, 500 employees.', link: '/reports' },
   ];
   await db.insertInto('notifications').values(notif.map((n) => ({ organizationId: ORG.id, ...n, data: JSON.stringify({}) }) as never)).execute();

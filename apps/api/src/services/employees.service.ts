@@ -1,12 +1,12 @@
 import { type z } from 'zod';
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import type { BulkEmployeeAction, CreateEmployeeInput, DeleteEmployeeInput, EmployeeDeviceStateDto, EmployeeDto, EmployeeListQuery, EmploymentHistoryDto, IdentityDocumentDto, UpdateEmployeeInput, identityDocumentInputSchema } from '@flowza/contracts';
+import { TEAM_PERMISSIONS, type BulkEmployeeAction, type CreateEmployeeInput, type DeleteEmployeeInput, type EmployeeDeviceStateDto, type EmployeeDto, type EmployeeListQuery, type EmploymentHistoryDto, type IdentityDocumentDto, type UpdateEmployeeInput, type identityDocumentInputSchema } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
-import { branchFilter, hasPermission, requireBranchAccess, requirePermission } from '../lib/authorize.js';
+import { branchFilter, hasPermission, requireAnyPermission, requireBranchAccess, requirePermission } from '../lib/authorize.js';
 import { type Actor, runUser, audit, diffObjects, withSystemScope } from '../lib/service.js';
 import { enqueueJob } from '../lib/jobs.js';
 import { hashPin } from '../lib/hashing.js';
@@ -15,6 +15,7 @@ import { assertWithinLimit } from './features/entitlements.js';
 import { likeContains, pageOf, prefixTsQuery, resolveSort, toCount } from '../lib/pagination.js';
 import { isoDate } from '../lib/mappers.js';
 import { DOCUMENT_COLUMNS, EMPLOYEE_COLUMNS, EMPTY_SYNC_SUMMARY, HISTORY_COLUMNS, toDeviceStateDto, toDocumentDto, toEmployeeDto, toHistoryDto, type DeviceSyncSummary, type DeviceStateRow, type EmployeeRow, type HistoryRow } from './employees.mappers.js';
+import { LEFT_EMPLOYMENT_STATUSES, hasLeft, offboardLinkedLogins } from './offboarding.js';
 
 type IdentityDocumentInput = z.infer<typeof identityDocumentInputSchema>;
 
@@ -39,7 +40,21 @@ function employeeQuery(trx: Trx, orgId: string) {
     .leftJoin('departments as d', 'd.id', 'e.departmentId')
     .leftJoin('designations as g', 'g.id', 'e.designationId')
     .leftJoin('employees as mgr', 'mgr.id', 'e.managerEmployeeId')
+    .leftJoin('employees as mgr2', 'mgr2.id', 'e.secondaryManagerEmployeeId')
     .where('e.organizationId', '=', orgId);
+}
+
+/**
+ * Employees already linked to a login of this organisation (any membership status) or reserved by a pending invitation.
+ * Read in the organisation's system scope: memberships are hidden from callers without user.view, and the filter must
+ * be exact for whoever picks an employee for a new login. Returns ids only.
+ */
+async function linkedEmployeeIds(trx: Trx, orgId: string): Promise<string[]> {
+  return withSystemScope(trx, orgId, async (t) => {
+    const members = await t.selectFrom('orgMemberships').select('employeeId').where('organizationId', '=', orgId).where('employeeId', 'is not', null).execute();
+    const invited = await t.selectFrom('invitations').select('employeeId').where('organizationId', '=', orgId).where('employeeId', 'is not', null).where('acceptedAt', 'is', null).where('revokedAt', 'is', null).where('expiresAt', '>', new Date()).execute();
+    return [...new Set([...members, ...invited].map((r) => r.employeeId).filter((id): id is string => !!id))];
+  });
 }
 
 async function syncSummaries(trx: Trx, orgId: string, employeeIds: string[]): Promise<Map<string, DeviceSyncSummary>> {
@@ -61,20 +76,48 @@ async function syncSummaries(trx: Trx, orgId: string, employeeIds: string[]): Pr
   return out;
 }
 
+/** Who may read the employee directory: organisation-wide (branch-scoped) viewers, and line managers for their team. */
+const DIRECTORY_KEYS = ['employee.view', 'employee.view_team'] as const;
+
+/**
+ * Employees the RLS read rule of `employees` shows a branch-scoped `employee.view` holder beyond their branches: their own
+ * record (self column) and, with any team key, their direct reports (team predicate). The service's branch filter must
+ * not hide what the database shows.
+ */
+function visibleBeyondBranches(grant: MembershipGrant): string[] {
+  const ids = grant.employeeId ? [grant.employeeId] : [];
+  if (TEAM_PERMISSIONS.some((p) => hasPermission(grant, p))) ids.push(...grant.teamEmployeeIds);
+  return [...new Set(ids)];
+}
+
 export async function listEmployees(deps: ApiDeps, actor: Actor, orgId: string, q: EmployeeListQuery): Promise<{ data: EmployeeDto[]; total: number }> {
-  const grant = requirePermission(actor.principal, orgId, 'employee.view');
-  const scope = branchFilter(grant, q.branchId);
+  const grant = requireAnyPermission(actor.principal, orgId, ...DIRECTORY_KEYS);
+  // "which employees already have a login" is user-management knowledge, answered in system scope: user.view only
+  if (q.unlinked) requirePermission(actor.principal, orgId, 'user.view');
+  // An organisation-wide viewer is narrowed to their branches (RLS again underneath). A team-only viewer (a line manager:
+  // employee.view_team) gets no branch filter — RLS already limits them to their own record and their direct reports,
+  // wherever those sit; an explicit branchId is then a plain filter over those rows.
+  const orgWide = hasPermission(grant, 'employee.view');
+  const scope = orgWide ? branchFilter(grant, q.branchId) : q.branchId ? [q.branchId] : null;
+  const beyond = orgWide && scope && !q.branchId ? visibleBeyondBranches(grant) : [];
   const sort = resolveSort(EMPLOYEE_SORT, q.sort, q.order, 'e.employee_number');
   return runUser(deps.db, actor, async (trx) => {
     const page = pageOf(q);
     let base = employeeQuery(trx, orgId);
     if (!q.includeDeleted) base = base.where('e.deletedAt', 'is', null);
-    if (scope) base = base.where('e.branchId', 'in', scope);
+    if (scope) base = beyond.length ? base.where((eb) => eb.or([eb('e.branchId', 'in', scope), eb('e.id', 'in', beyond)])) : base.where('e.branchId', 'in', scope);
     if (q.departmentId) base = base.where('e.departmentId', '=', q.departmentId);
     if (q.designationId) base = base.where('e.designationId', '=', q.designationId);
     if (q.employmentStatus) base = base.where('e.employmentStatus', '=', q.employmentStatus);
     if (q.employmentType) base = base.where('e.employmentType', '=', q.employmentType);
     if (q.managerEmployeeId) base = base.where('e.managerEmployeeId', '=', q.managerEmployeeId);
+    if (q.teamOf) { const id = q.teamOf; base = base.where((eb) => eb.or([eb('e.managerEmployeeId', '=', id), eb('e.secondaryManagerEmployeeId', '=', id)])); }
+    if (q.unlinked) {
+      const linked = await linkedEmployeeIds(trx, orgId);
+      if (linked.length) base = base.where('e.id', 'not in', linked);
+      // somebody who left can never be given a login (members.service refuses the link), so they are no candidate
+      base = base.where('e.employmentStatus', 'not in', [...LEFT_EMPLOYMENT_STATUSES]);
+    }
     if (q.search) {
       const like = likeContains(q.search);
       const tsq = prefixTsQuery(q.search);
@@ -112,8 +155,9 @@ async function historyRows(trx: Trx, orgId: string, employeeId: string, limit?: 
   return (await q.execute()).map((r) => toHistoryDto(r as HistoryRow));
 }
 
+// Profile reads admit either directory key; RLS decides whether the row is visible (a line manager's non-report → 404).
 export async function getEmployee(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<EmployeeDto & { currentHistory: EmploymentHistoryDto | null }> {
-  const grant = requirePermission(actor.principal, orgId, 'employee.view');
+  const grant = requireAnyPermission(actor.principal, orgId, ...DIRECTORY_KEYS);
   return runUser(deps.db, actor, async (trx) => {
     const dto = maskSensitive(await loadEmployeeDto(trx, orgId, id), grant);
     const [current] = await historyRows(trx, orgId, id, 1);
@@ -122,12 +166,12 @@ export async function getEmployee(deps: ApiDeps, actor: Actor, orgId: string, id
 }
 
 export async function getEmployeeHistory(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<EmploymentHistoryDto[]> {
-  requirePermission(actor.principal, orgId, 'employee.view');
+  requireAnyPermission(actor.principal, orgId, ...DIRECTORY_KEYS);
   return runUser(deps.db, actor, async (trx) => { await loadEmployeeRow(trx, orgId, id); return historyRows(trx, orgId, id); });
 }
 
 export async function getEmployeeDevices(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<EmployeeDeviceStateDto[]> {
-  requirePermission(actor.principal, orgId, 'employee.view');
+  requireAnyPermission(actor.principal, orgId, ...DIRECTORY_KEYS);
   return runUser(deps.db, actor, async (trx) => {
     await loadEmployeeRow(trx, orgId, id);
     const rows = await trx.selectFrom('deviceEmployeeStates as s').innerJoin('devices as dv', 'dv.id', 's.deviceId')
@@ -144,7 +188,7 @@ async function orgToday(trx: Trx, orgId: string): Promise<string> {
   return DateTime.now().setZone(org?.timezone ?? 'UTC').toISODate() ?? DateTime.utc().toISODate()!;
 }
 
-async function assertReferences(trx: Trx, orgId: string, refs: { branchId?: string; departmentId?: string | null; designationId?: string | null; managerEmployeeId?: string | null; selfId?: string }): Promise<void> {
+async function assertReferences(trx: Trx, orgId: string, refs: { branchId?: string; departmentId?: string | null; designationId?: string | null; managerEmployeeId?: string | null; secondaryManagerEmployeeId?: string | null; selfId?: string }): Promise<void> {
   if (refs.branchId) {
     const b = await trx.selectFrom('branches').select(['id', 'status']).where('organizationId', '=', orgId).where('id', '=', refs.branchId).executeTakeFirst();
     if (!b) throw errors.validation('Branch not found in this organisation.', { issues: [{ path: 'branchId', message: 'Unknown branch' }] });
@@ -162,6 +206,50 @@ async function assertReferences(trx: Trx, orgId: string, refs: { branchId?: stri
     if (refs.selfId && refs.managerEmployeeId === refs.selfId) throw errors.validation('An employee cannot be their own manager.', { issues: [{ path: 'managerEmployeeId', message: 'Self reference' }] });
     const m = await trx.selectFrom('employees').select('id').where('organizationId', '=', orgId).where('id', '=', refs.managerEmployeeId).where('deletedAt', 'is', null).executeTakeFirst();
     if (!m) throw errors.validation('Manager not found in this organisation.', { issues: [{ path: 'managerEmployeeId', message: 'Unknown employee' }] });
+  }
+  if (refs.secondaryManagerEmployeeId) {
+    if (refs.selfId && refs.secondaryManagerEmployeeId === refs.selfId) throw errors.validation('An employee cannot be their own secondary manager.', { issues: [{ path: 'secondaryManagerEmployeeId', message: 'Self reference' }] });
+    const m = await trx.selectFrom('employees').select('id').where('organizationId', '=', orgId).where('id', '=', refs.secondaryManagerEmployeeId).where('deletedAt', 'is', null).executeTakeFirst();
+    if (!m) throw errors.validation('Secondary manager not found in this organisation.', { issues: [{ path: 'secondaryManagerEmployeeId', message: 'Unknown employee' }] });
+  }
+  // the database check constraint says the same; validating here names the field instead of surfacing a 23514
+  if (refs.managerEmployeeId && refs.secondaryManagerEmployeeId && refs.managerEmployeeId === refs.secondaryManagerEmployeeId) {
+    throw errors.validation('The secondary manager must be a different person from the manager.', { issues: [{ path: 'secondaryManagerEmployeeId', message: 'Same as manager' }] });
+  }
+}
+
+/** How far up the reporting line the cycle check looks (the database trigger employees_no_manager_cycle uses the same bound). */
+export const MAX_REPORTING_DEPTH = 20;
+
+/**
+ * Refuses a manager link that would close a loop in the reporting line: the proposed (primary or secondary) manager
+ * already reports to the employee, directly or through other managers. Walks upwards from each proposed manager, following
+ * both the primary and the secondary link of every ancestor, up to MAX_REPORTING_DEPTH levels — the rule the database
+ * trigger enforces again; validating here names the field instead of surfacing a check violation. Only CHANGED links are
+ * passed in (an unchanged one was checked when it was set). Runs in the organisation's system scope, read-only, returning
+ * a verdict only: a branch-scoped caller's RLS view would hide part of the chain.
+ */
+async function assertNoReportingCycle(trx: Trx, orgId: string, employeeId: string, links: { managerEmployeeId?: string | null; secondaryManagerEmployeeId?: string | null }): Promise<void> {
+  for (const field of ['managerEmployeeId', 'secondaryManagerEmployeeId'] as const) {
+    const start = links[field];
+    if (!start) continue;
+    const loops = start === employeeId || await withSystemScope(trx, orgId, async (t) => {
+      const { rows } = await sql<{ loops: boolean }>`
+        with recursive up(id, depth) as (
+          select ${start}::uuid, 1
+          union
+          select l.manager_id, u.depth + 1
+          from up u
+          join public.employees e on e.id = u.id and e.organization_id = ${orgId}::uuid
+          cross join lateral (values (e.manager_employee_id), (e.secondary_manager_employee_id)) as l(manager_id)
+          where u.depth < ${MAX_REPORTING_DEPTH} and l.manager_id is not null
+        )
+        select exists (select 1 from up where up.id = ${employeeId}::uuid) as loops`.execute(t);
+      return rows[0]?.loops === true;
+    });
+    if (loops) {
+      throw errors.validation('This person already reports to the employee (directly or through other managers), so they cannot also be the employee\'s manager: the reporting line would go round in a circle.', { issues: [{ path: field, message: 'Reporting cycle' }] });
+    }
   }
 }
 
@@ -239,7 +327,7 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
   const grant = requirePermission(actor.principal, orgId, 'employee.create');
   requireBranchAccess(grant, input.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId });
+    await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId, secondaryManagerEmployeeId: input.secondaryManagerEmployeeId });
     // plan entitlement: count active employees org-wide (system scope, since branch-restricted creators only see their branch)
     const activeCount = await withSystemScope(trx, orgId, async (t) => {
       const row = await t.selectFrom('employees').select(({ fn }) => fn.countAll<string>().as('c')).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('employmentStatus', 'not in', ['terminated', 'resigned']).executeTakeFirstOrThrow();
@@ -252,7 +340,7 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
       organizationId: orgId, employeeNumber: input.employeeNumber, firstName: input.firstName, middleName: input.middleName ?? null, lastName: input.lastName, displayName, displayNameAr: input.displayNameAr ?? null,
       gender: input.gender, dateOfBirth: input.dateOfBirth ?? null, nationalityCode: input.nationalityCode ?? null, email: input.email ?? null, phone: input.phone ?? null,
       joiningDate: input.joiningDate, employmentStatus: input.employmentStatus, employmentType: input.employmentType, branchId: input.branchId, departmentId: input.departmentId ?? null,
-      designationId: input.designationId ?? null, managerEmployeeId: input.managerEmployeeId ?? null, deviceUserId, cardNumber: input.cardNumber ?? null, pinHash,
+      designationId: input.designationId ?? null, managerEmployeeId: input.managerEmployeeId ?? null, secondaryManagerEmployeeId: input.secondaryManagerEmployeeId ?? null, deviceUserId, cardNumber: input.cardNumber ?? null, pinHash,
       weeklyOffDays: input.weeklyOffDays ?? null, customFields: JSON.stringify(input.customFields ?? {}), createdBy: actor.userId, updatedBy: actor.userId,
     }).returning(['id', 'deviceUserId']).executeTakeFirstOrThrow();
     const row = input.deviceUserId ? await insert(input.deviceUserId) : await insertWithAutoDeviceUserId(trx, orgId, insert);
@@ -274,7 +362,14 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     const before = await loadEmployeeRow(trx, orgId, id);
     if (before.deletedAt) throw errors.invalidState('The employee has been deleted.');
     requireBranchAccess(grant, before.branchId);
-    await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId, selfId: id });
+    // the manager pair is validated as it will be AFTER the patch (a new primary equal to the kept secondary is refused too)
+    const effectiveManager = input.managerEmployeeId === undefined ? before.managerEmployeeId : input.managerEmployeeId;
+    const effectiveSecondary = input.secondaryManagerEmployeeId === undefined ? before.secondaryManagerEmployeeId : input.secondaryManagerEmployeeId;
+    await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: effectiveManager, secondaryManagerEmployeeId: effectiveSecondary, selfId: id });
+    await assertNoReportingCycle(trx, orgId, id, {
+      managerEmployeeId: effectiveManager !== before.managerEmployeeId ? effectiveManager : null,
+      secondaryManagerEmployeeId: effectiveSecondary !== before.secondaryManagerEmployeeId ? effectiveSecondary : null,
+    });
     const { effectiveFrom: requestedFrom, changeReason, pin, customFields, ...rest } = input;
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(rest)) if (v !== undefined) patch[k] = v;
@@ -297,6 +392,12 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     }
     patch['updatedBy'] = actor.userId;
     await trx.updateTable('employees').set(patch as never).where('organizationId', '=', orgId).where('id', '=', id).execute();
+    // B-75: becoming terminated/resigned ends every login linked to the record (a refusal rolls the whole change back).
+    // The reverse is deliberately NOT automatic: re-activating the employee leaves the login suspended until an
+    // administrator re-activates the member.
+    if (hasLeft(nextSnapshot.employmentStatus) && !hasLeft(before.employmentStatus)) {
+      await offboardLinkedLogins(deps, trx, actor, grant, orgId, [id], { source: 'update', employmentStatus: nextSnapshot.employmentStatus });
+    }
     const after = await loadEmployeeDto(trx, orgId, id);
     const beforeDto = toEmployeeDto(before);
     const diff = diffObjects(beforeDto as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>);
@@ -322,6 +423,8 @@ export async function deleteEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     await applyHistoryTransition(trx, orgId, id, { ...snapshotOf(before), employmentStatus: 'terminated' }, exitDate, input.reason ?? 'Deleted', actor.userId, joiningDate);
     await trx.updateTable('employees').set({ deletedAt: new Date(), employmentStatus: 'terminated', exitDate, updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', id).execute();
     await trx.updateTable('deviceEmployeeStates').set({ desired: false }).where('organizationId', '=', orgId).where('employeeId', '=', id).execute();
+    // B-75: archiving is leaving — every login still linked to the record ends (whatever the previous status was)
+    await offboardLinkedLogins(deps, trx, actor, grant, orgId, [id], { source: 'delete', employmentStatus: 'terminated' });
     await audit(trx, actor, orgId, 'employee.deleted', 'employee', { entityId: id, branchId: before.branchId, oldValue: { employmentStatus: before.employmentStatus, exitDate: before.exitDate }, newValue: { employmentStatus: 'terminated', exitDate, deleted: true }, reason: input.reason ?? null });
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.deleted', aggregateType: 'employee', aggregateId: id, payload: { employeeNumber: before.employeeNumber, branchId: before.branchId, exitDate }, actorUserId: actor.userId, requestId: actor.requestId });
     await maybeEnqueuePush(deps, trx, actor, orgId, [id]);
@@ -343,7 +446,8 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
       });
     }
     case 'export': {
-      const grant = requirePermission(actor.principal, orgId, 'employee.export');
+      // the file lands in Reports and is downloaded with report.export — refuse up front rather than generate what cannot be fetched
+      const grant = requirePermission(actor.principal, orgId, 'employee.export', 'report.export');
       return runUser(deps.db, actor, async (trx) => {
         const ids = input.employeeIds ? await visibleEmployeeIds(trx, orgId, grant, input.employeeIds) : null;
         const jobId = await enqueueJob(deps.queue, trx, { queue: 'reports', jobType: 'EXPORT_EMPLOYEES', organizationId: orgId, payload: { employeeIds: ids, branchIds: grant.allBranches ? null : grant.branchIds, format: input.format, requestedBy: actor.userId }, correlationId: actor.requestId });
@@ -376,6 +480,7 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
         const effectiveFrom = input.effectiveFrom ?? (await orgToday(trx, orgId));
         const employees = await visibleEmployees(trx, orgId, grant, input.employeeIds);
         const changed: string[] = [];
+        const leavers: string[] = [];
         for (const e of employees) {
           const next = snapshotOf(e);
           if (input.action === 'assign_branch') next.branchId = input.branchId;
@@ -386,6 +491,11 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
           await trx.updateTable('employees').set({ branchId: next.branchId, departmentId: next.departmentId, employmentStatus: next.employmentStatus, updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', e.id).execute();
           await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.updated', aggregateType: 'employee', aggregateId: e.id, payload: { bulk: input.action, transition: true, branchId: next.branchId }, actorUserId: actor.userId, requestId: actor.requestId });
           changed.push(e.id);
+          if (hasLeft(next.employmentStatus) && !hasLeft(e.employmentStatus)) leavers.push(e.id);
+        }
+        // B-75: every login linked to an employee who now left ends (one refusal rolls the whole bulk change back)
+        if (input.action === 'set_status' && leavers.length) {
+          await offboardLinkedLogins(deps, trx, actor, grant, orgId, leavers, { source: 'bulk_set_status', employmentStatus: input.employmentStatus });
         }
         const { employeeIds: _ids, ...rest } = input;
         await audit(trx, actor, orgId, 'employee.bulk_updated', 'employee', { newValue: { ...rest, effectiveFrom, employeeIds: changed } });

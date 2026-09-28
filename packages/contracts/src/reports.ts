@@ -11,7 +11,7 @@ export const reportParametersSchema = z.object({
   employeeIds: z.array(uuidSchema).max(5000).optional(),
   shiftId: uuidSchema.optional(),
   deviceIds: z.array(uuidSchema).max(1000).optional(),
-  status: z.string().optional(),
+  status: z.string().trim().max(40).optional(),
   sort: z.string().max(64).optional(),
   order: z.enum(['asc', 'desc']).optional(),
   locale: z.enum(['en', 'ar']).optional(),
@@ -21,6 +21,8 @@ export const reportParametersSchema = z.object({
   employmentStatus: z.enum(['active', 'inactive', 'all']).optional(),
   /** audit_report: attendance edits in the samples' layout, or the whole audit log. */
   scope: z.enum(['attendance', 'all']).optional(),
+  /** monthly_summary: the summary page's name / employee-number search (HR portal Prompt 6a review, defect 10). */
+  search: z.string().trim().max(100).optional(),
 });
 export type ReportParameters = z.infer<typeof reportParametersSchema>;
 
@@ -64,6 +66,7 @@ export const dashboardSummarySchema = z.object({
   devicesOffline: z.number().int(),
   devicesUnknown: z.number().int(),
   syncFailures24h: z.number().int(),
+  /** Approvals waiting for the CALLER (their pending seats, or of somebody who delegates to them today) — the Approvals card's "mine" queue. */
   pendingApprovals: z.number().int(),
 });
 export type DashboardSummary = z.infer<typeof dashboardSummarySchema>;

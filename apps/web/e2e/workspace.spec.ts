@@ -18,7 +18,7 @@ test.describe('authenticated workspace', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'emerald');
     await expect(page.getByText('Present today')).toBeVisible();
     await expect(page.getByText('431', { exact: true })).toBeVisible();
-    await expect(page.getByText('Pending approvals')).toBeVisible();
+    await expect(page.getByText('Awaiting your approval')).toBeVisible(); // the rail's approvals card (HR portal Prompt 5 title)
     await expect(page.getByText('Muscat HQ')).toBeVisible();
     await expect(page.getByText('Attendance trend')).toBeVisible();
   });
@@ -31,7 +31,7 @@ test.describe('authenticated workspace', () => {
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'midnight');
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
     await expect(page.getByText('Attendance rate')).toBeVisible();
-    await expect(page.getByText('Pending approvals')).toHaveCount(0); // the executive layout has no side rail
+    await expect(page.getByText('Awaiting your approval')).toHaveCount(0); // the executive layout has no side rail
     // the style reaches the sidebar through the CSS variables, not through per-component colours
     const sidebar = page.getByRole('complementary', { name: 'Primary' });
     if (await sidebar.isVisible()) await expect(sidebar).toHaveCSS('background-color', 'rgb(22, 26, 63)');

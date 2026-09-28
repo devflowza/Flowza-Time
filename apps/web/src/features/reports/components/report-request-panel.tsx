@@ -4,8 +4,8 @@ import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { BarChart3, Lock, Send } from 'lucide-react';
-import { createReportRequestSchema, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
+import { BarChart3, Lock, Send, Share2 } from 'lucide-react';
+import { createReportRequestSchema, DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
 import type { z } from 'zod';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, ErrorState, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@/components/ui';
 import { Combobox } from '@/components/forms';
@@ -22,6 +22,8 @@ import { useShiftOptions } from '@/features/schedule/api';
 import { useLeaveTypes } from '@/features/leave/api';
 import { EmployeeMultiSelect } from '@/features/attendance/components/employee-multi-select';
 import { useReportMutations, useReportTypes, type ReportTypeDef } from '../api';
+import type { ShareSpec } from './share-report-dialog';
+import '../schedules-i18n';
 
 type FormValues = z.input<typeof createReportRequestSchema>;
 const isEmpty = (v: unknown) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
@@ -33,7 +35,7 @@ function useDeviceOptions() {
 }
 
 /** Parameter form for one report type. Remounted per type (key) so defaults and the type-specific required-parameter refinement reset. */
-function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: string) => void }) {
+function ReportForm({ def, onQueued, onShare }: { def: ReportTypeDef; onQueued: (id: string) => void; onShare?: (spec: ShareSpec) => void }) {
   const { t } = useTranslation('reports');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
@@ -49,12 +51,14 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
   const schema = useMemo(() => createReportRequestSchema.superRefine((v, ctx) => {
     for (const p of def.requiredParameters) if (isEmpty((v.parameters as Record<string, unknown> | undefined)?.[p])) ctx.addIssue({ code: 'custom', path: ['parameters', p], message: t('request.required') });
     if (v.parameters?.from && v.parameters?.to && v.parameters.to < v.parameters.from) ctx.addIssue({ code: 'custom', path: ['parameters', 'to'], message: t('request.toBeforeFrom') });
+    // the Daily Report over a range (HR portal Prompt 6a review, ATT-21): the same limit the API and the worker apply
+    else if (def.key === 'daily_attendance' && dailyReportRangeTooLong(v.parameters ?? {})) ctx.addIssue({ code: 'custom', path: ['parameters', 'to'], message: t('request.dailyRangeTooLong', { max: DAILY_REPORT_MAX_DAYS }) });
   }), [def, t]);
   const today = todayIso(tz);
   const form = useForm<FormValues, unknown, CreateReportRequest>({
     resolver: zodResolver(schema),
     // the catalogue names the format its layout was designed for (the sample reports are print documents → PDF)
-    defaultValues: { reportType: def.key, format: def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: params.has('to') ? today.slice(0, 8) + '01' : today, ...(params.has('to') ? { to: today } : {}) } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}), ...(params.has('employmentStatus') ? { employmentStatus: 'active' as const } : {}), ...(params.has('scope') ? { scope: 'attendance' as const } : {}) } },
+    defaultValues: { reportType: def.key, format: def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: required.has('to') ? today.slice(0, 8) + '01' : today, ...(required.has('to') ? { to: today } : {}) } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}), ...(params.has('employmentStatus') ? { employmentStatus: 'active' as const } : {}), ...(params.has('scope') ? { scope: 'attendance' as const } : {}) } },
   });
   const { register, control, formState: { errors, isSubmitting } } = form;
   const branchId = useWatch({ control, name: 'parameters.branchId' });
@@ -69,12 +73,18 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
     } catch (e) { toastError(e); }
   });
 
+  // Send now (HR portal Prompt 6a): the same validated parameters, distributed to recipients instead of requested for me
+  const onShareClick = onShare ? form.handleSubmit((values) => {
+    const p = Object.fromEntries(Object.entries(values.parameters ?? {}).filter(([, v]) => !isEmpty(v)));
+    onShare({ reportType: def.key, format: values.format ?? def.formats[0]!, parameters: p, title: t(`types.${def.key}.name`, { defaultValue: def.name }) });
+  }) : undefined;
+
   return (
     <form onSubmit={onSubmit} className="space-y-4" noValidate data-testid="report-form">
       <div className="grid gap-4 sm:grid-cols-2">
         {params.has('from') ? <>
           <FormField label={params.has('to') ? tc('common.from') : def.key.startsWith('weekly') ? t('request.weekOf') : tc('common.date')} htmlFor="rp-from" required={required.has('from')} error={pErr?.['from']?.message}><Input id="rp-from" type="date" dir="ltr" {...register('parameters.from', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['from']} /></FormField>
-          {params.has('to') ? <FormField label={tc('common.to')} htmlFor="rp-to" required={required.has('to')} error={pErr?.['to']?.message}><Input id="rp-to" type="date" dir="ltr" {...register('parameters.to', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['to']} /></FormField> : null}
+          {params.has('to') ? <FormField label={tc('common.to')} htmlFor="rp-to" required={required.has('to')} optional={!required.has('to')} hint={def.key === 'daily_attendance' ? t('request.dailyRangeHint', { max: DAILY_REPORT_MAX_DAYS }) : undefined} error={pErr?.['to']?.message}><Input id="rp-to" type="date" dir="ltr" {...register('parameters.to', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['to']} /></FormField> : null}
         </> : null}
         {params.has('month') ? <FormField label={t('request.month')} htmlFor="rp-month" required={required.has('month')} error={pErr?.['month']?.message}><Input id="rp-month" type="month" dir="ltr" {...register('parameters.month', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['month']} /></FormField> : null}
         {params.has('branchId') ? <FormField label={tc('common.branch')} htmlFor="rp-branch" required={required.has('branchId')} optional={!required.has('branchId')} error={pErr?.['branchId']?.message}>
@@ -126,13 +136,16 @@ function ReportForm({ def, onQueued }: { def: ReportTypeDef; onQueued: (id: stri
         ); }} />
       </FormField> : null}
       <FormField label={t('request.reason')} htmlFor="rp-reason" optional hint={t('request.reasonHint')} error={errors.reason?.message}><Input id="rp-reason" {...register('reason', { setValueAs: blankToUndefined })} /></FormField>
-      <div className="flex justify-end"><Button type="submit" loading={isSubmitting} disabled={def.allowed === false}><Send /> {t('request.submit')}</Button></div>
+      <div className="flex flex-wrap justify-end gap-2">
+        {onShareClick ? <Button type="button" variant="outline" onClick={() => void onShareClick()} disabled={def.allowed === false}><Share2 /> {t('reportSchedules:share.open')}</Button> : null}
+        <Button type="submit" loading={isSubmitting} disabled={def.allowed === false}><Send /> {t('request.submit')}</Button>
+      </div>
     </form>
   );
 }
 
-/** Report catalogue (cards) + the parameter form of the selected type. */
-export function ReportRequestPanel({ onQueued }: { onQueued: (id: string) => void }) {
+/** Report catalogue (cards) + the parameter form of the selected type. `onShare` adds "Send now" (report.schedule holders). */
+export function ReportRequestPanel({ onQueued, onShare }: { onQueued: (id: string) => void; onShare?: (spec: ShareSpec) => void }) {
   const { t } = useTranslation('reports');
   const types = useReportTypes();
   const [selected, setSelected] = useState<string | null>(null);
@@ -155,7 +168,7 @@ export function ReportRequestPanel({ onQueued }: { onQueued: (id: string) => voi
               ))}
             </div>
           )}
-        {def ? <div className="rounded-lg border bg-muted/30 p-4"><h4 className="mb-3 text-sm font-semibold">{t('request.parametersFor', { name: t(`types.${def.key}.name`, { defaultValue: def.name }) })}</h4><ReportForm key={def.key} def={def} onQueued={onQueued} /></div>
+        {def ? <div className="rounded-lg border bg-muted/30 p-4"><h4 className="mb-3 text-sm font-semibold">{t('request.parametersFor', { name: t(`types.${def.key}.name`, { defaultValue: def.name }) })}</h4><ReportForm key={def.key} def={def} onQueued={onQueued} onShare={onShare} /></div>
           : types.data ? <p className="text-sm text-muted-foreground">{t('request.pickType')}</p> : null}
       </CardContent>
     </Card>

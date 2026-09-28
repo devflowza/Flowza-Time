@@ -1,9 +1,12 @@
 {
   "title": "Leave",
-  "subtitle": "Leave records feed the attendance engine: days on leave are never marked absent. Leave types define paid / unpaid.",
+  "subtitle": "Requests, balances and allocations. Leave feeds the attendance engine: days on leave are never marked absent.",
   "tabs": {
-    "records": "Leave records",
-    "types": "Leave types"
+    "records": "Requests",
+    "types": "Leave types",
+    "calendar": "Team calendar",
+    "balances": "Balances",
+    "allocations": "Allocations"
   },
   "filters": {
     "allStatuses": "All statuses"
@@ -12,7 +15,8 @@
     "PENDING": "Pending",
     "APPROVED": "Approved",
     "REJECTED": "Rejected",
-    "CANCELLED": "Cancelled"
+    "CANCELLED": "Cancelled",
+    "INFO_REQUESTED": "Info requested"
   },
   "recordStatus": {
     "active": "Active",
@@ -41,7 +45,31 @@
     "treatAsPresent": "Counts as present",
     "treatAsPresentHint": "A paid day away from the terminal (site duty). Reports count it with present days, not with leave.",
     "annualAllowance": "Days per year",
-    "annualAllowanceHint": "Shown to employees as their balance in the self-service portal. Leave blank not to track a balance."
+    "annualAllowanceHint": "Shown to employees as their balance in the self-service portal. Leave blank not to track a balance.",
+    "requiresApproval": "Needs approval",
+    "requiresApprovalHint": "Off: an application is approved at once (recorded as auto-approved).",
+    "allowHalfDay": "Half days allowed",
+    "allowHalfDayHint": "Employees can apply for the first or second half of a day.",
+    "portalVisible": "Employees can apply",
+    "portalVisibleHint": "Offered in the self-service portal. Off: HR records it.",
+    "isSpecial": "Special leave",
+    "isSpecialHint": "Never charged automatically for unexcused days (sick, maternity, Hajj…).",
+    "countMode": "Days counted",
+    "countModeHint": "Working days leave weekly offs and holidays free.",
+    "applicableGender": "Who may take it",
+    "applicableGenderHint": "A restricted type needs the gender on the employee record.",
+    "applicableEmploymentTypes": "Employment types",
+    "applicableEmploymentTypesHint": "Only employees of the ticked employment types may take it. Tick none for every employment type.",
+    "advanceNoticeDays": "Advance notice (days)",
+    "advanceNoticeDaysHint": "Employees are refused below it; HR is only warned.",
+    "maxConsecutiveDays": "Most days per request",
+    "maxConsecutiveDaysHint": "Leave blank for no limit. Employees are refused above it; HR is only warned.",
+    "accrual": "Earned",
+    "accrualHint": "Monthly: the yearly entitlement is earned month by month.",
+    "carryForwardMaxDays": "Carry forward (days)",
+    "carryForwardMaxDaysHint": "Unused days moved into next year at the year close (0 = none).",
+    "carryForwardExpiryMonths": "Carried days expire after (months)",
+    "carryForwardExpiryMonthsHint": "Leave blank for never."
   },
   "records": {
     "add": "Record leave",
@@ -57,7 +85,22 @@
     "cancelHint": "The days are recomputed as normal working days.",
     "cancelled": "Leave cancelled",
     "empty": "No leave records",
-    "emptyHint": "Record leave here or import it from your HR system."
+    "emptyHint": "Record leave here or import it from your HR system.",
+    "editTitle": "Edit leave",
+    "editHint": "Pending requests go back to their approvers with the change. Changing decided leave is logged as a correction.",
+    "updated": "Leave updated",
+    "resubmitted": "The request went back to its approvers.",
+    "createdPending": "Leave recorded — waiting for approval",
+    "viewRecalc": "View recalculation",
+    "approval": "Approval",
+    "level": "Level {{n}} of {{count}}",
+    "waitingFor": "Waiting for {{names}}",
+    "daysCount_one": "{{days}} day",
+    "daysCount_other": "{{days}} days",
+    "comments_one": "{{count}} comment",
+    "comments_other": "{{count}} comments",
+    "cancelRequest": "Cancel request",
+    "cancelRequestTitle": "Cancel this leave request?"
   },
   "types": {
     "hint": "Leave types are referenced by leave records and payroll summaries.",
@@ -80,7 +123,29 @@
     "allowance": "Allowance",
     "notTracked": "Not tracked",
     "daysPerYear_one": "{{count}} day / year",
-    "daysPerYear_other": "{{count}} days / year"
+    "daysPerYear_other": "{{count}} days / year",
+    "system": "System",
+    "systemHint": "The comp-off type is managed by the system: its balance comes from approved comp-off credits. Only its name and colour can change.",
+    "fromCredits": "From comp-off credits",
+    "policyColumn": "Policy",
+    "policy": {
+      "requests": "Requests",
+      "balance": "Balance"
+    },
+    "chips": {
+      "noApproval": "No approval",
+      "calendarDays": "Calendar days",
+      "notice_one": "{{count}} day notice",
+      "notice_other": "{{count}} days notice",
+      "maxConsecutive_one": "Max {{count}} day",
+      "maxConsecutive_other": "Max {{count}} days",
+      "monthly": "Earned monthly",
+      "carryForward_one": "Carries {{count}} day",
+      "carryForward_other": "Carries {{count}} days",
+      "hrOnly": "HR only",
+      "special": "Special",
+      "employmentTypes": "{{types}} only"
+    }
   },
   "decision": {
     "approve": "Approve",
@@ -88,9 +153,235 @@
     "approveTitle": "Approve leave request",
     "rejectTitle": "Reject leave request",
     "note": "Note to the employee",
+    "decidingFor": "Deciding for",
+    "decidingForHint": "This level waits for several approvers: choose whose approval your decision gives.",
+    "decidingForPlaceholder": "Choose an approver",
     "noteHint": "Shown to the employee with the decision.",
     "noteShort": "HR: {{note}}",
     "approved": "Leave approved",
-    "rejected": "Leave request rejected"
+    "rejected": "Leave request rejected",
+    "noteRequired": "A reason is required when rejecting; the employee sees it.",
+    "atLevel": "Your decision settles level {{n}} of {{count}}.",
+    "advanced": "Level {{n}} approved — waiting for {{names}}",
+    "approvalRecorded": "Your approval was recorded — waiting for {{names}}",
+    "rejectionRecorded": "Your rejection was recorded — waiting for {{names}}",
+    "nextApprover": "the next approver"
+  },
+  "countModes": {
+    "working": "Working days",
+    "calendar": "Calendar days"
+  },
+  "accruals": {
+    "none": "All at the start of the year",
+    "monthly": "Monthly"
+  },
+  "genders": {
+    "all": "Everyone",
+    "male": "Men only",
+    "female": "Women only"
+  },
+  "detail": {
+    "title": "Leave request",
+    "days_one": "{{days}} day",
+    "days_other": "{{days}} days",
+    "created": "Requested {{when}}",
+    "edited": "edited {{when}}",
+    "withdrawn": "withdrawn {{when}}",
+    "approval": "Approval",
+    "noRequest": "No approval request: this leave was recorded without one."
+  },
+  "thread": {
+    "title": "Conversation",
+    "empty": "No messages yet",
+    "emptyHint": "Questions and answers between the employee and the approvers appear here.",
+    "system": "FlowZa",
+    "you": "You",
+    "someone": "Someone",
+    "kind": {
+      "info_request": "asked a question",
+      "reply": "answered"
+    },
+    "commentLabel": "Add a comment",
+    "replyLabel": "Your answer to the approver",
+    "placeholder": "Write a comment…",
+    "replyPlaceholder": "Answer the question — your request goes back to the approvers.",
+    "post": "Send",
+    "reply": "Send answer",
+    "posted": "Comment sent",
+    "replied": "Answer sent — the request is back with your approvers"
+  },
+  "balances": {
+    "hint": "Available of the entitlement for each employee (allocations, carry-forward, accrual, taken and pending leave).",
+    "year": "Year",
+    "search": "Search employees",
+    "export": "Export CSV",
+    "empty": "No employees",
+    "emptyHint": "Balances appear once employees and leave types exist.",
+    "takenOnly": "{{days}} taken",
+    "pendingShort": "{{days}} pending",
+    "cfShort": "incl. {{days}} carried, expires {{date}}"
+  },
+  "allocations": {
+    "hint": "Allocation rows are the entitlement of each employee per leave type and year. Balances are computed from them.",
+    "add": "Add allocation",
+    "edit": "Edit allocation",
+    "dialogHint": "The allocation for {{year}}. Carried-forward days can expire; an adjustment can be negative.",
+    "allocated": "Allocated",
+    "allocatedHint": "Days granted for the year.",
+    "carriedForward": "Carried forward",
+    "carriedForwardHint": "Days brought from the previous year.",
+    "carriedForwardExpires": "Carried days expire on",
+    "opening": "Opening balance",
+    "openingHint": "Days brought in from a previous system.",
+    "adjustment": "Adjustment",
+    "adjustmentHint": "A manual correction (negative to take days away).",
+    "notes": "Notes",
+    "expires": "expires {{date}}",
+    "saved": "Allocation saved",
+    "unchanged": "Nothing changed",
+    "empty": "No allocations for {{year}}",
+    "emptyHint": "Create them from each type's yearly allowance, or add them one by one.",
+    "generate": "Create {{year}} allocations",
+    "generateTitle": "Create the missing allocations for {{year}}?",
+    "generateHint": "Every active employee gets a row per type with a yearly allowance, prorated for joiners. Existing rows are never changed.",
+    "generated": "{{created}} allocations created, {{skipped}} already existed",
+    "generatedOwnSkipped_one": "Your own allocation was left for another HR user: nobody allocates leave to themselves.",
+    "generatedOwnSkipped_other": "Your own {{count}} allocations were left for another HR user: nobody allocates leave to themselves.",
+    "closeYear": "Close {{from}} → {{to}}",
+    "closeTitle": "Close {{from}} and carry balances into {{to}}?",
+    "closeHint": "Unused days of types that carry forward move into {{to}}, capped by each type and with its expiry. Running it again changes nothing.",
+    "closeQueued": "Carrying {{from}} balances into {{to}}."
+  },
+  "calendar": {
+    "previous": "Previous month",
+    "next": "Next month",
+    "includePending": "Show pending",
+    "days": "Days",
+    "empty": "No leave this month",
+    "emptyHint": "Approved and pending leave of the people you can see appears here.",
+    "truncated": "Only the first 300 employees with leave this month are shown. Narrow it down by branch."
+  },
+  "team": {
+    "title": "Team leave",
+    "calendar": "Team calendar",
+    "days_one": "{{days}} day",
+    "days_other": "{{days}} days",
+    "empty": "No upcoming leave in your team"
+  },
+  "apply": {
+    "editTitle": "Edit leave request",
+    "editHint": "Your approvers see the change and decide again.",
+    "editAnswers": "Saving the change answers the approver's question: the request goes back to them.",
+    "saveEdit": "Save and resend",
+    "updated": "Leave request updated",
+    "resubmitted": "It went back to your approvers.",
+    "autoApproved": "Leave approved — this type needs no approval",
+    "previewCalendar_one": "This request uses {{days}} calendar day.",
+    "previewCalendar_other": "This request uses {{days}} calendar days.",
+    "noHalfDay": "{{type}} cannot be taken as a half day.",
+    "issues": {
+      "halfDay": "{{type}} cannot be taken as a half day.",
+      "notice_one": "{{type}} needs {{count}} day's notice — the earliest start date is {{date}}.",
+      "notice_other": "{{type}} needs {{count}} days' notice — the earliest start date is {{date}}.",
+      "maxConsecutive_one": "{{type}} allows at most {{count}} day per request.",
+      "maxConsecutive_other": "{{type}} allows at most {{count}} days per request.",
+      "compOff_one": "Not enough comp-off: {{available}} day available.",
+      "compOff_other": "Not enough comp-off: {{available}} days available.",
+      "overlap": "You already have {{type}} from {{from}} to {{to}} ({{status}}): one leave per date. Change or withdraw it first."
+    }
+  },
+  "portal": {
+    "totals": "Leave totals",
+    "tiles": {
+      "entitlement": "Entitlement",
+      "used": "Used",
+      "pending": "Pending",
+      "available": "Available",
+      "accrued": "Accrued to date"
+    },
+    "available": "days available",
+    "entitlement": "Entitlement",
+    "monthly": "Earned monthly",
+    "accruedToDate": "Accrued to date",
+    "carried_one": "Includes {{days}} day carried forward",
+    "carried_other": "Includes {{days}} days carried forward",
+    "carriedExpiring_one": "Includes {{days}} day carried forward, usable until {{date}}",
+    "carriedExpiring_other": "Includes {{days}} days carried forward, usable until {{date}}",
+    "carriedExpired_one": "{{days}} carried-forward day expired",
+    "carriedExpired_other": "{{days}} carried-forward days expired",
+    "withdrawHint": "Your approvers see why. Approved leave can only be cancelled by HR.",
+    "alreadyWithdrawn": "This request was already withdrawn.",
+    "withdrawReason": "Why are you withdrawing it?",
+    "withdrawReasonHint": "At least 3 characters.",
+    "conversationTitle": "Conversation",
+    "asked": "An approver asked:",
+    "askedBy": "{{name}} asked:",
+    "reply": "Reply",
+    "comments": "Comments",
+    "edit": "Edit"
+  },
+  "compOff": {
+    "badge": "Comp-off",
+    "typeName": "Comp-off",
+    "title": "Comp-off",
+    "availableLabel": "days available",
+    "availableDays_one": "{{days}} day available",
+    "availableDays_other": "{{days}} days available",
+    "reserved": "{{days}} reserved by pending requests",
+    "after_one": "{{days}} comp-off day left after this request.",
+    "after_other": "{{days}} comp-off days left after this request.",
+    "request": "Request comp-off",
+    "use": "Use comp-off",
+    "useTitle": "Use comp-off",
+    "useHint": "Take days off against your comp-off credits. The earliest-expiring credits are used first, when the request is approved.",
+    "empty": "No comp-off credits yet. Worked on a weekly off day or a holiday? Request one.",
+    "timeline": "Timeline",
+    "earned": "{{days}} day earned",
+    "left": "{{days}} left",
+    "expires": "expires {{date}}",
+    "claimed": "Claimed {{time}}",
+    "recorded": "Attendance shows {{time}}",
+    "noRecord": "No attendance record for this day",
+    "requestTitle": "Request comp-off",
+    "requestHint": "For work on a weekly off day or a holiday: {{full}} hours earn a day, {{half}} hours half a day. Approved credits can be used for {{days}} days.",
+    "workedOn": "Day worked",
+    "hours": "Hours worked",
+    "onWeeklyOff": "Your weekly off day.",
+    "onHoliday": "Holiday: {{name}}.",
+    "willEarn": "Earns {{days}} day of comp-off once approved.",
+    "belowHalf": "Below half a day: at least {{hours}} hours are needed.",
+    "location": "Where did you work?",
+    "summary": "What did you work on?",
+    "summaryHint": "Your approver reads this.",
+    "send": "Send request",
+    "requested": "Comp-off requested. Your approver has been notified.",
+    "dayType": {
+      "weekly_off": "Weekly off",
+      "holiday": "Holiday"
+    },
+    "status": {
+      "pending_approval": "Pending",
+      "approved": "Approved",
+      "partially_used": "Partly used",
+      "used": "Used",
+      "rejected": "Rejected",
+      "expired": "Expired",
+      "cancelled": "Cancelled"
+    },
+    "reasons": {
+      "future": "Comp-off is earned for a day already worked; this date is in the future.",
+      "before_joining": "This date is before your joining date.",
+      "after_exit": "This date is after your exit date.",
+      "working_day": "This is a working day: comp-off is earned for work on a weekly off day or a holiday.",
+      "expired": "A credit for this date would already have expired.",
+      "already_requested": "You already requested comp-off for this date."
+    }
+  },
+  "settings": {
+    "title": "Leave",
+    "hint": "Organisation-wide leave settings.",
+    "compOffExpiryDays": "Comp-off credits expire after (days)",
+    "compOffExpiryDaysHint": "Counted from the day worked. Default 90.",
+    "compOffThresholds": "The hours that earn a full or half comp-off day follow Settings → Attendance → full-day hours."
   }
 }

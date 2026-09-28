@@ -3,7 +3,7 @@ import type { Trx } from '@flowza/database';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { requireMembership, requirePermission } from '../lib/authorize.js';
-import { type Actor, runUser, audit } from '../lib/service.js';
+import { type Actor, runUser, audit, withSystemScope } from '../lib/service.js';
 import { toCount } from '../lib/pagination.js';
 import { groupBy, isoDateTime } from '../lib/mappers.js';
 
@@ -78,16 +78,32 @@ export async function updateRole(deps: ApiDeps, actor: Actor, orgId: string, id:
   });
 }
 
+/**
+ * Delete a custom role (role.manage). What uses it is counted in the organisation's SYSTEM scope (HR portal Prompt 5 review,
+ * P1-5): a role administrator usually cannot read members or invitations (user.view), and under their RLS an open invitation
+ * would be invisible — the role deleted and the invitation silently cascaded away with it. Now: members or OPEN invitations
+ * (not accepted, not revoked, not expired) → 409 (revoke the invitations first); closed invitations (accepted, revoked,
+ * resent / superseded, expired) go with the role by the cascade and are COUNTED on the `role.deleted` audit row.
+ */
 export async function deleteRole(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
   requirePermission(actor.principal, orgId, 'role.manage');
   return runUser(deps.db, actor, async (trx) => {
     const role = (await rolesWithPermissions(trx, orgId, [id]))[0];
     if (!role) throw errors.notFound('Role', id);
     if (role.isSystem) throw errors.invalidState('System roles cannot be deleted.');
-    const inUse = toCount((await trx.selectFrom('orgMemberships').select((eb) => eb.fn.countAll().as('n')).where('roleId', '=', id).executeTakeFirst())?.n)
-      + toCount((await trx.selectFrom('invitations').select((eb) => eb.fn.countAll().as('n')).where('roleId', '=', id).where('acceptedAt', 'is', null).executeTakeFirst())?.n);
-    if (inUse > 0) throw errors.conflict('The role is assigned to members or pending invitations and cannot be deleted.', { inUse });
+    const use = await withSystemScope(trx, orgId, async (t) => {
+      const members = toCount((await t.selectFrom('orgMemberships').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('roleId', '=', id).executeTakeFirst())?.n);
+      const invitations = await t.selectFrom('invitations').select(['acceptedAt', 'revokedAt', 'expiresAt']).where('organizationId', '=', orgId).where('roleId', '=', id).execute();
+      const now = Date.now();
+      const open = invitations.filter((i) => i.acceptedAt === null && i.revokedAt === null && i.expiresAt.getTime() > now).length;
+      return { members, openInvitations: open, closedInvitations: invitations.length - open };
+    });
+    if (use.members > 0 || use.openInvitations > 0) {
+      throw errors.conflict(use.openInvitations > 0 && use.members === 0
+        ? 'Open invitations use this role: revoke them before deleting it.'
+        : 'The role is assigned to members or open invitations and cannot be deleted.', { members: use.members, openInvitations: use.openInvitations, inUse: use.members + use.openInvitations });
+    }
     await trx.deleteFrom('roles').where('id', '=', id).where('organizationId', '=', orgId).execute();
-    await audit(trx, actor, orgId, 'role.deleted', 'role', { entityId: id, oldValue: { key: role.key, name: role.name, permissions: role.permissions } });
+    await audit(trx, actor, orgId, 'role.deleted', 'role', { entityId: id, oldValue: { key: role.key, name: role.name, permissions: role.permissions }, newValue: { closedInvitationsRemoved: use.closedInvitations } });
   });
 }

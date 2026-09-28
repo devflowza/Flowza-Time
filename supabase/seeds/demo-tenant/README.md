@@ -13,13 +13,13 @@ existing owner login.
 | Locations | Head office (Muscat) + Sohar, Salalah, Nizwa, Sur, Duqm site — full address, coordinates, geofence, contact person/email/phone, weekly-off (Duqm works Saturdays) |
 | Devices | 7 ZKTeco push terminals (two at head office, one per branch), model, serial, firmware, tags, notes, push-token hash, enrolment state per employee; Nizwa is offline |
 | Structure | 10 departments in a hierarchy with managers, 27 designations with levels and Arabic names, 12 teams with leads and members |
-| People | 53 employees (26 HQ, 8 Sohar, 6 Salalah, 4 Nizwa, 4 Sur, 5 Duqm) with Arabic display names, DOB, nationality, contact, manager, device PIN/card, custom fields (blood group, marital status, grade, emergency contact, Ramadan eligibility), identity documents, employment history (one transfer, two leavers, two joiners inside the window) |
-| Logins | 8 memberships, password **`Test@1234`** — see table below |
+| People | 53 employees (26 HQ, 8 Sohar, 6 Salalah, 4 Nizwa, 4 Sur, 5 Duqm) with Arabic display names, DOB, nationality, contact, manager (+ a secondary / dotted-line manager for the IT-DEV engineers and the Sohar sales executives), device PIN/card, custom fields (blood group, marital status, grade, emergency contact, Ramadan eligibility), identity documents, employment history (one transfer, two leavers, two joiners inside the window) |
+| Logins | 10 memberships, password **`Test@1234`** — see table below |
 | Schedule | Shifts OFFICE 08:00–17:00, SITE 07:00–16:00, FLEX 8 h; assignments org → Duqm branch → IT-DEV team → individual drivers/technicians; company rule set + Duqm rule set; Oman public holidays 2026 (+ two company days) |
 | Leave | 10 leave types (product defaults + Hajj + Paternity), 62 records Mar–Oct 2026 across every type and status |
 | Employee portal | Step 3b: yearly allowances on the leave types (AL 30, CL 6, EL 6, PTL 7, HJ 15, ML 98) and a full self-service history for **employee@flowza.ai** (Priya Sharma) — leave approved with HR's notes, rejected, withdrawn and two pending requests HR can approve on the Leave page; correction requests (pending, rejected, withdrawn); her notifications and HR's "new request" notifications |
 | Attendance | ~13 000 raw punches (1 Mar → yesterday) with per-employee habits: punctuality band, overtime appetite, absence rate, lunch punches, duplicate punches, missing punch-outs, half-day leave, Ramadan hours, weekend work on site |
-| Corrections | Approval workflow "Line manager → HR", 6 corrections (3 approved and applied by the worker, 2 pending, 1 rejected) |
+| Corrections | Approval workflow "Line manager → HR", 6 corrections (3 approved and applied by the worker, 2 pending, 1 rejected), in the approval engine v2 shape: each level's approvers seated (the line manager's login, else the HR Admin role; never the requester or the subject), decided levels with their decider, and a timeline per request |
 | Extras | Notifications, audit trail entries |
 
 Attendance records are **not** written by the seed. Raw punches land as `pending`; the worker's normaliser turns them into
@@ -38,6 +38,8 @@ monthly payroll summaries — every figure in the app is the real engine's outpu
 | attadmin@flowza.ai | Attendance Admin | Zainab Al Zadjali, Attendance Administrator |
 | brmanager@flowza.ai | Branch Manager (Sohar only) | Said Al Rawahi |
 | employee@flowza.ai | Employee (self-service) | Priya Sharma, Software Engineer |
+| manager@flowza.ai | Line Manager (team = direct reports) | Arun Menon, Team Lead IT-DEV (MG-1010) — Priya's manager |
+| auditor@flowza.ai | Auditor (read-only) | Suresh Pillai, Senior Accountant (MG-1007) |
 
 ## Running
 
@@ -58,12 +60,17 @@ old events through corrections or start from a fresh tenant instead.
 
 ## Known limits
 
-- The eight logins have e-mail notifications switched off for the attendance and system categories (in-app stays on):
+- The ten logins have e-mail notifications switched off for the attendance and system categories (in-app stays on):
   the seeded addresses are test accounts, and a worker built before the `sync.completed` routing fix e-mails every
   scheduled health check to every sync-permission holder.
 
 - Leave balances are a yearly allowance per leave type (`leave_types.annual_allowance_days`, migration 20260927000100);
   the portal counts used / pending working days against it. There are no per-employee entitlements or carry-over.
+- Step 02 needs migration 20260928000100 (`manager` / `auditor` system roles, `employees.secondary_manager_employee_id`).
+  The line manager sees Priya, Salim and Mohammed (IT-DEV) through the team predicate; the IT Manager (MG-1009) is their
+  secondary manager and would see them too once given a login with a team-scoped role.
+- Step 04 needs migration 20260928000200 (approval engine v2: step actors, request timeline, `SKIPPED` status); it also
+  brings the requests written by step 3b to that shape, so run 3b before 04.
 - Step 3b needs migration 20260927000100 (self-service permissions and columns) and must run before step 04: its one
   new approved leave day (1 Oct 2026) is in the future, so no generated punch ever lands on it.
 - Teams have no department column; the team name carries the department where it matters.

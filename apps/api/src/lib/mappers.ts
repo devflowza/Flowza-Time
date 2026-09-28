@@ -28,6 +28,19 @@ export function jsonArray<T = unknown>(value: unknown): T[] {
   if (typeof value === 'string') { try { const p = JSON.parse(value); return Array.isArray(p) ? (p as T[]) : []; } catch { return []; } }
   return [];
 }
+/**
+ * A Postgres array of an ENUM type (node-postgres only parses arrays of built-in types: `approval_entity[]` arrives as the
+ * literal `{LEAVE,COMP_OFF}`). Enum labels never contain commas, quotes or braces, so the literal splits safely.
+ */
+export function enumArrayOrNull<T extends string = string>(value: unknown): T[] | null {
+  if (value === null || value === undefined) return null;
+  if (Array.isArray(value)) return value.map(String) as T[];
+  if (typeof value === 'string') {
+    const inner = value.trim().replace(/^\{/, '').replace(/\}$/, '');
+    return (inner ? inner.split(',').map((x) => x.trim().replace(/^"|"$/g, '')) : []) as T[];
+  }
+  return null;
+}
 /** Group rows by a key for batch (non-N+1) lookups. */
 export function groupBy<T, K extends string>(rows: readonly T[], key: (row: T) => K): Map<K, T[]> {
   const out = new Map<K, T[]>();

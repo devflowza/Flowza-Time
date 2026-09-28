@@ -317,21 +317,34 @@ describe('calculateDailyRecord — holidays, weekly off, leave', () => {
     expect(r.trace.inputs.holiday).toBe('National Day');
   });
 
-  it('holiday with work keeps HOLIDAY status and counts all minutes as HOLIDAY overtime', () => {
-    const r = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00') }));
+  it('holiday with work keeps HOLIDAY status and counts all minutes as HOLIDAY overtime (policy: overtime)', () => {
+    const settings = { nonWorkingDay: { action: 'overtime' as const } };
+    const r = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00'), settings }));
     expect(r).toMatchObject({ status: 'HOLIDAY', workedMinutes: 480, overtimeMinutes: 480, overtimeCategory: 'HOLIDAY', lateMinutes: 0 });
-    expect(r.flags).toEqual(['OVERTIME', 'WORKED_ON_HOLIDAY']);
-    const noOt = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00'), rules: rules({ holidayWorkCountsAsOvertime: false }) }));
-    expect(noOt).toMatchObject({ status: 'HOLIDAY', workedMinutes: 480, overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_HOLIDAY'] });
-    const capped = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00'), rules: rules({ overtimeMaxMinutesPerDay: 300 }) }));
+    expect(r.flags).toEqual(['OVERTIME', 'WORKED_ON_HOLIDAY', 'NON_WORKING_DAY_WORK']);
+    const noOt = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00'), settings, rules: rules({ holidayWorkCountsAsOvertime: false }) }));
+    expect(noOt).toMatchObject({ status: 'HOLIDAY', workedMinutes: 480, overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_HOLIDAY', 'NON_WORKING_DAY_WORK'] });
+    const capped = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00'), settings, rules: rules({ overtimeMaxMinutesPerDay: 300 }) }));
     expect(capped.overtimeMinutes).toBe(300);
   });
 
-  it('weekly off with work → WEEKLY_OFF overtime category', () => {
+  it('holiday with work under the default policy (record) keeps the minutes without overtime; ignore zeroes them', () => {
+    const recorded = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00') }));
+    expect(recorded).toMatchObject({ status: 'HOLIDAY', workedMinutes: 480, overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_HOLIDAY', 'NON_WORKING_DAY_WORK'] });
+    expect(recorded.trace.steps.find((s) => s.step === 'nonWorkingDay')?.values).toMatchObject({ action: 'record', worked: 480 });
+    const ignored = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00'), settings: { nonWorkingDay: { action: 'ignore' } } }));
+    expect(ignored).toMatchObject({ status: 'HOLIDAY', workedMinutes: 0, overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_HOLIDAY'], punchCount: 2 });
+    expect(ignored.firstInAt).not.toBeNull(); // the punches stay facts on the record
+    expect(ignored.trace.steps.find((s) => s.step === 'nonWorkingDay')?.values).toMatchObject({ action: 'ignore', ignoredMinutes: 480 });
+  });
+
+  it('weekly off with work → WEEKLY_OFF overtime category (policy: overtime)', () => {
     const events = [punch(FRIDAY, '10:00'), punch(FRIDAY, '15:00')];
-    const r = calculateDailyRecord(input({ attendanceDate: FRIDAY, events }));
+    const r = calculateDailyRecord(input({ attendanceDate: FRIDAY, events, settings: { nonWorkingDay: { action: 'overtime' } } }));
     expect(r).toMatchObject({ status: 'WEEKLY_OFF', workedMinutes: 300, overtimeMinutes: 300, overtimeCategory: 'WEEKLY_OFF' });
-    expect(r.flags).toEqual(['OVERTIME', 'WORKED_ON_WEEKLY_OFF']);
+    expect(r.flags).toEqual(['OVERTIME', 'WORKED_ON_WEEKLY_OFF', 'NON_WORKING_DAY_WORK']);
+    const recorded = calculateDailyRecord(input({ attendanceDate: FRIDAY, events }));
+    expect(recorded).toMatchObject({ status: 'WEEKLY_OFF', workedMinutes: 300, overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_WEEKLY_OFF', 'NON_WORKING_DAY_WORK'] });
     expect(r.trace.inputs.weeklyOff).toBe(true);
     expect(calculateDailyRecord(input({ attendanceDate: FRIDAY })).status).toBe('WEEKLY_OFF');
   });
@@ -492,8 +505,8 @@ describe('calculateDailyRecord — adversarial review', () => {
   });
 
   it('does not leave a stale OVERTIME flag or a regular-overtime step on a holiday whose work earns no overtime', () => {
-    const r = calculateDailyRecord(input({ holiday, events: day('09:00', '18:50'), rules: rules({ holidayWorkCountsAsOvertime: false }) }));
-    expect(r).toMatchObject({ status: 'HOLIDAY', overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_HOLIDAY'] });
+    const r = calculateDailyRecord(input({ holiday, events: day('09:00', '18:50'), settings: { nonWorkingDay: { action: 'overtime' } }, rules: rules({ holidayWorkCountsAsOvertime: false }) }));
+    expect(r).toMatchObject({ status: 'HOLIDAY', overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_HOLIDAY', 'NON_WORKING_DAY_WORK'] });
     expect(r.trace.steps.filter((s) => s.step === 'overtime')).toHaveLength(1);
   });
 

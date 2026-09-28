@@ -5,6 +5,7 @@ import { DateTime } from 'luxon';
 import { AlarmClock, CalendarCheck, CalendarPlus, ClipboardList, Clock, Hourglass, Palmtree, PartyPopper, TrendingUp } from 'lucide-react';
 import { Badge, Button, Card, CardContent, EmptyState, ErrorState, Skeleton, StatCard } from '@/components/ui';
 import { fmtDate, fmtMinutes, fmtTime } from '@/lib/format';
+import { useLocalName } from '@/lib/local-name';
 import { useActiveMembership, useMe } from '@/features/me/use-me';
 import { AttendanceStatusBadge, FlagChips } from '@/features/attendance/components/badges';
 import { daypart, firstName } from '@/features/dashboard/model';
@@ -12,6 +13,8 @@ import { useSelfLeave, useSelfOverview, useSelfProfile } from '../api';
 import { fmtDays } from '../model';
 import { ApplyLeaveDialog } from '../components/apply-leave-dialog';
 import { BalanceRow, LeaveStatusBadge, SectionTitle, TypeDot } from '../components/parts';
+import { HomePunchCard, PendingSelfItems } from '../components/home-attendance';
+import { TeamUpcomingLeave } from '@/features/leave/components/team-upcoming-leave';
 
 function TodayCard() {
   const { t } = useTranslation('portal');
@@ -61,6 +64,7 @@ export default function PortalHomePage() {
   const year = Number((overview.data?.date ?? DateTime.now().toISODate()!).slice(0, 4));
   const leave = useSelfLeave(year);
   const [applyOpen, setApplyOpen] = useState(false);
+  const ln = useLocalName();
   const d = overview.data;
   const m = d?.month.totals;
   const tz = d?.timezone ?? 'UTC';
@@ -90,12 +94,15 @@ export default function PortalHomePage() {
         </div>
       ) : null}
 
+      <PendingSelfItems overview={d} />
+      <HomePunchCard overview={d} />
+
       <TodayCard />
 
       <section aria-label={t('home.thisMonth')}>
         <h2 className="mb-2 text-sm font-semibold">{t('home.thisMonth')} <span className="font-normal text-muted-foreground">· {d ? fmtDate(`${d.month.month}-01`, 'MMMM yyyy') : ''}</span></h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-          <StatCard label={t('home.attendanceRate')} value={m?.attendanceRate === null || m?.attendanceRate === undefined ? '—' : `${Math.round(m.attendanceRate * 100)}%`} hint={m ? t('home.attendanceRateHint', { present: m.present + m.halfDay * 0.5, working: m.workingDays }) : undefined} icon={TrendingUp} tone="success" loading={overview.isLoading} onClick={() => void navigate('/my/attendance')} />
+          <StatCard label={t('home.attendanceRate')} value={m?.attendanceRate === null || m?.attendanceRate === undefined ? '—' : `${Math.round(m.attendanceRate * 100)}%`} hint={m ? t('home.attendanceRateHint', { present: m.attendedDays ?? m.present + m.halfDay * 0.5, working: m.workingDays }) : undefined} icon={TrendingUp} tone="success" loading={overview.isLoading} onClick={() => void navigate('/my/attendance')} />
           <StatCard label={t('home.presentDays')} value={m ? fmtDays(m.present + m.halfDay * 0.5) : '—'} icon={CalendarCheck} loading={overview.isLoading} />
           <StatCard label={t('home.lateArrivals')} value={m?.late ?? '—'} hint={m && m.lateMinutes ? t('home.lateHint', { minutes: fmtMinutes(m.lateMinutes) }) : undefined} icon={AlarmClock} tone={m && m.late > 0 ? 'warning' : 'default'} loading={overview.isLoading} />
           <StatCard label={t('home.workedHours')} value={m ? fmtMinutes(m.workedMinutes) : '—'} icon={Clock} loading={overview.isLoading} />
@@ -108,7 +115,7 @@ export default function PortalHomePage() {
         <Card>
           <SectionTitle title={t('home.balances', { year })} to="/my/leave" linkLabel={t('home.seeAll')} />
           <CardContent className="space-y-4">
-            {overview.isLoading ? <Skeleton className="h-24 w-full" /> : d && d.balances.length ? d.balances.map((b) => <BalanceRow key={b.leaveTypeId} b={b} name={b.name} color={b.color} />) : <p className="text-sm text-muted-foreground">{t('home.balancesEmpty')}</p>}
+            {overview.isLoading ? <Skeleton className="h-24 w-full" /> : d && d.balances.length ? d.balances.map((b) => <BalanceRow key={b.leaveTypeId} b={b} name={ln(b.name, b.nameAr)} color={b.color} />) : <p className="text-sm text-muted-foreground">{t('home.balancesEmpty')}</p>}
           </CardContent>
         </Card>
 
@@ -120,7 +127,7 @@ export default function PortalHomePage() {
                 {d.upcomingLeave.map((l) => (
                   <li key={l.id} className="flex items-center justify-between gap-2 py-2.5 first:pt-0">
                     <div className="min-w-0">
-                      <p className="flex items-center gap-2 truncate text-sm font-medium"><TypeDot color={l.color} />{l.leaveTypeName}</p>
+                      <p className="flex items-center gap-2 truncate text-sm font-medium"><TypeDot color={l.color} />{ln(l.leaveTypeName, l.leaveTypeNameAr)}</p>
                       <p className="text-xs text-muted-foreground tnum">{l.startDate === l.endDate ? fmtDate(l.startDate, 'EEE dd MMM') : `${fmtDate(l.startDate, 'dd MMM')} → ${fmtDate(l.endDate, 'dd MMM')}`} · {fmtDays(l.days)}d</p>
                     </div>
                     <LeaveStatusBadge status={l.status} />
@@ -139,7 +146,7 @@ export default function PortalHomePage() {
                 {d.upcomingHolidays.map((h) => (
                   <li key={`${h.date}-${h.name}`} className="flex items-center gap-3 py-2.5 first:pt-0">
                     <div className="flex size-10 shrink-0 flex-col items-center justify-center rounded-md bg-accent text-accent-foreground"><span className="text-[10px] font-semibold uppercase leading-none">{fmtDate(h.date, 'MMM')}</span><span className="text-sm font-bold leading-tight tnum">{fmtDate(h.date, 'd')}</span></div>
-                    <div className="min-w-0"><p className="truncate text-sm font-medium" dir="auto">{h.name}</p><p className="text-xs text-muted-foreground tnum">{h.endDate && h.endDate !== h.date ? `${fmtDate(h.date, 'EEE dd MMM')} → ${fmtDate(h.endDate, 'EEE dd MMM')}` : fmtDate(h.date, 'EEEE')}</p></div>
+                    <div className="min-w-0"><p className="truncate text-sm font-medium" dir="auto">{ln(h.name, h.nameAr)}</p><p className="text-xs text-muted-foreground tnum">{h.endDate && h.endDate !== h.date ? `${fmtDate(h.date, 'EEE dd MMM')} → ${fmtDate(h.endDate, 'EEE dd MMM')}` : fmtDate(h.date, 'EEEE')}</p></div>
                   </li>
                 ))}
               </ul>
@@ -147,6 +154,9 @@ export default function PortalHomePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* managers (leave.view_team): the team's upcoming leave */}
+      <TeamUpcomingLeave />
 
       <Card>
         <SectionTitle title={t('home.recent')} to="/my/attendance?tab=log" linkLabel={t('home.seeAll')} />

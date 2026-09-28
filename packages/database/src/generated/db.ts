@@ -5,15 +5,27 @@
 
 import type { ColumnType } from "kysely";
 
-export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "SHIFT_CHANGE";
+export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "ATTENDANCE_NOTE" | "COMP_OFF" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "OVERTIME_CLAIM" | "REGULARISATION" | "SHIFT_CHANGE" | "SHIFT_SWAP";
 
-export type ApprovalStatus = "APPROVED" | "CANCELLED" | "PENDING" | "REJECTED";
+export type ApprovalStatus = "APPROVED" | "CANCELLED" | "INVALIDATED" | "PENDING" | "REJECTED" | "SKIPPED";
 
-export type ApproverType = "MANAGER" | "ROLE" | "USER";
+export type ApproverType = "BRANCH_MANAGER" | "DEPARTMENT_HEAD" | "HR_ADMIN" | "MANAGER" | "MANAGER_CHAIN" | "ROLE" | "SECONDARY_MANAGER" | "USER";
+
+export type ArrayType<T> = ArrayTypeImpl<T> extends (infer U)[]
+  ? U[]
+  : ArrayTypeImpl<T>;
+
+export type ArrayTypeImpl<T> = T extends ColumnType<infer S, infer I, infer U>
+  ? ColumnType<S[], I[], U[]>
+  : T[];
 
 export type AssignmentTarget = "BRANCH" | "DEPARTMENT" | "EMPLOYEE" | "ORGANIZATION" | "TEAM";
 
 export type AttendanceEventType = "BREAK_END" | "BREAK_START" | "PUNCH" | "PUNCH_IN" | "PUNCH_OUT";
+
+export type AttendanceNoteCategory = "absence_reason" | "client_visit" | "field_work" | "late_reason" | "other" | "wfh";
+
+export type AttendanceNoteStatus = "approved" | "excused" | "info_requested" | "pending" | "rejected";
 
 export type AttendanceStatus = "ABSENT" | "EXITED" | "HALF_DAY" | "HOLIDAY" | "LEAVE" | "MISSING_PUNCH" | "NOT_JOINED" | "PENDING" | "PRESENT" | "WEEKLY_OFF";
 
@@ -49,6 +61,10 @@ export type Generated<T> = T extends ColumnType<infer S, infer I, infer U>
   ? ColumnType<S, I | undefined, U>
   : ColumnType<T, T | undefined, T>;
 
+export type GeofenceEnforcement = "advisory_log" | "hard_block" | "soft_warn";
+
+export type GeofenceScope = "branch" | "department" | "employee" | "org" | "team";
+
 export type GrantAccessLevel = "read" | "write";
 
 export type HalfDayPart = "FIRST_HALF" | "SECOND_HALF";
@@ -81,7 +97,7 @@ export type JsonValue = JsonArray | JsonObject | JsonPrimitive;
 
 export type LeaveSource = "EXTERNAL" | "INTERNAL";
 
-export type LeaveStatus = "APPROVED" | "CANCELLED" | "PENDING" | "REJECTED";
+export type LeaveStatus = "APPROVED" | "CANCELLED" | "INFO_REQUESTED" | "PENDING" | "REJECTED";
 
 export type LoginEvent = "failed" | "logout" | "mfa_challenge" | "password_reset" | "success";
 
@@ -91,7 +107,7 @@ export type MembershipStatus = "active" | "invited" | "suspended";
 
 export type MissingPunchBehavior = "ASSUME_SHIFT_END" | "FLAG_ONLY" | "TREAT_AS_ABSENT" | "TREAT_AS_HALF_DAY";
 
-export type NotificationCategory = "APPROVAL" | "ATTENDANCE" | "DEVICE" | "SUBSCRIPTION" | "SYSTEM";
+export type NotificationCategory = "APPROVAL" | "ATTENDANCE" | "DEVICE" | "LEAVE" | "REPORTS" | "SUBSCRIPTION" | "SYSTEM";
 
 export type NotificationChannel = "EMAIL" | "IN_APP" | "PUSH" | "SMS" | "WHATSAPP";
 
@@ -111,7 +127,7 @@ export type PunchInterpretation = "DIRECTIONAL" | "FIRST_LAST" | "PAIRED";
 
 export type RawProcessingStatus = "error" | "held" | "ignored" | "normalized" | "pending" | "quarantined" | "unmatched";
 
-export type RawSource = "DEVICE_PUSH" | "IMPORT" | "MANUAL" | "POLL" | "WEBHOOK";
+export type RawSource = "DEVICE_PUSH" | "IMPORT" | "MANUAL" | "POLL" | "SELF_SERVICE" | "WEBHOOK";
 
 export type RecalculationStatus = "CANCELLED" | "COMPLETED" | "FAILED" | "QUEUED" | "RUNNING";
 
@@ -119,11 +135,19 @@ export type RecordHistoryReason = "CORRECTION" | "HOLIDAY_CHANGE" | "INITIAL" | 
 
 export type RecordStatus = "active" | "archived" | "inactive";
 
+export type RegularisationStatus = "approved" | "cancelled" | "pending" | "rejected";
+
+export type RegularisationType = "missed_punch" | "system_downtime" | "wfh_unmarked" | "wrong_punch";
+
 export type ReportFormat = "csv" | "pdf" | "xlsx";
 
 export type ReportStatus = "CANCELLED" | "COMPLETED" | "EXPIRED" | "FAILED" | "QUEUED" | "RUNNING";
 
 export type RoundingMode = "DOWN" | "NEAREST" | "NONE" | "UP";
+
+export type SelfieCheckinStatus = "approved" | "pending" | "rejected";
+
+export type ShiftSwapStatus = "approved" | "cancelled" | "pending" | "rejected";
 
 export type ShiftType = "FIXED" | "FLEXIBLE";
 
@@ -131,7 +155,7 @@ export type SubscriptionStatus = "active" | "cancelled" | "expired" | "past_due"
 
 export type SyncItemStatus = "CANCELLED" | "FAILED" | "OFFLINE" | "PENDING" | "QUEUED" | "RETRYING" | "RUNNING" | "SKIPPED" | "SUCCESS" | "UNSUPPORTED";
 
-export type SyncJobType = "DELETE_EMPLOYEE" | "DEVICE_HEALTH_CHECK" | "PULL_ATTENDANCE" | "PULL_EMPLOYEES" | "PUSH_EMPLOYEE" | "PUSH_EMPLOYEES" | "RECONCILIATION" | "RESTART_DEVICE" | "TEST_CONNECTION";
+export type SyncJobType = "DELETE_EMPLOYEE" | "DEVICE_HEALTH_CHECK" | "PULL_ATTENDANCE" | "PULL_EMPLOYEES" | "PUSH_ATTENDANCE" | "PUSH_EMPLOYEE" | "PUSH_EMPLOYEES" | "RECONCILIATION" | "RESTART_DEVICE" | "TEST_CONNECTION";
 
 export type SyncStatus = "CANCELLED" | "FAILED" | "PARTIAL_SUCCESS" | "PENDING" | "QUEUED" | "RETRYING" | "RUNNING" | "SUCCESS";
 
@@ -160,42 +184,136 @@ export interface ApiKeys {
   scopes: Generated<string[]>;
 }
 
+export interface ApprovalDelegations {
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  delegateUserId: string;
+  delegatorUserId: string;
+  endsOn: Timestamp;
+  entityTypes: ArrayType<ApprovalEntity> | null;
+  id: Generated<string>;
+  isActive: Generated<boolean>;
+  organizationId: string;
+  reason: string | null;
+  revokedAt: Timestamp | null;
+  revokedBy: string | null;
+  startsOn: Timestamp;
+}
+
+export interface ApprovalDigestRuns {
+  digestDate: Timestamp;
+  organizationId: string;
+  recipients: Generated<number>;
+  sentAt: Generated<Timestamp>;
+}
+
+export interface ApprovalEmailTokens {
+  action: string;
+  createdAt: Generated<Timestamp>;
+  expiresAt: Timestamp;
+  id: Generated<string>;
+  organizationId: string;
+  requestId: string;
+  stepId: string;
+  tokenHash: string;
+  usedAt: Timestamp | null;
+  userId: string;
+}
+
+export interface ApprovalRequestEvents {
+  actorUserId: string | null;
+  at: Generated<Timestamp>;
+  detail: Generated<Json>;
+  id: Generated<Int8>;
+  kind: string;
+  organizationId: string;
+  requestId: string;
+}
+
 export interface ApprovalRequests {
   branchId: string | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
   completedAt: Timestamp | null;
+  /**
+   * Other employees the request is about besides employee_id (a shift swap's colleague): never seated, never decide, bypass, ask, withdraw on behalf or receive a reassignment (segregation of duties; the owner is the logged exception).
+   */
+  coSubjectEmployeeIds: string[] | null;
+  /**
+   * Logins linked to the co-subject employees when the request was submitted (the live membership link is checked as well).
+   */
+  coSubjectUserIds: string[] | null;
   createdAt: Generated<Timestamp>;
   currentStep: Generated<number>;
+  decidedBy: string | null;
+  departmentId: string | null;
   employeeId: string | null;
   entityId: string;
   entityType: ApprovalEntity;
   id: Generated<string>;
+  infoRequestedAt: Timestamp | null;
+  invalidationReason: string | null;
   organizationId: string;
   requestedBy: string | null;
   status: Generated<ApprovalStatus>;
+  subjectUserId: string | null;
+  units: Numeric | null;
   updatedAt: Generated<Timestamp>;
   workflowId: string | null;
+}
+
+export interface ApprovalStepActors {
+  comment: string | null;
+  createdAt: Generated<Timestamp>;
+  decidedAt: Timestamp | null;
+  decision: Generated<ApprovalStatus>;
+  id: Generated<string>;
+  /**
+   * The seat an organisation-wide approver's override or an escalated approver decided for: one decision fills one pending seat (Finance B-91).
+   */
+  onBehalfOfUserId: string | null;
+  organizationId: string;
+  resolutionPath: string | null;
+  stepId: string;
+  userId: string;
+  viaDelegationOf: string | null;
 }
 
 export interface ApprovalSteps {
   actedAt: Timestamp | null;
   actedBy: string | null;
+  activatedAt: Timestamp | null;
   approverRoleId: string | null;
   approverType: ApproverType;
   approverUserId: string | null;
   comment: string | null;
+  delegatedFromUserId: string | null;
+  dueAt: Timestamp | null;
+  escalateAfterHours: number | null;
+  escalatedAt: Timestamp | null;
+  escalateTo: string | null;
   id: Generated<string>;
+  mode: Generated<string>;
   organizationId: string;
+  permissionKey: string | null;
+  remindedAt: Timestamp | null;
   requestId: string;
+  requiredCount: number | null;
+  resolutionPath: string | null;
+  resolutionReason: string | null;
   status: Generated<ApprovalStatus>;
   stepNo: number;
 }
 
 export interface ApprovalWorkflows {
+  allowSelfApproval: Generated<boolean>;
+  appliesTo: Generated<Json>;
   branchId: string | null;
   createdAt: Generated<Timestamp>;
   entityType: ApprovalEntity;
   id: Generated<string>;
   isDefault: Generated<boolean>;
+  minUnits: Numeric | null;
   name: string;
   organizationId: string;
   status: Generated<RecordStatus>;
@@ -212,6 +330,7 @@ export interface AttendanceCorrections {
   attendanceDate: Timestamp;
   branchId: string;
   createdAt: Generated<Timestamp>;
+  deviceId: string | null;
   employeeId: string;
   id: Generated<string>;
   organizationId: string;
@@ -278,6 +397,24 @@ export interface AttendanceDailyRecords {
   workedMinutes: Generated<number>;
 }
 
+export interface AttendanceDayMarks {
+  attendanceDate: Timestamp;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  employeeId: string;
+  id: Generated<string>;
+  kind: string;
+  organizationId: string;
+  payEffectDays: Generated<Numeric>;
+  reason: string | null;
+  revokedAt: Timestamp | null;
+  revokedBy: string | null;
+  revokeReason: string | null;
+  source: string;
+  sourceId: string | null;
+}
+
 export interface AttendanceEvents {
   branchId: string;
   correctionId: string | null;
@@ -295,6 +432,35 @@ export interface AttendanceEvents {
   verificationMethod: Generated<VerificationMethod>;
   voidedAt: Timestamp | null;
   voidedByCorrectionId: string | null;
+}
+
+export interface AttendanceNotes {
+  approvalRequestId: string | null;
+  attendanceDate: Timestamp;
+  branchId: string | null;
+  category: Generated<AttendanceNoteCategory>;
+  createdAt: Generated<Timestamp>;
+  dayMarkId: string | null;
+  deductedLeaveRecordId: string | null;
+  employeeId: string;
+  excusedAt: Timestamp | null;
+  excusedBy: string | null;
+  id: Generated<string>;
+  infoRequestedAt: Timestamp | null;
+  infoRequestedBy: string | null;
+  infoRequestMessage: string | null;
+  lossOfPay: Generated<boolean>;
+  note: string;
+  organizationId: string;
+  payEffectDays: Numeric | null;
+  reviewedAt: Timestamp | null;
+  reviewedBy: string | null;
+  reviewReason: string | null;
+  reviewVia: string | null;
+  status: Generated<AttendanceNoteStatus>;
+  submittedAt: Generated<Timestamp>;
+  submittedBy: string | null;
+  updatedAt: Generated<Timestamp>;
 }
 
 export interface AttendancePeriodLocks {
@@ -318,6 +484,7 @@ export interface AttendancePeriodSummaries {
   createdAt: Generated<Timestamp>;
   earlyDepartureMinutes: Generated<number>;
   employeeId: string;
+  excusedDays: Generated<number>;
   finalizedAt: Timestamp | null;
   finalizedBy: string | null;
   halfDays: Generated<number>;
@@ -326,7 +493,9 @@ export interface AttendancePeriodSummaries {
   lateDays: Generated<number>;
   lateMinutes: Generated<number>;
   leaveDays: Generated<Numeric>;
+  lopDays: Generated<Numeric>;
   missingPunchDays: Generated<number>;
+  nonWorkingDayWorkMinutes: Generated<number>;
   organizationId: string;
   overtimeHolidayMinutes: Generated<number>;
   overtimeMinutes: Generated<number>;
@@ -338,6 +507,7 @@ export interface AttendancePeriodSummaries {
   recordVersions: Json | null;
   regularMinutes: Generated<number>;
   status: Generated<PeriodSummaryStatus>;
+  unexcusedDays: Generated<number>;
   updatedAt: Generated<Timestamp>;
   version: Generated<number>;
   weeklyOffDays: Generated<number>;
@@ -386,6 +556,28 @@ export interface AttendanceRecalculationRequests {
   status: Generated<RecalculationStatus>;
   summary: Json | null;
   toDate: Timestamp;
+}
+
+export interface AttendanceRegularisationRequests {
+  appliedAt: Timestamp | null;
+  appliedCorrectionId: string | null;
+  approvalRequestId: string | null;
+  attendanceDate: Timestamp;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  decidedAt: Timestamp | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  employeeId: string;
+  id: Generated<string>;
+  organizationId: string;
+  proposedInAt: Timestamp | null;
+  proposedOutAt: Timestamp | null;
+  reason: string;
+  status: Generated<RegularisationStatus>;
+  type: RegularisationType;
+  updatedAt: Generated<Timestamp>;
 }
 
 export interface AttendanceRuleSets {
@@ -464,6 +656,39 @@ export interface Branches {
   timezone: Generated<string>;
   updatedAt: Generated<Timestamp>;
   weeklyOffDays: number[] | null;
+}
+
+export interface CompOffCredits {
+  approvalRequestId: string | null;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  daysEarned: Numeric;
+  decisionNote: string | null;
+  employeeId: string;
+  expiresOn: Timestamp | null;
+  id: Generated<string>;
+  location: string;
+  organizationId: string;
+  status: Generated<string>;
+  summary: string;
+  updatedAt: Generated<Timestamp>;
+  usedDays: Generated<Numeric>;
+  workedMinutes: number;
+  workedOn: Timestamp;
+  workedOnType: string;
+}
+
+export interface CompOffUsages {
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  creditId: string;
+  days: Numeric;
+  employeeId: string;
+  id: Generated<string>;
+  leaveRecordId: string;
+  organizationId: string;
+  releasedAt: Timestamp | null;
 }
 
 export interface DataRetentionPolicies {
@@ -673,6 +898,17 @@ export interface DomainEvents {
   requestId: string | null;
 }
 
+export interface EmployeeAttendanceGrants {
+  createdAt: Generated<Timestamp>;
+  employeeId: string;
+  grantedAt: Generated<Timestamp>;
+  grantedBy: string | null;
+  openAttendance: Generated<boolean>;
+  organizationId: string;
+  selfieRequired: Generated<boolean>;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface EmployeeIdentityDocuments {
   branchId: string | null;
   createdAt: Generated<Timestamp>;
@@ -734,6 +970,7 @@ export interface Employees {
   photoPath: string | null;
   pinHash: string | null;
   search: Generated<string | null>;
+  secondaryManagerEmployeeId: string | null;
   updatedAt: Generated<Timestamp>;
   updatedBy: string | null;
   userId: string | null;
@@ -776,6 +1013,77 @@ export interface FeatureFlags {
   description: string;
   key: string;
   rolloutPercentage: Generated<number>;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface FinancePushedEvents {
+  deviceId: string;
+  eventId: string;
+  organizationId: string;
+  outcome: Generated<string>;
+  pushedAt: Generated<Timestamp>;
+}
+
+export interface FinanceSyncState {
+  consecutiveFailures: Generated<number>;
+  createdAt: Generated<Timestamp>;
+  deviceId: string;
+  lastError: string | null;
+  lastErrorAt: Timestamp | null;
+  lastPullAt: Timestamp | null;
+  lastPullCount: Generated<number>;
+  lastPushAt: Timestamp | null;
+  lastPushCount: Generated<number>;
+  lastPushedEventAt: Timestamp | null;
+  /**
+   * Last event the push handled — delivered, or skipped for a missing PIN or as a poison batch (informational since 20260928000450; the push position is push_position_at).
+   */
+  lastPushedEventId: string | null;
+  nextPushAt: Timestamp | null;
+  organizationId: string;
+  /**
+   * Push window anchor: every eligible event created up to this instant has been examined; the next run scans from 15 minutes before it (late commits) and skips what finance_pushed_events already holds.
+   */
+  pushPositionAt: Timestamp | null;
+  pushRetryAttempts: Generated<number>;
+  /**
+   * First event of a batch Finance answered with per-punch errors; retried until push_retry_attempts reaches 5, then skipped.
+   */
+  pushRetryEventId: string | null;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface GeofenceAssignments {
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  geofenceId: string;
+  id: Generated<string>;
+  organizationId: string;
+  priority: Generated<number>;
+  requireOnCheckIn: Generated<boolean>;
+  requireOnCheckOut: Generated<boolean>;
+  scope: GeofenceScope;
+  targetId: string | null;
+}
+
+export interface Geofences {
+  accuracyThresholdM: Generated<number>;
+  activeFrom: Timestamp | null;
+  activeTo: Timestamp | null;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  enforcement: Generated<GeofenceEnforcement>;
+  graceM: Generated<number>;
+  id: Generated<string>;
+  isActive: Generated<boolean>;
+  latitude: number;
+  longitude: number;
+  name: string;
+  organizationId: string;
+  polygon: Json | null;
+  radiusM: number;
+  timeWindows: Json | null;
   updatedAt: Generated<Timestamp>;
 }
 
@@ -843,11 +1151,30 @@ export interface Invitations {
   allBranches: Generated<boolean>;
   branchIds: Generated<string[]>;
   createdAt: Generated<Timestamp>;
+  deliverySentAt: Timestamp | null;
+  /**
+   * sha256 (hex) of the token e-mailed by the worker; the plain token is never stored.
+   */
+  deliveryTokenHash: string | null;
   email: string;
+  employeeId: string | null;
   expiresAt: Timestamp;
   id: Generated<string>;
   invitedBy: string | null;
   organizationId: string;
+  /**
+   * The invitation that replaced this one when it was resent.
+   */
+  replacedById: string | null;
+  /**
+   * Set when the invitation was revoked (by an administrator, by a resend, by revoking portal access or by the employee leaving). A revoked invitation cannot be accepted; validation reports it as revoked.
+   */
+  revokedAt: Timestamp | null;
+  revokedBy: string | null;
+  /**
+   * Why it was revoked: revoked | resent | access_revoked | employee_left | superseded (free text up to 500 characters).
+   */
+  revokeReason: string | null;
   roleId: string;
   tokenHash: string;
 }
@@ -898,13 +1225,35 @@ export interface JobsQueueArchive {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface LeaveAllocations {
+  adjustmentDays: Generated<Numeric>;
+  allocatedDays: Generated<Numeric>;
+  branchId: string | null;
+  carriedForwardDays: Generated<Numeric>;
+  carriedForwardExpiresOn: Timestamp | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  employeeId: string;
+  id: Generated<string>;
+  leaveTypeId: string;
+  notes: string | null;
+  openingBalanceDays: Generated<Numeric>;
+  organizationId: string;
+  updatedAt: Generated<Timestamp>;
+  updatedBy: string | null;
+  year: number;
+}
+
 export interface LeaveRecords {
+  approvalRequestId: string | null;
   approvedAt: Timestamp | null;
   approvedBy: string | null;
   branchId: string | null;
   createdAt: Generated<Timestamp>;
   createdBy: string | null;
+  days: Numeric | null;
   decisionNote: string | null;
+  editedAt: Timestamp | null;
   employeeId: string;
   endDate: Timestamp;
   externalRef: string | null;
@@ -918,20 +1267,54 @@ export interface LeaveRecords {
   startDate: Timestamp;
   status: Generated<LeaveStatus>;
   updatedAt: Generated<Timestamp>;
+  withdrawnAt: Timestamp | null;
+}
+
+export interface LeaveRequestComments {
+  authorUserId: string | null;
+  body: string;
+  createdAt: Generated<Timestamp>;
+  id: Generated<string>;
+  kind: Generated<string>;
+  leaveRecordId: string;
+  organizationId: string;
 }
 
 export interface LeaveTypes {
+  accrual: Generated<string>;
+  advanceNoticeDays: Generated<number>;
+  allowHalfDay: Generated<boolean>;
   annualAllowanceDays: Numeric | null;
+  applicableEmploymentTypes: string[] | null;
+  applicableGender: Generated<string>;
+  carryForwardExpiryMonths: number | null;
+  carryForwardMaxDays: Generated<Numeric>;
   code: string;
   color: string | null;
+  countMode: Generated<string>;
   createdAt: Generated<Timestamp>;
   id: Generated<string>;
   isPaid: Generated<boolean>;
+  isSpecial: Generated<boolean>;
+  maxConsecutiveDays: number | null;
   name: string;
   nameAr: string | null;
   organizationId: string;
+  portalVisible: Generated<boolean>;
+  requiresApproval: Generated<boolean>;
   status: Generated<RecordStatus>;
+  systemKey: string | null;
   treatAsPresent: Generated<boolean>;
+}
+
+export interface LeaveYearCloses {
+  fromYear: number;
+  jobId: string | null;
+  organizationId: string;
+  ranAt: Generated<Timestamp>;
+  ranOn: Timestamp;
+  requestedBy: string | null;
+  summary: Generated<Json>;
 }
 
 export interface LoginHistory {
@@ -950,12 +1333,25 @@ export interface MembershipBranches {
   membershipId: string;
 }
 
+export interface MissingPunchReminders {
+  attendanceDate: Timestamp;
+  dueAt: Timestamp;
+  employeeId: string;
+  organizationId: string;
+  recipients: Generated<number>;
+  remindedAt: Generated<Timestamp>;
+}
+
 export interface NotificationDeliveries {
   attempts: Generated<number>;
   channel: NotificationChannel;
   createdAt: Generated<Timestamp>;
   error: string | null;
   id: Generated<Int8>;
+  /**
+   * Earliest time of the next e-mail attempt after a failure (exponential back-off); null = due now.
+   */
+  nextAttemptAt: Timestamp | null;
   notificationId: string;
   organizationId: string | null;
   provider: string | null;
@@ -979,6 +1375,10 @@ export interface Notifications {
   createdAt: Generated<Timestamp>;
   data: Generated<Json>;
   id: Generated<string>;
+  /**
+   * False for a notice stored only as the record of its e-mail (in-app off for its category, or the event asked for e-mail only); the inbox lists in_app rows only.
+   */
+  inApp: Generated<boolean>;
   link: string | null;
   organizationId: string | null;
   readAt: Timestamp | null;
@@ -1023,6 +1423,7 @@ export interface OrganizationSettings {
   dashboard: Generated<Json>;
   general: Generated<Json>;
   integrations: Generated<Json>;
+  leave: Generated<Json>;
   notifications: Generated<Json>;
   organizationId: string;
   reports: Generated<Json>;
@@ -1094,6 +1495,10 @@ export interface Plans {
 
 export interface PlatformAccessGrants {
   accessLevel: Generated<GrantAccessLevel>;
+  /**
+   * When the named second approver approved a write grant (its window starts then); null while pending. Read grants need no approval.
+   */
+  approvedAt: Timestamp | null;
   approvedBy: string | null;
   createdAt: Generated<Timestamp>;
   expiresAt: Timestamp;
@@ -1102,6 +1507,10 @@ export interface PlatformAccessGrants {
   organizationId: string;
   platformAdminUserId: string;
   reason: string;
+  /**
+   * Duration requested for a write grant, applied when it is approved (1–72).
+   */
+  requestedHours: number | null;
   revokedAt: Timestamp | null;
   startsAt: Generated<Timestamp>;
   ticketRef: string | null;
@@ -1147,6 +1556,29 @@ export interface ProviderWebhookEvents {
   status: Generated<WebhookEventStatus>;
 }
 
+export interface ReportDeliveries {
+  channels: Generated<string[]>;
+  createdAt: Generated<Timestamp>;
+  deliveredAt: Timestamp | null;
+  error: string | null;
+  format: ReportFormat;
+  id: Generated<string>;
+  mode: string;
+  organizationId: string;
+  periodFrom: Timestamp | null;
+  periodTo: Timestamp | null;
+  recipientUserId: string;
+  reportRequestId: string | null;
+  reportType: string;
+  runKey: string;
+  scheduleId: string | null;
+  scope: Generated<Json>;
+  sentBy: string | null;
+  skipReason: string | null;
+  status: Generated<string>;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface ReportRequests {
   branchId: string | null;
   completedAt: Timestamp | null;
@@ -1167,6 +1599,34 @@ export interface ReportRequests {
   status: Generated<ReportStatus>;
 }
 
+export interface ReportSchedules {
+  branchId: string | null;
+  cadence: string;
+  channels: Generated<string[]>;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  customFromDay: number | null;
+  customToDay: number | null;
+  filters: Generated<Json>;
+  format: Generated<ReportFormat>;
+  id: Generated<string>;
+  isActive: Generated<boolean>;
+  lastError: string | null;
+  lastRunAt: Timestamp | null;
+  lastStatus: string | null;
+  lastSummary: Json | null;
+  name: string;
+  nextRunAt: Timestamp | null;
+  organizationId: string;
+  periodRule: string;
+  recipients: Generated<Json>;
+  reportType: string;
+  runDay: number;
+  runTime: Generated<string>;
+  updatedAt: Generated<Timestamp>;
+  updatedBy: string | null;
+}
+
 export interface RolePermissions {
   permissionKey: string;
   roleId: string;
@@ -1181,6 +1641,30 @@ export interface Roles {
   name: string;
   organizationId: string | null;
   updatedAt: Generated<Timestamp>;
+}
+
+export interface SelfieCheckins {
+  accuracyM: number | null;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  direction: string;
+  employeeId: string;
+  id: Generated<string>;
+  latitude: number | null;
+  longitude: number | null;
+  organizationId: string;
+  photoPath: string;
+  photoSha256: string | null;
+  punchedAt: Generated<Timestamp>;
+  rawTransactionId: Int8 | null;
+  reviewedAt: Timestamp | null;
+  reviewedBy: string | null;
+  reviewReason: string | null;
+  status: Generated<SelfieCheckinStatus>;
+  updatedAt: Generated<Timestamp>;
+  verdict: string | null;
+  verdictReason: string | null;
 }
 
 export interface ShiftAssignments {
@@ -1232,6 +1716,28 @@ export interface Shifts {
   startTime: string | null;
   status: Generated<RecordStatus>;
   type: Generated<ShiftType>;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface ShiftSwapRequests {
+  approvalRequestId: string | null;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  decidedAt: Timestamp | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  id: Generated<string>;
+  organizationId: string;
+  reason: string;
+  requesterAssignmentId: string | null;
+  requesterEmployeeId: string;
+  requesterShiftId: string;
+  status: Generated<ShiftSwapStatus>;
+  swapDate: Timestamp;
+  targetAssignmentId: string | null;
+  targetEmployeeId: string;
+  targetShiftId: string;
   updatedAt: Generated<Timestamp>;
 }
 
@@ -1398,20 +1904,30 @@ export interface UserProfiles {
 
 export interface DB {
   apiKeys: ApiKeys;
+  approvalDelegations: ApprovalDelegations;
+  approvalDigestRuns: ApprovalDigestRuns;
+  approvalEmailTokens: ApprovalEmailTokens;
+  approvalRequestEvents: ApprovalRequestEvents;
   approvalRequests: ApprovalRequests;
+  approvalStepActors: ApprovalStepActors;
   approvalSteps: ApprovalSteps;
   approvalWorkflows: ApprovalWorkflows;
   attendanceCorrections: AttendanceCorrections;
   attendanceDailyRecordHistory: AttendanceDailyRecordHistory;
   attendanceDailyRecords: AttendanceDailyRecords;
+  attendanceDayMarks: AttendanceDayMarks;
   attendanceEvents: AttendanceEvents;
+  attendanceNotes: AttendanceNotes;
   attendancePeriodLocks: AttendancePeriodLocks;
   attendancePeriodSummaries: AttendancePeriodSummaries;
   attendanceRawTransactions: AttendanceRawTransactions;
   attendanceRecalculationRequests: AttendanceRecalculationRequests;
+  attendanceRegularisationRequests: AttendanceRegularisationRequests;
   attendanceRuleSets: AttendanceRuleSets;
   "audit.logs": AuditLogs;
   branches: Branches;
+  compOffCredits: CompOffCredits;
+  compOffUsages: CompOffUsages;
   dataRetentionPolicies: DataRetentionPolicies;
   departments: Departments;
   designations: Designations;
@@ -1425,12 +1941,17 @@ export interface DB {
   deviceProviders: DeviceProviders;
   devices: Devices;
   domainEvents: DomainEvents;
+  employeeAttendanceGrants: EmployeeAttendanceGrants;
   employeeIdentityDocuments: EmployeeIdentityDocuments;
   employeeProviderIdentities: EmployeeProviderIdentities;
   employees: Employees;
   employmentHistory: EmploymentHistory;
   entitlements: Entitlements;
   featureFlags: FeatureFlags;
+  financePushedEvents: FinancePushedEvents;
+  financeSyncState: FinanceSyncState;
+  geofenceAssignments: GeofenceAssignments;
+  geofences: Geofences;
   holidayCalendars: HolidayCalendars;
   holidays: Holidays;
   importJobRows: ImportJobRows;
@@ -1438,10 +1959,14 @@ export interface DB {
   invitations: Invitations;
   "jobs.queue": JobsQueue;
   "jobs.queueArchive": JobsQueueArchive;
+  leaveAllocations: LeaveAllocations;
   leaveRecords: LeaveRecords;
+  leaveRequestComments: LeaveRequestComments;
   leaveTypes: LeaveTypes;
+  leaveYearCloses: LeaveYearCloses;
   loginHistory: LoginHistory;
   membershipBranches: MembershipBranches;
+  missingPunchReminders: MissingPunchReminders;
   notificationDeliveries: NotificationDeliveries;
   notificationPreferences: NotificationPreferences;
   notifications: Notifications;
@@ -1457,12 +1982,16 @@ export interface DB {
   platformAdmins: PlatformAdmins;
   providerCircuitStates: ProviderCircuitStates;
   providerWebhookEvents: ProviderWebhookEvents;
+  reportDeliveries: ReportDeliveries;
   reportRequests: ReportRequests;
+  reportSchedules: ReportSchedules;
   rolePermissions: RolePermissions;
   roles: Roles;
+  selfieCheckins: SelfieCheckins;
   shiftAssignments: ShiftAssignments;
   shiftPatterns: ShiftPatterns;
   shifts: Shifts;
+  shiftSwapRequests: ShiftSwapRequests;
   subscriptions: Subscriptions;
   syncAttempts: SyncAttempts;
   syncCursors: SyncCursors;

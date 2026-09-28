@@ -1,7 +1,13 @@
 import * as React from 'react';
 import * as TabsPrimitive from '@radix-ui/react-tabs';
+import { useUiDirection } from '@/lib/direction';
 import { cn } from '@/lib/utils';
-export const Tabs = TabsPrimitive.Root;
+/** Tabs laid out in the UI language's direction (Radix writes dir="ltr" on the root otherwise — see lib/direction). */
+export const Tabs = React.forwardRef<React.ElementRef<typeof TabsPrimitive.Root>, React.ComponentPropsWithoutRef<typeof TabsPrimitive.Root>>(({ dir, ...props }, ref) => {
+  const uiDir = useUiDirection();
+  return <TabsPrimitive.Root ref={ref} dir={dir ?? uiDir} {...props} />;
+});
+Tabs.displayName = 'Tabs';
 export const TabsList = React.forwardRef<React.ElementRef<typeof TabsPrimitive.List>, React.ComponentPropsWithoutRef<typeof TabsPrimitive.List>>(({ className, ...props }, ref) => (
   <TabsPrimitive.List ref={ref} className={cn('inline-flex h-9 items-center justify-center rounded-lg bg-muted p-1 text-muted-foreground', className)} {...props} />
 ));

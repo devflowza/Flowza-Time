@@ -86,6 +86,25 @@ dedicated hostname (e.g. `push.flowza.example`) that accepts HTTP on port 80 **o
 `/iclock/*` paths (platform routing rule / small reverse proxy), rate-limited per source IP and serial, with everything
 else redirected to HTTPS. Prefer TLS-capable firmware where the vendor offers it. The API container itself is unchanged.
 
+## Public endpoints and the per-IP limits (invitation validate / accept)
+`POST /api/v1/invitations/validate` is public (the accept page's preview) and limited to 20 requests per minute per
+client IP; unknown, malformed, revoked-elsewhere and wrong-secret tokens all answer the same 404 after the same indexed
+lookup. The limit is only as good as the client IP the API sees (`apps/api/src/lib/http.ts` `clientIp`), so it depends
+on the deployment (HR portal Prompt 5 review, P2-7c):
+
+- **Set `EDGE_SHARED_SECRET`** (docs/go-live.md) so only the edge reaches the origin. Without it, anybody who reaches the
+  origin directly controls the forwarded-for chain and rotates past the per-IP bucket (probe: 23 requests, no 429).
+- **Set `CLIENT_IP_HEADER=CF-Connecting-IP`** behind Cloudflare (or keep `TRUSTED_PROXY_HOPS` equal to the real number of
+  proxies). With the edge secret set, requests carry the edge's authoritative client IP and the limit is per visitor.
+- **A request that passes the edge but carries no client IP falls into one shared `unknown` bucket.** A misconfigured edge
+  (header name wrong, `TRUST_PROXY=false`) would therefore let one visitor exhaust the preview for every invitee. After any
+  edge change, check that two different clients get independent budgets (21st request from one IP → 429 with
+  `Retry-After`, the other still 200).
+
+Accept (`POST /api/v1/invitations/accept`) needs a signed-in session and the invitation's own address, so it is limited by
+the authenticated per-user and per-IP API limits; concurrent accepts of one token are serialised by the database
+(one membership, one audit row).
+
 ## Residency (GCC)
 An organisation is pinned to a `region_cell`. MVP runs one cell. Adding a cell = a new Supabase project + API/worker
 deployment with the same images; the platform admin API routes tenants by cell. Choose Supabase regions with the lowest

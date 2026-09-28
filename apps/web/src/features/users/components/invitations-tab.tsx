@@ -1,14 +1,15 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Mail, Trash2, UserPlus } from 'lucide-react';
+import { Mail, MailCheck, RotateCw, Trash2, UserPlus } from 'lucide-react';
 import type { InvitationDto } from '@flowza/contracts';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, Skeleton, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui';
-import { fmtDateTime } from '@/lib/format';
+import { fmtDateTime, fmtRelative } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useCan, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useInvitations, useMemberMutations } from '../api';
 import { InviteDialog } from './invite-dialog';
+import { InvitationLinkDialog } from './invitation-link-dialog';
 
 export function InvitationsTab() {
   const { t } = useTranslation('users');
@@ -18,8 +19,10 @@ export function InvitationsTab() {
   const tz = useOrgTimezone();
   const q = useInvitations();
   const branches = useBranchOptions(true);
-  const { revoke } = useMemberMutations();
+  const { revoke, resend } = useMemberMutations();
   const [revoking, setRevoking] = useState<InvitationDto | null>(null);
+  const [resending, setResending] = useState<InvitationDto | null>(null);
+  const [resent, setResent] = useState<InvitationDto | null>(null);
   const [inviting, setInviting] = useState(false);
   const [now] = useState(() => Date.now());
 
@@ -39,13 +42,24 @@ export function InvitationsTab() {
               {q.data.map((inv) => {
                 const expired = new Date(inv.expiresAt).getTime() < now;
                 return (
-                  <TableRow key={inv.id}>
-                    <TableCell dir="ltr" className="font-medium">{inv.email}</TableCell>
+                  <TableRow key={inv.id} data-testid="invitation-row">
+                    <TableCell className="font-medium">
+                      <span dir="ltr">{inv.email}</span>
+                      {inv.employeeNumber ? <span className="block font-mono text-xs font-normal text-muted-foreground" dir="ltr">{inv.employeeNumber}</span> : null}
+                      <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground"><MailCheck className="size-3" aria-hidden />{inv.deliverySentAt ? t('resend.emailed', { when: fmtRelative(inv.deliverySentAt) }) : t('resend.notEmailed')}</span>
+                    </TableCell>
                     <TableCell>{inv.roleName ?? '—'}</TableCell>
                     <TableCell>{inv.allBranches ? <Badge variant="outline">{t('fields.allBranches')}</Badge> : <span className="flex flex-wrap gap-1">{inv.branchIds.map((id) => <Badge key={id} variant="secondary">{branches.byId.get(id)?.name ?? id.slice(0, 8)}</Badge>)}</span>}</TableCell>
                     <TableCell className="text-muted-foreground">{inv.invitedByName ?? '—'}</TableCell>
                     <TableCell className="tnum"><span className="inline-flex items-center gap-2">{fmtDateTime(inv.expiresAt, tz)}{expired ? <Badge variant="danger">{t('invitations.expired')}</Badge> : <Badge variant="info">{t('invitations.pending')}</Badge>}</span></TableCell>
-                    <TableCell className="text-end">{canManage ? <Button variant="ghost" size="icon" className="size-8 text-destructive" aria-label={t('invitations.revoke')} onClick={() => setRevoking(inv)}><Trash2 /></Button> : null}</TableCell>
+                    <TableCell className="text-end">
+                      {canManage ? (
+                        <span className="inline-flex items-center gap-1">
+                          <Button variant="outline" size="sm" onClick={() => setResending(inv)}><RotateCw /> {t('resend.action')}</Button>
+                          <Button variant="ghost" size="icon" className="size-8 text-destructive" aria-label={t('invitations.revoke')} onClick={() => setRevoking(inv)}><Trash2 /></Button>
+                        </span>
+                      ) : null}
+                    </TableCell>
                   </TableRow>
                 );
               })}
@@ -56,6 +70,9 @@ export function InvitationsTab() {
       {inviting ? <InviteDialog open onOpenChange={setInviting} /> : null}
       <ConfirmDialog open={!!revoking} onOpenChange={(o) => !o && setRevoking(null)} title={t('invitations.revokeTitle', { email: revoking?.email ?? '' })} description={t('invitations.revokeHint')} confirmLabel={t('invitations.revoke')} destructive loading={revoke.isPending}
         onConfirm={() => revoking && revoke.mutate(revoking.id, { onSuccess: () => { toast.success(t('invitations.revoked')); setRevoking(null); }, onError: toastError })} />
+      <ConfirmDialog open={!!resending} onOpenChange={(o) => !o && setResending(null)} title={t('resend.title', { email: resending?.email ?? '' })} description={t('resend.hint')} confirmLabel={t('resend.action')} loading={resend.isPending}
+        onConfirm={() => resending && resend.mutate(resending.id, { onSuccess: (next) => { toast.success(t('resend.done', { email: next.email })); setResending(null); setResent(next); }, onError: toastError })} />
+      <InvitationLinkDialog invitation={resent} title={t('resend.linkTitle')} onClose={() => setResent(null)} />
       <span className="sr-only">{tc('common.actions')}</span>
     </div>
   );

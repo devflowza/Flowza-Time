@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { REPORT_TYPE_DEFINITIONS, type CreateReportRequest, type PayrollPeriodActionInput, type PayrollPeriodDto, type ReportRequestDto, type ReportTypeDefinition } from '@flowza/contracts';
+import { DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, REPORT_TYPE_DEFINITIONS, type CreateReportRequest, type PayrollPeriodActionInput, type PayrollPeriodDto, type ReportRequestDto, type ReportTypeDefinition } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { AppError, errors } from '@flowza/shared';
@@ -46,8 +46,14 @@ export async function createReport(deps: ApiDeps, actor: Actor, orgId: string, i
   const missing = def.requiredParameters.filter((p) => (input.parameters as Record<string, unknown>)[p] === undefined);
   if (missing.length) throw errors.validation('Missing report parameters.', { issues: missing.map((m) => ({ path: `parameters.${m}`, message: 'Required' })) });
   if (input.parameters.from && input.parameters.to && input.parameters.to < input.parameters.from) throw errors.validation('to must be on/after from.');
+  // the Daily Report over a range (HR portal Prompt 6a review, ATT-21): each day of at most DAILY_REPORT_MAX_DAYS
+  if (input.reportType === 'daily_attendance' && dailyReportRangeTooLong(input.parameters)) {
+    throw errors.validation(`The Daily Report covers at most ${DAILY_REPORT_MAX_DAYS} days.`, { issues: [{ path: 'parameters.to', message: `At most ${DAILY_REPORT_MAX_DAYS} days` }] });
+  }
   requireBranchAccess(grant, input.parameters.branchId);
   const parameters: Record<string, unknown> = { ...input.parameters };
+  // the monthly summary uses a finalised payroll period's day counts only for payroll.view holders — as the summary page does
+  if (input.reportType === 'monthly_summary') parameters['finalizedFigures'] = hasPermission(grant, 'payroll.view');
   let branchId: string | null = input.parameters.branchId ?? null;
   if (!grant.allBranches) {
     // branch scope is injected server-side so a restricted caller can never widen the report
@@ -116,7 +122,8 @@ export async function getReport(deps: ApiDeps, actor: Actor, orgId: string, id: 
   return runUser(deps.db, actor, async (trx) => toReportDto(await loadReport(trx, actor, orgId, id, grant)));
 }
 export async function downloadReport(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<{ url: string; expiresInSeconds: number; fileName: string }> {
-  const grant = requirePermission(actor.principal, orgId, 'report.view');
+  // a download IS the export: report.export was declared for it and is enforced here (HR portal Prompt 6a), on top of report.view
+  const grant = requirePermission(actor.principal, orgId, 'report.view', 'report.export');
   return runUser(deps.db, actor, async (trx) => {
     const r = await loadReport(trx, actor, orgId, id, grant);
     if (r.status !== 'COMPLETED' || !r.filePath) throw errors.invalidState(`The report is ${r.status}; only completed reports can be downloaded.`);
@@ -134,6 +141,8 @@ export async function cancelReport(deps: ApiDeps, actor: Actor, orgId: string, i
     if (r.status !== 'QUEUED') throw errors.invalidState(`Only queued reports can be cancelled (current: ${r.status}).`);
     if (r.queueJobId !== null) await cancelQueueJob(trx, String(r.queueJobId));
     await trx.updateTable('reportRequests').set({ status: 'CANCELLED', completedAt: new Date() }).where('id', '=', id).execute();
+    // a shared / scheduled copy the recipient cancelled settles its delivery (the trail is system-written; review minor 14)
+    await systemStep(trx, orgId, (t) => t.updateTable('reportDeliveries').set({ status: 'cancelled' }).where('organizationId', '=', orgId).where('reportRequestId', '=', id).where('status', '=', 'queued').execute());
     await audit(trx, actor, orgId, 'report.cancelled', 'report_request', { entityId: id, branchId: r.branchId });
     return toReportDto(await loadReport(trx, actor, orgId, id, grant));
   });
@@ -205,7 +214,7 @@ export async function listSummaries(deps: ApiDeps, actor: Actor, orgId: string, 
     const page = pageOf(q);
     const rows = await base.selectAll('s').select(['e.employeeNumber', 'e.displayName as employeeName', 'e.departmentId', 'b.name as branchName']).orderBy('e.displayName').orderBy('s.id').limit(page.pageSize).offset(page.offset).execute();
     return {
-      data: rows.map((r) => ({ id: r.id, employeeId: r.employeeId, employeeNumber: r.employeeNumber, employeeName: r.employeeName, departmentId: r.departmentId, branchId: r.branchId, branchName: r.branchName, periodStart: isoDate(r.periodStart), periodEnd: isoDate(r.periodEnd), status: r.status, version: r.version, workingDays: r.workingDays, presentDays: numberOrNull(r.presentDays), absentDays: numberOrNull(r.absentDays), leaveDays: numberOrNull(r.leaveDays), paidLeaveDays: numberOrNull(r.paidLeaveDays), holidayDays: r.holidayDays, weeklyOffDays: r.weeklyOffDays, halfDays: r.halfDays, lateDays: r.lateDays, lateMinutes: r.lateMinutes, earlyDepartureMinutes: r.earlyDepartureMinutes, missingPunchDays: r.missingPunchDays, regularMinutes: r.regularMinutes, overtimeMinutes: r.overtimeMinutes, overtimeWeeklyOffMinutes: r.overtimeWeeklyOffMinutes, overtimeHolidayMinutes: r.overtimeHolidayMinutes, recordVersions: r.recordVersions === null ? null : jsonObject(r.recordVersions), computedAt: isoDateTime(r.computedAt), finalizedAt: isoDateTimeOrNull(r.finalizedAt), finalizedBy: r.finalizedBy })),
+      data: rows.map((r) => ({ id: r.id, employeeId: r.employeeId, employeeNumber: r.employeeNumber, employeeName: r.employeeName, departmentId: r.departmentId, branchId: r.branchId, branchName: r.branchName, periodStart: isoDate(r.periodStart), periodEnd: isoDate(r.periodEnd), status: r.status, version: r.version, workingDays: r.workingDays, presentDays: numberOrNull(r.presentDays), absentDays: numberOrNull(r.absentDays), leaveDays: numberOrNull(r.leaveDays), paidLeaveDays: numberOrNull(r.paidLeaveDays), holidayDays: r.holidayDays, weeklyOffDays: r.weeklyOffDays, halfDays: r.halfDays, lateDays: r.lateDays, lateMinutes: r.lateMinutes, earlyDepartureMinutes: r.earlyDepartureMinutes, missingPunchDays: r.missingPunchDays, regularMinutes: r.regularMinutes, overtimeMinutes: r.overtimeMinutes, overtimeWeeklyOffMinutes: r.overtimeWeeklyOffMinutes, overtimeHolidayMinutes: r.overtimeHolidayMinutes, lopDays: numberOrNull(r.lopDays) ?? 0, unexcusedDays: r.unexcusedDays, excusedDays: r.excusedDays, nonWorkingDayWorkMinutes: r.nonWorkingDayWorkMinutes, recordVersions: r.recordVersions === null ? null : jsonObject(r.recordVersions), computedAt: isoDateTime(r.computedAt), finalizedAt: isoDateTimeOrNull(r.finalizedAt), finalizedBy: r.finalizedBy })),
       total,
     };
   });

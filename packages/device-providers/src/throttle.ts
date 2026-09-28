@@ -39,6 +39,15 @@ export function resolveThrottling(throttling: ProviderThrottling | undefined): R
   return merged;
 }
 
+/** `details.reason` of a throttle wait that was aborted: local queueing in this process, never an answer (or silence) of the vendor. */
+export const THROTTLE_WAIT_ABORTED = 'throttle_wait_aborted';
+function throttleWaitAborted(accountKey: string): ProviderError {
+  return new ProviderError('TIMEOUT', `Throttle wait for account ${accountKey} aborted`, { retryable: true, details: { accountKey, reason: THROTTLE_WAIT_ABORTED } });
+}
+export function isThrottleWaitAborted(err: unknown): boolean {
+  return ProviderError.is(err) && err.details?.['reason'] === THROTTLE_WAIT_ABORTED;
+}
+
 export function createThrottler(throttling: ProviderThrottling | undefined, timers: Partial<ThrottlerTimers> = {}): Throttler {
   const limits = resolveThrottling(throttling);
   const t: ThrottlerTimers = { ...defaultTimers, ...timers };
@@ -116,7 +125,7 @@ export function createThrottler(throttling: ProviderThrottling | undefined, time
         settled = true;
         acc.waiting -= 1;
         cleanup();
-        reject(new ProviderError('TIMEOUT', `Throttle wait for account ${accountKey} aborted`, { retryable: true, details: { accountKey } }));
+        reject(throttleWaitAborted(accountKey));
       };
       const attempt = (): void => {
         if (settled) return;
@@ -134,7 +143,7 @@ export function createThrottler(throttling: ProviderThrottling | undefined, time
         timer = t.setTimeout(() => { timer = undefined; attempt(); }, Math.max(1, r.retryAfterMs));
       };
       if (opts.signal?.aborted) {
-        reject(new ProviderError('TIMEOUT', `Throttle wait for account ${accountKey} aborted`, { retryable: true, details: { accountKey } }));
+        reject(throttleWaitAborted(accountKey));
         return;
       }
       acc.waiting += 1;

@@ -1,52 +1,89 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { Check, X } from 'lucide-react';
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Textarea } from '@/components/ui';
-import { fmtDate } from '@/lib/format';
+import type { ApprovalRequestDto } from '@flowza/contracts';
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Textarea } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
-import { CorrectionSummary } from '@/features/attendance/components/record-dialog';
-import { CorrectionTypeBadge } from '@/features/attendance/components/badges';
-import { useApprovalMutations, type InboxItem } from '../api';
+import { useApprovalMutations, type DecisionKind } from '../api';
+import { decisionToast, waitingSeats } from '../labels';
+import { ApprovalContext, EntityIcon } from './parts';
+import { useActiveMembership } from '@/features/me/use-me';
+import { PayEffectChoice } from '@/features/attendance-review/components/pay-effect-choice';
+import { defaultPayEffect, type PayEffect } from '@/features/attendance-review/model';
+import type { AttendanceSettings } from '@flowza/contracts';
 
-export type Decision = 'approve' | 'reject';
+export type Decision = DecisionKind;
 
-/** Approve / reject one pending step. Rejecting requires a comment (the API enforces it too). */
-export function DecisionDialog({ item, decision, timezone, onClose }: { item: InboxItem | null; decision: Decision; timezone: string; onClose: () => void }) {
+/**
+ * Approve / reject the current level of one request. Rejecting requires a comment (the API enforces it too). An override or
+ * an escalated approver's decision fills ONE waiting seat: on a level that needs several approvals (ALL / QUORUM) with more
+ * than one seat waiting the approver chooses whose ("Deciding for" — the API refuses an unnamed one), otherwise the note
+ * names the seat it fills; either way the call names that seat, so what the approver saw is what is decided.
+ */
+export function DecisionDialog({ request, decision, timezone, onClose }: { request: ApprovalRequestDto | null; decision: Decision; timezone: string; onClose: () => void }) {
   const { t } = useTranslation('approvals');
   const { t: tc } = useTranslation();
   const { decide } = useApprovalMutations();
   const [comment, setComment] = useState('');
-  const reject = decision === 'reject';
+  const reject = decision === 'REJECT';
+  // rejecting a reason (HR portal Prompt 4) names its pay effect, proposed from the kind of day and the organisation's defaults
+  const noteContext = request?.context.kind === 'ATTENDANCE_NOTE' ? request.context.note : null;
+  const unexcused = (useActiveMembership()?.settings.attendance as Partial<AttendanceSettings> | undefined)?.unexcused;
+  const [payEffect, setPayEffect] = useState<PayEffect>(() => (noteContext ? defaultPayEffect(noteContext.dayStatus, noteContext.dayFlags, unexcused) : 0));
   const missing = reject && comment.trim().length === 0;
+  const via = request?.abilities.decideVia ?? null;
+  const fillsSeat = via === 'override' || via === 'escalated';
+  const seats = request && fillsSeat ? waitingSeats(request) : [];
+  const mustChoose = fillsSeat && request?.abilities.mustChooseSeat === true;
+  const [chosen, setChosen] = useState('');
+  const target = mustChoose ? (seats.some((s) => s.userId === chosen) ? chosen : '') : (seats[0]?.userId ?? '');
+  const seatMissing = mustChoose && !target;
+  const seatName = fillsSeat && !mustChoose ? seats[0]?.userName ?? '—' : null;
+  const hint = !fillsSeat ? null
+    : mustChoose ? (via === 'override' ? t('decision.overrideChooseHint') : t('decision.escalatedChooseHint'))
+    : via === 'override' ? t('decision.overrideHint', { name: seatName }) : t('decision.escalatedHint', { name: seatName });
   const submit = () => {
-    if (!item || missing) return;
-    decide.mutate({ requestId: item.requestId, decision, comment: comment.trim() || undefined }, {
-      onSuccess: (res) => { toast.success(reject ? t('decision.rejected') : res.status === 'APPROVED' ? t('decision.approved') : t('decision.stepApproved')); onClose(); },
+    if (!request || missing || seatMissing) return;
+    decide.mutate({ requestId: request.id, stepNo: request.currentStep, decision, comment: comment.trim() || undefined, ...(reject && noteContext ? { payEffectDays: payEffect } : {}), ...(fillsSeat && target ? { onBehalfOfUserId: target } : {}) }, {
+      onSuccess: (res) => { toast.success(decisionToast(t, res, decision, request.currentStep)); onClose(); },
       onError: toastError,
     });
   };
-  const c = item?.correction;
   return (
-    <Dialog open={!!item} onOpenChange={(o) => !o && onClose()}>
+    <Dialog open={!!request} onOpenChange={(o) => !o && onClose()}>
       <DialogContent size="sm">
         <DialogHeader>
           <DialogTitle>{reject ? t('decision.rejectTitle') : t('decision.approveTitle')}</DialogTitle>
           <DialogDescription>{reject ? t('decision.rejectHint') : t('decision.approveHint')}</DialogDescription>
         </DialogHeader>
-        {c ? (
-          <div className="space-y-1.5 rounded-md border bg-muted/30 p-3 text-sm">
-            <p className="font-medium">{c.employeeName ?? c.employeeId} <span className="font-mono text-xs text-muted-foreground" dir="ltr">{c.employeeNumber}</span></p>
-            <p className="flex flex-wrap items-center gap-2"><span className="tnum">{fmtDate(c.attendanceDate)}</span><CorrectionTypeBadge type={c.type} /><CorrectionSummary c={c} timezone={timezone} /></p>
-            <p className="text-xs text-muted-foreground">{c.reason}</p>
+        {request ? (
+          <div className="flex gap-3 rounded-md border bg-muted/30 p-3">
+            <EntityIcon entityType={request.entityType} />
+            <div className="min-w-0 space-y-1">
+              <p className="text-sm font-medium">{request.employeeName ?? request.requestedByName ?? '—'} <span className="font-mono text-xs text-muted-foreground" dir="ltr">{request.employeeNumber}</span></p>
+              <p className="text-xs text-muted-foreground">{t(`entity.${request.entityType}`)} · {t('level', { n: request.currentStep, count: request.stepCount })}</p>
+              <ApprovalContext context={request.context} timezone={timezone} />
+            </div>
           </div>
         ) : null}
-        <FormField label={t('decision.comment')} htmlFor="dec-comment" required={reject} optional={!reject} error={missing && comment.length === 0 && decide.isError ? t('decision.commentRequired') : undefined}>
+        {hint ? <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100" role="note" data-testid="decision-seat-hint">{hint}</p> : null}
+        {mustChoose ? (
+          <FormField label={t('decision.decidingFor')} htmlFor="dec-seat" required>
+            <Select value={chosen} onValueChange={setChosen}>
+              <SelectTrigger id="dec-seat" aria-invalid={seatMissing || undefined}><SelectValue placeholder={t('decision.decidingForPlaceholder')} /></SelectTrigger>
+              <SelectContent>{seats.map((s) => <SelectItem key={s.userId} value={s.userId}>{s.userName ?? s.userId.slice(0, 8)}</SelectItem>)}</SelectContent>
+            </Select>
+            {seatMissing ? <p className="text-xs text-muted-foreground">{t('decision.decidingForRequired')}</p> : null}
+          </FormField>
+        ) : null}
+        {reject && noteContext ? <PayEffectChoice value={payEffect} onChange={setPayEffect} name="dec-pay-effect" /> : null}
+        <FormField label={t('decision.comment')} htmlFor="dec-comment" required={reject} optional={!reject}>
           <Textarea id="dec-comment" rows={3} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={reject ? t('decision.rejectPlaceholder') : t('decision.approvePlaceholder')} aria-invalid={missing || undefined} />
           {missing ? <p className="text-xs text-muted-foreground">{t('decision.commentRequired')}</p> : null}
         </FormField>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>{tc('common.cancel')}</Button>
-          <Button type="button" variant={reject ? 'destructive' : 'default'} disabled={missing} loading={decide.isPending} onClick={submit}>{reject ? <><X /> {t('actions.reject')}</> : <><Check /> {t('actions.approve')}</>}</Button>
+          <Button type="button" variant={reject ? 'destructive' : 'default'} disabled={missing || seatMissing} loading={decide.isPending} onClick={submit}>{reject ? <><X /> {t('actions.reject')}</> : <><Check /> {t('actions.approve')}</>}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

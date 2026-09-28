@@ -2,8 +2,10 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
 import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCredentialsInput, DeviceGroupDto, DeviceGroupInput, DeviceListQuery, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
 import type { DeviceSummaryDto, DeviceSummaryQuery } from '@flowza/contracts';
+import { CONNECTOR_MANAGED_IN_INTEGRATIONS, FLOWZA_FINANCE_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY } from '@flowza/contracts';
+import { refuseSelfServiceDevices, refuseSelfServiceProvider } from './self-service-device-guard.js';
 import { emitDomainEvent, maskCredentials, type Trx } from '@flowza/database';
-import { createThrottler, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
+import { createThrottler, hostnameBlockReason, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
 import { AppError, errors, sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
@@ -47,7 +49,8 @@ export async function listProviders(deps: ApiDeps, actor: Actor, orgId: string |
 
 export async function listModels(deps: ApiDeps, actor: Actor, providerKey: string | undefined): Promise<DeviceModelDto[]> {
   return runUser(deps.db, actor, async (trx) => {
-    let q = trx.selectFrom('deviceModels').selectAll().orderBy('vendor').orderBy('model');
+    // the self-service virtual device's model is reference data for that row only, never a terminal to pick
+    let q = trx.selectFrom('deviceModels').selectAll().where('providerKey', '!=', SELF_SERVICE_PROVIDER_KEY).orderBy('vendor').orderBy('model');
     if (providerKey) q = q.where('providerKey', '=', providerKey);
     return (await q.execute()).map((m) => ({ id: m.id, providerKey: m.providerKey, vendor: m.vendor, model: m.model, family: m.family, capabilities: jsonObject(m.capabilities) as DeviceModelDto['capabilities'], verification: m.verification, notes: m.notes }));
   });
@@ -82,14 +85,18 @@ export function splitConfig(def: ProviderDefinition, input: Record<string, Confi
   return { config, secrets };
 }
 
-const PRIVATE_HOST = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.0\.0\.0|\[?::1\]?$|fc|fd|fe80)/i;
-/** Cloud providers must point at public hosts (SSRF guard); LAN/on-prem providers legitimately use private ranges over VPN. */
+/**
+ * Cloud providers must point at public hosts (SSRF guard); LAN/on-prem providers legitimately use private ranges over VPN. The host
+ * rule is the shared egress guard's (`hostnameBlockReason`: IP literals in every spelling, a trailing dot stripped, reserved names
+ * and single labels refused). The unique-local rule applies to IPv6 LITERALS only, so a public name such as `fdic.gov` passes
+ * (review D17). This is the syntax check at save time; a provider that calls out resolves and pins through `egressRequest`.
+ */
 export function assertEndpointAllowed(def: ProviderDefinition, endpointUrl: string | null | undefined): void {
   if (!endpointUrl) return;
   let url: URL;
   try { url = new URL(endpointUrl); } catch { throw errors.validation('endpointUrl must be a valid URL.', { issues: [{ path: 'endpointUrl', message: 'Invalid URL' }] }); }
   if (!/^https?:$/.test(url.protocol)) throw errors.validation('endpointUrl must use http or https.', { issues: [{ path: 'endpointUrl', message: 'Unsupported scheme' }] });
-  if ((def.integrationType === 'VENDOR_CLOUD_PULL' || def.integrationType === 'VENDOR_WEBHOOK') && PRIVATE_HOST.test(url.hostname)) {
+  if ((def.integrationType === 'VENDOR_CLOUD_PULL' || def.integrationType === 'VENDOR_WEBHOOK') && hostnameBlockReason(url.hostname) !== null) {
     throw errors.validation('Cloud providers cannot target private or loopback addresses.', { issues: [{ path: 'endpointUrl', message: 'Private address' }] });
   }
 }
@@ -113,6 +120,18 @@ function needsToken(p: DeviceProvider): boolean {
   return p.definition.integrationType === 'DEVICE_PUSH' || p.definition.integrationType === 'VENDOR_WEBHOOK' || typeof p.handleWebhook === 'function';
 }
 
+/**
+ * The Flowza Finance connector (provider `flowza_finance`) is platform plumbing configured in Settings → Integrations behind
+ * `integration.manage`: its row, config and token are written only by the integrations service. The generic device mutations
+ * refuse it so the connector cannot be re-created, re-pointed, re-keyed or removed around that permission (reads, logs, health
+ * checks and attendance pulls keep working like for any device).
+ */
+export const CONNECTOR_PROVIDER_KEY = FLOWZA_FINANCE_PROVIDER_KEY;
+/** 409 INVALID_STATE with `details.reason = CONNECTOR_MANAGED_IN_INTEGRATIONS` (the code detail the web keys on, like MFA_REQUIRED). */
+function refuseConnector(providerKey: string): void {
+  if (providerKey === CONNECTOR_PROVIDER_KEY) throw errors.invalidState('The Flowza Finance connector is managed in Settings → Integrations.', { reason: CONNECTOR_MANAGED_IN_INTEGRATIONS, providerKey });
+}
+
 function getProvider(deps: ApiDeps, key: string): DeviceProvider {
   const p = deps.providers.tryGet(key);
   if (!p) throw errors.validation(`Unknown device provider "${key}".`, { issues: [{ path: 'providerKey', message: 'Unknown provider' }] });
@@ -128,8 +147,12 @@ async function assertProviderEnabled(trx: Trx, orgId: string, def: ProviderDefin
 
 const DEVICE_SORT = { name: 'd.name', code: 'd.code', status: 'd.status', connectionStatus: 'd.connection_status', branch: 'b.name', provider: 'd.provider_key', lastHeartbeatAt: 'd.last_heartbeat_at', createdAt: 'd.created_at', updatedAt: 'd.updated_at' } as const;
 
+/**
+ * Every device read of this service. The organisation's virtual self-service device (provider `self_service`, HR portal
+ * Prompt 4) is not a terminal: it is hidden from lists, details and every mutation (404), like it never counts as a seat.
+ */
 function deviceQuery(trx: Trx, orgId: string) {
-  return trx.selectFrom('devices as d').innerJoin('branches as b', 'b.id', 'd.branchId').leftJoin('deviceProviders as p', 'p.key', 'd.providerKey').where('d.organizationId', '=', orgId);
+  return trx.selectFrom('devices as d').innerJoin('branches as b', 'b.id', 'd.branchId').leftJoin('deviceProviders as p', 'p.key', 'd.providerKey').where('d.organizationId', '=', orgId).where('d.providerKey', '!=', SELF_SERVICE_PROVIDER_KEY);
 }
 async function employeeCounts(trx: Trx, orgId: string, deviceIds: string[]): Promise<Map<string, number>> {
   if (deviceIds.length === 0) return new Map();
@@ -147,7 +170,7 @@ export async function summarizeDevices(deps: ApiDeps, actor: Actor, orgId: strin
   const grant = requirePermission(actor.principal, orgId, 'device.view');
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    let base = trx.selectFrom('devices as d').where('d.organizationId', '=', orgId);
+    let base = trx.selectFrom('devices as d').where('d.organizationId', '=', orgId).where('d.providerKey', '!=', SELF_SERVICE_PROVIDER_KEY);
     if (scope) base = base.where('d.branchId', 'in', scope);
     if (!q.includeDecommissioned) base = base.where('d.status', '!=', 'decommissioned');
     const rows = await base.select(['d.status', 'd.connectionStatus', (eb) => eb.fn.countAll().as('n')]).groupBy(['d.status', 'd.connectionStatus']).execute();
@@ -207,7 +230,8 @@ async function insertDevice(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string
     const model = await trx.selectFrom('deviceModels').select(['id', 'providerKey']).where('id', '=', input.modelId).executeTakeFirst();
     if (!model || model.providerKey !== def.key) throw errors.validation('Model does not belong to this provider.', { issues: [{ path: 'modelId', message: 'Unknown model' }] });
   }
-  const activeCount = toCount((await trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned').executeTakeFirst())?.n);
+  // the Flowza Finance connector and the self-service virtual device are plumbing, not terminals: they consume no plan device seat
+  const activeCount = toCount((await trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned').where('providerKey', 'not in', [CONNECTOR_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY]).executeTakeFirst())?.n);
   await assertWithinLimit(trx, orgId, 'devices', activeCount);
   const settings = await loadSettings(trx, orgId);
   const row = await trx.insertInto('devices').values({
@@ -241,6 +265,7 @@ async function storeSecrets(deps: ApiDeps, actor: Actor, orgId: string, deviceId
 export async function createDevice(deps: ApiDeps, actor: Actor, orgId: string, input: CreateDeviceInput): Promise<DeviceCreatedDto> {
   const grant = requirePermission(actor.principal, orgId, 'device.create');
   requireBranchAccess(grant, input.branchId);
+  refuseConnector(input.providerKey);
   const provider = getProvider(deps, input.providerKey);
   const def = provider.definition;
   assertEndpointAllowed(def, input.endpointUrl);
@@ -266,6 +291,7 @@ export async function updateDevice(deps: ApiDeps, actor: Actor, orgId: string, i
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadDeviceRow(trx, orgId, id);
     requireBranchAccess(grant, before.branchId);
+    refuseConnector(before.providerKey);
     if (before.status === 'decommissioned') throw errors.invalidState('A decommissioned device cannot be edited.');
     const provider = deps.providers.tryGet(before.providerKey);
     if (input.endpointUrl !== undefined && provider) assertEndpointAllowed(provider.definition, input.endpointUrl);
@@ -297,6 +323,7 @@ export async function putCredentials(deps: ApiDeps, actor: Actor, orgId: string,
   return runUser(deps.db, actor, async (trx) => {
     const device = await loadDeviceRow(trx, orgId, id);
     requireBranchAccess(grant, device.branchId);
+    refuseConnector(device.providerKey);
     if (device.status === 'decommissioned') throw errors.invalidState('A decommissioned device cannot receive credentials.');
     const def = getProvider(deps, device.providerKey).definition;
     const unknown = Object.keys(input).filter((k) => !def.secretFields.includes(k));
@@ -328,6 +355,7 @@ export async function removeDevice(deps: ApiDeps, actor: Actor, orgId: string, i
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadDeviceRow(trx, orgId, id);
     requireBranchAccess(grant, before.branchId);
+    refuseConnector(before.providerKey);
     if (before.status === 'decommissioned') throw errors.invalidState('The device is already decommissioned.');
     const status = decommission ? 'decommissioned' : 'disabled';
     await trx.updateTable('devices').set({ status, autoSyncEnabled: false, nextAttendanceSyncAt: null }).where('organizationId', '=', orgId).where('id', '=', id).execute();
@@ -354,8 +382,12 @@ export const TEST_CONNECTION_TIMEOUT_MS = 10_000;
 export async function testConnection(deps: ApiDeps, actor: Actor, orgId: string, input: TestConnectionInput): Promise<TestConnectionResultDto> {
   const grant = requireMembership(actor.principal, orgId);
   if (!hasPermission(grant, 'device.create') && !hasPermission(grant, 'device.update') && !hasPermission(grant, 'device.manage')) throw errors.forbidden('Missing permission: device.create or device.update.');
+  refuseSelfServiceProvider(input.providerKey);
   const provider = getProvider(deps, input.providerKey);
   const def = provider.definition;
+  // the connector is tested only through Settings → Integrations (integration.manage): the generic endpoint would otherwise send
+  // its stored token for a device.update holder, or probe any Finance URL for a device.create holder (review D13)
+  refuseConnector(def.key);
   const { config: requestConfig, secrets: requestSecrets } = splitConfig(def, input.config, { requireRequired: !input.deviceId });
   let config: Record<string, unknown> = requestConfig;
   let credentials: Record<string, unknown> = requestSecrets;
@@ -366,7 +398,7 @@ export async function testConnection(deps: ApiDeps, actor: Actor, orgId: string,
   let endpointUrl: string | null = typeof requestConfig.endpointUrl === 'string' ? requestConfig.endpointUrl : null;
   let serialNumber: string | null = typeof requestConfig.serialNumber === 'string' ? requestConfig.serialNumber : null;
   if (input.deviceId) {
-    const device = await runUser(deps.db, actor, async (trx) => { const d = await loadDeviceRow(trx, orgId, input.deviceId!); requireBranchAccess(grant, d.branchId); return d; });
+    const device = await runUser(deps.db, actor, async (trx) => { await refuseSelfServiceDevices(trx, orgId, [input.deviceId!]); const d = await loadDeviceRow(trx, orgId, input.deviceId!); requireBranchAccess(grant, d.branchId); return d; });
     if (device.providerKey !== def.key) throw errors.validation('providerKey does not match the stored device.', { issues: [{ path: 'providerKey', message: 'Mismatch' }] });
     const storedConfig = jsonObject(device.config);
     // stored credentials may only be reused for the *unchanged* endpoint (AGENTS.md service-level rules): generic endpoint keys
@@ -458,9 +490,15 @@ export type DeviceAction = 'sync-attendance' | 'sync-employees' | 'health-check'
 export async function runDeviceAction(deps: ApiDeps, actor: Actor, orgId: string, id: string, action: DeviceAction): Promise<CreatedSyncJob> {
   const grant = requirePermission(actor.principal, orgId, 'device.sync');
   return runUser(deps.db, actor, async (trx) => {
+    await refuseSelfServiceDevices(trx, orgId, [id]);
     const device = await loadDeviceRow(trx, orgId, id); requireBranchAccess(grant, device.branchId);
+    const connector = device.providerKey === CONNECTOR_PROVIDER_KEY;
+    // reconciliation compares device users with employees: the connector has none, and it is not a terminal (review D13)
+    if (connector && action === 'reconcile') refuseConnector(device.providerKey);
     if (device.status !== 'active') throw errors.invalidState('The device is not active.');
     const caps = jsonObject(device.capabilities) as Record<string, boolean>;
+    // a push-only connector is never pulled (review D6), even if its stored capabilities predate the direction rule
+    if (connector && action === 'sync-attendance' && jsonObject(device.config)['direction'] === 'push') throw errorUnsupported('attendancePull');
     const base = { organizationId: orgId, trigger: 'MANUAL' as const, branchId: device.branchId, requestedBy: actor.userId, correlationId: actor.requestId, priority: 7 };
     let job: CreatedSyncJob;
     switch (action) {
@@ -562,7 +600,7 @@ export async function setGroupMembers(deps: ApiDeps, actor: Actor, orgId: string
   return runUser(deps.db, actor, async (trx) => {
     const g = await loadGroup(trx, orgId, id); requireBranchAccess(grant, g.branchId);
     const unique = [...new Set(deviceIds)];
-    const devices = await trx.selectFrom('devices').select(['id', 'branchId']).where('organizationId', '=', orgId).where('id', 'in', unique).execute();
+    const devices = await trx.selectFrom('devices').select(['id', 'branchId']).where('organizationId', '=', orgId).where('id', 'in', unique).where('providerKey', '!=', SELF_SERVICE_PROVIDER_KEY).execute();
     if (devices.length !== unique.length) throw errors.validation('One or more devices were not found.', { missing: unique.filter((d) => !devices.some((x) => x.id === d)) });
     for (const d of devices) { requireBranchAccess(grant, d.branchId); if (g.branchId && d.branchId !== g.branchId) throw errors.validation('Devices must belong to the group branch.', { deviceId: d.id }); }
     if (mode === 'add') await trx.insertInto('deviceGroupMembers').values(unique.map((deviceId) => ({ organizationId: orgId, groupId: id, deviceId }))).onConflict((oc) => oc.doNothing()).execute();
@@ -593,6 +631,7 @@ export async function claimPending(deps: ApiDeps, actor: Actor, orgId: string, p
   const pending = await runSystem(deps.db, orgId, actor.requestId, (trx) => trx.selectFrom('pendingDevices').selectAll().where('id', '=', pendingId).where((eb) => eb.or([eb('organizationId', 'is', null), eb('organizationId', '=', orgId)])).executeTakeFirst());
   if (!pending) throw errors.notFound('Pending device', pendingId);
   if (pending.claimedDeviceId) throw errors.invalidState('This device has already been claimed.');
+  refuseConnector(pending.providerKey);
   const provider = getProvider(deps, pending.providerKey);
   const def = provider.definition;
   const info = jsonObject(pending.deviceInfo);

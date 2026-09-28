@@ -39,11 +39,14 @@ export function useEmployeeDocuments(id: string, enabled: boolean) {
   return useQuery({ queryKey: [...qk.detail(orgId, ENTITY, id), 'documents'], queryFn: async () => (await api.get<Envelope<IdentityDocumentDto[]>>(`/orgs/${orgId}/employees/${id}/documents`)).data, enabled });
 }
 
-/** Searchable employee options (manager pickers, team members…). Server-side search, debounced. */
-export function useEmployeeOptions(initialSearch = '') {
+/**
+ * Searchable employee options (manager pickers, team members…). Server-side search, debounced.
+ * `unlinked`: only employees not yet linked to a login or reserved by a pending invitation (the invite / member dialogs).
+ */
+export function useEmployeeOptions(initialSearch = '', opts: { unlinked?: boolean } = {}) {
   const [search, setSearch] = useState(initialSearch);
   const debounced = useDebounced(search, 250);
-  const q = useEmployees({ search: debounced || undefined, pageSize: 20, sort: 'displayName', employmentStatus: undefined });
+  const q = useEmployees({ search: debounced || undefined, pageSize: 20, sort: 'displayName', employmentStatus: undefined, unlinked: opts.unlinked ? true : undefined });
   const options = useMemo<ComboboxOption[]>(() => (q.data?.data ?? []).map((e) => ({ value: e.id, label: e.displayName, description: e.employeeNumber })), [q.data]);
   return { options, setSearch, isLoading: q.isLoading || q.isFetching, data: q.data?.data ?? [] };
 }

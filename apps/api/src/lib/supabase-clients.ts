@@ -3,8 +3,9 @@ import type { Logger } from '@flowza/shared';
 import type { RealtimePublisher, StorageSigner } from '../deps.js';
 
 /**
- * The service-role key is used ONLY for two platform operations that Supabase requires it for:
- * broadcasting to private realtime channels and signing storage URLs. It is never used for table access.
+ * The service-role key is used ONLY for platform operations that Supabase requires it for: broadcasting to private
+ * realtime channels, signing storage URLs, and storing / reading the objects the API owns (selfie photos). It is never
+ * used for table access.
  */
 export function createSupabasePlatformClients(opts: { url: string; serviceRoleKey?: string; log: Logger }): { realtime: RealtimePublisher; storage: StorageSigner } {
   if (!opts.serviceRoleKey) {
@@ -32,6 +33,16 @@ export function createSupabasePlatformClients(opts: { url: string; serviceRoleKe
         const { data, error } = await client.storage.from(bucket).createSignedUrl(path, expiresInSeconds);
         if (error) { opts.log.warn({ event: 'storage_sign_failed', bucket, err: error.message }); return null; }
         return data.signedUrl;
+      },
+      async upload(bucket, path, body, contentType) {
+        const { error } = await client.storage.from(bucket).upload(path, body, { contentType, upsert: false });
+        if (error) { opts.log.warn({ event: 'storage_upload_failed', bucket, err: error.message }); return false; }
+        return true;
+      },
+      async download(bucket, path) {
+        const { data, error } = await client.storage.from(bucket).download(path);
+        if (error || !data) { opts.log.warn({ event: 'storage_download_failed', bucket, err: error?.message ?? 'no data' }); return null; }
+        return new Uint8Array(await data.arrayBuffer());
       },
     },
   };

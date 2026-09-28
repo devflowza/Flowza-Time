@@ -1,23 +1,32 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Bell, CheckCheck } from 'lucide-react';
+import { Bell, CheckCheck, Settings2 } from 'lucide-react';
 import { Link } from 'react-router';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, EmptyState, ErrorState, Skeleton } from '@/components/ui';
+import { buttonVariants } from '@/components/ui/button';
 import { fmtRelative } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { useMarkRead, useNotifications } from './use-notifications';
+import { useNotificationRoute } from './use-notification-route';
 
-const CATEGORY_TONE: Record<string, 'info' | 'warning' | 'danger' | 'neutral' | 'success'> = { DEVICE: 'warning', ATTENDANCE: 'info', APPROVAL: 'success', SYSTEM: 'neutral', SUBSCRIPTION: 'danger' };
+const CATEGORY_TONE: Record<string, 'info' | 'warning' | 'danger' | 'neutral' | 'success'> = { DEVICE: 'warning', ATTENDANCE: 'info', LEAVE: 'info', REPORTS: 'neutral', APPROVAL: 'success', SYSTEM: 'neutral', SUBSCRIPTION: 'danger' };
 
 export function NotificationsPage() {
   const { t } = useTranslation();
   const [page, setPage] = useState(1);
   const q = useNotifications(page);
   const markRead = useMarkRead();
+  const routeOf = useNotificationRoute();
   return (
     <div className="page-container">
-      <PageHeader title={t('notifications.title')} actions={<Button variant="outline" size="sm" onClick={() => markRead.mutate('all')} loading={markRead.isPending}><CheckCheck /> {t('notifications.markAllRead')}</Button>} />
+      <PageHeader title={t('notifications.title')} actions={(
+        <>
+          {/* every member's own preferences (notifications review 8-P1-4) */}
+          <Link to="/account/notifications" className={buttonVariants({ variant: 'ghost', size: 'sm' })}><Settings2 /> {t('notifications.settingsLink')}</Link>
+          <Button variant="outline" size="sm" onClick={() => markRead.mutate('all')} loading={markRead.isPending}><CheckCheck /> {t('notifications.markAllRead')}</Button>
+        </>
+      )} />
       {q.isLoading ? <div className="space-y-2">{Array.from({ length: 6 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
         : q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} />
         : q.data && q.data.data.length === 0 ? <EmptyState icon={Bell} title={t('notifications.empty')} description={t('notifications.emptyHint')} />
@@ -25,9 +34,10 @@ export function NotificationsPage() {
           <Card className="divide-y">
             {q.data?.data.map((n) => (
               <div key={n.id} className={cn('flex items-start gap-3 p-4', !n.readAt && 'bg-accent/40')}>
-                <Badge variant={CATEGORY_TONE[n.category] ?? 'neutral'}>{n.category}</Badge>
+                <Badge variant={CATEGORY_TONE[n.category] ?? 'neutral'}>{t(`notifications.categories.${n.category}`, { defaultValue: n.category })}</Badge>
                 <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium">{n.link ? <Link to={n.link} className="hover:underline" onClick={() => !n.readAt && markRead.mutate(n.id)}>{n.title}</Link> : n.title}</p>
+                  {/* HR portal Prompt 5 (B-66): the page the READER works on, from type + data (the stored link is the fallback) */}
+                  <p className="text-sm font-medium">{routeOf(n) ? <Link to={routeOf(n)!} className="hover:underline" onClick={() => !n.readAt && markRead.mutate(n.id)}>{n.title}</Link> : n.title}</p>
                   {n.body ? <p className="mt-0.5 text-sm text-muted-foreground">{n.body}</p> : null}
                   <p className="mt-1 text-xs text-muted-foreground">{fmtRelative(n.createdAt)}</p>
                 </div>

@@ -2,8 +2,9 @@ import type { HandlerRegistry } from '../types.js';
 import { pullAttendance } from './attendance.js';
 import { deviceHealthCheck, restartDevice, testConnection, webhookEvent } from './device.js';
 import { deleteEmployee, pullEmployees, pushEmployee, pushEmployees, reconciliation } from './employees.js';
+import { pushAttendance } from './finance-push.js';
 
-export { pullAttendance, deviceHealthCheck, restartDevice, testConnection, webhookEvent, deleteEmployee, pullEmployees, pushEmployee, pushEmployees, reconciliation };
+export { pullAttendance, deviceHealthCheck, restartDevice, testConnection, webhookEvent, deleteEmployee, pullEmployees, pushEmployee, pushEmployees, reconciliation, pushAttendance };
 
 /**
  * Sync job handlers (docs/sync-engine.md). Every per-item handler runs through `runItem()` (handlers/sync/items.ts): one
@@ -21,4 +22,6 @@ export function registerSyncHandlers(registry: HandlerRegistry): void {
   registry.register({ jobType: 'RESTART_DEVICE', handler: restartDevice, timeoutMs: 2 * 60_000 });
   registry.register({ jobType: 'RECONCILIATION', handler: reconciliation, timeoutMs: 5 * 60_000 });
   registry.register({ jobType: 'WEBHOOK_EVENT', handler: webhookEvent, timeoutMs: 2 * 60_000 });
+  // Flowza Finance connector: FlowZa Time punches → Finance attendance-ingest (≤ 20 batches of ≤ 500 per run)
+  registry.register({ jobType: 'PUSH_ATTENDANCE', handler: pushAttendance, timeoutMs: 10 * 60_000 });
 }

@@ -1,9 +1,9 @@
 import type { Hono } from 'hono';
-import { approvalDecisionSchema, approvalInboxQuerySchema, approvalWorkflowInputSchema, approvalWorkflowUpdateSchema, attendanceActivityQuerySchema, attendanceEventsQuerySchema, correctionCancelSchema, correctionListQuerySchema, createCorrectionSchema, dailyAttendanceListQuerySchema, monthlyAttendanceListQuerySchema, periodLockListQuerySchema, periodLockSchema, periodUnlockSchema, rawTransactionsQuerySchema, recalculateSchema, recalculationListQuerySchema } from '@flowza/contracts';
+import { attendanceActivityQuerySchema, attendanceEventsQuerySchema, correctionCancelSchema, correctionListQuerySchema, createCorrectionSchema, dailyAttendanceListQuerySchema, monthlyAttendanceListQuerySchema, periodLockListQuerySchema, periodLockSchema, periodUnlockSchema, rawTransactionsQuerySchema, recalculateSchema, recalculationListQuerySchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { idempotency } from '../../../middleware/idempotency.js';
-import { created, noContent, ok, paginated } from '../../../lib/http.js';
+import { created, ok, paginated } from '../../../lib/http.js';
 import { body, param, query } from '../../../lib/validate.js';
 import { actorOf } from '../../../lib/service.js';
 import * as att from '../../../services/features/attendance.service.js';
@@ -22,13 +22,7 @@ export function registerAttendanceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void 
   v1.get('/orgs/:orgId/attendance/corrections', async (c) => { const q = query(c, correctionListQuerySchema); const r = await att.listCorrections(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.post('/orgs/:orgId/attendance/corrections/:id/cancel', async (c) => ok(c, await att.cancelCorrection(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), (await body(c, correctionCancelSchema)).reason)));
 
-  v1.get('/orgs/:orgId/approvals/inbox', async (c) => { const q = query(c, approvalInboxQuerySchema); const r = await att.approvalsInbox(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
-  v1.post('/orgs/:orgId/approvals/:requestId/approve', async (c) => ok(c, await att.decide(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'requestId'), 'approve', await body(c, approvalDecisionSchema))));
-  v1.post('/orgs/:orgId/approvals/:requestId/reject', async (c) => ok(c, await att.decide(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'requestId'), 'reject', await body(c, approvalDecisionSchema))));
-  v1.get('/orgs/:orgId/approval-workflows', async (c) => ok(c, await att.listWorkflows(deps, actorOf(c, deps), param(c, 'orgId'))));
-  v1.post('/orgs/:orgId/approval-workflows', async (c) => created(c, await att.createWorkflow(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, approvalWorkflowInputSchema))));
-  v1.patch('/orgs/:orgId/approval-workflows/:id', async (c) => ok(c, await att.updateWorkflow(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, approvalWorkflowUpdateSchema))));
-  v1.delete('/orgs/:orgId/approval-workflows/:id', async (c) => { await att.deleteWorkflow(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id')); return noContent(c); });
+  // approvals (inbox, decisions, workflows, delegations) live in ./approvals.ts — engine v2 (services/approvals)
 
   v1.post('/orgs/:orgId/attendance/recalculate', idem, async (c) => c.json({ data: await att.requestRecalculation(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, recalculateSchema)) }, 202));
   v1.get('/orgs/:orgId/attendance/recalculations', async (c) => { const q = query(c, recalculationListQuerySchema); const r = await att.listRecalculations(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });

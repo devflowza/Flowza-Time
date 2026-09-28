@@ -30,7 +30,7 @@
     "devicesOnline": "Devices online",
     "devicesOffline": "Devices offline",
     "syncFailures": "Sync failures (24h)",
-    "pendingApprovals": "Pending approvals",
+    "pendingApprovals": "Waiting for you",
     "attendanceRate": "Attendance rate",
     "ofEmployees": "of employees",
     "ofDevices": "of devices",
@@ -144,5 +144,7 @@
       { "text": "Take care of the minutes and the hours will take care of themselves.", "by": "Lord Chesterfield" },
       { "text": "The key is in not spending time, but in investing it.", "by": "Stephen R. Covey" }
     ]
-  }
+  },
+  "awaiting": {"title": "Awaiting your approval", "notes_one": "{{count}} attendance reason to review", "notes_other": "{{count}} attendance reasons to review"},
+  "team": {"onLeaveTitle": "Team on leave today", "onLeaveTitleOn": "Team on leave", "onLeaveEmpty": "Nobody in your team is on leave", "halfDay": "half day", "lateTitle": "Team late today", "lateTitleOn": "Team late", "lateEmpty": "Nobody in your team came in late", "lateBy": "{{time}} late", "more": "+{{count}} more"}
 }

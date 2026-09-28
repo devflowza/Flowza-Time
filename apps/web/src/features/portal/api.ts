@@ -19,15 +19,19 @@ export function useSelfAttendance(month: string) {
   const orgId = useOrgId();
   return useQuery({ queryKey: qk.list(orgId, SELF, { view: 'attendance', month }), queryFn: async () => (await api.get<Envelope<SelfAttendanceMonthDto>>(`/orgs/${orgId}/me/attendance`, { month })).data, placeholderData: keepPreviousData, staleTime: 30_000 });
 }
-export function useSelfLeave(year: number) {
+/**
+ * The portal's leave data of a year. `enabled: false` skips the call; `keepPrevious: false` never shows another year's data
+ * while loading (the apply dialog must not check a request against the wrong year's balance — leave v2 review P2-9).
+ */
+export function useSelfLeave(year: number, opts: { enabled?: boolean; keepPrevious?: boolean } = {}) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, SELF, { view: 'leave', year }), queryFn: async () => (await api.get<Envelope<SelfLeaveDto>>(`/orgs/${orgId}/me/leave`, { year })).data, placeholderData: keepPreviousData, staleTime: 30_000 });
+  return useQuery({ queryKey: qk.list(orgId, SELF, { view: 'leave', year }), queryFn: async () => (await api.get<Envelope<SelfLeaveDto>>(`/orgs/${orgId}/me/leave`, { year })).data, ...(opts.keepPrevious === false ? {} : { placeholderData: keepPreviousData }), enabled: opts.enabled ?? true, staleTime: 30_000 });
 }
 
 export function useSelfLeaveMutations() {
   const orgId = useOrgId();
   const qc = useQueryClient();
-  const invalidate = () => { for (const e of [SELF, 'leave-records']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
+  const invalidate = () => { for (const e of [SELF, 'leave-records', 'approvals-inbox', 'approval-request', 'approvals-mine']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
   const apply = useMutation({ mutationFn: async (input: SelfLeaveRequestInput) => (await api.post<Envelope<SelfLeaveRecordDto>>(`/orgs/${orgId}/me/leave`, input, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: invalidate });
   const withdraw = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<SelfLeaveRecordDto>>(`/orgs/${orgId}/me/leave/${id}/cancel`)).data, onSuccess: invalidate });
   return { apply, withdraw };

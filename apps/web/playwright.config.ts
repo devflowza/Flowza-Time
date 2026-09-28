@@ -7,6 +7,13 @@ import { defineConfig, devices } from '@playwright/test';
  *
  * Full-stack E2E against a seeded Supabase stack is a separate, planned suite (docs/testing.md).
  */
+/**
+ * The preview server's port. The bundle keeps calling the backend at http://localhost:4173 (build:e2e) and the backend double
+ * intercepts those calls whatever serves the page, so another port only changes where the page itself comes from — useful when
+ * 4173 is taken on a shared machine (E2E_WEB_PORT=4391 …). CI and the documented gate use 4173.
+ */
+const PORT = Number(process.env.E2E_WEB_PORT ?? 4173);
+
 export default defineConfig({
   testDir: './e2e',
   timeout: 30_000,
@@ -15,7 +22,7 @@ export default defineConfig({
   retries: process.env.CI ? 1 : 0,
   reporter: process.env.CI ? [['github'], ['html', { open: 'never' }]] : [['list']],
   use: {
-    baseURL: 'http://localhost:4173',
+    baseURL: `http://localhost:${PORT}`,
     trace: 'retain-on-failure',
     locale: 'en-GB',
     timezoneId: 'Asia/Muscat',
@@ -24,8 +31,8 @@ export default defineConfig({
     ...(process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE ? { launchOptions: { executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE } } : {}),
   },
   webServer: {
-    command: 'pnpm exec vite preview --outDir dist-e2e --port 4173 --strictPort',
-    url: 'http://localhost:4173',
+    command: `pnpm exec vite preview --outDir dist-e2e --port ${PORT} --strictPort`,
+    url: `http://localhost:${PORT}`,
     reuseExistingServer: !process.env.CI,
     timeout: 60_000,
   },

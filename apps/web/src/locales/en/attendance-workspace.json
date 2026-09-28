@@ -1,0 +1,102 @@
+{
+  "tabs": { "calendar": "Calendar" },
+  "source": {
+    "AUTO": "Auto", "MANUAL": "Manual",
+    "AUTOHint": "The status comes from the attendance rules (punches, shift, leave, holidays).",
+    "MANUALHint": "HR set this status by hand (an applied Set status correction); it overrides the rules until changed."
+  },
+  "edit": {
+    "titleAdd": "Add record", "titleEdit": "Edit record",
+    "subtitle": "Set the check-in and check-out and, if needed, the status. The outcome below is what the attendance rules make of it; the change is saved as corrections and audited.",
+    "pickEmployee": "Choose an employee…", "pickEmployeeHint": "Choose an employee and a date to see the day as the rules see it.",
+    "expected": "Expected", "locked": "This date is in a locked period — unlock it before editing.",
+    "checkIn": "Check-in", "checkOut": "Check-out", "outBeforeIn": "Check-out must be after check-in.", "nextDay": "Check-out on the next day",
+    "status": "Status", "statusHint": "Leave on Automatic to let the rules decide; pick a status to override them.", "manualInForce": "A manual status is in force: {{status}}.",
+    "autoStatus": "Automatic (from the rules)", "now": "Now", "after": "After the change",
+    "statusWins": "{{status}} will override the rules for this day.", "policyStatus": "The status follows the rules.",
+    "pendingCorrections": "{{count}} correction(s) waiting", "previewing": "Calculating…",
+    "reason": "Reason", "reasonRequired": "Give a reason (at least 3 characters).", "reasonPlaceholder": "e.g. Forgot to punch out — confirmed by the supervisor",
+    "nothing": "Change the check-in, the check-out or the status first.", "save": "Save record", "willFile": "Will file:",
+    "plan": { "ADD_PUNCH": "Add punch", "EDIT_PUNCH": "Move punch", "SET_STATUS": "Set status" },
+    "applied": "Record updated", "pending": "Sent for approval", "partial": "Saved {{count}} correction(s) — one step failed", "savedHint": "{{count}} correction(s) filed; the day is recalculated within seconds."
+  },
+  "bulk": {
+    "action": "Set status", "clearSelection": "Clear selection", "title": "Set status for the selected days",
+    "subtitle": "{{count}} day(s) selected. Each day gets its own correction with this reason.",
+    "status": "Status", "pickStatus": "Choose a status…", "statusRequired": "Choose a status.",
+    "hint": "Days in a locked period, or outside your scope, are reported back and skipped; the others are saved.",
+    "apply": "Apply", "done": "Status set on {{count}} day(s)", "partial": "{{ok}} saved, {{failed}} not saved",
+    "tooMany": "At most {{max}} days at a time — narrow the selection."
+  },
+  "calendar": {
+    "noRecord": "no record", "inOut": "In–out", "counts": "P {{present}} · A {{absent}} · L {{leave}}", "lateCount": "Late on {{count}} day(s)",
+    "addHint": "add a record", "legendUnexcused": "Unexcused / loss of pay", "legendManual": "Manual status", "legendToday": "Today",
+    "emptyHint": "Employees active during the month appear here, one calendar each."
+  },
+  "mapping": {
+    "title": "How Flowza Finance attendance statuses appear here",
+    "hint": "Finance keeps ten statuses; FlowZa keeps a status plus flags, so a late half day or a late missed punch keeps both facts.",
+    "finance": "Finance status", "status": "FlowZa status", "flags": "Flags", "note": "Note",
+    "notes": {
+      "noLate": "Present without the Late flag.",
+      "lateCombines": "Late is a flag, so it combines with a half day.",
+      "halfDayLeave": "Half-day leave adds the Half-day leave flag.",
+      "reviewed": "Unexcused or loss of pay once the day-close review decides.",
+      "halfLeave": "A half-day leave shows as Half day or Present with the Half-day leave flag.",
+      "missedPunch": "The status follows the rule set's missed-punch behaviour."
+    }
+  },
+  "timeline": {
+    "open": "Punch timeline", "title": "Punch timeline", "window": "Punches between {{from}} and {{to}} ({{zone}})",
+    "events": "Attendance events ({{count}})", "raw": "Device transactions ({{count}})", "noEvents": "No punches in this day's window.", "noRaw": "No device transactions in this window.",
+    "rawHidden": "Device transactions are visible to roles with the raw-data permission.", "notAttributed": "Not counted",
+    "channel": { "web": "Web check-in", "mobile": "Mobile check-in" },
+    "geofence": { "allowed": "Inside geofence", "no_fence": "No geofence", "flagged": "Outside geofence (flagged)", "logged": "Outside geofence (logged)", "denied_outside": "Outside geofence", "denied_mock": "Mock location", "outside": "Outside geofence", "denied": "Denied" },
+    "distance": "{{meters}} m away", "accuracy": "± {{meters}} m", "mock": "Mock location reported", "outOfWindow": "Outside the check-in window"
+  },
+  "sync": {
+    "button": "Sync punches", "hint": "Recalculate the days shown here from the punches already received.",
+    "queued": "Punches are being re-read and the days recalculated.", "follow": "Follow", "reason": "Sync punches from the attendance register",
+    "pickBranch": "Choose a branch or an employee first — your access covers selected branches only.", "future": "Nothing to sync yet for a future period.",
+    "thisRequest": "This request", "jobIdHint": "Background job id (for support)"
+  },
+  "summary": {
+    "title": "Attendance summary", "subtitle": "One row per employee for the month: days, hours and overtime from the daily records you can see.",
+    "export": "Export", "exportAs": { "csv": "CSV", "xlsx": "Excel (XLSX)", "pdf": "PDF" }, "finalized": "Finalised", "live": "Live",
+    "exportQueued": "The summary of {{count}} employee(s) is being prepared. Download it from Reports when it is ready.", "openReports": "Open Reports",
+    "empty": "No employees for this month", "emptyHint": "Employees active during the month appear here once their days are calculated.",
+    "card": "P {{present}} · Late {{late}} · A {{absent}} · L {{leave}} · {{worked}}",
+    "footnote": "A half day counts as ½ present. Months whose payroll period is finalised show the finalised figures.",
+    "columns": { "present": "Present", "late": "Late", "half": "Half days", "leave": "Leave", "absent": "Absent", "missing": "Missing punch", "holiday": "Holidays", "weeklyOff": "Weekly off", "daysWorked": "Days worked", "worked": "Worked", "average": "Avg / day", "overtime": "Overtime", "lop": "Loss of pay", "unexcused": "Unexcused", "source": "Source" }
+  },
+  "unmatched": {
+    "title": "Unmatched punches", "subtitle": "Device punches that could not be linked to an employee. Assign the device user id to an employee, or set the punches aside.",
+    "readOnly": "You can review these punches; assigning or ignoring them needs the device sync permission.",
+    "tabs": { "unmatched": "Unmatched", "ignored": "Ignored" },
+    "punches": "Punches", "seen": "First → last punch", "suggested": "Suggested",
+    "reason": { "device_user_id": "Matches the employee's device user id", "employee_number": "Matches the employee number" },
+    "assign": "Assign", "ignore": "Ignore", "restore": "Restore",
+    "assignBlocked": {
+      "CONNECTOR_RESOLVES_BY_EMPLOYEE_NUMBER": "Flowza Finance punches are matched by employee number, not by a device mapping: fix the employee number in FlowZa Time or in Flowza Finance, then re-queue these punches.",
+      "SELF_SERVICE_RESOLVES_BY_MEMBERSHIP": "Self-service punches are matched to the user's linked employee record: link the user to the employee (Users), then re-queue these punches."
+    },
+    "openRaw": "Raw transactions",
+    "assignTitle": "Assign punches to an employee",
+    "assignHint": "Device user id {{id}} on {{device}} ({{count}} punch(es)) will be linked to the employee you choose, and the punches processed again.",
+    "employee": "Employee", "pickEmployee": "Choose an employee…",
+    "assigned": "{{count}} punch(es) queued for processing", "assignedHint": "The employee's days are recalculated as the punches are processed.",
+    "ignoreTitle": "Ignore these punches", "ignoreHint": "The {{count}} punch(es) of device user id {{id}} are kept but no longer processed. You can restore them later.",
+    "ignorePlaceholder": "e.g. Test enrolment on the device", "ignored": "{{count}} punch(es) ignored",
+    "restoreTitle": "Restore these punches", "restoreHint": "The {{count}} ignored punch(es) of device user id {{id}} go back to triage.", "restored": "{{count}} punch(es) restored",
+    "empty": "No unmatched punches", "emptyIgnored": "No ignored punches", "emptyHint": "Every device punch is linked to an employee.",
+    "triageLink": "Triage unmatched punches", "searchPlaceholder": "Search device user id…", "count": "{{count}} punch(es)"
+  },
+  "print": {
+    "open": "Print view", "back": "Back to the employee", "print": "Print",
+    "screenOnly": "Printing and saving need the report export permission", "notAllowed": "This statement is a screen view: printing and saving it need the report export permission.", "title": "Monthly attendance statement", "generated": "Generated {{at}}",
+    "date": "Date", "status": "Status", "finalized": "Figures of a finalised payroll period.",
+    "signEmployee": "Employee signature", "signHr": "HR signature",
+    "noEmployee": "No employee selected", "noEmployeeHint": "Open the print view from an employee's profile or the attendance summary.",
+    "notFound": "No attendance for this employee and month", "notFoundHint": "The employee may be outside your access, or not yet active in this month."
+  }
+}

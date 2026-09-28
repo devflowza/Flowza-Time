@@ -1,15 +1,55 @@
 import type { DateTime } from 'luxon';
-import { ATTENDANCE_FLAGS, type AttendanceFlag, type AttendanceRules, type AttendanceStatus } from '@flowza/contracts';
+import { ATTENDANCE_FLAGS, DEFAULT_ATTENDANCE_SETTINGS, type AttendanceFlag, type AttendanceRules, type AttendanceStatus } from '@flowza/contracts';
 import { addDays, dayOfWeek, minutesBetween } from '@flowza/shared';
 import { attributeEvents } from './attribute.js';
 import { collapseDuplicates, computeBreaks, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
 import { roundMinutes, roundPunches } from './rounding.js';
-import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineShift, type TraceStep } from './types.js';
+import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EnginePunchPayload, type EngineShift, type TraceStep } from './types.js';
 import { assertTimezone, computePunchWindow, localInstant, parseInstant, toUtcIso, type PunchWindow } from './window.js';
 
 type TracePunch = CalculationTrace['punches'][number];
 type HalfDayOff = 'FIRST_HALF' | 'SECOND_HALF' | null;
 type DayType = 'WORKING' | 'HOLIDAY' | 'WEEKLY_OFF' | 'LEAVE';
+
+/** Geofence verdicts (as the check-in endpoint of Prompt 4 evaluates them) that mean the punch was not inside a fence it should have been in. */
+const OUTSIDE_GEOFENCE_VERDICTS: ReadonlySet<string> = new Set(['flagged', 'logged', 'denied_outside', 'denied_mock', 'outside', 'denied']);
+/** Reasons that mean nobody can say where the punch was (no location, an imprecise fix, no fence, geofencing off): never OUTSIDE_GEOFENCE. */
+const UNKNOWN_GEOFENCE_REASONS: ReadonlySet<string> = new Set(['location_missing', 'gps_accuracy_too_low', 'geofence_off', 'no_fences_assigned']);
+
+/**
+ * Whether the punch counts as OUTSIDE_GEOFENCE — the B-36 truth table (HR portal Prompt 4 review, P2-7): only when a REAL
+ * fence was evaluated with a location and the punch failed it. `withinGeofence` (written since the fix) decides alone;
+ * older payloads are read through their verdict and reason, where an unknown location / no fence / geofencing off never
+ * flags, and a mocked location flags only where a fence judged the punch (or no verdict was recorded at all — connector
+ * semantics).
+ */
+export function outsideGeofenceOf(p: EnginePunchPayload): string | null {
+  if (p.withinGeofence === false) return p.geofenceReason === 'mock_location' ? 'mock location inside a geofence check' : 'outside the assigned geofence';
+  if (p.withinGeofence === true || p.withinGeofence === null) return null;
+  const verdict = typeof p.geofenceVerdict === 'string' ? p.geofenceVerdict.toLowerCase() : null;
+  const reason = typeof p.geofenceReason === 'string' ? p.geofenceReason.toLowerCase() : null;
+  if (reason !== null && UNKNOWN_GEOFENCE_REASONS.has(reason)) return null;
+  if (verdict !== null && OUTSIDE_GEOFENCE_VERDICTS.has(verdict)) return `geofence verdict ${verdict}`;
+  // a mocked location proves nothing where a fence judged it; where none did (no fence, geofencing off) nobody can say
+  if (p.isMock === true && verdict !== 'no_fence' && verdict !== 'no_fences_assigned') return 'mock location reported';
+  return null;
+}
+
+/** What the self-service punch payloads of the attributed events say about the day (HR portal Prompt 3; the payloads are written by Prompt 4). */
+function punchPayloadFacts(events: readonly EngineEvent[]): { selfService: string[]; outsideGeofence: Array<{ id: string; why: string }>; outOfWindow: string[] } {
+  const selfService: string[] = [];
+  const outsideGeofence: Array<{ id: string; why: string }> = [];
+  const outOfWindow: string[] = [];
+  for (const e of events) {
+    const p = e.payload;
+    if (!p) continue;
+    if (p.channel === 'web' || p.channel === 'mobile') selfService.push(e.id);
+    const why = outsideGeofenceOf(p);
+    if (why) outsideGeofence.push({ id: e.id, why });
+    if (p.outOfWindow === true) outOfWindow.push(e.id);
+  }
+  return { selfService, outsideGeofence, outOfWindow };
+}
 
 /** Collects trace steps and flags in a deterministic order. */
 class Recorder {
@@ -83,11 +123,18 @@ const local = (dt: DateTime): string => dt.toISO({ suppressMilliseconds: true, i
  *
  * Precedence: NOT_JOINED / EXITED → HOLIDAY → WEEKLY_OFF → LEAVE → punches. When `input.now` is omitted the
  * day is treated as over (historical recomputation), so missing punches are judged, not left PENDING.
+ * Day marks (HR portal Prompt 3) are folded in last: they add flags and decide `lopDays` / `unexcused` but never
+ * change the computed status, so a record stays reproducible from raw + corrections + marks.
  */
 export function calculateDailyRecord(input: DailyCalculationInput): DailyCalculationResult {
+  return applyDayMarks(calculateCore(input), input.dayMarks ?? []);
+}
+
+function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   const { attendanceDate: date, timezone: zone, shift, rules } = input;
   assertTimezone(zone);
   const rec = new Recorder();
+  const settings = input.settings ?? DEFAULT_ATTENDANCE_SETTINGS;
 
   // 1. Punch windows for the date and its neighbours (§G.3).
   const window = computePunchWindow(shift, date, zone);
@@ -138,6 +185,21 @@ export function calculateDailyRecord(input: DailyCalculationInput): DailyCalcula
     rec.step('attribution.outOfWindow', `${outOfWindowOnDate} punch(es) on calendar day ${date} fall outside every window`, { count: outOfWindowOnDate });
   }
   if (attributed.some((e) => e.source === 'MANUAL' || e.source === 'CORRECTION')) rec.flag('MANUAL_CORRECTION');
+
+  // 2b. Self-service punch facts (payload written by the check-in endpoint): channel, geofence verdict, policy window.
+  const facts = punchPayloadFacts(attributed);
+  if (facts.selfService.length > 0) {
+    rec.flag('SELF_SERVICE_PUNCH');
+    rec.step('punch.selfService', `${facts.selfService.length} punch(es) came from the web / mobile check-in`, { events: facts.selfService });
+  }
+  if (facts.outsideGeofence.length > 0) {
+    rec.flag('OUTSIDE_GEOFENCE');
+    rec.step('punch.geofence', `${facts.outsideGeofence.length} punch(es) outside the geofence (${facts.outsideGeofence.map((f) => f.why).join('; ')})`, { events: facts.outsideGeofence });
+  }
+  if (facts.outOfWindow.length > 0) {
+    rec.flag('OUT_OF_WINDOW');
+    rec.step('punch.outOfWindow', `${facts.outOfWindow.length} punch(es) outside the policy check-in / check-out window`, { events: facts.outOfWindow });
+  }
 
   // 3. Duplicate collapsing and interpretation (§G.4).
   const { kept, duplicates } = collapseDuplicates(attributed, rules.duplicatePunchWindowSeconds);
@@ -209,6 +271,8 @@ export function calculateDailyRecord(input: DailyCalculationInput): DailyCalcula
     overtimeCategory: work.overtimeCategory,
     status,
     flags: rec.flags(),
+    lopDays: 0,
+    unexcused: false,
   });
 
   // 4. Employment boundaries.
@@ -247,7 +311,22 @@ export function calculateDailyRecord(input: DailyCalculationInput): DailyCalcula
     if (interpretation.missingOut && !dayOver) rec.step('missingPunch', `OUT not punched yet on ${status}; punch window still open → not flagged`, { missingOut: true, dayOver });
     if (interpretation.missingOut && dayOver) rec.flag('MISSING_OUT');
     if (interpretation.missingIn) rec.flag('MISSING_IN');
-    const otAllowed = rules.overtimeEnabled && ((dayType === 'HOLIDAY' && rules.holidayWorkCountsAsOvertime) || (dayType === 'WEEKLY_OFF' && rules.weeklyOffWorkCountsAsOvertime));
+    // Organisation policy for work on a weekly off / holiday (settings.attendance.nonWorkingDay.action):
+    //   ignore   → the punches are kept as facts (timestamps, flags) but the day earns nothing: 0 worked, 0 overtime;
+    //   record   → worked minutes stay on the record (NON_WORKING_DAY_WORK) without overtime;
+    //   overtime → worked minutes also count as WEEKLY_OFF / HOLIDAY overtime, still subject to the rule set's switches and cap.
+    // A leave day is not a non-working day in this sense: work on it is recorded and never earns overtime (as before).
+    const nonWorkingAction = dayType === 'LEAVE' ? 'record' : settings.nonWorkingDay.action;
+    if (dayType !== 'LEAVE' && work.workedMinutes > 0 && nonWorkingAction === 'ignore') {
+      rec.step('nonWorkingDay', `${status}: policy ignores work on non-working days → ${work.workedMinutes} worked minutes zeroed`, { action: nonWorkingAction, ignoredMinutes: work.workedMinutes });
+      rec.step('status', `${status} (work ignored by policy)`, { status, worked: 0 });
+      return finish(status, restSchedule, { ...work, workedMinutes: 0, breakMinutes: 0, overtimeMinutes: 0, overtimeCategory: null });
+    }
+    if (dayType !== 'LEAVE' && work.workedMinutes > 0) {
+      rec.flag('NON_WORKING_DAY_WORK');
+      rec.step('nonWorkingDay', `${status}: ${work.workedMinutes} worked minutes recorded (policy: ${nonWorkingAction})`, { action: nonWorkingAction, worked: work.workedMinutes });
+    }
+    const otAllowed = nonWorkingAction === 'overtime' && rules.overtimeEnabled && ((dayType === 'HOLIDAY' && rules.holidayWorkCountsAsOvertime) || (dayType === 'WEEKLY_OFF' && rules.weeklyOffWorkCountsAsOvertime));
     let overtimeMinutes = 0;
     let overtimeCategory: WorkFigures['overtimeCategory'] = null;
     if (otAllowed && work.workedMinutes > 0) {
@@ -255,8 +334,12 @@ export function calculateDailyRecord(input: DailyCalculationInput): DailyCalcula
       overtimeCategory = dayType === 'HOLIDAY' ? 'HOLIDAY' : 'WEEKLY_OFF';
       rec.flag('OVERTIME');
       rec.step('overtime', `all ${work.workedMinutes} worked minutes count as ${overtimeCategory} overtime${overtimeMinutes !== work.workedMinutes ? ` (capped at ${overtimeMinutes})` : ''}`, { worked: work.workedMinutes, overtime: overtimeMinutes, category: overtimeCategory, cap: rules.overtimeMaxMinutesPerDay ?? null });
+    } else if (dayType === 'LEAVE') {
+      rec.step('overtime', 'work on a leave day does not earn overtime', { overtimeEnabled: rules.overtimeEnabled });
+    } else if (nonWorkingAction !== 'overtime') {
+      rec.step('overtime', `work on ${dayType} is recorded but not paid as overtime (policy: ${nonWorkingAction})`, { action: nonWorkingAction });
     } else {
-      rec.step('overtime', dayType === 'LEAVE' ? 'work on a leave day does not earn overtime' : `work on ${dayType} does not count as overtime (rule disabled)`, { overtimeEnabled: rules.overtimeEnabled });
+      rec.step('overtime', `work on ${dayType} does not count as overtime (rule disabled)`, { overtimeEnabled: rules.overtimeEnabled });
     }
     rec.step('status', `${status} with work recorded`, { status, worked: work.workedMinutes });
     return finish(status, restSchedule, { ...work, overtimeMinutes, overtimeCategory });
@@ -537,6 +620,64 @@ function assumedInstant(side: MissingSide, interpretation: Interpretation, sched
     return interpretation.lastOut ? interpretation.lastOut.minus({ minutes }) : null;
   }
   return null;
+}
+
+/** A pay effect is 0, half a day or a full day; anything in between rounds down to the step it clears. */
+export function normalisePayEffect(days: number): 0 | 0.5 | 1 {
+  if (!Number.isFinite(days) || days < 0.5) return 0;
+  return days >= 1 ? 1 : 0.5;
+}
+const payEffectFlag = (days: 0 | 0.5 | 1): AttendanceFlag | null => (days === 1 ? 'PAY_EFFECT_FULL' : days === 0.5 ? 'PAY_EFFECT_HALF' : null);
+
+/**
+ * Fold the active day marks into a computed result (HR portal Prompt 3). Marks add flags and decide `lopDays` /
+ * `unexcused`; the status stays what the punches say — loss of pay is a payroll consequence, not a different kind of day.
+ * EXCUSED wins over every other mark: the LATE / ABSENT consequences stay visible on the record, but the day costs
+ * nothing and is not unexcused; an LOP / PAY_EFFECT mark left behind is reported as superseded rather than applied.
+ * Pure and traced, so a record stays reproducible from raw + corrections + marks.
+ */
+export function applyDayMarks(result: DailyCalculationResult, marks: readonly EngineDayMark[]): DailyCalculationResult {
+  if (marks.length === 0) return result;
+  const flags = new Set<AttendanceFlag>(result.flags);
+  const steps: TraceStep[] = [];
+  const byKind = (kind: EngineDayMark['kind']) => marks.filter((m) => m.kind === kind);
+  const excused = byKind('EXCUSED')[0];
+  const unexcused = byKind('UNEXCUSED')[0];
+  const lop = byKind('LOP')[0];
+  const payEffect = byKind('PAY_EFFECT')[0];
+  let lopDays: 0 | 0.5 | 1 = 0;
+  steps.push({ step: 'marks', detail: `${marks.length} active day mark(s): ${marks.map((m) => `${m.kind}${m.payEffectDays ? ` ${m.payEffectDays}d` : ''} (${m.source})`).join(', ')}`, values: { marks: marks.map((m) => ({ id: m.id, kind: m.kind, payEffectDays: m.payEffectDays, source: m.source })) } });
+
+  if (excused) {
+    flags.add('EXCUSED');
+    const superseded = [lop, payEffect, unexcused].filter((m): m is EngineDayMark => m !== undefined);
+    steps.push({ step: 'marks.excused', detail: `EXCUSED (${excused.source}): late / absent consequences stay on the record, no loss of pay${superseded.length ? `; ${superseded.map((m) => m.kind).join(' + ')} mark(s) superseded` : ''}`, values: { markId: excused.id, lopDays: 0, superseded: superseded.map((m) => m.id) } });
+  } else {
+    if (unexcused) {
+      flags.add('UNEXCUSED');
+      steps.push({ step: 'marks.unexcused', detail: `UNEXCUSED (${unexcused.source}): the day was left unexplained`, values: { markId: unexcused.id } });
+    }
+    if (payEffect) {
+      const days = normalisePayEffect(payEffect.payEffectDays);
+      const flag = payEffectFlag(days);
+      if (flag) flags.add(flag);
+      steps.push({ step: 'marks.payEffect', detail: `PAY_EFFECT ${days} day(s) charged to paid leave (${payEffect.source}) → no loss of pay`, values: { markId: payEffect.id, payEffectDays: days } });
+    }
+    if (lop) {
+      lopDays = normalisePayEffect(lop.payEffectDays);
+      const flag = payEffectFlag(lopDays);
+      if (flag) flags.add(flag);
+      if (lopDays > 0) flags.add('LOP');
+      steps.push({ step: 'marks.lop', detail: lopDays > 0 ? `LOP ${lopDays} day(s) (${lop.source}): loss of pay, no leave balance charged` : `LOP mark with no pay effect (${lop.source}) → nothing deducted`, values: { markId: lop.id, lopDays } });
+    }
+  }
+  return {
+    ...result,
+    flags: ATTENDANCE_FLAGS.filter((f) => flags.has(f)),
+    lopDays,
+    unexcused: unexcused !== undefined && excused === undefined,
+    trace: { ...result.trace, steps: [...result.trace.steps, ...steps] },
+  };
 }
 
 function classifyWorkingStatus(workedMinutes: number, schedule: Schedule, rules: AttendanceRules, halfDayOff: HalfDayOff, rec: Recorder): AttendanceStatus {

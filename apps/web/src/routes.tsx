@@ -26,6 +26,8 @@ function ComingSoonPage() {
 const ComingSoon = lazy(async () => ({ default: ComingSoonPage }));
 // Lazy like every other page: the dashboard carries the charts vendor chunk, which the shell itself never needs.
 const DashboardPage = lazy(() => import('@/features/dashboard/dashboard-page'));
+// Notifications review 8-P1-4: the member's own notification preferences, on a page every active member can open.
+const AccountNotificationsPage = lazy(() => import('@/features/notifications/account-notifications-page'));
 
 /**
  * Enrolment reachable on a valid session alone, without the shell and without `/me`.
@@ -64,6 +66,8 @@ export const router = createBrowserRouter([
         children: [
           { index: true, element: <HomeRoute /> },
           { path: 'notifications', element: <NotificationsPage /> },
+          // membership only (no permission, no employee link): the e-mail footer of a member without an employee link lands here
+          { path: 'account/notifications', element: <Suspense fallback={<PageFallback />}><AccountNotificationsPage /></Suspense> },
           ...featureRoutes,
           { path: '*', element: <Suspense fallback={<PageFallback />}><Outlet /><NotFound /></Suspense> },
         ],

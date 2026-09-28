@@ -46,6 +46,8 @@ export function dedupeKeyFor(op: SyncJobType, deviceId: string | null, employeeI
     case 'DEVICE_HEALTH_CHECK': return `health:${deviceId}`;
     // a second reboot while one is still pending is a duplicate, never a second reboot
     case 'RESTART_DEVICE': return `restart:${deviceId}`;
+    // one Flowza Finance push per connector at a time (the keyset position is per device; two runs would race on it)
+    case 'PUSH_ATTENDANCE': return `finance-push:${deviceId}`;
     case 'PUSH_EMPLOYEE': return `push:${deviceId}:${employeeId}:${syncJobId}`;
     case 'DELETE_EMPLOYEE': return `delete:${deviceId}:${employeeId ?? String(options['deviceUserId'] ?? '')}:${syncJobId}`;
     default: return `${op.toLowerCase()}:${deviceId}:${syncJobId}`;

@@ -1,3 +1,4 @@
+import { lopDaysOf } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { formatDays, hoursColonMinutes, leaveGroupOf, summariseCodes } from '@flowza/domain';
 import { errors } from '@flowza/shared';
@@ -11,7 +12,9 @@ import type { ReportDefinition } from './types.js';
  * Sample 3 — Summary Report: one row per employee for the period, day counts per attendance code grouped into
  * T/PR · T/OL · T/AB exactly as the sample orders them (PR HL OF [present-type leave] HP T/PR | [paid leave types]
  * T/OL | AB [unpaid leave types] T/AB), then OT1, OT2 as h:mm and UT in the tenant's notation. The leave columns are
- * the tenant's own leave types, so a tenant with CL and EL gets CL and EL columns.
+ * the tenant's own leave types, so a tenant with CL and EL gets CL and EL columns. Two policy-parity columns follow
+ * (HR portal Prompt 3), appended at the end so the sample's column positions stay where payroll imports expect them:
+ * UNX = days marked unexcused, LOP = loss-of-pay days (0.5 steps, `lopDaysOf` — the rule the period summaries use).
  */
 export const attendanceSummary: ReportDefinition = {
   key: 'attendance_summary',
@@ -33,12 +36,16 @@ export const attendanceSummary: ReportDefinition = {
     const rows = roster.map((e) => {
       const s = summariseCodes((byEmployee.get(e.id) ?? []).map((r) => ({ status: r.status, flags: r.flags, leaveTypeCode: r.leave?.code ?? null, firstInAt: r.firstInAt, lastOutAt: r.lastOutAt, workedMinutes: r.workedMinutes, scheduledMinutes: r.scheduledMinutes, overtimeMinutes: r.overtimeMinutes, overtimeCategory: r.overtimeCategory })), ctx.leaveTypes);
       const leaveDays = (code: string) => Object.entries(s.leave).filter(([k]) => k.toUpperCase() === code.toUpperCase()).reduce((a, [, v]) => a + v, 0);
+      const own = byEmployee.get(e.id) ?? [];
+      const unexcused = own.filter((r) => r.flags.includes('UNEXCUSED')).length;
+      const lop = own.reduce((a, r) => a + lopDaysOf(r.flags), 0);
       return { cells: [
         cell(e.employeeNumber, { mono: true }), cell(e.displayName),
         count(s.present), count(s.holiday), count(s.weeklyOff), ...presentTypes.map((l) => count(leaveDays(l.code))), count(s.halfDayPresent), total(s.totalPresent),
         ...paidTypes.map((l) => count(leaveDays(l.code))), total(s.totalLeave),
         count(s.absent), ...unpaidTypes.map((l) => count(leaveDays(l.code))), total(s.totalAbsent),
         num(s.ot1Minutes, hoursColonMinutes(s.ot1Minutes), { mono: true }), num(s.ot2Minutes, hoursColonMinutes(s.ot2Minutes), { mono: true }), num(s.utMinutes, ctx.hours(s.utMinutes, { zeroAsValue: true }), { mono: true }),
+        count(unexcused), num(lop, formatDays(lop, { zeroAsDash: true }), { align: 'center', bold: lop > 0 }),
       ] };
     });
     const sections: ReportSection[] = [{ rows }];
@@ -50,11 +57,12 @@ export const attendanceSummary: ReportDefinition = {
       ...paidTypes.map((l) => c(`lt-${l.code}`, l.code)), c('tol', ctx.t('col.totalLeave'), 5),
       c('ab', codeOf('ABSENT')), ...unpaidTypes.map((l) => c(`lt-${l.code}`, l.code)), c('tab', ctx.t('col.totalAbsent'), 5),
       { key: 'ot1', label: ctx.t('col.ot1'), align: 'end', width: 6, mono: true }, { key: 'ot2', label: ctx.t('col.ot2'), align: 'end', width: 6, mono: true }, { key: 'ut', label: ctx.t('col.ut'), align: 'end', width: 6, mono: true },
+      c('unx', ctx.t('col.unexcused')), c('lop', ctx.t('col.lop')),
     ];
     return {
       key: 'attendance_summary', title: ctx.t('report.attendance_summary.title'), company: ctx.company,
       period: ctx.t('period.forPeriod', { from: ctx.headerDate(from), to: ctx.headerDate(to) }), orientation: 'landscape', columns, sections,
-      legend: ctx.legend(), legendTitle: ctx.t('legend.title'), notes: ctx.notes(), endOfReport: false, endOfReportLabel: ctx.t('group.endOfReport'),
+      legend: ctx.legend(), legendTitle: ctx.t('legend.title'), notes: [...ctx.notes(), ctx.t('footer.policy')], endOfReport: false, endOfReportLabel: ctx.t('group.endOfReport'),
       generatedAt: ctx.now, generatedLabel: ctx.generatedLabel(), pageLabel: ctx.pageLabel, timezone: ctx.timezone, locale: ctx.locale, dir: ctx.dir,
       rowCount: countRows(sections), flatten: { headingColumnLabel: null, fieldColumns: false }, fileStem: `summary-report-${from}-${to}`,
     };

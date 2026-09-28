@@ -47,6 +47,17 @@ export const updateLeaveRecordSchema = z.object({
   status: z.enum(LEAVE_STATUSES).optional(),
   /** HR's comment on an approval or rejection; the employee sees it in the portal. */
   decisionNote: z.string().trim().max(1000).nullable().optional(),
+  /**
+   * Leave v2: the approval level the decider saw (the row's `approvalCurrentStep`). The Leave page sends it with every
+   * decision; the level must still be the current one (else 409). A decision without it may only settle a seat the caller
+   * actually holds on the current level — never another level by permission.
+   */
+  stepNo: z.number().int().min(1).max(50).optional(),
+  /**
+   * Leave v2 review (engine §9.8 seat choice): the waiting approver whose seat an organisation-wide override fills. Required
+   * by the engine when the level is ALL / QUORUM and several approvers still wait (the request's `abilities.mustChooseSeat`).
+   */
+  onBehalfOfUserId: uuidSchema.optional(),
 });
 export type UpdateLeaveRecordInput = z.infer<typeof updateLeaveRecordSchema>;
 export const ruleSetListQuerySchema = z.object({ branchId: uuidSchema.optional(), activeOn: isoDateSchema.optional(), includeExpired: booleanQuerySchema.default(true) });

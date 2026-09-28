@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { ClipboardPlus, Lock } from 'lucide-react';
+import { ClipboardPlus, ListTree, Lock, PencilLine } from 'lucide-react';
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, EmptyState, ErrorState, Skeleton, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { fmtDate, fmtDateTime, fmtMinutes, fmtTime } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -9,8 +9,16 @@ import { useAttendanceRecord } from '../api';
 import type { RecordDetail } from '../types';
 import { AttendanceStatusBadge, CorrectionStatusBadge, CorrectionTypeBadge, FlagChips } from './badges';
 import { TraceView } from './trace-view';
+import { DayMarks } from './day-marks';
+import { StatusSourceChip } from './source-chip';
+import { isManualStatus } from '../workspace-utils';
+import type { RecordEditPreset } from './record-edit-dialog';
+import '../workspace-i18n';
 
 export interface CorrectionPreset { employeeId: string; employeeName?: string; attendanceDate: string; timezone?: string }
+/** One employee-day (the punch timeline drawer, HR portal Prompt 6a). */
+export interface DayRef { employeeId: string; date: string; employeeName?: string }
+
 
 function Stat({ label, value, sub, className }: { label: string; value: React.ReactNode; sub?: string; className?: string }) {
   return <div className={cn('min-w-0 rounded-md border bg-muted/30 p-2.5', className)}><p className="truncate text-[11px] font-medium uppercase tracking-wide text-muted-foreground">{label}</p><p className="truncate text-sm font-semibold tnum">{value}</p>{sub ? <p className="truncate text-xs text-muted-foreground">{sub}</p> : null}</div>;
@@ -103,9 +111,13 @@ function CorrectionsTab({ r }: { r: RecordDetail }) {
   );
 }
 
-/** Daily record detail: summary, calculation trace, events, history and corrections. */
-export function RecordDialog({ recordId, onClose, onRequestCorrection }: { recordId: string | null; onClose: () => void; onRequestCorrection?: (preset: CorrectionPreset) => void }) {
+/**
+ * Daily record detail: summary, day marks (verdicts + loss of pay), calculation trace, events, history and corrections.
+ * `onOpenTimeline` / `onEditRecord` (HR portal Prompt 6a) add the punch timeline and HR's Add / Edit record to the footer.
+ */
+export function RecordDialog({ recordId, onClose, onRequestCorrection, onOpenTimeline, onEditRecord }: { recordId: string | null; onClose: () => void; onRequestCorrection?: (preset: CorrectionPreset) => void; onOpenTimeline?: (day: DayRef) => void; onEditRecord?: (preset: RecordEditPreset) => void }) {
   const { t } = useTranslation('attendance');
+  const { t: tw } = useTranslation('attendanceWorkspace');
   const { t: tc } = useTranslation();
   const orgTz = useOrgTimezone();
   const can = useCan();
@@ -122,7 +134,7 @@ export function RecordDialog({ recordId, onClose, onRequestCorrection }: { recor
             {r ? <>{r.employeeName ?? t('record.title')} <span className="font-mono text-sm font-normal text-muted-foreground" dir="ltr">{r.employeeNumber}</span></> : t('record.title')}
           </DialogTitle>
           <DialogDescription className="flex flex-wrap items-center gap-2">
-            {r ? <><span className="tnum">{fmtDate(r.attendanceDate, 'EEEE, dd MMM yyyy')}</span> · <span dir="ltr">{r.timezone}</span> <AttendanceStatusBadge status={r.status} /> <FlagChips flags={r.flags} max={6} size="xs" /> {r.lockedAt ? <Badge variant="neutral"><Lock className="size-3" /> {t('record.locked')}</Badge> : null}</> : t('record.subtitle')}
+            {r ? <><span className="tnum">{fmtDate(r.attendanceDate, 'EEEE, dd MMM yyyy')}</span> · <span dir="ltr">{r.timezone}</span> <AttendanceStatusBadge status={r.status} /> <StatusSourceChip source={isManualStatus(r) ? 'MANUAL' : 'AUTO'} /> <FlagChips flags={r.flags} max={6} size="xs" /> {r.lockedAt ? <Badge variant="neutral"><Lock className="size-3" /> {t('record.locked')}</Badge> : null}</> : t('record.subtitle')}
           </DialogDescription>
         </DialogHeader>
         {q.isLoading ? <div className="space-y-3"><Skeleton className="h-20 w-full" /><Skeleton className="h-8 w-64" /><Skeleton className="h-48 w-full" /></div>
@@ -130,6 +142,7 @@ export function RecordDialog({ recordId, onClose, onRequestCorrection }: { recor
           : (
             <div className="space-y-4">
               <Summary r={r} />
+              <DayMarks marks={r.marks} lopDays={r.lopDays} timezone={r.timezone || orgTz} />
               <Tabs value={tab} onValueChange={setTab}>
                 <TabsList aria-label={t('record.title')} className="max-w-full overflow-x-auto">
                   <TabsTrigger value="trace">{t('record.tabs.trace')}</TabsTrigger>
@@ -146,6 +159,8 @@ export function RecordDialog({ recordId, onClose, onRequestCorrection }: { recor
           )}
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>{tc('common.close')}</Button>
+          {r && onOpenTimeline ? <Button type="button" variant="outline" onClick={() => onOpenTimeline({ employeeId: r.employeeId, date: r.attendanceDate, employeeName: r.employeeName })}><ListTree /> {tw('timeline.open')}</Button> : null}
+          {r && onEditRecord ? <Button type="button" variant="outline" disabled={!!r.lockedAt} title={r.lockedAt ? t('record.lockedHint') : undefined} onClick={() => onEditRecord({ employeeId: r.employeeId, employeeName: r.employeeName, date: r.attendanceDate })}><PencilLine /> {tw('edit.titleEdit')}</Button> : null}
           {r && onRequestCorrection && (can('attendance.correct') || (selfCorrections && can('attendance.request_correction') && r.employeeId === ownEmployeeId)) ? (
             <Button type="button" disabled={!!r.lockedAt} title={r.lockedAt ? t('record.lockedHint') : undefined} onClick={() => onRequestCorrection({ employeeId: r.employeeId, employeeName: r.employeeName, attendanceDate: r.attendanceDate, timezone: r.timezone })}><ClipboardPlus /> {t('record.requestCorrection')}</Button>
           ) : null}

@@ -69,3 +69,17 @@ export function toCsvLine(values: readonly (string | number | null | undefined)[
     return /[",\r\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   }).join(',');
 }
+
+/**
+ * Cells a spreadsheet would evaluate (`=`, `+`, `-`, `@`, tab, CR) get an apostrophe so an employee named "=HYPERLINK(...)"
+ * stays text (AGENTS.md: exports escape formula-leading characters). Same rule as the worker's report renderer.
+ */
+export function escapeSpreadsheetText(v: string): string {
+  return /^[=+\-@\t\r]/.test(v) ? `'${v}` : v;
+}
+
+/** A CSV document for a download: header + rows, formula-escaped, CRLF, with a UTF-8 BOM so Excel opens Arabic correctly. */
+export function toCsvDocument(header: readonly string[], rows: ReadonlyArray<readonly (string | number | null | undefined)[]>): string {
+  const cell = (v: string | number | null | undefined) => (typeof v === 'number' ? v : v === null || v === undefined ? '' : escapeSpreadsheetText(v));
+  return `\uFEFF${[toCsvLine(header.map(escapeSpreadsheetText)), ...rows.map((r) => toCsvLine(r.map(cell)))].join('\r\n')}\r\n`;
+}

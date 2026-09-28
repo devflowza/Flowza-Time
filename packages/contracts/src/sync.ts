@@ -111,7 +111,24 @@ export const DOMAIN_EVENT_TYPES = [
   'device.created', 'device.updated', 'device.online', 'device.offline', 'device.credentials_changed',
   'sync.queued', 'sync.completed', 'sync.failed', 'sync.item_failed',
   'attendance.created', 'attendance.updated', 'attendance.correction_submitted', 'attendance.correction_approved', 'attendance.correction_rejected',
-  'approval.pending', 'report.ready', 'report.failed', 'subscription.limit_reached',
+  // day-close sweep (HR portal Prompt 3): one event per (employee, sweep run) listing the days marked UNEXCUSED; targeted via payload.userIds
+  'attendance.unexcused_marked',
+  'approval.pending', 'approval.reminder', 'approval.escalated', 'approval.decided', 'approval.info_requested', 'approval.info_answered', 'approval.reassigned', 'approval.bypassed',
+  'report.ready', 'report.failed', 'subscription.limit_reached',
   'leave.requested', 'leave.approved', 'leave.rejected',
+  // Flowza Finance connector: emitted by the worker after 3 consecutive pull/push failures of a connector device.
+  'sync.finance.failed',
+  // report sharing / schedules (HR portal Prompt 6a): one event per delivered recipient report; targeted via payload.userIds
+  'report.scheduled_delivery',
+  // employee portal attendance (HR portal Prompt 4): targeted via payload.userIds
+  'attendance.note_submitted', 'attendance.note_decided', 'attendance.note_info_requested', 'attendance.selfie_submitted', 'attendance.selfie_decided',
+  'attendance.punch_flagged', 'attendance.regularisation_decided', 'shift.swap_requested', 'shift.swap_decided',
+  // Leave v2 (HR portal Prompt 7): a comment on a leave request (targeted via payload.userIds: the other side of the
+  // thread), a year close carried balances forward (HR), comp-off credits expired (the employee, payload.userId)
+  'leave.comment_added', 'leave.year_closed', 'leave.comp_off_expired',
+  // Notifications & reminders (HR portal Prompt 8): an approver's question on a leave request, told to the employee
+  // (targeted via payload.userIds), and the missing check-out reminder (worker task attendance.missing-punch-reminder,
+  // one per employee-day, targeted at the employee's own login)
+  'leave.info_requested', 'punch.missing_out',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];

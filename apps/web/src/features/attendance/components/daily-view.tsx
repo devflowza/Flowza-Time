@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
-import type { ColumnDef } from '@tanstack/react-table';
+import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
-import { CalendarCheck, ChevronLeft, ChevronRight, X } from 'lucide-react';
+import { CalendarCheck, ChevronLeft, ChevronRight, ListChecks, ListTree, X } from 'lucide-react';
 import { ATTENDANCE_FLAGS, ATTENDANCE_STATUSES } from '@flowza/contracts';
 import { DataTable } from '@/components/data-table';
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StatCard } from '@/components/ui';
@@ -15,9 +15,13 @@ import { SearchBox } from '@/features/organization/components/search-box';
 import { useTabTable } from '@/features/organization/use-tab-table';
 import { useShiftOptions } from '@/features/schedule/api';
 import { useDailyAttendance } from '../api';
+import { useManualStatuses } from '../workspace-api';
 import type { DailyRecord } from '../types';
 import { AttendanceStatusBadge, FlagChips } from './badges';
 import { RecordDialog, type CorrectionPreset } from './record-dialog';
+import { StatusSourceChip } from './source-chip';
+import { BulkStatusDialog, type BulkStatusItem } from './bulk-status-dialog';
+import { useWorkspaceDialogs } from './workspace-dialogs';
 
 const ALL = '__all__';
 const STAT_KEYS = ['PRESENT', 'ABSENT', 'LEAVE', 'HALF_DAY', 'MISSING_PUNCH'] as const;
@@ -25,6 +29,7 @@ const STAT_TONE: Record<(typeof STAT_KEYS)[number], 'success' | 'danger' | 'info
 
 export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (preset: CorrectionPreset) => void }) {
   const { t } = useTranslation('attendance');
+  const { t: tw } = useTranslation('attendanceWorkspace');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
   const table = useTabTable();
@@ -36,9 +41,30 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
   const departments = useDepartmentOptions(f['branchId']);
   const shifts = useShiftOptions();
   const [recordId, setRecordId] = useState<string | null>(null);
+  // HR workspace (Prompt 6a): Auto / Manual source per row, bulk "Set status", punch timeline, Add / Edit record
+  const { canEdit, openEdit, openTimeline, dialogs } = useWorkspaceDialogs();
+  const manual = useManualStatuses({ from: date, to: date, branchId: f['branchId'] });
+  const manualKeys = useMemo(() => new Set((manual.data ?? []).map((m) => `${m.employeeId}|${m.date}`)), [manual.data]);
+  const [selection, setSelection] = useState<RowSelectionState>({});
+  const [picked, setPicked] = useState<Record<string, BulkStatusItem>>({});
+  const [bulkItems, setBulkItems] = useState<BulkStatusItem[] | null>(null);
+  const onSelectionChange = (next: RowSelectionState) => {
+    const rows = new Map((q.data?.data ?? []).map((r) => [r.id, r]));
+    const keep: Record<string, BulkStatusItem> = {};
+    for (const [id, on] of Object.entries(next)) {
+      if (!on) continue;
+      const r = rows.get(id);
+      const known = picked[id] ?? (r ? { employeeId: r.employeeId, date: r.attendanceDate, employeeName: r.employeeName } : undefined);
+      if (known) keep[id] = known;
+    }
+    setSelection(next); setPicked(keep);
+  };
+  const clearSelection = () => { setSelection({}); setPicked({}); };
   const hasFilters = Object.keys(f).some((k) => k !== 'date');
   const setDate = (d: string) => table.update({ filters: { date: d === todayIso(tz) ? '' : d } });
   const byStatus = q.data?.meta.byStatus ?? {};
+  // missing punch is a flag-derived count (MISSING_IN / MISSING_OUT); the API filters status=MISSING_PUNCH the same way
+  const statValue = (k: (typeof STAT_KEYS)[number]) => (k === 'MISSING_PUNCH' ? q.data?.meta.missingPunch ?? byStatus[k] ?? 0 : byStatus[k] ?? 0);
 
   const columns = useMemo<ColumnDef<DailyRecord, unknown>[]>(() => [
     { id: 'displayName', header: t('columns.employee'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.employeeName}</p><p className="truncate font-mono text-xs text-muted-foreground" dir="ltr">{row.original.employeeNumber}{row.original.branchName ? ` · ${row.original.branchName}` : ''}</p></div> },
@@ -49,9 +75,10 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
     { id: 'lateMinutes', header: t('columns.late'), cell: ({ row }) => <span className={cn('tnum', row.original.lateMinutes > 0 && 'text-amber-700 dark:text-amber-300')}>{row.original.lateMinutes ? fmtMinutes(row.original.lateMinutes) : '—'}</span> },
     { id: 'early', header: t('columns.early'), enableSorting: false, cell: ({ row }) => <span className={cn('tnum', row.original.earlyDepartureMinutes > 0 && 'text-amber-700 dark:text-amber-300')}>{row.original.earlyDepartureMinutes ? fmtMinutes(row.original.earlyDepartureMinutes) : '—'}</span> },
     { id: 'overtime', header: t('columns.overtime'), enableSorting: false, cell: ({ row }) => <span className={cn('tnum', row.original.overtimeMinutes > 0 && 'text-blue-700 dark:text-blue-300')}>{row.original.overtimeMinutes ? fmtMinutes(row.original.overtimeMinutes) : '—'}</span> },
-    { id: 'status', header: tc('common.status'), cell: ({ row }) => <AttendanceStatusBadge status={row.original.status} /> },
+    { id: 'status', header: tc('common.status'), cell: ({ row }) => <span className="inline-flex flex-wrap items-center gap-1"><AttendanceStatusBadge status={row.original.status} />{manual.isSuccess ? <StatusSourceChip source={manualKeys.has(`${row.original.employeeId}|${row.original.attendanceDate}`) ? 'MANUAL' : 'AUTO'} /> : null}</span> },
     { id: 'flags', header: t('columns.flags'), enableSorting: false, cell: ({ row }) => <FlagChips flags={row.original.flags} size="xs" /> },
-  ], [t, tc, tz]);
+    { id: 'actions', header: '', enableSorting: false, enableHiding: false, cell: ({ row }) => <Button variant="ghost" size="icon" className="size-7" aria-label={tw('timeline.open')} title={tw('timeline.open')} onClick={(e) => { e.stopPropagation(); openTimeline({ employeeId: row.original.employeeId, date: row.original.attendanceDate, employeeName: row.original.employeeName }); }}><ListTree /></Button> },
+  ], [t, tc, tw, tz, manual.isSuccess, manualKeys, openTimeline]);
 
   return (
     <div className="space-y-4">
@@ -65,13 +92,21 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
         <p className="text-sm text-muted-foreground">{fmtDate(date, 'EEEE, dd MMMM yyyy')}</p>
       </div>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {STAT_KEYS.map((k) => <StatCard key={k} label={t(`status.${k}`)} value={fmtNumber(byStatus[k] ?? 0)} tone={STAT_TONE[k]} loading={q.isLoading} onClick={() => table.setFilter('status', f['status'] === k ? undefined : k)} />)}
+        {STAT_KEYS.map((k) => <StatCard key={k} label={t(`status.${k}`)} value={fmtNumber(statValue(k))} tone={STAT_TONE[k]} loading={q.isLoading} onClick={() => table.setFilter('status', f['status'] === k ? undefined : k)} />)}
       </div>
       <DataTable
         columns={columns} data={q.data?.data} total={q.data?.meta.total} page={table.state.page} pageSize={table.state.pageSize}
         onPageChange={table.setPage} onPageSizeChange={table.setPageSize} sort={table.state.sort} order={table.state.order} onSort={table.toggleSort}
         isLoading={q.isLoading || q.isFetching} error={q.error} onRetry={() => void q.refetch()} storageKey="attendance-daily"
         onRowClick={(r) => setRecordId(r.id)}
+        getRowId={(r) => r.id}
+        selection={canEdit ? selection : undefined} onSelectionChange={canEdit ? onSelectionChange : undefined}
+        bulkActions={canEdit ? () => (
+          <>
+            <Button size="sm" onClick={() => setBulkItems(Object.values(picked))}><ListChecks /> {tw('bulk.action')}</Button>
+            <Button size="sm" variant="ghost" onClick={clearSelection}><X /> {tw('bulk.clearSelection')}</Button>
+          </>
+        ) : undefined}
         emptyTitle={t('daily.empty')} emptyDescription={hasFilters ? tc('common.noResultsHint') : t('daily.emptyHint')}
         toolbar={
           <>
@@ -97,7 +132,14 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
           </div>
         )}
       />
-      <RecordDialog recordId={recordId} onClose={() => setRecordId(null)} onRequestCorrection={onRequestCorrection ? (p) => { setRecordId(null); onRequestCorrection(p); } : undefined} />
+      <RecordDialog
+        recordId={recordId} onClose={() => setRecordId(null)}
+        onRequestCorrection={onRequestCorrection ? (p) => { setRecordId(null); onRequestCorrection(p); } : undefined}
+        onOpenTimeline={(d) => { setRecordId(null); openTimeline(d); }}
+        onEditRecord={openEdit ? (p) => { setRecordId(null); openEdit(p); } : undefined}
+      />
+      {bulkItems ? <BulkStatusDialog items={bulkItems} onOpenChange={(o) => { if (!o) setBulkItems(null); }} onDone={clearSelection} /> : null}
+      {dialogs}
     </div>
   );
 }

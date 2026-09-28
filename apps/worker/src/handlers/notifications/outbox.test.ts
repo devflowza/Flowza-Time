@@ -22,8 +22,8 @@ beforeAll(async () => {
     { organizationId: ORG, userId: OWNER, roleId: '10000000-0000-0000-0000-000000000001', status: 'active', allBranches: true },
     { organizationId: ORG, userId: EMP_USER, roleId: '10000000-0000-0000-0000-000000000008', status: 'active', allBranches: true },
   ]).execute();
-  // No DEVICE row on purpose: absent must mean enabled, or the channel is unreachable (nothing in the application
-  // writes notification_preferences). ATTENDANCE is explicitly off, to prove a stored row still overrides the default.
+  // No DEVICE row on purpose: absent must mean enabled. ATTENDANCE e-mail is explicitly off, to prove a stored row still
+  // overrides the default (the catalogue files attendance notices under ATTENDANCE, device and sync alerts under DEVICE).
   await a.insertInto('notificationPreferences').values({ userId: OWNER, organizationId: ORG, category: 'ATTENDANCE', channel: 'EMAIL', enabled: false }).execute();
   await a.insertInto('devices').values({ id: DEVICE, organizationId: ORG, branchId: BRANCH, code: 'D1', name: 'Gate', providerKey: 'mock', manufacturer: 'FlowZa', integrationType: 'VENDOR_CLOUD_PULL' }).execute();
 });
@@ -36,25 +36,48 @@ describe('outbox relay', () => {
       { organizationId: ORG, eventType: 'device.offline', aggregateType: 'device', aggregateId: DEVICE, payload: JSON.stringify({ deviceId: DEVICE, deviceName: 'Gate', lastSeenAt: '2026-09-05T06:00:00Z' }) },
       { organizationId: ORG, eventType: 'device.offline', aggregateType: 'device', aggregateId: DEVICE, payload: JSON.stringify({ deviceId: DEVICE, deviceName: 'Gate' }) }, // flap → deduped
       { organizationId: ORG, eventType: 'sync.failed', aggregateType: 'sync_job', aggregateId: '11111111-1111-4111-a111-111111111111', payload: JSON.stringify({ jobType: 'PULL_ATTENDANCE', error: 'boom', syncJobId: '11111111-1111-4111-a111-111111111111' }) },
+      { organizationId: ORG, eventType: 'attendance.unexcused_marked', aggregateType: 'employee', aggregateId: '66666666-6666-4666-a666-666666666666', payload: JSON.stringify({ userIds: [OWNER], employeeId: '66666666-6666-4666-a666-666666666666', employeeName: 'Someone', dates: ['2026-09-04'], count: 1 }) },
     ]).execute();
     const res = await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
-    expect(res.relayed).toBe(3);
-    const notifs = await a.selectFrom('notifications').select(['userId', 'type', 'category']).execute();
-    // owner (device.view + device.sync) gets device.offline once and sync.failed once; the employee role gets nothing
-    expect(notifs.filter((n) => n.userId === OWNER).map((n) => n.type).sort()).toEqual(['device.offline', 'sync.failed']);
+    expect(res.relayed).toBe(4);
+    const notifs = await a.selectFrom('notifications').select(['userId', 'type', 'category', 'title', 'link', 'inApp']).execute();
+    // owner (device.view + device.sync) gets device.offline once, sync.failed and the targeted attendance notice; the employee role gets nothing
+    expect(notifs.filter((n) => n.userId === OWNER).map((n) => [n.type, n.category]).sort()).toEqual([['attendance.unexcused_marked', 'ATTENDANCE'], ['device.offline', 'DEVICE'], ['sync.failed', 'DEVICE']]);
     expect(notifs.filter((n) => n.userId === EMP_USER)).toHaveLength(0);
-    const deliveries = await a.selectFrom('notificationDeliveries').select(['channel', 'status']).execute();
-    // device.offline has no preference row and still queues (absent = enabled); sync.failed has one set to false and
-    // does not — so this single row proves the default and the override at the same time.
-    expect(deliveries).toEqual([{ channel: 'EMAIL', status: 'pending' }]);
-    expect(h.published.map((p) => p.channel).sort()).toEqual([`org:${ORG}:devices`, `org:${ORG}:sync`]);
+    expect(notifs.find((n) => n.type === 'device.offline')).toMatchObject({ title: 'Device offline: Gate', link: `/devices/${DEVICE}`, inApp: true });
+    const deliveries = await a.selectFrom('notificationDeliveries as d').innerJoin('notifications as n', 'n.id', 'd.notificationId').select(['n.type', 'd.channel', 'd.status']).orderBy('n.type').execute();
+    // device.offline and sync.failed have no DEVICE preference row and queue (absent = enabled); the ATTENDANCE notice's
+    // e-mail preference is off and does not — the default and the override at the same time.
+    expect(deliveries).toEqual([{ type: 'device.offline', channel: 'EMAIL', status: 'pending' }, { type: 'sync.failed', channel: 'EMAIL', status: 'pending' }]);
+    expect(h.published.map((p) => p.channel).sort()).toEqual([`org:${ORG}:attendance`, `org:${ORG}:devices`, `org:${ORG}:sync`]);
     expect((h.published.find((p) => p.channel.endsWith(':devices'))!.payload as { count: number }).count).toBe(2);
     const unpublished = await a.selectFrom('domainEvents').select('id').where('publishedAt', 'is', null).execute();
     expect(unpublished).toHaveLength(0);
-    // delivery
+    // delivery: the branded e-mail, to the recipient's own address only
     const d = await deliverNotifications({ job: fakeJob('DELIVER_NOTIFICATIONS'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
-    expect(d.sent).toBe(1);
-    expect(h.emails[0]!.to).toBe('owner@t.local');
+    expect(d.sent).toBe(2);
+    expect(h.emails.map((e) => e.to)).toEqual(['owner@t.local', 'owner@t.local']);
+    const offline = h.emails.find((e) => e.subject.includes('Device offline'))!;
+    expect(offline.subject).toBe('[W] Device offline: Gate');
+    expect(offline.html).toContain(`href="http://web.test/devices/${DEVICE}"`);
+    expect(offline.html).toContain('lang="en" dir="ltr"');
+    expect(offline.text).toContain(`http://web.test/devices/${DEVICE}`);
+  });
+
+  it('8-P0-4 a correction\'s decision is published for realtime only: no attendance.correct holder, nobody of another branch, never the decider is notified by it', async () => {
+    const a = h.tdb.adminDb;
+    const before = await a.selectFrom('notifications').select('id').execute();
+    const published = h.published.length;
+    await a.insertInto('domainEvents').values([
+      { organizationId: ORG, eventType: 'attendance.correction_approved', aggregateType: 'attendance_correction', aggregateId: '55555555-5555-4555-a555-555555555555', payload: JSON.stringify({ userId: EMP_USER, employeeId: '66666666-6666-4666-a666-666666666666', attendanceDate: '2026-09-04', comment: 'ok' }), actorUserId: OWNER },
+      { organizationId: ORG, eventType: 'attendance.correction_rejected', aggregateType: 'attendance_correction', aggregateId: '55555555-5555-4555-a555-555555555556', payload: JSON.stringify({ userId: EMP_USER, attendanceDate: '2026-09-04', reason: 'no' }), actorUserId: OWNER },
+    ]).execute();
+    const res = await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
+    expect(res).toMatchObject({ relayed: 2, notifications: 0, failed: 0 });
+    expect(await a.selectFrom('notifications').select('id').execute()).toHaveLength(before.length);
+    // still on the attendance channel (the UI refreshes), and published
+    expect(h.published.slice(published).map((p) => [p.channel, p.event]).sort()).toEqual([[`org:${ORG}:attendance`, 'attendance.correction_approved'], [`org:${ORG}:attendance`, 'attendance.correction_rejected']]);
+    expect(await a.selectFrom('domainEvents').select('id').where('publishedAt', 'is', null).execute()).toHaveLength(0);
   });
 
   it('notifies a completed sync only when somebody asked for it — never the scheduler\'s health checks and polls', async () => {
