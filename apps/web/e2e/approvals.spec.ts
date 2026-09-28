@@ -11,7 +11,7 @@ const onScreen = (page: Page, text: string | RegExp) => page.getByText(text).loc
 test.describe('Approvals', () => {
   test.beforeEach(async ({ page }) => { await signInDirectly(page); });
 
-  test('inbox → approve the level waiting for me, with a comment', async ({ page }) => {
+  test('P2-12 inbox → approve the level waiting for me, with a comment', async ({ page }) => {
     const handlers = approvalsHandlers();
     const backend = await installMockBackend(page, { get: handlers.get, post: handlers.post });
     await page.goto('/approvals');
@@ -31,7 +31,7 @@ test.describe('Approvals', () => {
     await expect(page.getByText('Nothing waiting for you').locator('visible=true').first()).toBeVisible();
   });
 
-  test('request panel → every level with its approvers and the timeline', async ({ page }) => {
+  test('P2-12 request panel → every level with its approvers and the timeline', async ({ page }) => {
     const handlers = approvalsHandlers();
     await installMockBackend(page, { get: handlers.get, post: handlers.post });
     await page.goto(`/approvals?request=${APPROVAL_ID}`);
@@ -46,7 +46,7 @@ test.describe('Approvals', () => {
     await expect(panel.getByText('Moved to level 2')).toBeVisible();
   });
 
-  test('delegations → delegate my approvals to a colleague and see it listed', async ({ page }) => {
+  test('P2-12 delegations → delegate my approvals to a colleague and see it listed', async ({ page }) => {
     const handlers = approvalsHandlers();
     const backend = await installMockBackend(page, { get: handlers.get, post: handlers.post });
     await page.goto('/approvals/delegations');
@@ -69,7 +69,7 @@ test.describe('Approvals', () => {
     await expect(row).toContainText('Leave');
   });
 
-  test('workflow editor → a quorum above one on the manager is refused; one approval saves', async ({ page }) => {
+  test('P2-12 workflow editor → a quorum above one on the manager is refused; one approval saves', async ({ page }) => {
     const handlers = approvalsHandlers();
     const backend = await installMockBackend(page, { get: handlers.get, post: handlers.post });
     await page.goto('/approvals/workflows');
