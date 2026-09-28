@@ -178,11 +178,21 @@ export type ReportType = (typeof REPORT_TYPES)[number];
 export const IMPORT_STATUSES = ['UPLOADED', 'VALIDATING', 'VALIDATED', 'IMPORTING', 'COMPLETED', 'FAILED', 'CANCELLED'] as const;
 export type ImportStatus = (typeof IMPORT_STATUSES)[number];
 
-export const NOTIFICATION_CATEGORIES = ['DEVICE', 'ATTENDANCE', 'APPROVAL', 'SYSTEM', 'SUBSCRIPTION'] as const;
+/**
+ * Notification categories (Postgres enum `notification_category`, values appended, never reordered). LEAVE and REPORTS were
+ * added by HR portal Prompt 8 (migration 20260928001000): user preferences are kept per (organisation, category, channel).
+ */
+export const NOTIFICATION_CATEGORIES = ['DEVICE', 'ATTENDANCE', 'APPROVAL', 'SYSTEM', 'SUBSCRIPTION', 'LEAVE', 'REPORTS'] as const;
 export type NotificationCategory = (typeof NOTIFICATION_CATEGORIES)[number];
 
 export const NOTIFICATION_CHANNELS = ['IN_APP', 'EMAIL', 'SMS', 'WHATSAPP', 'PUSH'] as const;
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number];
+/** The channels a notification is delivered on today (SMS / WhatsApp / push are declared in the enum, not delivered). */
+export const NOTIFICATION_DELIVERY_CHANNELS = ['IN_APP', 'EMAIL'] as const satisfies readonly NotificationChannel[];
+export type NotificationDeliveryChannel = (typeof NOTIFICATION_DELIVERY_CHANNELS)[number];
+/** Languages notifications are written in (recipient's profile locale, else the organisation's, else English). */
+export const NOTIFICATION_LOCALES = ['en', 'ar'] as const;
+export type NotificationLocale = (typeof NOTIFICATION_LOCALES)[number];
 
 export const SUBSCRIPTION_STATUSES = ['trialing', 'active', 'past_due', 'cancelled', 'expired'] as const;
 export type SubscriptionStatus = (typeof SUBSCRIPTION_STATUSES)[number];

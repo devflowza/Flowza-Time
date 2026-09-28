@@ -223,6 +223,41 @@ export function resolveLeaveSettings(raw: unknown): LeaveSettings {
   return leaveSettingsSchema.parse(kept);
 }
 
+/**
+ * `organization_settings.notifications` — the organisation's switches (HR portal Prompt 8; written with
+ * `notification.manage`). A switch governs the E-MAIL of the notification types it covers (the notification catalogue's
+ * `orgSetting`): off ⇒ no e-mail for those types, the in-app notice is still written — the inbox is part of the product.
+ * `missingPunchReminder` additionally switches the reminder itself on or off (it exists only to nudge), and
+ * `missingPunchReminderHours` is how long after the shift end an open check-in is reminded. The stored group is
+ * `notificationSettingsSchema.partial()`; read it through `resolveNotificationSettings`.
+ */
+export const notificationSettingsSchema = z.object({
+  deviceOffline: z.boolean().default(true),
+  syncFailed: z.boolean().default(true),
+  approvalPending: z.boolean().default(true),
+  reportReady: z.boolean().default(true),
+  /** The 08:00 daily digest of pending approvals by e-mail (the in-app digest is always written). */
+  dailyDigest: z.boolean().default(false),
+  leaveUpdates: z.boolean().default(true),
+  attendanceNotes: z.boolean().default(true),
+  punchFlagged: z.boolean().default(true),
+  missingPunchReminder: z.boolean().default(true),
+  missingPunchReminderHours: z.number().int().min(1).max(12).default(2),
+  reportScheduledDelivery: z.boolean().default(true),
+});
+export type NotificationSettings = z.output<typeof notificationSettingsSchema>;
+export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = notificationSettingsSchema.parse({});
+/** Effective notification switches from whatever the row holds; a malformed key falls back to its default (never throws). */
+export function resolveNotificationSettings(raw: unknown): NotificationSettings {
+  const stored = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const kept: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(notificationSettingsSchema.shape)) {
+    const one = (schema as z.ZodType).safeParse(stored[key]);
+    if (one.success && one.data !== undefined) kept[key] = one.data;
+  }
+  return notificationSettingsSchema.parse(kept);
+}
+
 export const organizationSettingsSchema = z.object({
   general: z.object({
     dateFormat: z.enum(['DD/MM/YYYY', 'MM/DD/YYYY', 'YYYY-MM-DD']).default('DD/MM/YYYY'),
@@ -242,13 +277,7 @@ export const organizationSettingsSchema = z.object({
     /** Punches whose device clock skew exceeds this are quarantined (minutes). */
     maxClockSkewMinutes: z.number().int().min(1).max(1440).default(60),
   }).partial().default({}),
-  notifications: z.object({
-    deviceOffline: z.boolean().default(true),
-    syncFailed: z.boolean().default(true),
-    approvalPending: z.boolean().default(true),
-    reportReady: z.boolean().default(true),
-    dailyDigest: z.boolean().default(false),
-  }).partial().default({}),
+  notifications: notificationSettingsSchema.partial().default({}),
   security: z.object({
     mfaRequired: z.boolean().default(false),
     sessionIdleMinutes: z.number().int().min(5).max(1440).default(480),

@@ -5,6 +5,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Avatar, Badge, Button, Card, ErrorState, Skeleton } from '@/components/ui';
 import { fmtDate, todayIso } from '@/lib/format';
 import { useCan, useOrgTimezone } from '@/features/me/use-me';
+import { NotificationPreferencesCard } from '@/features/notifications/preferences/notification-preferences-card';
 import { useSelfProfile } from '../api';
 import { tenure } from '../model';
 
@@ -15,7 +16,7 @@ function Section({ title, children }: { title: string; children: React.ReactNode
   return <Card className="p-5"><h2 className="mb-4 text-sm font-semibold">{title}</h2><dl className="grid gap-4 sm:grid-cols-2">{children}</dl></Card>;
 }
 
-/** /my/profile — the employee's own record, read-only (HR maintains it). */
+/** /my/profile — the employee's own record, read-only (HR maintains it), and their notification preferences. */
 export default function MyProfilePage() {
   const { t, i18n } = useTranslation('portal');
   const tz = useOrgTimezone();
@@ -71,6 +72,8 @@ export default function MyProfilePage() {
           <Field label={t('profile.gender')}>{p.gender ? t(`gender.${p.gender}`, { defaultValue: p.gender }) : none}</Field>
         </Section>
       </div>
+      {/* how the employee hears about their requests, reminders and decisions (HR portal Prompt 8) */}
+      <NotificationPreferencesCard />
     </div>
   );
 }

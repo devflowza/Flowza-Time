@@ -147,15 +147,17 @@ describe('day-close sweep', () => {
     // one event per employee, targeted: the employee's login + the line manager holding attendance.approve
     const evs = await events();
     expect(evs.map((e) => [e.aggregateId, e.payload])).toEqual([
-      [E1, { employeeId: E1, dates: ['2026-03-02', '2026-03-03'], count: 2, autoDeduct: false, userIds: [UM, U1].sort() }],
-      [E2, { employeeId: E2, dates: ['2026-03-02'], count: 1, autoDeduct: false, userIds: [UM] }],
+      [E1, { employeeId: E1, employeeName: expect.any(String), dates: ['2026-03-02', '2026-03-03'], count: 2, autoDeduct: false, userIds: [UM, U1].sort() }],
+      [E2, { employeeId: E2, employeeName: expect.any(String), dates: ['2026-03-02'], count: 1, autoDeduct: false, userIds: [UM] }],
     ]);
     expect(await h.tdb.adminDb.selectFrom('audit.logs').select('action').where('action', '=', 'attendance.day_close_swept').execute()).toHaveLength(1);
     // the outbox relay turns them into in-app notifications for exactly those users
     await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
     const notes = await h.tdb.adminDb.selectFrom('notifications').select(['userId', 'type', 'title']).where('type', '=', 'attendance.unexcused_marked').orderBy('userId').orderBy('createdAt').execute();
     expect(notes.map((n) => n.userId).sort()).toEqual([UM, UM, U1].sort());
-    expect(notes.find((n) => n.userId === U1)?.title).toBe('2 attendance days marked unexcused');
+    // the employee's own notice and the manager's are worded for each (HR portal Prompt 8 templates)
+    expect(notes.find((n) => n.userId === U1)?.title).toBe('Your attendance: 2 attendance days marked unexcused');
+    expect(notes.filter((n) => n.userId === UM).map((n) => n.title).every((t) => t.endsWith('marked unexcused') && !t.startsWith('Your'))).toBe(true);
   });
 
   it('is idempotent: a second run marks nothing and emits nothing', async () => {

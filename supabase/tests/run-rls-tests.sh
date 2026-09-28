@@ -14,6 +14,8 @@ psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_hr_wor
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_portal_attendance.sql"
 # leave v2 (self-contained on top of the isolation fixtures; commits rows to the leave v2 tables only)
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_leave.sql"
+# notifications & reminders (HR portal Prompt 8): self-contained, every block rolls back
+psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_notifications.sql"
 # approval engine v2 (runs last: it commits fixtures of its own on top of the isolation ones)
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_approvals.sql"
 echo "RLS tests passed"

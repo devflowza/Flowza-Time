@@ -401,6 +401,8 @@ export interface MockBackend {
   unmatched: string[];
   /** employee-portal attendance (HR portal Prompt 4): the punches and reasons the SPA recorded through the double */
   portal: { punches: SelfPunchDto[]; notes: AttendanceNoteDto[] };
+  /** the member's notification preferences the SPA saved (HR portal Prompt 8), `CATEGORY:CHANNEL` → enabled */
+  notificationPreferences: Record<string, boolean>;
 }
 
 /** The employee record the portal scenarios link the signed-in member to. */
@@ -415,8 +417,9 @@ const apiError = (route: Route, status: number, code: string, message: string) =
 /** Install the backend double on `page`. Call before `page.goto`. */
 export async function installMockBackend(page: Page, opts: MockBackendOptions = {}): Promise<MockBackend> {
   const me = opts.me ?? meFixture();
-  const state: MockBackend = { calls: [], unmatched: [], portal: { punches: [], notes: [] } };
+  const state: MockBackend = { calls: [], unmatched: [], portal: { punches: [], notes: [] }, notificationPreferences: {} };
   const portal = portalAttendanceDouble(state);
+  const preferences = notificationPreferencesDouble(state);
   const leave: LeaveState = { records: [], comments: [] };
   const getHandlers: Record<string, unknown | ((url: URL) => unknown)> = {
     '/me': { data: me },
@@ -443,9 +446,11 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
     [`/orgs/${ORG_ID}/integrations/finance/status`]: { data: { configured: false, enabled: false, deviceId: null, connectionStatus: null, state: null, cursor: null, circuit: null, unmatchedCount: 0, pendingCount: 0, lastJobs: [] } satisfies FinanceIntegrationStatusDto },
     [`/orgs/${ORG_ID}/search`]: (url: URL) => { const q = (url.searchParams.get('q') ?? '').toLowerCase(); return { data: { q, employees: employeesFixture.filter((e) => e.displayName.toLowerCase().includes(q)).map((e) => ({ type: 'employee', id: e.id, title: e.displayName, subtitle: e.employeeNumber, branchId: e.branchId, status: e.employmentStatus })), devices: [], branches: [], departments: [] } }; },
     ...portal.get,
+    ...preferences.get,
     ...opts.get,
   };
   const postHandlers: Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }> = { ...portal.post, ...opts.post };
+  const putHandlers: Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }> = { ...preferences.put, ...opts.put };
 
   // ---- Supabase Auth (GoTrue) -------------------------------------------------------------------------------------
   await page.route('**/supabase/auth/v1/**', async (route) => {
@@ -490,13 +495,57 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
       return json(route, 200, page_([]));
     }
     // POST: the portal double + the scenario's own handlers; PATCH / PUT: the scenario's handlers; then the leave double
-    const custom = req.method() === 'POST' ? postHandlers[path] : req.method() === 'PATCH' ? opts.patch?.[path] : req.method() === 'PUT' ? opts.put?.[path] : undefined;
+    const custom = req.method() === 'POST' ? postHandlers[path] : req.method() === 'PATCH' ? opts.patch?.[path] : req.method() === 'PUT' ? putHandlers[path] : undefined;
     if (custom) { const r = custom(body, url); return json(route, r.status ?? 200, r.body); }
     const leaveAnswer = leaveRoute(leave, req.method(), path, body, url);
     if (leaveAnswer) return json(route, leaveAnswer.status ?? 200, leaveAnswer.body);
     return apiError(route, 404, 'NOT_FOUND', `No e2e handler for ${req.method()} ${path}`);
   });
   return state;
+}
+
+/**
+ * The member's notification preferences (HR portal Prompt 8): GET / PUT /me/notification-preferences?organizationId=, stateful
+ * so a scenario sees what it saved. The cells mirror the notification catalogue's matrix (@flowza/contracts
+ * `notificationPreferenceCells()`, copied like ALL_PERMISSIONS so this file has no runtime dependency on the package build);
+ * the API suite covers the real validation and ownership.
+ */
+const PREFERENCE_CELLS: Array<{ category: string; channel: 'IN_APP' | 'EMAIL'; configurable: boolean; alwaysOn: string[] }> = [
+  { category: 'APPROVAL', channel: 'IN_APP', configurable: true, alwaysOn: ['approval.pending', 'approval.reminder', 'approval.escalated', 'approval.info_requested', 'approval.info_answered', 'attendance.selfie_submitted', 'leave.requested'] },
+  { category: 'APPROVAL', channel: 'EMAIL', configurable: true, alwaysOn: [] },
+  { category: 'ATTENDANCE', channel: 'IN_APP', configurable: true, alwaysOn: ['attendance.note_info_requested'] },
+  { category: 'ATTENDANCE', channel: 'EMAIL', configurable: true, alwaysOn: [] },
+  { category: 'LEAVE', channel: 'IN_APP', configurable: true, alwaysOn: ['leave.info_requested'] },
+  { category: 'LEAVE', channel: 'EMAIL', configurable: true, alwaysOn: [] },
+  { category: 'REPORTS', channel: 'IN_APP', configurable: true, alwaysOn: [] },
+  { category: 'REPORTS', channel: 'EMAIL', configurable: true, alwaysOn: [] },
+  { category: 'DEVICE', channel: 'IN_APP', configurable: true, alwaysOn: [] },
+  { category: 'DEVICE', channel: 'EMAIL', configurable: true, alwaysOn: [] },
+  { category: 'SYSTEM', channel: 'IN_APP', configurable: false, alwaysOn: ['employee.imported'] },
+  { category: 'SYSTEM', channel: 'EMAIL', configurable: false, alwaysOn: ['employee.imported'] },
+  { category: 'SUBSCRIPTION', channel: 'IN_APP', configurable: false, alwaysOn: ['subscription.limit_reached'] },
+  { category: 'SUBSCRIPTION', channel: 'EMAIL', configurable: false, alwaysOn: ['subscription.limit_reached'] },
+];
+function notificationPreferencesDouble(state: MockBackend) {
+  const categories = [...new Set(PREFERENCE_CELLS.map((c) => c.category))];
+  const body = (url: URL) => ({
+    data: {
+      organizationId: url.searchParams.get('organizationId') ?? ORG_ID, locale: 'en',
+      categories: categories.map((category) => ({
+        category, relevant: true,
+        channels: PREFERENCE_CELLS.filter((c) => c.category === category).map((c) => ({ channel: c.channel, enabled: c.configurable ? state.notificationPreferences[`${category}:${c.channel}`] ?? true : true, configurable: c.configurable, alwaysOn: c.alwaysOn })),
+      })),
+    },
+  });
+  return {
+    get: { '/me/notification-preferences': (url: URL) => body(url) } as Record<string, (url: URL) => unknown>,
+    put: {
+      '/me/notification-preferences': (payload: unknown, url: URL) => {
+        for (const p of (payload as { preferences: Array<{ category: string; channel: string; enabled: boolean }> }).preferences) state.notificationPreferences[`${p.category}:${p.channel}`] = p.enabled;
+        return { body: body(url) };
+      },
+    } as Record<string, (body: unknown, url: URL) => { status?: number; body: unknown }>,
+  };
 }
 
 /** Pre-seed a signed-in supabase-js session so tests can start on an authenticated page. */

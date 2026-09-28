@@ -1,0 +1,33 @@
+{
+  "title": "Notifications",
+  "description": "Choose how you hear about each kind of notice in {{org}}.",
+  "columns": {
+    "category": "Notices"
+  },
+  "channels": {
+    "IN_APP": "In-app",
+    "EMAIL": "E-mail"
+  },
+  "switchLabel": "{{category}}: {{channel}}",
+  "lockedLabel": "Always on",
+  "saved": "Notification preferences saved",
+  "categories": {
+    "APPROVAL": { "label": "Approvals", "hint": "Requests waiting for you, reminders, escalations and decisions" },
+    "ATTENDANCE": { "label": "Attendance", "hint": "Reasons, regularisations, selfies, flagged punches and check-out reminders" },
+    "LEAVE": { "label": "Leave", "hint": "Leave decisions, questions and comments, comp-off expiry" },
+    "REPORTS": { "label": "Reports", "hint": "Reports you requested and reports shared with you" },
+    "DEVICE": { "label": "Devices and sync", "hint": "Devices going offline, failed syncs and the Flowza Finance connector" },
+    "SYSTEM": { "label": "System", "hint": "Imports and other system notices" },
+    "SUBSCRIPTION": { "label": "Subscription", "hint": "Plan limits" }
+  },
+  "notes": {
+    "actOn": "Items you must act on — approval requests, reminders, questions to you — always appear in your inbox.",
+    "locked": "Security, system and subscription notices cannot be switched off."
+  },
+  "language": {
+    "label": "Language of notifications and e-mails",
+    "hint": "Used for the notices and e-mails FlowZa Time sends you.",
+    "en": "English",
+    "ar": "العربية"
+  }
+}

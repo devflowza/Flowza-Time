@@ -78,7 +78,8 @@ async function assertApprovalUnlocked(trx: Trx, ctx: HookContext): Promise<void>
  * Leave: approval stamps APPROVED + approved_by/approved_at + the decision note, books a comp-off leave against its
  * credits and recomputes past days; rejection records the note; a cancelled request withdraws a still-undecided leave.
  * An approver's question moves the leave to INFO_REQUESTED and opens the thread; the employee's answer moves it back to
- * PENDING (leave v2). The employee is told through leave.approved / leave.rejected (payload.userId).
+ * PENDING (leave v2). The employee is told through leave.approved / leave.rejected (payload.userId) and leave.info_requested
+ * (payload.userIds, Prompt 8).
  */
 export const leaveHook: EntityHook = {
   entityType: 'LEAVE',
@@ -119,9 +120,21 @@ export const leaveHook: EntityHook = {
   },
   async onInfoRequested(_deps: ApiDeps, trx: Trx, ctx: HookContext) {
     const l = await trx.updateTable('leaveRecords').set({ status: 'INFO_REQUESTED' })
-      .where('organizationId', '=', ctx.orgId).where('id', '=', ctx.entityId).where('status', 'in', [...UNDECIDED]).returning('id').executeTakeFirst();
+      .where('organizationId', '=', ctx.orgId).where('id', '=', ctx.entityId).where('status', 'in', [...UNDECIDED]).returning(['id', 'employeeId', 'leaveTypeId', 'startDate', 'endDate']).executeTakeFirst();
     if (!l) return;
-    await trx.insertInto('leaveRequestComments').values({ organizationId: ctx.orgId, leaveRecordId: l.id, authorUserId: ctx.actor.userId, body: (ctx.comment ?? 'More information requested.').slice(0, 2000), kind: 'info_request' }).execute();
+    const question = (ctx.comment ?? 'More information requested.').slice(0, 2000);
+    await trx.insertInto('leaveRequestComments').values({ organizationId: ctx.orgId, leaveRecordId: l.id, authorUserId: ctx.actor.userId, body: question, kind: 'info_request' }).execute();
+    // The engine leaves the subject out of approval.info_requested (notifiesSubject): the employee hears the question here —
+    // with the leave's type and dates — on their own login(s), never the approver who asked (HR portal Prompt 8).
+    const userIds = (await trx.selectFrom('orgMemberships').select('userId').where('organizationId', '=', ctx.orgId).where('employeeId', '=', l.employeeId).where('status', '=', 'active').execute())
+      .map((m) => m.userId).filter((u) => u !== ctx.actor.userId);
+    if (userIds.length === 0) return;
+    const type = await trx.selectFrom('leaveTypes').select('name').where('id', '=', l.leaveTypeId).executeTakeFirst();
+    await emitDomainEvent(trx, {
+      organizationId: ctx.orgId, eventType: 'leave.info_requested', aggregateType: 'leave_record', aggregateId: l.id,
+      payload: { userIds, employeeId: l.employeeId, leaveRecordId: l.id, approvalRequestId: ctx.requestId, leaveTypeName: type?.name ?? null, startDate: isoDate(l.startDate), endDate: isoDate(l.endDate), question },
+      actorUserId: ctx.actor.userId, requestId: ctx.actor.requestId,
+    });
   },
   async onInfoAnswered(_deps: ApiDeps, trx: Trx, ctx: HookContext) {
     const exists = await trx.selectFrom('leaveRecords').select('id').where('organizationId', '=', ctx.orgId).where('id', '=', ctx.entityId).executeTakeFirst();

@@ -117,8 +117,17 @@ export async function getSettingsGroup(deps: ApiDeps, actor: Actor, orgId: strin
   return all[group];
 }
 
+/**
+ * The key that writes a settings group: the notifications group is delegated to `notification.manage` (HR portal Prompt 8),
+ * every other group needs `organization.manage`. The database enforces the same rule again (RLS + the
+ * organization_settings_group_guard trigger).
+ */
+export function settingsGroupPermission(group: SettingsGroup): 'notification.manage' | 'organization.manage' {
+  return group === 'notifications' ? 'notification.manage' : 'organization.manage';
+}
+
 export async function putSettingsGroup(deps: ApiDeps, actor: Actor, orgId: string, group: SettingsGroup, payload: unknown): Promise<OrganizationSettings[SettingsGroup]> {
-  requirePermission(actor.principal, orgId, 'organization.manage');
+  requirePermission(actor.principal, orgId, settingsGroupPermission(group));
   const groupSchema = organizationSettingsSchema.shape[group];
   const value = groupSchema.parse(payload ?? {}); // ZodError → 400 VALIDATION_ERROR envelope
   return runUser(deps.db, actor, async (trx) => {
