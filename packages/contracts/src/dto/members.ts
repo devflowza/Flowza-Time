@@ -116,7 +116,11 @@ export const INVITATION_STATES = ['valid', 'accepted', 'revoked', 'expired'] as 
 export type InvitationState = (typeof INVITATION_STATES)[number];
 
 /** POST /invitations/validate (public, rate limited): the token's state and who it is for, masked. Nothing is accepted. */
-export const validateInvitationSchema = z.object({ token: z.string().min(16).max(256) });
+/**
+ * POST /invitations/validate. Any token string up to 256 characters reaches the lookup (HR portal Prompt 5 review, P2-7): a
+ * malformed token and an unknown one get the same 404 after the same work; only a body without a token string is a 400.
+ */
+export const validateInvitationSchema = z.object({ token: z.string().min(1).max(256) });
 export type ValidateInvitationInput = z.infer<typeof validateInvitationSchema>;
 export interface InvitationPreviewDto {
   state: InvitationState;
@@ -138,16 +142,36 @@ export interface EmployeePortalAccessDto {
   membership: { id: string; userId: string; email: string; fullName: string; roleId: string; roleName: string; status: 'invited' | 'active' | 'suspended'; lastLoginAt: string | null } | null;
   /** The pending invitation carrying this employee, if any (expired ones included, flagged). */
   invitation: { id: string; email: string; roleId: string; roleName: string | null; expiresAt: string; createdAt: string; expired: boolean } | null;
-  /** The address an invitation would go to: the work email, else a personal email on the record. */
-  suggestedEmail: string | null;
-  suggestedEmailSource: 'work' | 'personal' | null;
+  /**
+   * The addresses on the employee record an invitation could go to (HR portal Prompt 5 review, P0-2) — offered as choices,
+   * NEVER as a default: people who hold `employee.update` but not `user.manage` can edit these fields, so the administrator
+   * picks one knowingly, seeing where it comes from and who last changed it.
+   */
+  addresses: PortalAccessAddressDto[];
   /** The employee left (terminated / resigned / archived): access cannot be granted or restored. */
   employeeLeft: boolean;
 }
 
-/** POST /orgs/:orgId/employees/:id/portal-access/invite — email defaults to the work / personal email, role to `employee`. */
+/** Days within which a change of an address field by somebody other than the administrator is flagged. */
+export const PORTAL_ADDRESS_RECENT_CHANGE_DAYS = 7;
+/** A known address of the employee (work e-mail field, or the `personalEmail` custom field) and its provenance. */
+export interface PortalAccessAddressDto {
+  email: string;
+  source: 'work' | 'personal';
+  /** When the field last changed, from the audit log (null: no change recorded — e.g. seeded or imported). */
+  changedAt: string | null;
+  changedByUserId: string | null;
+  changedByName: string | null;
+  /** Changed within the last PORTAL_ADDRESS_RECENT_CHANGE_DAYS days by somebody other than the caller: confirm before inviting. */
+  recentlyChangedByOther: boolean;
+}
+
+/**
+ * POST /orgs/:orgId/employees/:id/portal-access/invite — the address is REQUIRED (review P0-2: the server never defaults it
+ * from employee fields); role defaults to `employee`, scope to the employee's own branch.
+ */
 export const portalAccessInviteSchema = z.object({
-  email: emailSchema.optional(),
+  email: emailSchema,
   roleId: uuidSchema.optional(),
   /** Absent = the employee's own branch only. */
   allBranches: z.boolean().optional(),

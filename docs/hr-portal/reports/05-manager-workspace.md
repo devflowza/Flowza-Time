@@ -139,11 +139,13 @@ Changed (backward compatible): `GET /attendance/records/:id` accepts a team-key 
 Notes: the first full API run failed one **pre-existing** test, `approvals-review.test.ts` › "P2-13 a QUORUM override counts one approval…" (19/19 alone, 410/410 on the rerun). Cause (not touched here): an organisation-wide override fills `open[0]` of the level's pending seats, ordered by `(created_at, id)`; the role-holder seats share one `created_at`, so the tie falls to random uuid order and the override sometimes fills `hrLinked`'s own seat, whose later approval is then a no-op. `CI=1` for Playwright is deliberate: other agents' `vite preview` servers use port 4173 in this container, and without it Playwright silently reuses whatever answers there (a run against another bundle was observed and discarded).
 
 ## 7. Known limits / follow-ups
-- **Engine stand-in seats**: `app.approval_actionable_request_ids` (hence `/me.approvals.actionable`, the inbox "Mine" count and the approvals half) does not count a secondary manager standing in for the primary (`resolution_path = 'secondary'`) on non-reason entities such as leave. The notes half covers reasons; leave / corrections need the engine's definition extended (Prompt 2 owner).
+- **Engine stand-in seats** — *corrected by the review (P1-3)*: the original line here understated the gap. The engine's actionable set did not count a secondary manager's stand-in seat (`resolution_path = 'secondary'`) for ANY entity type — leave, corrections, and also regularisations and shift swaps, which the notes half did not cover either, so those stand-in seats were decidable but listed and counted nowhere. **Fixed in `20260928000950`**: `app.approval_actionable_request_ids` counts stand-in seats for every entity type, the notes half no longer carries a special case, and the team Approvals tab, the inbox "Mine" queue, `/me` and the badge all read the one set (see "Review fixes").
+- **Team scope follows the CURRENT reporting line, for past dates too (review O1, kept by design)**: when a report moves to another manager, the former manager loses the whole history (summary, records, attendance — including days they managed) and the new manager reads the earlier days. This is `app.team_employee_ids()`'s rule, which every team read and RLS predicate shares; a date-aware rule is possible (`employment_history.manager_employee_id` exists) but changes the RLS team predicate and belongs to a separate, reviewed RLS change.
+- **Requests waiting on the employee's answer stay "waiting for you" (review O2, kept by design)**: a request on which an approver asked for more information is still pending on its level — its approvers can withdraw the question or decide at any time — so it stays in the one number (chip, badge, KPI, inbox), consistently on every surface.
 - **Record history for line managers**: `attendance_daily_record_history` has no team predicate in its RLS, so the record dialog's history section is empty for a line manager (the day, punches, corrections and marks are visible). Not changed here (RLS change + suite needed).
 - **Night shifts on the board**: Today reads each report's calendar day in the branch zone; a shift that started the previous evening shows its punches on the previous date until the next day's first punch.
 - **Holidays**: no "restricted" / "optional" holiday types (employee-choice holidays) — ATT-102 follow-up.
-- **Personal e-mail** is read from an `employees.custom_fields.personalEmail` value (there is no dedicated column).
+- **Personal e-mail** is read from an `employees.custom_fields.personalEmail` value (there is no dedicated column). Since the review (P0-2) neither it nor the work e-mail is ever used by default: they are offered, with who last changed them and when, and the administrator chooses.
 - **Web bundle**: the main chunk is 924.9 kB (886.7 kB at `08ce01c`); the +38 kB is mostly the eagerly bundled `team` / `attendance-admin` / `invitation` locale JSON (the pattern every feature uses) — code-splitting the namespaces is the standing follow-up (Prompt 4 report).
 - The roster reads a whole month for ≤ 100 employees per page in one request; very large branches page through it.
 
@@ -152,3 +154,80 @@ Registries / indexes: `apps/api/src/routes/v1/features/index.ts` (team, attendan
 Engines / hooks reused and touched: `apps/web/src/features/approvals/api.ts` (document entities appended to the approval-view invalidation list), `apps/web/src/features/approvals/pages/delegations-page.tsx` (`DelegationsPanel` extracted, page unchanged), `apps/web/src/features/attendance-review/api.ts` (invalidation list appended), `apps/web/src/features/attendance-review/pages/notes-review-page.tsx` (Report tab), `apps/web/src/features/schedule/pages/shifts-page.tsx` (Roster tab), `apps/web/src/features/employees/pages/employee-profile-page.tsx` (access card), `apps/web/src/features/notifications/notifications-page.tsx`, `apps/web/src/features/dashboard/{model.ts,layouts.tsx,dashboard-page.tsx,widgets/approvals-card.tsx}`, `apps/web/src/features/auth/accept-invitation-page.tsx`, `apps/web/src/features/users/{api.ts,components/invitations-tab.tsx}`; API services `members.service.ts`, `members.mappers.ts`, `employees.service.ts`, `offboarding.ts`, `roles.service.ts`, `features/attendance.service.ts` (getRecord).
 Locales: `en|ar/team.json` (rewritten — every key of the placeholder kept except its unused `comingSoon` / `comingSoonHint` pair), `en|ar/attendance-admin.json` + `en|ar/invitation.json` (new), `en|ar/dashboard.json` and `en|ar/users.json` (keys appended).
 E2E: `apps/web/e2e/support/mock-backend.ts` (team section appended), `apps/web/e2e/workspace.spec.ts` (card title), `apps/web/e2e/team.spec.ts` (new).
+
+## Review fixes (review `docs/hr-portal/reviews/05-manager-workspace-review.md` @ `9df34c4`, fixed from `1b4a026`)
+One migration, `supabase/migrations/20260928000950_manager_workspace_review_fixes.sql` (additive, idempotent, one transaction, bounded lock waits, post-verified; `…000900` and earlier untouched). Every test is named after its defect id; every P0 / P1 fix was mutation-checked (fix reverted → its test red → fix restored byte for byte): 17 mutations, 17 red.
+
+| Defect | Fix | Tests |
+|---|---|---|
+| **P0-1** branch-scoped user admin escapes their scope | ONE member-management rule, `apps/api/src/services/member-authority.ts` `assertMayManageMember`, asked by every members / invitations / access-card write (invite, update, suspend, restore, revoke, resend, delete invitation): (a) nobody changes their own role, branch scope or status; (b) owners are changed by owners, and only an owner grants the owner role; (c) the caller must be able to grant the target's current AND new role; (d) the target's current and new branch scope lie within the caller's. The target's branch ids are read in the organisation's system scope (`membershipBranchIds`), so a caller who cannot read branches does not see a restricted member as "no branches" and pass (d). An invitation that leaves the scope out gets the CALLER's scope (`defaultInviteScope`), never "all branches". Web: own row not editable / suspendable (an owner may still link their own login to their employee record), "All branches" disabled for a scoped admin, the invite dialog defaults to the caller's branches. | api `members-review.test.ts` 5-P0-1 ×5, `core.test.ts`; contracts `organizations.test.ts`; web `member-dialog.test.tsx` ×3, `invite-dialog.test.tsx` ×2, `invitations-parity.test.tsx` (own login) |
+| **P0-2** invitation redirected to an address an `employee.update` holder edits | The access card's invite requires an EXPLICIT address (`portalAccessInviteSchema.email`; `{}` → 400). `GET …/portal-access` returns the record's known addresses with provenance (source, when and by whom each field last changed, from the employee audit trail); nothing is preselected; an address changed recently by somebody else carries a warning the admin must confirm; "Another address" is typed. The invitation audit row records the address source (`work` / `personal` / `entered`) and its provenance. | api `members-review.test.ts` 5-P0-2 ×2, `invitations-parity.test.ts`; web `invitations-parity.test.tsx` 5-P0-2 ×2 |
+| **P0-3** lower admin suspends / restores / resends an org admin | The same rule, clause (c) on the target's CURRENT role: suspend, restore, revoke, resend and the access card's revoke / restore / resend refuse a target whose role carries permissions the caller lacks — also an open invitation of such a role. | api `members-review.test.ts` 5-P0-3 ×2 |
+| **P1-1** register cannot decide an override on an ALL / QUORUM level with several seats | The register (single and bulk) carries the engine's §9.8 seat choice: rows expose `mustChooseSeat` + `pendingSeats`; the page shows "Deciding for" (single) and a per-row seat select (bulk); the API passes `onBehalfOfUserId` to the engine and audits it. | api `attendance-admin.test.ts` 5-P1-1; web `attendance-admin.test.tsx` 5-P1-1 ×3 |
+| **P1-2** old invitation unreachable behind 1 000 newer rows | Indexed equality lookup on `token_hash` / `delivery_token_hash` (both uniquely indexed — asserted by the migration's post-verify), then a constant-time confirmation; no newest-N window. | api `members-review.test.ts` 5-P1-2 (1 001 newer rows) |
+| **P1-3** stand-in regularisation / shift-swap seats counted and listed nowhere | `app.approval_actionable_request_ids` rewritten: stand-in (`secondary`) seats count for every entity type; the notes half lost its special case. Corrects §7. | api `team-workspace.test.ts` 5-P1-3 ×2; RLS `rls_approvals.sql` 5-P1-3 ×3 |
+| **P1-4** roster uses today's placement all month | Each day resolved with the shared per-date working calendar (`loadEmployeeWorkingCalendars`, the resolver of the engine's input loader and leave counting): that date's branch / department / team, shift, weekly offs, branch holiday calendar; branch / department filters apply per day (a branch-B reader never sees the branch-A days). Days carry `branchId`. | api `roster.test.ts` 5-P1-4 (engine agreement asserted per day) |
+| **P1-5** role deletion silently revokes an open invitation the deleter cannot read | Usage counted in the organisation's system scope: members and OPEN invitations block deletion (409 with counts); closed invitations are reported, not blocking. | api `members-review.test.ts` 5-P1-5 |
+| **P1-6** line-manager attendance notifications land on the manager's own page | The route follows WHOSE day it is: the subject → `/my/attendance?date=…` (the portal page opens that day); a line manager without `attendance.view` → `/team?tab=attendance&employeeId=…&date=…` (the team page honours both params, Day view on that date; a non-report id is dropped with a note); an HR reader → the register. | web `notification-route.test.ts` 5-P1-6 ×3, `team-page.test.tsx` 5-P1-6 ×2, `portal-attendance.test.tsx` 5-P1-6 |
+| **O3** one person approved two levels | Four-eyes in the ENGINE: `resolveStepActors` skips anyone who approved an earlier level (a level held only by them falls through to the next rung, event `four_eyes_excluded`); `assessDecider` refuses such a person (own seat, delegate or override); exception approval (bypass) and reassignment refuse them; the worker's escalation never adds them; the actionable set excludes those levels. The organisation owner keeps a LOGGED override (`four_eyes_owner_bypass`). The reviewer's A3 probe is refused. | api `approvals-review.test.ts` 5-O3 ×4; domain `resolve.test.ts` 5-O3 ×4, `evaluate.test.ts`; worker `approvals.test.ts` 5-O3; RLS `rls_approvals.sql` 5-O3 ×3 |
+| **P2-1** a delegate's own request waits for them | Actionable set: never a request about the caller (subject, linked employee, co-subjects), never one they filed reached only as a delegate. Null-safe (a request without a subject login is not "about" anybody). | api `team-workspace.test.ts` 5-P2-1; RLS 5-P2-1 |
+| **P2-2** secondary manager without a team key reads 0 | The stand-in seat is in the approvals half (the engine set needs no team key). | api `team-workspace.test.ts` 5-P2-2 |
+| **P2-3** two pending numbers, one phrase | ONE number (`features/team/waiting.ts` `useWaitingForYou`): `team/pending-counts.total` = actionable requests + reasons with no live request; chip, Approvals badge, dashboard KPI ("Waiting for you") and widget read it. Info-requested requests stay counted (O2). | web `dashboard-page.test.tsx` 5-P2-3, `sidebar.test.tsx` |
+| **P2-4** chip at 390 px | Pinned by Playwright at 390 × 844, en + ar, `/` and `/team`, with a count and "99+": no horizontal scroll, every top-bar control on screen. | e2e `team-mobile.spec.ts` 5-P2-4 ×4 |
+| **P2-5** `safeLink` lets other origins through | Only same-origin app paths: must start with `/`, never `//`, no backslash or control characters, and must resolve to the same origin. | web `notification-route.test.ts` 5-P2-5 |
+| **P2-6** breakdown not pluralised | `chip.approvals_*` / `chip.notes_*` plural keys (Arabic zero / one / two / few / many / other), a zero half omitted. | web `pending-chip.test.tsx` 5-P2-6 (en + ar) |
+| **P2-7** validate edge cases | (a) the organisation part is validated as a uuid → 404 like every bad token; (b) every bad token answers the same 404 after the same single indexed lookup; (c) the per-IP limit's dependence on `EDGE_SHARED_SECRET` / `CLIENT_IP_HEADER` documented in `docs/deployment.md` ("Public endpoints and the per-IP limits"). | api `members-review.test.ts` 5-P2-7, `invitations-parity.test.ts`; contracts |
+| **P2-8** quota 429 without `Retry-After` | The error handler turns any 429 carrying `retryAfterMs` into `Retry-After` (seconds, ≥ 1) — every quota, not only the rate limiter. | api `error-handler.test.ts` 5-P2-8, `attendance-admin.test.ts` 5-P2-8 |
+| **P2-9** one token accepted four times concurrently | Accept claims the invitation with a conditional update (`accepted_at is null and revoked_at is null`); the losers of a race by the same invitee get the same answer (their membership) and write nothing; a later re-accept is 409. | api `members-review.test.ts` 5-P2-9 (4 concurrent accepts → one membership, one audit row) |
+
+### Decisions taken
+1. **Nobody changes their own membership, owners included** (403). There is no single-step ownership transfer: an owner promotes another member to owner, who then changes the first. The one self change left is an owner linking their own login to their own employee record.
+2. **An invitation with no branch scope gets the caller's scope** — organisation-wide admins keep "all branches" as before; a scoped admin gets exactly their branches.
+3. **The member-management rule reads the target's reach in system scope** and the caller's grant from their session, so what a caller cannot read never widens what they may do.
+4. **Four-eyes spans every path** (decide, delegate, override, bypass, reassign, escalation, the "waiting for you" set); only the organisation owner may break it, and that is logged. Requests created before this change are protected by the decide-time check (`assessDecider`); their stored seats are not rewritten.
+5. **One number for "waiting for you"**, defined once in SQL (approvals) and once in the team service (reasons without a request), consumed by one hook; info-requested requests stay in it (O2).
+6. **The accept race is idempotent for the racers only**: a sequential re-accept after success stays 409 (single use).
+7. **`validateInvitationSchema.token` is `min(1).max(256)`**: shape errors are no longer 400 — the service answers every bad token with the same 404.
+8. **O1 and O2 stay as designed** and are documented in §7.
+
+### Acceptance items after the fixes
+| Item | Status |
+|---|---|
+| **B-61, B-62, B-74** | met (unchanged) |
+| **B-63** | met — stand-in seats of every entity type counted (P1-3), a delegate's own request excluded (P2-1), a secondary manager without a team key counted (P2-2) |
+| **B-64** | met — "My assigned requests" lists stand-in regularisations and shift swaps (P1-3) |
+| **B-65** | met — the register names the seat on ALL / QUORUM overrides (P1-1) |
+| **B-66** | met — stand-in items are listed where they are routed (P1-3); attendance notifications route by whose day it is (P1-6) |
+| **B-67** | met — one permission AND one member-management rule (branch and role boundaries, no self-change) (P0-1, P0-3) |
+| **B-68** | met — explicit, provenance-shown address; older open invitations revoked; hash only; 7 days (P0-2) |
+| **B-69** | met — resend on a suspended login restores it, within the member-management rule (P0-3) |
+| **B-70 / B-71** | met — indexed lookup, no row window (P1-2); every bad token 404 (P2-7); single use under concurrency (P2-9) |
+| **B-76** | n/a by design (unchanged) |
+| **ATT-70, ATT-77, ATT-78, ATT-86, ATT-102 … ATT-104** | met (unchanged) |
+| **ATT-105** | met — the roster resolves every day from the per-date working calendar (P1-4) |
+
+### Verification of the fixes
+| Gate | Result |
+|---|---|
+| `pnpm build:packages` | ✅ |
+| `pnpm lint` | ✅ 0 problems |
+| `pnpm -r --filter "./apps/*" run typecheck` | ✅ api, web, worker |
+| `pnpm test:unit` | ✅ 41 files / 712 tests (shared 4, contracts 48, device-providers 286, domain 353, database 21) |
+| `pnpm --filter @flowza/web run test` | ✅ 83 files / 498 tests |
+| RLS suites (`flowza_p5f_rls`) | ✅ 532 `ok` assertions — "RLS tests passed" |
+| `pnpm test:db` | ✅ 5 files / 24 tests |
+| `pnpm --filter @flowza/api run test` | ✅ 39 files / 514 tests |
+| worker `vitest run` | ✅ 21 files / 224 passed, 1 skipped |
+| `pnpm -r --filter "./apps/*" run build` | ✅ |
+| `PGDATABASE=flowza_p5f_ci2 bash scripts/db-reset-local.sh` | ✅ |
+| single-transaction replay (`flowza_p5f_tx`) | ✅ every file one transaction |
+| `pnpm db:types` (`flowza_p5f`) | ✅ no diff |
+| `build:e2e` + `test:e2e` (`/opt/pw-browsers/chromium`, `CI=1`) | ✅ 72 passed (incl. `team-mobile.spec.ts` 4 × chromium + tablet) |
+| Mutation checks (P0 / P1 / O3) | ✅ 17 of 17 red with the fix reverted |
+
+The migration's exclusion is null-safe (`not coalesce((…), false)`): a first draft wrote `not (subject_user_id = me.uid or …)`, which is NULL for a request without a subject login and silently dropped it from everybody's set; the existing RLS test "P2-1 …the inbox queue" caught it, and the post-verify now asserts the null-safe form.
+
+### Open items
+- A member-admin role needs `branch.view` to PICK branches in the web dialogs; without it the API still judges scope correctly (system-scope read), but `MemberDto.branchIds` / names display empty.
+- The Prompt 4 notes review (`canReview`) does not know about four-eyes; reasons without a live request are single-level, so no second level exists to protect today.
+- Requests in flight before this change keep their stored seats; a prior approver seated on a later level is refused at decide time and no longer counted as waiting, but the seat row stays until the level is decided or reassigned.

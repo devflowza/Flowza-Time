@@ -32,7 +32,6 @@ const AREA_KEYS: Record<TeamArea, { team: Permission; org: Permission }> = {
   attendance: { team: 'attendance.view_team', org: 'attendance.view' },
   leave: { team: 'leave.view_team', org: 'leave.view' },
 };
-const NIL = '00000000-0000-0000-0000-000000000000';
 const OPEN_LEAVE = ['APPROVED', 'PENDING', 'INFO_REQUESTED'] as const;
 
 interface TeamScope { grant: MembershipGrant; teamKey: boolean; orgKey: boolean; ids: string[] }
@@ -118,41 +117,24 @@ export async function halfOrZero<T>(deps: ApiDeps, actor: Actor, orgId: string, 
 }
 
 /**
- * The notes half: attendance reasons the caller may review as a mapped line manager that the approvals half does not count.
- *   (a) pending reasons of the direct reports with no live approval request — the line manager decides those directly
- *       (notes.service reviewNote, role `manager`);
- *   (b) pending reasons whose CURRENT level seats the caller as the secondary manager standing in for the primary
- *       (resolution path `secondary`, line-manager.ts) — minus any the engine's actionable set already lists, so a future
- *       engine that counts those seats cannot make one item count twice.
- * Read under the caller's RLS (their team key reveals the reasons and requests of their reports). Independent of the
- * approvals half: when the de-duplicating read of the actionable set fails, the approvals half — the same function — reads
- * 0 as well, so nothing is counted twice then either.
+ * The notes half: pending attendance reasons of the caller's direct reports that have NO live approval request — the line
+ * manager decides those directly (notes.service reviewNote, role `manager`), so no engine seat stands for them. Everything
+ * with a live request is the engine's and counted in the approvals half, whoever's seat it is: the caller's own, a delegate
+ * seat, or the secondary manager's stand-in seat on the primary's (HR portal Prompt 5 review, P1-3 — the actionable set counts
+ * those for every entity type; the notes-only special case that used to live here is gone). Read under the caller's RLS (their
+ * team key reveals their reports' reasons); a reason can therefore never be counted in both halves.
  */
 async function notesHalf(deps: ApiDeps, actor: Actor, orgId: string, grant: MembershipGrant): Promise<Map<string, number>> {
   const team = grant.teamEmployeeIds.filter((id) => id !== grant.employeeId);
-  const { direct, standIn } = await runUser(deps.db, actor, async (trx) => ({
-    direct: team.length ? await trx.selectFrom('attendanceNotes as n')
-      .select(['n.employeeId', (eb) => eb.fn.countAll<string>().as('n')])
-      .where('n.organizationId', '=', orgId).where('n.employeeId', 'in', team).where('n.status', '=', 'pending')
-      .where(({ not, exists, selectFrom }) => not(exists(selectFrom('approvalRequests as r').select('r.id')
-        .where('r.organizationId', '=', orgId).where('r.entityType', '=', 'ATTENDANCE_NOTE').whereRef('r.entityId', '=', 'n.id').where('r.status', '=', 'PENDING'))))
-      .groupBy('n.employeeId').execute() : [],
-    standIn: await trx.selectFrom('approvalRequests as r')
-      .innerJoin('approvalSteps as s', (j) => j.onRef('s.requestId', '=', 'r.id').onRef('s.stepNo', '=', 'r.currentStep'))
-      .innerJoin('approvalStepActors as a', 'a.stepId', 's.id')
-      .innerJoin('attendanceNotes as n', (j) => j.onRef('n.id', '=', 'r.entityId').on('n.status', '=', 'pending'))
-      .select(['r.id', 'r.employeeId']).distinct()
-      .where('r.organizationId', '=', orgId).where('r.entityType', '=', 'ATTENDANCE_NOTE').where('r.status', '=', 'PENDING').where('s.status', '=', 'PENDING')
-      .where('a.userId', '=', actor.userId).where('a.decision', '=', 'PENDING').where('a.resolutionPath', '=', 'secondary').where('a.viaDelegationOf', 'is not', null)
-      .where('n.employeeId', '!=', grant.employeeId ?? NIL)
-      .execute(),
-  }));
+  if (team.length === 0) return new Map();
+  const direct = await runUser(deps.db, actor, (trx) => trx.selectFrom('attendanceNotes as n')
+    .select(['n.employeeId', (eb) => eb.fn.countAll<string>().as('n')])
+    .where('n.organizationId', '=', orgId).where('n.employeeId', 'in', team).where('n.status', '=', 'pending')
+    .where(({ not, exists, selectFrom }) => not(exists(selectFrom('approvalRequests as r').select('r.id')
+      .where('r.organizationId', '=', orgId).where('r.entityType', '=', 'ATTENDANCE_NOTE').whereRef('r.entityId', '=', 'n.id').where('r.status', '=', 'PENDING'))))
+    .groupBy('n.employeeId').execute());
   const out = new Map<string, number>();
   for (const r of direct) out.set(r.employeeId, (out.get(r.employeeId) ?? 0) + toCount(r.n));
-  if (standIn.length) {
-    const counted = await halfOrZero(deps, actor, orgId, 'notes.dedupe', new Set<string>(), () => runUser(deps.db, actor, async (trx) => new Set((await actionableRequests(trx, orgId)).map((r) => r.id))));
-    for (const r of standIn) if (!counted.has(r.id)) { const key = r.employeeId ?? NIL; out.set(key, (out.get(key) ?? 0) + 1); }
-  }
   return out;
 }
 

@@ -9,7 +9,7 @@ import { Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFoote
 import { Combobox } from '@/components/forms';
 import { fmtDateTime } from '@/lib/format';
 import { toastError } from '@/lib/toast';
-import { useOrgTimezone } from '@/features/me/use-me';
+import { useActiveMembership, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useEmployeeOptions } from '@/features/employees/api';
 import { CopyButton } from '@/features/audit/components/copy-button';
@@ -18,19 +18,26 @@ import { useMemberMutations, useRoles } from '../api';
 
 type FormValues = z.input<typeof inviteMemberSchema>;
 
+/**
+ * Invite a member. The branch scope starts as the CALLER's own (HR portal Prompt 5 review, P0-1): every branch for an
+ * organisation-wide user admin, exactly their branches for a branch-scoped one — who can never grant every branch, so the
+ * switch is locked for them. The API applies the same rule whatever is sent.
+ */
 export function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { t } = useTranslation('users');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
+  const me = useActiveMembership();
+  const scoped = !!me && !me.allBranches;
   const roles = useRoles();
   const branches = useBranchOptions();
   // one login per employee record: employees already linked (or reserved by a pending invitation) are not offered
   const employees = useEmployeeOptions('', { unlinked: true });
   const { invite } = useMemberMutations();
   const [result, setResult] = useState<InvitationDto | null>(null);
-  const form = useForm<FormValues, unknown, InviteMemberInput>({ resolver: zodResolver(inviteMemberSchema), defaultValues: { email: '', roleId: '', allBranches: true, branchIds: [] } });
+  const form = useForm<FormValues, unknown, InviteMemberInput>({ resolver: zodResolver(inviteMemberSchema), defaultValues: { email: '', roleId: '', allBranches: !scoped, branchIds: scoped ? [...(me?.branchIds ?? [])] : [] } });
   const { register, control, formState: { errors, isSubmitting }, setValue } = form;
-  const allBranches = useWatch({ control, name: 'allBranches' }) ?? true;
+  const allBranches = useWatch({ control, name: 'allBranches' }) ?? !scoped;
   const branchIds = useWatch({ control, name: 'branchIds' }) ?? [];
 
   const onSubmit = form.handleSubmit(async (values) => {
@@ -79,8 +86,8 @@ export function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChan
                 )} />
               </FormField>
               <div className="flex items-center justify-between rounded-md border p-3">
-                <div><Label htmlFor="inv-all">{t('fields.allBranches')}</Label><p className="text-xs text-muted-foreground">{t('fields.allBranchesHint')}</p></div>
-                <Switch id="inv-all" checked={allBranches} onCheckedChange={(v) => { setValue('allBranches', v, { shouldDirty: true, shouldValidate: true }); if (v) setValue('branchIds', []); }} />
+                <div><Label htmlFor="inv-all">{t('fields.allBranches')}</Label><p className="text-xs text-muted-foreground">{scoped ? t('fields.allBranchesScoped') : t('fields.allBranchesHint')}</p></div>
+                <Switch id="inv-all" checked={allBranches} disabled={scoped} onCheckedChange={(v) => { setValue('allBranches', v, { shouldDirty: true, shouldValidate: true }); if (v) setValue('branchIds', []); }} />
               </div>
               {!allBranches ? (
                 <FormField label={t('fields.branches')} htmlFor="inv-branches" required error={errors.branchIds?.message}>

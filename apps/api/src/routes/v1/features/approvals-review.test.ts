@@ -658,3 +658,84 @@ describe('P2-11 — the dashboard count is the caller\'s queue', () => {
     expect(all.body.meta.total).toBeGreaterThan(ownerQueue.body.meta.total);
   });
 });
+
+describe('5-O3 four-eyes — one person approves at most one level of a request', () => {
+  it('5-O3 the reviewer\'s A3 probe is refused: a line manager who approved level 1 cannot approve level 2 as an HR admin\'s delegate', async () => {
+    await workflow('LEAVE', [{ order: 1, approverType: 'MANAGER' }, { order: 2, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ANY' }]);
+    const d = await h.request('POST', `${base()}/approval-delegations`, { token: f.hrAdmin, body: { delegateUserId: lineManager, entityTypes: ['LEAVE'], startsOn: isoToday(-1), endsOn: isoToday(10), reason: 'Away' } });
+    expect(d.status).toBe(201);
+    try {
+      const r = await h.request('POST', `${base()}/me/leave`, { token: staff5, body: { leaveTypeId, ...nextRange(1), reason: 'Four eyes' } });
+      const id = r.body.data.approvalRequestId as string;
+      // level 2 seats the HR admins — and the line manager in the delegating HR admin's seat
+      expect((await actorsOf(id, 2)).find((a) => a.userId === lineManager)).toMatchObject({ viaDelegationOf: f.hrAdmin, decision: 'PENDING' });
+      expect((await decide(id, lineManager, { decision: 'APPROVE', stepNo: 1 })).body.data).toMatchObject({ status: 'PENDING', terminal: false });
+      // level 2 opened without them: their delegate row is skipped and the timeline says why
+      expect((await actorsOf(id, 2)).find((a) => a.userId === lineManager)).toMatchObject({ decision: 'SKIPPED' });
+      expect(await eventsOf(id)).toContain('four_eyes_excluded');
+      expect((await detail(id, lineManager)).body.data.abilities).toMatchObject({ canDecide: false, canRequestInfo: false, decideVia: null });
+      const refused = await decide(id, lineManager, { decision: 'APPROVE', stepNo: 2 });
+      expect(refused.status).toBe(403);
+      expect(refused.body.message).toMatch(/approved an earlier level/);
+      expect((await h.request('POST', `${base()}/approvals/${id}/request-info`, { token: lineManager, body: { comment: 'Sure?' } })).status).toBe(403);
+      // not waiting for them on any surface
+      const queue = await h.request('GET', `${base()}/approvals?scope=mine&view=pending&pageSize=100`, { token: lineManager });
+      expect(queue.body.data.map((x: { id: string }) => x.id)).not.toContain(id);
+      // the HR admins still decide the level
+      expect((await decide(id, f.hrAdmin, { decision: 'APPROVE', stepNo: 2 })).body.data).toMatchObject({ status: 'APPROVED', terminal: true });
+    } finally {
+      await h.request('DELETE', `${base()}/approval-delegations/${d.body.data.id}`, { token: f.hrAdmin });
+    }
+  });
+
+  it('5-O3 a level held only by somebody who approved an earlier one falls through to the next rung of the ladder', async () => {
+    await workflow('LEAVE', [{ order: 1, approverType: 'MANAGER' }, { order: 2, approverType: 'USER', userId: lineManager }]);
+    const r = await h.request('POST', `${base()}/me/leave`, { token: staff5, body: { leaveTypeId, ...nextRange(1), reason: 'Same person twice' } });
+    const id = r.body.data.approvalRequestId as string;
+    expect((await actorsOf(id, 2)).map((a) => a.userId)).toEqual([lineManager]);
+    expect((await decide(id, lineManager, { decision: 'APPROVE', stepNo: 1 })).body.data).toMatchObject({ status: 'PENDING' });
+    const step2 = await stepOf(id, 2);
+    expect(step2.resolutionPath).toBe('hr_admin');
+    const seats = await actorsOf(id, 2);
+    expect(seats.find((a) => a.userId === lineManager)).toMatchObject({ decision: 'SKIPPED' });
+    const waiting = seats.filter((a) => a.decision === 'PENDING').map((a) => a.userId);
+    expect(waiting).toContain(f.hrAdmin);
+    expect(waiting).not.toContain(lineManager);
+    const ev = await h.admin.selectFrom('approvalRequestEvents').select('detail').where('requestId', '=', id).where('kind', '=', 'four_eyes_excluded').executeTakeFirstOrThrow();
+    expect(ev.detail).toMatchObject({ stepNo: 2, excluded: [lineManager], fellBackTo: 'hr_admin' });
+    expect((await decide(id, lineManager, { decision: 'APPROVE', stepNo: 2 })).status).toBe(403);
+    expect((await decide(id, f.hrAdmin, { decision: 'APPROVE', stepNo: 2 })).body.data).toMatchObject({ status: 'APPROVED', terminal: true });
+  });
+
+  it('5-O3 the owner keeps an override on a later level — logged', async () => {
+    await workflow('LEAVE', [{ order: 1, approverType: 'MANAGER' }, { order: 2, approverType: 'ROLE', roleId: HR_ADMIN_ROLE, mode: 'ANY' }]);
+    const r = await h.request('POST', `${base()}/me/leave`, { token: staff5, body: { leaveTypeId, ...nextRange(1), reason: 'Owner twice' } });
+    const id = r.body.data.approvalRequestId as string;
+    expect((await decide(id, f.owner, { decision: 'APPROVE', stepNo: 1 })).body.data).toMatchObject({ status: 'PENDING' });
+    expect((await detail(id, f.owner)).body.data.abilities).toMatchObject({ canDecide: true, decideVia: 'override' });
+    expect((await decide(id, f.owner, { decision: 'APPROVE', stepNo: 2 })).body.data).toMatchObject({ status: 'APPROVED', terminal: true });
+    expect(await eventsOf(id)).toContain('four_eyes_owner_bypass');
+    expect((await auditRows(h.admin, 'approval.four_eyes_owner_bypass')).some((a) => a.entityId === id)).toBe(true);
+  });
+
+  it('5-O3 an exception approval or a reassignment never gives a second level to somebody who approved one', async () => {
+    await workflow('LEAVE', [{ order: 1, approverType: 'HR_ADMIN' }, { order: 2, approverType: 'MANAGER' }]);
+    const r = await h.request('POST', `${base()}/me/leave`, { token: staff5, body: { leaveTypeId, ...nextRange(1), reason: 'Exception' } });
+    const id = r.body.data.approvalRequestId as string;
+    expect((await decide(id, hrLinked, { decision: 'APPROVE', stepNo: 1 })).body.data).toMatchObject({ status: 'PENDING' });
+    // hrLinked holds approval.manage — but approving the rest as an exception would be a second level
+    expect((await detail(id, hrLinked)).body.data.abilities).toMatchObject({ canBypass: false });
+    const bypass = await h.request('POST', `${base()}/approvals/${id}/bypass`, { token: hrLinked, body: { reason: 'Urgent' } });
+    expect(bypass.status).toBe(403);
+    expect(bypass.body.message).toMatch(/one person approves at most one level/);
+    // nor can the level be moved to them
+    const moved = await h.request('POST', `${base()}/approvals/${id}/reassign`, { token: f.owner, body: { userId: hrLinked, reason: 'Manager away' } });
+    expect(moved.status).toBe(400);
+    expect(moved.body.message).toMatch(/approved an earlier level/);
+    expect((await requestRow(id)).status).toBe('PENDING');
+    // another approval manager who approved nothing may approve it as an exception
+    expect((await detail(id, hr20)).body.data.abilities).toMatchObject({ canBypass: true });
+    expect((await h.request('POST', `${base()}/approvals/${id}/bypass`, { token: hr20, body: { reason: 'Manager away, urgent' } })).status).toBeLessThan(300);
+    expect((await requestRow(id)).status).toBe('APPROVED');
+  });
+});

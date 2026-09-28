@@ -200,6 +200,29 @@ describe('DashboardPage — team widgets (HR portal Prompt 5)', () => {
     expect(apiMock.get.mock.calls.some((c) => c[0] === '/orgs/org-1/team/summary')).toBe(false);
   });
 
+  it('5-P2-3 the KPI tile and the rail widget show ONE "waiting for you" number — the chip\'s — with its breakdown', async () => {
+    testState.settings = { dashboard: { layout: 'operations' } };
+    testState.employeeId = 'e4'; testState.teamSize = 3;
+    grant('dashboard.view', 'attendance.view', 'attendance.view_team', 'leave.view_team', 'employee.view_team', 'device.view');
+    // the summary's own count is the approvals half only (1); the chip, the badge and the widget show the total (2)
+    mockDashboard({
+      '/orgs/org-1/team/summary': { data: teamSummary([]) },
+      '/orgs/org-1/team/pending-counts': { data: { approvals: 1, notes: 1, total: 2 } },
+      '/orgs/org-1/dashboard/summary': { data: { ...summary, pendingApprovals: 1 } },
+    });
+    try {
+      renderWithProviders(<DashboardPage />);
+      const tile = (await screen.findByText('Waiting for you')).closest('a')!;
+      await waitFor(() => expect(tile).toHaveTextContent(/Waiting for you\s*2/));
+      expect(tile).toHaveTextContent('1 approval request · 1 attendance reason');
+      // a line manager without an approve key works the items on /team — the same link as the chip
+      expect(tile).toHaveAttribute('href', '/team?tab=approvals');
+      expect(await screen.findByTestId('awaiting-count')).toHaveTextContent('2');
+    } finally {
+      testState.settings = {};
+    }
+  });
+
   it('keeps every layout unchanged for a member with neither reports nor approve keys (no team request at all)', async () => {
     grant('dashboard.view', 'attendance.view', 'holiday.view');
     mockDashboard();

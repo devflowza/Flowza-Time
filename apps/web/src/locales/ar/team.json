@@ -65,6 +65,7 @@
     "empty": "لا سجلات حضور في هذه الفترة",
     "emptyHint": "تظهر السجلات بعد وصول البصمات واحتساب اليوم.",
     "readOnly": "للعرض فقط: طلب التصحيح يحتاج إلى صلاحية attendance.correct.",
+    "notAReport": "هذا الموظف ليس من مرؤوسيك المباشرين: يُعرض فريقك كاملاً.",
     "columns": { "employee": "الموظف", "status": "الحالة", "in": "الدخول", "out": "الانصراف", "worked": "العمل", "late": "التأخير" },
     "prevPage": "الصفحة السابقة",
     "nextPage": "الصفحة التالية",
@@ -120,6 +121,17 @@
     "label_few": "{{count}} عناصر بانتظارك",
     "label_many": "{{count}} عنصراً بانتظارك",
     "label_other": "{{count}} عنصر بانتظارك",
-    "split": "{{approvals}} طلبات موافقة · {{notes}} مبررات حضور"
+    "approvals_zero": "لا طلبات موافقة",
+    "approvals_one": "طلب موافقة واحد",
+    "approvals_two": "طلبا موافقة",
+    "approvals_few": "{{count}} طلبات موافقة",
+    "approvals_many": "{{count}} طلب موافقة",
+    "approvals_other": "{{count}} طلب موافقة",
+    "notes_zero": "لا مبررات حضور",
+    "notes_one": "مبرر حضور واحد",
+    "notes_two": "مبررا حضور",
+    "notes_few": "{{count}} مبررات حضور",
+    "notes_many": "{{count}} مبرر حضور",
+    "notes_other": "{{count}} مبرر حضور"
   }
 }

@@ -95,7 +95,10 @@ async function escalate(trx: Trx, orgId: string, s: CurrentStep, now: Date): Pro
   // the request's other parties (a swap's colleague — review P0-2): the logins snapshotted at submit and every CURRENT link
   const coSubjects = s.coSubjectEmployeeIds ?? [];
   const linkedToCoSubjects = new Set([...(s.coSubjectUserIds ?? []), ...(coSubjects.length ? (await trx.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', 'in', coSubjects).execute()).map((m) => m.userId) : [])]);
-  const eligible = (ids: string[]) => ids.filter((u) => !current.has(u) && u !== s.subjectUserId && u !== s.requestedBy && !linkedToSubject.has(u) && !linkedToCoSubjects.has(u));
+  // four-eyes (HR portal Prompt 5 review, O3): whoever approved an earlier level of the request is never added to a later one
+  const priorApprovers = new Set((await trx.selectFrom('approvalStepActors as a').innerJoin('approvalSteps as st', 'st.id', 'a.stepId').select('a.userId')
+    .where('st.organizationId', '=', orgId).where('st.requestId', '=', s.requestId).where('st.stepNo', '<', s.stepNo).where('a.decision', '=', 'APPROVED').execute()).map((a) => a.userId));
+  const eligible = (ids: string[]) => ids.filter((u) => !current.has(u) && u !== s.subjectUserId && u !== s.requestedBy && !linkedToSubject.has(u) && !linkedToCoSubjects.has(u) && !priorApprovers.has(u));
   const ladder: ApprovalEscalationTarget[] = s.escalateTo === 'NEXT_STEP' ? ['NEXT_STEP', 'HR_ADMIN', 'OWNER'] : s.escalateTo === 'HR_ADMIN' ? ['HR_ADMIN', 'OWNER'] : ['OWNER'];
   let target: ApprovalEscalationTarget | null = null;
   let added: string[] = [];

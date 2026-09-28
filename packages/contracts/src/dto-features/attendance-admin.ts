@@ -6,7 +6,7 @@ import {
   type ApprovalRequestStatus, type ApprovalStatus, type ApproverType, type AttendanceFlag, type AttendanceNoteCategory, type AttendanceNoteStatus, type AttendanceStatus,
 } from '../enums.js';
 import { isoDateSchema, paginationQuerySchema, uuidSchema } from '../common.js';
-import type { ApprovalDecideVia } from './approvals.js';
+import type { ApprovalDecideVia, ApprovalSeatDto } from './approvals.js';
 
 /**
  * HR attendance administration (HR portal Prompt 6b): the regularisation register with decisions through the approval
@@ -60,6 +60,14 @@ export interface RegularisationApprovalDto {
   /** The caller may decide the current level (seat, delegation, escalation or organisation-wide override). */
   canDecide: boolean;
   decideVia: ApprovalDecideVia | null;
+  /**
+   * The caller's decision is an override (or an escalated approver's) on an ALL / QUORUM level with more than one seat waiting:
+   * it must name the seat it fills (`onBehalfOfUserId`) — engine §9.8, the same rule as the approvals inbox (HR portal Prompt 5
+   * review, P1-1). Optional so payloads of an older API still parse.
+   */
+  mustChooseSeat?: boolean;
+  /** The seats of the current level still waiting, in the engine's seat order (the "Deciding for" choices). */
+  pendingSeats?: ApprovalSeatDto[];
 }
 export interface RegularisationAdminItemDto extends RegularisationDto {
   employeeName: string;
@@ -81,13 +89,16 @@ export const regularisationDecideSchema = z.object({
   comment: z.string().trim().max(1000).optional(),
   /** The level the caller is looking at (an override must name it; absent = the request's current level). */
   stepNo: z.number().int().min(1).max(20).optional(),
+  /** The waiting seat an override fills — required by the engine on an ALL / QUORUM level with several seats waiting (§9.8). */
+  onBehalfOfUserId: uuidSchema.optional(),
 }).refine(needsComment, { message: 'A comment is required when rejecting.', path: ['comment'] });
 export type RegularisationDecideInput = z.infer<typeof regularisationDecideSchema>;
 
 export const REGULARISATION_BULK_MAX = 100;
 /** POST …/attendance/regularisations/bulk-decide — each item decided on its own (per-item authorisation and result). */
 export const regularisationBulkDecideSchema = z.object({
-  items: z.array(z.object({ id: uuidSchema, stepNo: z.number().int().min(1).max(20).optional() })).min(1).max(REGULARISATION_BULK_MAX),
+  /** Each item names the level it was on and, for an override on a level waiting for several approvers, the seat it fills. */
+  items: z.array(z.object({ id: uuidSchema, stepNo: z.number().int().min(1).max(20).optional(), onBehalfOfUserId: uuidSchema.optional() })).min(1).max(REGULARISATION_BULK_MAX),
   decision: z.enum(REGULARISATION_ADMIN_DECISIONS),
   comment: z.string().trim().max(1000).optional(),
 }).refine(needsComment, { message: 'A comment is required when rejecting.', path: ['comment'] })

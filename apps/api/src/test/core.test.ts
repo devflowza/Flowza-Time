@@ -206,12 +206,14 @@ describe('members, invitations and roles', () => {
     expect(del.status).toBe(204);
   });
 
-  it('protects the last active owner', async () => {
+  it('protects the last active owner — and nobody changes their own membership (review 5-P0-1: 403)', async () => {
     const demote = await api.request('PATCH', `/orgs/${F.orgA}/members/${F.membershipOwnerA}`, { user: F.ownerA, body: { roleId: SYSTEM_ROLE_IDS.hr_admin } });
-    expect(demote.status).toBe(409);
-    expect(demote.json.code).toBe('INVALID_STATE');
+    expect(demote.status).toBe(403);
+    expect(demote.json.code).toBe('FORBIDDEN');
     const suspendSelf = await api.request('DELETE', `/orgs/${F.orgA}/members/${F.membershipOwnerA}`, { user: F.ownerA });
-    expect(suspendSelf.status).toBe(409);
+    expect(suspendSelf.status).toBe(403);
+    const owners = await api.tdb.adminDb.selectFrom('orgMemberships').select(['roleId', 'status']).where('id', '=', F.membershipOwnerA).executeTakeFirstOrThrow();
+    expect(owners).toEqual({ roleId: SYSTEM_ROLE_IDS.owner, status: 'active' });
   });
 
   it('invitation create (existing account → invited membership) and accept flow', async () => {

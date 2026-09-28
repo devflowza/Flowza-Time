@@ -202,4 +202,33 @@ describe('approvals.reminders', () => {
     const timeline = await a.selectFrom('approvalRequestEvents').select(['kind', 'detail']).where('requestId', '=', req).orderBy('id').execute();
     expect(timeline.find((t) => t.kind === 'escalated')?.detail).toMatchObject({ target: 'HR_ADMIN', added: [W.hrOther] });
   });
+
+  it('5-O3 escalation never adds somebody who approved an earlier level of the request (four-eyes)', async () => {
+    const a = h.tdb.adminDb;
+    const ORG4 = '0f200000-0000-0000-0000-000000000000'; const BRANCH4 = '0f200000-0000-0000-0000-00000000000b'; const EMP4 = '0f200000-0000-0000-0000-0000000000e1';
+    const X = { owner: 'f2000000-0000-0000-0000-000000000001', approver: 'f2000000-0000-0000-0000-000000000002', hrPrior: 'f2000000-0000-0000-0000-000000000003', hrOther: 'f2000000-0000-0000-0000-000000000004' };
+    await sql`insert into auth.users (id, email) values ${sql.join(Object.values(X).map((id) => sql`(${id}::uuid, ${`${id}@t.local`})`))}`.execute(a);
+    await a.insertInto('userProfiles').values(Object.entries(X).map(([k, id]) => ({ id, email: `${id}@t.local`, fullName: k }))).execute();
+    await a.insertInto('organizations').values({ id: ORG4, companyCode: 'APR4', legalName: 'D', displayName: 'D', timezone: 'Asia/Muscat' }).execute();
+    await a.insertInto('branches').values({ id: BRANCH4, organizationId: ORG4, code: 'HQ', name: 'HQ' }).execute();
+    await a.insertInto('employees').values({ id: EMP4, organizationId: ORG4, branchId: BRANCH4, employeeNumber: 'E4', firstName: 'Sub', lastName: 'Ject', displayName: 'Subject Four', joiningDate: '2024-01-01', deviceUserId: '4' }).execute();
+    await a.insertInto('orgMemberships').values([
+      { organizationId: ORG4, userId: X.owner, roleId: '10000000-0000-0000-0000-000000000001', status: 'active', allBranches: true },
+      { organizationId: ORG4, userId: X.approver, roleId: '10000000-0000-0000-0000-000000000009', status: 'active', allBranches: true },
+      { organizationId: ORG4, userId: X.hrPrior, roleId: '10000000-0000-0000-0000-000000000003', status: 'active', allBranches: true },
+      { organizationId: ORG4, userId: X.hrOther, roleId: '10000000-0000-0000-0000-000000000003', status: 'active', allBranches: true },
+    ]).execute();
+    // level 1 (the HR admins) was approved by hrPrior; level 2 (a manager) is overdue and escalates to the HR admins
+    const req = (await a.insertInto('approvalRequests').values({ organizationId: ORG4, entityType: 'LEAVE', entityId: '0f200000-0000-0000-0000-0000000001a1', branchId: BRANCH4, employeeId: EMP4, subjectUserId: null, requestedBy: X.owner, currentStep: 2, status: 'PENDING', createdAt: at(80) }).returning('id').executeTakeFirstOrThrow()).id;
+    const l1 = (await a.insertInto('approvalSteps').values({ organizationId: ORG4, requestId: req, stepNo: 1, approverType: 'HR_ADMIN', mode: 'ANY', requiredCount: 1, status: 'APPROVED', activatedAt: at(80) }).returning('id').executeTakeFirstOrThrow()).id;
+    await a.insertInto('approvalStepActors').values([{ organizationId: ORG4, stepId: l1, userId: X.hrPrior, resolutionPath: 'hr_admin', decision: 'APPROVED' }, { organizationId: ORG4, stepId: l1, userId: X.hrOther, resolutionPath: 'hr_admin', decision: 'SKIPPED' }]).execute();
+    const l2 = (await a.insertInto('approvalSteps').values({ organizationId: ORG4, requestId: req, stepNo: 2, approverType: 'MANAGER', approverUserId: X.approver, mode: 'ANY', requiredCount: 1, status: 'PENDING', activatedAt: at(80), dueAt: at(81), escalateTo: 'HR_ADMIN', escalateAfterHours: 1 }).returning('id').executeTakeFirstOrThrow()).id;
+    await a.insertInto('approvalStepActors').values({ organizationId: ORG4, stepId: l2, userId: X.approver, resolutionPath: 'primary' }).execute();
+    clock = at(82);
+    expect(await runApprovalReminders(h.deps, ORG4)).toMatchObject({ escalated: 1 });
+    const actors = await a.selectFrom('approvalStepActors').select(['userId', 'resolutionPath']).where('stepId', '=', l2).orderBy('userId').execute();
+    expect(actors).toEqual([{ userId: X.approver, resolutionPath: 'primary' }, { userId: X.hrOther, resolutionPath: 'escalated' }]);
+    const timeline = await a.selectFrom('approvalRequestEvents').select(['kind', 'detail']).where('requestId', '=', req).orderBy('id').execute();
+    expect(timeline.find((t) => t.kind === 'escalated')?.detail).toMatchObject({ target: 'HR_ADMIN', added: [X.hrOther] });
+  });
 });

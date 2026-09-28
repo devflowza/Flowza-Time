@@ -227,3 +227,120 @@ describe('GET /team/pending-counts', () => {
     }
   });
 });
+
+describe('review 5 — one definition of "waiting for you" (stand-in seats, delegates, secondary managers)', () => {
+  let MORN: string; let EVE: string; let e13: string;
+  /** A working day (Sunday–Thursday: the organisation's weekly off is Friday + Saturday) at least `from` days ahead. */
+  const workdayAhead = (from: number) => {
+    for (let i = from; i < from + 7; i += 1) { const d = new Date(); d.setUTCDate(d.getUTCDate() + i); if (![5, 6].includes(d.getUTCDay())) return d.toISOString().slice(0, 10); }
+    throw new Error('no working day');
+  };
+  /** Every surface built on the engine's actionable set: the badge counts, /me and the inbox "Mine" queue. */
+  async function waitingFor(token: string) {
+    const counts = (await h.request('GET', `${base()}/team/pending-counts`, { token })).body.data as { approvals: number; notes: number; total: number };
+    const me = (await h.request('GET', '/api/v1/me', { token })).body.data.memberships.find((m: { organization: { id: string } }) => m.organization.id === f.orgId).approvals.actionable as number;
+    const inbox = await h.request('GET', `${base()}/approvals?scope=mine&view=pending&pageSize=100`, { token });
+    return { counts, me, inboxIds: inbox.body.data.map((x: { id: string }) => x.id) as string[], inboxTotal: inbox.body.meta.total as number };
+  }
+  const requestOfEntity = (entityId: string) => h.admin.selectFrom('approvalRequests').select(['id', 'status']).where('entityId', '=', entityId).executeTakeFirstOrThrow();
+  const seatsOf = async (requestId: string) => h.admin.selectFrom('approvalStepActors as a').innerJoin('approvalSteps as s', 's.id', 'a.stepId').select(['a.userId', 'a.resolutionPath', 'a.viaDelegationOf', 'a.decision']).where('s.requestId', '=', requestId).execute();
+
+  beforeAll(async () => {
+    MORN = (await h.admin.insertInto('shifts').values({ organizationId: f.orgId, code: 'MORN', name: 'Morning', type: 'FIXED', startTime: '08:00', endTime: '16:00' }).returning('id').executeTakeFirstOrThrow()).id;
+    EVE = (await h.admin.insertInto('shifts').values({ organizationId: f.orgId, code: 'EVE', name: 'Evening', type: 'FIXED', startTime: '14:00', endTime: '22:00' }).returning('id').executeTakeFirstOrThrow()).id;
+    e13 = await seedEmployee(h.admin, f.orgId, f.branchB, 13);
+    const a = (targetId: string, shiftId: string) => ({ organizationId: f.orgId, targetType: 'EMPLOYEE' as const, targetId, branchId: f.branchB, shiftId, effectiveFrom: '2026-01-01' });
+    await h.admin.insertInto('shiftAssignments').values([a(e6, MORN), a(e13, EVE)]).execute();
+  });
+
+  it('5-P1-3 a secondary manager\'s stand-in seat on a regularisation is listed, counted and decidable', async () => {
+    const before = await waitingFor(lineManager);
+    const date = isoToday(-2);
+    const r = await h.request('POST', `${base()}/me/regularisations`, { token: emp6, body: { date, type: 'missed_punch', proposedInAt: `${date}T05:00:00Z`, proposedOutAt: `${date}T13:00:00Z`, reason: 'The terminal was offline' } });
+    expect(r.status).toBe(201);
+    const req = await requestOfEntity(r.body.data.id);
+    expect(await seatsOf(req.id)).toEqual(expect.arrayContaining([
+      expect.objectContaining({ userId: mgr9, resolutionPath: 'primary', viaDelegationOf: null }),
+      expect.objectContaining({ userId: lineManager, resolutionPath: 'secondary', viaDelegationOf: mgr9 }),
+    ]));
+    const after = await waitingFor(lineManager);
+    expect(after.counts.approvals).toBe(before.counts.approvals + 1);
+    expect(after.counts.total).toBe(before.counts.total + 1);
+    expect(after.me).toBe(after.counts.approvals);
+    expect(after.inboxTotal).toBe(after.counts.approvals);
+    expect(after.inboxIds).toContain(req.id);
+    // the team board counts it on the report's card
+    const board = await h.request('GET', `${base()}/team/summary?date=${D}`, { token: lineManager });
+    expect(board.body.data.totals.pendingItems).toBe(after.counts.total);
+    // … and the stand-in decides it
+    const d = await h.request('POST', `${base()}/approvals/${req.id}/decide`, { token: lineManager, body: { decision: 'APPROVE', stepNo: 1 } });
+    expect(d.status).toBe(200);
+    expect((await requestOfEntity(r.body.data.id)).status).toBe('APPROVED');
+    expect((await waitingFor(lineManager)).counts.total).toBe(before.counts.total);
+    expect((await waitingFor(mgr9)).inboxIds).not.toContain(req.id);
+  });
+
+  it('5-P1-3 … and on a shift swap', async () => {
+    const before = await waitingFor(lineManager);
+    const s = await h.request('POST', `${base()}/me/shift-swaps`, { token: emp6, body: { date: workdayAhead(3), withEmployeeId: e13, reason: 'Family event in the morning' } });
+    expect(s.status).toBe(201);
+    const req = await requestOfEntity(s.body.data.id);
+    expect((await seatsOf(req.id)).find((x) => x.userId === lineManager)).toMatchObject({ resolutionPath: 'secondary', viaDelegationOf: mgr9 });
+    const after = await waitingFor(lineManager);
+    expect(after.counts.approvals).toBe(before.counts.approvals + 1);
+    expect(after.me).toBe(after.counts.approvals);
+    expect(after.inboxIds).toContain(req.id);
+    expect((await waitingFor(mgr9)).inboxIds).toContain(req.id);
+    const d = await h.request('POST', `${base()}/approvals/${req.id}/decide`, { token: lineManager, body: { decision: 'APPROVE', stepNo: 1 } });
+    expect(d.status).toBe(200);
+    expect((await h.admin.selectFrom('shiftSwapRequests').select('status').where('id', '=', s.body.data.id).executeTakeFirstOrThrow()).status).toBe('approved');
+    expect((await waitingFor(lineManager)).counts.approvals).toBe(before.counts.approvals);
+  });
+
+  it('5-P2-1 a delegate\'s own request never waits for them (it waits for the approver they stand in for)', async () => {
+    const d = await h.request('POST', `${base()}/approval-delegations`, { token: lineManager, body: { delegateUserId: emp5, startsOn: isoToday(-1), endsOn: isoToday(30), reason: 'Away' } });
+    expect(d.status).toBe(201);
+    try {
+      const before = await waitingFor(emp5);
+      const leave = await h.request('POST', `${base()}/me/leave`, { token: emp5, body: { leaveTypeId, startDate: workdayAhead(20), endDate: workdayAhead(20), reason: 'My own leave' } });
+      expect(leave.status).toBe(201);
+      const id = leave.body.data.approvalRequestId as string;
+      // the line manager's seat: the delegate — who is the subject — would reach it only as the delegate
+      expect((await waitingFor(lineManager)).inboxIds).toContain(id);
+      const after = await waitingFor(emp5);
+      expect(after.inboxIds).not.toContain(id);
+      expect(after.me).toBe(before.me);
+      expect(after.counts.approvals).toBe(before.counts.approvals);
+      expect((await h.request('GET', `${base()}/approvals/${id}`, { token: emp5 })).body.data.abilities.canDecide).toBe(false);
+      await h.request('POST', `${base()}/approvals/${id}/cancel`, { token: emp5, body: { reason: 'Test done' } });
+    } finally {
+      await h.admin.updateTable('approvalDelegations').set({ isActive: false }).where('id', '=', d.body.data.id).execute();
+    }
+  });
+
+  it('5-P2-2 a secondary manager whose role carries no team key sees their stand-in seat in the badge', async () => {
+    const eP = await seedEmployee(h.admin, f.orgId, f.branchA, 30);
+    const eS = await seedEmployee(h.admin, f.orgId, f.branchA, 31);
+    const eR = await seedEmployee(h.admin, f.orgId, f.branchA, 32, { managerEmployeeId: eP });
+    await h.admin.updateTable('employees').set({ secondaryManagerEmployeeId: eS }).where('id', '=', eR).execute();
+    const prim = uuid('c'); const sec = uuid('c'); const rep = uuid('c');
+    for (const [id, email] of [[prim, 'prim-teamws'], [sec, 'sec-teamws'], [rep, 'rep-teamws']] as const) await seedUser(h.admin, id, `${email}@test.local`, email);
+    await seedMembership(h.admin, f.orgId, prim, ROLE.manager, { employeeId: eP });
+    await seedMembership(h.admin, f.orgId, sec, ROLE.employee, { employeeId: eS });
+    await seedMembership(h.admin, f.orgId, rep, ROLE.employee, { employeeId: eR });
+    await seedDay(eR, f.branchA, isoToday(-4), 'ABSENT');
+    const n = await h.request('POST', `${base()}/me/attendance/notes`, { token: rep, body: { date: isoToday(-4), category: 'absence_reason', note: 'Doctor' } });
+    expect(n.status).toBe(201);
+    const standIn = await h.admin.selectFrom('approvalStepActors').select(['resolutionPath', 'viaDelegationOf']).where('userId', '=', sec).execute();
+    expect(standIn).toEqual([{ resolutionPath: 'secondary', viaDelegationOf: prim }]);
+    const w = await waitingFor(sec);
+    expect(w.counts).toEqual({ approvals: 1, notes: 0, total: 1 });
+    expect(w.me).toBe(1);
+    expect(w.inboxTotal).toBe(1);
+    // what the badge counts is what they may review
+    const reasons = await h.request('GET', `${base()}/attendance/notes?scope=mine&open=true`, { token: sec });
+    expect(reasons.body.data.filter((x: { canReview: boolean }) => x.canReview)).toHaveLength(1);
+    expect((await h.request('POST', `${base()}/attendance/notes/${n.body.data.id}/review`, { token: sec, body: { decision: 'approve' } })).status).toBe(200);
+    expect((await waitingFor(sec)).counts.total).toBe(0);
+  });
+});

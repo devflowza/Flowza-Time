@@ -57,6 +57,7 @@
     "empty": "No attendance records in this range",
     "emptyHint": "Records appear once punches arrive and the engine calculates the day.",
     "readOnly": "Read-only: requesting a correction needs the attendance.correct permission.",
+    "notAReport": "That employee is not one of your direct reports: showing your whole team.",
     "columns": { "employee": "Employee", "status": "Status", "in": "In", "out": "Out", "worked": "Worked", "late": "Late" },
     "prevPage": "Previous page",
     "nextPage": "Next page",
@@ -104,6 +105,9 @@
   "chip": {
     "label_one": "{{count}} item waiting for you",
     "label_other": "{{count}} items waiting for you",
-    "split": "{{approvals}} approval requests · {{notes}} attendance reasons"
+    "approvals_one": "{{count}} approval request",
+    "approvals_other": "{{count}} approval requests",
+    "notes_one": "{{count}} attendance reason",
+    "notes_other": "{{count}} attendance reasons"
   }
 }

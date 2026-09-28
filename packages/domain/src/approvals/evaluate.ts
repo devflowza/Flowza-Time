@@ -112,6 +112,26 @@ export function requiredAfterReassign(mode: ApprovalStepModeSpec, requiredCount:
   return Math.max(1, Math.min(required, approvedSeats + 1));
 }
 
+/**
+ * Four-eyes (HR portal Prompt 5 review, O3): the people who APPROVED a level before `stepNo` — directly, as a delegate, as an
+ * escalated approver or as an override (the row's `userId` is whoever decided). One person approves at most one level of a
+ * request, so these are never seated on, and may not decide, a later level. A rejection or a skipped row does not count.
+ */
+export function approversOfEarlierLevels(levels: ReadonlyArray<{ stepNo: number; actors: ReadonlyArray<{ userId: string; decision: string }> }>, stepNo: number): Set<string> {
+  const out = new Set<string>();
+  for (const l of levels) if (l.stepNo < stepNo) for (const a of l.actors) if (a.decision === 'APPROVED') out.add(a.userId);
+  return out;
+}
+
+/**
+ * Four-eyes for a decision spanning several levels (an exception approval completes every open level): true when `userId`
+ * APPROVED a level of the request and deciding `deciding` would make them the approver of a second, different level.
+ */
+export function breaksFourEyes(levels: ReadonlyArray<{ stepNo: number; actors: ReadonlyArray<{ userId: string; decision: string }> }>, userId: string, deciding: readonly number[]): boolean {
+  const approved = levels.filter((l) => l.actors.some((a) => a.userId === userId && a.decision === 'APPROVED')).map((l) => l.stepNo);
+  return approved.length > 0 && new Set([...approved, ...deciding]).size > 1;
+}
+
 /** When an activated level escalates, or null when the step has no escalation. */
 export function escalationDueAt(step: { escalateAfterHours?: number | null | undefined; escalateTo?: string | null | undefined }, activatedAt: Date): Date | null {
   if (!step.escalateAfterHours || !step.escalateTo) return null;

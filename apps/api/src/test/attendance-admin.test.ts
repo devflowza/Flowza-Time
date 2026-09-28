@@ -179,3 +179,82 @@ describe('the regularisation register reads under the caller\'s RLS', () => {
     expect(still.status).toBe('pending');
   });
 });
+
+describe('5-P1-1 the register names the seat an override fills (engine §9.8)', () => {
+  const hr2 = uuid('c');
+  const decideOne = (id: string, token: string, body: Record<string, unknown>) => h.request('POST', `${base()}/attendance/regularisations/${id}/decide`, { token, body });
+  beforeAll(async () => {
+    await seedUser(h.admin, hr2, 'hr2-attadm@test.local', 'HR Two');
+    await seedMembership(h.admin, f.orgId, hr2, ROLE.hr_admin);
+    // one level that needs EVERY HR admin: an override must say whose seat it fills
+    const wf = await h.request('POST', `${base()}/approval-workflows`, { token: f.owner, body: { name: 'Regularisations — every HR admin', entityType: 'REGULARISATION', steps: [{ order: 1, approverType: 'ROLE', roleId: ROLE.hr_admin, mode: 'ALL' }] } });
+    expect(wf.status).toBe(201);
+  });
+  afterAll(async () => { await h.admin.deleteFrom('approvalWorkflows').where('organizationId', '=', f.orgId).where('entityType', '=', 'REGULARISATION').execute(); });
+
+  it('5-P1-1 the register decides an override on an ALL level with several waiting seats — single and bulk name the seat', async () => {
+    const one = (await reg(f.employeeUser, isoToday(-5))).body.data.id as string;
+    const two = (await reg(f.employeeUser, isoToday(-4))).body.data.id as string;
+    const three = (await reg(f.employeeUser, isoToday(-3))).body.data.id as string;
+    // the row says a seat must be chosen and lists the waiting seats — what the inbox says for the same request
+    const list = await h.request('GET', `${base()}/attendance/regularisations?status=pending`, { token: f.owner });
+    const row = list.body.data.find((x: { id: string }) => x.id === one);
+    expect(row.approval).toMatchObject({ canDecide: true, decideVia: 'override', mustChooseSeat: true });
+    expect(row.approval.pendingSeats.map((s: { userId: string }) => s.userId).sort()).toEqual([f.hrAdmin, hr2].sort());
+    expect(row.approval.pendingSeats.every((s: { userName: string | null }) => !!s.userName)).toBe(true);
+    const inbox = await h.request('GET', `${base()}/approvals/${(await requestOf(one)).id}`, { token: f.owner });
+    expect(inbox.body.data.steps[0].pendingSeats.map((s: { userId: string }) => s.userId)).toEqual(row.approval.pendingSeats.map((s: { userId: string }) => s.userId));
+    // unnamed: the engine's own refusal; nothing decided
+    const unnamed = await decideOne(one, f.owner, { decision: 'approve', stepNo: 1 });
+    expect(unnamed.status).toBe(400);
+    expect(unnamed.body.message).toMatch(/^Choose which approver you are deciding for/);
+    // named: fills exactly that seat — the level still waits for the other HR admin
+    const named = await decideOne(one, f.owner, { decision: 'approve', stepNo: 1, onBehalfOfUserId: hr2, comment: 'For HR Two' });
+    expect(named.status).toBe(200);
+    expect(named.body.data).toMatchObject({ ok: true, requestStatus: 'PENDING' });
+    const actors = await h.admin.selectFrom('approvalStepActors as a').innerJoin('approvalSteps as s', 's.id', 'a.stepId').select(['a.userId', 'a.onBehalfOfUserId', 'a.decision']).where('s.requestId', '=', (await requestOf(one)).id).execute();
+    expect(actors.find((a) => a.userId === f.owner)).toMatchObject({ onBehalfOfUserId: hr2, decision: 'APPROVED' });
+    expect((await auditRows(h.admin, 'attendance.regularisation_approved')).find((a) => a.entityId === one)!.newValue).toMatchObject({ onBehalfOfUserId: hr2, requestStatus: 'PENDING' });
+    // the seated HR admin decides their own (last) seat without choosing
+    const hrRow = (await h.request('GET', `${base()}/attendance/regularisations?status=pending`, { token: f.hrAdmin })).body.data.find((x: { id: string }) => x.id === one);
+    expect(hrRow.approval).toMatchObject({ decideVia: 'actor', mustChooseSeat: false });
+    expect((await decideOne(one, f.hrAdmin, { decision: 'approve', stepNo: 1 })).body.data).toMatchObject({ ok: true, status: 'approved', requestStatus: 'APPROVED' });
+    // bulk: per item — a named item fills its seat; an unnamed one fails on its own and stays pending
+    const bulk = await h.request('POST', `${base()}/attendance/regularisations/bulk-decide`, { token: f.owner, body: { items: [{ id: two, stepNo: 1, onBehalfOfUserId: f.hrAdmin }, { id: three, stepNo: 1 }], decision: 'approve' } });
+    expect(bulk.status).toBe(200);
+    const byId = new Map(bulk.body.data.results.map((x: { id: string }) => [x.id, x]));
+    expect(byId.get(two)).toMatchObject({ ok: true, requestStatus: 'PENDING' });
+    expect(byId.get(three)).toMatchObject({ ok: false, code: 'VALIDATION_ERROR' });
+    expect((await requestOf(three)).status).toBe('PENDING');
+    const twoActors = await h.admin.selectFrom('approvalStepActors as a').innerJoin('approvalSteps as s', 's.id', 'a.stepId').select(['a.userId', 'a.onBehalfOfUserId', 'a.decision']).where('s.requestId', '=', (await requestOf(two)).id).execute();
+    expect(twoActors.find((a) => a.userId === f.owner)).toMatchObject({ onBehalfOfUserId: f.hrAdmin, decision: 'APPROVED' });
+    // the remaining seat is hr2's own: they see no choice to make and complete the level
+    const own = await h.request('GET', `${base()}/attendance/regularisations?status=pending`, { token: hr2 });
+    expect(own.body.data.find((x: { id: string }) => x.id === two).approval).toMatchObject({ decideVia: 'actor', mustChooseSeat: false });
+    const done = await h.request('POST', `${base()}/attendance/regularisations/bulk-decide`, { token: hr2, body: { items: [{ id: two, stepNo: 1 }], decision: 'approve' } });
+    expect(done.body.data.results[0]).toMatchObject({ ok: true, status: 'approved', requestStatus: 'APPROVED' });
+  });
+});
+
+describe('5-P2-8 quota refusals say when to come back', () => {
+  it('5-P2-8 a 429 from an organisation export quota carries Retry-After', async () => {
+    const hour = 3_600_000;
+    const windows = [new Date(Math.floor(Date.now() / hour) * hour), new Date(Math.floor(Date.now() / hour) * hour + hour)];
+    for (const [metric, path, token] of [
+      ['regularisation_exports', `${base()}/attendance/regularisations/export`, f.hrAdmin],
+      ['attendance_notes_report_exports', `${base()}/attendance/notes/report/export?from=${isoToday(-30)}&to=${isoToday(0)}`, f.hrUser],
+    ] as const) {
+      for (const windowStart of windows) {
+        await h.admin.insertInto('usageQuotas').values({ organizationId: f.orgId, metric, windowStart, windowSeconds: 3600, count: 10_000 })
+          .onConflict((oc) => oc.columns(['organizationId', 'metric', 'windowStart']).doUpdateSet({ count: 10_000 })).execute();
+      }
+      const r = await h.request('GET', path, { token });
+      expect(r.status).toBe(429);
+      expect(r.body.code).toBe('RATE_LIMITED');
+      const retry = Number(r.headers.get('retry-after'));
+      expect(Number.isInteger(retry)).toBe(true);
+      expect(retry).toBeGreaterThanOrEqual(1);
+      expect(retry).toBeLessThanOrEqual(3600);
+    }
+  });
+});

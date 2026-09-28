@@ -18,22 +18,30 @@ const PAGE_SIZE = 50;
 /**
  * The team's daily records through the HR register's own month grid (Prompt 6a component), fed by /team/attendance: every
  * row is a direct report, a cell opens the record dialog (read-only unless the caller may file corrections). The Day view
- * lists one date for the whole team.
+ * lists one date for the whole team. Opened with a report and a day (a notice about that report — review P1-6), it starts on
+ * the Day view of that date filtered to the report; an employee who is not a direct report is not applied (the whole team is
+ * shown, with a note), so a crafted link never turns into an error page.
  */
-export function AttendanceTab({ canCorrect, onOpenRecord }: { canCorrect: boolean; onOpenRecord: (recordId: string) => void }) {
+export function AttendanceTab({ canCorrect, onOpenRecord, initialEmployeeId = null, initialDate = null }: { canCorrect: boolean; onOpenRecord: (recordId: string) => void; initialEmployeeId?: string | null; initialDate?: string | null }) {
   const { t } = useTranslation(TEAM_NS);
   const tz = useOrgTimezone();
   const weeklyOff = useActiveMembership()?.organization.weeklyOffDays ?? [];
-  const [view, setView] = useState<View>('month');
-  const [month, setMonth] = useState(() => todayIso(tz).slice(0, 7));
-  const [date, setDate] = useState(() => todayIso(tz));
-  const [employeeId, setEmployeeId] = useState<string | null>(null);
+  const today = todayIso(tz);
+  const startDate = initialDate && initialDate <= today ? initialDate : null;
+  const [view, setView] = useState<View>(startDate ? 'day' : 'month');
+  const [month, setMonth] = useState(() => (startDate ?? today).slice(0, 7));
+  const [date, setDate] = useState(() => startDate ?? today);
+  const [employeeId, setEmployeeId] = useState<string | null>(initialEmployeeId);
   const [page, setPage] = useState(1);
-  const range = view === 'month' ? monthBounds(month) : { from: date, to: date };
-  const q = useTeamAttendance({ ...range, employeeId: employeeId ?? undefined, page, pageSize: PAGE_SIZE }, !!range.from);
   // the report picker lists the whole team (today's board is cached and cheap), whatever page of rows is shown
   const members = useTeamSummary(undefined);
   const options = useMemo(() => (members.data?.members ?? []).map((m) => ({ value: m.employeeId, label: m.employeeName, description: m.employeeNumber })), [members.data]);
+  // a pre-selected employee counts once the team is known: a report is applied, anybody else is dropped (with a note)
+  const known = !employeeId ? true : members.data ? members.data.members.some((m) => m.employeeId === employeeId) : members.isError ? true : null;
+  const notAReport = !!employeeId && known === false;
+  const effectiveEmployeeId = notAReport ? null : employeeId;
+  const range = view === 'month' ? monthBounds(month) : { from: date, to: date };
+  const q = useTeamAttendance({ ...range, employeeId: effectiveEmployeeId ?? undefined, page, pageSize: PAGE_SIZE }, !!range.from && known !== null);
   const days = useMemo(() => monthDates(month), [month]);
   const rows = useMemo(() => monthlyRowsFrom(q.data?.data ?? [], days), [q.data, days]);
   const meta = q.data?.meta;
@@ -52,12 +60,13 @@ export function AttendanceTab({ canCorrect, onOpenRecord }: { canCorrect: boolea
             <Button size="icon" variant="outline" className="size-8" aria-label={t('attendance.next')} onClick={() => { setMonth((m) => shiftLeaveMonth(m, 1)); reset(); }}><ChevronRight className="rtl:rotate-180" /></Button>
           </div>
         ) : (
-          <Input type="date" aria-label={t('attendance.date')} value={date} max={todayIso(tz)} onChange={(e) => { if (e.target.value) { setDate(e.target.value); reset(); } }} className="h-8 w-44" />
+          <Input type="date" aria-label={t('attendance.date')} value={date} max={today} onChange={(e) => { if (e.target.value) { setDate(e.target.value); reset(); } }} className="h-8 w-44" />
         )}
         <Label htmlFor="team-att-employee" className="sr-only">{t('attendance.employee')}</Label>
-        <Combobox id="team-att-employee" value={employeeId} onChange={(v) => { setEmployeeId(v); reset(); }} options={options} loading={members.isLoading} clearable placeholder={t('attendance.allReports')} className="h-8 w-56" />
+        <Combobox id="team-att-employee" value={effectiveEmployeeId} onChange={(v) => { setEmployeeId(v); reset(); }} options={options} loading={members.isLoading} clearable placeholder={t('attendance.allReports')} className="h-8 w-56" />
         {!canCorrect ? <span className="text-xs text-muted-foreground sm:ms-auto">{t('attendance.readOnly')}</span> : null}
       </div>
+      {notAReport ? <p className="text-xs text-muted-foreground" role="note" data-testid="team-att-not-report">{t('attendance.notAReport')}</p> : null}
       {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} />
         : q.isLoading ? <TableSkeleton cols={8} rows={5} />
         : (q.data?.data.length ?? 0) === 0 ? <EmptyState icon={CalendarDays} title={t('attendance.empty')} description={t('attendance.emptyHint')} />

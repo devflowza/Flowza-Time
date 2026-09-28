@@ -47,10 +47,11 @@ export function MembersTab() {
     { id: 'status', accessorKey: 'status', header: tc('common.status'), cell: ({ row }) => <Badge variant={STATUS_TONE[row.original.status]} dot>{t(`status.${row.original.status}`)}</Badge> },
     { id: 'lastLogin', header: t('fields.lastLogin'), enableSorting: false, cell: ({ row }) => <span className="text-xs tnum">{fmtDateTime(row.original.lastLoginAt, tz)}</span> },
     { id: 'actions', header: '', enableHiding: false, cell: ({ row }) => canManage ? <RowActions actions={[
-      { key: 'edit', label: tc('common.edit'), icon: <Pencil />, onSelect: () => setEditing(row.original) },
+      // nobody changes their own membership (review P0-1); an owner may still link their own login to their employee record
+      { key: 'edit', label: tc('common.edit'), icon: <Pencil />, disabled: row.original.id === me?.membershipId && me?.roleKey !== 'owner', onSelect: () => setEditing(row.original) },
       { key: 'suspend', label: t('members.suspend'), icon: <Ban />, destructive: true, disabled: row.original.status === 'suspended' || row.original.id === me?.membershipId, onSelect: () => setSuspending(row.original) },
     ]} /> : null },
-  ], [t, tc, tz, canManage, me?.membershipId]);
+  ], [t, tc, tz, canManage, me?.membershipId, me?.roleKey]);
 
   return (
     <>

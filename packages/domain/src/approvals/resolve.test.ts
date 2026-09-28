@@ -243,3 +243,39 @@ describe('resolveStepActors — co-subjects (4-P0-2)', () => {
     expect(users(r)).toEqual([colleague.userId]);
   });
 });
+
+describe('resolveStepActors — four-eyes (review 5-O3)', () => {
+  it('5-O3 somebody who approved an earlier level never holds a later seat: the rung falls through like the subject\'s', () => {
+    // the primary manager approved level 1: the secondary manager takes the reporting line's seat
+    const line = resolveStepActors(step(), ctx({ priorApproverUserIds: [U.manager] }));
+    expect(users(line)).toEqual([U.secondary]);
+    expect(line.path).toBe('secondary');
+    expect(line.reason).toMatch(/four-eyes/);
+    // both managers approved earlier levels: the HR admins
+    expect(users(resolveStepActors(step(), ctx({ priorApproverUserIds: [U.manager, U.secondary] })))).toEqual([U.hr1, U.hr2]);
+    // a named user who approved an earlier level: the ladder's next rung
+    const named = resolveStepActors(step({ approverType: 'USER', userId: U.named }), ctx({ priorApproverUserIds: [U.named] }));
+    expect(users(named)).toEqual([U.hr1, U.hr2]);
+    expect(named.path).toBe('hr_admin');
+  });
+  it('5-O3 dropped from HR admins, roles and permission holders — with anybody acting in their seat', () => {
+    const hr = resolveStepActors(step({ approverType: 'HR_ADMIN' }), ctx({ priorApproverUserIds: [U.hr1], delegateOf: (u) => (u === U.hr1 ? U.delegate : null) }));
+    expect(hr.actors).toEqual([{ userId: U.hr2, viaDelegationOf: null }]);
+    expect(hr.reason).toMatch(/approved an earlier level excluded/);
+    // the A3 probe's shape: the line manager approved level 1 and is an HR admin's delegate on level 2
+    const role = resolveStepActors(step({ approverType: 'ROLE', roleId: 'role-hr' }), ctx({ priorApproverUserIds: [U.manager], delegateOf: (u) => (u === U.hr1 ? U.manager : null) }));
+    expect(role.actors).toEqual([{ userId: U.hr1, viaDelegationOf: null }, { userId: U.hr2, viaDelegationOf: null }]);
+    const perm = resolveStepActors(step({ approverType: 'ROLE', permission: 'leave.approve' }), ctx({ priorApproverUserIds: [U.hr1, U.manager] }));
+    expect(users(perm)).toEqual([U.owner]);
+  });
+  it('5-O3 the owner is kept as the approver of last resort when nobody else at all remains', () => {
+    const r = resolveStepActors(step({ approverType: 'HR_ADMIN' }), ctx({ hrAdminUserIds: [U.hr1], priorApproverUserIds: [U.hr1, U.owner] }));
+    expect(users(r)).toEqual([U.owner]);
+    expect(r.path).toBe('owner');
+    expect(r.reason).toMatch(/four-eyes override/);
+  });
+  it('5-O3 nothing changes without earlier approvals', () => {
+    expect(users(resolveStepActors(step(), ctx({ priorApproverUserIds: [] })))).toEqual([U.manager]);
+    expect(users(resolveStepActors(step({ approverType: 'HR_ADMIN' }), ctx()))).toEqual([U.hr1, U.hr2]);
+  });
+});

@@ -1,6 +1,6 @@
 import type { ApprovalAbilitiesDto, ApprovalActorDto, ApprovalContextDto, ApprovalEntity, ApprovalEscalationTarget, ApprovalRequestDto, ApprovalRequestStatus, ApprovalStepDto, ApprovalStepMode, ApprovalTimelineEventDto, ApproverType } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
-import { pendingSeats, seatMustBeNamed, type MembershipGrant } from '@flowza/domain';
+import { approversOfEarlierLevels, breaksFourEyes, pendingSeats, seatMustBeNamed, type MembershipGrant } from '@flowza/domain';
 import { hasPermission } from '../../lib/authorize.js';
 import { isoDateTime, isoDateTimeOrNull, jsonObject, numberOrNull } from '../../lib/mappers.js';
 import type { Actor } from '../../lib/service.js';
@@ -83,7 +83,7 @@ export async function hydrateRequests(trx: Trx, actor: Actor, grant: MembershipG
       const context: ApprovalContextDto = contexts.get(`${r.entityType}:${r.entityId}`) ?? { kind: 'GENERIC', entityType: r.entityType, summary: null };
       const pending = r.status === 'PENDING';
       // the same rule the engine applies to a decision (review P0-1): the UI never offers a button the API refuses
-      const check = assessDecider({ grant, userId: actor.userId, request: { entityType: r.entityType, requestedBy: r.requestedBy, subjectUserId: r.subjectUserId, employeeId: r.employeeId, branchId: r.branchId, coSubjectEmployeeIds: r.coSubjectEmployeeIds ?? null, coSubjectUserIds: r.coSubjectUserIds ?? null }, stepActors: current?.actors.map((a) => ({ userId: a.userId, viaDelegationOf: a.viaDelegationOf, onBehalfOfUserId: a.onBehalfOfUserId, resolutionPath: a.resolutionPath, decision: a.decision })) ?? [], delegators: delegatorsByType.get(r.entityType) ?? new Set() });
+      const check = assessDecider({ grant, userId: actor.userId, request: { entityType: r.entityType, requestedBy: r.requestedBy, subjectUserId: r.subjectUserId, employeeId: r.employeeId, branchId: r.branchId, coSubjectEmployeeIds: r.coSubjectEmployeeIds ?? null, coSubjectUserIds: r.coSubjectUserIds ?? null }, stepActors: current?.actors.map((a) => ({ userId: a.userId, viaDelegationOf: a.viaDelegationOf, onBehalfOfUserId: a.onBehalfOfUserId, resolutionPath: a.resolutionPath, decision: a.decision })) ?? [], delegators: delegatorsByType.get(r.entityType) ?? new Set(), priorApprovers: approversOfEarlierLevels(mySteps, r.currentStep) });
       const levelOpen = pending && current?.status === 'PENDING';
       const canDecide = levelOpen && check.ok && !check.alreadyDecided;
       const isOwner = grant.roleKey === 'owner';
@@ -92,8 +92,9 @@ export async function hydrateRequests(trx: Trx, actor: Actor, grant: MembershipG
         canDecide,
         canCancel: pending && canCancel(grant, actor.userId, r),
         canReassign: pending && (hasPermission(grant, 'approval.manage') || isOwner) && !check.branchBlocked && (isOwner || !involved),
-        canBypass: pending && canBypass(grant, actor.userId, r),
-        canRequestInfo: levelOpen && !!check.via && check.sodBlocked === null && !(check.override && check.branchBlocked),
+        // four-eyes (review O3): an exception approval would make somebody who approved a level the approver of another
+        canBypass: pending && canBypass(grant, actor.userId, r) && (isOwner || !breaksFourEyes(mySteps, actor.userId, mySteps.filter((s) => s.status === 'PENDING').map((s) => s.stepNo))),
+        canRequestInfo: levelOpen && !!check.via && check.sodBlocked === null && !check.fourEyesBlocked && !(check.override && check.branchBlocked),
         canAnswerInfo: pending && !!r.infoRequestedAt && (r.requestedBy === actor.userId || isPrimarySubject(grant, actor.userId, r)),
         actingAsDelegateOf: check.via === 'delegate' ? check.delegateOf : null,
         decideVia: canDecide ? decideViaOf(check) : null,

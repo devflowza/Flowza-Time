@@ -49,7 +49,10 @@
       "override": "You are not seated on this level: your decision is recorded as an organisation-wide override.",
       "comment": "Comment",
       "commentPlaceholder": "Visible to the employee",
-      "commentRequired": "A comment is required when rejecting."
+      "commentRequired": "A comment is required when rejecting.",
+      "bulkSeats_one": "{{count}} of these requests needs several approvals on its level: choose whose seat your decision fills.",
+      "bulkSeats_other": "{{count}} of these requests need several approvals on their level: choose whose seat your decision fills for each.",
+      "decidingForRow": "Deciding for — {{name}}, {{date}}"
     },
     "done": { "approved": "Regularisation approved", "advanced": "Approved on this level — the next level decides now", "rejected": "Regularisation rejected" },
     "bulk": {

@@ -155,6 +155,32 @@ describe('TeamPage', () => {
     });
   });
 
+  describe('5-P1-6 opened from an attendance notice about a report', () => {
+    const REPORT = 'e0000000-0000-4000-8000-000000000005';
+    const day = new Date(Date.now() - 3 * 86_400_000).toISOString().slice(0, 10);
+    const rows = (q: Record<string, unknown> | undefined) => page([{ employeeId: REPORT, employeeNumber: 'E005', employeeName: 'Salma', branchId: 'b1', departmentId: null, relation: 'primary', records: [daily({ employeeId: REPORT, attendanceDate: String(q?.['from']) })] }], 1, 1, 50);
+
+    it('5-P1-6 honours employeeId and date: the Day view of that date, filtered to the report', async () => {
+      mockTeam({ '/orgs/org-1/team/summary': { data: teamSummary([teamMember({ employeeId: REPORT, employeeName: 'Salma' })]) }, '/orgs/org-1/team/attendance': rows });
+      renderWithProviders(<TeamPage />, { route: `/team?tab=attendance&employeeId=${REPORT}&date=${day}` });
+      expect(await screen.findByTestId('team-day-row')).toHaveTextContent('Salma');
+      expect(screen.getByRole('button', { name: 'Day' })).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByLabelText('Date')).toHaveValue(day);
+      const call = apiMock.get.mock.calls.find((c) => c[0] === '/orgs/org-1/team/attendance');
+      expect(call?.[1]).toMatchObject({ from: day, to: day, employeeId: REPORT });
+      expect(screen.queryByTestId('team-att-not-report')).not.toBeInTheDocument();
+    });
+
+    it('5-P1-6 an employee who is not a direct report is not applied: the whole team, with a note — never an error page', async () => {
+      mockTeam({ '/orgs/org-1/team/summary': { data: teamSummary([teamMember({ employeeId: REPORT, employeeName: 'Salma' })]) }, '/orgs/org-1/team/attendance': rows });
+      renderWithProviders(<TeamPage />, { route: `/team?tab=attendance&employeeId=e0000000-0000-4000-8000-000000000099&date=${day}` });
+      expect(await screen.findByTestId('team-att-not-report')).toHaveTextContent('not one of your direct reports');
+      await screen.findByTestId('team-day-row');
+      const calls = apiMock.get.mock.calls.filter((c) => c[0] === '/orgs/org-1/team/attendance');
+      expect(calls.every((c) => !(c[1] as Record<string, unknown>)['employeeId'])).toBe(true);
+    });
+  });
+
   describe('Leave', () => {
     it('hides the upcoming-leave card when nothing is coming (B-62) and links the pending requests to Approvals', async () => {
       mockTeam({ '/orgs/org-1/team/leave': { data: { from: '2026-09-01', to: '2026-09-30', today: '2026-09-28', entries: [teamLeave()], upcoming: [], pendingForMe: 2 } } });

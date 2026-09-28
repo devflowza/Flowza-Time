@@ -5,6 +5,7 @@ import { fmtMinutes, fmtNumber } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import type { DashboardSettings } from './theme';
 import { deltaVsLastWeek, pct, sparkValues, visibleTeamWidgets, type DashboardViewer, type TrendKey, type TrendPoint } from './model';
+import { useWaitingForYou, waitingBreakdown } from '@/features/team/waiting';
 import { KpiTile, type KpiDelta, type KpiTileProps } from './widgets/kpi-tile';
 import { TrendCard } from './widgets/trend-card';
 import { TodayCard } from './widgets/today-card';
@@ -45,6 +46,9 @@ type TileKey = 'employees' | 'present' | 'absent' | 'onLeave' | 'late' | 'earlyD
 /** Every KPI the layouts can show, computed from the summary and the trend series. */
 function useTiles(d: DashboardData): Record<TileKey, KpiTileProps> {
   const { t } = useTranslation('dashboard');
+  // THE "waiting for you" number (review P2-3): the chip's, the sidebar badge's and the widget's figure; the summary's own
+  // count (the approvals half) only for a member the badge query does not run for — for whom the reasons half is empty
+  const waiting = useWaitingForYou();
   const s = d.summary;
   const loading = d.summaryLoading && !s;
   const employees = s?.employees ?? 0;
@@ -70,8 +74,10 @@ function useTiles(d: DashboardData): Record<TileKey, KpiTileProps> {
     devicesOnline: { label: t('kpi.devicesOnline'), value: n(s?.devicesOnline), icon: Cpu, tone: 'success', loading, percent: percent(s?.devicesOnline, devices), hint: ofDevices(s?.devicesOnline), to: d.can('device.view') ? '/devices' : undefined },
     devicesOffline: { label: t('kpi.devicesOffline'), value: n(s?.devicesOffline), icon: WifiOff, tone: s && s.devicesOffline > 0 ? 'danger' : 'neutral', loading, percent: percent(s?.devicesOffline, devices), hint: ofDevices(s?.devicesOffline), to: d.can('device.view') ? '/devices' : undefined },
     syncFailures: { label: t('kpi.syncFailures'), value: n(s?.syncFailures24h), icon: AlertTriangle, tone: s && s.syncFailures24h > 0 ? 'danger' : 'neutral', loading, to: d.can('device.view') ? '/sync' : undefined },
-    // the caller's own queue (review P2-11): every member reaches /approvals
-    pendingApprovals: { label: t('kpi.pendingApprovals'), value: n(s?.pendingApprovals), icon: ClipboardCheck, tone: 'info', loading, to: '/approvals' },
+    // the caller's own queue (review P2-11): every member reaches /approvals — or their team queue (the chip's link)
+    pendingApprovals: waiting.enabled && waiting.loaded
+      ? { label: t('kpi.pendingApprovals'), value: n(waiting.total), icon: ClipboardCheck, tone: 'info', loading: false, hint: waitingBreakdown(t, waiting) || undefined, to: waiting.to }
+      : { label: t('kpi.pendingApprovals'), value: n(s?.pendingApprovals), icon: ClipboardCheck, tone: 'info', loading, to: '/approvals' },
     attendanceRate: { label: t('kpi.attendanceRate'), value: s ? `${pct(s.presentToday, employees)}%` : '—', icon: Gauge, tone: 'present', loading, hint: s ? `${fmtNumber(s.presentToday)} / ${fmtNumber(employees)} ${t('kpi.ofEmployees')}` : undefined, delta: delta('present', true), spark: spark('present') },
   };
 }

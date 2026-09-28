@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { attendanceSettingsSchema, DEFAULT_ATTENDANCE_SETTINGS, organizationSettingsSchema, resolveAttendanceSettings } from './organizations.js';
+import { attendanceSettingsSchema, DEFAULT_ATTENDANCE_SETTINGS, inviteMemberSchema, organizationSettingsSchema, resolveAttendanceSettings } from './organizations.js';
+import { portalAccessInviteSchema, validateInvitationSchema } from './dto/members.js';
 
 /**
  * `organization_settings.attendance` (HR portal Prompt 3). The API stores the whole group (`PUT /settings/attendance`)
@@ -92,5 +93,25 @@ describe('attendance settings', () => {
     expect(salvaged.nonWorkingDay.action).toBe('overtime');
     expect(salvaged.processingDelaySeconds).toBe(7);
     expect(salvaged.unexcused).toEqual(DEFAULT_ATTENDANCE_SETTINGS.unexcused);
+  });
+});
+
+describe('invitations (HR portal Prompt 5 review)', () => {
+  const role = '10000000-0000-0000-0000-000000000008';
+  it('5-P0-1 an invitation has no every-branch default: left out, the API applies the caller\'s own scope', () => {
+    expect(inviteMemberSchema.parse({ email: 'a@b.co', roleId: role })).toEqual({ email: 'a@b.co', roleId: role, branchIds: [] });
+    expect(inviteMemberSchema.parse({ email: 'a@b.co', roleId: role, allBranches: true }).allBranches).toBe(true);
+    // an explicit "some branches" still needs one
+    expect(inviteMemberSchema.safeParse({ email: 'a@b.co', roleId: role, allBranches: false }).success).toBe(false);
+    expect(inviteMemberSchema.safeParse({ email: 'a@b.co', roleId: role, allBranches: false, branchIds: ['b0000000-0000-4000-8000-000000000001'] }).success).toBe(true);
+  });
+  it('5-P0-2 a portal invitation carries its address explicitly', () => {
+    expect(portalAccessInviteSchema.safeParse({}).success).toBe(false);
+    expect(portalAccessInviteSchema.safeParse({ email: 'a@b.co' }).success).toBe(true);
+  });
+  it('5-P2-7 any token string reaches the lookup (the API answers 404 for malformed and unknown alike)', () => {
+    expect(validateInvitationSchema.safeParse({ token: 'short' }).success).toBe(true);
+    expect(validateInvitationSchema.safeParse({ token: '' }).success).toBe(false);
+    expect(validateInvitationSchema.safeParse({}).success).toBe(false);
   });
 });

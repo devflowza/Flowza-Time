@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
-import { APPROVAL_SEAT_CHOICE_MESSAGE, approvalContextFacts, type ApprovalBulkDecideItemDto, type ApprovalBulkDecideResultDto, type ApprovalDecideVia, type ApprovalDecision, type ApprovalEntity, type ApprovalEscalationTarget, type ApprovalRequestStatus, type ApprovalStepMode, type ApproverType, type DomainEventType, type Permission } from '@flowza/contracts';
+import { APPROVAL_SEAT_CHOICE_MESSAGE, SYSTEM_ROLE_IDS, approvalContextFacts, type ApprovalBulkDecideItemDto, type ApprovalBulkDecideResultDto, type ApprovalDecideVia, type ApprovalDecision, type ApprovalEntity, type ApprovalEscalationTarget, type ApprovalRequestStatus, type ApprovalStepMode, type ApproverType, type DomainEventType, type Permission } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
-import { collapseSeats, escalationDueAt, evaluateLevel, isExtraHandRow, pendingSeats, requiredAfterReassign, resolveStepActors, seatMustBeNamed, seatOfRow, selectWorkflow, type ApprovalStepSpec, type MembershipGrant, type ResolvedActor } from '@flowza/domain';
+import { approversOfEarlierLevels, breaksFourEyes, collapseSeats, escalationDueAt, evaluateLevel, isExtraHandRow, pendingSeats, requiredAfterReassign, resolveStepActors, seatMustBeNamed, seatOfRow, selectWorkflow, type ApprovalStepSpec, type MembershipGrant, type ResolvedActor } from '@flowza/domain';
 import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { hasPermission, requireMembership } from '../../lib/authorize.js';
@@ -106,6 +106,14 @@ export interface DeciderAssessment {
   override: boolean;
   /** The caller's seat on this level is already decided (by them, their delegate or an override): a repeat is a no-op. */
   alreadyDecided: boolean;
+  /**
+   * Four-eyes (HR portal Prompt 5 review, O3): the caller already APPROVED an earlier level of this request, directly or as a
+   * delegate — one person approves at most one level, so they may not decide this one (the level falls through to its other
+   * approvers). Never set for the owner, who keeps a logged override (`fourEyesOwnerBypass`).
+   */
+  fourEyesBlocked: boolean;
+  /** The owner decides a level after one they approved themselves: allowed, recorded as `four_eyes_owner_bypass`. */
+  fourEyesOwnerBypass: boolean;
 }
 
 /** What segregation of duties needs to know about who a request is about. */
@@ -151,6 +159,8 @@ export function assessDecider(params: {
   stepActors: readonly ActorRowLite[];
   /** Approvers who delegate to the caller today (entity type already applied). */
   delegators: ReadonlySet<string>;
+  /** Who approved an earlier level of the request (`approversOfEarlierLevels`) — the four-eyes rule. Absent = nobody. */
+  priorApprovers?: ReadonlySet<string>;
 }): DeciderAssessment {
   const { grant, userId, request } = params;
   const rows = params.stepActors;
@@ -184,8 +194,12 @@ export function assessDecider(params: {
   let ownerBypass = false;
   if (isRequestSubject(grant, userId, request)) { if (isOwner) ownerBypass = true; else sodBlocked = 'subject'; }
   else if (request.requestedBy === userId && via !== 'actor' && via !== 'escalated') { if (isOwner) ownerBypass = true; else sodBlocked = 'requester'; }
+  // four-eyes (review O3): one person approves at most one level of a request — the owner keeps a logged override
+  const priorApprover = !!params.priorApprovers?.has(userId);
+  const fourEyesBlocked = priorApprover && !isOwner;
+  const fourEyesOwnerBypass = priorApprover && isOwner;
   const override = via === 'permission' || via === 'owner';
-  return { ok: via !== null && sodBlocked === null && !(override && branchBlocked), via, delegateOf, sodBlocked, ownerBypass, branchBlocked, override, alreadyDecided };
+  return { ok: via !== null && sodBlocked === null && !fourEyesBlocked && !(override && branchBlocked), via, delegateOf, sodBlocked, ownerBypass, branchBlocked, override, alreadyDecided, fourEyesBlocked, fourEyesOwnerBypass };
 }
 
 /** How the UI names the caller's route to a decision. */
@@ -298,6 +312,15 @@ async function recordOwnerBypass(t: Trx, actor: Actor, orgId: string, req: { id:
   await audit(t, actor, orgId, 'approval.sod_owner_bypass', 'approval_request', { entityId: req.id, branchId: req.branchId, newValue: { ...detail, entityType: req.entityType, entityId: req.entityId } });
 }
 
+/** The refusal of a decision by somebody who approved an earlier level of the request (four-eyes, review O3). */
+export const FOUR_EYES_MESSAGE = 'You already approved an earlier level of this request: another approver must decide this one (one person approves at most one level).';
+
+/** The owner decided a level after one they approved themselves (four-eyes, review O3): allowed for the owner only, recorded. */
+async function recordFourEyesOwnerBypass(t: Trx, actor: Actor, orgId: string, req: { id: string; branchId: string | null; entityType: ApprovalEntity; entityId: string }, detail: Record<string, unknown>): Promise<void> {
+  await recordEvent(t, orgId, req.id, 'four_eyes_owner_bypass', actor.userId, detail);
+  await audit(t, actor, orgId, 'approval.four_eyes_owner_bypass', 'approval_request', { entityId: req.id, branchId: req.branchId, newValue: { ...detail, entityType: req.entityType, entityId: req.entityId } });
+}
+
 /** Who hears about a final decision: the requester and the subject, never the decider, and not the subject when the entity's hook tells them itself. */
 function decisionRecipients(req: { entityType: ApprovalEntity; requestedBy: string | null; subjectUserId: string | null }, actorUserId: string): string[] {
   const informedByHook = hookFor(req.entityType)?.notifiesSubject ? req.subjectUserId : null;
@@ -346,12 +369,86 @@ export function assertNotSystemRejected(outcome: { requestId: string; systemReje
   throw new AppError('INVALID_STATE', `This request can no longer be approved and was rejected automatically: ${outcome.systemRejected.reason}`, { details: { reason: 'SYSTEM_REJECTED', systemReason: outcome.systemRejected.reason, requestId: outcome.requestId, status: 'REJECTED' } });
 }
 
+/** The request facts the four-eyes re-resolution needs (a RequestRow carries them all). */
+type ActivatedRequest = {
+  id: string; entityType: ApprovalEntity; entityId: string; employeeId: string | null; requestedBy: string | null;
+  workflowId?: string | null; branchId?: string | null; coSubjectEmployeeIds?: string[] | null; coSubjectUserIds?: string[] | null;
+};
+
+/** The comment on a seat four-eyes took away when its level opened. */
+const FOUR_EYES_SKIPPED = 'approved an earlier level of this request (four-eyes): the level passes to its other approvers';
+
+/** The level's configured spec: the workflow's own (chain level included), else what the level row stored at submit. */
+async function levelSpecOf(t: Trx, req: ActivatedRequest, step: LoadedStep): Promise<ApprovalStepSpec> {
+  const wf = req.workflowId ? await t.selectFrom('approvalWorkflows').select('steps').where('id', '=', req.workflowId).executeTakeFirst() : undefined;
+  const configured = wf ? parseWorkflowSteps(wf.steps)[step.stepNo - 1] : undefined;
+  if (configured && configured.approverType === step.approverType) return configured;
+  return {
+    order: step.stepNo, approverType: step.approverType as ApproverType, mode: step.mode as ApprovalStepMode,
+    roleId: step.approverRoleId ?? undefined, userId: step.approverType === 'USER' ? step.approverUserId ?? undefined : undefined, permission: step.permissionKey ?? undefined,
+    requiredCount: step.requiredCount ?? undefined, chainLevel: configured?.chainLevel,
+  };
+}
+
+/**
+ * Four-eyes when a level opens (HR portal Prompt 5 review, O3): one person approves at most ONE level of a request, directly or
+ * as a delegate. Whoever approved an earlier level is dropped from this level's seats — with anybody acting in their seat,
+ * exactly like the subject is dropped at submission — and the level falls through to its other approvers. When nobody is left,
+ * the level is resolved again with those people excluded, so it takes the next rung of the resolver's ladder (the secondary
+ * manager, the next manager in the line, the HR admins, finally the owner — kept even if they approved earlier, the one
+ * logged exception). A QUORUM never asks for more approvals than the seats left. Everything is on the timeline.
+ */
+async function applyFourEyes(t: Trx, orgId: string, req: ActivatedRequest, next: LoadedStep, actor: { userId: string | null }): Promise<void> {
+  const prior = new Set((await t.selectFrom('approvalStepActors as a').innerJoin('approvalSteps as s', 's.id', 'a.stepId').select('a.userId')
+    .where('s.organizationId', '=', orgId).where('s.requestId', '=', req.id).where('s.stepNo', '<', next.stepNo).where('a.decision', '=', 'APPROVED').execute()).map((r) => r.userId));
+  if (!prior.size) return;
+  const pending = next.actors.filter((a) => a.decision === 'PENDING');
+  const drop = pending.filter((a) => prior.has(a.userId) || (!!a.viaDelegationOf && prior.has(a.viaDelegationOf)));
+  if (!drop.length) return;
+  const remaining = pending.filter((a) => !drop.includes(a) && !isExtraHand(a));
+  let fallback: ReturnType<typeof resolveStepActors> | null = null;
+  if (remaining.length === 0) {
+    // nobody left on the level: the resolver's next rung, with the earlier approvers excluded like the subject
+    const today = await approvalToday(t, orgId);
+    const ctx = await buildResolutionContext(t, orgId, { employeeId: req.employeeId, branchId: req.branchId ?? null, requestedBy: req.requestedBy, entityType: req.entityType, viewPermission: viewPermissionFor(req.entityType), today, coSubjectEmployeeIds: req.coSubjectEmployeeIds ?? [], coSubjectUserIds: req.coSubjectUserIds ?? [] });
+    fallback = resolveStepActors(await levelSpecOf(t, req, next), { ...ctx, priorApproverUserIds: [...prior] });
+    if (fallback.unresolved) {
+      // no owner at all (cannot happen in a live organisation): keep the seats — an organisation-wide approver can still decide
+      await recordEvent(t, orgId, req.id, 'four_eyes_unresolved', actor.userId, { stepNo: next.stepNo, excluded: [...prior].sort(), reason: fallback.reason });
+      return;
+    }
+  }
+  const reseated = new Set((fallback?.actors ?? []).map((a) => a.userId));
+  const dropIds = drop.filter((a) => !reseated.has(a.userId)).map((a) => a.id);
+  if (dropIds.length) await t.updateTable('approvalStepActors').set({ decision: 'SKIPPED', comment: FOUR_EYES_SKIPPED }).where('id', 'in', dropIds).execute();
+  if (fallback) {
+    for (const a of fallback.actors) {
+      const path = a.viaDelegationOf ? 'delegate' : fallback.path;
+      await t.insertInto('approvalStepActors').values({ organizationId: orgId, stepId: next.id, userId: a.userId, viaDelegationOf: a.viaDelegationOf, resolutionPath: path })
+        .onConflict((oc) => oc.columns(['stepId', 'userId']).doUpdateSet({ viaDelegationOf: a.viaDelegationOf, resolutionPath: path, decision: 'PENDING', decidedAt: null, comment: null, onBehalfOfUserId: null })).execute();
+    }
+  }
+  const seatCount = fallback ? fallback.seatCount : new Set(remaining.map(seatOfRow)).size;
+  const requiredCount = next.mode === 'QUORUM' && (next.requiredCount ?? 1) > seatCount ? Math.max(1, seatCount) : next.requiredCount;
+  const seats = fallback ? [...new Set(fallback.actors.map((a) => a.viaDelegationOf ?? a.userId))] : [];
+  await t.updateTable('approvalSteps').set({
+    requiredCount,
+    ...(fallback ? { resolutionPath: fallback.path, resolutionReason: fallback.reason, ...(next.approverType === 'USER' ? {} : { approverUserId: seats.length === 1 ? seats[0]! : null }) } : {}),
+  }).where('id', '=', next.id).execute();
+  await recordEvent(t, orgId, req.id, 'four_eyes_excluded', actor.userId, {
+    stepNo: next.stepNo, excluded: [...new Set(drop.map((a) => a.userId))].sort(),
+    ...(fallback ? { fellBackTo: fallback.path, seated: [...reseated].sort() } : {}),
+    ...(requiredCount !== next.requiredCount ? { requiredCount: { from: next.requiredCount, to: requiredCount } } : {}),
+  });
+}
+
 /**
  * Make `next` the current step: activation time, escalation deadline, notification of its approvers. A question the level
  * being left had open is closed with it (leave v2 review P2-3): nobody at the next level is waiting on the answer, so the
- * request drops `info_requested_at` and the entity leaves its "information requested" state through `onInfoClosed`.
+ * request drops `info_requested_at` and the entity leaves its "information requested" state through `onInfoClosed`. The
+ * four-eyes rule runs as the level opens (`applyFourEyes`): nobody who approved an earlier level keeps a seat on it.
  */
-export async function activateStep(t: Trx, orgId: string, req: { id: string; entityType: ApprovalEntity; entityId: string; employeeId: string | null; requestedBy: string | null }, next: LoadedStep, actor: { userId: string | null; requestId: string | null }, now = new Date()): Promise<void> {
+export async function activateStep(t: Trx, orgId: string, req: ActivatedRequest, next: LoadedStep, actor: { userId: string | null; requestId: string | null }, now = new Date()): Promise<void> {
   const dueAt = escalationDueAt({ escalateAfterHours: next.escalateAfterHours, escalateTo: next.escalateTo }, now);
   const left = await t.selectFrom('approvalRequests').select(['currentStep', 'infoRequestedAt']).where('id', '=', req.id).executeTakeFirst();
   await t.updateTable('approvalRequests').set({ currentStep: next.stepNo, infoRequestedAt: null }).where('id', '=', req.id).execute();
@@ -360,9 +457,11 @@ export async function activateStep(t: Trx, orgId: string, req: { id: string; ent
     await recordEvent(t, orgId, req.id, 'info_request_closed', actor.userId, { fromStepNo: left.currentStep, stepNo: next.stepNo, reason: 'level approved' });
     await hookFor(req.entityType)?.onInfoClosed?.(t, { orgId, requestId: req.id, entityId: req.entityId, fromStepNo: left.currentStep, stepNo: next.stepNo, actorUserId: actor.userId });
   }
+  await applyFourEyes(t, orgId, req, next, actor);
   await recordEvent(t, orgId, req.id, 'advanced', actor.userId, { stepNo: next.stepNo, dueAt: dueAt?.toISOString() ?? null });
   const payload = await requestPayload(t, orgId, req);
-  await emitTargeted(t, orgId, 'approval.pending', req.id, next.actors.filter((a) => a.decision === 'PENDING').map((a) => a.userId), { ...payload, stepId: next.id, stepNo: next.stepNo }, actor);
+  const waiting = (await t.selectFrom('approvalStepActors').select('userId').where('stepId', '=', next.id).where('decision', '=', 'PENDING').orderBy('createdAt').orderBy('userId').execute()).map((a) => a.userId);
+  await emitTargeted(t, orgId, 'approval.pending', req.id, waiting, { ...payload, stepId: next.id, stepNo: next.stepNo }, actor);
 }
 
 // ----- submit --------------------------------------------------------------------------------------------------------------------
@@ -447,6 +546,7 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
   const comment = input.comment ?? null;
   const explicitStep = input.stepNo !== undefined;
   let bypassed = false;
+  let fourEyesBypassed = false;
   const outcome = await systemStep(trx, orgId, async (t): Promise<DecideOutcome> => {
     const req = await lockRequest(t, orgId, requestId);
     if (req.status !== 'PENDING') throw errors.invalidState(`The request is already ${req.status}.`);
@@ -456,11 +556,13 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
     const step = steps.find((s) => s.stepNo === req.currentStep && s.status === 'PENDING');
     if (!step) throw errors.invalidState('The request has no pending step.');
     const delegators = await delegatorsOf(t, orgId, req.entityType, actor.userId);
-    const check = assessDecider({ grant, userId: actor.userId, request: { entityType: req.entityType, requestedBy: req.requestedBy, subjectUserId: req.subjectUserId, employeeId: req.employeeId, branchId: req.branchId, ...partiesOf(req) }, stepActors: step.actors, delegators });
+    const priorApprovers = approversOfEarlierLevels(steps, step.stepNo);
+    const check = assessDecider({ grant, userId: actor.userId, request: { entityType: req.entityType, requestedBy: req.requestedBy, subjectUserId: req.subjectUserId, employeeId: req.employeeId, branchId: req.branchId, ...partiesOf(req) }, stepActors: step.actors, delegators, priorApprovers });
     const base = { requestId: req.id, stepNo: step.stepNo, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId };
     if (check.sodBlocked === 'subject') throw errors.forbidden('Self-approval is not permitted: this request is about you.');
     if (check.sodBlocked === 'requester') throw errors.forbidden('You cannot approve or reject your own request; cancel it instead.');
     if (check.alreadyDecided) return { ...base, status: req.status, noop: true, terminal: false };
+    if (check.fourEyesBlocked) throw errors.forbidden(FOUR_EYES_MESSAGE);
     if (!check.via) throw errors.forbidden('You are not an approver of the current step.');
     if (check.override) {
       if (input.requireSeat) throw errors.forbidden('This link was for an approver seat you no longer hold; open the request in the app.');
@@ -495,6 +597,7 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
     const now = new Date();
     const decision = input.decision === 'APPROVE' ? 'APPROVED' : 'REJECTED';
     if (check.ownerBypass) { await recordOwnerBypass(t, actor, orgId, req, { stepNo: step.stepNo, decision }); bypassed = true; }
+    if (check.fourEyesOwnerBypass) { await recordFourEyesOwnerBypass(t, actor, orgId, req, { stepNo: step.stepNo, decision }); fourEyesBypassed = true; }
     const own = step.actors.find((a) => a.userId === actor.userId);
     let seat: string;
     let decidedRowId: string | null = null;
@@ -557,7 +660,7 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
   }
   if (!outcome.noop) {
     const action = input.decision === 'APPROVE' ? (outcome.status === 'APPROVED' ? 'approval.approved' : 'approval.step_approved') : (outcome.terminal ? 'approval.rejected' : 'approval.step_rejected');
-    const detail = { stepNo: outcome.stepNo, comment, entityType: outcome.entityType, entityId: outcome.entityId, viaEmailToken: input.viaEmailToken ?? false, via: outcome.via ?? null, onBehalfOfUserId: outcome.onBehalfOfUserId ?? null, ownerBypass: bypassed };
+    const detail = { stepNo: outcome.stepNo, comment, entityType: outcome.entityType, entityId: outcome.entityId, viaEmailToken: input.viaEmailToken ?? false, via: outcome.via ?? null, onBehalfOfUserId: outcome.onBehalfOfUserId ?? null, ownerBypass: bypassed, ...(fourEyesBypassed ? { fourEyesOwnerBypass: true } : {}) };
     await audit(trx, actor, orgId, action, 'approval_request', { entityId: requestId, branchId: outcome.branchId, newValue: detail });
     if (outcome.via === 'override' || outcome.via === 'escalated') await audit(trx, actor, orgId, 'approval.override', 'approval_request', { entityId: requestId, branchId: outcome.branchId, newValue: { ...detail, decision: input.decision } });
   }
@@ -704,8 +807,12 @@ export async function reassignRequest(deps: ApiDeps, trx: Trx, actor: Actor, org
       if (!isOwner) throw errors.forbidden('You cannot reassign a request you filed or that is about you; ask another approval manager.');
       await recordOwnerBypass(t, actor, orgId, req, { stepNo, action: 'reassign', to: input.userId });
     }
-    const member = await t.selectFrom('orgMemberships').select(['userId', 'employeeId']).where('organizationId', '=', orgId).where('userId', '=', input.userId).where('status', '=', 'active').executeTakeFirst();
+    const member = await t.selectFrom('orgMemberships').select(['userId', 'employeeId', 'roleId']).where('organizationId', '=', orgId).where('userId', '=', input.userId).where('status', '=', 'active').executeTakeFirst();
     if (!member) throw errors.validation('The new approver is not an active member of this organisation.', { userId: input.userId });
+    // four-eyes (review O3): somebody who approved an earlier level never holds a later one (the owner excepted, logged when deciding)
+    if (approversOfEarlierLevels(steps, stepNo).has(input.userId) && member.roleId !== SYSTEM_ROLE_IDS.owner) {
+      throw errors.validation('This person approved an earlier level of this request: one person approves at most one level. Reassign the level to somebody else.', { issues: [{ path: 'userId', message: 'Approved an earlier level' }] });
+    }
     if (input.userId === req.requestedBy) throw errors.validation('The person who filed the request cannot be its approver.', { issues: [{ path: 'userId', message: 'The requester' }] });
     if (input.userId === req.subjectUserId || (!!member.employeeId && member.employeeId === req.employeeId)) throw errors.validation('The person a request is about cannot be its approver.', { issues: [{ path: 'userId', message: 'The subject' }] });
     // the request's other parties (a swap's colleague — review P0-2) never approve it either
@@ -761,6 +868,12 @@ export async function bypassRequest(deps: ApiDeps, trx: Trx, actor: Actor, orgId
       await recordOwnerBypass(t, actor, orgId, req, { stepNo: req.currentStep, decision: 'APPROVED', exception: true });
     }
     const steps = await loadSteps(t, req.id);
+    // four-eyes (review O3): an exception approval completes every open level — never a second level for somebody who already
+    // approved one (the owner excepted, logged)
+    if (breaksFourEyes(steps, actor.userId, steps.filter((s) => s.status === 'PENDING').map((s) => s.stepNo))) {
+      if (grant.roleKey !== 'owner') throw errors.forbidden('You already approved a level of this request: another approver must approve it as an exception (one person approves at most one level).');
+      await recordFourEyesOwnerBypass(t, actor, orgId, req, { stepNo: req.currentStep, decision: 'APPROVED', exception: true });
+    }
     // an exception approval is still an approval: the entity may refuse it (review P2-11) — rejected by the system instead
     const blocker = await hookFor(req.entityType)?.approvalBlocker?.(deps, t, hookCtx(orgId, req, actor, reason));
     if (blocker) {
@@ -798,9 +911,10 @@ export async function requestInfo(deps: ApiDeps, trx: Trx, actor: Actor, orgId: 
     const steps = await loadSteps(t, req.id);
     const step = steps.find((s) => s.stepNo === req.currentStep && s.status === 'PENDING');
     const delegators = await delegatorsOf(t, orgId, req.entityType, actor.userId);
-    const check = assessDecider({ grant, userId: actor.userId, request: { entityType: req.entityType, requestedBy: req.requestedBy, subjectUserId: req.subjectUserId, employeeId: req.employeeId, branchId: req.branchId, ...partiesOf(req) }, stepActors: step?.actors ?? [], delegators });
+    const check = assessDecider({ grant, userId: actor.userId, request: { entityType: req.entityType, requestedBy: req.requestedBy, subjectUserId: req.subjectUserId, employeeId: req.employeeId, branchId: req.branchId, ...partiesOf(req) }, stepActors: step?.actors ?? [], delegators, priorApprovers: approversOfEarlierLevels(steps, req.currentStep) });
     if (check.sodBlocked === 'subject') throw errors.forbidden('You cannot ask for information on a request about you.');
     if (check.sodBlocked === 'requester') throw errors.forbidden('You filed this request; answer questions on it instead of asking them.');
+    if (check.fourEyesBlocked) throw errors.forbidden(FOUR_EYES_MESSAGE);
     if (!check.via || (check.override && check.branchBlocked)) throw errors.forbidden('You are not an approver of the current step.');
     if (check.ownerBypass) await recordOwnerBypass(t, actor, orgId, req, { stepNo: req.currentStep, action: 'request_info' });
     await t.updateTable('approvalRequests').set({ infoRequestedAt: new Date() }).where('id', '=', req.id).execute();

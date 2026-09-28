@@ -6,7 +6,7 @@ vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import { apiMock, grantAll, mockGet, page, renderWithProviders, resetApiMock } from '@/features/employees/test-utils';
+import { apiMock, grantAll, mockGet, page, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
 import { InviteDialog } from './invite-dialog';
 
 const branch = (id: string, name: string) => ({ id, organizationId: 'org-1', code: id.toUpperCase(), name, nameAr: null, countryCode: 'OM', city: null, address: {}, timezone: 'Asia/Muscat', latitude: null, longitude: null, geofenceRadiusM: null, contact: {}, weeklyOffDays: null, holidayCalendarId: null, status: 'active', createdAt: '2024-01-01T00:00:00Z', updatedAt: '2024-01-01T00:00:00Z' });
@@ -51,5 +51,38 @@ describe('InviteDialog', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Copy invitation link' }));
     await waitFor(() => expect(writeText).toHaveBeenCalledWith('http://localhost:3000/auth/invite?token=org-1.secret-token-value'));
     expect(screen.getByText(/never shown again/)).toBeInTheDocument();
+  });
+
+  it('5-P0-1 a branch-scoped administrator invites to their own branches: the scope starts there and every branch cannot be granted', async () => {
+    const B2 = 'b0000000-0000-4000-8000-000000000002';
+    testState.allBranches = false; testState.branchIds = [B2];
+    try {
+      mockGet({ '/orgs/org-1/roles': { data: [role] }, '/orgs/org-1/branches': page([branch(B2, 'Salalah')]), '/orgs/org-1/employees': page([]) });
+      apiMock.post.mockResolvedValue({ data: { id: 'inv1', organizationId: 'org-1', email: 'new@acme.om', roleId: role.id, allBranches: false, branchIds: [B2], invitedBy: 'u1', expiresAt: '2030-01-08T10:00:00Z', acceptedAt: null, createdAt: '2030-01-01T10:00:00Z', token: 'org-1.t' } });
+      renderWithProviders(<InviteDialog open onOpenChange={() => {}} />);
+      await screen.findByRole('dialog');
+      const all = screen.getByRole('switch', { name: /All branches/ });
+      expect(all).not.toBeChecked();
+      expect(all).toBeDisabled();
+      expect(screen.getByText('Your own access is limited to some branches: you can only give access to those branches.')).toBeInTheDocument();
+      expect(await screen.findByRole('checkbox', { name: 'Salalah' })).toBeChecked();
+      fireEvent.change(screen.getByLabelText(/^Email/), { target: { value: 'new@acme.om' } });
+      const trigger = screen.getByRole('combobox', { name: /Role/ });
+      fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+      const option = await screen.findByRole('option', { name: /HR admin/ });
+      fireEvent.pointerUp(option); fireEvent.click(option);
+      fireEvent.click(screen.getByRole('button', { name: 'Create invitation' }));
+      await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/invitations', expect.objectContaining({ email: 'new@acme.om', allBranches: false, branchIds: [B2] })));
+    } finally {
+      testState.allBranches = true; testState.branchIds = [];
+    }
+  });
+
+  it('5-P0-1 an organisation-wide administrator keeps the every-branch default', async () => {
+    renderWithProviders(<InviteDialog open onOpenChange={() => {}} />);
+    await screen.findByRole('dialog');
+    const all = screen.getByRole('switch', { name: /All branches/ });
+    expect(all).toBeChecked();
+    expect(all).toBeEnabled();
   });
 });

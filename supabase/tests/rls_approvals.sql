@@ -290,6 +290,52 @@ select pg_temp.assert_eq((select count(*) from app.approval_actionable_request_i
 select pg_temp.assert_eq((select count(*) from app.approval_inbox_summary() where organization_id = '0a000000-0000-0000-0000-000000000000' and actionable = 1 and delegated_to_me), 1, 'P2-1 ...and /me');
 rollback;
 
+-- ---------- HR portal Prompt 5 review (20260928000950): ONE definition of "waiting for you" ----------
+-- R5: REGULARISATION about e1 — manager-a seated as primary, e1's secondary manager (a…06) standing in on that seat
+--     (`secondary`, no delegation behind it: 5-P1-3); R6: LEAVE about delegate-a, seated on manager-a, whose LEAVE seats
+--     delegate-a covers today (5-P2-1); R7: LEAVE delegate-a filed about e1, seated on manager-a (5-P2-1, requester);
+-- R8: two levels — level 1 approved by assignee-a and by owner-a, level 2 seats both of them again (5-O3 four-eyes).
+begin;
+insert into public.approval_requests (id, organization_id, entity_type, entity_id, branch_id, employee_id, subject_user_id, current_step, status, requested_by) values
+  ('0a000000-0000-0000-0000-0000000005a5', '0a000000-0000-0000-0000-000000000000', 'REGULARISATION', gen_random_uuid(), '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000000e1', null, 1, 'PENDING', 'a0000000-0000-0000-0000-000000000001'),
+  ('0a000000-0000-0000-0000-0000000005a6', '0a000000-0000-0000-0000-000000000000', 'LEAVE', gen_random_uuid(), '0a000000-0000-0000-0000-00000000000b', null, 'a0000000-0000-0000-0000-000000000009', 1, 'PENDING', 'a0000000-0000-0000-0000-000000000009'),
+  ('0a000000-0000-0000-0000-0000000005a7', '0a000000-0000-0000-0000-000000000000', 'LEAVE', gen_random_uuid(), '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000000e1', null, 1, 'PENDING', 'a0000000-0000-0000-0000-000000000009'),
+  ('0a000000-0000-0000-0000-0000000005a8', '0a000000-0000-0000-0000-000000000000', 'LEAVE', gen_random_uuid(), '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000000e1', null, 2, 'PENDING', 'a0000000-0000-0000-0000-000000000003');
+insert into public.approval_steps (id, organization_id, request_id, step_no, approver_type, status, mode) values
+  ('0a000000-0000-0000-0000-0000000005b5', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005a5', 1, 'MANAGER', 'PENDING', 'ANY'),
+  ('0a000000-0000-0000-0000-0000000005b6', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005a6', 1, 'MANAGER', 'PENDING', 'ANY'),
+  ('0a000000-0000-0000-0000-0000000005b7', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005a7', 1, 'MANAGER', 'PENDING', 'ANY'),
+  ('0a000000-0000-0000-0000-0000000005b8', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005a8', 1, 'USER', 'APPROVED', 'ALL'),
+  ('0a000000-0000-0000-0000-0000000005b9', '0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005a8', 2, 'USER', 'PENDING', 'ANY');
+insert into public.approval_step_actors (organization_id, step_id, user_id, via_delegation_of, resolution_path, decision) values
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005b5', 'a0000000-0000-0000-0000-000000000005', null, 'primary', 'PENDING'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005b5', 'a0000000-0000-0000-0000-000000000006', 'a0000000-0000-0000-0000-000000000005', 'secondary', 'PENDING'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005b6', 'a0000000-0000-0000-0000-000000000005', null, 'primary', 'PENDING'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005b7', 'a0000000-0000-0000-0000-000000000005', null, 'primary', 'PENDING'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005b8', 'a0000000-0000-0000-0000-000000000008', null, 'user', 'APPROVED'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005b8', 'a0000000-0000-0000-0000-000000000001', null, 'user', 'APPROVED'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005b9', 'a0000000-0000-0000-0000-000000000008', null, 'user', 'PENDING'),
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000005b9', 'a0000000-0000-0000-0000-000000000001', null, 'user', 'PENDING');
+set local role authenticated;
+-- the secondary manager standing in: their seat counts — no delegation needed, any entity type (5-P1-3)
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000006","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from app.approval_actionable_request_ids('0a000000-0000-0000-0000-000000000000') x where x = '0a000000-0000-0000-0000-0000000005a5'), 1, '5-P1-3 a secondary manager''s stand-in seat on a regularisation is waiting for them');
+select pg_temp.assert_eq((select actionable from app.approval_inbox_summary() where organization_id = '0a000000-0000-0000-0000-000000000000'), 1, '5-P1-3 ...and /me counts it');
+-- the primary still has it too
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000005","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from app.approval_actionable_request_ids('0a000000-0000-0000-0000-000000000000') x where x = '0a000000-0000-0000-0000-0000000005a5'), 1, '5-P1-3 ...as it waits for the primary manager');
+-- a delegate never waits for their own request, nor for one they filed that they would reach only as the delegate (5-P2-1)
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000009","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from app.approval_actionable_request_ids('0a000000-0000-0000-0000-000000000000') x where x in ('0a000000-0000-0000-0000-0000000005a6', '0a000000-0000-0000-0000-0000000005a7')), 0, '5-P2-1 a delegate''s own request (subject or requester) is not waiting for them');
+select pg_temp.assert_eq((select count(*) from app.approval_actionable_request_ids('0a000000-0000-0000-0000-000000000000') x where x = '0a000000-0000-0000-0000-0000000002a1'), 1, '5-P2-1 ...the delegator''s other seats still are');
+-- four-eyes: a level after one the caller approved is not waiting for them; the owner keeps the logged override (5-O3)
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000008","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from app.approval_actionable_request_ids('0a000000-0000-0000-0000-000000000000') x where x = '0a000000-0000-0000-0000-0000000005a8'), 0, '5-O3 a level after one the caller approved is not waiting for them');
+select pg_temp.assert_eq((select count(*) from app.approval_actionable_request_ids('0a000000-0000-0000-0000-000000000000') x where x = '0a000000-0000-0000-0000-0000000002a1'), 1, '5-O3 ...their other seats are');
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from app.approval_actionable_request_ids('0a000000-0000-0000-0000-000000000000') x where x = '0a000000-0000-0000-0000-0000000005a8'), 1, '5-O3 the owner keeps the override (logged when they decide)');
+rollback;
+
 -- ---------- P1-5: indexed per-row assignee check, no array of every assignment ----------
 select pg_temp.assert_eq((select count(*) from pg_policies where schemaname = 'public' and tablename like 'approval%' and (qual ~ 'approval_assigned_request_ids' or coalesce(with_check, '') ~ 'approval_assigned_request_ids')), 0, 'P1-5 no approval read rule builds the array of every assignment');
 select pg_temp.assert_eq((select count(*) from pg_policies where schemaname = 'public' and tablename = 'approval_requests' and policyname = 'approval_requests_select' and qual ~ 'approval_request_assigned\(id, organization_id, entity_type\)'), 1, 'P1-5 the assignee branch is a per-row check on the request''s own ids');

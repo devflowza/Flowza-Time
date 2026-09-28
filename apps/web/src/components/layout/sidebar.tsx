@@ -72,11 +72,11 @@ export function Sidebar() {
   // empty page.
   const isManager = hasDirectReports && (can('employee.view_team') || can('employee.view'));
   // HR portal Prompt 5: the team workspace also opens with a team attendance / leave key (always with direct reports), and
-  // the Approvals item carries the count waiting for the member — /me.approvals.actionable, refreshed by the badge query
-  // (team/pending-counts, whose approvals half is the same engine definition) the topbar chip already runs
+  // the Approvals item carries THE "waiting for you" number (review P2-3: the same figure as the topbar chip, the dashboard
+  // KPI and widget — team/pending-counts.total), /me.approvals.actionable until the badge query has answered
   const team = useTeamAccess();
   const counts = usePendingCounts(team.pendingChip);
-  const approvalsBadge = counts.data?.approvals ?? approvalsSignal?.actionable ?? 0;
+  const approvalsBadge = counts.data?.total ?? approvalsSignal?.actionable ?? 0;
 
   const sections: NavSection[] = [
     { items: [{ to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, permissions: ['dashboard.view'] }] },

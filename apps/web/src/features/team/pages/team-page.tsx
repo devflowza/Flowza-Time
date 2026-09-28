@@ -17,11 +17,14 @@ import { DelegationTab } from '../components/delegation-tab';
 
 const TABS = ['today', 'attendance', 'leave', 'approvals', 'delegation'] as const;
 type Tab = (typeof TABS)[number];
+const ID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
  * /team?tab=today|attendance|leave|approvals|delegation — the line manager's workspace (HR portal Prompt 5, Finance B-61 …
  * B-66): today's board of the direct reports, their attendance through the HR register's month grid, their leave, what waits
- * for the manager, and delegation. Each tab asks the API with its own key (attendance / leave view_team or the organisation-
+ * for the manager, and delegation. `tab=attendance&employeeId=<report>&date=<yyyy-MM-dd>` opens one report's day — where an
+ * attendance notice about a report takes a line manager (review P1-6). Each tab asks the API with its own key (attendance / leave view_team or the organisation-
  * wide one); the API re-checks the reporting relationship and RLS applies the team predicate again.
  */
 export default function TeamPage() {
@@ -57,7 +60,7 @@ export default function TeamPage() {
           ))}
         </TabsList>
         <TabsContent value="today">{tab === 'today' ? <TodayTab enabled={access.attendance} onOpenRecord={setRecordId} onPending={() => setTab('approvals')} /> : null}</TabsContent>
-        <TabsContent value="attendance">{tab === 'attendance' ? <AttendanceTab canCorrect={access.correct} onOpenRecord={setRecordId} /> : null}</TabsContent>
+        <TabsContent value="attendance">{tab === 'attendance' ? <AttendanceTab key={`${params.get('employeeId') ?? ''}:${params.get('date') ?? ''}`} canCorrect={access.correct} onOpenRecord={setRecordId} initialEmployeeId={ID.test(params.get('employeeId') ?? '') ? params.get('employeeId') : null} initialDate={ISO_DATE.test(params.get('date') ?? '') ? params.get('date') : null} /> : null}</TabsContent>
         <TabsContent value="leave">{tab === 'leave' ? <LeaveTab onOpenApprovals={() => setTab('approvals')} /> : null}</TabsContent>
         <TabsContent value="approvals">{tab === 'approvals' ? <ApprovalsTab /> : null}</TabsContent>
         <TabsContent value="delegation">{tab === 'delegation' ? <DelegationTab /> : null}</TabsContent>

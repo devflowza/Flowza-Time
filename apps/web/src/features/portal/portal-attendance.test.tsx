@@ -414,6 +414,18 @@ describe('MyAttendancePage — last 30 days (Prompt 4)', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`/orgs/${ORG}/me/attendance/notes`, { date: ago(3), category: 'absence_reason', note: 'Hospital visit' }));
   });
 
+  it('5-P1-6 a notice about the employee\'s own day opens that day: /my/attendance?date=… loads its month and its record', async () => {
+    const target = ago(40);
+    const days = [rec('r40', target, 'ABSENT')];
+    mockGet({
+      [`/orgs/${ORG}/me/attendance`]: (q: Record<string, unknown> | undefined) => ({ data: { month: String(q?.month), days: days.filter((d) => d.attendanceDate.startsWith(String(q?.month))), totals, leaveByDate: {}, holidaysByDate: {} } }),
+      [`/orgs/${ORG}/me/attendance/notes`]: { data: [] },
+    });
+    renderWithProviders(<MyAttendancePage />, { route: `/my/attendance?date=${target}` });
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith(`/orgs/${ORG}/me/attendance`, { month: target.slice(0, 7) }));
+    await waitFor(() => expect(apiMock.get.mock.calls.some((c) => c[0] === `/orgs/${ORG}/attendance/records/r40`)).toBe(true));
+  });
+
   it('marks nothing as required when the organisation requires no reason', async () => {
     const days = [rec('r1', ago(1), 'ABSENT')];
     mockGet({

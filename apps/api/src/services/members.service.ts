@@ -1,19 +1,20 @@
 import { type z } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
-import { INVITATION_EMAIL_JOB_TYPE, SYSTEM_ROLE_IDS, type updateMemberSchema, type InviteMemberInput, type InvitationDto, type InvitationPreviewDto, type MemberDto, type MemberListQuery } from '@flowza/contracts';
+import { INVITATION_EMAIL_JOB_TYPE, SYSTEM_ROLE_IDS, uuidSchema, type updateMemberSchema, type InviteMemberInput, type InvitationDto, type InvitationPreviewDto, type MemberDto, type MemberListQuery } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { errors, randomToken, sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
-import { requireBranchAccess, requirePermission } from '../lib/authorize.js';
-import { type Actor, runUser, runSystem, audit, diffObjects, withSystemScope } from '../lib/service.js';
+import { requirePermission } from '../lib/authorize.js';
+import { type Actor, runUser, runSystem, audit, diffObjects, withSystemScope, PLATFORM_SCOPE_ORG } from '../lib/service.js';
 import { likeContains, pageOf, resolveSort, toCount } from '../lib/pagination.js';
 import { groupBy } from '../lib/mappers.js';
 import { toInvitationDto, toMemberDto, type MemberRow } from './members.mappers.js';
 import { revokeSessions } from '../lib/sessions.js';
 import { enqueueJob } from '../lib/jobs.js';
 import { hasLeft } from './offboarding.js';
+import { assertMayManageMember, defaultInviteScope, membershipBranchIds, type ManagedTarget } from './member-authority.js';
 
 export type UpdateMemberInput = z.infer<typeof updateMemberSchema>;
 const INVITATION_TTL_DAYS = 7;
@@ -70,19 +71,13 @@ async function assertRoleUsable(trx: Trx, orgId: string, roleId: string): Promis
 }
 
 /**
- * No privilege escalation through role assignment: an actor may only hand out a role whose permissions they hold
- * themselves (same rule the DB enforces for custom role definitions). Owners hold every permission.
+ * The branches exist in the organisation — a referential check, read in the organisation's system scope: a user admin need
+ * not hold `branch.view`, and whether the caller may hand the branches out is THE member-management rule's question (its
+ * branch-scope clause runs first and answers 403), never a side effect of what the caller can read.
  */
-async function assertRoleGrantable(trx: Trx, roleId: string, grant: MembershipGrant): Promise<void> {
-  if (grant.roleKey === 'owner') return;
-  const perms = (await trx.selectFrom('rolePermissions').select('permissionKey').where('roleId', '=', roleId).execute()).map((p) => p.permissionKey);
-  const missing = perms.filter((p) => !(grant.permissions as readonly string[]).includes(p));
-  if (missing.length) throw errors.forbidden(`You cannot assign a role with permissions you do not hold: ${missing.join(', ')}.`);
-}
-
 async function assertBranchesInOrg(trx: Trx, orgId: string, branchIds: string[]): Promise<void> {
   if (branchIds.length === 0) return;
-  const found = await trx.selectFrom('branches').select('id').where('organizationId', '=', orgId).where('id', 'in', branchIds).execute();
+  const found = await withSystemScope(trx, orgId, (t) => t.selectFrom('branches').select('id').where('organizationId', '=', orgId).where('id', 'in', branchIds).execute());
   if (found.length !== new Set(branchIds).size) throw errors.validation('One or more branches do not belong to this organisation.', { issues: [{ path: 'branchIds', message: 'Unknown branch' }] });
 }
 
@@ -140,7 +135,8 @@ export function parseToken(token: string): { orgId: string; hash: string } | nul
   const idx = token.indexOf('.');
   if (idx <= 0) return null;
   const orgId = token.slice(0, idx); const secret = token.slice(idx + 1);
-  if (!/^[0-9a-f-]{36}$/i.test(orgId) || secret.length < 16) return null;
+  // the organisation part must be a real uuid (review P2-7a: 36 dashes passed a character-class check and failed the cast)
+  if (!uuidSchema.safeParse(orgId).success || secret.length < 16) return null;
   return { orgId, hash: sha256Hex(secret) };
 }
 /** Constant-time comparison of two hex digests (AGENTS.md: invitation hashes are compared with timingSafeEqual). */
@@ -161,6 +157,21 @@ export function findByTokenHash<T extends { tokenHash: string; deliveryTokenHash
   return found;
 }
 
+const INVITATION_LOOKUP_COLUMNS = ['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'employeeId', 'expiresAt', 'acceptedAt', 'acceptedBy', 'revokedAt', 'tokenHash', 'deliveryTokenHash'] as const;
+
+/**
+ * The invitation of `orgId` a token hash belongs to (review P1-2): an INDEXED equality lookup on the two hash columns — both
+ * carry a unique index (`invitations_token_hash_key`, `invitations_delivery_token_hash_key`) — never a window of the newest
+ * rows, so an old open invitation stays reachable however many newer ones the organisation has. The row found is then
+ * confirmed with a constant-time comparison (AGENTS.md). What the database compares is a sha256 of a 256-bit secret, never
+ * the secret itself. Accepted / revoked rows are found too, so a re-used token reports why it no longer works.
+ */
+async function invitationByTokenHash(trx: Trx, orgId: string, hash: string) {
+  const rows = await trx.selectFrom('invitations').select(INVITATION_LOOKUP_COLUMNS)
+    .where('organizationId', '=', orgId).where((eb) => eb.or([eb('tokenHash', '=', hash), eb('deliveryTokenHash', '=', hash)])).limit(2).execute();
+  return findByTokenHash(rows, hash);
+}
+
 /** `a***@e***.com`: enough for the invitee to recognise their address, not enough to harvest it (B-70). */
 export function maskEmail(email: string): string {
   const [local = '', domain = ''] = email.split('@');
@@ -178,12 +189,12 @@ export function maskEmail(email: string): string {
  */
 export async function validateInvitation(deps: ApiDeps, requestId: string, token: string): Promise<InvitationPreviewDto> {
   const parsed = parseToken(token);
-  if (!parsed) throw errors.notFound('Invitation');
-  return runSystem(deps.db, parsed.orgId, requestId, async (trx) => {
-    const candidates = await trx.selectFrom('invitations').select(['id', 'email', 'employeeId', 'expiresAt', 'acceptedAt', 'revokedAt', 'tokenHash', 'deliveryTokenHash'])
-      .where('organizationId', '=', parsed.orgId).orderBy('createdAt', 'desc').limit(1000).execute();
-    const inv = findByTokenHash(candidates, parsed.hash);
-    if (!inv) throw errors.notFound('Invitation');
+  // review P2-7: a malformed token and an unknown one answer the same 404 after the same work — one indexed lookup in a
+  // system context (a malformed token is looked up under the nil organisation, where no invitation exists)
+  const lookup = parsed ?? { orgId: PLATFORM_SCOPE_ORG, hash: sha256Hex(token) };
+  return runSystem(deps.db, lookup.orgId, requestId, async (trx) => {
+    const inv = await invitationByTokenHash(trx, lookup.orgId, lookup.hash);
+    if (!inv || !parsed) throw errors.notFound('Invitation');
     const org = await trx.selectFrom('organizations').select('displayName').where('id', '=', parsed.orgId).executeTakeFirst();
     const employee = inv.employeeId ? await trx.selectFrom('employees').select('displayName').where('organizationId', '=', parsed.orgId).where('id', '=', inv.employeeId).executeTakeFirst() : undefined;
     const state: InvitationPreviewDto['state'] = inv.acceptedAt ? 'accepted' : inv.revokedAt ? 'revoked' : inv.expiresAt.getTime() < Date.now() ? 'expired' : 'valid';
@@ -202,26 +213,47 @@ export interface CreateInvitationOptions {
   source: 'members' | 'employee_profile' | 'resend';
   /** The invitation this one replaces (a resend): recorded on the audit row. */
   replaces?: string;
+  /**
+   * Where the address came from (review P0-2, employee profile only): the employee's work e-mail field, their personal e-mail
+   * field, or typed in by the administrator — with who last changed that field and when — recorded on the audit row.
+   */
+  address?: { source: 'work' | 'personal' | 'entered'; changedAt: string | null; changedByUserId: string | null };
+}
+
+/** The invitation's branch scope once the caller's defaults are applied (a branch-scoped caller defaults to their own). */
+export type ResolvedInviteInput = Omit<InviteMemberInput, 'allBranches' | 'branchIds'> & { allBranches: boolean; branchIds: string[] };
+
+/**
+ * The membership an invitation to this address would refresh (an existing account invited before, or a suspended login):
+ * read in the organisation's system scope so the rules below see it whatever the caller's read keys.
+ */
+async function membershipByEmail(trx: Trx, orgId: string, email: string): Promise<(ManagedTarget & { id: string; status: string }) | null> {
+  const m = await withSystemScope(trx, orgId, (t) => t.selectFrom('orgMemberships as m').innerJoin('userProfiles as u', 'u.id', 'm.userId').select(['m.id', 'm.userId', 'm.roleId', 'm.status', 'm.allBranches'])
+    .where('m.organizationId', '=', orgId).where(sql`lower(u.email::text)`, '=', email.toLowerCase()).executeTakeFirst());
+  if (!m) return null;
+  return { id: m.id, userId: m.userId, roleId: m.roleId, status: m.status, allBranches: m.allBranches, branchIds: m.allBranches ? [] : await membershipBranchIds(trx, orgId, m.id) };
 }
 
 /**
  * Insert one invitation (+ an `invited` membership when the invitee already has an account) and queue its e-mail, inside the
  * caller's transaction. The caller has already checked `user.manage`; every rule of the invitation itself lives here:
- * usable and grantable role, owner-only owner invites, branches of the organisation, an employee that is linkable and not
- * linked elsewhere, no active member and no open invitation for the address. The token is `<orgId>.<secret>`; only
- * sha256(secret) is stored. The e-mail job mints its OWN token at send time (worker, hash only) — nothing secret is queued.
+ * THE member-management rule (member-authority.ts — grantable role, owner-only owner, the caller's branch scope; the
+ * membership an invitation to an existing account would refresh counts as its target), a usable role, branches of the
+ * organisation, an employee that is linkable and not linked elsewhere, no active member and no open invitation for the
+ * address. The token is `<orgId>.<secret>`; only sha256(secret) is stored. The e-mail job mints its OWN token at send time
+ * (worker, hash only) — nothing secret is queued.
  */
-export async function createInvitation(deps: ApiDeps, trx: Trx, actor: Actor, grant: MembershipGrant, orgId: string, input: InviteMemberInput, profileId: string | null, opts: CreateInvitationOptions): Promise<InvitationDto> {
-  for (const b of input.branchIds) requireBranchAccess(grant, b);
-  await assertRoleUsable(trx, orgId, input.roleId);
-  if (input.roleId === SYSTEM_ROLE_IDS.owner && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can invite another owner.');
-  await assertRoleGrantable(trx, input.roleId, grant);
-  await assertBranchesInOrg(trx, orgId, input.branchIds);
-  if (input.employeeId) { await assertEmployeeLinkable(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId); }
-  const existingMember = await trx.selectFrom('orgMemberships as m').innerJoin('userProfiles as u', 'u.id', 'm.userId').select(['m.id', 'm.status']).where('m.organizationId', '=', orgId).where(sql`lower(u.email::text)`, '=', input.email.toLowerCase()).executeTakeFirst();
+export async function createInvitation(deps: ApiDeps, trx: Trx, actor: Actor, grant: MembershipGrant, orgId: string, request: InviteMemberInput, profileId: string | null, opts: CreateInvitationOptions): Promise<InvitationDto> {
+  const input: ResolvedInviteInput = { ...request, ...defaultInviteScope(grant, request) };
+  const existingMember = await membershipByEmail(trx, orgId, input.email);
   // an `invited` membership (an earlier invitation to an existing account) is refreshed by the new invitation; a suspended
   // one is re-invited as before; only an ACTIVE member is refused
   if (existingMember && existingMember.status === 'active') throw errors.conflict('This user is already a member of the organisation.');
+  await assertRoleUsable(trx, orgId, input.roleId);
+  await assertMayManageMember(trx, actor, grant, existingMember, { roleId: input.roleId, allBranches: input.allBranches, branchIds: input.branchIds });
+  await assertBranchesInOrg(trx, orgId, input.branchIds);
+  if (!input.allBranches && input.branchIds.length === 0) throw errors.validation('Select at least one branch or grant all branches.', { issues: [{ path: 'branchIds', message: 'Required' }] });
+  if (input.employeeId) { await assertEmployeeLinkable(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId); }
   const pending = await trx.selectFrom('invitations').select('id').where('organizationId', '=', orgId).where(sql`lower(email::text)`, '=', input.email.toLowerCase())
     .where('acceptedAt', 'is', null).where('revokedAt', 'is', null).where('expiresAt', '>', new Date()).executeTakeFirst();
   if (pending) throw errors.conflict('An invitation for this email is already pending.', { invitationId: pending.id });
@@ -247,14 +279,18 @@ export async function createInvitation(deps: ApiDeps, trx: Trx, actor: Actor, gr
   // B-68: the invitation is e-mailed (same commit as the row: a rolled-back invitation sends nothing)
   await enqueueJob(deps.queue, trx, { queue: 'notifications', jobType: INVITATION_EMAIL_JOB_TYPE, organizationId: orgId, payload: { organizationId: orgId, invitationId: inv.id }, correlationId: actor.requestId, priority: 3, maxAttempts: 5 });
   await audit(trx, actor, orgId, opts.source === 'resend' ? 'member.invitation_resent' : 'member.invited', 'invitation', {
-    entityId: inv.id, newValue: { email: input.email, roleId: input.roleId, allBranches: input.allBranches, branchIds: input.branchIds, employeeId: input.employeeId ?? null, membershipId, source: opts.source, ...(opts.replaces ? { replaces: opts.replaces } : {}) },
+    entityId: inv.id,
+    newValue: {
+      email: input.email, roleId: input.roleId, allBranches: input.allBranches, branchIds: input.branchIds, employeeId: input.employeeId ?? null, membershipId, source: opts.source,
+      ...(opts.replaces ? { replaces: opts.replaces } : {}),
+      ...(opts.address ? { addressSource: opts.address.source, addressChangedAt: opts.address.changedAt, addressChangedBy: opts.address.changedByUserId } : {}),
+    },
   });
   return toInvitationDto(inv, { token, membershipId });
 }
 
 export async function inviteMember(deps: ApiDeps, actor: Actor, orgId: string, input: InviteMemberInput): Promise<InvitationDto> {
   const grant = requirePermission(actor.principal, orgId, 'user.manage');
-  for (const b of input.branchIds) requireBranchAccess(grant, b);
   const profileId = await profileIdByEmail(deps, orgId, actor.requestId, input.email);
   return runUser(deps.db, actor, (trx) => createInvitation(deps, trx, actor, grant, orgId, input, profileId, { source: 'members' }));
 }
@@ -280,12 +316,17 @@ export async function revokeInvitationWithin(trx: Trx, actor: Actor, orgId: stri
     .where('userId', 'in', trx.selectFrom('userProfiles').select('id').where(sql`lower(email::text)`, '=', String(inv.email).toLowerCase())).execute();
 }
 
+/** An invitation as the member-management rule sees it: its role and branch scope (no login behind it yet). */
+export const invitationTarget = (inv: { roleId: string; allBranches: boolean; branchIds: readonly string[] }): ManagedTarget => ({ userId: null, roleId: inv.roleId, allBranches: inv.allBranches, branchIds: inv.allBranches ? [] : inv.branchIds });
+
 export async function revokeInvitation(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
-  requirePermission(actor.principal, orgId, 'user.manage');
+  const grant = requirePermission(actor.principal, orgId, 'user.manage');
   return runUser(deps.db, actor, async (trx) => {
-    const inv = await trx.selectFrom('invitations').select(['id', 'email', 'acceptedAt', 'revokedAt']).where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
+    const inv = await trx.selectFrom('invitations').select(['id', 'email', 'roleId', 'allBranches', 'branchIds', 'acceptedAt', 'revokedAt']).where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!inv || inv.revokedAt) throw errors.notFound('Invitation', id);
     if (inv.acceptedAt) throw errors.invalidState('The invitation was already accepted.');
+    // review P0-1 / P0-3: only an invitation the caller could have issued (its role and branch scope) is theirs to revoke
+    await assertMayManageMember(trx, actor, grant, invitationTarget(inv), null);
     await revokeInvitationWithin(trx, actor, orgId, inv, 'revoked');
     await audit(trx, actor, orgId, 'member.invitation_revoked', 'invitation', { entityId: id, oldValue: { email: inv.email } });
   });
@@ -311,6 +352,8 @@ export async function resendWithin(deps: ApiDeps, trx: Trx, actor: Actor, grant:
     .where('organizationId', '=', orgId).where('id', '=', id).forUpdate().executeTakeFirst();
   if (!locked || locked.revokedAt) throw errors.conflict('This invitation was already revoked or resent.');
   if (locked.acceptedAt) throw errors.invalidState('The invitation was already accepted.');
+  // the invitation being replaced is the target (its role and scope); the successor goes through the same rule in createInvitation
+  await assertMayManageMember(trx, actor, grant, invitationTarget(locked), null);
   await revokeInvitationWithin(trx, actor, orgId, locked, 'resent');
   const next = await createInvitation(deps, trx, actor, grant, orgId, {
     email: locked.email, roleId: locked.roleId, allBranches: locked.allBranches, branchIds: locked.allBranches ? [] : locked.branchIds, ...(locked.employeeId ? { employeeId: locked.employeeId } : {}),
@@ -322,15 +365,16 @@ export async function resendWithin(deps: ApiDeps, trx: Trx, actor: Actor, grant:
 /**
  * Accept an invitation. The caller is not a member yet, so this runs in the system context of the organisation
  * encoded in the token after verifying the token hash and that the invitation was addressed to the caller's email.
+ *
+ * Atomic (review P2-9): the invitation is CLAIMED first by a conditional update (`accepted_at is null and revoked_at is
+ * null`) that only one of several concurrent accepts can win; a loser re-reads the committed row and, when the winner was the
+ * same person, gets the same answer (the membership) without a second membership write or audit row.
  */
 export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: string): Promise<{ membershipId: string; organizationId: string }> {
   const parsed = parseToken(token);
   if (!parsed) throw errors.notFound('Invitation');
   return runSystem(deps.db, parsed.orgId, actor.requestId, async (trx) => {
-    // Never let the database do the secret comparison: load the organisation's open invitations and compare the hashes in constant time.
-    const candidates = await trx.selectFrom('invitations').select(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'employeeId', 'expiresAt', 'acceptedAt', 'revokedAt', 'tokenHash', 'deliveryTokenHash'])
-      .where('organizationId', '=', parsed.orgId).orderBy('createdAt', 'desc').limit(1000).execute(); // accepted / revoked ones stay so a re-used token reports why
-    const inv = findByTokenHash(candidates, parsed.hash);
+    const inv = await invitationByTokenHash(trx, parsed.orgId, parsed.hash); // accepted / revoked ones are found so a re-used token reports why
     if (!inv) throw errors.notFound('Invitation');
     if (inv.acceptedAt) throw errors.invalidState('This invitation was already accepted.');
     if (inv.revokedAt) throw errors.invalidState('This invitation was revoked.');
@@ -340,6 +384,19 @@ export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: strin
     // (leaving revokes pending invitations; this guards invitations that predate that rule)
     if (inv.employeeId && (await employeeHasLeft(trx, inv.organizationId, inv.employeeId))) {
       throw errors.invalidState('This invitation is no longer valid: the employee record it was issued for has left the organisation.');
+    }
+    const claimed = await trx.updateTable('invitations').set({ acceptedAt: new Date(), acceptedBy: actor.userId })
+      .where('organizationId', '=', inv.organizationId).where('id', '=', inv.id).where('acceptedAt', 'is', null).where('revokedAt', 'is', null)
+      .returning('id').executeTakeFirst();
+    if (!claimed) {
+      // a concurrent accept (or a revocation) committed between the read and the claim: read what it left behind
+      const now = await trx.selectFrom('invitations').select(['acceptedAt', 'acceptedBy', 'revokedAt']).where('organizationId', '=', inv.organizationId).where('id', '=', inv.id).executeTakeFirst();
+      if (now?.acceptedAt && now.acceptedBy === actor.userId) {
+        const mine = await trx.selectFrom('orgMemberships').select('id').where('organizationId', '=', inv.organizationId).where('userId', '=', actor.userId).executeTakeFirst();
+        if (mine) return { membershipId: mine.id, organizationId: inv.organizationId };
+      }
+      if (now?.revokedAt) throw errors.invalidState('This invitation was revoked.');
+      throw errors.invalidState('This invitation was already accepted.');
     }
     const profile = await trx.selectFrom('userProfiles').select('id').where('id', '=', actor.userId).executeTakeFirst();
     if (!profile) await trx.insertInto('userProfiles').values({ id: actor.userId, email: actor.email, fullName: '' }).execute();
@@ -352,7 +409,6 @@ export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: strin
       .returning('id').executeTakeFirstOrThrow();
     await trx.deleteFrom('membershipBranches').where('membershipId', '=', membership.id).execute();
     if (!inv.allBranches && inv.branchIds.length > 0) await trx.insertInto('membershipBranches').values(inv.branchIds.map((b) => ({ membershipId: membership.id, branchId: b }))).execute();
-    await trx.updateTable('invitations').set({ acceptedAt: new Date(), acceptedBy: actor.userId }).where('id', '=', inv.id).execute();
     await audit(trx, actor, inv.organizationId, 'member.invitation_accepted', 'org_membership', { entityId: membership.id, newValue: { invitationId: inv.id, roleId: inv.roleId, allBranches: inv.allBranches, branchIds: inv.branchIds, employeeId: inv.employeeId && !linkClash ? inv.employeeId : null, ...(linkClash ? { employeeLinkSkipped: linkClash } : {}) } });
     return { membershipId: membership.id, organizationId: inv.organizationId };
   });
@@ -367,23 +423,38 @@ export async function assertNotLastOwner(trx: Trx, orgId: string, membershipId: 
   if (owners <= 1) throw errors.invalidState('An organisation must keep at least one active owner.');
 }
 
+/** True when the patch changes the membership's role, status or branch scope (anything but the employee link). */
+function changesReach(before: MemberDto, beforeBranchIds: readonly string[], input: UpdateMemberInput): boolean {
+  if (input.roleId !== undefined && input.roleId !== before.roleId) return true;
+  if (input.status !== undefined && input.status !== before.status) return true;
+  const nextAll = input.allBranches ?? (input.branchIds ? false : before.allBranches);
+  if (nextAll !== before.allBranches) return true;
+  if (!nextAll && input.branchIds) {
+    const a = [...new Set(input.branchIds)].sort(); const b = [...beforeBranchIds].sort();
+    if (a.length !== b.length || a.some((x, i) => x !== b[i])) return true;
+  }
+  return false;
+}
+
 export async function updateMember(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: UpdateMemberInput): Promise<MemberDto> {
   const grant = requirePermission(actor.principal, orgId, 'user.manage');
-  for (const b of input.branchIds ?? []) requireBranchAccess(grant, b);
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadMember(trx, orgId, id);
-    if (input.roleId) {
-      await assertRoleUsable(trx, orgId, input.roleId);
-      if (input.roleId === SYSTEM_ROLE_IDS.owner && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can grant the owner role.');
-      if (input.roleId !== before.roleId) await assertRoleGrantable(trx, input.roleId, grant);
-    }
-    if (before.roleKey === 'owner' && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can change another owner.');
-    if (input.branchIds) await assertBranchesInOrg(trx, orgId, input.branchIds);
-    if (input.employeeId) { await assertEmployeeLinkable(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId, { membershipId: id }); }
+    // the member's branches as stored — MemberDto.branchIds is empty for a caller without branch.view
+    const beforeBranchIds = before.allBranches ? [] : await membershipBranchIds(trx, orgId, id);
+    if (input.roleId) await assertRoleUsable(trx, orgId, input.roleId);
     const nextRole = input.roleId ?? before.roleId;
     const nextStatus = input.status ?? before.status;
     const nextAll = input.allBranches ?? (input.branchIds ? false : before.allBranches);
-    if (!nextAll && (input.branchIds ?? before.branchIds).length === 0) throw errors.validation('Select at least one branch or grant all branches.', { issues: [{ path: 'branchIds', message: 'Required' }] });
+    const nextBranches = nextAll ? [] : (input.branchIds ?? beforeBranchIds);
+    // THE member-management rule (review P0-1 / P0-3): not oneself, owners by owners, grantable roles (current and new), the
+    // caller's branch scope over the current and the requested reach. The one self change left: an OWNER linking their own
+    // login to their own employee record (nobody else can in a single-owner organisation, and an owner reads every record).
+    const ownerSelfLink = before.userId === actor.userId && grant.roleKey === 'owner' && !changesReach(before, beforeBranchIds, input);
+    if (!ownerSelfLink) await assertMayManageMember(trx, actor, grant, { userId: before.userId, roleId: before.roleId, allBranches: before.allBranches, branchIds: beforeBranchIds }, { roleId: nextRole, allBranches: nextAll, branchIds: nextBranches });
+    if (input.branchIds) await assertBranchesInOrg(trx, orgId, input.branchIds);
+    if (input.employeeId) { await assertEmployeeLinkable(trx, orgId, input.employeeId); await assertEmployeeUnlinked(trx, orgId, input.employeeId, { membershipId: id }); }
+    if (!nextAll && nextBranches.length === 0) throw errors.validation('Select at least one branch or grant all branches.', { issues: [{ path: 'branchIds', message: 'Required' }] });
     await assertNotLastOwner(trx, orgId, id, { roleId: nextRole, status: nextStatus });
     // B-75: a login stays suspended while the employee it is linked to has left — re-activating the employee record
     // does not bring the login back, and neither does re-activating the login while the employee is still gone
@@ -401,7 +472,7 @@ export async function updateMember(deps: ApiDeps, actor: Actor, orgId: string, i
     if (nextAll) await trx.deleteFrom('membershipBranches').where('membershipId', '=', id).execute();
     else if (input.branchIds) {
       await trx.deleteFrom('membershipBranches').where('membershipId', '=', id).execute();
-      await trx.insertInto('membershipBranches').values(input.branchIds.map((b) => ({ membershipId: id, branchId: b }))).execute();
+      await trx.insertInto('membershipBranches').values([...new Set(input.branchIds)].map((b) => ({ membershipId: id, branchId: b }))).execute();
     }
     const sessionsRevoked = endSessions ? await revokeSessions(deps, trx, { organizationId: orgId, userIds: [before.userId], reason: endSessions, requestId: actor.requestId }) : 0;
     const after = await loadMember(trx, orgId, id);
@@ -416,8 +487,8 @@ export async function suspendMember(deps: ApiDeps, actor: Actor, orgId: string, 
   const grant = requirePermission(actor.principal, orgId, 'user.manage');
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadMember(trx, orgId, id);
-    if (before.roleKey === 'owner' && grant.roleKey !== 'owner') throw errors.forbidden('Only an owner can suspend another owner.');
-    if (before.userId === actor.userId) throw errors.invalidState('You cannot suspend your own membership.');
+    // THE member-management rule (review P0-3): not oneself, owners by owners, a role the caller may grant, within their branches
+    await assertMayManageMember(trx, actor, grant, { userId: before.userId, roleId: before.roleId, allBranches: before.allBranches, branchIds: before.allBranches ? [] : await membershipBranchIds(trx, orgId, id) }, null);
     if (before.status === 'suspended') return before;
     await assertNotLastOwner(trx, orgId, id, { roleId: before.roleId, status: 'suspended' });
     await trx.updateTable('orgMemberships').set({ status: 'suspended' }).where('id', '=', id).where('organizationId', '=', orgId).execute();

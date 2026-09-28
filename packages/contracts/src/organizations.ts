@@ -368,13 +368,18 @@ export const teamInputSchema = z.object({
   memberIds: z.array(uuidSchema).max(500).optional(),
 });
 
+/**
+ * POST /orgs/:orgId/invitations. `allBranches` has no default of its own (HR portal Prompt 5 review, P0-1): left out, the
+ * invitation gets the CALLER's scope — every branch for an organisation-wide user admin, exactly their branches for a
+ * branch-scoped one, who can never grant every branch. `allBranches: false` needs at least one branch.
+ */
 export const inviteMemberSchema = z.object({
   email: emailSchema,
   roleId: uuidSchema,
-  allBranches: z.boolean().default(true),
+  allBranches: z.boolean().optional(),
   branchIds: z.array(uuidSchema).max(200).default([]),
   employeeId: uuidSchema.optional(),
-}).refine((v) => v.allBranches || v.branchIds.length > 0, { message: 'Select at least one branch or grant all branches', path: ['branchIds'] });
+}).refine((v) => v.allBranches !== false || v.branchIds.length > 0, { message: 'Select at least one branch or grant all branches', path: ['branchIds'] });
 export type InviteMemberInput = z.infer<typeof inviteMemberSchema>;
 export const updateMemberSchema = z.object({
   roleId: uuidSchema.optional(),

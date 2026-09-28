@@ -25,6 +25,8 @@ export interface RosterDayDto {
   isOff: boolean;
   holidayName: string | null;
   onLeave: boolean;
+  /** The branch the employee was placed in ON that date (employment history — review P1-4); absent on older payloads. */
+  branchId?: string;
 }
 export interface RosterRowDto {
   employeeId: string;
@@ -33,7 +35,10 @@ export interface RosterRowDto {
   branchId: string;
   branchName: string | null;
   departmentName: string | null;
-  /** Keyed by ISO date; days outside the employment (before joining, after exit) are absent. */
+  /**
+   * Keyed by ISO date; absent: days outside the employment (before joining, after exit) and days the employee was placed in a
+   * branch / department outside the filter (or the caller's branch scope) — each day resolves with the placement in force then.
+   */
   days: Record<string, RosterDayDto>;
 }
 export interface ShiftRosterDto {

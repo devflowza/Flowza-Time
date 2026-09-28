@@ -1,5 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createApiHarness, seedOrg, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
+import { loadDailyInputs, withContext } from '@flowza/database';
+import { createApiHarness, seedEmployee, seedOrg, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
 
 /**
  * The monthly shift roster (HR portal Prompt 6b, Finance ATT-105): the engine's resolution per employee and day (assignment,
@@ -34,7 +35,7 @@ describe('GET /shift-roster', () => {
     expect(r.body.data.shifts.map((s: { code: string }) => s.code)).toEqual(['DAY']);
     const row = (id: string) => r.body.data.rows.find((x: { employeeId: string }) => x.employeeId === id);
     // assignment: every day, Fridays off (organisation weekly off), the default calendar's holiday
-    expect(row(f.e1).days['2026-02-10']).toEqual({ shiftId: dayShift, source: 'ASSIGNMENT', isOff: false, holidayName: null, onLeave: false });
+    expect(row(f.e1).days['2026-02-10']).toEqual({ shiftId: dayShift, source: 'ASSIGNMENT', isOff: false, holidayName: null, onLeave: false, branchId: f.branchA });
     expect(row(f.e1).days['2026-02-13'].isOff).toBe(true);
     expect(row(f.e1).days['2026-02-15'].holidayName).toBe('Founders Day');
     // a branch-scoped holiday applies to its branch only
@@ -57,6 +58,39 @@ describe('GET /shift-roster', () => {
     expect(p.body.data.rows).toHaveLength(1);
     const s = await roster(f.hrAdmin, `month=2026-02&search=${encodeURIComponent('Employee 3')}`);
     expect(s.body.data.rows.map((x: { employeeId: string }) => x.employeeId)).toEqual([f.e3]);
+  });
+
+  it('5-P1-4 resolves each day with the branch in force ON that date (a mid-month transfer) — the roster and the engine agree', async () => {
+    const base = `/api/v1/orgs/${f.orgId}`;
+    // the reviewer's probe: branch A until 15 Sep, branch B from 16 Sep; branch shifts SA and SB
+    const sa = (await h.request('POST', `${base}/shifts`, { token: f.hrAdmin, body: { code: 'SA', name: 'Branch A shift', type: 'FIXED', startTime: '07:00', endTime: '15:00' } })).body.data.id;
+    const sb = (await h.request('POST', `${base}/shifts`, { token: f.hrAdmin, body: { code: 'SB', name: 'Branch B shift', type: 'FIXED', startTime: '09:00', endTime: '18:00' } })).body.data.id;
+    expect((await h.request('POST', `${base}/shift-assignments`, { token: f.hrAdmin, body: { targetType: 'BRANCH', targetId: f.branchA, shiftId: sa, effectiveFrom: '2026-01-01' } })).status).toBe(201);
+    expect((await h.request('POST', `${base}/shift-assignments`, { token: f.hrAdmin, body: { targetType: 'BRANCH', targetId: f.branchB, shiftId: sb, effectiveFrom: '2026-01-01' } })).status).toBe(201);
+    const moved = await seedEmployee(h.admin, f.orgId, f.branchB, 77);
+    await h.admin.updateTable('employmentHistory').set({ branchId: f.branchA, effectiveTo: '2026-09-16' }).where('employeeId', '=', moved).execute();
+    await h.admin.insertInto('employmentHistory').values({ organizationId: f.orgId, employeeId: moved, effectiveFrom: '2026-09-16', effectiveTo: null, branchId: f.branchB, employmentType: 'full_time', employmentStatus: 'active', reason: 'Transfer' }).execute();
+    const r = await roster(f.hrAdmin, 'month=2026-09');
+    const days = r.body.data.rows.find((x: { employeeId: string }) => x.employeeId === moved).days;
+    const cell = (d: string) => ({ shiftId: days[d]?.shiftId ?? null, branchId: days[d]?.branchId ?? null });
+    expect(cell('2026-09-01')).toEqual({ shiftId: sa, branchId: f.branchA });
+    expect(cell('2026-09-15')).toEqual({ shiftId: sa, branchId: f.branchA });
+    expect(cell('2026-09-16')).toEqual({ shiftId: sb, branchId: f.branchB });
+    expect(cell('2026-09-30')).toEqual({ shiftId: sb, branchId: f.branchB });
+    // the engine's input loader resolves the same shift and branch on each of those days
+    for (const d of ['2026-09-01', '2026-09-15', '2026-09-16', '2026-09-30']) {
+      const inputs = await withContext(h.tdb.db, { kind: 'system', organizationId: f.orgId }, (trx) => loadDailyInputs(trx, f.orgId, moved, d, new Date()));
+      expect([d, inputs?.branchId, inputs?.input.shift?.id ?? null]).toEqual([d, cell(d).branchId, cell(d).shiftId]);
+    }
+    // the branch filter applies per day: branch A shows the first half of the month only, branch B the second half
+    const inA = (await roster(f.hrAdmin, `month=2026-09&branchId=${f.branchA}`)).body.data.rows.find((x: { employeeId: string }) => x.employeeId === moved);
+    expect(Object.keys(inA.days).sort().at(0)).toBe('2026-09-01');
+    expect(Object.keys(inA.days).sort().at(-1)).toBe('2026-09-15');
+    const inB = (await roster(f.hrAdmin, `month=2026-09&branchId=${f.branchB}`)).body.data.rows.find((x: { employeeId: string }) => x.employeeId === moved);
+    expect(Object.keys(inB.days).sort().at(0)).toBe('2026-09-16');
+    // and a branch-B manager never sees the branch-A days of their employee
+    const bm = (await roster(f.branchManagerB, 'month=2026-09')).body.data.rows.find((x: { employeeId: string }) => x.employeeId === moved);
+    expect(Object.keys(bm.days).every((d) => d >= '2026-09-16')).toBe(true);
   });
 
   it('needs shift.view and a valid month', async () => {

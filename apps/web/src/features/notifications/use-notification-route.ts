@@ -6,6 +6,6 @@ import type { NotificationDto } from './use-notifications';
 export function useNotificationRoute(): (n: Pick<NotificationDto, 'type' | 'data' | 'link'>) => string | null {
   const m = useActiveMembership();
   const can = useCan();
-  const viewer: NotificationViewer = { employeeId: m?.employeeId ?? null, approver: can('attendance.approve') || can('leave.approve'), hasReports: m?.isManager ?? false };
+  const viewer: NotificationViewer = { employeeId: m?.employeeId ?? null, approver: can('attendance.approve') || can('leave.approve'), hasReports: m?.isManager ?? false, attendanceView: can('attendance.view') };
   return (n) => resolveNotificationRoute(n, viewer);
 }

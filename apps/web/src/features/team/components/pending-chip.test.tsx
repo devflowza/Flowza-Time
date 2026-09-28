@@ -7,6 +7,7 @@ vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
+import i18n from '@/lib/i18n';
 import { apiMock, grant, mockGet, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
 import { PendingChip } from './pending-chip';
 
@@ -48,5 +49,29 @@ describe('PendingChip (the second count next to the bell, Finance B-63)', () => 
     renderWithProviders(<PendingChip />);
     expect(screen.queryByTestId('pending-chip')).not.toBeInTheDocument();
     expect(apiMock.get).not.toHaveBeenCalled();
+  });
+
+  it('5-P2-6 the breakdown is pluralised in English and Arabic, and a half that is zero is left out', async () => {
+    grant('dashboard.view', 'leave.approve');
+    mockGet({ '/orgs/org-1/team/pending-counts': { data: { approvals: 1, notes: 0, total: 1 } } });
+    const one = renderWithProviders(<PendingChip />);
+    expect(await screen.findByTestId('pending-chip')).toHaveAccessibleName('1 item waiting for you · 1 approval request');
+    one.unmount();
+    mockGet({ '/orgs/org-1/team/pending-counts': { data: { approvals: 0, notes: 1, total: 1 } } });
+    const note = renderWithProviders(<PendingChip />);
+    expect(await screen.findByTestId('pending-chip')).toHaveAccessibleName('1 item waiting for you · 1 attendance reason');
+    note.unmount();
+    await i18n.changeLanguage('ar');
+    try {
+      mockGet({ '/orgs/org-1/team/pending-counts': { data: { approvals: 2, notes: 0, total: 2 } } });
+      const two = renderWithProviders(<PendingChip />);
+      expect(await screen.findByTestId('pending-chip')).toHaveAccessibleName('عنصران بانتظارك · طلبا موافقة');
+      two.unmount();
+      mockGet({ '/orgs/org-1/team/pending-counts': { data: { approvals: 1, notes: 3, total: 4 } } });
+      renderWithProviders(<PendingChip />);
+      expect(await screen.findByTestId('pending-chip')).toHaveAccessibleName('4 عناصر بانتظارك · طلب موافقة واحد · 3 مبررات حضور');
+    } finally {
+      await i18n.changeLanguage('en');
+    }
   });
 });

@@ -1,11 +1,12 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { KeyRound, RotateCw, ShieldOff, ShieldCheck, UserPlus } from 'lucide-react';
-import type { EmployeePortalAccessDto, InvitationDto, PortalAccessState } from '@flowza/contracts';
+import { AlertTriangle, KeyRound, RotateCw, ShieldOff, ShieldCheck, UserPlus } from 'lucide-react';
+import type { EmployeePortalAccessDto, InvitationDto, PortalAccessAddressDto, PortalAccessState } from '@flowza/contracts';
 import { Badge, Button, Card, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, ErrorState, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea } from '@/components/ui';
 import { fmtDateTime, fmtRelative } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { toast, toastError } from '@/lib/toast';
-import { useCan, useOrgTimezone } from '@/features/me/use-me';
+import { useActiveMembership, useCan, useOrgTimezone } from '@/features/me/use-me';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/users.json';
 import ar from '@/locales/ar/users.json';
@@ -17,19 +18,42 @@ registerNamespace('users', en, ar);
 
 const TONE: Record<PortalAccessState, 'neutral' | 'info' | 'success' | 'danger'> = { none: 'neutral', invited: 'info', active: 'success', suspended: 'danger' };
 const DEFAULT_ROLE = '__default';
+const OTHER = '__other';
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-/** "Invite to FlowZa Time": the work (else personal) e-mail, the Employee role, the employee's branch — each can be changed. */
+/** Who last changed an address field and when (from the audit log), as the dialog shows it. */
+function useProvenance() {
+  const { t } = useTranslation('users');
+  const tz = useOrgTimezone();
+  return (a: PortalAccessAddressDto) => a.changedAt
+    ? t('access.address.changed', { name: a.changedByName ?? t('access.address.someone'), when: fmtDateTime(a.changedAt, tz) })
+    : t('access.address.noChange');
+}
+
+/**
+ * "Invite to FlowZa Time" (HR portal Prompt 5 review, P0-2): the address is the administrator's CHOICE — the addresses on the
+ * record are offered with their source (work / personal e-mail field) and who last changed that field and when, nothing is
+ * pre-selected, and a field changed in the last 7 days by somebody else carries a warning (people who can edit an employee
+ * record cannot grant logins; redirecting the invitation to their own mailbox would be an account takeover). Another address
+ * can be typed in. Role (default Employee) and scope (the employee's branch) as before.
+ */
 function InviteDialog({ open, onOpenChange, employeeId, employeeName, access, onInvited }: { open: boolean; onOpenChange: (o: boolean) => void; employeeId: string; employeeName: string; access: EmployeePortalAccessDto; onInvited: (inv: InvitationDto) => void }) {
   const { t } = useTranslation('users');
   const { t: tc } = useTranslation();
   const roles = useRoles();
+  const provenance = useProvenance();
   const { invite } = usePortalAccessMutations(employeeId);
-  const [email, setEmail] = useState(access.suggestedEmail ?? '');
+  const addresses = access.addresses ?? [];
+  // nothing is pre-selected; with no address on the record the only choice is to type one
+  const [choice, setChoice] = useState<string | null>(addresses.length === 0 ? OTHER : null);
+  const [typed, setTyped] = useState('');
   const [roleId, setRoleId] = useState(DEFAULT_ROLE);
-  const valid = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
+  const picked = choice && choice !== OTHER ? addresses.find((a) => a.email === choice) ?? null : null;
+  const email = choice === OTHER ? typed.trim() : picked?.email ?? '';
+  const valid = EMAIL.test(email);
   const submit = () => {
     if (!valid) return;
-    invite.mutate({ email: email.trim(), ...(roleId !== DEFAULT_ROLE ? { roleId } : {}) }, {
+    invite.mutate({ email, ...(roleId !== DEFAULT_ROLE ? { roleId } : {}) }, {
       onSuccess: (res) => { toast.success(t('access.sent', { email: res.invitation.email })); onOpenChange(false); onInvited(res.invitation); },
       onError: toastError,
     });
@@ -39,9 +63,36 @@ function InviteDialog({ open, onOpenChange, employeeId, employeeName, access, on
       <DialogContent size="sm">
         <DialogHeader><DialogTitle>{t('access.inviteTitle', { name: employeeName })}</DialogTitle><DialogDescription>{t('access.inviteHint')}</DialogDescription></DialogHeader>
         <div className="space-y-4">
-          <FormField label={t('access.email')} htmlFor="access-email" required hint={access.suggestedEmailSource && email.trim() === access.suggestedEmail ? t(`access.emailFrom.${access.suggestedEmailSource}`) : !access.suggestedEmail ? t('access.noEmail') : undefined}>
-            <Input id="access-email" type="email" dir="ltr" autoComplete="off" value={email} onChange={(e) => setEmail(e.target.value)} aria-invalid={!valid || undefined} />
-          </FormField>
+          <fieldset className="space-y-2">
+            <legend className="text-sm font-medium">{t('access.address.legend')} <span className="text-destructive" aria-hidden>*</span></legend>
+            <p className="text-xs text-muted-foreground">{addresses.length ? t('access.address.pick') : t('access.noEmail')}</p>
+            <div role="radiogroup" aria-label={t('access.address.legend')} className="space-y-2" data-testid="access-addresses">
+              {addresses.map((a) => (
+                <label key={a.email} data-testid="access-address" className={cn('flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring', choice === a.email ? 'border-brand-500 bg-accent/50' : 'hover:border-brand-300')}>
+                  <input type="radio" name="access-address" value={a.email} checked={choice === a.email} onChange={() => setChoice(a.email)} className="mt-0.5 accent-brand-600" />
+                  <span className="min-w-0 space-y-0.5">
+                    <span className="block break-all font-medium" dir="ltr">{a.email}</span>
+                    <span className="block text-xs text-muted-foreground">{t(`access.address.source.${a.source}`)} · {provenance(a)}</span>
+                    {a.recentlyChangedByOther ? <span className="flex items-start gap-1 text-xs text-amber-700 dark:text-amber-300" data-testid="access-address-warning"><AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {t('access.address.recent')}</span> : null}
+                  </span>
+                </label>
+              ))}
+              <label className={cn('flex cursor-pointer items-start gap-2 rounded-md border p-3 text-sm transition-colors has-[:focus-visible]:ring-2 has-[:focus-visible]:ring-ring', choice === OTHER ? 'border-brand-500 bg-accent/50' : 'hover:border-brand-300')}>
+                <input type="radio" name="access-address" value={OTHER} checked={choice === OTHER} onChange={() => setChoice(OTHER)} className="mt-0.5 accent-brand-600" />
+                <span className="font-medium">{t('access.address.other')}</span>
+              </label>
+            </div>
+          </fieldset>
+          {picked?.recentlyChangedByOther ? (
+            <p role="alert" className="flex items-start gap-1.5 rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100" data-testid="access-address-confirm">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden /> {t('access.address.confirm', { name: picked.changedByName ?? t('access.address.someone'), email: picked.email })}
+            </p>
+          ) : null}
+          {choice === OTHER ? (
+            <FormField label={t('access.email')} htmlFor="access-email" required>
+              <Input id="access-email" type="email" dir="ltr" autoComplete="off" value={typed} onChange={(e) => setTyped(e.target.value)} aria-invalid={(typed.length > 0 && !valid) || undefined} />
+            </FormField>
+          ) : null}
           <FormField label={t('access.role')} htmlFor="access-role">
             <Select value={roleId} onValueChange={setRoleId}>
               <SelectTrigger id="access-role"><SelectValue /></SelectTrigger>
@@ -70,6 +121,7 @@ export function PortalAccessCard({ employeeId, employeeName }: { employeeId: str
   const { t } = useTranslation('users');
   const tz = useOrgTimezone();
   const can = useCan();
+  const me = useActiveMembership();
   const visible = can('user.view');
   const manage = can('user.manage');
   const q = usePortalAccess(employeeId, visible);
@@ -108,7 +160,8 @@ export function PortalAccessCard({ employeeId, employeeName }: { employeeId: str
             ) : null}
             {a.invitation ? <p className="text-sm text-muted-foreground">{a.invitation.expired ? t('access.invitationExpired', { email: a.invitation.email, date: fmtDateTime(a.invitation.expiresAt, tz) }) : t('access.invitation', { email: a.invitation.email, date: fmtDateTime(a.invitation.expiresAt, tz) })}</p> : null}
             {a.employeeLeft ? <p className="text-sm text-muted-foreground" role="note">{t('access.left')}</p> : null}
-            {manage && !a.employeeLeft ? (
+            {/* nobody changes their own access (review P0-1): the controls are offered for other people's records only */}
+            {manage && !a.employeeLeft && !(a.membership && me && a.membership.id === me.membershipId) ? (
               <div className="flex flex-wrap gap-2">
                 {a.state === 'none' ? <Button size="sm" onClick={() => setInviting(true)}><UserPlus /> {t('access.invite')}</Button> : null}
                 {a.state === 'invited' ? <Button size="sm" variant="outline" loading={resend.isPending} onClick={doResend}><RotateCw /> {t('access.resend')}</Button> : null}

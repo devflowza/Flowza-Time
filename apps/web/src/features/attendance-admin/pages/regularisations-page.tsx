@@ -3,7 +3,7 @@ import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Check, CheckCircle2, Download, X, XCircle } from 'lucide-react';
-import { REGULARISATION_STATUSES, REGULARISATION_TYPES, type RegularisationAdminDecision, type RegularisationAdminItemDto, type RegularisationBulkResultDto, type RegularisationStatus } from '@flowza/contracts';
+import { REGULARISATION_STATUSES, REGULARISATION_TYPES, type ApprovalSeatDto, type RegularisationAdminDecision, type RegularisationAdminItemDto, type RegularisationBulkResultDto, type RegularisationStatus } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
 import { Combobox, DateRange } from '@/components/forms';
@@ -25,29 +25,73 @@ const FILTER_KEYS = ['status', 'type', 'from', 'to', 'branchId', 'departmentId',
 
 type Deciding = { kind: RegularisationAdminDecision; rows: RegularisationAdminItemDto[] } | null;
 
-/** Approve / reject one or several regularisations; rejecting needs a comment (the API enforces it too). */
+/** The row's decision fills a seat: an organisation-wide override or an escalated approver (engine §9.8). */
+const fillsSeat = (r: RegularisationAdminItemDto) => r.approval?.decideVia === 'override' || r.approval?.decideVia === 'escalated';
+/** The seats of the row's current level still waiting (the choices of "Deciding for", in the engine's seat order). */
+const seatsOf = (r: RegularisationAdminItemDto): ApprovalSeatDto[] => (fillsSeat(r) ? r.approval?.pendingSeats ?? [] : []);
+/** An override on an ALL / QUORUM level with several seats waiting must name the seat it fills (the API refuses it otherwise). */
+const mustChoose = (r: RegularisationAdminItemDto) => fillsSeat(r) && r.approval?.mustChooseSeat === true && seatsOf(r).length > 1;
+const seatLabel = (s: ApprovalSeatDto) => s.userName ?? s.userId.slice(0, 8);
+
+/** "Deciding for": the seat an override fills — the same select, words and rule as the approvals inbox and the reasons review. */
+function SeatSelect({ id, row, value, onChange, label }: { id: string; row: RegularisationAdminItemDto; value: string; onChange: (v: string) => void; label: string }) {
+  const { t: ta } = useTranslation('approvals');
+  const missing = !seatsOf(row).some((s) => s.userId === value);
+  return (
+    <FormField label={label} htmlFor={id} required>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger id={id} aria-invalid={missing || undefined}><SelectValue placeholder={ta('decision.decidingForPlaceholder')} /></SelectTrigger>
+        <SelectContent>{seatsOf(row).map((s) => <SelectItem key={s.userId} value={s.userId}>{seatLabel(s)}</SelectItem>)}</SelectContent>
+      </Select>
+      {missing ? <p className="text-xs text-muted-foreground">{ta('decision.decidingForRequired')}</p> : null}
+    </FormField>
+  );
+}
+
+/**
+ * Approve / reject one or several regularisations; rejecting needs a comment (the API enforces it too). An organisation-wide
+ * override fills ONE waiting seat of the request's level (engine §9.8, HR portal Prompt 5 review P1-1): on a level that needs
+ * every / several approvals with more than one seat waiting the decider chooses whose ("Deciding for" — per row in a bulk
+ * decision), otherwise the dialog names the one seat the decision fills.
+ */
 function DecideDialog({ deciding, onClose, onBulkResult }: { deciding: Deciding; onClose: () => void; onBulkResult: (r: RegularisationBulkResultDto, rows: RegularisationAdminItemDto[]) => void }) {
   const { t } = useTranslation(AA_NS);
   const { t: tc } = useTranslation();
+  const { t: ta } = useTranslation('approvals');
   const { decide, bulkDecide } = useRegularisationDecisions();
   const [comment, setComment] = useState('');
+  const [chosen, setChosen] = useState<Record<string, string>>({});
   const reject = deciding?.kind === 'reject';
   const rows = deciding?.rows ?? [];
   const bulk = rows.length > 1;
   const missing = reject && comment.trim().length === 0;
   const override = rows.some((r) => r.approval?.decideVia === 'override');
+  /** The seat a row's decision fills: the chosen one when it must choose, else the one waiting seat; none for a seated approver. */
+  const seatFor = (r: RegularisationAdminItemDto): string | undefined => {
+    if (!fillsSeat(r)) return undefined;
+    if (mustChoose(r)) return seatsOf(r).some((s) => s.userId === chosen[r.id]) ? chosen[r.id] : undefined;
+    return seatsOf(r)[0]?.userId;
+  };
+  const choosing = rows.filter(mustChoose);
+  const seatMissing = choosing.some((r) => !seatFor(r));
+  const single = !bulk ? rows[0] : undefined;
+  const seatHint = single && fillsSeat(single)
+    ? mustChoose(single) ? ta(single.approval?.decideVia === 'escalated' ? 'decision.escalatedChooseHint' : 'decision.overrideChooseHint')
+      : seatsOf(single)[0] ? ta(single.approval?.decideVia === 'escalated' ? 'decision.escalatedHint' : 'decision.overrideHint', { name: seatLabel(seatsOf(single)[0]!) }) : null
+    : null;
   const submit = () => {
-    if (!deciding || missing || rows.length === 0) return;
+    if (!deciding || missing || seatMissing || rows.length === 0) return;
     const c = comment.trim() || undefined;
     if (!bulk) {
       const r = rows[0]!;
-      decide.mutate({ id: r.id, decision: deciding.kind, comment: c, stepNo: r.approval?.currentStep ?? undefined }, {
+      const seat = seatFor(r);
+      decide.mutate({ id: r.id, decision: deciding.kind, comment: c, stepNo: r.approval?.currentStep ?? undefined, ...(seat ? { onBehalfOfUserId: seat } : {}) }, {
         onSuccess: (res) => { toast.success(res.status === 'rejected' ? t('regs.done.rejected') : res.advanced ? t('regs.done.advanced') : t('regs.done.approved')); onClose(); },
         onError: toastError,
       });
       return;
     }
-    bulkDecide.mutate({ items: rows.map((r) => ({ id: r.id, stepNo: r.approval?.currentStep ?? undefined })), decision: deciding.kind, comment: c }, {
+    bulkDecide.mutate({ items: rows.map((r) => { const seat = seatFor(r); return { id: r.id, stepNo: r.approval?.currentStep ?? undefined, ...(seat ? { onBehalfOfUserId: seat } : {}) }; }), decision: deciding.kind, comment: c }, {
       onSuccess: (res) => { onBulkResult(res, rows); onClose(); },
       onError: toastError,
     });
@@ -65,13 +109,26 @@ function DecideDialog({ deciding, onClose, onBulkResult }: { deciding: Deciding;
           </div>
         ) : null}
         {override ? <p className="rounded-md border border-amber-300 bg-amber-50 p-2 text-xs text-amber-900 dark:bg-amber-950 dark:text-amber-100" role="note">{t('regs.decide.override')}</p> : null}
+        {seatHint ? <p className="text-xs text-muted-foreground" data-testid="reg-seat-hint">{seatHint}</p> : null}
+        {single && mustChoose(single) ? <SeatSelect id="reg-seat" row={single} value={chosen[single.id] ?? ''} onChange={(v) => setChosen((c) => ({ ...c, [single.id]: v }))} label={ta('decision.decidingFor')} /> : null}
+        {bulk && choosing.length ? (
+          <div className="space-y-2" data-testid="reg-bulk-seats">
+            <p className="text-xs text-muted-foreground">{t('regs.decide.bulkSeats', { count: choosing.length })}</p>
+            <div className="max-h-60 space-y-2 overflow-y-auto">
+              {choosing.map((r) => (
+                <SeatSelect key={r.id} id={`reg-seat-${r.id}`} row={r} value={chosen[r.id] ?? ''} onChange={(v) => setChosen((c) => ({ ...c, [r.id]: v }))}
+                  label={t('regs.decide.decidingForRow', { name: r.employeeName, date: fmtDate(r.attendanceDate, 'dd MMM') })} />
+              ))}
+            </div>
+          </div>
+        ) : null}
         <FormField label={t('regs.decide.comment')} htmlFor="reg-comment" required={reject} optional={!reject}>
           <Textarea id="reg-comment" rows={3} maxLength={1000} value={comment} onChange={(e) => setComment(e.target.value)} placeholder={t('regs.decide.commentPlaceholder')} aria-invalid={missing || undefined} />
           {missing ? <p className="text-xs text-muted-foreground">{t('regs.decide.commentRequired')}</p> : null}
         </FormField>
         <DialogFooter>
           <Button type="button" variant="outline" onClick={onClose}>{tc('common.cancel')}</Button>
-          <Button type="button" variant={reject ? 'destructive' : 'default'} disabled={missing} loading={decide.isPending || bulkDecide.isPending} onClick={submit}>{reject ? <><X /> {t('regs.actions.reject')}</> : <><Check /> {t('regs.actions.approve')}</>}</Button>
+          <Button type="button" variant={reject ? 'destructive' : 'default'} disabled={missing || seatMissing} loading={decide.isPending || bulkDecide.isPending} onClick={submit}>{reject ? <><X /> {t('regs.actions.reject')}</> : <><Check /> {t('regs.actions.approve')}</>}</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>

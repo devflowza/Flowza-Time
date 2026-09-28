@@ -101,6 +101,8 @@ function toItem(r: RegularisationRow, x: Enriched, approval: ApprovalRequestDto 
       requestId: approval.id, status: approval.status, currentStep: approval.status === 'PENDING' ? approval.currentStep : null, stepCount: approval.steps.length,
       approverType: current?.approverType ?? null, approvers: (current?.actors ?? []).map((a) => ({ userId: a.userId, name: a.userName ?? '', decision: a.decision })),
       infoRequested: !!approval.infoRequestedAt, canDecide: approval.abilities.canDecide, decideVia: approval.abilities.decideVia ?? null,
+      // engine §9.8 (review P1-1): an override on an ALL / QUORUM level with several seats waiting names the seat it fills
+      mustChooseSeat: approval.abilities.mustChooseSeat ?? false, pendingSeats: current?.pendingSeats ?? [],
     } : null,
   };
 }
@@ -171,10 +173,11 @@ export async function decideRegularisation(deps: ApiDeps, actor: Actor, orgId: s
     if (refused) throw refused;
     const outcome = await decideWithin(deps, trx, actor, orgId, found!.requestId!, {
       ...(input.stepNo !== undefined ? { stepNo: input.stepNo } : {}), decision: input.decision === 'approve' ? 'APPROVE' : 'REJECT', comment: input.comment,
+      ...(input.onBehalfOfUserId ? { onBehalfOfUserId: input.onBehalfOfUserId } : {}),
       detail: { source: 'regularisation_admin' },
     });
     await audit(trx, actor, orgId, `attendance.regularisation_${input.decision === 'approve' ? 'approved' : 'rejected'}`, 'attendance_regularisation', {
-      entityId: id, branchId: found!.reg.branchId, reason: input.comment ?? null, newValue: { requestId: found!.requestId, stepNo: input.stepNo ?? null, requestStatus: outcome.status, noop: outcome.noop },
+      entityId: id, branchId: found!.reg.branchId, reason: input.comment ?? null, newValue: { requestId: found!.requestId, stepNo: input.stepNo ?? null, onBehalfOfUserId: outcome.onBehalfOfUserId ?? null, requestStatus: outcome.status, noop: outcome.noop },
     });
     const after = await trx.selectFrom('attendanceRegularisationRequests').select('status').where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     return { id, ok: true, status: after?.status ?? null, requestStatus: outcome.status as ApprovalRequestStatus, advanced: outcome.status === 'PENDING' && !outcome.noop };
@@ -190,14 +193,14 @@ export async function bulkDecideRegularisations(deps: ApiDeps, actor: Actor, org
   const ids = input.items.map((i) => i.id);
   const found = await runUser(deps.db, actor, (trx) => resolve(trx, orgId, ids));
   const results = new Map<string, RegularisationDecisionResultDto>();
-  const toDecide: Array<{ id: string; requestId: string; stepNo?: number | undefined }> = [];
+  const toDecide: Array<{ id: string; requestId: string; stepNo?: number | undefined; onBehalfOfUserId?: string | undefined }> = [];
   for (const item of input.items) {
     const f = found.get(item.id);
     const refused = preflight(item.id, f);
     if (refused) results.set(item.id, refusal(item.id, refused));
-    else toDecide.push({ id: item.id, requestId: f!.requestId!, stepNo: item.stepNo });
+    else toDecide.push({ id: item.id, requestId: f!.requestId!, stepNo: item.stepNo, onBehalfOfUserId: item.onBehalfOfUserId });
   }
-  const out = toDecide.length ? await bulkDecide(deps, actor, orgId, { items: toDecide.map((d) => ({ requestId: d.requestId, stepNo: d.stepNo })), decision: input.decision === 'approve' ? 'APPROVE' : 'REJECT', comment: input.comment }) : { results: [] };
+  const out = toDecide.length ? await bulkDecide(deps, actor, orgId, { items: toDecide.map((d) => ({ requestId: d.requestId, stepNo: d.stepNo, ...(d.onBehalfOfUserId ? { onBehalfOfUserId: d.onBehalfOfUserId } : {}) })), decision: input.decision === 'approve' ? 'APPROVE' : 'REJECT', comment: input.comment }) : { results: [] };
   const byRequest = new Map(out.results.map((r) => [r.requestId, r]));
   const after = await statusAfter(deps, actor, orgId, toDecide.map((d) => d.id));
   for (const d of toDecide) {

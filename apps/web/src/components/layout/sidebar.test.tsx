@@ -121,7 +121,7 @@ describe('Sidebar', () => {
     expect(approvalsLink()).not.toBeInTheDocument();
   });
 
-  it('HR portal Prompt 5: the Approvals item carries what waits for the member — /me first, then the fresher badge query', async () => {
+  it('HR portal Prompt 5 / 5-P2-3: the Approvals item carries THE "waiting for you" number — /me first, then the badge query\'s total', async () => {
     resetApiMock();
     grant('dashboard.view', 'attendance.approve');
     testState.approvals = { actionable: 4, delegatedToMe: false };
@@ -132,8 +132,9 @@ describe('Sidebar', () => {
     const link = screen.getByRole('link', { name: 'Approvals' });
     expect(within(link).getByTestId('nav-badge-/approvals')).toHaveTextContent('4');
     resolve({ data: { approvals: 5, notes: 1, total: 6 } });
-    await waitFor(() => expect(within(link).getByTestId('nav-badge-/approvals')).toHaveTextContent('5'));
-    expect(link).toHaveAccessibleDescription('5 items waiting for you');
+    // the same figure as the topbar chip, the dashboard tile and the widget (review P2-3): approvals + reasons
+    await waitFor(() => expect(within(link).getByTestId('nav-badge-/approvals')).toHaveTextContent('6'));
+    expect(link).toHaveAccessibleDescription('6 items waiting for you');
     testState.approvals = { actionable: 0, delegatedToMe: false };
   });
 

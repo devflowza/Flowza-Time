@@ -6,15 +6,24 @@ import { MEMBERSHIP_STATUSES, updateMemberSchema, type MemberDto } from '@flowza
 import { Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { toast, toastError } from '@/lib/toast';
+import { useActiveMembership } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useEmployeeOptions } from '@/features/employees/api';
 import { useMemberMutations, useRoles, type UpdateMemberInput } from '../api';
 
 type FormValues = z.input<typeof updateMemberSchema>;
 
+/**
+ * Edit a member: role, branch scope, employee link, status. THE member-management rule applies (HR portal Prompt 5 review,
+ * P0-1 / P0-3): nobody changes their own role, scope or status — on one's own row only an owner may change the employee link —
+ * and a branch-scoped administrator never grants every branch (the switch is locked for them). The API decides again.
+ */
 export function MemberDialog({ member, onClose }: { member: MemberDto; onClose: () => void }) {
   const { t } = useTranslation('users');
   const { t: tc } = useTranslation();
+  const me = useActiveMembership();
+  const self = !!me && member.id === me.membershipId;
+  const scoped = !!me && !me.allBranches;
   const roles = useRoles();
   const branches = useBranchOptions();
   // only employees without a login are offered (the member's own current link is kept in the list below)
@@ -28,7 +37,9 @@ export function MemberDialog({ member, onClose }: { member: MemberDto; onClose: 
 
   const onSubmit = form.handleSubmit(async (values) => {
     if (scopeInvalid) return;
-    try { await update.mutateAsync({ id: member.id, input: values }); toast.success(t('members.updated', { name: member.fullName })); onClose(); } catch (e) { toastError(e); }
+    // one's own membership: only the employee link is sent (the rest cannot change)
+    const input = self ? { employeeId: values.employeeId } : values;
+    try { await update.mutateAsync({ id: member.id, input }); toast.success(t('members.updated', { name: member.fullName })); onClose(); } catch (e) { toastError(e); }
   });
 
   return (
@@ -39,24 +50,25 @@ export function MemberDialog({ member, onClose }: { member: MemberDto; onClose: 
           <DialogDescription dir="ltr" className="text-start">{member.email}</DialogDescription>
         </DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
+          {self ? <p className="rounded-md border bg-muted/40 p-2 text-xs text-muted-foreground" role="note" data-testid="member-self-hint">{t('members.ownerSelfHint')}</p> : null}
           <FormField label={t('fields.role')} htmlFor="mem-role" error={errors.roleId?.message} hint={member.roleKey === 'owner' ? t('members.ownerHint') : undefined}>
             <Controller control={control} name="roleId" render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select value={field.value} onValueChange={field.onChange} disabled={self}>
                 <SelectTrigger id="mem-role"><SelectValue /></SelectTrigger>
                 <SelectContent>{(roles.data ?? []).map((r) => <SelectItem key={r.id} value={r.id}>{r.name}{r.isSystem ? '' : ` · ${t('roles.custom')}`}</SelectItem>)}</SelectContent>
               </Select>
             )} />
           </FormField>
           <div className="flex items-center justify-between rounded-md border p-3">
-            <div><Label htmlFor="mem-all">{t('fields.allBranches')}</Label><p className="text-xs text-muted-foreground">{t('fields.allBranchesHint')}</p></div>
-            <Switch id="mem-all" checked={allBranches} onCheckedChange={(v) => { setValue('allBranches', v, { shouldDirty: true }); if (v) setValue('branchIds', []); }} />
+            <div><Label htmlFor="mem-all">{t('fields.allBranches')}</Label><p className="text-xs text-muted-foreground">{scoped ? t('fields.allBranchesScoped') : t('fields.allBranchesHint')}</p></div>
+            <Switch id="mem-all" checked={allBranches} disabled={self || (scoped && !allBranches)} onCheckedChange={(v) => { setValue('allBranches', v, { shouldDirty: true }); if (v) setValue('branchIds', []); }} />
           </div>
           {!allBranches ? (
             <FormField label={t('fields.branches')} htmlFor="mem-branches" required error={scopeInvalid ? t('fields.branchesRequired') : undefined}>
               <ul id="mem-branches" className="grid max-h-48 gap-1 overflow-y-auto rounded-md border p-2 sm:grid-cols-2">
                 {branches.data.map((b) => (
                   <li key={b.id} className="flex items-center gap-2 text-sm">
-                    <Checkbox id={`mem-b-${b.id}`} checked={branchIds.includes(b.id)} onCheckedChange={(v) => setValue('branchIds', v ? [...branchIds, b.id] : branchIds.filter((x) => x !== b.id), { shouldDirty: true })} />
+                    <Checkbox id={`mem-b-${b.id}`} checked={branchIds.includes(b.id)} disabled={self} onCheckedChange={(v) => setValue('branchIds', v ? [...branchIds, b.id] : branchIds.filter((x) => x !== b.id), { shouldDirty: true })} />
                     <Label htmlFor={`mem-b-${b.id}`}>{b.name}</Label>
                   </li>
                 ))}
@@ -68,7 +80,7 @@ export function MemberDialog({ member, onClose }: { member: MemberDto; onClose: 
           </FormField>
           <FormField label={tc('common.status')} htmlFor="mem-status" hint={t('members.statusHint')}>
             <Controller control={control} name="status" render={({ field }) => (
-              <Select value={field.value} onValueChange={field.onChange}>
+              <Select value={field.value} onValueChange={field.onChange} disabled={self}>
                 <SelectTrigger id="mem-status"><SelectValue /></SelectTrigger>
                 <SelectContent>{MEMBERSHIP_STATUSES.map((s) => <SelectItem key={s} value={s}>{t(`status.${s}`)}</SelectItem>)}</SelectContent>
               </Select>

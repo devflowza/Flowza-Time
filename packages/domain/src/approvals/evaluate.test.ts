@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { collapseSeats, escalationDueAt, evaluateLevel, isExtraHandRow, pendingSeats, requiredAfterReassign, seatMustBeNamed, seatOrder, type ActorDecisionRow } from './evaluate.js';
+import { approversOfEarlierLevels, breaksFourEyes, collapseSeats, escalationDueAt, evaluateLevel, isExtraHandRow, pendingSeats, requiredAfterReassign, seatMustBeNamed, seatOrder, type ActorDecisionRow } from './evaluate.js';
 
 describe('evaluateLevel', () => {
   it('ANY: one approval satisfies; a rejection is terminal only when nobody is left to approve', () => {
@@ -151,5 +151,25 @@ describe('escalationDueAt', () => {
     expect(escalationDueAt({ escalateAfterHours: 48, escalateTo: 'HR_ADMIN' }, at)?.toISOString()).toBe('2026-09-29T08:00:00.000Z');
     expect(escalationDueAt({ escalateAfterHours: 48 }, at)).toBeNull();
     expect(escalationDueAt({}, at)).toBeNull();
+  });
+});
+
+describe('four-eyes (review 5-O3)', () => {
+  const levels = [
+    { stepNo: 1, actors: [{ userId: 'a', decision: 'APPROVED' }, { userId: 'b', decision: 'SKIPPED' }, { userId: 'c', decision: 'REJECTED' }] },
+    { stepNo: 2, actors: [{ userId: 'd', decision: 'APPROVED' }, { userId: 'e', decision: 'PENDING' }] },
+    { stepNo: 3, actors: [{ userId: 'f', decision: 'PENDING' }] },
+  ];
+  it('5-O3 the approvers of the levels before a step: approvals only (never a skipped or rejected row)', () => {
+    expect([...approversOfEarlierLevels(levels, 1)]).toEqual([]);
+    expect([...approversOfEarlierLevels(levels, 2)]).toEqual(['a']);
+    expect([...approversOfEarlierLevels(levels, 3)].sort()).toEqual(['a', 'd']);
+  });
+  it('5-O3 a decision over several levels (an exception approval) breaks four-eyes only across two different levels', () => {
+    expect(breaksFourEyes(levels, 'a', [2, 3])).toBe(true); // approved level 1, would complete 2 and 3
+    expect(breaksFourEyes(levels, 'd', [2, 3])).toBe(true); // approved level 2, would complete level 3 too
+    expect(breaksFourEyes(levels, 'd', [2])).toBe(false); // the same level only
+    expect(breaksFourEyes(levels, 'e', [2, 3])).toBe(false); // approved nothing yet
+    expect(breaksFourEyes(levels, 'b', [2, 3])).toBe(false); // a skipped row is not an approval
   });
 });

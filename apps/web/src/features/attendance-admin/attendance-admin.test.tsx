@@ -9,6 +9,7 @@ vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks'
 vi.mock('@/lib/save-text-file', () => ({ saveTextFile: vi.fn() }));
 
 import { apiMock, grant, mockGet, page, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
+import '@/features/approvals/routes';
 import { saveTextFile } from '@/lib/save-text-file';
 import RegularisationsPage from './pages/regularisations-page';
 import { NotesReport } from './components/notes-report';
@@ -116,6 +117,73 @@ describe('RegularisationsPage (HR portal Prompt 6b)', () => {
     renderWithProviders(<RegularisationsPage />, { route: '/attendance/regularisations' });
     await screen.findAllByText('Salma Al Harthy');
     expect(screen.queryByRole('button', { name: /Export CSV/ })).not.toBeInTheDocument();
+  });
+});
+
+describe('5-P1-1 the register names the seat an override fills (engine §9.8)', () => {
+  beforeEach(() => { resetApiMock(); testState.employeeId = null; testState.teamSize = 0; grant('attendance.approve', 'attendance.view', 'report.export'); });
+  const seats = [{ userId: 'u7', userName: 'Fatma HR' }, { userId: 'u8', userName: 'Salim HR' }];
+  const override = (over: Partial<RegularisationAdminItemDto> = {}) => reg({ approvalStepCount: 1, approval: { ...reg().approval!, stepCount: 1, approverType: 'ROLE', approvers: [{ userId: 'u7', name: 'Fatma HR', decision: 'PENDING' }, { userId: 'u8', name: 'Salim HR', decision: 'PENDING' }], decideVia: 'override', mustChooseSeat: true, pendingSeats: seats }, ...over });
+  const mock = (rows: RegularisationAdminItemDto[]) => mockGet({ '/orgs/org-1/attendance/regularisations': page(rows), '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]) });
+  const choose = async (trigger: HTMLElement, name: RegExp) => {
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    const option = await screen.findByRole('option', { name });
+    fireEvent.pointerUp(option); fireEvent.click(option);
+  };
+
+  it('5-P1-1 a single decision on an ALL level with several seats waiting asks "Deciding for" and sends the seat', async () => {
+    mock([override()]);
+    apiMock.post.mockResolvedValue({ data: { id: 'g1', ok: true, status: 'pending', requestStatus: 'PENDING', advanced: false } });
+    renderWithProviders(<RegularisationsPage />, { route: '/attendance/regularisations' });
+    fireEvent.click((await screen.findAllByRole('button', { name: /^Approve$/ }))[0]!);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByTestId('reg-seat-hint')).toHaveTextContent('choose whose seat it fills');
+    const submit = within(dialog).getByRole('button', { name: /Approve/ });
+    expect(submit).toBeDisabled();
+    expect(dialog).toHaveTextContent('Choose the approver whose seat your decision fills.');
+    await choose(within(dialog).getByRole('combobox', { name: /Deciding for/ }), /Salim HR/);
+    expect(submit).toBeEnabled();
+    fireEvent.click(submit);
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/attendance/regularisations/g1/decide', { decision: 'approve', comment: undefined, stepNo: 1, onBehalfOfUserId: 'u8' }, expect.anything()));
+  });
+
+  it('5-P1-1 an override with one seat waiting names that seat; a seated approver sends none', async () => {
+    mock([override({ approval: { ...override().approval!, mustChooseSeat: false, pendingSeats: [seats[0]!] } })]);
+    apiMock.post.mockResolvedValue({ data: { id: 'g1', ok: true, status: 'approved', requestStatus: 'APPROVED', advanced: false } });
+    const r = renderWithProviders(<RegularisationsPage />, { route: '/attendance/regularisations' });
+    fireEvent.click((await screen.findAllByRole('button', { name: /^Approve$/ }))[0]!);
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByTestId('reg-seat-hint')).toHaveTextContent('fills the seat of Fatma HR');
+    expect(within(dialog).queryByRole('combobox', { name: /Deciding for/ })).not.toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: /Approve/ }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/attendance/regularisations/g1/decide', expect.objectContaining({ onBehalfOfUserId: 'u7' }), expect.anything()));
+    r.unmount();
+    resetApiMock(); mock([reg()]);
+    apiMock.post.mockResolvedValue({ data: { id: 'g1', ok: true, status: 'approved', requestStatus: 'APPROVED', advanced: false } });
+    renderWithProviders(<RegularisationsPage />, { route: '/attendance/regularisations' });
+    fireEvent.click((await screen.findAllByRole('button', { name: /^Approve$/ }))[0]!);
+    const own = await screen.findByRole('dialog');
+    expect(within(own).queryByTestId('reg-seat-hint')).not.toBeInTheDocument();
+    fireEvent.click(within(own).getByRole('button', { name: /Approve/ }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/attendance/regularisations/g1/decide', { decision: 'approve', comment: undefined, stepNo: 1 }, expect.anything()));
+  });
+
+  it('5-P1-1 bulk: each row that needs a seat gets its own "Deciding for"; the items carry their seats', async () => {
+    mock([override(), reg({ id: 'g2', employeeName: 'Yousuf' })]);
+    apiMock.post.mockResolvedValue({ data: { results: [{ id: 'g1', ok: true, status: 'pending', requestStatus: 'PENDING', advanced: false }, { id: 'g2', ok: true, status: 'approved', requestStatus: 'APPROVED', advanced: false }], succeeded: 2, failed: 0 } });
+    renderWithProviders(<RegularisationsPage />, { route: '/attendance/regularisations' });
+    await screen.findAllByText('Yousuf');
+    fireEvent.click(screen.getAllByRole('checkbox', { name: 'Select all' })[0]!);
+    fireEvent.click(await screen.findByRole('button', { name: /Approve selected/ }));
+    const dialog = await screen.findByRole('dialog');
+    const bulkSeats = within(dialog).getByTestId('reg-bulk-seats');
+    expect(bulkSeats).toHaveTextContent('1 of these requests needs several approvals');
+    expect(within(bulkSeats).getAllByRole('combobox')).toHaveLength(1);
+    const submit = within(dialog).getByRole('button', { name: /Approve/ });
+    expect(submit).toBeDisabled();
+    await choose(within(bulkSeats).getByRole('combobox', { name: /Deciding for — Salma Al Harthy/ }), /Fatma HR/);
+    fireEvent.click(submit);
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/attendance/regularisations/bulk-decide', { items: [{ id: 'g1', stepNo: 1, onBehalfOfUserId: 'u7' }, { id: 'g2', stepNo: 1 }], decision: 'approve', comment: undefined }, expect.anything()));
   });
 });
 

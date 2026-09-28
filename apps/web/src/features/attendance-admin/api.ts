@@ -38,13 +38,14 @@ export function useRegularisationDecisions() {
   const orgId = useOrgId();
   const invalidate = useInvalidateRegularisations();
   const decide = useMutation({
-    mutationFn: async ({ id, decision, comment, stepNo }: { id: string; decision: RegularisationAdminDecision; comment?: string; stepNo?: number }) =>
-      (await api.post<Envelope<RegularisationDecisionResultDto>>(`/orgs/${orgId}/attendance/regularisations/${id}/decide`, { decision, comment: comment || undefined, stepNo }, { idempotencyKey: crypto.randomUUID() })).data,
+    // an override on a level waiting for several approvers names the seat it fills (engine §9.8, review P1-1)
+    mutationFn: async ({ id, decision, comment, stepNo, onBehalfOfUserId }: { id: string; decision: RegularisationAdminDecision; comment?: string; stepNo?: number; onBehalfOfUserId?: string }) =>
+      (await api.post<Envelope<RegularisationDecisionResultDto>>(`/orgs/${orgId}/attendance/regularisations/${id}/decide`, { decision, comment: comment || undefined, stepNo, ...(onBehalfOfUserId ? { onBehalfOfUserId } : {}) }, { idempotencyKey: crypto.randomUUID() })).data,
     onSuccess: invalidate,
   });
-  /** Each item is decided on its own through the engine; the answer reports one line per item. */
+  /** Each item is decided on its own through the engine (naming its seat when it must); the answer reports one line per item. */
   const bulkDecide = useMutation({
-    mutationFn: async ({ items, decision, comment }: { items: Array<{ id: string; stepNo?: number }>; decision: RegularisationAdminDecision; comment?: string }) =>
+    mutationFn: async ({ items, decision, comment }: { items: Array<{ id: string; stepNo?: number; onBehalfOfUserId?: string }>; decision: RegularisationAdminDecision; comment?: string }) =>
       (await api.post<Envelope<RegularisationBulkResultDto>>(`/orgs/${orgId}/attendance/regularisations/bulk-decide`, { items, decision, comment: comment || undefined }, { idempotencyKey: crypto.randomUUID() })).data,
     onSuccess: invalidate,
   });

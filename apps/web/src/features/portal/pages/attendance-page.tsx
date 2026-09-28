@@ -167,7 +167,11 @@ function CorrectionsTab({ timezone }: { timezone: string }) {
   );
 }
 
-/** /my/attendance?month=yyyy-MM&tab=calendar|log|activity|corrections&day=<record id> */
+/**
+ * /my/attendance?month=yyyy-MM&tab=calendar|log|activity|corrections&day=<record id> — or `date=yyyy-MM-dd` (where an
+ * attendance notice about the employee's own day takes them, HR portal Prompt 5 review P1-6): that date's month, with the
+ * day's record opened.
+ */
 export default function MyAttendancePage() {
   const { t } = useTranslation('portal');
   const tz = useOrgTimezone();
@@ -177,10 +181,11 @@ export default function MyAttendancePage() {
   const firstDayOfWeek = (membership?.settings.general as { firstDayOfWeek?: number } | undefined)?.firstDayOfWeek ?? 0;
   const today = todayIso(tz);
   const [params, setParams] = useSearchParams();
-  const month = validMonth(params.get('month'), today.slice(0, 7));
+  const dateParam = /^\d{4}-\d{2}-\d{2}$/.test(params.get('date') ?? '') ? params.get('date') : null;
+  const month = validMonth(params.get('month') ?? dateParam?.slice(0, 7), today.slice(0, 7));
   const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'calendar';
-  const openId = params.get('day');
   const q = useSelfAttendance(month);
+  const openId = params.get('day') ?? (dateParam ? q.data?.days.find((d) => d.attendanceDate === dateParam)?.id ?? null : null);
   const [correction, setCorrection] = useState<{ date: string; timezone: string } | null>(null);
   const [reason, setReason] = useState<{ day: SelfDayDto; note: AttendanceNoteDto | null } | null>(null);
   const { t: tpa } = useTranslation(PA_NS);
@@ -200,11 +205,11 @@ export default function MyAttendancePage() {
 
       <div className="flex flex-wrap items-center gap-2">
         <div className="inline-flex items-center rounded-md border bg-card shadow-card">
-          <Button variant="ghost" size="icon" aria-label={t('attendance.previousMonth')} onClick={() => set({ month: shiftMonth(month, -1), day: null })}><ChevronLeft className="rtl:rotate-180" /></Button>
+          <Button variant="ghost" size="icon" aria-label={t('attendance.previousMonth')} onClick={() => set({ month: shiftMonth(month, -1), day: null, date: null })}><ChevronLeft className="rtl:rotate-180" /></Button>
           <span className="min-w-36 px-1 text-center text-sm font-medium tnum">{fmtDate(`${month}-01`, 'MMMM yyyy')}</span>
-          <Button variant="ghost" size="icon" aria-label={t('attendance.nextMonth')} disabled={month >= today.slice(0, 7)} onClick={() => set({ month: shiftMonth(month, 1), day: null })}><ChevronRight className="rtl:rotate-180" /></Button>
+          <Button variant="ghost" size="icon" aria-label={t('attendance.nextMonth')} disabled={month >= today.slice(0, 7)} onClick={() => set({ month: shiftMonth(month, 1), day: null, date: null })}><ChevronRight className="rtl:rotate-180" /></Button>
         </div>
-        {month !== today.slice(0, 7) ? <Button variant="outline" size="sm" onClick={() => set({ month: null, day: null })}>{t('attendance.thisMonth')}</Button> : null}
+        {month !== today.slice(0, 7) ? <Button variant="outline" size="sm" onClick={() => set({ month: null, day: null, date: null })}>{t('attendance.thisMonth')}</Button> : null}
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
@@ -231,7 +236,7 @@ export default function MyAttendancePage() {
         <TabsContent value="corrections">{tab === 'corrections' ? <CorrectionsTab timezone={dayTz} /> : null}</TabsContent>
       </Tabs>
 
-      <RecordDialog recordId={openId} onClose={() => set({ day: null })} onRequestCorrection={(p) => { set({ day: null }); setCorrection({ date: p.attendanceDate, timezone: p.timezone ?? dayTz }); }} />
+      <RecordDialog recordId={openId} onClose={() => set({ day: null, date: null })} onRequestCorrection={(p) => { set({ day: null, date: null }); setCorrection({ date: p.attendanceDate, timezone: p.timezone ?? dayTz }); }} />
       {reason ? <NoteDialog key={reason.note?.id ?? reason.day.attendanceDate} open onOpenChange={(o) => !o && setReason(null)} date={reason.day.attendanceDate} note={reason.note} defaultCategory={suggestedCategory(reason.day.status, reason.day.flags)} /> : null}
       <SelfCorrectionDialog key={correction ? `${correction.date}` : 'closed'} open={!!correction} onOpenChange={(o) => !o && setCorrection(null)} date={correction?.date ?? null} timezone={correction?.timezone ?? dayTz} />
     </div>

@@ -1,8 +1,9 @@
 /**
  * Invitations parity (HR portal Prompt 6b, Finance B-67 … B-71, B-74): resend (old token revoked, new 7-day token, e-mail
  * queued), the public validation before sign-in (state, masked address, rate limited), acceptance with either token (single
- * use, e-mail bound, refused once revoked / expired), and FlowZa Time access on an employee profile (invite with defaults,
- * revoke = suspend without unlinking, restore, resend restores a suspended login directly).
+ * use, e-mail bound, refused once revoked / expired), and FlowZa Time access on an employee profile (invite to the address the
+ * administrator chose — review 5-P0-2 — with role and scope defaults, revoke = suspend without unlinking, restore, resend
+ * restores a suspended login directly).
  */
 import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -65,7 +66,8 @@ describe('resend + validate + accept', () => {
     expect(v.body.data).toEqual({ state: 'valid', organizationName: 'Org invites', employeeName: 'Employee 2', emailMasked: 'R***@t***.local', expiresAt: again.body.data.expiresAt });
     expect((await validate(first.body.data.token)).body.data.state).toBe('revoked');
     expect((await validate(`${f.orgId}.${'x'.repeat(40)}`)).status).toBe(404);
-    expect((await validate('short')).status).toBe(400);
+    // review 5-P2-7: a malformed token gets the same 404 as an unknown one
+    expect((await validate('short')).status).toBe(404);
 
     // accept: the old token is refused as revoked; the address must match; single use
     const invitee = uuid('c');
@@ -135,22 +137,25 @@ describe('FlowZa Time access on an employee profile', () => {
     await seedUser(h.admin, person, 'four@test.local', 'Four');
   });
 
-  it('shows the state and suggests the work e-mail, else the personal one; reading needs user.view, writing user.manage', async () => {
+  it('shows the state and offers the known addresses (work, personal) as choices; reading needs user.view, writing user.manage', async () => {
     const r = await h.request('GET', `${base()}/employees/${e4}/portal-access`, { token: f.hrAdmin });
     expect(r.status).toBe(200);
-    expect(r.body.data).toMatchObject({ state: 'none', membership: null, invitation: null, suggestedEmail: 'four@test.local', suggestedEmailSource: 'work', employeeLeft: false });
-    expect((await h.request('GET', `${base()}/employees/${e5}/portal-access`, { token: f.hrAdmin })).body.data).toMatchObject({ suggestedEmail: 'five.personal@test.local', suggestedEmailSource: 'personal' });
+    expect(r.body.data).toMatchObject({ state: 'none', membership: null, invitation: null, employeeLeft: false });
+    // set without the API (no audit row): no provenance to show, nothing flagged — and nothing is pre-selected either way
+    expect(r.body.data.addresses).toEqual([{ email: 'four@test.local', source: 'work', changedAt: null, changedByUserId: null, changedByName: null, recentlyChangedByOther: false }]);
+    expect((await h.request('GET', `${base()}/employees/${e5}/portal-access`, { token: f.hrAdmin })).body.data.addresses).toEqual([expect.objectContaining({ email: 'five.personal@test.local', source: 'personal' })]);
     expect((await h.request('GET', `${base()}/employees/${e4}/portal-access`, { token: f.employeeUser })).status).toBe(403);
-    expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.hrAdmin, body: {} })).status).toBe(403);
+    expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.hrAdmin, body: { email: 'four@test.local' } })).status).toBe(403);
   });
 
-  it('invite defaults: the suggested e-mail, the employee role, the employee\'s own branch, the employee link; older open invitations are superseded', async () => {
-    const r = await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: {} });
+  it('invite: the chosen e-mail (required), the employee role, the employee\'s own branch, the employee link; older open invitations are superseded', async () => {
+    expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: {} })).status).toBe(400);
+    const r = await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: { email: 'four@test.local' } });
     expect(r.status).toBe(201);
     expect(r.body.data.invitation).toMatchObject({ email: 'four@test.local', roleId: ROLE.employee, allBranches: false, branchIds: [f.branchB], employeeId: e4 });
     // the existing account got an `invited` membership up-front
     expect(r.body.data.access).toMatchObject({ state: 'invited', invitation: { email: 'four@test.local', expired: false } });
-    const again = await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: {} });
+    const again = await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: { email: 'four@test.local' } });
     expect(again.status).toBe(201);
     expect((await invitation(r.body.data.invitation.id)).revokeReason).toBe('superseded');
     // resend re-issues the open invitation
@@ -159,7 +164,7 @@ describe('FlowZa Time access on an employee profile', () => {
     const ok = await accept(person, 'four@test.local', resent.body.data.invitation.token);
     expect(ok.status).toBe(200);
     expect((await h.request('GET', `${base()}/employees/${e4}/portal-access`, { token: f.owner })).body.data).toMatchObject({ state: 'active', membership: { userId: person, status: 'active' }, invitation: null });
-    expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: {} })).status).toBe(409);
+    expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: { email: 'four@test.local' } })).status).toBe(409);
   });
 
   it('revoke suspends the login WITHOUT unlinking the employee and ends its sessions; restore re-activates; resend restores directly (B-69)', async () => {
@@ -173,7 +178,7 @@ describe('FlowZa Time access on an employee profile', () => {
     expect((await auditRows(h.admin, 'member.portal_access_revoked')).at(0)!.reason).toBe('Left the project');
     expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/revoke`, { token: f.owner, body: {} })).status).toBe(409);
     // the invitation route cannot sneak around the revocation
-    expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: {} })).status).toBe(409);
+    expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: { email: 'four@test.local' } })).status).toBe(409);
     const restored = await h.request('POST', `${base()}/employees/${e4}/portal-access/restore`, { token: f.owner, body: {} });
     expect(restored.body.data).toMatchObject({ state: 'active' });
     expect((await auditRows(h.admin, 'member.portal_access_restored')).length).toBe(1);
@@ -186,11 +191,11 @@ describe('FlowZa Time access on an employee profile', () => {
     await h.request('POST', `${base()}/employees/${e4}/portal-access/revoke`, { token: f.owner, body: {} });
     await h.admin.updateTable('employees').set({ employmentStatus: 'terminated' }).where('id', '=', e4).execute();
     expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/restore`, { token: f.owner, body: {} })).status).toBe(409);
-    expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: {} })).status).toBe(409);
-    // an owner linked to an employee cannot revoke their own access
+    expect((await h.request('POST', `${base()}/employees/${e4}/portal-access/invite`, { token: f.owner, body: { email: 'four@test.local' } })).status).toBe(409);
+    // an owner linked to an employee cannot revoke their own access (review 5-P0-1: the member-management rule, 403)
     const own = await seedEmployee(h.admin, f.orgId, f.branchA, 9);
     await h.admin.updateTable('orgMemberships').set({ employeeId: own }).where('userId', '=', f.owner).where('organizationId', '=', f.orgId).execute();
-    expect((await h.request('POST', `${base()}/employees/${own}/portal-access/revoke`, { token: f.owner, body: {} })).status).toBe(409);
+    expect((await h.request('POST', `${base()}/employees/${own}/portal-access/revoke`, { token: f.owner, body: {} })).status).toBe(403);
     await h.admin.updateTable('orgMemberships').set({ employeeId: null }).where('userId', '=', f.owner).where('organizationId', '=', f.orgId).execute();
   });
 

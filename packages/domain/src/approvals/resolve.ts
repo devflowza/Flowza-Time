@@ -39,10 +39,17 @@ function isCoSubject(ctx: ResolutionContext, ids: { employeeId?: string | null; 
   return (!!ids.employeeId && !!ctx.coSubjectEmployeeIds?.includes(ids.employeeId)) || (!!ids.userId && !!ctx.coSubjectUserIds?.includes(ids.userId));
 }
 
+/** Four-eyes (review O3): somebody who already approved an earlier level of the request. */
+function isPriorApprover(ctx: ResolutionContext, userId: string | null | undefined): boolean {
+  return !!userId && !!ctx.priorApproverUserIds?.includes(userId);
+}
+
 function candidate(c: ApproverCandidate | null, ctx: ResolutionContext): { actors: ResolvedActor[]; reason: string | null } {
   if (!c) return { actors: [], reason: 'not set' };
   // a party to the request never holds its seat, and nobody holds it for them (no delegate substitution): the rung falls through
   if (isCoSubject(ctx, c)) return { actors: [], reason: 'party to the request' };
+  // four-eyes: somebody who approved an earlier level holds no later seat — the rung falls through exactly like the subject's
+  if (isPriorApprover(ctx, c.userId)) return { actors: [], reason: 'approved an earlier level (four-eyes)' };
   if (!c.userId) return { actors: [], reason: c.absentReason ?? 'no linked login' };
   if (!ctx.activeUserIds.has(c.userId)) return { actors: [], reason: c.absentReason ?? 'no active membership' };
   const delegate = ctx.delegateOf(c.userId);
@@ -130,6 +137,10 @@ function segregate(actors: readonly ResolvedActor[], ctx: ResolutionContext, opt
   const beforeCo = out.length;
   out = out.filter((a) => !isCoSubject(ctx, { userId: a.userId }) && !isCoSubject(ctx, { userId: a.viaDelegationOf }));
   if (out.length !== beforeCo) notes.push('party to the request excluded');
+  // four-eyes (review O3): whoever approved an earlier level is dropped from every later seat, with anybody acting in theirs
+  const beforePrior = out.length;
+  out = out.filter((a) => !isPriorApprover(ctx, a.userId) && !isPriorApprover(ctx, a.viaDelegationOf));
+  if (out.length !== beforePrior) notes.push('approved an earlier level excluded (four-eyes)');
   if (ctx.requestedBy) {
     const withoutRequestor = out.filter((a) => a.userId !== ctx.requestedBy && a.viaDelegationOf !== ctx.requestedBy);
     if (withoutRequestor.length !== out.length) {
@@ -145,6 +156,11 @@ function segregate(actors: readonly ResolvedActor[], ctx: ResolutionContext, opt
     // the same exception for a co-subject who is the organisation's only possible approver (an owner, in their own seat)
     const parties = actors.filter((a) => a.viaDelegationOf === null && ctx.ownerUserIds.includes(a.userId) && isCoSubject(ctx, { userId: a.userId }));
     if (parties.length) { out = parties; notes.push('party to the request kept: the organisation\'s only possible approver is this owner (owner bypass, logged when they decide)'); }
+  }
+  if (out.length === 0 && opts.lastResort) {
+    // four-eyes: an owner who approved an earlier level is kept when nobody else at all remains (their decision is logged)
+    const prior = actors.filter((a) => a.viaDelegationOf === null && ctx.ownerUserIds.includes(a.userId) && isPriorApprover(ctx, a.userId) && a.userId !== ctx.subjectUserId && !isCoSubject(ctx, { userId: a.userId }));
+    if (prior.length) { out = prior; notes.push('owner kept although they approved an earlier level: nobody else can decide (four-eyes override, logged when they decide)'); }
   }
   return { actors: out, reason: notes.length ? notes.join('; ') : null };
 }

@@ -45,6 +45,15 @@ export interface ResolutionContext {
    */
   coSubjectEmployeeIds?: readonly string[];
   coSubjectUserIds?: readonly string[];
+  /**
+   * Four-eyes (HR portal Prompt 5 review, O3): the people who already APPROVED an earlier level of the request (directly or as
+   * a delegate). One person approves at most one level, so they are treated like the subject on every later level: a rung of
+   * the reporting line held by one falls through (to its secondary manager, then the next rung of the ladder), and they — and
+   * anybody acting in their seat — are dropped from HR admins, roles, permission holders and owners. The owner of last resort
+   * is the one exception (kept in their own seat when nobody else remains; their decision is logged as a four-eyes override).
+   * Optional: absent = nobody yet (every level resolved at submission).
+   */
+  priorApproverUserIds?: readonly string[];
   /** chain[0] = the subject's own managers, chain[1] = the managers of chain[0].primary's employee record, … (primary links only). */
   chain: readonly ChainRung[];
   departmentHead: ApproverCandidate | null;
