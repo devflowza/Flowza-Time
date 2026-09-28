@@ -250,6 +250,16 @@ describe('7-P1-1 / 7-P1-2 the per-date working calendar (shared with the attenda
     // … and a leave stored without days (before leave v2) is counted with the branch of each date: still 5, not 4
     await h.admin.updateTable('leaveRecords').set({ days: null }).where('id', '=', rec.body.data.id).execute();
     expect(await taken()).toBe(5);
+    // the stored figure is the document: a holiday added to branch X's calendar afterwards does not move it …
+    await h.admin.updateTable('leaveRecords').set({ days: 5 }).where('id', '=', rec.body.data.id).execute();
+    const calX = await h.admin.insertInto('holidayCalendars').values({ organizationId: f.orgId, name: 'Branch X' }).returning('id').executeTakeFirstOrThrow();
+    await h.admin.updateTable('branches').set({ holidayCalendarId: calX.id }).where('id', '=', x).execute();
+    await h.admin.insertInto('holidays').values({ organizationId: f.orgId, calendarId: calX.id, name: 'Late holiday', date: '2026-05-05' }).execute();
+    expect(await taken()).toBe(5);
+    // … while a row stored without days is counted with it: 4
+    await h.admin.updateTable('leaveRecords').set({ days: null }).where('id', '=', rec.body.data.id).execute();
+    expect(await taken()).toBe(4);
+    await h.admin.updateTable('leaveRecords').set({ days: 5 }).where('id', '=', rec.body.data.id).execute();
     // CAL-2: attendance sees the Thursday as a working day of branch X; the shared placement helper agrees
     const inputs = await withContext(h.tdb.db, { kind: 'system', organizationId: f.orgId }, (trx) => loadDailyInputs(trx, f.orgId, eT, '2026-05-07', new Date()));
     expect(inputs!.input.weeklyOffDays).not.toContain(4);

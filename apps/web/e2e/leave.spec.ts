@@ -52,9 +52,12 @@ test.describe('leave v2 — review fixes', () => {
   test.beforeEach(async ({ page }) => { await signInDirectly(page); });
   const managerMe = () => meFixture({ roleKey: 'manager', roleName: 'Line Manager', employeeId: EMPLOYEE_ID, isManager: true, teamSize: 2, permissions: ['leave.request', 'leave.view_team', 'leave.approve', 'attendance.view_own'] });
   const teamLeavePath = `/orgs/${ORG_ID}/me/team/leave`;
+  // the /my home's own summary (an empty month), so the page renders its cards around the team card
+  const totals = { present: 0, absent: 0, leave: 0, holiday: 0, weeklyOff: 0, halfDay: 0, late: 0, missingPunch: 0, workedMinutes: 0, overtimeMinutes: 0, lateMinutes: 0, earlyDepartureMinutes: 0, workingDays: 0, attendanceRate: null };
+  const overview = { [`/orgs/${ORG_ID}/me/overview`]: { data: { date: '2026-09-28', timezone: 'Asia/Muscat', today: null, month: { month: '2026-09', totals }, recent: [], balances: [], upcomingLeave: [], pendingLeave: 0, pendingCorrections: 0, upcomingHolidays: [] } } };
 
   test('7-P2-7 /my: a manager\'s team leave card is hidden while the team has no upcoming leave (B-62)', async ({ page }) => {
-    await installMockBackend(page, { me: managerMe() });
+    await installMockBackend(page, { me: managerMe(), get: { ...overview } });
     // the card itself asks for the team's leave, so it is on screen (loading) until the answer arrives
     const answered = page.waitForResponse((r) => new URL(r.url()).pathname.endsWith(teamLeavePath));
     await page.goto('/my');
@@ -66,7 +69,7 @@ test.describe('leave v2 — review fixes', () => {
 
   test('7-P2-7 /my: with one upcoming leave in the team the card lists it', async ({ page }) => {
     const leave = { id: 'x1', employeeId: 'e1', employeeName: 'Salim Report', employeeNumber: 'E1', leaveTypeId: LEAVE_TYPE_AL, leaveTypeName: 'Annual Leave', leaveTypeCode: 'AL', color: '#175cd3', startDate: '2026-12-06', endDate: '2026-12-07', isHalfDay: false, halfDayPart: null, days: 2, status: 'PENDING' };
-    await installMockBackend(page, { me: managerMe(), get: { [teamLeavePath]: { data: [leave] } } });
+    await installMockBackend(page, { me: managerMe(), get: { ...overview, [teamLeavePath]: { data: [leave] } } });
     await page.goto('/my');
     await expect(page.getByRole('heading', { name: 'Team leave', exact: true })).toBeVisible();
     await expect(page.getByRole('list', { name: 'Team leave' })).toContainText('Salim Report');

@@ -16,6 +16,7 @@ import '@/features/approvals/routes';
 import { approvalRequest, approvalStep, leaveContext } from '@/features/approvals/test-fixtures';
 import LeavePage from './leave-page';
 import { TeamUpcomingLeave } from '../components/team-upcoming-leave';
+import { RequestDetail } from '@/features/approvals/components/request-detail';
 
 registerNamespace('leave', en, ar);
 
@@ -142,5 +143,22 @@ describe('7-P2-7 the team card on /my', () => {
     expect(await screen.findByText('Team leave')).toBeInTheDocument();
     expect(await screen.findByText(/· 1 day$/)).toBeInTheDocument();
     testState.teamSize = 0;
+  });
+});
+
+describe('7-P2-3 the timeline says the open question was closed', () => {
+  it('7-P2-3 an info_request_closed event reads as a closed question, not "Updated"', async () => {
+    const req = approvalRequest({
+      id: 'req-9', entityType: 'LEAVE', employeeName: 'Priya Sharma', currentStep: 2, stepCount: 2, context: leaveContext(),
+      events: [
+        { id: 'e1', at: '2026-09-21T08:00:00Z', actorUserId: 'u5', actorName: 'Team Approver', kind: 'info_requested', detail: { stepNo: 1, comment: 'Who covers?' } },
+        { id: 'e2', at: '2026-09-21T09:00:00Z', actorUserId: 'u5', actorName: 'Team Approver', kind: 'step_approved', detail: { stepNo: 1 } },
+        { id: 'e3', at: '2026-09-21T09:00:00Z', actorUserId: 'u5', actorName: 'Team Approver', kind: 'info_request_closed', detail: { fromStepNo: 1, stepNo: 2, reason: 'level approved' } },
+      ],
+    });
+    mockGet({ '/orgs/org-1/approvals/req-9': { data: req } });
+    renderWithProviders(<RequestDetail requestId="req-9" />);
+    expect(await screen.findByText('Open question closed — its level was approved')).toBeInTheDocument();
+    expect(screen.queryByText('Updated')).not.toBeInTheDocument();
   });
 });
