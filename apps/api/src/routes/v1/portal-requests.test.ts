@@ -158,7 +158,7 @@ describe('attendance notes — the reviewer side', () => {
     const item = inbox.body.data.find((x: { id: string }) => x.id === req!.id);
     expect(item.context).toMatchObject({ kind: 'ATTENDANCE_NOTE', note: { id: n.body.data.id, dayStatus: 'ABSENT', category: 'absence_reason' } });
     expect(item.context.summary).toContain(D.absent2);
-    const r = await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.managerUser, body: { decision: 'REJECT', comment: 'Not a valid reason', payEffectDays: 0 } });
+    const r = await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.managerUser, body: { stepNo: 1, decision: 'REJECT', comment: 'Not a valid reason', payEffectDays: 0 } });
     expect(r.status).toBe(200);
     const after = await h.admin.selectFrom('attendanceNotes').selectAll().where('id', '=', n.body.data.id).executeTakeFirstOrThrow();
     expect(after).toMatchObject({ status: 'rejected', lossOfPay: false, reviewReason: 'Not a valid reason', reviewVia: 'manager' });
@@ -173,8 +173,8 @@ describe('attendance notes — the reviewer side', () => {
     const n = await note(day);
     expect(n.status).toBe(201);
     const [req] = await requestOf(n.body.data.id);
-    // the decide body of the web built before this prompt: decision + comment, no payEffectDays
-    const r = await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.managerUser, body: { decision: 'REJECT', comment: 'No proof given' } });
+    // the decide body of the web built before this prompt: the level, decision + comment, no payEffectDays
+    const r = await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.managerUser, body: { stepNo: 1, decision: 'REJECT', comment: 'No proof given' } });
     expect(r.status).toBe(200);
     expect(r.body.data).toMatchObject({ id: req!.id, status: 'REJECTED' });
     const after = await h.admin.selectFrom('attendanceNotes').selectAll().where('id', '=', n.body.data.id).executeTakeFirstOrThrow();
@@ -240,8 +240,8 @@ describe('regularisations', () => {
     expect(r.status).toBe(201);
     expect(r.body.data).toMatchObject({ status: 'pending', approvalStatus: 'PENDING', type: 'missed_punch' });
     const [req] = await requestOf(r.body.data.id);
-    expect((await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.employeeUser, body: { decision: 'APPROVE' } })).status).toBe(403);
-    const ok = await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.managerUser, body: { decision: 'APPROVE', comment: 'OK' } });
+    expect((await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.employeeUser, body: { stepNo: 1, decision: 'APPROVE' } })).status).toBe(403);
+    const ok = await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.managerUser, body: { stepNo: 1, decision: 'APPROVE', comment: 'OK' } });
     expect(ok.status).toBe(200);
     const reg = await h.admin.selectFrom('attendanceRegularisationRequests').selectAll().where('id', '=', r.body.data.id).executeTakeFirstOrThrow();
     expect(reg).toMatchObject({ status: 'approved', decidedBy: f.managerUser, decisionNote: 'OK' });
@@ -258,13 +258,13 @@ describe('regularisations', () => {
   it('work from home not marked becomes present; a wrong punch edits the day\'s own punch', async () => {
     const wfh = await h.request('POST', `${base()}/me/regularisations`, { token: f.employeeUser, body: { date: D.wfh, type: 'wfh_unmarked', reason: 'Worked from home, approved by email' } });
     const [wreq] = await requestOf(wfh.body.data.id);
-    await h.request('POST', `${base()}/approvals/${wreq!.id}/decide`, { token: f.managerUser, body: { decision: 'APPROVE' } });
+    await h.request('POST', `${base()}/approvals/${wreq!.id}/decide`, { token: f.managerUser, body: { stepNo: 1, decision: 'APPROVE' } });
     const wc = await h.admin.selectFrom('attendanceCorrections').selectAll().where('approvalRequestId', '=', wreq!.id).execute();
     expect(wc.map((c) => `${c.type}:${c.proposedStatus}`)).toEqual(['SET_STATUS:PRESENT']);
     const ev = await h.admin.insertInto('attendanceEvents').values({ organizationId: f.orgId, employeeId: f.e1, branchId: f.branchA, punchedAt: new Date(`${D.wrong}T06:30:00Z`), eventType: 'PUNCH_IN', source: 'DEVICE' }).returning('id').executeTakeFirstOrThrow();
     const wrong = await h.request('POST', `${base()}/me/regularisations`, { token: f.employeeUser, body: { date: D.wrong, type: 'wrong_punch', proposedInAt: `${D.wrong}T05:00:00Z`, reason: 'The terminal clock was wrong' } });
     const [rreq] = await requestOf(wrong.body.data.id);
-    await h.request('POST', `${base()}/approvals/${rreq!.id}/decide`, { token: f.managerUser, body: { decision: 'APPROVE' } });
+    await h.request('POST', `${base()}/approvals/${rreq!.id}/decide`, { token: f.managerUser, body: { stepNo: 1, decision: 'APPROVE' } });
     const rc = await h.admin.selectFrom('attendanceCorrections').selectAll().where('approvalRequestId', '=', rreq!.id).execute();
     expect(rc).toEqual([expect.objectContaining({ type: 'EDIT_PUNCH', originalEventId: ev.id, proposedEventType: 'PUNCH_IN' })]);
   });
@@ -331,7 +331,7 @@ describe('shift tab and swaps', () => {
 
   it('approval writes two one-day assignments and splits the ones that covered the day', async () => {
     const [req] = await requestOf(swapId);
-    const ok = await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.managerUser, body: { decision: 'APPROVE' } });
+    const ok = await h.request('POST', `${base()}/approvals/${req!.id}/decide`, { token: f.managerUser, body: { stepNo: 1, decision: 'APPROVE' } });
     expect(ok.status).toBe(200);
     const swap = await h.admin.selectFrom('shiftSwapRequests').selectAll().where('id', '=', swapId).executeTakeFirstOrThrow();
     expect(swap.status).toBe('approved');

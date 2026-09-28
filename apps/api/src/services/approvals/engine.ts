@@ -116,7 +116,10 @@ export function assessDecider(params: {
   let alreadyDecided = false;
   const own = rows.find((r) => r.userId === userId);
   if (own) {
-    const ownVia: DeciderAssessment['via'] = own.resolutionPath === 'escalated' ? 'escalated' : own.resolutionPath === 'override' ? 'permission' : own.resolutionPath === 'owner_override' ? 'owner' : own.viaDelegationOf ? 'delegate' : 'actor';
+    // `secondary`: the reporting line's secondary manager seated beside the primary on the primary's seat (HR portal Prompt 4,
+    // Finance B-22 — either manager reviews for the line). That seat comes from the org structure, not from a delegation, so it
+    // does not lapse with one: the stand-in decides the shared seat as its actor (one seat — a rejection by either is final).
+    const ownVia: DeciderAssessment['via'] = own.resolutionPath === 'escalated' ? 'escalated' : own.resolutionPath === 'override' ? 'permission' : own.resolutionPath === 'owner_override' ? 'owner' : own.resolutionPath === 'secondary' ? 'actor' : own.viaDelegationOf ? 'delegate' : 'actor';
     if (isDecided(own.decision)) { alreadyDecided = true; via = ownVia; }
     else if (own.decision === 'PENDING') {
       if (ownVia === 'delegate') {
