@@ -154,8 +154,12 @@ export const selfieListQuerySchema = paginationQuerySchema.extend({ status: z.en
 export const selfieReviewSchema = z.object({ decision: z.enum(['approve', 'reject']), reason: z.string().trim().max(1000).optional() })
   .refine((v) => v.decision !== 'reject' || !!v.reason, { message: 'A reason is required when rejecting.', path: ['reason'] });
 export type SelfieReviewInput = z.infer<typeof selfieReviewSchema>;
-/** A short-lived signed URL of a selfie photo (every issue is audited). */
-export interface SelfiePhotoDto { url: string; expiresInSeconds: number }
+/**
+ * A selfie photo, served by the API (every issue is audited). Since the Prompt 4 review (P2-17) `url` is a `data:` URL of the
+ * type detected from the bytes (the object is re-validated server-side; no storage URL leaves the API); `expiresInSeconds`
+ * is how long the client may keep it.
+ */
+export interface SelfiePhotoDto { url: string; expiresInSeconds: number; contentType?: 'image/jpeg' | 'image/png' | 'image/webp' }
 
 /** Withdrawing one's own regularisation / swap: an optional reason (a default is recorded when none is given). */
 export const portalCancelSchema = z.object({ reason: z.string().trim().min(3).max(500).optional() });
@@ -196,11 +200,17 @@ export const attendanceNotesQuerySchema = paginationQuerySchema.extend({
 });
 export type AttendanceNotesQuery = z.infer<typeof attendanceNotesQuerySchema>;
 
-/** POST /orgs/:orgId/attendance/notes/:id/review. A rejection names its pay effect; a question needs its text. */
+/**
+ * POST /orgs/:orgId/attendance/notes/:id/review. A rejection names its pay effect; a question needs its text.
+ * `onBehalfOfUserId` names the pending seat an organisation-wide reviewer's override (or an escalated reviewer's decision)
+ * fills — REQUIRED when the note's approval level is ALL or QUORUM with several seats waiting (the approval request's
+ * `abilities.mustChooseSeat`; 400 `APPROVAL_SEAT_CHOICE_MESSAGE` otherwise), exactly as on /approvals/:id/decide (engine §9.8).
+ */
 export const noteReviewSchema = z.object({
   decision: z.enum(NOTE_REVIEW_DECISIONS),
   reason: z.string().trim().max(1000).optional(),
   payEffectDays: z.union([z.literal(0), z.literal(0.5), z.literal(1)]).optional(),
+  onBehalfOfUserId: uuidSchema.optional(),
 }).superRefine((v, ctx) => {
   if (v.decision === 'reject' && v.payEffectDays === undefined) ctx.addIssue({ code: 'custom', path: ['payEffectDays'], message: 'Choose the pay effect of the rejection (none, half day, full day).' });
   if (v.decision !== 'reject' && v.payEffectDays !== undefined) ctx.addIssue({ code: 'custom', path: ['payEffectDays'], message: 'Only a rejection has a pay effect.' });
@@ -303,11 +313,17 @@ export interface SelfStatsHintDto { kind: SelfStatsHintKind; value: number; targ
 export interface PunctualityWindowDto { from: string; to: string; days: number; onTimeDays: number; lateDays: number; avgArrivalDeltaMinutes: number | null; totalDelayMinutes: number; avgDelayMinutes: number | null }
 export interface SelfStatsDto {
   range: (typeof SELF_STATS_RANGES)[number]; from: string; to: string;
+  /**
+   * `workingDays` / `attendancePct` follow the ONE portal definition shared with the month card (HR portal Prompt 4 review,
+   * P2-14; `attendanceRateOf` in @flowza/domain): expected = present, half-day, absent and missing-punch days, approved leave
+   * outside (a half-day-leave day counts 0.5); attended = present and missing-punch days in full, half days by half.
+   * `missingCheckouts` never counts today's running day (its check-out is still to come).
+   */
   workingDays: number; presentDays: number; halfDays: number; absentDays: number; leaveDays: number; lateDays: number; missingCheckouts: number;
   workedDays: number; workedMinutes: number;
   /** Average hours per day over the days with worked time; null without any. */
   avgHoursPerDay: number | null;
-  /** (present + late + 0.5 × half days) / working days × 100, one decimal; null before the first working day. */
+  /** Attended / expected days × 100 (see above), one decimal; null before the first working day. */
   attendancePct: number | null;
   targets: { attendancePct: number; fullDayHours: number };
   hints: SelfStatsHintDto[];
@@ -356,10 +372,24 @@ export const geofenceAssignmentsInputSchema = z.object({ assignments: z.array(ge
 export const geofenceUpdateSchema = updateSchemaOf<Omit<GeofenceInput, 'assignments'>>(geofenceShape);
 export type GeofenceUpdateInput = Partial<Omit<GeofenceInput, 'assignments'>>;
 export interface GeofenceAssignmentDto { id: string; geofenceId: string; scope: GeofenceScope; targetId: string | null; targetName: string | null; priority: number; requireOnCheckIn: boolean; requireOnCheckOut: boolean; createdAt: string }
+/**
+ * A geofence as HR sees it. Which fence judges a punch (ATT-63/64, the pack's decision): the MOST SPECIFIC assignment scope
+ * that applies to the employee wins (employee, then team, then department, then branch, then organisation), and within that
+ * scope the WORST verdict of its fences decides (one failing fence fails the punch; priority only orders equally specific
+ * fences for display).
+ */
 export interface GeofenceDto {
   id: string; organizationId: string; branchId: string | null; branchName: string | null; name: string; latitude: number; longitude: number; radiusM: number;
   polygon: Array<[number, number]> | null; enforcement: GeofenceEnforcement; accuracyThresholdM: number; graceM: number; activeFrom: string | null; activeTo: string | null;
   timeWindows: GeofenceTimeWindow[]; isActive: boolean; assignments: GeofenceAssignmentDto[]; createdAt: string; updatedAt: string;
+  /**
+   * The caller may change or delete this fence and its assignments (HR portal Prompt 4 review, P0-1): the fence belongs to one
+   * of their branches (organisation-wide fences only for an unrestricted holder) AND every assignment it carries targets people
+   * inside their scope. Absent from an API that predates the flag (treat as true for `attendance.manage_geofences`).
+   */
+  editable?: boolean;
+  /** How many of the fence's assignments target people outside the caller's scope (they are not listed and not editable). */
+  hiddenAssignments?: number;
 }
 export const geofenceListQuerySchema = z.object({ branchId: uuidSchema.optional(), includeInactive: booleanQuerySchema.optional() });
 export const geofenceEvaluateSchema = z.object({

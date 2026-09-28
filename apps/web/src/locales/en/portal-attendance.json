@@ -129,10 +129,14 @@
       "attempts_other": "{{count}} attempts",
       "synced_one": "{{count}} offline punch sent",
       "synced_other": "{{count}} offline punches sent",
-      "refused": "An offline punch was refused: {{reason}}"
+      "refused": "An offline punch was refused: {{reason}}",
+      "lastError": "Last attempt: {{message}}",
+      "legacyDiscarded_one": "{{count}} punch saved on this device by an earlier version was removed: it could not be tied to an account. If it was yours, punch again or request a regularisation.",
+      "legacyDiscarded_other": "{{count}} punches saved on this device by an earlier version were removed: they could not be tied to an account. If they were yours, punch again or request a regularisation."
     },
     "footer": "Forgot to punch, or a punch is wrong?",
-    "footerLink": "Request a regularisation"
+    "footerLink": "Request a regularisation",
+    "accuracyWarning": "Your location is only accurate to ±{{meters}} m (more than {{limit}} m). Move to an open area or wait a moment and refresh — the zone check may not be able to place you."
   },
   "home": {
     "reasonsRequired_one": "{{count}} day needs a reason",

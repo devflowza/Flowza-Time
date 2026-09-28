@@ -1,13 +1,13 @@
 import type { ApprovalRequestStatus, RegularisationDto, RegularisationStatus, SelfRegularisationInput } from '@flowza/contracts';
 import { effectiveBranchOn, type Trx } from '@flowza/database';
-import { addDays, errors } from '@flowza/shared';
+import { addDays, AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
 import { isoDate, isoDateTime, isoDateTimeOrNull } from '../../lib/mappers.js';
 import { cancelForEntity, submit } from '../approvals/engine.js';
 import { systemStep } from '../features/context.js';
 import { dv } from '../features/sql-helpers.js';
-import { isPeriodLocked, isWorking, loadEmployeeCtx, localDate, localInstant, lockEmployee, portalSelf } from './common.js';
+import { attendancePolicy, isPeriodLocked, isWorking, loadEmployeeCtx, localDate, localInstant, lockEmployee, portalSelf } from './common.js';
 import { seatSecondaryManager } from './line-manager.js';
 import { loadRegularisation, REGULARISATION_COLUMNS, type RegularisationRow } from './regularisation-effects.js';
 
@@ -16,7 +16,8 @@ import { loadRegularisation, REGULARISATION_COLUMNS, type RegularisationRow } fr
  * home that was not marked, a system downtime. Filed by the employee (attendance.note or attendance.request_correction),
  * routed by the approval engine (REGULARISATION workflow, else the line manager with the secondary standing in), applied on
  * approval THROUGH attendance corrections (regularisation-effects.ts). One open request per day; the employee may withdraw
- * a pending one.
+ * a pending one. The organisation turns the feature off with Settings → Attendance → self-service → "Regularisation
+ * requests" (`selfService.regularisation`, on by default — review P2-9), independently of direct self-service corrections.
  */
 
 const REG_KEYS = ['attendance.note', 'attendance.request_correction'] as const;
@@ -57,6 +58,7 @@ export async function submitRegularisation(deps: ApiDeps, actor: Actor, orgId: s
   const self = portalSelf(actor, orgId, ...REG_KEYS);
   return runUser(deps.db, actor, async (trx) => {
     await lockEmployee(trx, 'regularisation', self.employeeId);
+    if (!(await attendancePolicy(trx, orgId)).selfService.regularisation) throw new AppError('FORBIDDEN', 'Regularisation requests are turned off for this organisation.', { details: { reason: 'REGULARISATION_DISABLED' } });
     const emp = await loadEmployeeCtx(trx, orgId, self.employeeId);
     const now = new Date();
     const today = localInstant(now, emp.timezone).date;

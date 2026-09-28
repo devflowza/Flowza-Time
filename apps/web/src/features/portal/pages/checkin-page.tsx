@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
-import { Camera, CloudOff, Crosshair, LogIn, LogOut, MapPin, RefreshCw, ShieldOff, Trash2 } from 'lucide-react';
+import { AlertTriangle, Camera, CloudOff, Crosshair, LogIn, LogOut, MapPin, RefreshCw, ShieldOff, Trash2 } from 'lucide-react';
 import type { SelfPunchDirection, SelfPunchPreviewDto, SelfPunchRefusal, SelfPunchStatusDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, EmptyState, ErrorState, Skeleton } from '@/components/ui';
@@ -31,6 +31,9 @@ function useServerClock(serverTime: string | undefined, receivedAt: number, time
 
 const refusalOf = (e: unknown): { reason: SelfPunchRefusal | string; message: string } | null =>
   e instanceof ApiError && typeof e.details?.['reason'] === 'string' ? { reason: e.details['reason'], message: e.message } : null;
+
+/** A fix less precise than this is worth a warning before punching (Finance B-31): the zone check may not be able to place it. */
+const ACCURACY_WARNING_M = 50;
 
 function nextDirection(status: SelfPunchStatusDto | undefined, queued: ReadonlyArray<{ direction: SelfPunchDirection }>): SelfPunchDirection {
   const last = queued.length ? queued[queued.length - 1]!.direction : status?.lastDirection ?? null;
@@ -105,8 +108,8 @@ export default function CheckInPage() {
       onError: (e) => {
         // no response at all (offline, DNS, a dropped connection): keep the punch on the device and send it later
         if (!(e instanceof ApiError) || e.status === 0) {
-          void offline.enqueue({ key, direction, lat: fix?.lat, lng: fix?.lng, accuracy: fix?.accuracy, clientQueuedAt: new Date().toISOString() });
-          toast.warning(t('checkin.offline.queued'));
+          void offline.enqueue({ key, direction, lat: fix?.lat, lng: fix?.lng, accuracy: fix?.accuracy, clientQueuedAt: new Date().toISOString() })
+            .then((queued) => (queued ? toast.warning(t('checkin.offline.queued')) : toastError(e)));
           return;
         }
         const r = refusalOf(e);
@@ -163,6 +166,12 @@ export default function CheckInPage() {
               {near ? <span>· {t('checkin.nearest', { name: near.fence.name, distance: fmtDistance(near.edgeDistanceM) })}</span> : s && s.fences.length === 0 ? <span>· {t('checkin.noFences')}</span> : null}
               <Button variant="ghost" size="sm" onClick={() => void locate()} disabled={locating}>{fix ? <RefreshCw /> : <Crosshair />} {fix ? t('checkin.relocate') : t('checkin.locate')}</Button>
             </div>
+            {fix && fix.accuracy > ACCURACY_WARNING_M ? (
+              <p role="status" data-testid="accuracy-warning" className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100">
+                <AlertTriangle className="mt-0.5 size-4 shrink-0" aria-hidden />
+                <span>{t('checkin.accuracyWarning', { meters: Math.round(fix.accuracy), limit: ACCURACY_WARNING_M })}</span>
+              </p>
+            ) : null}
 
             <div className="flex flex-wrap gap-2 pt-1">
               {!selfieOnly ? (
@@ -204,7 +213,10 @@ export default function CheckInPage() {
             <ul className="divide-y">
               {offline.items.map((p) => (
                 <li key={p.key} className="flex items-center justify-between gap-2 py-2 text-sm">
-                  <span><Badge variant="outline">{t(`checkin.direction.${p.direction}`)}</Badge> <span className="tnum">{t('checkin.offline.takenAt', { time: fmtDateTime(p.clientQueuedAt, tz, 'dd MMM HH:mm') })}</span>{p.attempts > 0 ? <span className="ms-2 text-xs text-muted-foreground">{t('checkin.offline.attempts', { count: p.attempts })}</span> : null}</span>
+                  <span className="min-w-0">
+                    <Badge variant="outline">{t(`checkin.direction.${p.direction}`)}</Badge> <span className="tnum">{t('checkin.offline.takenAt', { time: fmtDateTime(p.clientQueuedAt, tz, 'dd MMM HH:mm') })}</span>{p.attempts > 0 ? <span className="ms-2 text-xs text-muted-foreground">{t('checkin.offline.attempts', { count: p.attempts })}</span> : null}
+                    {p.lastError ? <span className="block break-words text-xs text-muted-foreground" data-testid="offline-last-error">{t('checkin.offline.lastError', { message: p.lastError })}</span> : null}
+                  </span>
                   <Button size="sm" variant="ghost" onClick={() => void offline.discard(p.key)} aria-label={t('checkin.offline.discard')}><Trash2 /> {t('checkin.offline.discard')}</Button>
                 </li>
               ))}

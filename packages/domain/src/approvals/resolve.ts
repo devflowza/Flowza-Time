@@ -34,8 +34,15 @@ function expand(userIds: readonly string[], ctx: ResolutionContext): ResolvedAct
  * seat is unusable UNLESS an active delegation substitutes the delegate — who then acts in the absent approver's seat.
  * A linked login whose membership is not active is reported as such ("membership suspended"), never as "no linked login".
  */
+/** A co-subject of the request (P0-2): their employee record or one of their logins. */
+function isCoSubject(ctx: ResolutionContext, ids: { employeeId?: string | null; userId?: string | null }): boolean {
+  return (!!ids.employeeId && !!ctx.coSubjectEmployeeIds?.includes(ids.employeeId)) || (!!ids.userId && !!ctx.coSubjectUserIds?.includes(ids.userId));
+}
+
 function candidate(c: ApproverCandidate | null, ctx: ResolutionContext): { actors: ResolvedActor[]; reason: string | null } {
   if (!c) return { actors: [], reason: 'not set' };
+  // a party to the request never holds its seat, and nobody holds it for them (no delegate substitution): the rung falls through
+  if (isCoSubject(ctx, c)) return { actors: [], reason: 'party to the request' };
   if (!c.userId) return { actors: [], reason: c.absentReason ?? 'no linked login' };
   if (!ctx.activeUserIds.has(c.userId)) return { actors: [], reason: c.absentReason ?? 'no active membership' };
   const delegate = ctx.delegateOf(c.userId);
@@ -111,11 +118,18 @@ function base(step: ApprovalStepSpec, ctx: ResolutionContext): Partial {
  * logged `sod_owner_bypass`): at the owner rung, when the subject is an owner and nobody else at all can hold the seat —
  * a single-owner organisation with no HR admin — the subject-owner is seated in their own seat (never their delegate), so
  * their own leave or correction can still be decided instead of being refused outright.
+ *
+ * The request's CO-SUBJECTS (the colleague of a shift swap — HR portal Prompt 4 review, P0-2) are treated exactly like the
+ * subject: dropped wherever they resolve (and their delegates with them), kept only as the owner of last resort.
  */
 function segregate(actors: readonly ResolvedActor[], ctx: ResolutionContext, opts: { lastResort?: boolean } = {}): { actors: ResolvedActor[]; reason: string | null } {
   const notes: string[] = [];
   let out = actors.filter((a) => !(ctx.subjectUserId && (a.userId === ctx.subjectUserId || a.viaDelegationOf === ctx.subjectUserId)));
   if (out.length !== actors.length) notes.push('subject excluded');
+  // the request's other parties (a swap's colleague — P0-2): never an approver, nor anybody acting in their seat
+  const beforeCo = out.length;
+  out = out.filter((a) => !isCoSubject(ctx, { userId: a.userId }) && !isCoSubject(ctx, { userId: a.viaDelegationOf }));
+  if (out.length !== beforeCo) notes.push('party to the request excluded');
   if (ctx.requestedBy) {
     const withoutRequestor = out.filter((a) => a.userId !== ctx.requestedBy && a.viaDelegationOf !== ctx.requestedBy);
     if (withoutRequestor.length !== out.length) {
@@ -126,6 +140,11 @@ function segregate(actors: readonly ResolvedActor[], ctx: ResolutionContext, opt
   if (out.length === 0 && opts.lastResort && ctx.subjectUserId && ctx.ownerUserIds.includes(ctx.subjectUserId)) {
     const self = actors.find((a) => a.userId === ctx.subjectUserId && a.viaDelegationOf === null);
     if (self) { out = [self]; notes.push('subject kept: the organisation\'s only possible approver is this owner (owner bypass, logged when they decide)'); }
+  }
+  if (out.length === 0 && opts.lastResort) {
+    // the same exception for a co-subject who is the organisation's only possible approver (an owner, in their own seat)
+    const parties = actors.filter((a) => a.viaDelegationOf === null && ctx.ownerUserIds.includes(a.userId) && isCoSubject(ctx, { userId: a.userId }));
+    if (parties.length) { out = parties; notes.push('party to the request kept: the organisation\'s only possible approver is this owner (owner bypass, logged when they decide)'); }
   }
   return { actors: out, reason: notes.length ? notes.join('; ') : null };
 }

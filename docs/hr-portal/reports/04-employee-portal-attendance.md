@@ -44,7 +44,7 @@ Self-service (the caller's own employee record — never an id from the client):
 | POST | `/orgs/:orgId/me/punch` | server-time punch (idempotency key); 201, or 200 `replayed` |
 | POST | `/orgs/:orgId/me/selfie-checkin` | JSON (base64) or multipart; photo sniffed (JPEG / PNG / WebP, ≤ 2 MB), stored by the API |
 | GET | `/orgs/:orgId/me/selfie-checkins` | own selfie check-ins |
-| GET | `/orgs/:orgId/me/selfie-checkins/:id/photo` | 60-second signed URL of the caller's own photo (audited) |
+| GET | `/orgs/:orgId/me/selfie-checkins/:id/photo` | the caller's own photo, served by the API (a `data:` URL of the detected type, `nosniff` — review P2-17, §10) (audited) |
 | GET / POST / PATCH | `/orgs/:orgId/me/attendance/notes[/:id]` | own reasons; one active per day; an edit re-submits |
 | GET / POST | `/orgs/:orgId/me/regularisations` | own regularisations; file one |
 | POST | `/orgs/:orgId/me/regularisations/:id/cancel` | withdraw a pending one |
@@ -62,7 +62,7 @@ Manager / HR:
 | GET | `/orgs/:orgId/attendance/notes?scope=mine\|team\|all` | review list (day status + flags, excused count this year, oversight flag, can-review) |
 | POST | `/orgs/:orgId/attendance/notes/:id/review` | approve / excuse / request_info (question required) / reject (`payEffectDays` 0 / 0.5 / 1 required) |
 | GET | `/orgs/:orgId/attendance/selfie-checkins` | selfie review list (`viaManager`, `canReview`, `canViewPhoto`) |
-| GET | `/orgs/:orgId/attendance/selfie-checkins/:id/photo` | 60-second signed URL for the photo's viewers (audited) |
+| GET | `/orgs/:orgId/attendance/selfie-checkins/:id/photo` | the photo for its viewers, served by the API (review P2-17, §10) (audited) |
 | POST | `/orgs/:orgId/attendance/selfie-checkins/:id/review` | approve (writes the raw punch) / reject (reason required) |
 | GET / PUT | `/orgs/:orgId/employees/:id/attendance-grants` | open attendance / selfie required (line manager or attendance approver; never oneself) |
 | GET / POST | `/orgs/:orgId/geofences` | list / create |
@@ -82,6 +82,8 @@ Normaliser: `SELF_SERVICE` rows become `MOBILE` events of the employee the row n
 - en + ar for every string (`portal-attendance`, `attendance-review` namespaces).
 
 ## 2. Acceptance items (Appendix A `ATT-*`, feature checklist `B-*`)
+
+Rows changed by the review fixes are restated in §10.3.
 
 | Item | Status |
 |---|---|
@@ -181,7 +183,7 @@ Normaliser: `SELF_SERVICE` rows become `MOBILE` events of the employee the row n
 
 | Path | Written by | Read by | Client storage access |
 |---|---|---|---|
-| `employee-photos/checkins/<org_id>/<employee_id>/<selfie_id>.<jpg\|png\|webp>` | the API's service client only, after its checks (organisation switch, grant, active employment, unlocked day, duplicate window, magic-byte sniff, ≤ 2 MB); `upsert: false` | nobody directly. The API issues a **60-second signed URL** — `GET /orgs/:orgId/me/selfie-checkins/:id/photo` for the employee themself (RLS: own rows only), `GET /orgs/:orgId/attendance/selfie-checkins/:id/photo` for the primary / secondary manager (the team relationship) and attendance reviewers in scope (`attendance.view` + `attendance.approve` or `attendance.review_notes`, inside their branches). Anybody else — incl. `attendance.view` alone (payroll, auditors) and colleagues — gets 404. Every issue is audited (`attendance.selfie_photo_viewed`, `via` self / manager / oversight). | **none**: the first path segment is not an organisation id, so no tenant storage policy (all keyed on `app.path_org_id`) matches it, and the restrictive `flowza_selfie_photos_deny_client` denies `anon` / `authenticated` / `flowza_system` every operation on the prefix — a later, broader policy cannot open it |
+| `employee-photos/checkins/<org_id>/<employee_id>/<selfie_id>.<jpg\|png\|webp>` | the API's service client only, after its checks (organisation switch, grant, active employment, unlocked day, duplicate window, magic-byte sniff, ≤ 2 MB); `upsert: false` | nobody directly. The API reads the object and serves it itself (review P2-17, §10): validated structurally again, returned as a `data:` URL of the type detected from its bytes inside JSON sent with `nosniff` — `GET /orgs/:orgId/me/selfie-checkins/:id/photo` for the employee themself (RLS: own rows only), `GET /orgs/:orgId/attendance/selfie-checkins/:id/photo` for the primary / secondary manager (the team relationship) and attendance reviewers in scope (`attendance.view` + `attendance.approve` or `attendance.review_notes`, inside their branches). Anybody else — incl. `attendance.view` alone (payroll, auditors) and colleagues — gets 404. Every issue is audited (`attendance.selfie_photo_viewed`, `via` self / manager / oversight). | **none**: the first path segment is not an organisation id, so no tenant storage policy (all keyed on `app.path_org_id`) matches it, and the restrictive `flowza_selfie_photos_deny_client` denies `anon` / `authenticated` / `flowza_system` every operation on the prefix — a later, broader policy cannot open it |
 
 No other storage path is added by this prompt. The RLS suite proves: a same-org employee without rights reads 0 selfie objects (even by exact name) and can neither change, delete nor upload one; managers, branch managers, auditors and the owner read 0; with a deliberately broad permissive policy added, a plain employee reads the control object (tenant path) but still 0 selfie objects. Dropping the restrictive policy in that situation exposes them (checked by hand as a negative control), so the assertion is meaningful.
 
@@ -263,3 +265,148 @@ Notes: on the 4 shared cores one earlier web run failed the pre-existing timing 
 - **Web bundle**: the main chunk is 842 kB (Vite warns above 700 kB; the warning predates this phase) — the new pages are lazy, but locale JSON is bundled eagerly; code-splitting the namespaces is a follow-up.
 - Playwright covers one portal scenario (check in → add a reason) with the mocked backend.
 - No new dependencies.
+
+## 10. Review fixes (adversarial review `docs/hr-portal/reviews/04-employee-portal-attendance-review.md`)
+
+Every defect of the review is fixed on the branch of this worktree (base `3e9a6d1`), with the decisions the brief took,
+one additive migration `supabase/migrations/20260928000840_portal_attendance_review_fixes.sql` (idempotent, one transaction,
+bounded lock waits; `20260928000500` untouched) and a regression test per defect, named after it (`4-<id>`), in the layer
+where the bug lived. The P0 / P1 tests were mutation-checked (§10.4). Statements of §§1–9 that the fixes changed are
+superseded by this section (the storage row of §4 and the two photo routes of §1 are updated in place).
+
+Commits: `cb96fc6` (the review), `8e8ee19` (migration, generated types, RLS suite, migration test), `2cf9ecf` (approval
+engine: co-subjects, system rejection), `7941cbe` (API: geofence checks, selfie validation and serving, IP list behind the
+edge), `e2b91a9` (portal: queue, notes, regularisations, swaps, shift, stats, settings, top bar, tests), then this report.
+The gates of §10.5 ran on exactly that tree.
+
+### 10.1 Defect → fix → test
+
+| Defect | Fix | Regression test(s) |
+|---|---|---|
+| **P0-1** a branch-restricted `attendance.manage_geofences` holder rewrote organisation-wide fences and other branches' assignments through PostgREST | `geofences` / `geofence_assignments` are **service-write-only**, exactly like `report_schedules` after 6a: client INSERT / UPDATE / DELETE revoked, three explicit restrictive denials each (a later GRANT or broad policy never reopens them), a `flowza_system` write policy for the API's system step. Reads stay RLS-scoped: a fence with `attendance.view` or `attendance.manage_geofences` in branch scope, organisation-wide fences as **read-only context**; an assignment only of a fence the caller can read AND whose target sits in the caller's branches (or the organisation scope) — new helper `app.geofence_target_branch_id`. The API writes in a system step after checking, on the row locked FOR UPDATE: the STORED fence's branch (organisation-wide fences for unrestricted members only), the fence's REACH (every existing assignment inside the caller's branches), the NEW branch, and every NEW target (employee / team / department / branch; organisation scope for unrestricted members only). The DTO says `editable` / `hiddenAssignments`; the page renders a fence the caller may not change read-only, with the reason | RLS `rls_portal_attendance.sql`: schema facts (no client write privilege, 6 denials, system-only writer), the reviewer's P-A1 … P-A6 as a branch-scoped holder → all raise 42501 and nothing changes, assignment reads (own branch + organisation scope only), re-GRANT + a broad permissive policy still refused, the system context writes (create / edit / assign / delete + cascade), every other role's direct write raises; API `portal-review-fixes.test.ts` `4-P0-1` ×4 (reads + `editable`; the six probes through the API → 403, nothing changed; reach / targets / new branch → 403; every legitimate in-scope write works and is audited as the caller); web `attendance-review.test.tsx` `4-P0-1` |
+| **P0-2** the colleague of a shift swap could approve it (as line manager, secondary stand-in or HR admin) | A **generic engine capability**: `approval_requests.co_subject_employee_ids` + `co_subject_user_ids` (the logins at submit; the live membership link is checked too). `submit(..., { coSubjectEmployeeIds })` persists them; the resolver drops co-subjects (and anybody acting as their delegate) from every rung exactly like the subject — a reporting-line seat held by one falls through to the secondary manager, then the next rung; HR admins / roles / permission holders / owners are filtered, the owner of last resort kept as for the subject. `isRequestSubject` covers co-subjects, so decide, bypass, request-info and withdraw-on-behalf refuse them and a reassignment cannot target them (the owner remains the logged exception); `answerInfo` stays with the requester and the PRIMARY subject; the secondary manager is never seated as a stand-in when they are a co-subject; the worker's escalation never adds one. Swap requests pass the colleague; pending requests filed before the fix are backfilled by the migration | domain `resolve.test.ts` `4-P0-2` ×6; API `4-P0-2` S1 (line manager = colleague: not seated, 403 on decide / request-info, HR admin decides), S2 (HR admin = colleague: not seated, DTO offers nothing, 403 on decide / bypass / request-info / withdraw, reassigning to them 400), S2b (secondary manager = colleague never stands in); worker `approvals.test.ts` `4-P0-2` (escalation skips the snapshot login and the current link); database `portal-attendance-review-migration.db.test.ts` `4-P0-2` (backfill, every linked login, idempotent) |
+| **P0-3** the offline queue replayed one user's punch under another user's session | Queue items carry `userId` + `orgId`; only the signed-in user's own items are shown, replayed and discarded (`ownPunch`, `discardOwn`); signing out leaves other people's items where they are and never sends them; an item cannot be queued without a known user; items saved before the fix (no user) are removed once with a notice (`purgeUnattributed`), never sent. The hook keeps its list keyed by the session it was read for, so another user never sees it even for one render | web `attendance-model.test.ts` `4-P0-3` ×2; `portal-attendance.test.tsx` `4-P0-3` ×4 (probe W1, sign-out path, legacy purge with notice, discard only own) |
+| **P1-4** a check-out right after a check-in was refused as `DUPLICATE_PUNCH` and the web dropped it as "recorded" | The duplicate window is per DIRECTION (an `in` never blocks an `out`); a genuine duplicate is the first refusal and returns 409 with `details.direction`; the web counts a queued item as sent only when the duplicate is of its own direction — otherwise it stays queued with the server's message (shown on the item) | API `portal-punch.test.ts` `4-P1-4`; web `portal-attendance.test.tsx` `4-P1-4` ×2 (probe W2) |
+| **P1-5** editing a pending note kept its request (an approval of text A stood for text B) | Any material edit (text or category) of a pending or info-requested note invalidates its request (timeline "superseded") and routes a new one; an edit that changes nothing keeps the request; the update is optimistic (409 if the note changed meanwhile) | API `4-P1-5` N2a (pending edit, no-op edit, superseded request refuses a decision), N2b (a level-1 approval never carries over; level 2 of the old request cannot complete) |
+| **P1-6** `wrong_punch` edited the day's check-in into a check-out (and vice versa) | A single proposed time edits only the punch of the SAME direction (first `PUNCH_IN` / last `PUNCH_OUT`); with none of that direction it becomes an ADD of that direction; a direction is never flipped and a direction-less device punch is never guessed at | API `4-P1-6` R1, R1b (+ direction-less punch → ADD; same-direction punch → EDIT) |
+| **Seat choice** (engine §9.8) | The HR note review accepts `onBehalfOfUserId` and passes it to the engine (audited); `/attendance/notes` shows "Deciding for" (the level's `pendingSeats`) when `mustChooseSeat`, names the single waiting seat automatically otherwise, and keeps Approve disabled until a seat is chosen. Regularisations and swaps are decided in the approvals inbox (which already has it); selfie reviews are not engine requests | API `4-seat-choice` (unnamed override 400 and nothing written, a seat that is not waiting 400, named seat recorded as `onBehalfOfUserId`, the seated HR admin completes); web `4-seat-choice` ×2 |
+| **P2-7** `OUTSIDE_GEOFENCE` without a real fence evaluation (no location, no fence, geofencing off, mock without a fence) | B-36 truth table: `withinGeofenceOf` — `true` inside, `false` only when a real fence was evaluated with a location and failed (outside or mocked), `null` otherwise. The punch payload and the approved selfie punch carry `withinGeofence` + the verdict reason (new `selfie_checkins.verdict_reason`); the loader passes the tri-state; the engine flags only `false` (older payloads read through verdict + reason, conservatively) | domain `evaluate.test.ts` + `marks.test.ts` `4-P2-7`; database `load-inputs.test.ts` `4-P2-7`; API `portal-review-fixes-punch.test.ts` `4-P2-7` (inside → true, outside → false, no location → null, no fence → null) |
+| **P2-8** the web / mobile switches trust the client-declared channel | Documented as client-declared (the apps respect them; they are a product switch, not a control — location, geofences, IP list and windows are what the server enforces): schema doc, punch service doc, and a note under the switches in Settings → Attendance | web `attendance-section.test.tsx` `4-P2-8 4-P2-9 4-P2-18` |
+| **P2-9** regularisations ignored the self-service switches | New `selfService.regularisation` switch (default on, independent of `allowSelfServiceCorrections`; refused with `REGULARISATION_DISABLED` when off). Outcomes are applied ON BEHALF OF the approval: the approver is the actor of record and `attendance.regularisation_applied` names them (`approvedBy`, `onBehalfOfApproval`, the correction ids). Status changes stay HR's for DIRECT corrections | contracts `4-P2-9`; API `4-P2-9` (switch off → 403; a direct self SET_STATUS still 403; the approved WFH regularisation applied, audit names the approver); web (switch saved) |
+| **P2-10** a pending self-correction and a regularisation for the same instant both applied | Applying a regularisation is idempotent: a correction whose punch the day already has (same instant AND direction) or an equivalent APPROVED / APPLIED correction is skipped, and the skips are listed in the audit | API `4-P2-10` (probe R2: one approved ADD_PUNCH for the instant; an existing punch is not added again) |
+| **P2-11** a swap was approved after the colleague had left | The hook's new `approvalBlocker` re-checks that both people are employed on the swap day; on APPROVE (any level) or an exception approval the engine then **rejects the request by the system** with that reason (every open level skipped, nobody recorded as the decider, the swap closed with the reason, both people told); the commit happens and the caller gets 409 `INVALID_STATE` `details.reason = SYSTEM_REJECTED` (bulk decide reports it as `REJECTED`); timeline "Rejected automatically" | API `4-P2-11` (probe S3: 409 + reason, request / swap closed, nothing assigned, timeline, audit, notice) |
+| **P2-12** two colleagues could book the same person on the same day | Ordered advisory locks on BOTH people; a day already swapped — pending or approved — for either of them is refused (409, the message says which); partial unique indexes `(org, target, date)` and `(org, requester, date)` where `status in ('pending', 'approved')` as the database's word (the migration refuses, with instructions, while duplicates exist) | API `4-P2-12` (probe S6: exactly one of two concurrent requests; an approved day holds); RLS schema facts `4-P2-12`; database `4-P2-12` |
+| **P2-13** the shift tab and swap rules used the current branch for days before a future-dated transfer | One helper `effectiveBranchIdOn(trx, org, employee, date)` (`packages/database/src/employees/effective-branch.ts`, shared with the Leave-v2 fix): the portal shift tab (assignments, weekly offs, holidays per date), the swap validation ("same branch", period lock) and the candidate list use the branch effective on each date | API `4-P2-13` (probe S5: today = the old branch's shift, after the transfer the new one, candidates and the branch check by date) |
+| **P2-14** two attendance percentages on one page; today counted as a missing check-out | ONE definition `attendanceRateOf` (domain) used by the statistics card, the month card and the home page: expected = PRESENT, HALF_DAY, ABSENT, MISSING_PUNCH (a half-day-leave day 0.5; approved leave, offs, holidays outside); attended = present / missing punch in full, half day by half. `isOpenDay`: today's day with only the check-out outstanding is never a missing check-out (stats hint and month card) | domain `self-stats.test.ts` `4-P2-14` ×2; API `4-P2-14` (probe E1: both cards agree with the definition computed independently; the running day not counted) |
+| **P2-15** `/my/shift` and the global top bar overflowed at 390 px | `min-w-0` down the shift page's grid and rows (names truncate / wrap); the top bar lets the organisation switcher shrink, keeps the action cluster, and the language switcher shows its icon only below `sm` | Playwright `e2e/portal-mobile.spec.ts` `4-P2-15` at 390 × 844 in en and ar (chromium + tablet projects): no sideways scroll on `/my/shift`, `/my/checkin`, `/my/requests`, `/attendance/notes`, `/attendance/geofences`, `/`; every top-bar control on screen |
+| **P2-16** no accuracy warning above 50 m (B-31) | The check-in page warns when the fix is less precise than 50 m, even inside the zone | web `4-P2-16` ×2 |
+| **P2-17** polyglot selfie files accepted (magic bytes only) and served by a storage URL | Structural validation: JPEG SOI … well-formed segments … EOI ending the file, PNG signature + IHDR first + chunks inside the file + IEND ending it, WebP RIFF sized to the file; any HTML / script marker anywhere refuses the file. The photo is served BY THE API: read server-side, validated again (an older stored object that fails is refused with 409 `PHOTO_INVALID`, audited), returned as a `data:` URL of the detected type inside JSON sent with `X-Content-Type-Options: nosniff` — no storage URL leaves the API (Supabase storage does not send `nosniff`). The web re-encodes a chosen file to a clean JPEG when the browser can | API `portal-review-fixes-punch.test.ts` `4-P2-17` ×3 (six polyglots refused; declared PNG / real JPEG stored and served as JPEG with nosniff to the employee and the manager; a stored polyglot refused and audited); `portal-punch.test.ts` (served data URL) |
+| **P2-18** the IP allow-list trusted forwarded headers without the edge | Without `EDGE_SHARED_SECRET` a non-empty list cannot be saved (400 naming the secret) and a list saved earlier is treated as off with a logged warning (`ip_allow_list_ignored`); behind the edge it is saved and enforced | API `4-P2-18` without the edge (refused save, stored list ignored + warning) and behind the edge (`portal-review-fixes-punch.test.ts`: gate refuses a direct request, list saved, 192.168.1.5 refused, 10.1.2.3 accepted); web (hint names the secret) |
+| **P2-19** re-applying the migrations bumped `device_providers.updated_at` | A BEFORE UPDATE trigger keeps the stored `updated_at` when nothing else changed, so every no-op provider upsert (the migrations' and any later one) leaves the row byte-identical | database `4-P2-19` (re-applying every provider-writing migration: byte-identical; control without the trigger: the stamp moves; a real change still moves it); the reviewer's re-apply check (below) |
+| **ATT-82** marriage / bereavement / adoption / compassionate leave charged for an unexcused day | The default exclusion list gains `MARRIAGE`, `BEREAVEMENT`, `ADOPTION`, `COMPASSIONATE`; the migration marks existing leave types with those CODES (case-insensitive) `is_special`, one audit row each; tenants' own codes are untouched | contracts `4-ATT-82`; API `4-ATT-82` (AL exhausted → LOP, no special leave charged); database `4-ATT-82` (marked by code, `MR` / `AL` untouched, idempotent) |
+| **ATT-63 / ATT-64** precedence differs from Finance | Kept (the pack's decision): the most specific assignment scope decides alone, the worst verdict within it. Stated on the geofence page and in the contracts / service docs | domain `4-ATT-63/64` (probe P8); web `4-P0-1` (the rule is on the page) |
+
+### 10.2 Decisions
+
+1. **P0-1 reads.** A branch-restricted holder reads their branches' fences AND the organisation-wide ones (they apply to their
+   people too, so the geofence page shows them as context), read-only; they see an assignment only when its fence is
+   readable and its target sits in their branches (organisation-scope assignments are visible context). Out-of-scope writes
+   answer **403** (the fence is read in the system scope to judge the change), not 404: the reach rule means "you can see it
+   but not change it" is the common case.
+2. **P0-1 who may write what.** Organisation-wide fences and organisation-scope assignments: unrestricted members only. A fence
+   of the caller's branch that also applies to people of another branch belongs to whoever may reach both (the reach rule) —
+   the page says so with the number of hidden targets.
+3. **P0-2 co-subjects.** Generic: any entity may declare co-subjects at submit (only swaps do today). Owner exception as for
+   the subject (logged). A co-subject may still read the request and be told about it; only the requester and the primary
+   subject answer an information request.
+4. **P1-6 direction-less device punches** (`PUNCH`) are never edited by a regularisation: the single proposed time becomes an ADD
+   of its direction (known limit: the day then has both punches until HR voids one).
+5. **P2-9** regularisations stay decided through approvals whatever `allowSelfServiceCorrections` says; the switch that turns them
+   off is their own.
+6. **P2-10** is checked when the regularisation is applied. Known limit: a self-correction approved AFTER an identical
+   regularisation is not re-checked at its own approval (the correction flow is Prompt 2's; left for its owner).
+7. **P2-11** is checked on every approval (each level) and on an exception approval, never on a rejection. A system rejection
+   commits and then answers 409, so the caller learns why and the request does not stay open.
+8. **P2-12** the indexes are per role (target, requester); a person asked as target on a day they requested themselves is
+   refused by the service under the ordered locks.
+9. **P2-13** the branch comes from employment history; department and teams stay the current ones (the history does not carry
+   teams).
+10. **P2-14** approved leave is outside the denominator (Finance B-13 counts calendar working days with leave inside — declined:
+    a day of approved leave is not a day of missed attendance).
+11. **P2-17** the photo travels inside the API's JSON (the endpoint already returned `{ url, expiresInSeconds }`; `url` is now a
+    `data:` URL and `contentType` is added — no client change needed beyond rendering it). `expiresInSeconds` stays as a cache
+    hint.
+12. **P2-18** is fail-closed at save time and fail-open (with a warning) at punch time for a list saved earlier: refusing every
+    punch of an organisation because of a deployment setting would lock everybody out.
+13. **P2-19** a genuine re-definition still changes the row: re-applying `20260928000400` (superseded by `…000450`) rewrites the
+    Finance connector row to its older definition and `…000450` restores it, moving `updated_at` once — inherent to two
+    migrations that define the same row; every no-op re-apply is byte-identical.
+14. **ATT-82** by code only: a tenant's own code (e.g. `MR` "Marriage Leave") is not guessed from its name; tenants mark such
+    types special themselves (leave v2 `is_special`).
+
+### 10.3 Updated acceptance rows (supersede §2)
+
+| Item | Status |
+|---|---|
+| ATT-62 / ATT-69 IP restriction | ✓ behind the edge only (`EDGE_SHARED_SECRET`); without it a list cannot be saved and an older one is ignored (P2-18). The web / mobile switches are client-declared (P2-8) |
+| ATT-63 / ATT-64 precedence | ✓ as decided by the pack (most specific scope, worst verdict within it) — documented on the page (differs from Finance, which judges every fence) |
+| ATT-66 geofence administration | partial as before, now inside the caller's branches and the fence's reach (P0-1) |
+| ATT-67 / B-36 truthful `within_geofence` | ✓ tri-state; `OUTSIDE_GEOFENCE` only when a real fence failed (P2-7) |
+| ATT-74 / B-18 an edit resets to pending | ✓ a material edit invalidates the request and submits a new one (P1-5) |
+| ATT-82 special types excluded | ✓ + MARRIAGE, BEREAVEMENT, ADOPTION, COMPASSIONATE by default; matching existing types marked special |
+| ATT-94 / B-28 applied once | ✓ idempotent against an identical punch or an approved correction (P2-10); applied on behalf of the approval (P2-9) |
+| ATT-97 / ATT-101 selfie storage and views | ✓ structurally validated; served by the API with its detected type and nosniff, every view audited (P2-17) |
+| ATT-106 / B-40 swaps | ✓ the colleague never decides (P0-2); both employed on the day re-checked at approval (P2-11); one open swap per person and day (P2-12); branch of the date (P2-13) |
+| B-13 attendance % | ✓ one definition for every portal card (P2-14) |
+| B-29 duplicates | ✓ per direction (P1-4) |
+| B-30 / B-33 offline queue | ✓ per user and organisation (P0-3); a duplicate counts as sent only for its own direction (P1-4) |
+| B-31 accuracy warning | ✓ above 50 m (P2-16) |
+
+### 10.4 Mutation check (revert the fix → the test goes red → restore)
+
+| Reverted | Red |
+|---|---|
+| geofence service checks (stored branch + reach) | API `4-P0-1` (3 of 4) |
+| migration §1 (geofence tables back on the generic tenant policies) | RLS suite (schema fact first; the P-A probes alone: P-A1 fails) |
+| page ignores `editable` | web `4-P0-1` |
+| swap submit without the colleague | API `4-P0-2` ×3 (+ `4-P2-12`) |
+| resolver without co-subjects | domain `4-P0-2` ×5 |
+| escalation without co-subjects | worker `4-P0-2` |
+| migration backfill | database `4-P0-2` |
+| queue ignores the user | web `4-P0-3` ×6 |
+| duplicate window per employee | API `4-P1-4` |
+| any duplicate counts as sent | web `4-P1-4` ×2 |
+| pending edit keeps its request | API `4-P1-5` ×2 |
+| `wrong_punch` falls back to any punch | API `4-P1-6` ×2 |
+| top bar / shift page layout (P2-15) | Playwright `4-P2-15` (scrollWidth 1111 / 1167 with both reverted, 453 / 464 with only the top bar reverted) |
+
+### 10.5 Verification (local Postgres 16 @ 127.0.0.1:54329; databases `flowza_p4f*`; DB-sharing suites under `flock /tmp/flowza-dbtests.lock`)
+
+| Gate | Result |
+|---|---|
+| `pnpm build:packages` | pass |
+| `pnpm lint` (`--max-warnings 0`) | pass |
+| typecheck (api, worker, web) | pass |
+| `pnpm test:unit` | pass — shared 4, contracts 10, device-providers 286, domain 324, database 21 |
+| `pnpm --filter @flowza/web run test` | pass — 71 files, 365 tests |
+| `PGDATABASE=flowza_p4f_rls flock … run-rls-tests.sh` | pass — `rls_portal_attendance.sql` 174 assertions (was 136) |
+| `flock … pnpm test:db` | pass — 4 files, 19 tests (new `portal-attendance-review-migration.db.test.ts` 4) |
+| `pnpm --filter @flowza/api run test` | pass — 31 files, 425 tests (new `portal-review-fixes.test.ts` 20, `portal-review-fixes-punch.test.ts` 5) |
+| `flock … pnpm --filter @flowza/worker exec vitest run` | pass — 17 files, 173 passed + 1 skipped (pre-existing) |
+| build (api, worker, web) | pass (the > 700 kB main-chunk warning predates this phase) |
+| `PGDATABASE=flowza_p4f_ci2 bash scripts/db-reset-local.sh` | pass |
+| single-transaction replay (`replay-single-tx.sh <worktree> flowza_p4f_tx`) | pass — `…000840` applied with `psql -1` |
+| `--seed` reset of `flowza_p4f` + `pnpm db:types` | pass; `db.ts` gains the co-subject columns and `selfie_checkins.verdict_reason` (committed) |
+| the reviewer's re-apply check (snapshot of all 244 base tables, re-apply `…000500` and `…000840` twice over the seeded database, snapshot) | **no table changed** (the review measured `device_providers` changing) |
+| `build:e2e` + `test:e2e` (`CI=1`, `PLAYWRIGHT_CHROMIUM_EXECUTABLE=/opt/pw-browsers/chromium`) | pass — 54 passed (new `portal-mobile.spec.ts`: en + ar × chromium + tablet) |
+
+### 10.6 Open items
+
+- **`apps/web/public/_headers` sends `Permissions-Policy: camera=(), microphone=(), geolocation=()`**, which forbids the camera and
+  the location to the app's own origin: behind Cloudflare Pages the check-in page cannot locate the employee and the selfie
+  dialog cannot open the camera. **Resolved at integration** (merge of this branch): the header now reads
+  `camera=(self), microphone=(), geolocation=(self)` — this origin only, never embedded third-party frames.
+- The web / mobile switches remain client-declared (P2-8) until a mobile app can attest its channel.
+- P2-10 reverse order (a self-correction approved after an identical regularisation) and P1-6 direction-less punches — §10.2.
+- The integrator merges; `db.ts` is to be regenerated after the merge (the Leave-v2 fix adds the same `effectiveBranchIdOn`
+  helper at the same path with the same signature — keep one).

@@ -208,7 +208,8 @@ export default function MyAttendancePage() {
       </div>
 
       <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <StatCard label={t('home.attendanceRate')} value={totals?.attendanceRate === null || totals?.attendanceRate === undefined ? '—' : `${Math.round(totals.attendanceRate * 100)}%`} icon={TrendingUp} tone="success" loading={q.isLoading} />
+        {/* the ONE portal attendance rate (review P2-14): the same definition as the statistics card — approved leave outside */}
+        <StatCard label={t('home.attendanceRate')} value={totals?.attendanceRate === null || totals?.attendanceRate === undefined ? '—' : `${Math.round(totals.attendanceRate * 100)}%`} hint={totals ? t('home.attendanceRateHint', { present: fmtDays(totals.attendedDays ?? totals.present + totals.halfDay * 0.5), working: fmtDays(totals.workingDays) }) : undefined} icon={TrendingUp} tone="success" loading={q.isLoading} />
         <StatCard label={t('home.presentDays')} value={totals ? fmtDays(totals.present + totals.halfDay * 0.5) : '—'} hint={totals && totals.absent > 0 ? t('home.absentHint', { count: totals.absent }) : undefined} icon={CalendarCheck} loading={q.isLoading} />
         <StatCard label={t('home.lateArrivals')} value={totals?.late ?? '—'} hint={totals && totals.lateMinutes ? t('home.lateHint', { minutes: fmtMinutes(totals.lateMinutes) }) : undefined} icon={AlarmClock} tone={totals && totals.late > 0 ? 'warning' : 'default'} loading={q.isLoading} />
         <StatCard label={t('home.workedHours')} value={totals ? fmtMinutes(totals.workedMinutes) : '—'} icon={Clock} loading={q.isLoading} />

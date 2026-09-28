@@ -71,6 +71,7 @@ export async function createApiHarness(name: string, opts: { config?: Partial<Ap
     storage: {
       async signedUrl(bucket, path, expires = 300) { if (path.includes('missing')) return null; const u = `https://storage.test/${bucket}/${path}?exp=${expires}`; signedUrls.push(u); return u; },
       async upload(bucket, path, body, contentType) { uploads.set(`${bucket}/${path}`, { body, contentType }); return true; },
+      async download(bucket, path) { return uploads.get(`${bucket}/${path}`)?.body ?? null; },
     },
   };
   // the feature routes are registered by createApp → registerV1Routes → registerFeatureRoutes (same auth/MFA chain as production)

@@ -16,10 +16,10 @@ describe('attendance settings', () => {
     expect(resolveAttendanceSettings(undefined)).toEqual(DEFAULT_ATTENDANCE_SETTINGS);
     expect(DEFAULT_ATTENDANCE_SETTINGS).toMatchObject({
       processingDelaySeconds: 30, payrollPeriod: 'calendar_month', payrollCutoffDay: 25, allowSelfServiceCorrections: false,
-      selfService: { webCheckIn: false, mobileCheckIn: false, requireGeofence: 'flag', allowSelfieCheckIn: false, ipAllowList: [], checkInWindow: null, checkOutWindow: null, outOfWindowAction: 'flag', duplicatePunchSeconds: 60 },
+      selfService: { webCheckIn: false, mobileCheckIn: false, regularisation: true, requireGeofence: 'flag', allowSelfieCheckIn: false, ipAllowList: [], checkInWindow: null, checkOutWindow: null, outOfWindowAction: 'flag', duplicatePunchSeconds: 60 },
       missedPunch: { detectionEnabled: true, dayCloseGraceDays: 2, singlePunchSplitTime: '12:00' },
       nonWorkingDay: { action: 'record' },
-      unexcused: { autoDeductEnabled: false, graceDays: 3, payEffectAbsent: 1, payEffectLate: 0.5, payEffectMissingPunch: 0.5, leaveTypePriority: ['AL', 'CL'], excludeLeaveTypeCodes: ['SL', 'ML', 'PTL', 'HJ'] },
+      unexcused: { autoDeductEnabled: false, graceDays: 3, payEffectAbsent: 1, payEffectLate: 0.5, payEffectMissingPunch: 0.5, leaveTypePriority: ['AL', 'CL'], excludeLeaveTypeCodes: ['SL', 'ML', 'PTL', 'HJ', 'MARRIAGE', 'BEREAVEMENT', 'ADOPTION', 'COMPASSIONATE'] },
       notes: { requireReasonForLate: false, requireReasonForAbsent: false },
       stats: { attendanceTargetPct: 90, fullDayHours: 8 },
     });
@@ -54,6 +54,23 @@ describe('attendance settings', () => {
     const one = organizationSettingsSchema.shape.attendance.parse({ selfService: { webCheckIn: true } });
     expect(one.selfService).toEqual({ ...DEFAULT_ATTENDANCE_SETTINGS.selfService, webCheckIn: true });
     expect(one.unexcused).toEqual(DEFAULT_ATTENDANCE_SETTINGS.unexcused);
+  });
+
+  it('4-ATT-82 never charges marriage, bereavement, adoption or compassionate leave for an unexcused day by default (Finance parity)', () => {
+    const codes = DEFAULT_ATTENDANCE_SETTINGS.unexcused.excludeLeaveTypeCodes;
+    for (const code of ['MARRIAGE', 'BEREAVEMENT', 'ADOPTION', 'COMPASSIONATE', 'SL', 'ML', 'PTL', 'HJ']) expect(codes).toContain(code);
+    // a group saved before the list grew keeps what the tenant chose (an explicit list is never widened behind their back)
+    expect(organizationSettingsSchema.shape.attendance.parse({ unexcused: { excludeLeaveTypeCodes: ['SL'] } }).unexcused.excludeLeaveTypeCodes).toEqual(['SL']);
+  });
+
+  it('4-P2-9 regularisation requests have their own self-service switch, on by default and independent of direct corrections', () => {
+    expect(DEFAULT_ATTENDANCE_SETTINGS.selfService.regularisation).toBe(true);
+    expect(DEFAULT_ATTENDANCE_SETTINGS.allowSelfServiceCorrections).toBe(false);
+    const off = organizationSettingsSchema.shape.attendance.parse({ selfService: { regularisation: false } });
+    expect(off.selfService.regularisation).toBe(false);
+    expect(off.allowSelfServiceCorrections).toBe(false);
+    // a group stored before the switch existed resolves it to on (the phase shipped with regularisation always available)
+    expect(resolveAttendanceSettings({ selfService: { webCheckIn: true } }).selfService.regularisation).toBe(true);
   });
 
   it('rejects out-of-range values instead of clamping them', () => {

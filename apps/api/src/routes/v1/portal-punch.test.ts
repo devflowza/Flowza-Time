@@ -67,16 +67,20 @@ describe('self-service check-in / check-out', () => {
     expect(await rawRows(f.e1)).toHaveLength(1);
   });
 
-  it('keeps the in / out sequence and answers a double tap as a duplicate', async () => {
+  it('4-P1-4 keeps the in / out sequence; the duplicate window is per direction (a check-out right after a check-in is not a duplicate)', async () => {
+    // a second check-in within the window is a double tap: the duplicate is the FIRST refusal and names its direction
     const twice = await punch({ direction: 'in' });
     expect(twice.status).toBe(409);
-    expect(twice.body.details.reason).toBe('ALREADY_CHECKED_IN');
+    expect(twice.body.details).toMatchObject({ reason: 'DUPLICATE_PUNCH', direction: 'in' });
+    expect(twice.body.details.refusals).toEqual(['DUPLICATE_PUNCH', 'ALREADY_CHECKED_IN']);
+    // an `in` never blocks an `out` (review P3b: this answered 409 DUPLICATE_PUNCH and the offline queue dropped the check-out)
     const quick = await punch({ direction: 'out' });
-    expect(quick.status).toBe(409);
-    expect(quick.body.details.reason).toBe('DUPLICATE_PUNCH');
+    expect(quick.status).toBe(201);
+    const again = await punch({ direction: 'out' });
+    expect(again.status).toBe(409);
+    expect(again.body.details).toMatchObject({ reason: 'DUPLICATE_PUNCH', direction: 'out' });
+    expect((await rawRows(f.e1)).map((r) => r.direction)).toEqual(['in', 'out']);
     await setSelfService({ duplicatePunchSeconds: 0 });
-    const out = await punch({ direction: 'out' });
-    expect(out.status).toBe(201);
     expect((await punch({ direction: 'out' })).body.details.reason).toBe('NOT_CHECKED_IN');
   });
 
@@ -139,11 +143,7 @@ describe('self-service check-in / check-out', () => {
     expect((await domainEvents(h.admin, 'attendance.punch_flagged')).at(-1)!.payload).toMatchObject({ outcome: 'flagged' });
   });
 
-  it('enforces the IP allow-list, the check-in window and the mobile switch', async () => {
-    await setSelfService({ ipAllowList: ['10.0.0.0/8', '2001:db8::/32'] });
-    const blocked = await punch({ direction: 'in', ...OFFICE, accuracy: 10 }, { 'x-forwarded-for': '192.168.1.5' });
-    expect(blocked.status).toBe(403);
-    expect(blocked.body.details.reason).toBe('IP_NOT_ALLOWED');
+  it('enforces the check-in window and the mobile switch (the IP allow-list: portal-review-fixes-punch.test.ts, behind the edge)', async () => {
     // a window that excludes the current Muscat time, rejected then flagged
     const now = DateTime.now().setZone('Asia/Muscat');
     const start = now.plus({ hours: 3 }).toFormat('HH:mm'); const end = now.plus({ hours: 4 }).toFormat('HH:mm');
@@ -156,7 +156,7 @@ describe('self-service check-in / check-out', () => {
     expect(flagged.status).toBe(201);
     expect(flagged.body.data).toMatchObject({ outOfWindow: true, flagged: true });
     expect((await rawRows(f.e1)).at(-1)!.rawPayload).toMatchObject({ outOfWindow: true, ip: '10.1.2.3' });
-    await setSelfService({ checkInWindow: null, ipAllowList: [] });
+    await setSelfService({ checkInWindow: null });
     const mobile = await punch({ direction: 'out', channel: 'mobile', ...OFFICE, accuracy: 10 });
     expect(mobile.status).toBe(403);
     expect(mobile.body.details.reason).toBe('MOBILE_CHECKIN_DISABLED');
@@ -226,8 +226,10 @@ describe('selfie check-in and attendance grants', () => {
     expect(list.body.data).toEqual([expect.objectContaining({ id: selfieId, viaManager: true, employeeName: 'Employee 1' })]);
     const photo = await h.request('GET', `${base()}/attendance/selfie-checkins/${selfieId}/photo`, { token: f.managerUser });
     expect(photo.status).toBe(200);
-    expect(photo.body.data).toMatchObject({ expiresInSeconds: 60 });
-    expect(photo.body.data.url).toContain(`checkins/${f.orgId}/${f.e1}/`);
+    // served by the API (review P2-17): the stored bytes, re-validated, as a data URL of the DETECTED type, with nosniff
+    expect(photo.body.data).toMatchObject({ expiresInSeconds: 60, contentType: 'image/png' });
+    expect(photo.body.data.url).toBe(`data:image/png;base64,${PNG_BASE64}`);
+    expect(photo.headers.get('x-content-type-options')).toBe('nosniff');
     // the employee cannot open the review side, nor review themselves
     expect((await h.request('POST', `${base()}/attendance/selfie-checkins/${selfieId}/review`, { token: f.employeeUser, body: { decision: 'approve' } })).status).toBe(403);
     expect((await h.request('POST', `${base()}/attendance/selfie-checkins/${selfieId}/review`, { token: f.payrollUser, body: { decision: 'approve' } })).status).toBe(404);
@@ -261,8 +263,8 @@ describe('selfie check-in and attendance grants', () => {
     // the employee opens their own photo from the portal (and only their own)
     const own = await photo(`/me/selfie-checkins/${selfieId}/photo`, f.employeeUser);
     expect(own.status).toBe(200);
-    expect(own.body.data).toMatchObject({ expiresInSeconds: 60 });
-    expect(own.body.data.url).toContain(`checkins/${f.orgId}/${f.e1}/${selfieId}`);
+    expect(own.body.data).toMatchObject({ expiresInSeconds: 60, contentType: 'image/png' });
+    expect(own.body.data.url.startsWith('data:image/png;base64,')).toBe(true);
     const mine = await h.request('GET', `${base()}/me/selfie-checkins`, { token: f.employeeUser });
     expect(mine.body.data.find((x: { id: string }) => x.id === selfieId)).toMatchObject({ canViewPhoto: true });
     expect(mine.body.data[0]).not.toHaveProperty('canReview');

@@ -19,8 +19,9 @@ import MyAttendancePage from './pages/attendance-page';
 import { HomePunchCard, PendingSelfItems } from './components/home-attendance';
 import { NoteDialog } from './components/note-dialog';
 import { SelfStats } from './components/self-stats';
-import { createMemoryStore, setPunchQueueStore } from './offline-queue';
+import { createMemoryStore, setPunchQueueStore, type PunchQueueStore, type QueuedPunch } from './offline-queue';
 import { sendOutcomeOf } from './use-offline-punches';
+import { toast } from '@/lib/toast';
 
 const EMP = '11111111-1111-4111-8111-111111111111';
 const ORG = 'org-1';
@@ -49,8 +50,8 @@ function mockGeolocation(fix: { latitude: number; longitude: number; accuracy: n
   });
 }
 
-beforeEach(() => { resetApiMock(); grantAll(); testState.orgId = ORG; testState.employeeId = EMP; setPunchQueueStore(createMemoryStore()); });
-afterEach(() => { setPunchQueueStore(null); testState.settings = {}; });
+beforeEach(() => { resetApiMock(); grantAll(); testState.orgId = ORG; testState.employeeId = EMP; testState.userId = 'u1'; setPunchQueueStore(createMemoryStore()); });
+afterEach(() => { setPunchQueueStore(null); testState.settings = {}; testState.userId = 'u1'; vi.restoreAllMocks(); });
 
 describe('portal navigation (Prompt 4)', () => {
   it('adds check-in, requests and shift to "My workspace"', () => {
@@ -125,13 +126,140 @@ describe('CheckInPage', () => {
 });
 
 describe('offline replay outcomes', () => {
-  it('retries what nobody answered, counts a duplicate as recorded, drops a refusal', () => {
+  it('retries what nobody answered, drops a refusal', () => {
     expect(sendOutcomeOf(new ApiError(0, 'NETWORK_ERROR', 'offline'))).toMatchObject({ kind: 'retry' });
     expect(sendOutcomeOf(new ApiError(503, 'UNAVAILABLE', 'busy'))).toMatchObject({ kind: 'retry' });
     expect(sendOutcomeOf(new TypeError('Failed to fetch'))).toMatchObject({ kind: 'retry' });
-    expect(sendOutcomeOf(new ApiError(409, 'CONFLICT', 'dup', undefined, { reason: 'DUPLICATE_PUNCH' }))).toEqual({ kind: 'sent' });
     expect(sendOutcomeOf(new ApiError(403, 'FORBIDDEN', 'outside', undefined, { reason: 'OUTSIDE_GEOFENCE' }))).toEqual({ kind: 'refused', reason: 'OUTSIDE_GEOFENCE' });
     expect(sendOutcomeOf(new ApiError(422, 'VALIDATION_FAILED', 'bad'))).toEqual({ kind: 'refused', reason: 'VALIDATION_FAILED' });
+  });
+
+  it('4-P1-4 a duplicate counts as recorded only when it is of the punch\'s own direction; otherwise it stays queued with the server\'s message', () => {
+    const dup = (direction?: string) => new ApiError(409, 'CONFLICT', 'You just punched; wait a moment before punching again.', undefined, { reason: 'DUPLICATE_PUNCH', ...(direction ? { direction } : {}) });
+    expect(sendOutcomeOf(dup('in'), { direction: 'in' })).toEqual({ kind: 'sent' });
+    expect(sendOutcomeOf(dup('in'), { direction: 'out' })).toEqual({ kind: 'retry', error: 'You just punched; wait a moment before punching again.' });
+    // an API that does not say which direction it holds: never assumed to be this punch
+    expect(sendOutcomeOf(dup(), { direction: 'out' })).toMatchObject({ kind: 'retry' });
+    expect(sendOutcomeOf(dup('out'))).toMatchObject({ kind: 'retry' });
+  });
+
+  it('4-P1-4 replaying a queued in / out pair keeps the check-out when the server answers it with the check-in\'s duplicate (probe W2)', async () => {
+    const store = createMemoryStore();
+    setPunchQueueStore(store);
+    await store.put({ key: 'k-in', userId: 'u1', orgId: ORG, direction: 'in', clientQueuedAt: '2026-09-27T04:00:00Z', attempts: 0, lastError: null });
+    await store.put({ key: 'k-out', userId: 'u1', orgId: ORG, direction: 'out', clientQueuedAt: '2026-09-27T04:00:30Z', attempts: 0, lastError: null });
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status() } });
+    // an older API: the check-out right after the check-in answered as the check-in's duplicate
+    apiMock.post.mockImplementation((path: string, body: { direction?: string }) => {
+      if (path.endsWith('/me/punch/preview')) return Promise.resolve({ data: preview() });
+      if (path.endsWith('/me/punch')) {
+        if (body.direction === 'out') return Promise.reject(new ApiError(409, 'CONFLICT', 'You just punched; wait a moment before punching again.', undefined, { reason: 'DUPLICATE_PUNCH', direction: 'in' }));
+        return Promise.resolve({ data: { replayed: false, punch: { id: 'p1', punchedAt: '2026-09-27T04:30:00Z', direction: 'in', source: 'SELF_SERVICE', channel: 'web', verdict: 'allowed', deviceName: null, processingStatus: 'pending' }, verdict: preview().verdict, outOfWindow: false, flagged: false } });
+      }
+      return Promise.reject(new ApiError(404, 'NOT_FOUND', 'x'));
+    });
+    renderWithProviders(<CheckInPage />);
+    const queue = await screen.findByTestId('offline-queue');
+    await waitFor(() => expect(within(queue).getByTestId('offline-last-error')).toHaveTextContent('You just punched'));
+    expect((await store.all()).map((p) => p.key)).toEqual(['k-out']);
+  });
+});
+
+describe('offline queue per user (4-P0-3)', () => {
+  const queued = (key: string, userId: string, orgId = ORG): QueuedPunch => ({ key, userId, orgId, direction: 'in', lat: 23.61, lng: 58.54, accuracy: 9, clientQueuedAt: '2026-09-27T03:00:00Z', attempts: 0, lastError: null });
+  function punchApi(sent: unknown[]) {
+    apiMock.post.mockImplementation((path: string, body: unknown) => {
+      if (path.endsWith('/me/punch/preview')) return Promise.resolve({ data: preview() });
+      if (path.endsWith('/me/punch')) { sent.push(body); return Promise.resolve({ data: { replayed: false, punch: { id: 'p1', punchedAt: '2026-09-27T04:30:00Z', direction: 'in', source: 'SELF_SERVICE', channel: 'web', verdict: 'allowed', deviceName: null, processingStatus: 'pending' }, verdict: preview().verdict, outOfWindow: false, flagged: false } }); }
+      return Promise.reject(new ApiError(404, 'NOT_FOUND', 'x'));
+    });
+  }
+  async function openCheckIn(store: PunchQueueStore) {
+    setPunchQueueStore(store);
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status() } });
+    const view = renderWithProviders(<CheckInPage />);
+    await screen.findByTestId('verdict-banner');
+    return view;
+  }
+
+  it('4-P0-3 a punch queued by user A is never replayed under user B\'s session (probe W1), nor shown to them', async () => {
+    const store = createMemoryStore();
+    await store.put(queued('user-a-key-1', 'user-a'));
+    const sent: unknown[] = [];
+    punchApi(sent);
+    testState.userId = 'user-b';
+    await openCheckIn(store);
+    // give the automatic replay every chance to run
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent).toEqual([]);
+    expect(apiMock.post).not.toHaveBeenCalledWith(`/orgs/${ORG}/me/punch`, expect.objectContaining({ idempotencyKey: 'user-a-key-1' }));
+    expect(screen.queryByTestId('offline-queue')).not.toBeInTheDocument();
+    expect((await store.all()).map((p) => [p.key, p.userId])).toEqual([['user-a-key-1', 'user-a']]);
+  });
+
+  it('4-P0-3 signing out leaves the queue as it is; the next user never sends it, its owner does when they are back', async () => {
+    const store = createMemoryStore();
+    await store.put(queued('mine-1', 'u1'));
+    const sent: Array<{ idempotencyKey?: string }> = [];
+    punchApi(sent);
+    // another person signs in on this browser: nothing of u1's is sent
+    testState.userId = 'u2';
+    const other = await openCheckIn(store);
+    await new Promise((r) => setTimeout(r, 50));
+    expect(sent).toEqual([]);
+    other.unmount();
+    expect((await store.all()).map((p) => p.key)).toEqual(['mine-1']);
+    // u1 signs in again: their punch goes out with their own session
+    testState.userId = 'u1';
+    await openCheckIn(store);
+    await waitFor(() => expect(sent.map((b) => b.idempotencyKey)).toEqual(['mine-1']));
+    await waitFor(async () => expect(await store.all()).toEqual([]));
+  });
+
+  it('4-P0-3 punches saved before the queue knew its users are discarded once, with a notice, never sent', async () => {
+    const warn = vi.spyOn(toast, 'warning');
+    const store = createMemoryStore();
+    await store.put({ key: 'legacy-1', orgId: ORG, direction: 'in', clientQueuedAt: '2026-09-27T03:00:00Z', attempts: 0, lastError: null } as unknown as QueuedPunch);
+    const sent: unknown[] = [];
+    punchApi(sent);
+    await openCheckIn(store);
+    await waitFor(() => expect(warn).toHaveBeenCalledWith(expect.stringContaining('could not be tied to an account')));
+    expect(sent).toEqual([]);
+    expect(await store.all()).toEqual([]);
+  });
+
+  it('4-P0-3 the discard button removes only the signed-in user\'s punch', async () => {
+    const store = createMemoryStore();
+    await store.put(queued('mine-2', 'u1'));
+    await store.put(queued('theirs-2', 'someone-else'));
+    apiMock.post.mockImplementation((path: string) => (path.endsWith('/me/punch/preview') ? Promise.resolve({ data: preview() }) : Promise.reject(new ApiError(0, 'NETWORK_ERROR', 'offline'))));
+    await openCheckIn(store);
+    const queue = await screen.findByTestId('offline-queue');
+    expect(within(queue).getByText('Saved on this device (1)')).toBeInTheDocument();
+    fireEvent.click(within(queue).getByRole('button', { name: /Discard/ }));
+    await waitFor(() => expect(screen.queryByTestId('offline-queue')).not.toBeInTheDocument());
+    expect((await store.all()).map((p) => p.key)).toEqual(['theirs-2']);
+  });
+});
+
+describe('accuracy warning (4-P2-16)', () => {
+  it('4-P2-16 warns when the location is less precise than 50 m, even inside the zone (probe W3)', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 90 });
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status() } });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    renderWithProviders(<CheckInPage />);
+    expect(await screen.findByTestId('accuracy-warning')).toHaveTextContent('±90 m');
+    expect(screen.getByTestId('verdict-banner')).toHaveTextContent('Inside HQ');
+  });
+  it('4-P2-16 says nothing for a precise fix', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 20 });
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status() } });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    renderWithProviders(<CheckInPage />);
+    await screen.findByTestId('verdict-banner');
+    expect(screen.queryByTestId('accuracy-warning')).not.toBeInTheDocument();
   });
 });
 

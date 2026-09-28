@@ -85,7 +85,7 @@ interface EmployeeLite { id: string; managerEmployeeId: string | null; secondary
  * Without it, a `manager` role holding attendance.approve would sit on every correction in the organisation instead of
  * only on their direct reports' ones.
  */
-export async function buildResolutionContext(trx: Trx, orgId: string, input: { employeeId: string | null; branchId: string | null; requestedBy: string | null; entityType: ApprovalEntity; viewPermission: string; today: string; /** Ignored: self-approval is not configurable (review P0-3). */ allowSelfApproval?: boolean; directory?: OrgDirectory }): Promise<ResolutionContext> {
+export async function buildResolutionContext(trx: Trx, orgId: string, input: { employeeId: string | null; branchId: string | null; requestedBy: string | null; entityType: ApprovalEntity; viewPermission: string; today: string; /** Ignored: self-approval is not configurable (review P0-3). */ allowSelfApproval?: boolean; directory?: OrgDirectory; /** Other people the request is about and their logins (HR portal Prompt 4 review, P0-2): never seated. */ coSubjectEmployeeIds?: readonly string[]; coSubjectUserIds?: readonly string[] }): Promise<ResolutionContext> {
   const dir = input.directory ?? await loadOrgDirectory(trx, orgId);
   const delegations = await loadDelegationMap(trx, orgId, input.entityType, input.today);
   const employees = new Map<string, EmployeeLite>();
@@ -140,6 +140,7 @@ export async function buildResolutionContext(trx: Trx, orgId: string, input: { e
     subjectEmployeeId: input.employeeId,
     subjectUserId: input.employeeId ? dir.userByEmployee.get(input.employeeId) ?? null : null,
     requestedBy: input.requestedBy,
+    ...(input.coSubjectEmployeeIds?.length ? { coSubjectEmployeeIds: input.coSubjectEmployeeIds, coSubjectUserIds: input.coSubjectUserIds ?? [] } : {}),
     chain,
     departmentHead: candidate(headEmployeeId),
     branchManagerUserIds,

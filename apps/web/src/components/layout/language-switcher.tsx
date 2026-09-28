@@ -10,7 +10,7 @@ export function LanguageSwitcher() {
   return (
     <DropdownMenu>
       <DropdownMenuTrigger asChild>
-        <Button variant="ghost" size="sm" aria-label={t('common.language')}><Languages /> {NAMES[i18n.language] ?? i18n.language}</Button>
+        <Button variant="ghost" size="sm" aria-label={t('common.language')}><Languages /> <span className="hidden sm:inline">{NAMES[i18n.language] ?? i18n.language}</span></Button>
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end">
         {SUPPORTED_LOCALES.map((l) => <DropdownMenuItem key={l} onSelect={() => void i18n.changeLanguage(l)}>{NAMES[l]}</DropdownMenuItem>)}

@@ -312,6 +312,10 @@
         "geofence_off": "geofence checks are off"
       },
       "noFences": "No fence applies to this employee."
-    }
+    },
+    "precedence": "Which zone judges a punch: the most specific assignment that applies to the employee wins (employee, then team, department, branch, organisation). Within that scope the worst result decides — one zone the punch is outside of is enough to flag or refuse it.",
+    "readOnlyBranch": "Read-only: it belongs to another branch or to the whole organisation.",
+    "readOnlyReach_one": "Read-only: it also applies to {{count}} target outside your branches.",
+    "readOnlyReach_other": "Read-only: it also applies to {{count}} targets outside your branches."
   }
 }

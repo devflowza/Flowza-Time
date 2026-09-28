@@ -49,6 +49,12 @@ export function punchPayloadOf(raw: unknown): EnginePunchPayload | null {
   if (o['channel'] === 'web' || o['channel'] === 'mobile') out.channel = o['channel'];
   const verdict = o['geofenceVerdict'] ?? o['geofence_verdict'] ?? o['verdict'];
   if (typeof verdict === 'string' && verdict.length > 0 && verdict.length <= 40) out.geofenceVerdict = verdict;
+  // the B-36 truth table (HR portal Prompt 4 review, P2-7): an explicit tri-state since the fix, the reason for older payloads
+  const withinKey = 'withinGeofence' in o ? 'withinGeofence' : 'within_geofence' in o ? 'within_geofence' : null;
+  const within = withinKey ? o[withinKey] : undefined;
+  if (within === true || within === false || within === null) out.withinGeofence = within;
+  const reason = o['geofenceReason'] ?? o['geofence_reason'] ?? o['verdictReason'];
+  if (typeof reason === 'string' && reason.length > 0 && reason.length <= 40) out.geofenceReason = reason;
   if (o['isMock'] === true || o['is_mock'] === true) out.isMock = true;
   if (o['outOfWindow'] === true || o['out_of_window'] === true) out.outOfWindow = true;
   return Object.keys(out).length === 0 ? null : out;

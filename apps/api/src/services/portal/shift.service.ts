@@ -1,5 +1,5 @@
 import type { ApprovalRequestStatus, SelfShiftAssignmentDto, SelfShiftDayDto, SelfShiftDto, SelfShiftSwapInput, ShiftSwapDto, ShiftSwapStatus, SwapCandidateDto } from '@flowza/contracts';
-import type { Trx } from '@flowza/database';
+import { effectiveBranchIdOn, type Trx } from '@flowza/database';
 import { addDays, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { likeContains } from '../../lib/pagination.js';
@@ -20,6 +20,11 @@ import { loadSwap, SWAP_COLUMNS, type SwapRow } from './swap-effects.js';
  * works a different shift that day; it is routed like a note (SHIFT_SWAP workflow, else the requester's line manager with
  * the secondary standing in) and applied on approval by two one-day assignments (swap-effects.ts). The colleague is told
  * when it is filed and decided; they do not need to consent through the system (the manager's decision covers it).
+ *
+ * Review fixes (HR portal Prompt 4): the colleague is a CO-SUBJECT of the approval request, so they never decide it
+ * (P0-2); both people are locked in a fixed order and a day already swapped (pending or approved) for either of them is
+ * refused, with partial unique indexes as the backstop (P2-12); "same branch", the shift of each day and the candidate list
+ * use the branch EFFECTIVE on the swap date (employment history, P2-13).
  */
 
 const UPCOMING_DAYS = 14;
@@ -73,17 +78,32 @@ export async function getMyShift(deps: ApiDeps, actor: Actor, orgId: string): Pr
   });
 }
 
-/** Colleagues of the requester's branch and their shift on the date (eligible = works a different shift that day). */
+/** The branch the employee belongs to on `date` (employment history, else the current branch — review P2-13). System scope. */
+async function branchOn(trx: Trx, orgId: string, employeeId: string, fallback: string, date: string): Promise<string> {
+  return (await withSystemScope(trx, orgId, (t) => effectiveBranchIdOn(t, orgId, employeeId, date))) ?? fallback;
+}
+
+/** Colleagues of the requester's branch ON THE DATE and their shift that day (eligible = works a different shift that day). */
 export async function listSwapCandidates(deps: ApiDeps, actor: Actor, orgId: string, q: { date: string; search?: string | undefined }): Promise<SwapCandidateDto[]> {
   const self = portalSelf(actor, orgId, 'shift.request_swap');
   return runUser(deps.db, actor, async (trx) => {
     const me = await loadEmployeeCtx(trx, orgId, self.employeeId);
     const [mine] = await resolveDays(trx, orgId, me, q.date, q.date);
+    const myBranch = await branchOn(trx, orgId, me.id, me.branchId, q.date);
     const colleagues = await withSystemScope(trx, orgId, async (t) => {
-      let base = t.selectFrom('employees').select(['id', 'displayName', 'employeeNumber']).where('organizationId', '=', orgId).where('branchId', '=', me.branchId).where('id', '!=', me.id)
-        .where('deletedAt', 'is', null).where('employmentStatus', 'not in', ['terminated', 'resigned']);
-      if (q.search) { const like = likeContains(q.search); base = base.where((eb) => eb.or([eb('displayName', 'ilike', like), eb('employeeNumber', 'ilike', like)])); }
-      return base.orderBy('displayName').limit(50).execute();
+      // prefilter: in the branch now, or in it on the date by employment history; then confirm each on the date
+      let base = t.selectFrom('employees as e').select(['e.id', 'e.displayName', 'e.employeeNumber']).where('e.organizationId', '=', orgId).where('e.id', '!=', me.id)
+        .where('e.deletedAt', 'is', null).where('e.employmentStatus', 'not in', ['terminated', 'resigned'])
+        .where((eb) => eb.or([
+          eb('e.branchId', '=', myBranch),
+          eb.exists(eb.selectFrom('employmentHistory as h').select('h.id').whereRef('h.employeeId', '=', 'e.id').where('h.organizationId', '=', orgId).where('h.branchId', '=', myBranch)
+            .where('h.effectiveFrom', '<=', dv(q.date)).where((w) => w.or([w('h.effectiveTo', 'is', null), w('h.effectiveTo', '>', dv(q.date))]))),
+        ]));
+      if (q.search) { const like = likeContains(q.search); base = base.where((eb) => eb.or([eb('e.displayName', 'ilike', like), eb('e.employeeNumber', 'ilike', like)])); }
+      const rows = await base.orderBy('e.displayName').orderBy('e.id').limit(200).execute();
+      const out: typeof rows = [];
+      for (const c of rows) if (out.length < 50 && (await effectiveBranchIdOn(t, orgId, c.id, q.date)) === myBranch) out.push(c);
+      return out;
     });
     const out: SwapCandidateDto[] = [];
     for (const c of colleagues) {
@@ -136,7 +156,8 @@ export async function requestSwap(deps: ApiDeps, actor: Actor, orgId: string, in
   const self = portalSelf(actor, orgId, 'shift.request_swap');
   if (input.withEmployeeId === self.employeeId) throw errors.validation('Choose a colleague to swap with.', { issues: [{ path: 'withEmployeeId', message: 'Yourself' }] });
   return runUser(deps.db, actor, async (trx) => {
-    await lockEmployee(trx, 'shift-swap', self.employeeId);
+    // BOTH people, in a fixed order (P2-12): two colleagues filing with the same person for the same day serialise
+    for (const id of [self.employeeId, input.withEmployeeId].sort()) await lockEmployee(trx, 'shift-swap', id);
     const me = await loadEmployeeCtx(trx, orgId, self.employeeId);
     const today = localInstant(new Date(), me.timezone).date;
     if (!isWorking(me, today)) throw errors.forbidden('Your employment is not active.');
@@ -144,23 +165,27 @@ export async function requestSwap(deps: ApiDeps, actor: Actor, orgId: string, in
     if (input.date > addDays(today, SWAP_AHEAD_DAYS)) throw errors.validation(`A swap can be requested at most ${SWAP_AHEAD_DAYS} days ahead.`, { issues: [{ path: 'date', message: 'Too far ahead' }] });
     const other = await loadEmployeeCtx(trx, orgId, input.withEmployeeId).catch(() => null);
     if (!other || !isWorking(other, input.date)) throw errors.validation('Colleague not found.', { issues: [{ path: 'withEmployeeId', message: 'Unknown colleague' }] });
-    if (other.branchId !== me.branchId) throw errors.validation('Shifts can only be swapped within your branch.', { issues: [{ path: 'withEmployeeId', message: 'Other branch' }] });
-    if (await isPeriodLocked(trx, orgId, me.branchId, input.date)) throw errors.periodLocked('The attendance period of this date is locked.');
+    // the branch each of them belongs to ON the swap day (a future-dated transfer does not move the days before it — P2-13)
+    const myBranch = await branchOn(trx, orgId, me.id, me.branchId, input.date);
+    if ((await branchOn(trx, orgId, other.id, other.branchId, input.date)) !== myBranch) throw errors.validation('Shifts can only be swapped within your branch.', { issues: [{ path: 'withEmployeeId', message: 'Other branch' }] });
+    if (await isPeriodLocked(trx, orgId, myBranch, input.date)) throw errors.periodLocked('The attendance period of this date is locked.');
     const { mine, theirs } = await assertSwapPossible(trx, orgId, me, other, input.date);
-    const clash = await withSystemScope(trx, orgId, (t) => t.selectFrom('shiftSwapRequests').select('id').where('organizationId', '=', orgId).where('swapDate', '=', dv(input.date)).where('status', '=', 'pending')
+    // a day already swapped — waiting or approved — for either of them (P2-12; the partial unique indexes are the backstop)
+    const clash = await withSystemScope(trx, orgId, (t) => t.selectFrom('shiftSwapRequests').select(['id', 'status']).where('organizationId', '=', orgId).where('swapDate', '=', dv(input.date)).where('status', 'in', ['pending', 'approved'])
       .where((eb) => eb.or([eb('requesterEmployeeId', 'in', [me.id, other.id]), eb('targetEmployeeId', 'in', [me.id, other.id])])).executeTakeFirst());
-    if (clash) throw errors.conflict('A swap for one of you on this day is already waiting for a decision.', { swapId: clash.id });
+    if (clash) throw errors.conflict(clash.status === 'approved' ? 'One of you already has an approved swap on this day.' : 'A swap for one of you on this day is already waiting for a decision.', { swapId: clash.id });
     const row = await systemStep(trx, orgId, (t) => t.insertInto('shiftSwapRequests').values({
-      organizationId: orgId, requesterEmployeeId: me.id, targetEmployeeId: other.id, branchId: me.branchId, swapDate: input.date, requesterShiftId: mine.shiftId!, targetShiftId: theirs.shiftId!, reason: input.reason, status: 'pending', createdBy: actor.userId,
+      organizationId: orgId, requesterEmployeeId: me.id, targetEmployeeId: other.id, branchId: myBranch, swapDate: input.date, requesterShiftId: mine.shiftId!, targetShiftId: theirs.shiftId!, reason: input.reason, status: 'pending', createdBy: actor.userId,
     }).returning('id').executeTakeFirstOrThrow());
-    const submitted = await submit(deps, trx, actor, orgId, { entityType: 'SHIFT_SWAP', entityId: row.id, employeeId: me.id, branchId: me.branchId, departmentId: me.departmentId, units: null, requestedBy: actor.userId, noWorkflow: { kind: 'MANAGER' } });
+    // the colleague is a CO-SUBJECT (P0-2): never seated on any rung, never deciding, bypassing or withdrawing it
+    const submitted = await submit(deps, trx, actor, orgId, { entityType: 'SHIFT_SWAP', entityId: row.id, employeeId: me.id, branchId: myBranch, departmentId: me.departmentId, units: null, requestedBy: actor.userId, noWorkflow: { kind: 'MANAGER' }, coSubjectEmployeeIds: [other.id] });
     await systemStep(trx, orgId, async (t) => {
       await seatSecondaryManager(t, actor, orgId, { requestId: submitted.requestId, entityType: 'SHIFT_SWAP', entityId: row.id, employeeId: me.id, secondaryManagerEmployeeId: me.secondaryManagerEmployeeId, employeeName: me.displayName });
       await t.updateTable('shiftSwapRequests').set({ approvalRequestId: submitted.requestId }).where('id', '=', row.id).execute();
     });
     await emitToUsers(trx, actor, orgId, 'shift.swap_requested', { type: 'shift_swap', id: row.id }, await userIdsOfEmployees(trx, orgId, [other.id]),
       { swapId: row.id, swapDate: input.date, requesterEmployeeId: me.id, requesterName: me.displayName, requesterShiftName: mine.shift?.name ?? null, targetShiftName: theirs.shift?.name ?? null, approvalRequestId: submitted.requestId });
-    await audit(trx, actor, orgId, 'shift.swap_requested', 'shift_swap', { entityId: row.id, branchId: me.branchId, newValue: { ...input, requesterShiftId: mine.shiftId, targetShiftId: theirs.shiftId } });
+    await audit(trx, actor, orgId, 'shift.swap_requested', 'shift_swap', { entityId: row.id, branchId: myBranch, newValue: { ...input, requesterShiftId: mine.shiftId, targetShiftId: theirs.shiftId } });
     const saved = (await withSystemScope(trx, orgId, (t) => loadSwap(t, orgId, row.id)))!;
     return (await swapDtos(trx, orgId, me.id, [saved]))[0]!;
   });

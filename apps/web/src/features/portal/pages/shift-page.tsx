@@ -19,14 +19,14 @@ function DayLine({ d, emphasis = false }: { d: SelfShiftDayDto; emphasis?: boole
   const what = d.onLeave ? t('shift.onLeave') : d.holidayName ? t('shift.holiday', { name: d.holidayName }) : d.isOff ? t('shift.off') : d.shift ? shiftLabel(d.shift) : t('shift.noShift');
   const quiet = d.onLeave || !!d.holidayName || d.isOff || !d.shift;
   return (
-    <div className={cn('flex items-center justify-between gap-3', emphasis ? 'py-1' : 'py-2')} data-testid="shift-day">
-      <div className="flex min-w-0 items-center gap-3">
+    <div className={cn('flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1', emphasis ? 'py-1' : 'py-2')} data-testid="shift-day">
+      <div className="flex min-w-0 flex-1 items-center gap-3">
         {d.shift?.color && !quiet ? <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: d.shift.color }} aria-hidden /> : <span className="size-2.5 shrink-0 rounded-full bg-muted-foreground/30" aria-hidden />}
-        <span className={cn('tnum', emphasis ? 'text-base font-semibold' : 'w-28 text-sm font-medium')}>{fmtDate(d.date, emphasis ? 'EEEE, dd MMMM' : 'EEE dd MMM')}</span>
+        <span className={cn('shrink-0 tnum', emphasis ? 'text-base font-semibold' : 'w-28 text-sm font-medium')}>{fmtDate(d.date, emphasis ? 'EEEE, dd MMMM' : 'EEE dd MMM')}</span>
         <span className={cn('truncate text-sm', quiet ? 'text-muted-foreground' : 'font-medium')} dir="auto">{what}</span>
       </div>
-      <span className="flex shrink-0 items-center gap-1.5">
-        {d.swap ? <Badge variant={d.swap.status === 'approved' ? 'success' : 'warning'}>{t(d.swap.status === 'approved' ? 'shift.swapApproved' : 'shift.swapPending', { name: d.swap.withEmployeeName ?? '—' })}</Badge> : null}
+      <span className="flex min-w-0 max-w-full flex-wrap items-center gap-1.5">
+        {d.swap ? <Badge variant={d.swap.status === 'approved' ? 'success' : 'warning'} className="max-w-full truncate">{t(d.swap.status === 'approved' ? 'shift.swapApproved' : 'shift.swapPending', { name: d.swap.withEmployeeName ?? '—' })}</Badge> : null}
         {d.shift && !quiet ? <Badge variant="outline" className="text-[10px]">{t(`shift.source.${d.source}`)}</Badge> : null}
       </span>
     </div>
@@ -49,21 +49,22 @@ export default function MyShiftPage() {
       <PageHeader title={t('shift.title')} description={t('shift.subtitle')}
         actions={<Button onClick={() => setSwapOpen(true)} disabled={!d || !canSwap}><ArrowLeftRight /> {t('shift.requestSwap')}</Button>} />
 
-      <Card className="p-5">
+      <Card className="min-w-0 p-5">
         <p className="mb-1 flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-muted-foreground"><CalendarClock className="size-4" aria-hidden />{t('shift.today')}</p>
         {d ? <DayLine d={d.today} emphasis /> : <Skeleton className="h-8 w-72" />}
         {d?.today.shift?.graceInMinutes ? <p className="text-xs text-muted-foreground">{t('shift.grace', { minutes: d.today.shift.graceInMinutes })}</p> : null}
       </Card>
 
-      <div className="grid gap-5 lg:grid-cols-3">
-        <Card className="lg:col-span-2">
+      {/* grid items never grow past the screen (review P2-15: 390 px): min-w-0 lets the day rows truncate and wrap */}
+      <div className="grid min-w-0 gap-5 lg:grid-cols-3">
+        <Card className="min-w-0 lg:col-span-2">
           <SectionTitle title={t('shift.upcoming', { count: d?.upcoming.length ?? 0 })} />
           <CardContent>
             {!d ? <Skeleton className="h-64 w-full" /> : d.upcoming.length ? <div className="divide-y">{d.upcoming.map((day) => <DayLine key={day.date} d={day} />)}</div>
               : <EmptyState icon={CalendarDays} title={t('shift.noUpcoming')} className="py-6" />}
           </CardContent>
         </Card>
-        <Card>
+        <Card className="min-w-0">
           <SectionTitle title={t('shift.history')} />
           <CardContent>
             {!d ? <Skeleton className="h-32 w-full" /> : d.history.length ? (
@@ -80,7 +81,7 @@ export default function MyShiftPage() {
         </Card>
       </div>
 
-      <section aria-label={t('shift.swaps')} className="space-y-2">
+      <section aria-label={t('shift.swaps')} className="min-w-0 space-y-2">
         <h2 className="text-sm font-semibold">{t('shift.swaps')}</h2>
         {swaps.isLoading ? <Skeleton className="h-24 w-full" /> : swaps.data && swaps.data.length ? <SwapsTable rows={swaps.data} /> : <p className="text-sm text-muted-foreground">{t('swap.emptyHint')}</p>}
       </section>

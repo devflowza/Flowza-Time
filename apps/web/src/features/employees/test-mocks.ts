@@ -59,7 +59,7 @@ export const envModule = { env: { supabaseUrl: 'http://localhost', supabaseAnonK
 /** `settings` is the organisation settings object /me carries; tests set e.g. `{ dashboard: { theme: 'midnight' } }`. */
 /** `teamSize` > 0 models a member whose employee record has direct reports (/me: isManager). */
 /** `approvals` is /me's approval signal for the membership (what waits for the member, a delegation to them today). */
-export const testState = { permissions: new Set<string>(), orgId: 'org-1' as string | null, timezone: 'Asia/Muscat', membershipId: 'mem-1', settings: {} as Record<string, unknown>, employeeId: null as string | null, teamSize: 0, approvals: { actionable: 0, delegatedToMe: false } };
+export const testState = { permissions: new Set<string>(), orgId: 'org-1' as string | null, timezone: 'Asia/Muscat', membershipId: 'mem-1', settings: {} as Record<string, unknown>, employeeId: null as string | null, teamSize: 0, approvals: { actionable: 0, delegatedToMe: false }, /** The signed-in user's id (useMe); tests that switch users set it and reset it to 'u1'. */ userId: 'u1' };
 export function grant(...perms: Permission[]) { testState.permissions = new Set(perms); }
 export function grantAll() { testState.permissions = new Set(['*']); }
 const membership = () =>
@@ -73,7 +73,7 @@ export const useMeModule = {
   meQueryKey: ['me'] as const,
   useMe: () => {
     const m = membership();
-    return { data: { user: { id: 'u1', email: 'dev@flowza.ai', fullName: 'Dev', avatarUrl: null, locale: 'en', mfaEnrolled: false, isPlatformAdmin: m === null }, memberships: m ? [m] : [] }, isLoading: false, isError: false };
+    return { data: { user: { id: testState.userId, email: 'dev@flowza.ai', fullName: 'Dev', avatarUrl: null, locale: 'en', mfaEnrolled: false, isPlatformAdmin: m === null }, memberships: m ? [m] : [] }, isLoading: false, isError: false };
   },
   useActiveMembership: () => membership(),
   useCan: () => (...perms: string[]) => testState.permissions.has('*') || perms.every((p) => testState.permissions.has(p)),

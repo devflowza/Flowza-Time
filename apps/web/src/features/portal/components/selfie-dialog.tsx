@@ -66,13 +66,14 @@ export function SelfieDialog({ open, onOpenChange, direction, fix, onSent }: { o
     setError(null);
     if (!file) return;
     if (!/^image\/(jpeg|png|webp)$/.test(file.type)) { setError(t('checkin.selfie.badType')); return; }
-    if (file.size <= SELFIE_MAX_BYTES) { setPhoto(file); return; }
-    // too large as taken: shrink it on the device before sending
+    // always re-encoded on the device when the browser can: a clean JPEG of the picture only — no metadata, no data a camera
+    // appends after the image (motion photos), which the server's structural check refuses (review P2-17)
     try {
       const bitmap = typeof createImageBitmap === 'function' ? await createImageBitmap(file) : null;
       const blob = bitmap ? await toJpeg(bitmap, bitmap.width, bitmap.height) : null;
       if (blob && blob.size <= SELFIE_MAX_BYTES) { setPhoto(blob); return; }
     } catch { /* fall through */ }
+    if (file.size <= SELFIE_MAX_BYTES) { setPhoto(file); return; }
     setError(t('checkin.selfie.tooLarge'));
   };
   const send = () => {

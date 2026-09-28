@@ -4,7 +4,7 @@ import { addDays, dayOfWeek, minutesBetween } from '@flowza/shared';
 import { attributeEvents } from './attribute.js';
 import { collapseDuplicates, computeBreaks, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
 import { roundMinutes, roundPunches } from './rounding.js';
-import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EngineShift, type TraceStep } from './types.js';
+import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EnginePunchPayload, type EngineShift, type TraceStep } from './types.js';
 import { assertTimezone, computePunchWindow, localInstant, parseInstant, toUtcIso, type PunchWindow } from './window.js';
 
 type TracePunch = CalculationTrace['punches'][number];
@@ -13,6 +13,27 @@ type DayType = 'WORKING' | 'HOLIDAY' | 'WEEKLY_OFF' | 'LEAVE';
 
 /** Geofence verdicts (as the check-in endpoint of Prompt 4 evaluates them) that mean the punch was not inside a fence it should have been in. */
 const OUTSIDE_GEOFENCE_VERDICTS: ReadonlySet<string> = new Set(['flagged', 'logged', 'denied_outside', 'denied_mock', 'outside', 'denied']);
+/** Reasons that mean nobody can say where the punch was (no location, an imprecise fix, no fence, geofencing off): never OUTSIDE_GEOFENCE. */
+const UNKNOWN_GEOFENCE_REASONS: ReadonlySet<string> = new Set(['location_missing', 'gps_accuracy_too_low', 'geofence_off', 'no_fences_assigned']);
+
+/**
+ * Whether the punch counts as OUTSIDE_GEOFENCE — the B-36 truth table (HR portal Prompt 4 review, P2-7): only when a REAL
+ * fence was evaluated with a location and the punch failed it. `withinGeofence` (written since the fix) decides alone;
+ * older payloads are read through their verdict and reason, where an unknown location / no fence / geofencing off never
+ * flags, and a mocked location flags only where a fence judged the punch (or no verdict was recorded at all — connector
+ * semantics).
+ */
+export function outsideGeofenceOf(p: EnginePunchPayload): string | null {
+  if (p.withinGeofence === false) return p.geofenceReason === 'mock_location' ? 'mock location inside a geofence check' : 'outside the assigned geofence';
+  if (p.withinGeofence === true || p.withinGeofence === null) return null;
+  const verdict = typeof p.geofenceVerdict === 'string' ? p.geofenceVerdict.toLowerCase() : null;
+  const reason = typeof p.geofenceReason === 'string' ? p.geofenceReason.toLowerCase() : null;
+  if (reason !== null && UNKNOWN_GEOFENCE_REASONS.has(reason)) return null;
+  if (verdict !== null && OUTSIDE_GEOFENCE_VERDICTS.has(verdict)) return `geofence verdict ${verdict}`;
+  // a mocked location proves nothing where a fence judged it; where none did (no fence, geofencing off) nobody can say
+  if (p.isMock === true && verdict !== 'no_fence' && verdict !== 'no_fences_assigned') return 'mock location reported';
+  return null;
+}
 
 /** What the self-service punch payloads of the attributed events say about the day (HR portal Prompt 3; the payloads are written by Prompt 4). */
 function punchPayloadFacts(events: readonly EngineEvent[]): { selfService: string[]; outsideGeofence: Array<{ id: string; why: string }>; outOfWindow: string[] } {
@@ -23,9 +44,8 @@ function punchPayloadFacts(events: readonly EngineEvent[]): { selfService: strin
     const p = e.payload;
     if (!p) continue;
     if (p.channel === 'web' || p.channel === 'mobile') selfService.push(e.id);
-    const verdict = typeof p.geofenceVerdict === 'string' ? p.geofenceVerdict.toLowerCase() : null;
-    if (p.isMock === true) outsideGeofence.push({ id: e.id, why: 'mock location reported' });
-    else if (verdict !== null && OUTSIDE_GEOFENCE_VERDICTS.has(verdict)) outsideGeofence.push({ id: e.id, why: `geofence verdict ${verdict}` });
+    const why = outsideGeofenceOf(p);
+    if (why) outsideGeofence.push({ id: e.id, why });
     if (p.outOfWindow === true) outOfWindow.push(e.id);
   }
   return { selfService, outsideGeofence, outOfWindow };

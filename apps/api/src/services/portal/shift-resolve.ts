@@ -1,11 +1,11 @@
 import type { SelfShiftDayDto, SelfShiftSummaryDto } from '@flowza/contracts';
-import type { Trx } from '@flowza/database';
+import { effectiveBranchIdOn, type Trx } from '@flowza/database';
 import { holidayDates, resolveShift, type EngineShiftAssignment, type EngineShiftPattern } from '@flowza/domain';
 import { dayOfWeek, eachDate } from '@flowza/shared';
 import { isoDate, isoDateOrNull, jsonArray } from '../../lib/mappers.js';
 import { withSystemScope } from '../../lib/service.js';
 import { dv } from '../features/sql-helpers.js';
-import { type EmployeeCtx, attendancePolicy, weeklyOffOf } from './common.js';
+import { type EmployeeCtx, attendancePolicy } from './common.js';
 
 /**
  * Which shift an employee works on given dates (HR portal Prompt 4: the portal's shift tab, swap validation and the swap
@@ -13,6 +13,11 @@ import { type EmployeeCtx, attendancePolicy, weeklyOffOf } from './common.js';
  * default shift where nothing resolves, plus the day's weekly off (employee → branch → organisation, pattern off days),
  * holiday and approved leave. Read in the organisation's system scope for an already authorised employee (an employee's
  * role cannot read shifts or assignments).
+ *
+ * Every date is resolved with the branch EFFECTIVE on that date (employment history — `effectiveBranchIdOn`, review P2-13),
+ * the way the engine and `GET /shifts/resolve` do: a future-dated transfer updates `employees.branch_id` at once, but the days
+ * before the transfer keep the old branch's assignments, weekly offs and holidays. Department and teams are the current ones
+ * (employment history does not carry teams).
  */
 export interface ResolvedDay extends Omit<SelfShiftDayDto, 'swap'> { shiftId: string | null; assignmentId: string | null; assignmentTarget: string | null }
 
@@ -48,25 +53,45 @@ export async function resolveDays(trx: Trx, orgId: string, emp: EmployeeCtx, fro
   const dates = eachDate(from, to).slice(0, 366);
   if (dates.length === 0) return [];
   return withSystemScope(trx, orgId, async (t) => {
+    const branchOn = new Map<string, string>();
+    for (const date of dates) branchOn.set(date, (await effectiveBranchIdOn(t, orgId, emp.id, date)) ?? emp.branchId);
+    const branchIds = [...new Set(branchOn.values())];
+    const [branchRows, defaultCalendar] = await Promise.all([
+      t.selectFrom('branches').select(['id', 'weeklyOffDays', 'holidayCalendarId']).where('organizationId', '=', orgId).where('id', 'in', branchIds).execute(),
+      t.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('isDefault', '=', true).executeTakeFirst(),
+    ]);
+    const branchById = new Map(branchRows.map((b) => [b.id, b]));
+    const calendarOf = (branchId: string): string | null => branchById.get(branchId)?.holidayCalendarId ?? defaultCalendar?.id ?? null;
+    const calendarIds = [...new Set(branchIds.map(calendarOf).filter((x): x is string => !!x))];
     const [assignmentRows, patternRows, policy, holidays, leave] = await Promise.all([
       t.selectFrom('shiftAssignments').select(['id', 'targetType', 'targetId', 'shiftId', 'shiftPatternId', 'effectiveFrom', 'effectiveTo']).where('organizationId', '=', orgId)
         .where('effectiveFrom', '<=', dv(to)).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', dv(from))])).execute(),
       t.selectFrom('shiftPatterns').select(['id', 'cycleLengthDays', 'anchorDate', 'sequence']).where('organizationId', '=', orgId).execute(),
       attendancePolicy(t, orgId),
-      emp.holidayCalendarId ? t.selectFrom('holidays').select(['date', 'endDate', 'name', 'branchIds']).where('organizationId', '=', orgId).where('calendarId', '=', emp.holidayCalendarId)
+      calendarIds.length ? t.selectFrom('holidays').select(['calendarId', 'date', 'endDate', 'name', 'branchIds']).where('organizationId', '=', orgId).where('calendarId', 'in', calendarIds)
         .where('date', '<=', dv(to)).where((eb) => eb.or([eb('endDate', '>=', dv(from)), eb.and([eb('endDate', 'is', null), eb('date', '>=', dv(from))])])).execute() : Promise.resolve([]),
       t.selectFrom('leaveRecords').select(['startDate', 'endDate']).where('organizationId', '=', orgId).where('employeeId', '=', emp.id).where('status', '=', 'APPROVED')
         .where('startDate', '<=', dv(to)).where('endDate', '>=', dv(from)).execute(),
     ]);
     const assignments: EngineShiftAssignment[] = assignmentRows.map((a) => ({ id: a.id, targetType: a.targetType, targetId: a.targetId, shiftId: a.shiftId, shiftPatternId: a.shiftPatternId, effectiveFrom: isoDate(a.effectiveFrom), effectiveTo: isoDateOrNull(a.effectiveTo) }));
     const patterns: EngineShiftPattern[] = patternRows.map((p) => ({ id: p.id, cycleLengthDays: p.cycleLengthDays, anchorDate: isoDate(p.anchorDate), sequence: jsonArray(p.sequence) as EngineShiftPattern['sequence'] }));
-    const holidayName = new Map<string, string>();
-    for (const h of holidays.filter((x) => !x.branchIds || x.branchIds.includes(emp.branchId))) for (const d of holidayDates([{ date: isoDate(h.date), endDate: isoDateOrNull(h.endDate) }])) if (!holidayName.has(d)) holidayName.set(d, h.name);
+    // a holiday applies on a date when it is in the calendar of the branch effective that day and covers that branch
+    const holidayOn = (date: string): string | null => {
+      const branchId = branchOn.get(date)!;
+      const calendarId = calendarOf(branchId);
+      for (const h of holidays) {
+        if (h.calendarId !== calendarId || (h.branchIds && !h.branchIds.includes(branchId))) continue;
+        if (holidayDates([{ date: isoDate(h.date), endDate: isoDateOrNull(h.endDate) }]).has(date)) return h.name;
+      }
+      return null;
+    };
     const leaveOn = (d: string) => leave.some((l) => isoDate(l.startDate) <= d && isoDate(l.endDate) >= d);
-    const scope = { employeeId: emp.id, teamIds: emp.teamIds, departmentId: emp.departmentId, branchId: emp.branchId, organizationId: orgId };
-    const weeklyOff = weeklyOffOf(emp);
+    const nums = (v: unknown): number[] | null => (Array.isArray(v) ? v.map(Number) : null);
+    // weekly offs: the employee's own, else the branch effective that day, else the organisation's (the engine's precedence)
+    const weeklyOffOn = (date: string): number[] => emp.weeklyOffDays ?? nums(branchById.get(branchOn.get(date)!)?.weeklyOffDays) ?? emp.orgWeeklyOffDays;
+    const scopeOn = (date: string) => ({ employeeId: emp.id, teamIds: emp.teamIds, departmentId: emp.departmentId, branchId: branchOn.get(date)!, organizationId: orgId });
     const defaultShiftId = policy.defaultShiftId ?? null;
-    const resolved = dates.map((date) => ({ date, r: resolveShift(assignments, patterns, scope, date) }));
+    const resolved = dates.map((date) => ({ date, r: resolveShift(assignments, patterns, scopeOn(date), date) }));
     const shiftIds = resolved.map(({ r }) => r.shiftId ?? (r.isPatternOff ? null : defaultShiftId)).filter((x): x is string => !!x);
     const shifts = await loadShifts(t, orgId, shiftIds);
     return resolved.map(({ date, r }): ResolvedDay => {
@@ -74,8 +99,8 @@ export async function resolveDays(trx: Trx, orgId: string, emp: EmployeeCtx, fro
       const shiftId = r.shiftId ?? (r.isPatternOff ? null : defaultShiftId);
       const shift = shiftId ? shifts.get(shiftId) : undefined;
       return {
-        date, shift: shift ? toShiftSummary(shift) : null, shiftId: shift ? shift.id : null, source, isOff: r.isPatternOff || weeklyOff.includes(dayOfWeek(date)),
-        holidayName: holidayName.get(date) ?? null, onLeave: leaveOn(date), assignmentId: r.assignment?.id ?? null, assignmentTarget: r.assignment?.targetType ?? null,
+        date, shift: shift ? toShiftSummary(shift) : null, shiftId: shift ? shift.id : null, source, isOff: r.isPatternOff || weeklyOffOn(date).includes(dayOfWeek(date)),
+        holidayName: holidayOn(date), onLeave: leaveOn(date), assignmentId: r.assignment?.id ?? null, assignmentTarget: r.assignment?.targetType ?? null,
       };
     });
   });

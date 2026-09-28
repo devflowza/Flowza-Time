@@ -58,9 +58,15 @@ export interface SelfProfileDto {
 export interface SelfMonthTotals {
   present: number; absent: number; leave: number; holiday: number; weeklyOff: number; halfDay: number; late: number; missingPunch: number;
   workedMinutes: number; overtimeMinutes: number; lateMinutes: number; earlyDepartureMinutes: number;
-  /** Days the employee was expected to work so far (records other than holiday / weekly off / not joined / exited). */
+  /**
+   * Days the employee was expected to work so far — THE portal definition shared with the statistics card (HR portal Prompt 4
+   * review, P2-14; `attendanceRateOf` in @flowza/domain): present, half-day, absent and missing-punch days; approved leave is
+   * outside (a half-day-leave day counts 0.5), as are holidays, weekly offs, not-joined / exited and uncomputed days.
+   */
   workingDays: number;
-  /** (present + half days) / working days, 0..1; null before the first working day. */
+  /** Of `workingDays`, the days attended (present and missing-punch days in full, half days by half). Absent from older API builds. */
+  attendedDays?: number;
+  /** attendedDays / workingDays, 0..1; null before the first working day. */
   attendanceRate: number | null;
 }
 

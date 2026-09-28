@@ -175,6 +175,24 @@ function nearestOf(list: readonly FenceOutcome[]): FenceOutcome | null {
   return [...list].filter((o) => o.distanceM !== null).sort((a, b) => a.distanceM! - b.distanceM! || a.fence.id.localeCompare(b.fence.id))[0] ?? null;
 }
 
+/**
+ * The B-36 truth table of a punch's location (HR portal Prompt 4 review, P2-7; Finance `_attendance_geofence_pass`):
+ *   true  — a fence judged the punch and it was inside (`allowed`);
+ *   false — a REAL fence was evaluated with a location and the punch failed it (reason `outside`, or a mocked location,
+ *           which every fence treats as outside);
+ *   null  — nobody can say: no fence applies (`no_fence`: none assigned, or geofencing off), no location was sent, or the fix
+ *           was too imprecise for the fence to judge.
+ * The attendance engine raises OUTSIDE_GEOFENCE only for `false`. A stored verdict without its reason (rows written before
+ * the reason was kept) is read conservatively: only an outright refusal counts as failed.
+ */
+export function withinGeofenceOf(e: { verdict: string | null | undefined; reason: string | null | undefined }): boolean | null {
+  if (!e.verdict || e.verdict === 'no_fence') return null;
+  if (e.verdict === 'allowed') return true;
+  if (e.reason === 'outside' || e.reason === 'mock_location') return false;
+  if (!e.reason && (e.verdict === 'denied_outside' || e.verdict === 'denied_mock')) return false;
+  return null;
+}
+
 /** True when the verdict means the punch is refused (not recorded). */
 export const isRefusalVerdict = (v: GeofenceVerdictSpec): boolean => v === 'denied_outside' || v === 'denied_mock';
 /** True when the verdict flags the punch (recorded, but a manager should look). */

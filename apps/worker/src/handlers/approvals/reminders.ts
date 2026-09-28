@@ -15,13 +15,15 @@ export const APPROVAL_DIGEST_LOCAL_HOUR = 8;
 interface CurrentStep {
   stepId: string; requestId: string; stepNo: number; entityType: ApprovalEntity; entityId: string; employeeId: string | null; branchId: string | null;
   requestedBy: string | null; subjectUserId: string | null; workflowId: string | null; activatedAt: Date | null; dueAt: Date | null; escalatedAt: Date | null; remindedAt: Date | null; escalateTo: string | null;
+  /** Other people the request is about (HR portal Prompt 4 review, P0-2 — a swap's colleague) and their logins at submit. */
+  coSubjectEmployeeIds: string[] | null; coSubjectUserIds: string[] | null;
 }
 
 export interface ApprovalRemindersResult { escalated: number; reminded: number; digests: number }
 
 async function currentSteps(trx: Trx, orgId: string): Promise<CurrentStep[]> {
   return trx.selectFrom('approvalSteps as s').innerJoin('approvalRequests as r', 'r.id', 's.requestId')
-    .select(['s.id as stepId', 's.requestId', 's.stepNo', 'r.entityType', 'r.entityId', 'r.employeeId', 'r.branchId', 'r.requestedBy', 'r.subjectUserId', 'r.workflowId', 's.activatedAt', 's.dueAt', 's.escalatedAt', 's.remindedAt', 's.escalateTo'])
+    .select(['s.id as stepId', 's.requestId', 's.stepNo', 'r.entityType', 'r.entityId', 'r.employeeId', 'r.branchId', 'r.requestedBy', 'r.subjectUserId', 'r.workflowId', 's.activatedAt', 's.dueAt', 's.escalatedAt', 's.remindedAt', 's.escalateTo', 'r.coSubjectEmployeeIds', 'r.coSubjectUserIds'])
     .where('r.organizationId', '=', orgId).where('r.status', '=', 'PENDING').where('s.status', '=', 'PENDING').whereRef('s.stepNo', '=', 'r.currentStep')
     .orderBy('r.createdAt').orderBy('r.id').execute() as Promise<CurrentStep[]>;
 }
@@ -66,13 +68,16 @@ async function membersByRole(trx: Trx, orgId: string, roleKey: 'hr_admin' | 'own
  * hands, not an extra seat: their decision fills ONE pending seat of the level (Finance B-91 "one row per call", review
  * P2-13) — an ANY level settles, an ALL / QUORUM level counts one approval — so escalation never makes a level harder to
  * close and never lets one person close a level that needs several. The person the request is about (the submit-time
- * snapshot or the CURRENT membership link, review P0-4) and the requester are never added: self-approval is not
- * configurable (review P0-3).
+ * snapshot or the CURRENT membership link, review P0-4), its other parties (co-subjects — HR portal Prompt 4 review, P0-2)
+ * and the requester are never added: self-approval is not configurable (review P0-3).
  */
 async function escalate(trx: Trx, orgId: string, s: CurrentStep, now: Date): Promise<string[]> {
   const current = new Set((await trx.selectFrom('approvalStepActors').select('userId').where('stepId', '=', s.stepId).execute()).map((a) => a.userId));
   const linkedToSubject = new Set(s.employeeId ? (await trx.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', s.employeeId).execute()).map((m) => m.userId) : []);
-  const eligible = (ids: string[]) => ids.filter((u) => !current.has(u) && u !== s.subjectUserId && u !== s.requestedBy && !linkedToSubject.has(u));
+  // the request's other parties (a swap's colleague — review P0-2): the logins snapshotted at submit and every CURRENT link
+  const coSubjects = s.coSubjectEmployeeIds ?? [];
+  const linkedToCoSubjects = new Set([...(s.coSubjectUserIds ?? []), ...(coSubjects.length ? (await trx.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', 'in', coSubjects).execute()).map((m) => m.userId) : [])]);
+  const eligible = (ids: string[]) => ids.filter((u) => !current.has(u) && u !== s.subjectUserId && u !== s.requestedBy && !linkedToSubject.has(u) && !linkedToCoSubjects.has(u));
   const ladder: ApprovalEscalationTarget[] = s.escalateTo === 'NEXT_STEP' ? ['NEXT_STEP', 'HR_ADMIN', 'OWNER'] : s.escalateTo === 'HR_ADMIN' ? ['HR_ADMIN', 'OWNER'] : ['OWNER'];
   let target: ApprovalEscalationTarget | null = null;
   let added: string[] = [];

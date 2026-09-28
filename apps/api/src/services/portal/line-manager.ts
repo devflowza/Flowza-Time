@@ -12,17 +12,20 @@ import { dv } from '../features/sql-helpers.js';
  * today) — the secondary, then HR admins, then the owner. Right after that submit the secondary manager is added to the
  * primary's seat as a stand-in (`via_delegation_of` = the primary, resolution path `secondary`): either of the two decides for
  * the reporting line, and because they share ONE seat a rejection by either is final, exactly as with a single manager.
- * Only for a request the engine routed to the primary manager (no workflow, level 1, path `primary`); never the subject.
+ * Only for a request the engine routed to the primary manager (no workflow, level 1, path `primary`); never the subject nor
+ * another party to the request (a swap's colleague — review P0-2).
  * Runs in a system step (the approval tables are written by the platform only).
  */
 export async function seatSecondaryManager(t: Trx, actor: Actor, orgId: string, input: { requestId: string; entityType: ApprovalEntity; entityId: string; employeeId: string; secondaryManagerEmployeeId: string | null; employeeName: string | null }): Promise<string | null> {
   if (!input.secondaryManagerEmployeeId || input.secondaryManagerEmployeeId === input.employeeId) return null;
-  const req = await t.selectFrom('approvalRequests').select(['id', 'status', 'workflowId', 'currentStep', 'subjectUserId', 'requestedBy']).where('organizationId', '=', orgId).where('id', '=', input.requestId).executeTakeFirst();
+  const req = await t.selectFrom('approvalRequests').select(['id', 'status', 'workflowId', 'currentStep', 'subjectUserId', 'requestedBy', 'coSubjectEmployeeIds', 'coSubjectUserIds']).where('organizationId', '=', orgId).where('id', '=', input.requestId).executeTakeFirst();
   if (!req || req.status !== 'PENDING' || req.workflowId !== null || req.currentStep !== 1) return null;
+  // a party to the request (a swap's colleague — review P0-2) never stands in, whichever manager they are
+  if (req.coSubjectEmployeeIds?.includes(input.secondaryManagerEmployeeId)) return null;
   const step = await t.selectFrom('approvalSteps').select(['id', 'approverType', 'approverUserId', 'resolutionPath']).where('requestId', '=', req.id).where('stepNo', '=', 1).executeTakeFirst();
   if (!step || step.approverType !== 'MANAGER' || step.resolutionPath !== 'primary' || !step.approverUserId) return null;
   const secondary = await t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', input.secondaryManagerEmployeeId).where('status', '=', 'active').orderBy('createdAt').executeTakeFirst();
-  if (!secondary || secondary.userId === step.approverUserId || secondary.userId === req.subjectUserId || secondary.userId === req.requestedBy) return null;
+  if (!secondary || secondary.userId === step.approverUserId || secondary.userId === req.subjectUserId || secondary.userId === req.requestedBy || req.coSubjectUserIds?.includes(secondary.userId)) return null;
   // somebody on approved leave today cannot stand in (the resolver applies the same rule to the primary)
   const today = await orgToday(t, orgId);
   const onLeave = await t.selectFrom('leaveRecords').select('id').where('organizationId', '=', orgId).where('employeeId', '=', input.secondaryManagerEmployeeId).where('status', '=', 'APPROVED')

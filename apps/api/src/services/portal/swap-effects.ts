@@ -6,7 +6,7 @@ import { isoDate, isoDateOrNull } from '../../lib/mappers.js';
 import type { HookContext } from '../approvals/hooks/index.js';
 import { orgToday } from '../features/recalc.js';
 import { dv } from '../features/sql-helpers.js';
-import { emitToUsers, isPeriodLocked, loadEmployeeCtx, userIdsOfEmployees } from './common.js';
+import { emitToUsers, isPeriodLocked, isWorking, loadEmployeeCtx, userIdsOfEmployees } from './common.js';
 import { resolveDays, worksShift } from './shift-resolve.js';
 
 /**
@@ -15,6 +15,8 @@ import { resolveDays, worksShift } from './shift-resolve.js';
  * split around it (the schedule's no-overlap exclusion allows one employee assignment per date), so the rest of that
  * assignment is untouched. Before anything is written the swap is re-validated: both still work, on the shifts captured
  * when it was requested, outside a locked period — otherwise the decision is refused (409) and the request stays open.
+ * Before that, the engine asks `swapApprovalBlocker` whether both people are still employed on the swap day (review P2-11):
+ * when one is not, the request is rejected by the system with that reason instead of approved.
  * Days up to today are recomputed at once (SHIFT_CHANGE). System scope; never imports the engine.
  */
 
@@ -53,6 +55,23 @@ async function placeOneDayShift(t: Trx, orgId: string, employeeId: string, branc
   return { id: row.id, touched };
 }
 
+/**
+ * Why a pending swap can no longer be approved (review P2-11), asked by the engine before any approval of it is recorded: both
+ * employees must still be employed on the swap day (not terminated / resigned, no exit date before it, record not removed).
+ * A reason makes the engine reject the request BY THE SYSTEM with it.
+ */
+export async function swapApprovalBlocker(t: Trx, ctx: Pick<HookContext, 'orgId' | 'entityId'>): Promise<string | null> {
+  const swap = await loadSwap(t, ctx.orgId, ctx.entityId);
+  if (!swap || swap.status !== 'pending') return null;
+  const date = isoDate(swap.swapDate);
+  for (const [employeeId, who] of [[swap.requesterEmployeeId, 'The employee who asked for the swap'], [swap.targetEmployeeId, 'The colleague']] as const) {
+    const emp = await loadEmployeeCtx(t, ctx.orgId, employeeId).catch(() => null);
+    if (!emp) return `${who} is no longer an employee of the organisation.`;
+    if (!isWorking(emp, date)) return `${emp.displayName} is no longer employed on ${date}, so the shifts of that day cannot be exchanged.`;
+  }
+  return null;
+}
+
 export async function applySwapApproval(deps: ApiDeps, t: Trx, ctx: Pick<HookContext, 'orgId' | 'entityId' | 'actor' | 'comment'>): Promise<void> {
   const swap = await loadSwap(t, ctx.orgId, ctx.entityId);
   if (!swap || swap.status !== 'pending') return;
@@ -76,13 +95,14 @@ export async function applySwapApproval(deps: ApiDeps, t: Trx, ctx: Pick<HookCon
     { swapId: swap.id, swapDate: date, decision: 'approved', comment: ctx.comment, requesterEmployeeId: requester.id, requesterName: requester.displayName, targetEmployeeId: target.id, targetName: target.displayName });
 }
 
-export async function applySwapClosed(t: Trx, ctx: Pick<HookContext, 'orgId' | 'entityId' | 'actor' | 'comment'>, status: 'rejected' | 'cancelled'): Promise<void> {
+export async function applySwapClosed(t: Trx, ctx: Pick<HookContext, 'orgId' | 'entityId' | 'actor' | 'comment' | 'system'>, status: 'rejected' | 'cancelled'): Promise<void> {
   const swap = await loadSwap(t, ctx.orgId, ctx.entityId);
   if (!swap || swap.status !== 'pending') return;
-  await t.updateTable('shiftSwapRequests').set({ status, decidedBy: ctx.actor.userId, decidedAt: new Date(), decisionNote: ctx.comment }).where('id', '=', swap.id).where('status', '=', 'pending').execute();
+  // a system rejection (review P2-11) has no decider: the note carries the system's reason
+  await t.updateTable('shiftSwapRequests').set({ status, decidedBy: ctx.system ? null : ctx.actor.userId, decidedAt: new Date(), decisionNote: ctx.comment }).where('id', '=', swap.id).where('status', '=', 'pending').execute();
   if (status === 'rejected') {
-    await emitToUsers(t, ctx.actor, ctx.orgId, 'shift.swap_decided', { type: 'shift_swap', id: swap.id }, await userIdsOfEmployees(t, ctx.orgId, [swap.requesterEmployeeId, swap.targetEmployeeId]),
-      { swapId: swap.id, swapDate: isoDate(swap.swapDate), decision: 'rejected', comment: ctx.comment, requesterEmployeeId: swap.requesterEmployeeId, targetEmployeeId: swap.targetEmployeeId });
+    await emitToUsers(t, ctx.system ? null : ctx.actor, ctx.orgId, 'shift.swap_decided', { type: 'shift_swap', id: swap.id }, await userIdsOfEmployees(t, ctx.orgId, [swap.requesterEmployeeId, swap.targetEmployeeId]),
+      { swapId: swap.id, swapDate: isoDate(swap.swapDate), decision: 'rejected', comment: ctx.comment, requesterEmployeeId: swap.requesterEmployeeId, targetEmployeeId: swap.targetEmployeeId, ...(ctx.system ? { system: true } : {}) });
   }
 }
 
