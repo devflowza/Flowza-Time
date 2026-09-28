@@ -62,7 +62,9 @@ describe('self-service leave', () => {
     const r = await h.request('GET', `${base()}/me/leave`, { token: f.employeeUser });
     expect(r.status).toBe(200);
     expect(r.body.data.types.map((x: { code: string }) => x.code)).toEqual(['AL']);
-    expect(r.body.data.balances).toEqual([{ leaveTypeId: annualId, allowanceDays: 30, usedDays: 0, pendingDays: 0, remainingDays: 30 }]);
+    // leave v2 adds the full balance to each entry; the pre-v2 fields keep their names and meaning (backward compatibility)
+    expect(r.body.data.balances).toHaveLength(1);
+    expect(r.body.data.balances[0]).toMatchObject({ leaveTypeId: annualId, allowanceDays: 30, usedDays: 0, pendingDays: 0, remainingDays: 30 });
   });
 
   let requestId: string;

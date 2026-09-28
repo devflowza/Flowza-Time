@@ -142,15 +142,21 @@ describe('leave records respect period locks', () => {
     expect(inMay.status).toBe(201);
     const lock = await h.request('POST', `${base()}/attendance/periods/lock`, { token: f.hrAdmin, body: { periodStart: '2026-05-01', periodEnd: '2026-05-31', reason: 'Payroll May' } });
     expect(lock.status).toBe(201);
-    const spanning = await h.request('POST', `${base()}/leave-records`, { token: f.hrAdmin, body: { employeeId: f.e1, leaveTypeId: lt.body.data.id, startDate: '2026-04-28', endDate: '2026-06-02' } });
+    // leave v2 (B-54): the lock holds for leave.manage without attendance.lock_period (hr_user) …
+    const spanning = await h.request('POST', `${base()}/leave-records`, { token: f.hrUser, body: { employeeId: f.e1, leaveTypeId: lt.body.data.id, startDate: '2026-04-28', endDate: '2026-06-02' } });
     expect(spanning.status).toBe(409);
     expect(spanning.body.code).toBe('PERIOD_LOCKED');
-    expect((await h.request('PATCH', `${base()}/leave-records/${inMay.body.data.id}`, { token: f.hrAdmin, body: { endDate: '2026-05-13' } })).status).toBe(409);
-    expect((await h.request('DELETE', `${base()}/leave-records/${inMay.body.data.id}`, { token: f.hrAdmin })).status).toBe(409);
-    const june = await h.request('POST', `${base()}/leave-records`, { token: f.hrAdmin, body: { employeeId: f.e1, leaveTypeId: lt.body.data.id, startDate: '2026-06-10', endDate: '2026-06-11' } });
+    expect((await h.request('PATCH', `${base()}/leave-records/${inMay.body.data.id}`, { token: f.hrUser, body: { endDate: '2026-05-13' } })).status).toBe(409);
+    expect((await h.request('DELETE', `${base()}/leave-records/${inMay.body.data.id}`, { token: f.hrUser })).status).toBe(409);
+    const june = await h.request('POST', `${base()}/leave-records`, { token: f.hrUser, body: { employeeId: f.e1, leaveTypeId: lt.body.data.id, startDate: '2026-06-10', endDate: '2026-06-11' } });
     expect(june.status).toBe(201);
-    expect((await h.request('PATCH', `${base()}/leave-records/${june.body.data.id}`, { token: f.hrAdmin, body: { startDate: '2026-05-20' } })).status).toBe(409);
-    expect((await h.request('PATCH', `${base()}/leave-records/${june.body.data.id}`, { token: f.hrAdmin, body: { endDate: '2026-06-12' } })).status).toBe(200);
+    expect((await h.request('PATCH', `${base()}/leave-records/${june.body.data.id}`, { token: f.hrUser, body: { startDate: '2026-05-20' } })).status).toBe(409);
+    expect((await h.request('PATCH', `${base()}/leave-records/${june.body.data.id}`, { token: f.hrUser, body: { endDate: '2026-06-12' } })).status).toBe(200);
+    // … while a holder of attendance.lock_period (who could unlock the period anyway) may correct inside it, and the override is logged
+    const fixed = await h.request('PATCH', `${base()}/leave-records/${inMay.body.data.id}`, { token: f.hrAdmin, body: { endDate: '2026-05-13' } });
+    expect(fixed.status).toBe(200);
+    const logged = await h.admin.selectFrom('audit.logs').select(['action', 'reason']).where('organizationId', '=', f.orgId).where('entityId', '=', inMay.body.data.id).where('action', '=', 'leave.corrected').execute();
+    expect(logged.some((a) => (a.reason ?? '').includes('locked period (attendance.lock_period)'))).toBe(true);
   });
 });
 

@@ -7,6 +7,7 @@ import { leaveHook } from './leave.js';
 import { attendanceNoteHook } from './attendance-notes.js';
 import { regularisationHook } from './regularisations.js';
 import { shiftSwapHook } from './shift-swaps.js';
+import { compOffHook } from './comp-off.js';
 
 /** What the engine hands an entity hook when a request reaches a terminal state. Runs inside the engine's system step. */
 export interface HookContext {
@@ -29,6 +30,11 @@ export interface HookContext {
    * Absent for auto-approvals, bypasses and cancellations.
    */
   detail?: Record<string, unknown>;
+  /**
+   * The document needed no approval at all (leave v2: a leave type with `requires_approval = false`): nobody decided, so
+   * a hook records no approver.
+   */
+  notRequired?: boolean;
 }
 
 /**
@@ -58,9 +64,9 @@ export interface EntityHook {
   onApproved(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onRejected(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   onCancelled?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
-  /** An approver asked for more information (the request stays pending); `ctx.comment` is the question. */
+  /** An approver asked for more information (the request stays pending; leave v2: leave → INFO_REQUESTED); `ctx.comment` is the question. */
   onInfoRequested?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
-  /** The requester / subject answered; `ctx.comment` is the answer. */
+  /** The requester / subject answered (leave v2: leave → PENDING); `ctx.comment` is the answer. */
   onInfoAnswered?(deps: ApiDeps, trx: Trx, ctx: HookContext): Promise<void>;
   /** Inbox / detail context for a page of requests (system scope; ids the caller could already see). */
   loadContexts(trx: Trx, orgId: string, entityIds: string[]): Promise<Map<string, ApprovalContextDto>>;
@@ -79,6 +85,7 @@ export const entityHooks: Partial<Record<ApprovalEntity, EntityHook>> = {
   ATTENDANCE_NOTE: attendanceNoteHook,
   REGULARISATION: regularisationHook,
   SHIFT_SWAP: shiftSwapHook,
+  COMP_OFF: compOffHook,
 };
 
 /** Fallback for entity types without a registered hook: decisions still need a permission — the attendance one, like every other request. */

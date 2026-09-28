@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { countLeaveDays, holidayDates, isWorkingDay, leaveBalances, type WorkingCalendar } from './days.js';
+import { countLeaveDays, holidayDates, isWorkingDay, type WorkingCalendar } from './days.js';
+import { leaveBalances } from './balances.js';
 
 // Oman: Friday + Saturday off. 2026-09-25 is a Friday.
 const cal: WorkingCalendar = { weeklyOffDays: [5, 6], holidays: holidayDates([{ date: '2026-09-29', endDate: null }]) };

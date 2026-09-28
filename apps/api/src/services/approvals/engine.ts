@@ -28,6 +28,11 @@ export interface SubmitInput {
    * (primary → secondary → HR admins → owner, the domain resolver's fallback chain).
    */
   noWorkflow: { kind: 'AUTO_APPROVE' } | { kind: 'PERMISSION'; permission: Permission } | { kind: 'MANAGER' };
+  /**
+   * The document needs no approval at all (leave v2: a leave type with `requires_approval = false`): record an APPROVED
+   * request at once whatever the workflows say; the hook sees `notRequired` (nobody decided).
+   */
+  notRequired?: boolean;
 }
 export interface SubmitResult { requestId: string; status: 'PENDING' | 'APPROVED'; autoApproved: boolean; stepCount: number; firstStepActorIds: string[] }
 
@@ -297,11 +302,11 @@ export async function submit(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
     const base = { organizationId: orgId, workflowId: row?.id ?? null, entityType: input.entityType, entityId: input.entityId, branchId: input.branchId, employeeId: input.employeeId, departmentId: input.departmentId ?? null, units: input.units ?? null, requestedBy: input.requestedBy };
     const subjectUserId = input.employeeId ? (await t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', '=', input.employeeId).where('status', '=', 'active').orderBy('createdAt').executeTakeFirst())?.userId ?? null : null;
 
-    if (!row && input.noWorkflow.kind === 'AUTO_APPROVE') {
+    if (input.notRequired || (!row && input.noWorkflow.kind === 'AUTO_APPROVE')) {
       const now = new Date();
-      const req = await t.insertInto('approvalRequests').values({ ...base, subjectUserId, currentStep: 1, status: 'APPROVED', completedAt: now, decidedBy: actor.userId }).returningAll().executeTakeFirstOrThrow();
-      await recordEvent(t, orgId, req.id, 'auto_approved', actor.userId, { reason: 'no workflow configured for this entity type' });
-      await hookFor(input.entityType)?.onApproved(deps, t, hookCtx(orgId, req, actor, null, true));
+      const req = await t.insertInto('approvalRequests').values({ ...base, workflowId: input.notRequired ? null : base.workflowId, subjectUserId, currentStep: 1, status: 'APPROVED', completedAt: now, decidedBy: input.notRequired ? null : actor.userId }).returningAll().executeTakeFirstOrThrow();
+      await recordEvent(t, orgId, req.id, 'auto_approved', actor.userId, { reason: input.notRequired ? 'no approval required for this item' : 'no workflow configured for this entity type' });
+      await hookFor(input.entityType)?.onApproved(deps, t, { ...hookCtx(orgId, req, actor, null, true), notRequired: input.notRequired ?? false });
       return { requestId: req.id, status: 'APPROVED', autoApproved: true, stepCount: 0, firstStepActorIds: [] };
     }
     const steps: ApprovalStepSpec[] = row ? parseWorkflowSteps(row.steps)

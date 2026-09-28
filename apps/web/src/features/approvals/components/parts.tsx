@@ -10,6 +10,7 @@ import { modeText } from '../labels';
 import { AR_NS } from '@/features/attendance-review/i18n';
 import { AttendanceStatusBadge, FlagChips } from '@/features/attendance/components/badges';
 import { fmtTime } from '@/lib/format';
+import { CompOffApprovalContext } from '@/features/leave/components/comp-off-context';
 
 const STATUS_TONE: Record<string, 'warning' | 'success' | 'danger' | 'neutral'> = { PENDING: 'warning', APPROVED: 'success', REJECTED: 'danger', CANCELLED: 'neutral', INVALIDATED: 'neutral', SKIPPED: 'neutral' };
 
@@ -68,6 +69,8 @@ export function ApprovalContext({ context, timezone, compact = false }: { contex
     );
   }
   if (context.kind === 'ATTENDANCE_NOTE' || context.kind === 'REGULARISATION' || context.kind === 'SHIFT_SWAP') return <PortalRequestContext context={context} timezone={timezone} compact={compact} />;
+  // leave v2: a comp-off credit request (the day worked, hours claimed vs recorded, days earned)
+  if (context.kind === 'COMP_OFF') return <CompOffApprovalContext c={context.compOff} compact={compact} />;
   return <p className="text-sm text-muted-foreground">{context.summary ?? t('context.noDetails')}</p>;
 }
 

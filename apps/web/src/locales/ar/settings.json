@@ -12,7 +12,8 @@
     "security": "الأمان",
     "subscription": "الاشتراك",
     "reports": "التقارير",
-    "dashboard": "لوحة التحكم"
+    "dashboard": "لوحة التحكم",
+    "leave": "الإجازات"
   },
   "orgStatus": {
     "trial": "تجريبي",

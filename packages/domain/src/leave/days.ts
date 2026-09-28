@@ -37,31 +37,26 @@ export function countLeaveDays(range: LeaveRangeLike, cal: WorkingCalendar, clip
   return range.isHalfDay ? days * 0.5 : days;
 }
 
+/** How a leave type counts the days of a range: working days only (weekly offs / holidays free) or every calendar date. */
+export type LeaveCountMode = 'working' | 'calendar';
+
+/**
+ * Days charged for a range under a type's count mode (leave v2). `working` = countLeaveDays; `calendar` = every date of
+ * the (clipped) range, a half-day request 0.5.
+ */
+export function countLeaveDaysByMode(range: LeaveRangeLike, cal: WorkingCalendar, mode: LeaveCountMode, clip?: { from: string; to: string }): number {
+  if (mode === 'working') return countLeaveDays(range, cal, clip);
+  const from = clip && clip.from > range.startDate ? clip.from : range.startDate;
+  const to = clip && clip.to < range.endDate ? clip.to : range.endDate;
+  if (to < from) return 0;
+  let days = 0;
+  for (const _ of eachDate(from, to)) days += 1;
+  return range.isHalfDay ? days * 0.5 : days;
+}
+
 /** Expand holiday rows (date + optional end date) into the set of dates they cover. */
 export function holidayDates(rows: ReadonlyArray<{ date: string; endDate: string | null }>): Set<string> {
   const out = new Set<string>();
   for (const h of rows) for (const d of eachDate(h.date, h.endDate ?? h.date)) out.add(d);
   return out;
-}
-
-export interface LeaveBalanceInput { leaveTypeId: string; allowanceDays: number | null }
-export interface LeaveBalanceRecord extends LeaveRangeLike { leaveTypeId: string; status: string }
-export interface LeaveBalance { leaveTypeId: string; allowanceDays: number | null; usedDays: number; pendingDays: number; remainingDays: number | null }
-
-/**
- * Per-type usage for one calendar year: APPROVED ranges count as used (whether taken or still upcoming), PENDING as
- * pending; rejected and cancelled requests are ignored. Remaining = allowance − used − pending (never below zero is
- * *not* enforced: an overdrawn balance shows as negative so HR sees it).
- */
-export function leaveBalances(types: readonly LeaveBalanceInput[], records: readonly LeaveBalanceRecord[], cal: WorkingCalendar, year: number): LeaveBalance[] {
-  const clip = { from: `${year}-01-01`, to: `${year}-12-31` };
-  return types.map((t) => {
-    let used = 0; let pending = 0;
-    for (const r of records) {
-      if (r.leaveTypeId !== t.leaveTypeId) continue;
-      if (r.status === 'APPROVED') used += countLeaveDays(r, cal, clip);
-      else if (r.status === 'PENDING') pending += countLeaveDays(r, cal, clip);
-    }
-    return { leaveTypeId: t.leaveTypeId, allowanceDays: t.allowanceDays, usedDays: used, pendingDays: pending, remainingDays: t.allowanceDays === null ? null : t.allowanceDays - used - pending };
-  });
 }

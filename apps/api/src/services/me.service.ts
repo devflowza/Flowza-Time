@@ -39,7 +39,7 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
     const bundle = await trx.selectNoFrom((eb) => [
       jsonObjectFrom(eb.selectFrom('userProfiles').select(PROFILE_COLUMNS).where('id', '=', actor.userId)).as('profile'),
       jsonArrayFrom(eb.selectFrom('organizations').select(ORG_COLUMNS).where('id', 'in', orgKeys)).as('orgs'),
-      jsonArrayFrom(eb.selectFrom('organizationSettings').select(['organizationId', 'general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard']).where('organizationId', 'in', orgKeys)).as('settings'),
+      jsonArrayFrom(eb.selectFrom('organizationSettings').select(['organizationId', 'general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard', 'leave']).where('organizationId', 'in', orgKeys)).as('settings'),
       jsonArrayFrom(eb.selectFrom('roles').select(['id', 'name']).where('id', 'in', roleKeys)).as('roles'),
       jsonArrayFrom(eb.selectFrom('featureFlags').select(['key', 'defaultEnabled'])).as('flags'),
       jsonArrayFrom(eb.selectFrom('organizationFeatureFlags').select(['organizationId', 'flagKey', 'enabled']).where('organizationId', 'in', orgKeys)).as('overrides'),

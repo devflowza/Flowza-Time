@@ -13,6 +13,7 @@ import { fmtDays } from '../model';
 import { ApplyLeaveDialog } from '../components/apply-leave-dialog';
 import { BalanceRow, LeaveStatusBadge, SectionTitle, TypeDot } from '../components/parts';
 import { HomePunchCard, PendingSelfItems } from '../components/home-attendance';
+import { TeamUpcomingLeave } from '@/features/leave/components/team-upcoming-leave';
 
 function TodayCard() {
   const { t } = useTranslation('portal');
@@ -151,6 +152,9 @@ export default function PortalHomePage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* managers (leave.view_team): the team's upcoming leave */}
+      <TeamUpcomingLeave />
 
       <Card>
         <SectionTitle title={t('home.recent')} to="/my/attendance?tab=log" linkLabel={t('home.seeAll')} />

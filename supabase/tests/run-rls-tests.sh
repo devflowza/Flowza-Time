@@ -12,6 +12,8 @@ psql -U flowza_worker -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_s
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_hr_workspace.sql"
 # employee portal attendance self-service (HR portal Prompt 4): commits fixtures of its own on top of the isolation ones
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_portal_attendance.sql"
+# leave v2 (self-contained on top of the isolation fixtures; commits rows to the leave v2 tables only)
+psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_leave.sql"
 # approval engine v2 (runs last: it commits fixtures of its own on top of the isolation ones)
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_approvals.sql"
 echo "RLS tests passed"

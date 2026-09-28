@@ -3,5 +3,7 @@ export * from './sync/index.js';
 export * from './authorization/types.js';
 export * from './reports/index.js';
 export * from './leave/days.js';
+export * from './leave/balances.js';
+export * from './leave/rules.js';
 export * from './approvals/index.js';
 export * from './geofence/index.js';
