@@ -35,7 +35,7 @@ export const createOrganizationSchema = z.object({
   address: addressSchema.default({}),
   ownerEmail: emailSchema,
   ownerFullName: z.string().trim().min(1).max(160),
-  planKey: z.string().default('trial'),
+  planKey: z.string().trim().min(1).max(64).default('trial'),
 });
 export type CreateOrganizationInput = z.infer<typeof createOrganizationSchema>;
 
@@ -294,7 +294,7 @@ export const organizationSettingsSchema = z.object({
   security: z.object({
     mfaRequired: z.boolean().default(false),
     sessionIdleMinutes: z.number().int().min(5).max(1440).default(480),
-    allowedEmailDomains: z.array(z.string().min(3)).max(20).default([]),
+    allowedEmailDomains: z.array(z.string().min(3).max(253)).max(20).default([]),
     exportRequiresReason: z.boolean().default(false),
   }).partial().default({}),
   integrations: z.object({}).partial().default({}),
@@ -316,7 +316,7 @@ export const organizationSettingsSchema = z.object({
     /** How hour columns print: 9.45 = 9 h 45 min (the GCC payroll notation the sample reports use) or 9:45. */
     hoursNotation: z.enum(['h.mm', 'hh:mm']).default('h.mm'),
     /** Two-letter code per attendance status (keys: PRESENT, ABSENT, WEEKLY_OFF, HOLIDAY, HALF_DAY, HALF_DAY_LEAVE, LEAVE). Leave days use the leave type's own code. */
-    codeOverrides: z.record(z.string(), z.string().trim().min(1).max(6)).default({}),
+    codeOverrides: z.record(z.string().min(1).max(40), z.string().trim().min(1).max(6)).default({}),
     defaultFormat: z.enum(['pdf', 'xlsx', 'csv']).default('pdf'),
     showLegend: z.boolean().default(true),
   }).partial().default({}),
@@ -392,7 +392,7 @@ export const roleInputSchema = z.object({
   key: z.string().regex(/^[a-z][a-z0-9_]{1,63}$/),
   name: z.string().trim().min(1).max(80),
   description: z.string().max(300).optional(),
-  permissions: z.array(z.enum(PERMISSIONS)).min(1),
+  permissions: z.array(z.enum(PERMISSIONS)).min(1).max(PERMISSIONS.length),
 });
 export type RoleInput = z.infer<typeof roleInputSchema>;
 

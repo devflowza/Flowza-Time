@@ -82,11 +82,11 @@ select pg_temp.assert_eq((select count(*) from public.approval_request_events), 
 select pg_temp.assert_eq((select count(*) from public.approval_delegations), 0, 'assignee does not see somebody else''s delegation');
 select pg_temp.assert_raises($q$ select count(*) from public.approval_email_tokens $q$, 'clients cannot read e-mail tokens at all');
 select pg_temp.assert_raises($q$ insert into public.approval_requests (organization_id, entity_type, entity_id, current_step, status) values ('0a000000-0000-0000-0000-000000000000', 'LEAVE', gen_random_uuid(), 1, 'APPROVED') $q$, 'clients cannot create requests');
-select pg_temp.assert_rows($q$ update public.approval_requests set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 0, 'clients cannot decide a request by UPDATE');
-select pg_temp.assert_rows($q$ update public.approval_step_actors set decision = 'APPROVED' where user_id = 'a0000000-0000-0000-0000-000000000008' $q$, 0, 'clients cannot record a decision by UPDATE');
+select pg_temp.assert_raises($q$ update public.approval_requests set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 'clients cannot decide a request by UPDATE');
+select pg_temp.assert_raises($q$ update public.approval_step_actors set decision = 'APPROVED' where user_id = 'a0000000-0000-0000-0000-000000000008' $q$, 'clients cannot record a decision by UPDATE');
 select pg_temp.assert_raises($q$ insert into public.approval_step_actors (organization_id, step_id, user_id) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000002b2', 'a0000000-0000-0000-0000-000000000008') $q$, 'clients cannot seat themselves on another level');
 select pg_temp.assert_raises($q$ insert into public.approval_request_events (organization_id, request_id, kind) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000002a1', 'approved') $q$, 'clients cannot forge timeline events');
-select pg_temp.assert_rows($q$ delete from public.approval_steps $q$, 0, 'clients cannot delete levels');
+select pg_temp.assert_raises($q$ delete from public.approval_steps $q$, 'clients cannot delete levels');
 rollback;
 
 -- ---------- delegate of the approver (LEAVE, today) ----------
@@ -125,9 +125,9 @@ select pg_temp.assert_raises($q$ insert into public.attendance_corrections (orga
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '2026-09-02', 'ADD_PUNCH', '2026-09-02 04:00+00', 'Pre-approved', 'a0000000-0000-0000-0000-000000000005', 'APPROVED') $q$, 'manager cannot insert an APPROVED correction');
 select pg_temp.assert_raises($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '2026-09-03', 'ADD_PUNCH', '2026-09-03 04:00+00', 'In HR''s name', 'a0000000-0000-0000-0000-000000000001', 'PENDING') $q$, 'manager cannot file a correction in somebody else''s name');
-select pg_temp.assert_rows($q$ update public.attendance_corrections set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000003c9' $q$, 0, 'manager cannot approve a correction by UPDATE');
-select pg_temp.assert_rows($q$ update public.attendance_corrections set proposed_punched_at = '2026-08-30 09:00+00' where id = '0a000000-0000-0000-0000-0000000003c9' $q$, 0, 'manager cannot rewrite a pending correction');
-select pg_temp.assert_rows($q$ delete from public.attendance_corrections where id = '0a000000-0000-0000-0000-0000000003c9' $q$, 0, 'manager cannot delete a correction');
+select pg_temp.assert_raises($q$ update public.attendance_corrections set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000003c9' $q$, 'manager cannot approve a correction by UPDATE');
+select pg_temp.assert_raises($q$ update public.attendance_corrections set proposed_punched_at = '2026-08-30 09:00+00' where id = '0a000000-0000-0000-0000-0000000003c9' $q$, 'manager cannot rewrite a pending correction');
+select pg_temp.assert_raises($q$ delete from public.attendance_corrections where id = '0a000000-0000-0000-0000-0000000003c9' $q$, 'manager cannot delete a correction');
 rollback;
 
 -- ---------- organisation-wide reader (auditor) and HR (owner) ----------
@@ -143,7 +143,7 @@ select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-0000000
 select pg_temp.assert_eq((select count(*) from public.approval_delegations), 1, 'approval.manage sees the organisation''s delegations');
 select pg_temp.assert_rows($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '0a000000-0000-0000-0000-00000000000c', '2026-09-04', 'ADD_PUNCH', '2026-09-04 04:00+00', 'HR files for anyone', 'a0000000-0000-0000-0000-000000000001', 'PENDING') $q$, 1, 'HR (organisation-wide attendance.view) files for anyone in scope');
-select pg_temp.assert_rows($q$ update public.attendance_corrections set status = 'APPLIED' where id = '0a000000-0000-0000-0000-0000000003c9' $q$, 0, 'not even HR applies a correction by UPDATE (system context only)');
+select pg_temp.assert_raises($q$ update public.attendance_corrections set status = 'APPLIED' where id = '0a000000-0000-0000-0000-0000000003c9' $q$, 'not even HR applies a correction by UPDATE (system context only)');
 select pg_temp.assert_eq((select count(*) from public.approval_requests where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'owner A sees no request of org B');
 rollback;
 

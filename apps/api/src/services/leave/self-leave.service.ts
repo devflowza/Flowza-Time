@@ -15,9 +15,10 @@ import { UNDECIDED_LEAVE, recalcLeaveRange, resubmitLeave } from './lifecycle.js
 
 /**
  * Leave in the employee portal (/orgs/:orgId/me/leave…) — leave v2 (HR portal Prompt 7). Always the caller's own employee
- * record (the membership's link, never a client-supplied id). Own rows are read and written under the caller's RLS
- * (self policies: apply → PENDING, edit / withdraw while PENDING or INFO_REQUESTED); balances, calendars and the approval
- * request behind each leave are read in the organisation's system scope for the caller's own employee only.
+ * record (the membership's link, never a client-supplied id). Own rows are read under the caller's RLS and written in the
+ * organisation's system step after this service's checks (apply → PENDING, edit / withdraw while PENDING or INFO_REQUESTED;
+ * leave_records is system-write-only since the security gate, Prompt 10); balances, calendars and the approval request
+ * behind each leave are read in the organisation's system scope for the caller's own employee only.
  *
  * The pre-v2 contract of the current web (GET /me/leave, POST /me/leave, POST /me/leave/:id/cancel) keeps its shapes:
  * fields are only added.
@@ -309,8 +310,10 @@ export async function withdrawLeave(deps: ApiDeps, actor: Actor, orgId: string, 
     if (!UNDECIDED_LEAVE.includes(before.status)) throw errors.invalidState(`Only a pending request can be withdrawn (current: ${before.status}).`);
     const lock = await checkLeaveRangeLock(trx, orgId, emp.branchId, isoDate(before.startDate), isoDate(before.endDate), scope.grant);
     const why = reason?.trim() || DEFAULT_WITHDRAW_REASON;
-    const res = await trx.updateTable('leaveRecords').set({ status: 'CANCELLED', withdrawnAt: new Date() })
-      .where('organizationId', '=', orgId).where('id', '=', id).where('employeeId', '=', emp.id).where('status', 'in', ['PENDING', 'INFO_REQUESTED']).executeTakeFirst();
+    // system step (the table refuses client writes since the security gate): the row was read above under the caller's RLS as
+    // their own filing, and the withdrawal and the engine's cancellation below commit together — never one without the other
+    const res = await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ status: 'CANCELLED', withdrawnAt: new Date() })
+      .where('organizationId', '=', orgId).where('id', '=', id).where('employeeId', '=', emp.id).where('status', 'in', ['PENDING', 'INFO_REQUESTED']).executeTakeFirst());
     if (Number(res.numUpdatedRows) !== 1) throw errors.conflict('The request changed meanwhile. Please refresh.');
     // withdrawing the leave withdraws its approval request (the approvers are told; the timeline records the reason)
     await systemStep(trx, orgId, (t) => cancelForEntity(deps, t, actor, orgId, 'LEAVE', id, why, { source: 'self_service' }));

@@ -1495,6 +1495,10 @@ export interface Plans {
 
 export interface PlatformAccessGrants {
   accessLevel: Generated<GrantAccessLevel>;
+  /**
+   * When the named second approver approved a write grant (its window starts then); null while pending. Read grants need no approval.
+   */
+  approvedAt: Timestamp | null;
   approvedBy: string | null;
   createdAt: Generated<Timestamp>;
   expiresAt: Timestamp;
@@ -1503,6 +1507,10 @@ export interface PlatformAccessGrants {
   organizationId: string;
   platformAdminUserId: string;
   reason: string;
+  /**
+   * Duration requested for a write grant, applied when it is approved (1–72).
+   */
+  requestedHours: number | null;
   revokedAt: Timestamp | null;
   startsAt: Generated<Timestamp>;
   ticketRef: string | null;

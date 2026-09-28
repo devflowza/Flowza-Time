@@ -2,6 +2,14 @@ import { z } from 'zod';
 import { EMPLOYMENT_STATUSES, EMPLOYMENT_TYPES, GENDERS, IDENTITY_DOCUMENT_TYPES } from './enums.js';
 import { booleanQuerySchema, codeSchema, countryCodeSchema, emailSchema, isoDateSchema, isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, phoneSchema, uuidSchema, weeklyOffDaysSchema } from './common.js';
 
+/**
+ * Free custom fields on an employee (e.g. ramadanEligible, personalEmail): named scalar values, bounded like every other
+ * request field (security gate, Prompt 10) — at most 50 fields, names up to 64 characters, text up to 2,000.
+ */
+export const EMPLOYEE_CUSTOM_FIELDS_MAX = 50;
+export const employeeCustomFieldsSchema = z.record(z.string().min(1).max(64), z.union([z.string().max(2000), z.number(), z.boolean(), z.null()]))
+  .refine((v) => Object.keys(v).length <= EMPLOYEE_CUSTOM_FIELDS_MAX, { message: `At most ${EMPLOYEE_CUSTOM_FIELDS_MAX} custom fields` });
+
 export const deviceUserIdSchema = z.string().trim().regex(/^[A-Za-z0-9_-]{1,32}$/, 'Device user id: letters, digits, - _ (max 32)');
 
 /** Fields without creation defaults; `createEmployeeSchema` adds the defaults, `updateEmployeeSchema` must not (a PATCH would otherwise reset them). */
@@ -31,7 +39,7 @@ const employeeFieldsSchema = z.object({
   cardNumber: z.string().trim().max(64).optional(),
   pin: z.string().regex(/^\d{4,8}$/).optional(),
   weeklyOffDays: weeklyOffDaysSchema.optional(),
-  customFields: jsonObjectSchema.optional(),
+  customFields: employeeCustomFieldsSchema.optional(),
 });
 export const createEmployeeSchema = employeeFieldsSchema.extend({
   gender: z.enum(GENDERS).default('unspecified'),

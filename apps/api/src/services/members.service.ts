@@ -470,7 +470,7 @@ export async function updateMember(deps: ApiDeps, actor: Actor, orgId: string, i
     if (nextStatus === 'active' && before.status !== 'active') patch['joinedAt'] = new Date();
     await trx.updateTable('orgMemberships').set(patch).where('id', '=', id).where('organizationId', '=', orgId).execute();
     if (nextAll) await trx.deleteFrom('membershipBranches').where('membershipId', '=', id).execute();
-    else if (input.branchIds) {
+    else if (input.branchIds && (before.allBranches || !sameBranches(input.branchIds, before.branchIds))) {
       await trx.deleteFrom('membershipBranches').where('membershipId', '=', id).execute();
       await trx.insertInto('membershipBranches').values([...new Set(input.branchIds)].map((b) => ({ membershipId: id, branchId: b }))).execute();
     }

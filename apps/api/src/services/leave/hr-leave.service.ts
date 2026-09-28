@@ -251,8 +251,8 @@ export async function createLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     await lockEmployeeLeave(trx, input.employeeId);
     await assertNoOverlap(trx, orgId, input.employeeId, { startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart });
     const own = !!grant.employeeId && grant.employeeId === input.employeeId;
-    // review P0-2: a row about the caller is written in the system context after these checks (the database refuses it from
-    // the caller's own session); anybody else's row is written under the caller's RLS as before
+    // written in the organisation's system step after these checks: leave_records is system-write-only since the security
+    // gate (Prompt 10); review P0-2's rule (never a row about oneself from one's own session) is part of it
     const row = await ownRowWrite(trx, orgId, own, (t) => t.insertInto('leaveRecords').values({ organizationId: orgId, employeeId: input.employeeId, leaveTypeId: input.leaveTypeId, branchId: emp.branchId, startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart, days: ev.days, reason: input.reason ?? null, status: 'PENDING', createdBy: actor.userId }).returning('id').executeTakeFirstOrThrow());
     await audit(trx, actor, orgId, 'leave.recorded', 'leave_record', { entityId: row.id, branchId: emp.branchId, newValue: { ...input, days: ev.days, ...(ev.warnings.length ? { warnings: ev.warnings.map((w) => w.code) } : {}) }, ...(lock.lockedOverride ? { reason: 'locked period (attendance.lock_period)' } : {}) });
     const submitted = await submit(deps, trx, actor, orgId, {
@@ -337,8 +337,8 @@ export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
       }
       ownerBypass = selfDecision ? 'decide' : 'correct';
     }
-    // a row about the caller is written in the system context after these checks: the database refuses it from their own
-    // session (review P0-2); anybody else's row is written under the caller's RLS as before
+    // every write happens in the organisation's system step after these checks: leave_records is system-write-only since the
+    // security gate (Prompt 10), which also keeps review P0-2's rule (never a row about oneself from one's own session)
     const write = <T,>(fn: (t: Trx) => Promise<T>): Promise<T> => ownRowWrite(trx, orgId, ownRow, fn);
     // both the range being left and the range being entered must be open (HR unlocks first, then edits — or holds attendance.lock_period)
     const lockA = await checkLeaveRangeLock(trx, orgId, before.branchId, beforeStart, beforeEnd, grant);

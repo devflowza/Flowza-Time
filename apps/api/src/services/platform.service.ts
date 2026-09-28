@@ -1,5 +1,6 @@
 import { type z } from 'zod';
 import { provisionTenant } from './tenant-provisioning.js';
+import { ACCESS_GRANT_APPROVAL_WINDOW_HOURS } from '@flowza/contracts';
 import type { AccessGrantDto, CreateAccessGrantInput, CreateOrganizationInput, CreateOrganizationResult, FeatureFlagDto, OrgFeatureFlagDto, OrgStatus, PlanDto, PlatformHealthDto, PlatformOrganizationDto, accessGrantListQuerySchema, platformOrgListQuerySchema, putFeatureFlagsSchema, putOrgFeatureFlagsSchema, updateOrganizationStatusSchema } from '@flowza/contracts';
 import { FLOWZA_FINANCE_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY, SYSTEM_ROLE_IDS } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
@@ -116,13 +117,19 @@ export async function updateOrganizationStatus(deps: ApiDeps, actor: Actor, id: 
 }
 
 // Access grants ----------------------------------------------------------------------------------
-const GRANT_SELECT = ['g.id', 'g.organizationId', 'g.platformAdminUserId', 'g.accessLevel', 'g.reason', 'g.ticketRef', 'g.grantedBy', 'g.approvedBy', 'g.startsAt', 'g.expiresAt', 'g.revokedAt', 'g.createdAt', 'o.displayName as organizationName', 'u.email as platformAdminEmail'] as const;
-function toGrantDto(r: { id: string; organizationId: string; platformAdminUserId: string; accessLevel: 'read' | 'write'; reason: string; ticketRef: string | null; grantedBy: string | null; approvedBy: string | null; startsAt: Date; expiresAt: Date; revokedAt: Date | null; createdAt: Date; organizationName: string | null; platformAdminEmail: string | null }): AccessGrantDto {
+const GRANT_SELECT = ['g.id', 'g.organizationId', 'g.platformAdminUserId', 'g.accessLevel', 'g.reason', 'g.ticketRef', 'g.grantedBy', 'g.approvedBy', 'g.approvedAt', 'g.requestedHours', 'g.startsAt', 'g.expiresAt', 'g.revokedAt', 'g.createdAt', 'o.displayName as organizationName', 'u.email as platformAdminEmail'] as const;
+type GrantRow = { id: string; organizationId: string; platformAdminUserId: string; accessLevel: 'read' | 'write'; reason: string; ticketRef: string | null; grantedBy: string | null; approvedBy: string | null; approvedAt: Date | null; requestedHours: number | null; startsAt: Date; expiresAt: Date; revokedAt: Date | null; createdAt: Date; organizationName: string | null; platformAdminEmail: string | null };
+const APPROVAL_WINDOW_MS = ACCESS_GRANT_APPROVAL_WINDOW_HOURS * 3_600_000;
+/** A write grant still waiting for its second approver (and not lapsed): it grants nothing until approved. */
+const isPendingGrant = (r: Pick<GrantRow, 'accessLevel' | 'approvedAt' | 'revokedAt' | 'createdAt'>, now = Date.now()) => r.accessLevel === 'write' && !r.approvedAt && !r.revokedAt && r.createdAt.getTime() > now - APPROVAL_WINDOW_MS;
+function toGrantDto(r: GrantRow, viewerUserId: string | null = null): AccessGrantDto {
   const now = Date.now();
+  const pendingApproval = isPendingGrant(r, now);
   return {
     id: r.id, organizationId: r.organizationId, organizationName: r.organizationName, platformAdminUserId: r.platformAdminUserId, platformAdminEmail: r.platformAdminEmail, accessLevel: r.accessLevel, reason: r.reason, ticketRef: r.ticketRef,
-    grantedBy: r.grantedBy, approvedBy: r.approvedBy, startsAt: isoDateTime(r.startsAt), expiresAt: isoDateTime(r.expiresAt), revokedAt: isoDateTimeOrNull(r.revokedAt),
-    active: !r.revokedAt && r.startsAt.getTime() <= now && r.expiresAt.getTime() > now, createdAt: isoDateTime(r.createdAt),
+    grantedBy: r.grantedBy, approvedBy: r.approvedBy, approvedAt: isoDateTimeOrNull(r.approvedAt), pendingApproval, canApprove: pendingApproval && !!viewerUserId && r.approvedBy === viewerUserId,
+    requestedHours: r.requestedHours, startsAt: isoDateTime(r.startsAt), expiresAt: isoDateTime(r.expiresAt), revokedAt: isoDateTimeOrNull(r.revokedAt),
+    active: !r.revokedAt && (r.accessLevel === 'read' || !!r.approvedAt) && r.startsAt.getTime() <= now && r.expiresAt.getTime() > now, createdAt: isoDateTime(r.createdAt),
   };
 }
 
@@ -132,10 +139,16 @@ export async function listGrants(deps: ApiDeps, actor: Actor, q: GrantListQuery)
     const page = pageOf(q);
     let base = trx.selectFrom('platformAccessGrants as g').leftJoin('organizations as o', 'o.id', 'g.organizationId').leftJoin('userProfiles as u', 'u.id', 'g.platformAdminUserId');
     if (q.organizationId) base = base.where('g.organizationId', '=', q.organizationId);
-    if (q.activeOnly) base = base.where('g.revokedAt', 'is', null).where('g.expiresAt', '>', new Date());
+    // "active only" lists the grants in force and the write grants still waiting for their approver
+    if (q.activeOnly) {
+      base = base.where('g.revokedAt', 'is', null).where((eb) => eb.or([
+        eb('g.expiresAt', '>', new Date()),
+        eb.and([eb('g.accessLevel', '=', 'write'), eb('g.approvedAt', 'is', null), eb('g.createdAt', '>', new Date(Date.now() - APPROVAL_WINDOW_MS))]),
+      ]));
+    }
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const rows = await base.select(GRANT_SELECT).orderBy('g.createdAt', 'desc').limit(page.pageSize).offset(page.offset).execute();
-    return { data: rows.map(toGrantDto), total };
+    return { data: rows.map((r) => toGrantDto(r, actor.userId)), total };
   });
 }
 
@@ -146,6 +159,10 @@ export async function createGrant(deps: ApiDeps, actor: Actor, input: CreateAcce
   const adminUserId = input.platformAdminUserId ?? actor.userId;
   const startsAt = new Date();
   const expiresAt = new Date(startsAt.getTime() + input.hours * 3_600_000);
+  // Security gate (Prompt 10): naming the second approver approves nothing. A write grant is created PENDING — its window
+  // ends the moment it is created, so it grants nothing — and starts only when that approver approves it in their own
+  // session (approveGrant). The database refuses an active, unapproved write grant (platform_access_grants_write_pending).
+  const pending = input.accessLevel === 'write';
   return runSystem(deps.db, input.organizationId, actor.requestId, async (trx) => {
     const org = await trx.selectFrom('organizations').select('id').where('id', '=', input.organizationId).executeTakeFirst();
     if (!org) throw errors.notFound('Organisation', input.organizationId);
@@ -155,10 +172,42 @@ export async function createGrant(deps: ApiDeps, actor: Actor, input: CreateAcce
       const approver = await trx.selectFrom('platformAdmins').select('userId').where('userId', '=', input.approvedBy).where('status', '=', 'active').executeTakeFirst();
       if (!approver) throw errors.validation('The approver is not an active platform administrator.', { issues: [{ path: 'approvedBy', message: 'Not a platform admin' }] });
     }
-    const row = await trx.insertInto('platformAccessGrants').values({ organizationId: input.organizationId, platformAdminUserId: adminUserId, accessLevel: input.accessLevel, reason: input.reason, ticketRef: input.ticketRef ?? null, grantedBy: actor.userId, approvedBy: input.approvedBy ?? null, startsAt, expiresAt }).returning('id').executeTakeFirstOrThrow();
-    await platformAudit(trx, actor, input.organizationId, 'platform.access_granted', 'platform_access_grant', { entityId: row.id, newValue: { platformAdminUserId: adminUserId, accessLevel: input.accessLevel, hours: input.hours, ticketRef: input.ticketRef ?? null, approvedBy: input.approvedBy ?? null }, reason: input.reason });
+    const row = await trx.insertInto('platformAccessGrants').values({
+      organizationId: input.organizationId, platformAdminUserId: adminUserId, accessLevel: input.accessLevel, reason: input.reason, ticketRef: input.ticketRef ?? null, grantedBy: actor.userId, approvedBy: input.approvedBy ?? null,
+      ...(pending ? { startsAt: sql<Date>`now() - interval '1 second'`, expiresAt: sql<Date>`now()`, requestedHours: input.hours, approvedAt: null } : { startsAt, expiresAt }),
+    }).returning('id').executeTakeFirstOrThrow();
+    await platformAudit(trx, actor, input.organizationId, pending ? 'platform.access_requested' : 'platform.access_granted', 'platform_access_grant', { entityId: row.id, newValue: { platformAdminUserId: adminUserId, accessLevel: input.accessLevel, hours: input.hours, ticketRef: input.ticketRef ?? null, approvedBy: input.approvedBy ?? null, ...(pending ? { pendingApproval: true } : {}) }, reason: input.reason });
     const full = await trx.selectFrom('platformAccessGrants as g').leftJoin('organizations as o', 'o.id', 'g.organizationId').leftJoin('userProfiles as u', 'u.id', 'g.platformAdminUserId').select(GRANT_SELECT).where('g.id', '=', row.id).executeTakeFirstOrThrow();
-    return toGrantDto(full);
+    return toGrantDto(full, actor.userId);
+  });
+}
+
+/**
+ * POST /platform/access-grants/:id/approve — the named second approver starts a pending write grant: its window runs from
+ * now for the requested hours. Only that approver, in their own session; never the grantee or the granter (also a database
+ * constraint); only while the request is pending (not revoked, not approved, not lapsed after
+ * ACCESS_GRANT_APPROVAL_WINDOW_HOURS).
+ */
+export async function approveGrant(deps: ApiDeps, actor: Actor, id: string): Promise<AccessGrantDto> {
+  requirePlatformAdmin(actor.principal);
+  const grant = await runUser(deps.db, actor, (trx) => trx.selectFrom('platformAccessGrants').select(['id', 'organizationId', 'accessLevel', 'approvedBy', 'approvedAt', 'revokedAt', 'createdAt', 'grantedBy', 'platformAdminUserId']).where('id', '=', id).executeTakeFirst());
+  if (!grant) throw errors.notFound('Access grant', id);
+  if (grant.accessLevel !== 'write') throw errors.invalidState('Only a write grant needs approval.');
+  if (grant.approvedBy !== actor.userId) throw errors.forbidden('Only the platform administrator named as the approver can approve this grant.');
+  if (grant.platformAdminUserId === actor.userId || grant.grantedBy === actor.userId) throw errors.forbidden('The approver must be neither the grantee nor the granter.');
+  if (grant.revokedAt) throw errors.invalidState('This grant was revoked.');
+  if (grant.approvedAt) throw errors.invalidState('This grant is already approved.');
+  if (grant.createdAt.getTime() <= Date.now() - APPROVAL_WINDOW_MS) throw errors.invalidState(`This request lapsed: a write grant must be approved within ${ACCESS_GRANT_APPROVAL_WINDOW_HOURS} hours. Request a new one.`);
+  return runSystem(deps.db, grant.organizationId, actor.requestId, async (trx) => {
+    const approver = await trx.selectFrom('platformAdmins').select('userId').where('userId', '=', actor.userId).where('status', '=', 'active').executeTakeFirst();
+    if (!approver) throw errors.forbidden('The approver is not an active platform administrator.');
+    const res = await trx.updateTable('platformAccessGrants')
+      .set({ approvedAt: sql<Date>`now()`, startsAt: sql<Date>`now()`, expiresAt: sql<Date>`now() + make_interval(hours => requested_hours)` })
+      .where('id', '=', id).where('approvedAt', 'is', null).where('revokedAt', 'is', null).where('approvedBy', '=', actor.userId).executeTakeFirst();
+    if (Number(res.numUpdatedRows) !== 1) throw errors.conflict('The grant changed meanwhile. Please refresh.');
+    await platformAudit(trx, actor, grant.organizationId, 'platform.access_approved', 'platform_access_grant', { entityId: id, newValue: { approvedBy: actor.userId } });
+    const full = await trx.selectFrom('platformAccessGrants as g').leftJoin('organizations as o', 'o.id', 'g.organizationId').leftJoin('userProfiles as u', 'u.id', 'g.platformAdminUserId').select(GRANT_SELECT).where('g.id', '=', id).executeTakeFirstOrThrow();
+    return toGrantDto(full, actor.userId);
   });
 }
 
@@ -172,7 +221,7 @@ export async function revokeGrant(deps: ApiDeps, actor: Actor, id: string): Prom
       await platformAudit(trx, actor, grant.organizationId, 'platform.access_revoked', 'platform_access_grant', { entityId: id });
     }
     const full = await trx.selectFrom('platformAccessGrants as g').leftJoin('organizations as o', 'o.id', 'g.organizationId').leftJoin('userProfiles as u', 'u.id', 'g.platformAdminUserId').select(GRANT_SELECT).where('g.id', '=', id).executeTakeFirstOrThrow();
-    return toGrantDto(full);
+    return toGrantDto(full, actor.userId);
   });
 }
 

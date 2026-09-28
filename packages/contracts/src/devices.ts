@@ -70,6 +70,14 @@ export const deviceModelDtoSchema = z.object({
 });
 export type DeviceModelDto = z.infer<typeof deviceModelDtoSchema>;
 
+/**
+ * A device's provider configuration (non-secret + secret values keyed by the provider's config field). Bounded like every
+ * other request field (security gate, Prompt 10): at most 64 fields, keys up to 64 characters, text values up to 4 KB.
+ */
+export const DEVICE_CONFIG_MAX_FIELDS = 64;
+const deviceConfigSchema = z.record(z.string().min(1).max(64), z.union([z.string().max(4096), z.number(), z.boolean()]))
+  .refine((v) => Object.keys(v).length <= DEVICE_CONFIG_MAX_FIELDS, { message: `At most ${DEVICE_CONFIG_MAX_FIELDS} configuration fields` });
+
 export const createDeviceSchema = z.object({
   code: codeSchema,
   name: z.string().trim().min(1).max(120),
@@ -80,9 +88,9 @@ export const createDeviceSchema = z.object({
   modelName: z.string().trim().max(120).optional(),
   serialNumber: z.string().trim().max(120).optional(),
   timezone: timezoneSchema.optional(),
-  endpointUrl: z.url().optional(),
+  endpointUrl: z.url().max(500).optional(),
   /** Non-secret + secret config values keyed by provider config field. Secrets are split out server-side. */
-  config: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+  config: deviceConfigSchema.default({}),
   offlineThresholdMinutes: z.number().int().min(1).max(1440).optional(),
   autoSyncEnabled: z.boolean().optional(),
   syncIntervalMinutes: z.number().int().min(1).max(1440).optional(),
@@ -93,8 +101,8 @@ export type CreateDeviceInput = z.infer<typeof createDeviceSchema>;
 export const updateDeviceSchema = createDeviceSchema.omit({ providerKey: true, config: true }).partial().extend({ status: z.enum(DEVICE_STATUSES).optional() });
 export type UpdateDeviceInput = z.infer<typeof updateDeviceSchema>;
 export const testConnectionSchema = z.object({
-  providerKey: z.string().min(1),
-  config: z.record(z.string(), z.union([z.string(), z.number(), z.boolean()])).default({}),
+  providerKey: z.string().min(1).max(64),
+  config: deviceConfigSchema.default({}),
   /** When testing an existing device without re-entering secrets. */
   deviceId: uuidSchema.optional(),
 });

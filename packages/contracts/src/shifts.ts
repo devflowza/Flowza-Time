@@ -34,7 +34,7 @@ export const shiftPatternInputSchema = z.object({
   sequence: z.array(z.union([
     z.object({ day: z.number().int().min(0), shiftId: uuidSchema }),
     z.object({ day: z.number().int().min(0), off: z.literal(true) }),
-  ])).min(1),
+  ])).min(1).max(366),
   anchorDate: isoDateSchema,
 });
 export type ShiftPatternInput = z.infer<typeof shiftPatternInputSchema>;
@@ -57,7 +57,7 @@ export const holidayInputSchema = z.object({
   endDate: isoDateSchema.nullable().optional(),
   isHalfDay: z.boolean().default(false),
   type: z.enum(HOLIDAY_TYPES).default('PUBLIC'),
-  branchIds: z.array(uuidSchema).nullable().optional(),
+  branchIds: z.array(uuidSchema).max(200).nullable().optional(),
   isTentative: z.boolean().default(false),
 });
 export type HolidayInput = z.infer<typeof holidayInputSchema>;

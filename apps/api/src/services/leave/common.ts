@@ -39,12 +39,15 @@ export async function lockEmployeeLeave(trx: Trx, employeeId: string): Promise<v
 }
 
 /**
- * Review P0-2: the database refuses, from a user's own session, every write to leave rows about that user (decisions,
- * `days`, creates…) — `app.leave_subject_write_guard`. The API performs such a write, after its own checks (segregation of
- * duties, validation), in the organisation's system context; a row about somebody else is written under the caller's RLS.
+ * Where a leave row (record / allocation) is written: always in the organisation's system step, after the service's own
+ * checks — `leave.manage`, the branch scope of the employee / the stored row, segregation of duties (review P0-2: never
+ * one's own leave, the owner's logged exception), the engine's rules. The security gate (migration 20260928001100, Prompt 10)
+ * made leave_records / leave_allocations system-write-only: a client session can no longer write them at all, so a leave
+ * can never be approved, moved or withdrawn around the approval engine (the Leave v2 open item). `own` is kept for the
+ * callers' audit of the owner's exception.
  */
-export async function ownRowWrite<T>(trx: Trx, orgId: string, own: boolean, fn: (t: Trx) => Promise<T>): Promise<T> {
-  return own ? systemStep(trx, orgId, fn) : fn(trx);
+export async function ownRowWrite<T>(trx: Trx, orgId: string, _own: boolean, fn: (t: Trx) => Promise<T>): Promise<T> {
+  return systemStep(trx, orgId, fn);
 }
 
 /** A stored leave row as the list / calendar readers select it. */

@@ -19,6 +19,7 @@ export function registerPlatformRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.put('/platform/orgs/:id/feature-flags', async (c) => ok(c, await platform.putOrgFeatureFlags(deps, actorOf(c, deps), param(c, 'id'), await body(c, putOrgFeatureFlagsSchema))));
   v1.get('/platform/access-grants', async (c) => { const q = query(c, accessGrantListQuerySchema); const r = await platform.listGrants(deps, actorOf(c, deps), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.post('/platform/access-grants', async (c) => created(c, await platform.createGrant(deps, actorOf(c, deps), await body(c, createAccessGrantSchema))));
+  v1.post('/platform/access-grants/:id/approve', async (c) => ok(c, await platform.approveGrant(deps, actorOf(c, deps), param(c, 'id'))));
   v1.delete('/platform/access-grants/:id', async (c) => ok(c, await platform.revokeGrant(deps, actorOf(c, deps), param(c, 'id'))));
   v1.get('/platform/plans', async (c) => ok(c, await platform.listPlans(deps, actorOf(c, deps))));
   v1.get('/platform/feature-flags', async (c) => ok(c, await platform.listFeatureFlags(deps, actorOf(c, deps))));

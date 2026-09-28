@@ -87,7 +87,7 @@ export type RoleDto = z.infer<typeof roleDtoSchema>;
 export const updateRoleSchema = z.object({
   name: z.string().trim().min(1).max(80).optional(),
   description: z.string().max(300).nullable().optional(),
-  permissions: z.array(z.enum(PERMISSIONS)).min(1).optional(),
+  permissions: z.array(z.enum(PERMISSIONS)).min(1).max(PERMISSIONS.length).optional(),
 });
 export type UpdateRoleInput = z.infer<typeof updateRoleSchema>;
 

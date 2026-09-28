@@ -49,5 +49,7 @@ export function usePlatformMutations() {
   const putOrgFlags = useMutation({ mutationFn: async ({ id, input }: { id: string; input: OrgFlagsInput }) => (await api.put<Envelope<OrgFeatureFlagDto[]>>(`/platform/orgs/${id}/feature-flags`, input)).data, onSuccess: (data, v) => { qc.setQueryData(pk.orgFlags(v.id), data); } });
   const createGrant = useMutation({ mutationFn: async (input: CreateAccessGrantInput) => (await api.post<Envelope<AccessGrantDto>>('/platform/access-grants', input)).data, onSuccess: () => { void qc.invalidateQueries({ queryKey: ['platform', 'grants'] }); void qc.invalidateQueries({ queryKey: pk.health }); } });
   const revokeGrant = useMutation({ mutationFn: async (id: string) => (await api.delete<Envelope<AccessGrantDto>>(`/platform/access-grants/${id}`)).data, onSuccess: () => { void qc.invalidateQueries({ queryKey: ['platform', 'grants'] }); void qc.invalidateQueries({ queryKey: pk.health }); } });
-  return { createOrg, updateStatus, putOrgFlags, createGrant, revokeGrant };
+  // a write grant starts only when its named second approver approves it in their own session
+  const approveGrant = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<AccessGrantDto>>(`/platform/access-grants/${id}/approve`, {})).data, onSuccess: () => { void qc.invalidateQueries({ queryKey: ['platform', 'grants'] }); void qc.invalidateQueries({ queryKey: pk.health }); } });
+  return { createOrg, updateStatus, putOrgFlags, createGrant, revokeGrant, approveGrant };
 }

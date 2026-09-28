@@ -169,7 +169,9 @@ export async function generateAllocations(deps: ApiDeps, actor: Actor, orgId: st
     }
     const insert = (t: Trx, rows: NewAllocation[]) => t.insertInto('leaveAllocations').values(rows).onConflict((oc) => oc.columns(['organizationId', 'employeeId', 'leaveTypeId', 'year']).doNothing()).returning('id').execute();
     let created = 0;
-    for (let i = 0; i < values.length; i += 500) created += (await insert(trx, values.slice(i, i + 500))).length;
+    // system step (allocations are system-write-only since the security gate): the employees were selected under the caller's
+    // RLS and branch scope above, the caller's own rows were set aside (segregation of duties)
+    for (let i = 0; i < values.length; i += 500) created += (await ownRowWrite(trx, orgId, false, (t) => insert(t, values.slice(i, i + 500)))).length;
     if (ownValues.length) {
       const res = await ownRowWrite(trx, orgId, true, (t) => insert(t, ownValues));
       created += res.length;

@@ -11,7 +11,7 @@ export const reportParametersSchema = z.object({
   employeeIds: z.array(uuidSchema).max(5000).optional(),
   shiftId: uuidSchema.optional(),
   deviceIds: z.array(uuidSchema).max(1000).optional(),
-  status: z.string().optional(),
+  status: z.string().trim().max(40).optional(),
   sort: z.string().max(64).optional(),
   order: z.enum(['asc', 'desc']).optional(),
   locale: z.enum(['en', 'ar']).optional(),

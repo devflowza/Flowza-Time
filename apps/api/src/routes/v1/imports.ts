@@ -6,6 +6,7 @@ import type { ApiDeps } from '../../deps.js';
 import { accepted, created, ok, paginated } from '../../lib/http.js';
 import { param, query } from '../../lib/validate.js';
 import { actorOf } from '../../lib/service.js';
+import { requirePermission } from '../../lib/authorize.js';
 import { idempotency } from '../../middleware/idempotency.js';
 import * as imports from '../../services/imports.service.js';
 
@@ -33,7 +34,7 @@ async function readUpload(c: Context<AppEnv>): Promise<{ fileName: string; conte
 export function registerImportRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const idem = idempotency();
   v1.get('/orgs/:orgId/employees/imports/template', (c) => {
-    actorOf(c, deps);
+    requirePermission(actorOf(c, deps).principal, param(c, 'orgId'), 'employee.import');
     c.header('content-type', 'text/csv; charset=utf-8');
     c.header('content-disposition', 'attachment; filename="employees-import-template.csv"');
     return c.body(imports.templateCsv());
@@ -43,7 +44,12 @@ export function registerImportRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
     const { data, total } = await imports.listImports(deps, actorOf(c, deps), param(c, 'orgId'), q);
     return paginated(c, data, q.page, q.pageSize, total);
   });
-  v1.post('/orgs/:orgId/employees/imports', idem, async (c) => created(c, await imports.createImport(deps, actorOf(c, deps), param(c, 'orgId'), await readUpload(c))));
+  v1.post('/orgs/:orgId/employees/imports', idem, async (c) => {
+    const actor = actorOf(c, deps); const orgId = param(c, 'orgId');
+    // Prompt 10: authorise before the (up to 20 MB) upload is read; the service checks it again
+    requirePermission(actor.principal, orgId, 'employee.import');
+    return created(c, await imports.createImport(deps, actor, orgId, await readUpload(c)));
+  });
   v1.get('/orgs/:orgId/employees/imports/:id', async (c) => {
     const q = query(c, importJobRowsQuerySchema);
     const { job, rows, total } = await imports.getImport(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), q);

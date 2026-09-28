@@ -13,9 +13,12 @@ import { chargeDayAsSystem, reverseChargeAsSystem, type ChargeOutcome } from './
 
 /**
  * HR / manager surface of the attendance day marks (HR portal Prompt 3). Authorization twice: the service checks the
- * permission, the team scope and the branch scope; RLS enforces read scope (attendance.view / own rows / attendance.view_team)
- * and write scope (attendance.approve + branch) again. Every write queues the day's recompute in the same transaction
- * through the shared primitives of `@flowza/database` — the daily record is never patched directly.
+ * permission, the team scope and the branch scope, and reads the mark / the employee under the caller's RLS (read scope:
+ * attendance.view / own rows / attendance.view_team); the mark is then written in the organisation's system step — the
+ * table refuses every client write since the security gate (migration 20260928001100, Prompt 10): a direct write let an
+ * attendance.approve holder excuse their OWN days or mark another branch's employee by choosing the row's branch column.
+ * Every write queues the day's recompute in the same transaction through the shared primitives of `@flowza/database` — the
+ * daily record is never patched directly.
  *
  *   EXCUSED     waives the consequences: any PAY_EFFECT / LOP charge on the day is reversed (leave restored) first;
  *   UNEXCUSED   marks the day; with a pay effect > 0 it is also charged through the pay-effect charger;
@@ -121,7 +124,7 @@ export async function createDayMark(deps: ApiDeps, actor: Actor, orgId: string, 
         const undone = await reverseChargeAsSystem(deps, trx, actor, orgId, { employeeId: input.employeeId, date: input.attendanceDate, reason: `Excused: ${input.reason}` });
         reversed = undone.reversedMarks.length;
       }
-      const written = await writeMark(trx, deps.queue, { ...common, kind: input.kind, payEffectDays: input.kind === 'UNEXCUSED' ? input.payEffectDays ?? 0 : 0 }, { correlationId: actor.requestId });
+      const written = await systemStep(trx, orgId, (t) => writeMark(t, deps.queue, { ...common, kind: input.kind, payEffectDays: input.kind === 'UNEXCUSED' ? input.payEffectDays ?? 0 : 0 }, { correlationId: actor.requestId }));
       mark = toDayMarkDto(written.mark);
       if (input.kind === 'UNEXCUSED' && (input.payEffectDays ?? 0) > 0) {
         const result = await chargeDayAsSystem(deps, trx, actor, orgId, { employeeId: input.employeeId, date: input.attendanceDate, payEffectDays: input.payEffectDays ?? 0, sourceKind: 'HR', reason: input.reason });
@@ -147,7 +150,7 @@ export async function revokeDayMark(deps: ApiDeps, actor: Actor, orgId: string, 
       await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ status: 'CANCELLED', decisionNote: `Charge reversed: ${reason}`.slice(0, 1000) })
         .where('organizationId', '=', orgId).where('employeeId', '=', existing.employeeId).where('externalRef', '=', `mark:${existing.id}`).where('status', '=', 'APPROVED').execute());
     }
-    const revoked = await writeRevocation(trx, deps.queue, { organizationId: orgId, markId: existing.id, revokedBy: actor.userId, reason }, { recomputeReason: existing.kind === 'PAY_EFFECT' ? 'LEAVE_CHANGE' : 'MANUAL_OVERRIDE', correlationId: actor.requestId });
+    const revoked = await systemStep(trx, orgId, (t) => writeRevocation(t, deps.queue, { organizationId: orgId, markId: existing.id, revokedBy: actor.userId, reason }, { recomputeReason: existing.kind === 'PAY_EFFECT' ? 'LEAVE_CHANGE' : 'MANUAL_OVERRIDE', correlationId: actor.requestId }));
     if (!revoked) throw errors.notFound('Attendance day mark', id);
     await audit(trx, actor, orgId, 'attendance.day_mark_revoked', 'attendance_day_mark', { entityId: existing.id, branchId: existing.branchId, oldValue: { kind: existing.kind, payEffectDays: existing.payEffectDays }, reason });
     return toDayMarkDto(revoked);

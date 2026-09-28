@@ -11,6 +11,7 @@ import type { ApiDeps } from '../../deps.js';
 import { created, noContent, ok, paginated } from '../../lib/http.js';
 import { body, optionalBody, param, query } from '../../lib/validate.js';
 import { actorOf } from '../../lib/service.js';
+import { portalSelf } from '../../services/portal/common.js';
 import * as geofences from '../../services/portal/geofences.service.js';
 import * as notes from '../../services/portal/notes.service.js';
 import * as punch from '../../services/portal/punch.service.js';
@@ -36,6 +37,9 @@ export function registerPortalAttendanceRoutes(v1: Hono<AppEnv>, deps: ApiDeps):
   // ----- selfie check-in: JSON (base64) or multipart (`photo` file + fields)
   v1.post('/orgs/:orgId/me/selfie-checkin', async (c) => {
     const actor = actorOf(c, deps); const orgId = param(c, 'orgId');
+    // Prompt 10: authorise before the upload is read or the image decoded (a caller who may not check in learns nothing and
+    // makes the server parse nothing); the service checks the same again with the rest of the rules
+    portalSelf(actor, orgId, 'attendance.checkin');
     const type = (c.req.header('content-type') ?? '').toLowerCase();
     if (type.startsWith('multipart/form-data')) {
       const form = await c.req.parseBody().catch(() => { throw errors.validation('The form could not be read.'); });

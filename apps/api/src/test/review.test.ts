@@ -215,7 +215,46 @@ describe('platform grants', () => {
     expect(selfApproved.status).toBe(400);
     const ok = await api.request('POST', '/platform/access-grants', { user: F.platformAdmin, body: { organizationId: F.orgB, accessLevel: 'write', reason: 'Ticket 999 data repair', approvedBy: other, hours: 2 } });
     expect(ok.status).toBe(201);
-    expect(ok.json.data).toMatchObject({ accessLevel: 'write', approvedBy: other });
+    expect(ok.json.data).toMatchObject({ accessLevel: 'write', approvedBy: other, pendingApproval: true, active: false, approvedAt: null });
+  });
+
+  it('security gate: a write grant grants nothing until the named approver approves it in their own session', async () => {
+    const approver = 'c0000000-0000-0000-0000-000000000003';
+    const grantee = 'c0000000-0000-0000-0000-000000000004';
+    for (const [id, email] of [[approver, 'platform3@test.local'], [grantee, 'platform4@test.local']] as const) {
+      EMAILS[id] = email;
+      await sql`insert into auth.users (id, email) values (${id}::uuid, ${email})`.execute(api.tdb.adminDb);
+      await api.tdb.adminDb.insertInto('userProfiles').values({ id, email, fullName: email }).execute();
+      await api.tdb.adminDb.insertInto('platformAdmins').values({ userId: id, level: 'support' }).execute();
+    }
+    // the platform admin grants the grantee WRITE access to org B, naming a second admin as the approver
+    const req = await api.request('POST', '/platform/access-grants', { user: F.platformAdmin, body: { organizationId: F.orgB, platformAdminUserId: grantee, accessLevel: 'write', reason: 'Ticket 1000 data repair', approvedBy: approver, hours: 3 } });
+    expect(req.status).toBe(201);
+    expect(req.json.data).toMatchObject({ pendingApproval: true, active: false, requestedHours: 3, canApprove: false });
+    const id = req.json.data.id as string;
+    // pending: the grantee reaches nothing in org B (the database's own readers see no active grant)
+    expect((await api.request('GET', `/orgs/${F.orgB}/employees`, { user: grantee, aal: 'aal2' })).status).toBe(403);
+    // the pending request is listed among the active ones, and only the named approver may approve it
+    const listed = await api.request('GET', '/platform/access-grants?activeOnly=true', { user: approver, aal: 'aal2' });
+    expect(listed.json.data.find((g: { id: string }) => g.id === id)).toMatchObject({ pendingApproval: true, canApprove: true });
+    for (const who of [F.platformAdmin, grantee]) {
+      const refused = await api.request('POST', `/platform/access-grants/${id}/approve`, { user: who, aal: 'aal2' });
+      expect(refused.status).toBe(403);
+    }
+    // a direct write cannot start it either: the database refuses an active, unapproved write grant
+    await expect(sql`update public.platform_access_grants set starts_at = now(), expires_at = now() + interval '1 hour' where id = ${id}::uuid`.execute(api.tdb.adminDb)).rejects.toThrow(/platform_access_grants_write_pending/);
+    const approved = await api.request('POST', `/platform/access-grants/${id}/approve`, { user: approver, aal: 'aal2' });
+    expect(approved.status).toBe(200);
+    expect(approved.json.data).toMatchObject({ pendingApproval: false, active: true, canApprove: false });
+    expect(new Date(approved.json.data.expiresAt).getTime() - new Date(approved.json.data.startsAt).getTime()).toBe(3 * 3_600_000);
+    expect((await api.request('POST', `/platform/access-grants/${id}/approve`, { user: approver, aal: 'aal2' })).status).toBe(409);
+    expect((await api.request('GET', `/orgs/${F.orgB}/employees`, { user: grantee, aal: 'aal2' })).status).toBe(200);
+    const audits = await api.tdb.adminDb.selectFrom('audit.logs').select('action').where('entityId', '=', id).execute();
+    expect(audits.map((a) => a.action).sort()).toEqual(['platform.access_approved', 'platform.access_requested']);
+    // a read grant needs no approval and a write grant cannot be approved once revoked
+    const second = await api.request('POST', '/platform/access-grants', { user: F.platformAdmin, body: { organizationId: F.orgB, platformAdminUserId: grantee, accessLevel: 'write', reason: 'Ticket 1001 data repair', approvedBy: approver } });
+    expect((await api.request('DELETE', `/platform/access-grants/${second.json.data.id}`, { user: F.platformAdmin })).status).toBe(200);
+    expect((await api.request('POST', `/platform/access-grants/${second.json.data.id}/approve`, { user: approver, aal: 'aal2' })).status).toBe(409);
   });
 });
 

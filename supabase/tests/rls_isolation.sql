@@ -144,17 +144,16 @@ select pg_temp.assert_eq((select count(*) from jsonb_object_keys(secrets.masked_
 select pg_temp.assert_raises($q$ select * from secrets.get_device_credentials('0a000000-0000-0000-0000-0000000000d1') $q$, 'user context cannot decrypt credentials');
 -- an owner is linked to no employee: no team, whatever the permissions
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 0, 'owner A (no employee link) has no team');
--- day marks: organisation-wide read and write (attendance.view / attendance.approve), append-only with revocation
+-- day marks: organisation-wide read (attendance.view). Since the security gate (20260928001100) no client session writes a
+-- mark, whatever it holds: the API checks attendance.approve, the team / branch scope and segregation of duties, then writes
+-- in its system step (a direct write let an approver excuse their OWN days or choose the row's branch). The append-only
+-- rules are asserted in the system-context block below.
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 3, 'owner A sees the 3 day marks of A');
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'owner A cannot see org B day marks');
-select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 1, 'owner A (attendance.approve) may mark a day');
-select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'test') $q$, 'one active mark per (employee, date, kind)');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'owner A (attendance.approve) cannot write a day mark directly: the API writes it in its system step');
 select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000e1', '2026-09-02', '0b000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'owner A cannot mark a day in org B');
-select pg_temp.assert_raises($q$ update public.attendance_day_marks set kind = 'EXCUSED', pay_effect_days = 0 where id = '0a000000-0000-0000-0000-0000000002a2' $q$, 'a day mark''s verdict is immutable');
-select pg_temp.assert_raises($q$ delete from public.attendance_day_marks where id = '0a000000-0000-0000-0000-0000000002a2' $q$, 'day marks are never deleted (revoke instead)');
-select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoked_by = 'a0000000-0000-0000-0000-000000000001', revoke_reason = 'Wrong day' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 1, 'owner A may revoke a mark');
-select pg_temp.assert_raises($q$ update public.attendance_day_marks set revoke_reason = 'Changed my mind' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 'a revoked mark is frozen');
-select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'test') $q$, 1, 'after the revocation a new active mark of the same kind may be written');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set revoked_at = now(), revoked_by = 'a0000000-0000-0000-0000-000000000001', revoke_reason = 'Wrong day' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 'owner A cannot revoke a mark directly');
+select pg_temp.assert_raises($q$ delete from public.attendance_day_marks where id = '0a000000-0000-0000-0000-0000000002a2' $q$, 'owner A cannot delete a day mark');
 -- finance_sync_state: readable with device.view, never writable from a user session (no policy AND no grant → raises, not 0 rows)
 select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'owner A sees only own connector state');
 select pg_temp.assert_eq((select count(*) from public.finance_sync_state where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'owner A cannot see org B connector state');
@@ -167,6 +166,21 @@ select pg_temp.assert_eq((select count(*) from public.finance_pushed_events wher
 select pg_temp.assert_raises($q$ insert into public.finance_pushed_events (organization_id, device_id, event_id) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000d1', '0a000000-0000-0000-0000-0000000003a2') $q$, 'owner A cannot write the push ledger');
 select pg_temp.assert_raises($q$ update public.finance_pushed_events set outcome = 'pushed' where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot update the push ledger');
 select pg_temp.assert_raises($q$ delete from public.finance_pushed_events where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot delete from the push ledger');
+rollback;
+
+-- ---------- the system step (the API after its checks, the day-close sweep): day marks are append-only with revocation ----------
+begin;
+set local role flowza_system;
+select set_config('request.jwt.claims', '{"role":"flowza_system","org_id":"0a000000-0000-0000-0000-000000000000"}', true);
+select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 1, 'the system step marks a day');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'test') $q$, 'one active mark per (employee, date, kind)');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000e1', '2026-09-02', '0b000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'the system step of org A cannot mark a day in org B');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set kind = 'EXCUSED', pay_effect_days = 0 where id = '0a000000-0000-0000-0000-0000000002a2' $q$, 'a day mark''s verdict is immutable');
+select pg_temp.assert_raises($q$ delete from public.attendance_day_marks where id = '0a000000-0000-0000-0000-0000000002a2' $q$, 'day marks are never deleted (revoke instead)');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set organization_id = '0b000000-0000-0000-0000-000000000000' where id = '0a000000-0000-0000-0000-0000000002a2' $q$, 'a day mark never moves to another organisation');
+select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoked_by = 'a0000000-0000-0000-0000-000000000001', revoke_reason = 'Wrong day' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 1, 'the system step revokes a mark');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set revoke_reason = 'Changed my mind' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 'a revoked mark is frozen');
+select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-01', '0a000000-0000-0000-0000-00000000000b', 'UNEXCUSED', 1, 'SWEEP', 'test') $q$, 1, 'after the revocation a new active mark of the same kind may be written');
 rollback;
 
 -- ---------- as Branch Manager A (restricted to branch A-2) ----------
@@ -186,8 +200,8 @@ select pg_temp.assert_eq((select count(*) from public.employee_identity_document
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 0, 'branch manager without an employee link has no team');
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 2, 'branch manager sees the day marks of branch A-2 only');
 select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'branch manager cannot mark a day outside the branch scope');
-select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '2026-09-02', '0a000000-0000-0000-0000-00000000000c', 'UNEXCUSED', 0, 'HR', 'test') $q$, 1, 'branch manager marks a day in own branch');
-select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 0, 'branch manager cannot revoke a mark outside the branch scope');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '2026-09-02', '0a000000-0000-0000-0000-00000000000c', 'UNEXCUSED', 0, 'HR', 'test') $q$, 'branch manager cannot write a day mark directly, even in own branch (the API writes it after the branch check)');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 'branch manager cannot revoke a mark outside the branch scope');
 select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'connector state is organisation-level (device.view, not branch scoped)');
 select pg_temp.assert_eq((select count(*) from public.finance_pushed_events), 1, 'push ledger is organisation-level (device.view, not branch scoped)');
 rollback;
@@ -209,7 +223,7 @@ select pg_temp.assert_eq((select count(*) from public.employees where id = '0a00
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 1, 'employee sees only the day marks of own days');
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where employee_id = '0a000000-0000-0000-0000-0000000000e2'), 0, 'a manager relationship without a team key reveals no day marks');
 select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '2026-09-02', '0a000000-0000-0000-0000-00000000000c', 'EXCUSED', 0, 'HR', 'test') $q$, 'employee cannot excuse own day');
-select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'Not me' where id = '0a000000-0000-0000-0000-0000000002a3' $q$, 0, 'employee cannot revoke a mark on own day');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'Not me' where id = '0a000000-0000-0000-0000-0000000002a3' $q$, 'employee cannot revoke a mark on own day');
 -- self-service leave (migration 20260927000100)
 select pg_temp.assert_eq((select count(*) from public.leave_types), 1, 'employee sees active leave types only');
 select pg_temp.assert_eq((select count(*) from public.leave_records), 2, 'employee sees only own leave');
@@ -224,9 +238,9 @@ select pg_temp.assert_raises($q$ insert into public.leave_records (organization_
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000001a1', '2026-11-08', '2026-11-08', 'PENDING', 'a0000000-0000-0000-0000-000000000003') $q$, 'employee cannot file leave on another branch');
 select pg_temp.assert_raises($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'employee cannot approve own request');
 select pg_temp.assert_raises($q$ update public.leave_records set status = 'CANCELLED', end_date = '2026-10-30' where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'self-cancel cannot change other columns');
-select pg_temp.assert_rows($q$ update public.leave_records set status = 'CANCELLED' where id = '0a000000-0000-0000-0000-0000000001b4' $q$, 0, 'employee cannot cancel approved leave');
-select pg_temp.assert_rows($q$ update public.leave_records set status = 'CANCELLED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 0, 'employee cannot cancel someone else''s request');
-select pg_temp.assert_rows($q$ update public.leave_records set status = 'CANCELLED' where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 1, 'employee may withdraw own pending request');
+select pg_temp.assert_raises($q$ update public.leave_records set status = 'CANCELLED' where id = '0a000000-0000-0000-0000-0000000001b4' $q$, 'employee cannot cancel approved leave');
+select pg_temp.assert_raises($q$ update public.leave_records set status = 'CANCELLED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 'employee cannot cancel someone else''s request');
+select pg_temp.assert_raises($q$ update public.leave_records set status = 'CANCELLED' where id = '0a000000-0000-0000-0000-0000000001b3' $q$, 'employee cannot withdraw own pending request directly: the API withdraws it in its system step and cancels its approval request (security gate 20260928001100)');
 select pg_temp.assert_rows($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e3', '0a000000-0000-0000-0000-00000000000c', '2026-09-01', 'ADD_PUNCH', '2026-09-01 04:00+00', 'Forgot to punch', 'a0000000-0000-0000-0000-000000000003', 'PENDING') $q$, 1, 'employee may request a correction for own day');
 select pg_temp.assert_raises($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
@@ -255,12 +269,12 @@ select pg_temp.assert_eq((select count(*) from public.employees where id = '0a00
 select pg_temp.assert_eq((select count(*) from public.employees where id = '0a000000-0000-0000-0000-0000000000e6'), 0, 'manager cannot read a report of a report''s employee row');
 select pg_temp.assert_eq((select count(*) from public.devices), 0, 'manager has no device.view');
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'x' where id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'manager cannot edit the report''s master record (no employee.update)');
-select pg_temp.assert_rows($q$ update public.attendance_daily_records set status = 'ABSENT' where employee_id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'manager cannot write daily records');
-select pg_temp.assert_rows($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 0, 'manager cannot approve leave through RLS (leave.approve is enforced by the API/engine, leave.manage by RLS)');
+select pg_temp.assert_raises($q$ update public.attendance_daily_records set status = 'ABSENT' where employee_id = '0a000000-0000-0000-0000-0000000000e1' $q$, 'manager cannot write daily records');
+select pg_temp.assert_raises($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 'manager cannot approve leave through RLS (leave.approve is enforced by the API/engine, leave.manage by RLS)');
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 1, 'manager sees the day marks of the direct report only (attendance.view_team)');
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where employee_id = '0a000000-0000-0000-0000-0000000000e1'), 1, 'manager reads the report''s day mark');
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where employee_id in ('0a000000-0000-0000-0000-0000000000e2', '0a000000-0000-0000-0000-0000000000e3')), 0, 'manager cannot read a non-report''s day marks');
-select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 1, 'manager (attendance.approve) may mark the report''s day; the direct-report rule on writes is enforced by the API');
+select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'manager (attendance.approve) cannot write the report''s day mark directly; the API checks the direct-report rule and writes it');
 rollback;
 
 -- ---------- as Secondary Manager A (role manager, linked to e5 = secondary manager of e1) ----------
@@ -370,18 +384,77 @@ select pg_temp.assert_raises($q$ insert into public.employees (organization_id, 
 select pg_temp.assert_rows($q$ delete from public.employees where id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, 'auditor cannot delete employees');
 select pg_temp.assert_raises($q$ insert into public.leave_records (organization_id, employee_id, branch_id, leave_type_id, start_date, end_date, status, created_by)
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000001a1', '2026-12-01', '2026-12-02', 'PENDING', 'a0000000-0000-0000-0000-000000000007') $q$, 'auditor cannot record leave');
-select pg_temp.assert_rows($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 0, 'auditor cannot approve leave');
-select pg_temp.assert_rows($q$ delete from public.leave_records where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 0, 'auditor cannot delete leave');
+select pg_temp.assert_raises($q$ update public.leave_records set status = 'APPROVED' where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 'auditor cannot approve leave');
+select pg_temp.assert_raises($q$ delete from public.leave_records where id = '0a000000-0000-0000-0000-0000000001b1' $q$, 'auditor cannot delete leave');
 select pg_temp.assert_raises($q$ insert into public.attendance_corrections (organization_id, employee_id, branch_id, attendance_date, type, proposed_punched_at, reason, requested_by, status)
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '2026-09-01', 'ADD_PUNCH', '2026-09-01 04:00+00', 'Audit note', 'a0000000-0000-0000-0000-000000000007', 'PENDING') $q$, 'auditor cannot file corrections');
-select pg_temp.assert_rows($q$ update public.attendance_daily_records set status = 'ABSENT' where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'auditor cannot write daily records');
+select pg_temp.assert_raises($q$ update public.attendance_daily_records set status = 'ABSENT' where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 'auditor cannot write daily records');
 select pg_temp.assert_raises($q$ insert into public.shifts (organization_id, code, name, type, start_time, end_time) values ('0a000000-0000-0000-0000-000000000000', 'AUD', 'Audit shift', 'FIXED', '08:00', '17:00') $q$, 'auditor cannot create shifts');
 select pg_temp.assert_rows($q$ update public.organizations set display_name = 'x' where id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'auditor cannot edit the organisation');
 select pg_temp.assert_rows($q$ update public.org_memberships set role_id = '10000000-0000-0000-0000-000000000001' where id = '0a000000-0000-0000-0000-0000000000a7' $q$, 0, 'auditor cannot promote themselves');
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 3, 'auditor reads every day mark');
 select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'auditor cannot mark days');
-select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'audit' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 0, 'auditor cannot revoke marks');
-select pg_temp.assert_rows($q$ delete from public.attendance_day_marks where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'auditor cannot delete marks');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'audit' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 'auditor cannot revoke marks');
+select pg_temp.assert_raises($q$ delete from public.attendance_day_marks where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 'auditor cannot delete marks');
+rollback;
+
+-- ---------- security gate (20260928001100): no privilege escalation through memberships, their branches and invitations ----------
+-- An organisation admin (org_admin: user.manage and every key but one, all branches, not an owner), a branch-restricted
+-- administrator (a custom role: user.view + user.manage + the employee role's keys, restricted to A-2) and a user with no
+-- membership yet. Everything is rolled back.
+begin;
+insert into auth.users (id, email) values
+  ('a0000000-0000-0000-0000-0000000000b1', 'admin-a@test.local'),
+  ('a0000000-0000-0000-0000-0000000000b2', 'radmin-a@test.local'),
+  ('a0000000-0000-0000-0000-0000000000b3', 'new-a@test.local');
+insert into public.user_profiles (id, email, full_name) values
+  ('a0000000-0000-0000-0000-0000000000b1', 'admin-a@test.local', 'Admin A'),
+  ('a0000000-0000-0000-0000-0000000000b2', 'radmin-a@test.local', 'Branch Admin A'),
+  ('a0000000-0000-0000-0000-0000000000b3', 'new-a@test.local', 'New A');
+insert into public.roles (id, organization_id, key, name) values ('0a000000-0000-0000-0000-0000000009f1', '0a000000-0000-0000-0000-000000000000', 'branch_admin', 'Branch admin');
+set local session_replication_role = replica; -- fixture only: the role-definition guard needs a user who holds the keys
+insert into public.role_permissions (role_id, permission_key)
+  select '0a000000-0000-0000-0000-0000000009f1', k from (select 'user.view' as k union select 'user.manage' union select rp.permission_key from public.role_permissions rp where rp.role_id = '10000000-0000-0000-0000-000000000008') s;
+set local session_replication_role = origin;
+insert into public.org_memberships (id, organization_id, user_id, role_id, status, all_branches) values
+  ('0a000000-0000-0000-0000-0000000009b1', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-0000000000b1', '10000000-0000-0000-0000-000000000002', 'active', true),
+  ('0a000000-0000-0000-0000-0000000009b2', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-0000000000b2', '0a000000-0000-0000-0000-0000000009f1', 'active', false);
+insert into public.membership_branches (membership_id, branch_id) values ('0a000000-0000-0000-0000-0000000009b2', '0a000000-0000-0000-0000-00000000000c');
+-- the organisation admin
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-0000000000b1","role":"authenticated"}', true);
+select pg_temp.assert_raises($q$ update public.org_memberships set role_id = '10000000-0000-0000-0000-000000000001' where id = '0a000000-0000-0000-0000-0000000009b1' $q$, '10-S5 an admin cannot make themselves owner');
+select pg_temp.assert_raises($q$ update public.org_memberships set employee_id = '0a000000-0000-0000-0000-0000000000e1' where id = '0a000000-0000-0000-0000-0000000009b1' $q$, '10-S5 an admin cannot link their own login to a colleague''s employee record (their reports and self-service rows)');
+select pg_temp.assert_raises($q$ delete from public.org_memberships where id = '0a000000-0000-0000-0000-0000000009b1' $q$, '10-S5 an admin cannot remove their own membership');
+select pg_temp.assert_raises($q$ update public.org_memberships set role_id = '10000000-0000-0000-0000-000000000001' where id = '0a000000-0000-0000-0000-0000000000a3' $q$, '10-S5 only an owner grants the owner role');
+select pg_temp.assert_raises($q$ update public.org_memberships set status = 'suspended' where id = '0a000000-0000-0000-0000-0000000000a1' $q$, '10-S5 only an owner changes an owner''s membership');
+select pg_temp.assert_raises($q$ delete from public.org_memberships where id = '0a000000-0000-0000-0000-0000000000a1' $q$, '10-S5 only an owner removes an owner');
+select pg_temp.assert_raises($q$ insert into public.org_memberships (organization_id, user_id, role_id, status, all_branches) values ('0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-0000000000b3', '10000000-0000-0000-0000-000000000001', 'invited', true) $q$, '10-S5 an admin cannot seat a new owner');
+select pg_temp.assert_raises($q$ insert into public.invitations (organization_id, email, role_id, all_branches, token_hash, expires_at) values ('0a000000-0000-0000-0000-000000000000', 'new-a@test.local', '10000000-0000-0000-0000-000000000001', true, repeat('b', 64), now() + interval '7 days') $q$, '10-S5 an admin cannot invite an owner');
+select pg_temp.assert_rows($q$ update public.org_memberships set role_id = '10000000-0000-0000-0000-000000000004' where id = '0a000000-0000-0000-0000-0000000000a3' $q$, 1, '10-S5 control: an admin changes a member''s role to one they hold every key of');
+select pg_temp.assert_rows($q$ insert into public.invitations (organization_id, email, role_id, all_branches, token_hash, expires_at) values ('0a000000-0000-0000-0000-000000000000', 'new-a@test.local', '10000000-0000-0000-0000-000000000003', true, repeat('c', 64), now() + interval '7 days') $q$, 1, '10-S5 control: an admin invites an HR admin with all branches');
+-- the branch-restricted administrator
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-0000000000b2","role":"authenticated"}', true);
+select pg_temp.assert_raises($q$ insert into public.org_memberships (organization_id, user_id, role_id, status, all_branches) values ('0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-0000000000b3', '10000000-0000-0000-0000-000000000002', 'invited', false) $q$, '10-S5 a role carrying keys the writer lacks cannot be handed out');
+select pg_temp.assert_raises($q$ insert into public.org_memberships (organization_id, user_id, role_id, status, all_branches) values ('0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-0000000000b3', '10000000-0000-0000-0000-000000000008', 'invited', true) $q$, '10-S5 a branch-restricted administrator cannot grant all branches');
+select pg_temp.assert_rows($q$ insert into public.org_memberships (id, organization_id, user_id, role_id, status, all_branches) values ('0a000000-0000-0000-0000-0000000009b3', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-0000000000b3', '10000000-0000-0000-0000-000000000008', 'invited', false) $q$, 1, '10-S5 control: a branch-restricted administrator seats an employee');
+select pg_temp.assert_raises($q$ insert into public.membership_branches (membership_id, branch_id) values ('0a000000-0000-0000-0000-0000000009b3', '0a000000-0000-0000-0000-00000000000b') $q$, '10-S5 ...but never on a branch outside their own scope');
+select pg_temp.assert_rows($q$ insert into public.membership_branches (membership_id, branch_id) values ('0a000000-0000-0000-0000-0000000009b3', '0a000000-0000-0000-0000-00000000000c') $q$, 1, '10-S5 control: ...on their own branch');
+select pg_temp.assert_raises($q$ insert into public.membership_branches (membership_id, branch_id) values ('0a000000-0000-0000-0000-0000000009b2', '0a000000-0000-0000-0000-00000000000b') $q$, '10-S5 nobody widens their own branch scope beyond it');
+select pg_temp.assert_raises($q$ update public.org_memberships set all_branches = true where id = '0a000000-0000-0000-0000-0000000009b3' $q$, '10-S5 a branch-restricted administrator cannot widen a member to all branches');
+select pg_temp.assert_raises($q$ insert into public.invitations (organization_id, email, role_id, all_branches, token_hash, expires_at) values ('0a000000-0000-0000-0000-000000000000', 'new-a@test.local', '10000000-0000-0000-0000-000000000008', true, repeat('d', 64), now() + interval '7 days') $q$, '10-S5 a branch-restricted administrator cannot invite with all branches');
+select pg_temp.assert_raises($q$ insert into public.invitations (organization_id, email, role_id, all_branches, branch_ids, token_hash, expires_at) values ('0a000000-0000-0000-0000-000000000000', 'new-a@test.local', '10000000-0000-0000-0000-000000000008', false, array['0a000000-0000-0000-0000-00000000000b']::uuid[], repeat('e', 64), now() + interval '7 days') $q$, '10-S5 ...nor on a branch outside their scope');
+select pg_temp.assert_rows($q$ insert into public.invitations (organization_id, email, role_id, all_branches, branch_ids, token_hash, expires_at) values ('0a000000-0000-0000-0000-000000000000', 'new-a@test.local', '10000000-0000-0000-0000-000000000008', false, array['0a000000-0000-0000-0000-00000000000c']::uuid[], repeat('f', 64), now() + interval '7 days') $q$, 1, '10-S5 control: a branch-restricted administrator invites on their own branch');
+-- the owner
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+select pg_temp.assert_rows($q$ update public.org_memberships set employee_id = '0a000000-0000-0000-0000-0000000000e6' where id = '0a000000-0000-0000-0000-0000000000a1' $q$, 1, '10-S5 control: an owner links their own login to an employee record');
+select pg_temp.assert_rows($q$ update public.org_memberships set role_id = '10000000-0000-0000-0000-000000000001' where id = '0a000000-0000-0000-0000-0000000009b1' $q$, 1, '10-S5 control: an owner promotes an admin to owner');
+select pg_temp.assert_rows($q$ update public.org_memberships set role_id = '10000000-0000-0000-0000-000000000002' where id = '0a000000-0000-0000-0000-0000000000a1' $q$, 1, '10-S5 control: an owner may step down (a change about oneself only keeps or reduces access; the API keeps one active owner)');
+-- the organisation's system context (invitation acceptance, offboarding) acts for an already-authorised caller
+reset role;
+set local role flowza_system;
+select set_config('request.jwt.claims', '{"role":"flowza_system","org_id":"0a000000-0000-0000-0000-000000000000"}', true);
+select pg_temp.assert_rows($q$ update public.org_memberships set role_id = '10000000-0000-0000-0000-000000000003', status = 'active' where id = '0a000000-0000-0000-0000-0000000009b3' $q$, 1, '10-S5 control: the system context accepts an invitation (not a user write)');
 rollback;
 
 -- ---------- as Owner B ----------
@@ -394,7 +467,7 @@ select pg_temp.assert_eq((select count(*) from public.org_memberships), 1, 'owne
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 1, 'owner B sees only own day marks');
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A day marks (cross-tenant zero)');
 select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'owner B cannot mark a day in org A');
-select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'owner B cannot revoke org A marks');
+select pg_temp.assert_raises($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 'owner B cannot revoke org A marks');
 select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'owner B sees only own connector state');
 select pg_temp.assert_eq((select count(*) from public.finance_sync_state where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A connector state');
 select pg_temp.assert_eq((select count(*) from public.finance_pushed_events), 1, 'owner B sees only own push ledger');
