@@ -9,7 +9,7 @@ import { jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
 import { systemStep } from '../features/context.js';
 import { orgToday } from '../features/recalc.js';
 import { buildResolutionContext, loadDelegationMap } from './context.js';
-import { approvePermissionFor, hookFor, viewPermissionFor, type HookContext } from './hooks/index.js';
+import { approvePermissionFor, holdsApprovePermission, hookFor, viewPermissionFor, type HookContext } from './hooks/index.js';
 
 // ----- shapes ------------------------------------------------------------------------------------------------------------------
 
@@ -22,12 +22,22 @@ export interface SubmitInput {
   /** Leave days, overtime minutes… — what workflow tiers (`min_units`) compare against; null when the entity has no size. */
   units?: number | null;
   requestedBy: string;
-  /** Without a workflow: approve at once (the request row still exists — Finance parity) or route to holders of a permission. */
-  noWorkflow: { kind: 'AUTO_APPROVE' } | { kind: 'PERMISSION'; permission: Permission };
+  /**
+   * Without a workflow: approve at once (the request row still exists — Finance parity), route to holders of a permission,
+   * or (HR portal Prompt 4 — attendance notes, regularisations, swaps) route to the subject's line manager: one MANAGER level
+   * (primary → secondary → HR admins → owner, the domain resolver's fallback chain).
+   */
+  noWorkflow: { kind: 'AUTO_APPROVE' } | { kind: 'PERMISSION'; permission: Permission } | { kind: 'MANAGER' };
 }
 export interface SubmitResult { requestId: string; status: 'PENDING' | 'APPROVED'; autoApproved: boolean; stepCount: number; firstStepActorIds: string[] }
 
-export interface DecideInput { stepNo?: number | undefined; decision: ApprovalDecision; comment?: string | undefined; viaEmailToken?: boolean }
+export interface DecideInput {
+  stepNo?: number | undefined; decision: ApprovalDecision; comment?: string | undefined; viaEmailToken?: boolean;
+  /** Attendance-note rejections: the pay effect in days (HR portal Prompt 4); recorded on the timeline and handed to the hook. */
+  payEffectDays?: 0 | 0.5 | 1 | undefined;
+  /** Extra decision detail for the entity hook (e.g. `{ outcome: 'excuse' }`); recorded on the timeline. */
+  detail?: Record<string, unknown> | undefined;
+}
 export interface DecideOutcome { requestId: string; status: string; noop: boolean; terminal: boolean; stepNo: number; entityType: ApprovalEntity; entityId: string; branchId: string | null }
 
 type ActorRowLite = { userId: string; viaDelegationOf: string | null; decision: string };
@@ -47,7 +57,7 @@ export function assessDecider(params: {
   const isOwner = grant.roleKey === 'owner';
   const actorRow = params.stepActors.find((a) => a.userId === userId);
   const delegateRow = params.stepActors.find((a) => a.decision === 'PENDING' && a.userId !== userId && params.delegators.has(a.userId));
-  const permHolder = hasPermission(grant, approvePermissionFor(request.entityType)) && (hasPermission(grant, viewPermissionFor(request.entityType)) || (!!request.employeeId && isTeamMember(grant, request.employeeId)));
+  const permHolder = holdsApprovePermission(grant, request.entityType) && (hasPermission(grant, viewPermissionFor(request.entityType)) || (!!request.employeeId && isTeamMember(grant, request.employeeId)));
   const via: DeciderAssessment['via'] = actorRow ? 'actor' : delegateRow ? 'delegate' : permHolder ? 'permission' : isOwner ? 'owner' : null;
   let sodBlocked: DeciderAssessment['sodBlocked'] = null;
   let ownerBypass = false;
@@ -125,8 +135,8 @@ async function workflowAllowsSelf(t: Trx, workflowId: string | null): Promise<bo
   return (await t.selectFrom('approvalWorkflows').select('allowSelfApproval').where('id', '=', workflowId).executeTakeFirst())?.allowSelfApproval ?? false;
 }
 
-function hookCtx(orgId: string, req: RequestRow, actor: Actor, comment: string | null, auto = false): HookContext {
-  return { orgId, requestId: req.id, entityId: req.entityId, employeeId: req.employeeId, branchId: req.branchId, actor, comment, auto };
+function hookCtx(orgId: string, req: RequestRow, actor: Actor, comment: string | null, auto = false, detail?: Record<string, unknown>): HookContext {
+  return { orgId, requestId: req.id, entityId: req.entityId, employeeId: req.employeeId, branchId: req.branchId, actor, comment, auto, ...(detail ? { detail } : {}) };
 }
 
 async function skipPending(t: Trx, stepIds: string[], comment: string | null): Promise<void> {
@@ -145,7 +155,7 @@ async function completeApproved(deps: ApiDeps, t: Trx, actor: Actor, orgId: stri
   const now = new Date();
   await t.updateTable('approvalRequests').set({ status: 'APPROVED', completedAt: now, decidedBy: actor.userId, infoRequestedAt: null }).where('id', '=', req.id).execute();
   await recordEvent(t, orgId, req.id, 'approved', actor.userId, { ...detail, comment });
-  await hookFor(req.entityType)?.onApproved(deps, t, hookCtx(orgId, req, actor, comment));
+  await hookFor(req.entityType)?.onApproved(deps, t, hookCtx(orgId, req, actor, comment, false, detail));
   const payload = await requestPayload(t, orgId, req);
   await emitTargeted(t, orgId, 'approval.decided', req.id, decisionRecipients(req, actor.userId), { ...payload, decision: 'APPROVED', comment, decidedBy: actor.userId }, actor);
 }
@@ -155,7 +165,7 @@ async function completeRejected(deps: ApiDeps, t: Trx, actor: Actor, orgId: stri
   await skipPending(t, steps.filter((s) => s.stepNo > req.currentStep && s.status === 'PENDING').map((s) => s.id), null);
   await t.updateTable('approvalRequests').set({ status: 'REJECTED', completedAt: now, decidedBy: actor.userId, infoRequestedAt: null }).where('id', '=', req.id).execute();
   await recordEvent(t, orgId, req.id, 'rejected', actor.userId, { ...detail, comment });
-  await hookFor(req.entityType)?.onRejected(deps, t, hookCtx(orgId, req, actor, comment));
+  await hookFor(req.entityType)?.onRejected(deps, t, hookCtx(orgId, req, actor, comment, false, detail));
   const payload = await requestPayload(t, orgId, req);
   await emitTargeted(t, orgId, 'approval.decided', req.id, decisionRecipients(req, actor.userId), { ...payload, decision: 'REJECTED', comment, decidedBy: actor.userId }, actor);
 }
@@ -197,7 +207,9 @@ export async function submit(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
       await hookFor(input.entityType)?.onApproved(deps, t, hookCtx(orgId, req, actor, null, true));
       return { requestId: req.id, status: 'APPROVED', autoApproved: true, stepCount: 0, firstStepActorIds: [] };
     }
-    const steps: ApprovalStepSpec[] = row ? parseWorkflowSteps(row.steps) : [{ order: 1, approverType: 'ROLE', permission: input.noWorkflow.kind === 'PERMISSION' ? input.noWorkflow.permission : 'attendance.approve', mode: 'ANY' }];
+    const steps: ApprovalStepSpec[] = row ? parseWorkflowSteps(row.steps)
+      : input.noWorkflow.kind === 'MANAGER' ? [{ order: 1, approverType: 'MANAGER', mode: 'ANY' }]
+      : [{ order: 1, approverType: 'ROLE', permission: input.noWorkflow.kind === 'PERMISSION' ? input.noWorkflow.permission : 'attendance.approve', mode: 'ANY' }];
     const ctx = await buildResolutionContext(t, orgId, { employeeId: input.employeeId, branchId: input.branchId, requestedBy: input.requestedBy, entityType: input.entityType, viewPermission: viewPermissionFor(input.entityType), today, allowSelfApproval: row?.allowSelfApproval ?? false });
     const resolved = steps.map((spec) => ({ spec, res: resolveStepActors(spec, ctx) }));
     resolved.forEach(({ spec, res }, i) => {
@@ -276,7 +288,7 @@ export async function decideWithin(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
     // escalated approvers are extra hands, not extra seats: counting them would make an ALL / QUORUM level harder to close
     const rows = (await t.selectFrom('approvalStepActors').select(['userId', 'viaDelegationOf', 'decision', 'resolutionPath']).where('stepId', '=', step.id).execute()).filter((r) => r.resolutionPath !== 'escalated');
     const level = override ? (decision === 'APPROVED' ? 'satisfied' : 'rejected') : evaluateLevel(step.mode as ApprovalStepMode, step.requiredCount, collapseSeats(rows));
-    const eventDetail = { stepNo: step.stepNo, decision, comment, via: check.via, delegateOf: check.delegateOf, mode: step.mode, requiredCount: step.requiredCount };
+    const eventDetail = { ...(input.detail ?? {}), ...(input.payEffectDays !== undefined ? { payEffectDays: input.payEffectDays } : {}), stepNo: step.stepNo, decision, comment, via: check.via, delegateOf: check.delegateOf, mode: step.mode, requiredCount: step.requiredCount };
     if (level === 'open') {
       await recordEvent(t, orgId, req.id, decision === 'APPROVED' ? 'approval_recorded' : 'rejection_recorded', actor.userId, { ...eventDetail, levelOpen: true });
       return { requestId: req.id, status: req.status, noop: false, terminal: false, stepNo: step.stepNo, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId };
@@ -377,7 +389,7 @@ export function canCancel(grant: MembershipGrant, userId: string, req: { entityT
   if (req.requestedBy === userId) return true;
   if (!grant.allBranches && req.branchId && !grant.branchIds.includes(req.branchId)) return false;
   if (grant.roleKey === 'owner' || hasPermission(grant, 'approval.manage')) return true;
-  return hasPermission(grant, approvePermissionFor(req.entityType)) && (hasPermission(grant, viewPermissionFor(req.entityType)) || (!!req.employeeId && isTeamMember(grant, req.employeeId)));
+  return holdsApprovePermission(grant, req.entityType) && (hasPermission(grant, viewPermissionFor(req.entityType)) || (!!req.employeeId && isTeamMember(grant, req.employeeId)));
 }
 
 export async function cancelRequest(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, requestId: string, reason: string | null): Promise<CloseOutcome> {
@@ -480,8 +492,12 @@ export async function requestInfo(deps: ApiDeps, trx: Trx, actor: Actor, orgId: 
     if (!check.via || check.branchBlocked) throw errors.forbidden('You are not an approver of the current step.');
     await t.updateTable('approvalRequests').set({ infoRequestedAt: new Date() }).where('id', '=', req.id).execute();
     await recordEvent(t, orgId, req.id, 'info_requested', actor.userId, { stepNo: req.currentStep, comment });
+    const hook = hookFor(req.entityType);
+    await hook?.onInfoRequested?.(deps, t, hookCtx(orgId, req, actor, comment));
+    // a hook that tells the subject itself (attendance notes: attendance.note_info_requested) keeps them out of the generic notice
+    const informedByHook = hook?.onInfoRequested && hook.notifiesSubject ? req.subjectUserId : null;
     const payload = await requestPayload(t, orgId, req);
-    await emitTargeted(t, orgId, 'approval.info_requested', req.id, [req.requestedBy, req.subjectUserId].filter((u): u is string => !!u && u !== actor.userId), { ...payload, comment, askedBy: actor.userId }, actor);
+    await emitTargeted(t, orgId, 'approval.info_requested', req.id, [req.requestedBy, req.subjectUserId].filter((u): u is string => !!u && u !== actor.userId && u !== informedByHook), { ...payload, comment, askedBy: actor.userId }, actor);
     return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: req.status };
   });
   await audit(trx, actor, orgId, 'approval.info_requested', 'approval_request', { entityId: requestId, branchId: out.branchId, newValue: { comment } });
@@ -499,6 +515,7 @@ export async function answerInfo(deps: ApiDeps, trx: Trx, actor: Actor, orgId: s
     const step = steps.find((s) => s.stepNo === req.currentStep && s.status === 'PENDING');
     await t.updateTable('approvalRequests').set({ infoRequestedAt: null }).where('id', '=', req.id).execute();
     await recordEvent(t, orgId, req.id, 'info_answered', actor.userId, { stepNo: req.currentStep, comment });
+    await hookFor(req.entityType)?.onInfoAnswered?.(deps, t, hookCtx(orgId, req, actor, comment));
     const payload = await requestPayload(t, orgId, req);
     await emitTargeted(t, orgId, 'approval.info_answered', req.id, (step?.actors ?? []).filter((a) => a.decision === 'PENDING').map((a) => a.userId), { ...payload, comment, answeredBy: actor.userId }, actor);
     return { requestId: req.id, entityType: req.entityType, entityId: req.entityId, branchId: req.branchId, status: req.status };

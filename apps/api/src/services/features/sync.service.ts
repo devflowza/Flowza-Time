@@ -1,5 +1,6 @@
 import { sql } from 'kysely';
 import type { DeviceReconciliationDto, SyncAttendanceRequest, SyncDeviceScope, SyncEmployeesRequest, SyncJobAcceptedDto, SyncJobDto, SyncJobItemDto, SyncReconcileRequest, syncJobListQuerySchema } from '@flowza/contracts';
+import { SELF_SERVICE_PROVIDER_KEY } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { errors } from '@flowza/shared';
 import type { z } from 'zod';
@@ -219,7 +220,7 @@ export async function reconciliationSummary(deps: ApiDeps, actor: Actor, orgId: 
   const grant = requirePermission(actor.principal, orgId, 'device.view');
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    let dq = trx.selectFrom('devices').select(['id', 'code', 'name', 'branchId']).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned');
+    let dq = trx.selectFrom('devices').select(['id', 'code', 'name', 'branchId']).where('organizationId', '=', orgId).where('status', '!=', 'decommissioned').where('providerKey', '!=', SELF_SERVICE_PROVIDER_KEY);
     if (scope) dq = dq.where('branchId', 'in', scope);
     if (q.deviceId) dq = dq.where('id', '=', q.deviceId);
     const devices = await dq.orderBy('name').execute();

@@ -13,9 +13,10 @@ import { isPeriodLocked } from './recompute.js';
  *
  * Once a working day is older than the grace period — `max(missedPunch.dayCloseGraceDays, unexcused.graceDays)` days in
  * the organisation's timezone — a day that is ABSENT, carries the LATE flag, or carries MISSING_IN / MISSING_OUT and has
- * no open explanation is marked UNEXCUSED (source SWEEP). "Open explanation" today = an active EXCUSED / PAY_EFFECT / LOP
- * mark or approved leave covering the day; the attendance notes of Prompt 4 join that list by writing marks through the
- * same table. When `unexcused.autoDeductEnabled` is on, the pay effect (`payEffectAbsent` / `payEffectLate` /
+ * no open explanation is marked UNEXCUSED (source SWEEP). "Open explanation" = an active EXCUSED / PAY_EFFECT / LOP mark,
+ * approved leave covering the day, or the employee's reason for the day (an attendance note of Prompt 4 that is pending,
+ * waiting for an answer, approved or excused — the reviewer decides that day, not the sweep; a rejected note leaves the
+ * review's own marks behind). When `unexcused.autoDeductEnabled` is on, the pay effect (`payEffectAbsent` / `payEffectLate` /
  * `payEffectMissingPunch`, the largest applicable weight) is charged through the one pay-effect charger — paid leave first,
  * LOP otherwise — the same function a manager's rejection uses.
  *
@@ -48,6 +49,8 @@ export interface DayCloseSummary {
   alreadyMarked: number;
   skippedLocked: number;
   skippedLeave: number;
+  /** Days the employee explained (an attendance note that is pending, info requested, approved or excused). */
+  skippedNote: number;
   skippedDisabled: number;
   errors: number;
   employees: number;
@@ -112,7 +115,7 @@ export async function runDayClose(trx: Trx, p: DayClosePayload, now: Date, jobId
   const grace = Math.max(settings.missedPunch.dayCloseGraceDays, settings.unexcused.graceDays);
   const cutoff = addDays(asOf, -grace);
   const fromDate = p.fromDate ?? addDays(cutoff, -DAY_CLOSE_LOOKBACK_DAYS);
-  const summary: DayCloseSummary = { asOf, cutoff, fromDate, candidates: 0, marked: 0, chargedLeave: 0, lop: 0, alreadyMarked: 0, skippedLocked: 0, skippedLeave: 0, skippedDisabled: 0, errors: 0, employees: 0, capped: false };
+  const summary: DayCloseSummary = { asOf, cutoff, fromDate, candidates: 0, marked: 0, chargedLeave: 0, lop: 0, alreadyMarked: 0, skippedLocked: 0, skippedLeave: 0, skippedNote: 0, skippedDisabled: 0, errors: 0, employees: 0, capped: false };
   if (fromDate > cutoff) return summary;
 
   // Working days that still need an explanation: judged (not PENDING), absent / late / missing a punch, not yet marked.
@@ -131,13 +134,16 @@ export async function runDayClose(trx: Trx, p: DayClosePayload, now: Date, jobId
   if (candidates.length === 0) return summary;
 
   const employeeIds = [...new Set(candidates.map((c) => c.employeeId))];
-  const [marks, leaves, locks] = await Promise.all([
+  const [marks, leaves, locks, notes] = await Promise.all([
     activeMarksBetween(trx, organizationId, employeeIds, fromDate, cutoff),
     trx.selectFrom('leaveRecords').select(['employeeId', 'startDate', 'endDate']).where('organizationId', '=', organizationId).where('status', '=', 'APPROVED').where('employeeId', 'in', employeeIds)
       .where('startDate', '<=', asDate(cutoff)).where('endDate', '>=', asDate(fromDate)).execute(),
     trx.selectFrom('attendancePeriodLocks').select(['branchId', 'periodStart', 'periodEnd']).where('organizationId', '=', organizationId).where('unlockedAt', 'is', null)
       .where('periodStart', '<=', asDate(cutoff)).where('periodEnd', '>=', asDate(fromDate)).execute(),
+    trx.selectFrom('attendanceNotes').select(['employeeId', 'attendanceDate']).where('organizationId', '=', organizationId).where('employeeId', 'in', employeeIds)
+      .where('status', 'in', ['pending', 'info_requested', 'approved', 'excused']).where('attendanceDate', '>=', asDate(fromDate)).where('attendanceDate', '<=', asDate(cutoff)).execute(),
   ]);
+  const explained = new Set(notes.map((n) => `${n.employeeId}|${isoDate(n.attendanceDate)}`));
   const markedKeys = new Set(marks.map((m) => `${m.employeeId}|${m.attendanceDate}`));
   const onLeave = (employeeId: string, date: string) => leaves.some((l) => l.employeeId === employeeId && isoDate(l.startDate) <= date && isoDate(l.endDate) >= date);
   const lockedByCache = (branchId: string, date: string) => locks.some((l) => (l.branchId === null || l.branchId === branchId) && isoDate(l.periodStart) <= date && isoDate(l.periodEnd) >= date);
@@ -147,6 +153,7 @@ export async function runDayClose(trx: Trx, p: DayClosePayload, now: Date, jobId
     const key = `${c.employeeId}|${c.attendanceDate}`;
     if (markedKeys.has(key)) { summary.alreadyMarked++; continue; }
     if (onLeave(c.employeeId, c.attendanceDate)) { summary.skippedLeave++; continue; }
+    if (explained.has(key)) { summary.skippedNote++; continue; }
     const assessed = assessDay(c.status, c.flags, settings);
     if (!assessed) { summary.skippedDisabled++; continue; }
     if (lockedByCache(c.branchId, c.attendanceDate) || await isPeriodLocked(trx, organizationId, c.branchId, c.attendanceDate)) { summary.skippedLocked++; continue; }

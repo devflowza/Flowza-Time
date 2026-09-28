@@ -131,6 +131,8 @@ export interface ReverseChargeInput {
   reason: string;
   /** Only undo charges that came from this source (a note id); default: every active charge on the day. */
   sourceId?: string | null;
+  /** Only undo charges written by these sources (e.g. SWEEP + NOTE_REVIEW: an employee's reason never undoes HR's own charge); default: any source. */
+  sources?: readonly DayMarkSource[];
 }
 export interface ReverseChargeResult { reversedMarks: DayMarkRow[]; cancelledLeaveRecordIds: string[] }
 
@@ -138,7 +140,8 @@ export interface ReverseChargeResult { reversedMarks: DayMarkRow[]; cancelledLea
 export async function reverseUnexcusedCharge(trx: Trx, queue: JobQueue, input: ReverseChargeInput, opts: { now?: Date; correlationId?: string } = {}): Promise<ReverseChargeResult> {
   const now = opts.now ?? new Date();
   const marks = (await activeMarksOn(trx, input.organizationId, input.employeeId, input.date))
-    .filter((m) => (m.kind === 'PAY_EFFECT' || m.kind === 'LOP') && (input.sourceId === undefined || input.sourceId === null || m.sourceId === input.sourceId));
+    .filter((m) => (m.kind === 'PAY_EFFECT' || m.kind === 'LOP') && (input.sourceId === undefined || input.sourceId === null || m.sourceId === input.sourceId)
+      && (input.sources === undefined || input.sources.includes(m.source)));
   const reversedMarks: DayMarkRow[] = [];
   const cancelledLeaveRecordIds: string[] = [];
   for (const m of marks) {

@@ -13,7 +13,7 @@ import * as approvals from '../../../services/approvals/index.js';
  * and delegations.
  */
 export function registerApprovalRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
-  const decideAndReturn = async (c: Context<AppEnv>, input: { stepNo?: number | undefined; decision: 'APPROVE' | 'REJECT'; comment?: string | undefined }) => {
+  const decideAndReturn = async (c: Context<AppEnv>, input: { stepNo?: number | undefined; decision: 'APPROVE' | 'REJECT'; comment?: string | undefined; payEffectDays?: 0 | 0.5 | 1 | undefined }) => {
     const actor = actorOf(c, deps); const orgId = param(c, 'orgId'); const id = param(c, 'requestId');
     const dto = await runUser(deps.db, actor, async (trx) => {
       const outcome = await approvals.decideWithin(deps, trx, actor, orgId, id, input);

@@ -19,4 +19,5 @@ export * from './dto/employee-details.js';
 export * from './dto/dashboard.js';
 export * from './dto/platform.js';
 export * from './dto/self-service.js';
+export * from './dto/portal-attendance.js';
 export * from './dto-features/index.js';

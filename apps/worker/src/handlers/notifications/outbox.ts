@@ -68,7 +68,39 @@ const ROUTING: Record<string, Route> = {
   'report.failed': { category: 'SYSTEM', permission: 'report.view', recipients: 'user', title: (p) => `Report failed: ${String(p['reportTitle'] ?? p['reportType'] ?? '')}`, body: (p) => String(p['error'] ?? ''), link: () => '/reports' },
   'employee.imported': { category: 'SYSTEM', permission: 'employee.import', title: (p) => `Import finished: ${String(p['imported'] ?? 0)} employees`, link: (p) => `/employees/imports/${String(p['importId'] ?? '')}` },
   'subscription.limit_reached': { category: 'SUBSCRIPTION', permission: 'organization.manage', title: (p) => `Plan limit reached: ${String(p['metric'] ?? '')}`, link: () => '/settings/subscription' },
+  // Employee portal attendance (HR portal Prompt 4): every notice is targeted — payload.userIds is resolved by the API (the
+  // employee's own login for decisions and questions, the line managers for reasons / selfies / flagged punches, the colleague
+  // named in a swap), re-checked against active memberships here.
+  'attendance.note_submitted': { category: 'APPROVAL', recipients: 'users', title: (p) => `Attendance reason from ${String(p['employeeName'] ?? 'an employee')}`, body: (p) => String(p['attendanceDate'] ?? ''), link: () => '/attendance/notes' },
+  'attendance.note_decided': { category: 'ATTENDANCE', recipients: 'users', title: (p) => noteDecisionTitle(p), body: (p) => noteDecisionBody(p), link: () => '/my/requests' },
+  'attendance.note_info_requested': { category: 'ATTENDANCE', recipients: 'users', title: (p) => `Question about your reason for ${String(p['attendanceDate'] ?? 'a day')}`, body: (p) => String(p['question'] ?? ''), link: () => '/my/requests' },
+  'attendance.selfie_submitted': { category: 'APPROVAL', recipients: 'users', title: (p) => `Selfie check-${p['direction'] === 'out' ? 'out' : 'in'} from ${String(p['employeeName'] ?? 'an employee')}`, body: (p) => String(p['at'] ?? ''), link: () => '/attendance/notes?tab=selfies' },
+  'attendance.selfie_decided': { category: 'ATTENDANCE', recipients: 'users', title: (p) => (p['decision'] === 'approved' ? 'Selfie check-in approved' : 'Selfie check-in not approved'), body: (p) => (p['reason'] ? String(p['reason']) : ''), link: () => '/my/checkin' },
+  'attendance.punch_flagged': { category: 'ATTENDANCE', recipients: 'users', title: (p) => `${p['outcome'] === 'denied' ? 'Check-in refused' : 'Check-in flagged'}: ${String(p['employeeName'] ?? 'an employee')}`, body: (p) => [p['reason'] ? String(p['reason']).replaceAll('_', ' ') : null, p['geofenceName'] ? String(p['geofenceName']) : null, typeof p['distanceM'] === 'number' ? `${Math.round(p['distanceM'] as number)} m away` : null].filter(Boolean).join(' · '), link: (p) => `/attendance?employeeId=${String(p['employeeId'] ?? '')}` },
+  'attendance.regularisation_decided': { category: 'ATTENDANCE', recipients: 'users', title: (p) => `Regularisation for ${String(p['attendanceDate'] ?? 'a day')} ${p['decision'] === 'approved' ? 'approved' : 'not approved'}`, body: (p) => (p['comment'] ? String(p['comment']) : ''), link: () => '/my/requests' },
+  'shift.swap_requested': { category: 'APPROVAL', recipients: 'users', title: (p) => `${String(p['requesterName'] ?? 'A colleague')} asked to swap shifts with you`, body: (p) => `${String(p['swapDate'] ?? '')}: ${String(p['requesterShiftName'] ?? '')} ⇄ ${String(p['targetShiftName'] ?? '')}`, link: () => '/my/shift' },
+  'shift.swap_decided': { category: 'ATTENDANCE', recipients: 'users', title: (p) => `Shift swap on ${String(p['swapDate'] ?? '')} ${p['decision'] === 'approved' ? 'approved' : 'not approved'}`, body: (p) => (p['comment'] ? String(p['comment']) : ''), link: () => '/my/shift' },
 };
+
+/** "Reason accepted / excused / not accepted" (the decision the employee cares about). */
+function noteDecisionTitle(p: Payload): string {
+  const date = String(p['attendanceDate'] ?? 'a day');
+  if (p['decision'] === 'approved') return `Your reason for ${date} was accepted`;
+  if (p['decision'] === 'excused') return `${date} was excused`;
+  return `Your reason for ${date} was not accepted`;
+}
+/** A rejection says what it cost: a paid-leave deduction or loss of pay (half / full day), or nothing. */
+function noteDecisionBody(p: Payload): string {
+  const parts: string[] = [];
+  const days = Number(p['payEffectDays'] ?? 0);
+  if (p['decision'] === 'rejected' && days > 0) {
+    const amount = days === 0.5 ? 'half a day' : days === 1 ? 'one day' : `${days} days`;
+    if (p['chargeOutcome'] === 'lop' || p['lossOfPay'] === true) parts.push(`${amount} loss of pay`);
+    else if (p['chargeOutcome'] === 'charged_leave') parts.push(`${amount} deducted from ${String(p['leaveTypeCode'] ?? 'your leave')}`);
+  }
+  if (p['reason']) parts.push(String(p['reason']));
+  return parts.join(' · ');
+}
 
 /** Approval notifications whose e-mail carries one-click approve / reject links for the recipient. */
 const ONE_CLICK_TYPES = new Set(['approval.pending', 'approval.escalated', 'approval.reminder']);

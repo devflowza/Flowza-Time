@@ -2,3 +2,4 @@
 export * from './recompute-queue.js';
 export * from './day-marks.js';
 export * from './pay-effect.js';
+export * from './self-service-device.js';
