@@ -802,6 +802,14 @@ export interface FeatureFlags {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface FinancePushedEvents {
+  deviceId: string;
+  eventId: string;
+  organizationId: string;
+  outcome: Generated<string>;
+  pushedAt: Generated<Timestamp>;
+}
+
 export interface FinanceSyncState {
   consecutiveFailures: Generated<number>;
   createdAt: Generated<Timestamp>;
@@ -813,9 +821,21 @@ export interface FinanceSyncState {
   lastPushAt: Timestamp | null;
   lastPushCount: Generated<number>;
   lastPushedEventAt: Timestamp | null;
+  /**
+   * Last event the push handled — delivered, or skipped for a missing PIN or as a poison batch (informational since 20260928000450; the push position is push_position_at).
+   */
   lastPushedEventId: string | null;
   nextPushAt: Timestamp | null;
   organizationId: string;
+  /**
+   * Push window anchor: every eligible event created up to this instant has been examined; the next run scans from 15 minutes before it (late commits) and skips what finance_pushed_events already holds.
+   */
+  pushPositionAt: Timestamp | null;
+  pushRetryAttempts: Generated<number>;
+  /**
+   * First event of a batch Finance answered with per-punch errors; retried until push_retry_attempts reaches 5, then skipped.
+   */
+  pushRetryEventId: string | null;
   updatedAt: Generated<Timestamp>;
 }
 
@@ -1473,6 +1493,7 @@ export interface DB {
   employmentHistory: EmploymentHistory;
   entitlements: Entitlements;
   featureFlags: FeatureFlags;
+  financePushedEvents: FinancePushedEvents;
   financeSyncState: FinanceSyncState;
   holidayCalendars: HolidayCalendars;
   holidays: Holidays;

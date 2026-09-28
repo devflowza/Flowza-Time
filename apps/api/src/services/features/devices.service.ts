@@ -2,8 +2,9 @@ import { randomBytes, timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
 import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCredentialsInput, DeviceGroupDto, DeviceGroupInput, DeviceListQuery, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
 import type { DeviceSummaryDto, DeviceSummaryQuery } from '@flowza/contracts';
+import { CONNECTOR_MANAGED_IN_INTEGRATIONS, FLOWZA_FINANCE_PROVIDER_KEY } from '@flowza/contracts';
 import { emitDomainEvent, maskCredentials, type Trx } from '@flowza/database';
-import { createThrottler, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
+import { createThrottler, hostnameBlockReason, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
 import { AppError, errors, sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
@@ -82,14 +83,18 @@ export function splitConfig(def: ProviderDefinition, input: Record<string, Confi
   return { config, secrets };
 }
 
-const PRIVATE_HOST = /^(localhost|127\.|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|169\.254\.|0\.0\.0\.0|\[?::1\]?$|fc|fd|fe80)/i;
-/** Cloud providers must point at public hosts (SSRF guard); LAN/on-prem providers legitimately use private ranges over VPN. */
+/**
+ * Cloud providers must point at public hosts (SSRF guard); LAN/on-prem providers legitimately use private ranges over VPN. The host
+ * rule is the shared egress guard's (`hostnameBlockReason`: IP literals in every spelling, a trailing dot stripped, reserved names
+ * and single labels refused). The unique-local rule applies to IPv6 LITERALS only, so a public name such as `fdic.gov` passes
+ * (review D17). This is the syntax check at save time; a provider that calls out resolves and pins through `egressRequest`.
+ */
 export function assertEndpointAllowed(def: ProviderDefinition, endpointUrl: string | null | undefined): void {
   if (!endpointUrl) return;
   let url: URL;
   try { url = new URL(endpointUrl); } catch { throw errors.validation('endpointUrl must be a valid URL.', { issues: [{ path: 'endpointUrl', message: 'Invalid URL' }] }); }
   if (!/^https?:$/.test(url.protocol)) throw errors.validation('endpointUrl must use http or https.', { issues: [{ path: 'endpointUrl', message: 'Unsupported scheme' }] });
-  if ((def.integrationType === 'VENDOR_CLOUD_PULL' || def.integrationType === 'VENDOR_WEBHOOK') && PRIVATE_HOST.test(url.hostname)) {
+  if ((def.integrationType === 'VENDOR_CLOUD_PULL' || def.integrationType === 'VENDOR_WEBHOOK') && hostnameBlockReason(url.hostname) !== null) {
     throw errors.validation('Cloud providers cannot target private or loopback addresses.', { issues: [{ path: 'endpointUrl', message: 'Private address' }] });
   }
 }
@@ -119,9 +124,10 @@ function needsToken(p: DeviceProvider): boolean {
  * refuse it so the connector cannot be re-created, re-pointed, re-keyed or removed around that permission (reads, logs, health
  * checks and attendance pulls keep working like for any device).
  */
-export const CONNECTOR_PROVIDER_KEY = 'flowza_finance';
+export const CONNECTOR_PROVIDER_KEY = FLOWZA_FINANCE_PROVIDER_KEY;
+/** 409 INVALID_STATE with `details.reason = CONNECTOR_MANAGED_IN_INTEGRATIONS` (the code detail the web keys on, like MFA_REQUIRED). */
 function refuseConnector(providerKey: string): void {
-  if (providerKey === CONNECTOR_PROVIDER_KEY) throw errors.invalidState('The Flowza Finance connector is managed in Settings → Integrations.', { providerKey });
+  if (providerKey === CONNECTOR_PROVIDER_KEY) throw errors.invalidState('The Flowza Finance connector is managed in Settings → Integrations.', { reason: CONNECTOR_MANAGED_IN_INTEGRATIONS, providerKey });
 }
 
 function getProvider(deps: ApiDeps, key: string): DeviceProvider {
@@ -372,6 +378,9 @@ export async function testConnection(deps: ApiDeps, actor: Actor, orgId: string,
   if (!hasPermission(grant, 'device.create') && !hasPermission(grant, 'device.update') && !hasPermission(grant, 'device.manage')) throw errors.forbidden('Missing permission: device.create or device.update.');
   const provider = getProvider(deps, input.providerKey);
   const def = provider.definition;
+  // the connector is tested only through Settings → Integrations (integration.manage): the generic endpoint would otherwise send
+  // its stored token for a device.update holder, or probe any Finance URL for a device.create holder (review D13)
+  refuseConnector(def.key);
   const { config: requestConfig, secrets: requestSecrets } = splitConfig(def, input.config, { requireRequired: !input.deviceId });
   let config: Record<string, unknown> = requestConfig;
   let credentials: Record<string, unknown> = requestSecrets;
@@ -475,8 +484,13 @@ export async function runDeviceAction(deps: ApiDeps, actor: Actor, orgId: string
   const grant = requirePermission(actor.principal, orgId, 'device.sync');
   return runUser(deps.db, actor, async (trx) => {
     const device = await loadDeviceRow(trx, orgId, id); requireBranchAccess(grant, device.branchId);
+    const connector = device.providerKey === CONNECTOR_PROVIDER_KEY;
+    // reconciliation compares device users with employees: the connector has none, and it is not a terminal (review D13)
+    if (connector && action === 'reconcile') refuseConnector(device.providerKey);
     if (device.status !== 'active') throw errors.invalidState('The device is not active.');
     const caps = jsonObject(device.capabilities) as Record<string, boolean>;
+    // a push-only connector is never pulled (review D6), even if its stored capabilities predate the direction rule
+    if (connector && action === 'sync-attendance' && jsonObject(device.config)['direction'] === 'push') throw errorUnsupported('attendancePull');
     const base = { organizationId: orgId, trigger: 'MANUAL' as const, branchId: device.branchId, requestedBy: actor.userId, correlationId: actor.requestId, priority: 7 };
     let job: CreatedSyncJob;
     switch (action) {

@@ -1,14 +1,14 @@
 import { sql } from 'kysely';
 import { rawTransactionSchema, type RawTransaction } from '@flowza/contracts';
 import { withContext, type Trx } from '@flowza/database';
-import { ProviderError, type AttendancePullResult, type SyncCursor } from '@flowza/device-providers';
+import { isFinanceCursorError, ProviderError, type AttendancePullResult, type SyncCursor } from '@flowza/device-providers';
 import { nextAdaptiveInterval } from '@flowza/domain';
 import { AppError, event } from '@flowza/shared';
 import type { JobContext } from '../types.js';
 import { checkCircuit } from './circuit.js';
 import { capabilitiesOf, circuitOpenError, handleProviderFailure, handleProviderSuccess, loadDeviceOrThrow, requireCapability } from './common.js';
-import { buildProviderContext, loadOrgSyncSettings } from './context.js';
-import { isFinanceConnector, recordFinanceFailure, recordFinancePull } from './finance-state.js';
+import { buildProviderContext, deviceConfig, loadOrgSyncSettings } from './context.js';
+import { connectorGenerationIs, isFinanceConnector, isLocalThrottleWait, recordFinanceFailure, recordFinancePull } from './finance-state.js';
 import { applyHealth } from './health.js';
 import { ingestRawTransactions, type IngestResult } from './ingest.js';
 import { runItem, toSyncError } from './items.js';
@@ -58,14 +58,17 @@ export async function pullAttendance(ctx: JobContext) {
         const health = await applyHealth(trx, device, { online, lastSeenAt: device.lastHeartbeatAt, event: 'push_health_refresh', jobId: item.syncJobId }, now);
         return { push: true as const, online, health };
       }
+      // a push-only Flowza Finance connector is never pulled (review D6), whatever queued this item (sync-all, a retry, an old job)
+      if (isFinanceConnector(device) && deviceConfig(device)['direction'] === 'push') return { push: false as const, skip: 'direction_push' as const };
       const provider = deps.providers.get(device.providerKey);
       requireCapability(capabilitiesOf(device, provider), 'attendancePull', 'pullAttendance');
       const built = await buildProviderContext(trx, deps, device, ctx.job.id, ctx.signal, { log, provider });
       const circuit = await checkCircuit(trx, { organizationId: device.organizationId, providerKey: device.providerKey, accountKey: built.accountKey }, now);
       const cursorRow = await trx.selectFrom('syncCursors').select(['cursor']).where('deviceId', '=', device.id).where('stream', '=', 'attendance').executeTakeFirst();
-      return { push: false as const, device, settings, built, circuit, cursor: cursorOrNull(cursorRow?.cursor) };
+      return { push: false as const, skip: null, device, settings, built, circuit, cursor: cursorOrNull(cursorRow?.cursor) };
     });
     if (prep.push) return { result: { mode: 'push', pending: true, online: prep.online, connectionStatus: prep.health.current } };
+    if (prep.skip) return { result: { skipped: prep.skip, direction: 'push' } };
     const { device, settings, built } = prep;
     if (!prep.circuit.allow) { built.dispose(); throw circuitOpenError(prep.circuit.halfOpenAt, now); }
     const key = { organizationId: device.organizationId, providerKey: device.providerKey, accountKey: built.accountKey };
@@ -75,13 +78,19 @@ export async function pullAttendance(ctx: JobContext) {
     let cursorResets = 0;
     let cursor = fullResync ? null : prep.cursor;
     let since: string | undefined = fullResync ? new Date(now.getTime() - FULL_RESYNC_FLOOR_DAYS * 86_400_000).toISOString() : undefined;
+    const connector = isFinanceConnector(device);
+    // Only a cursor the provider says it cannot read is reset. For the Flowza Finance connector that is exactly the error its
+    // cursor parser raises: an HTTP-level 400/404/405/3xx/5xx or an unreadable answer is a failed run (counted, retried with
+    // back-off) that keeps the cursor — rewinding on a gateway hiccup skipped every unpulled row older than the rewind (review D10).
+    const isCursorProblem = (err: unknown): err is ProviderError => ProviderError.is(err) && (connector ? isFinanceCursorError(err) : CURSOR_RESET_CODES.has(err.code));
+    let superseded = false;
     try {
       for (let i = 0; i < maxPages; i++) {
         let page: AttendancePullResult;
         try {
           page = await built.provider.pullAttendance(built.ctx, cursor, { ...(pageSize !== undefined ? { pageSize } : {}), ...(since !== undefined ? { since } : {}) });
         } catch (err) {
-          if (!(i === 0 && cursor !== null && ProviderError.is(err) && CURSOR_RESET_CODES.has(err.code))) throw err;
+          if (!(i === 0 && cursor !== null && isCursorProblem(err))) throw err;
           const bad = cursor;
           await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, (trx) => resetInvalidCursor(trx, device, bad, err, deps.now()));
           log.warn(event('sync_cursor_reset', { deviceId: device.id, code: err.code }));
@@ -92,10 +101,13 @@ export async function pullAttendance(ctx: JobContext) {
         }
         const transactions = page.transactions.flatMap((t) => { const p = rawTransactionSchema.safeParse(t); return p.success ? [p.data] : []; });
         const ingested = await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
+          // a connector re-pointed (or disconnected) while this page was in flight: its rows and cursor belong to the old Finance
+          if (connector && !(await connectorGenerationIs(trx, device.id, device.generation))) return null;
           const r = await ingestRawTransactions(trx, { organizationId: device.organizationId, device, source: 'POLL', syncJobId: item.syncJobId, transactions, now: deps.now(), settings, queue: deps.queue });
           await saveCursor(trx, device, page.nextCursor, transactions, deps.now());
           return r;
         });
+        if (!ingested) { superseded = true; break; }
         pages++;
         totals.inserted += ingested.inserted; totals.duplicates += ingested.duplicates; totals.quarantined += ingested.quarantined; totals.held += ingested.held;
         cursor = page.nextCursor;
@@ -103,6 +115,10 @@ export async function pullAttendance(ctx: JobContext) {
         hasMore = page.hasMore;
         if (!page.hasMore) break;
         ctx.signal.throwIfAborted();
+      }
+      if (superseded) {
+        log.info(event('finance_pull_superseded', { deviceId: device.id, generation: device.generation }));
+        return { recordsIngested: totals.inserted, result: { pages, inserted: totals.inserted, superseded: true } };
       }
       const adaptive = await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
         const base = Math.max(1, device.syncIntervalMinutes);
@@ -120,8 +136,10 @@ export async function pullAttendance(ctx: JobContext) {
       });
       return { recordsIngested: totals.inserted, result: { pages, inserted: totals.inserted, duplicates: totals.duplicates, quarantined: totals.quarantined, held: totals.held, hasMore, cursorResets, fullResync, nextIntervalMinutes: adaptive.intervalMinutes, emptyPollCount: adaptive.emptyPollCount } };
     } catch (err) {
-      if (isFinanceConnector(device)) await recordFinanceFailure(deps, device, 'pull', toSyncError(err), ctx.job.id);
-      await handleProviderFailure(ctx, device, key.accountKey, err);
+      // a throttle wait that timed out is this worker's own queueing, not Finance failing: it feeds neither the streak nor the circuit
+      const localWait = connector && isLocalThrottleWait(err);
+      if (connector && !localWait) await recordFinanceFailure(deps, device, 'pull', toSyncError(err), ctx.job.id);
+      if (!localWait) await handleProviderFailure(ctx, device, key.accountKey, err);
       if (err instanceof Error && (err.name === 'TimeoutError' || err.name === 'AbortError')) throw new AppError('PROVIDER_TIMEOUT', err.message, { retryable: true, cause: err });
       throw err;
     } finally {

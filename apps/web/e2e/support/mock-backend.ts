@@ -1,5 +1,5 @@
 import type { Page, Route } from '@playwright/test';
-import type { DashboardSummary, DeviceDto, EmployeeDto, MeDto, Permission } from '@flowza/contracts';
+import type { DashboardSummary, DeviceDto, EmployeeDto, FinanceIntegrationDto, FinanceIntegrationStatusDto, MeDto, Permission } from '@flowza/contracts';
 
 /**
  * Backend double for the UI end-to-end suite.
@@ -88,6 +88,12 @@ const device = (n: number, name: string, code: string, branchId: string, branchN
 } as DeviceDto);
 export const devicesFixture: DeviceDto[] = [device(1, 'Main gate', 'GATE-1', BRANCH_A, 'Muscat HQ', 'online'), device(2, 'Plant entrance', 'PLANT-1', BRANCH_B, 'Sohar Plant', 'offline')];
 
+/** Flowza Finance connector as GET /integrations/finance answers before it is configured (defaults; start date 30 days back). */
+export const financeIntegrationFixture = (): FinanceIntegrationDto => ({
+  configured: false, enabled: false, deviceId: null, branchId: null, baseUrl: 'https://ucjtxdmklhhhvayirwqe.supabase.co/functions/v1', deviceSerial: null, direction: 'both', pinKey: 'employee_number', pollMinutes: 10,
+  syncFrom: new Date(Date.now() - 30 * 86_400_000).toISOString().slice(0, 10), hasToken: false, tokenMasked: null, connectionStatus: null, lastErrorCode: null, lastError: null, updatedAt: null,
+});
+
 export const branchesFixture = [
   { id: BRANCH_A, organizationId: ORG_ID, code: 'MCT', name: 'Muscat HQ', nameAr: 'مسقط', countryCode: 'OM', city: 'Muscat', address: {}, timezone: 'Asia/Muscat', latitude: null, longitude: null, geofenceRadiusM: null, contact: {}, weeklyOffDays: null, holidayCalendarId: null, status: 'active', employeeCount: 2, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
   { id: BRANCH_B, organizationId: ORG_ID, code: 'SOH', name: 'Sohar Plant', nameAr: 'صحار', countryCode: 'OM', city: 'Sohar', address: {}, timezone: 'Asia/Muscat', latitude: null, longitude: null, geofenceRadiusM: null, contact: {}, weeklyOffDays: null, holidayCalendarId: null, status: 'active', employeeCount: 1, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z' },
@@ -142,6 +148,9 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
     [`/orgs/${ORG_ID}/devices/pending`]: { data: [] },
     [`/orgs/${ORG_ID}/device-groups`]: { data: [] },
     '/device-providers': { data: [] },
+    // Settings → Integrations (Flowza Finance connector): an organisation that has not configured it yet
+    [`/orgs/${ORG_ID}/integrations/finance`]: { data: financeIntegrationFixture() },
+    [`/orgs/${ORG_ID}/integrations/finance/status`]: { data: { configured: false, enabled: false, deviceId: null, connectionStatus: null, state: null, cursor: null, circuit: null, unmatchedCount: 0, pendingCount: 0, lastJobs: [] } satisfies FinanceIntegrationStatusDto },
     [`/orgs/${ORG_ID}/search`]: (url: URL) => { const q = (url.searchParams.get('q') ?? '').toLowerCase(); return { data: { q, employees: employeesFixture.filter((e) => e.displayName.toLowerCase().includes(q)).map((e) => ({ type: 'employee', id: e.id, title: e.displayName, subtitle: e.employeeNumber, branchId: e.branchId, status: e.employmentStatus })), devices: [], branches: [], departments: [] } }; },
     ...opts.get,
   };

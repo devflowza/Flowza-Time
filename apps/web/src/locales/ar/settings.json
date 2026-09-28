@@ -240,7 +240,37 @@
     "circuit": "تم إيقاف الاتصال بـ Finance مؤقتاً بعد إخفاقات متكررة ({{state}})؛ المحاولة التالية {{at}}.",
     "recentJobs": "أحدث مهام المزامنة",
     "noJobs": "لا توجد مهام مزامنة بعد.",
-    "viewJob": "التفاصيل"
+    "viewJob": "التفاصيل",
+    "syncFrom": "المزامنة ابتداءً من",
+    "syncFromHint": "لا تُزامَن البصمات السابقة لهذا التاريخ في أي من الاتجاهين؛ يبدأ أول جلب وأول إرسال من هنا. تقديمه إلى تاريخ أبكر يعيد قراءة Finance ويعيد إرسال بصمات FlowZa Time من التاريخ الجديد (يتجاهل الطرفان المكرر).",
+    "syncFromFuture": "لا يمكن أن يكون تاريخ البدء في المستقبل.",
+    "disconnect": "قطع الاتصال",
+    "disconnectTitle": "قطع الاتصال بـ Flowza Finance؟",
+    "disconnectHint": "يتوقف الموصّل ويُحذف رمز Finance الخاص به ويُمسح موضع المزامنة. تبقى البصمات التي تم تبادلها كما هي. لإعادة الاتصال أدخل رمز إرسال واحفظ.",
+    "disconnected": "تم قطع الاتصال بـ Flowza Finance",
+    "pushRetry": "رفض Finance بصمات من آخر دفعة إرسال؛ تُعاد محاولتها (المحاولة {{attempts}} من {{max}}، ثم تُتخطّى ويُبلَّغ عنها).",
+    "circuitStates": {
+      "closed": "طبيعي",
+      "open": "متوقف مؤقتاً",
+      "half_open": "اختبار التعافي"
+    },
+    "errorCodes": {
+      "AUTH_FAILED": "رُفضت بيانات الاعتماد",
+      "DEVICE_OFFLINE": "تعذّر الوصول",
+      "RATE_LIMITED": "تجاوز حد الطلبات",
+      "TIMEOUT": "انتهت المهلة",
+      "UNSUPPORTED": "غير مدعوم",
+      "NOT_FOUND": "غير موجود",
+      "INVALID_CONFIG": "مشكلة في الإعدادات",
+      "VENDOR_ERROR": "خطأ من Finance",
+      "NOT_IMPLEMENTED": "غير متاح",
+      "PROTOCOL_ERROR": "رد غير مقروء",
+      "CONFLICT": "تعارض",
+      "INTERNAL": "خطأ داخلي",
+      "CONNECTION_FAILED": "فشل الاتصال",
+      "PROVIDER_ERROR": "فشل اختبار الاتصال",
+      "unknown": "خطأ"
+    }
   },
   "notifications": {
     "title": "إشعارات المنظمة",

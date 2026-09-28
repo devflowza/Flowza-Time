@@ -236,7 +236,37 @@
     "circuit": "Calls to Finance are paused after repeated failures ({{state}}); next attempt {{at}}.",
     "recentJobs": "Recent sync jobs",
     "noJobs": "No sync jobs yet.",
-    "viewJob": "Details"
+    "viewJob": "Details",
+    "syncFrom": "Synchronise from",
+    "syncFromHint": "Punches before this date are never synchronised in either direction; the first pull and the first push start here. Moving it earlier re-reads Finance and re-sends FlowZa Time punches from the new date (both sides skip duplicates).",
+    "syncFromFuture": "The start date cannot be in the future.",
+    "disconnect": "Disconnect",
+    "disconnectTitle": "Disconnect Flowza Finance?",
+    "disconnectHint": "The connector stops, its Finance token is deleted and its sync position is cleared. Punches already exchanged stay where they are. To reconnect, enter a push token and save.",
+    "disconnected": "Flowza Finance disconnected",
+    "pushRetry": "Finance rejected punches of the last push batch; it is being retried (attempt {{attempts}} of {{max}}, then it is skipped and reported).",
+    "circuitStates": {
+      "closed": "normal",
+      "open": "paused",
+      "half_open": "testing recovery"
+    },
+    "errorCodes": {
+      "AUTH_FAILED": "Credential rejected",
+      "DEVICE_OFFLINE": "Unreachable",
+      "RATE_LIMITED": "Rate limited",
+      "TIMEOUT": "Timed out",
+      "UNSUPPORTED": "Not supported",
+      "NOT_FOUND": "Not found",
+      "INVALID_CONFIG": "Configuration problem",
+      "VENDOR_ERROR": "Finance error",
+      "NOT_IMPLEMENTED": "Not available",
+      "PROTOCOL_ERROR": "Unreadable answer",
+      "CONFLICT": "Conflict",
+      "INTERNAL": "Internal error",
+      "CONNECTION_FAILED": "Connection failed",
+      "PROVIDER_ERROR": "Connection test failed",
+      "unknown": "Error"
+    }
   },
   "notifications": {
     "title": "Organisation notifications",

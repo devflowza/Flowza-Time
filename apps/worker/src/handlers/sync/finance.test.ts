@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
-import { createMockFinanceServer, defaultRegistry, encodeFinanceCursor, financePunchFixtures, type MockFinanceServer } from '@flowza/device-providers';
+import { defaultRegistry } from '@flowza/device-providers';
+import { createMockFinanceServer, encodeFinanceCursor, financePunchFixtures, type MockFinanceServer } from '@flowza/device-providers/testing';
 import { withContext } from '@flowza/database';
 import { AppError } from '@flowza/shared';
 import { createHarness, fakeJob, type TestHarness } from '../../test/harness.js';
@@ -26,10 +27,10 @@ let queueSeq = 500;
 const clock = () => new Date();
 
 beforeAll(async () => {
-  // five Finance punches covering every identity path of the normaliser:
+  // five Finance punches covering every identity path of the normaliser (pulled rows resolve ONLY by employee number):
   //  0 E0100 → employee number; 1 'e0101' → case-insensitive employee number (citext); 2 E9999 → unknown, stays unmatched;
-  //  3 no employee number, PIN '3' → unmatched even though an employee has device_user_id '3' (no generic fallback);
-  //  4 E7777 → explicit provider identity mapping (what reconciliation writes) → E0102
+  //  3 no employee number, PIN '3' → stored as `pin:FIN-MOBILE:3`, unmatched although an employee has device_user_id '3';
+  //  4 E7777 → unmatched: even a provider identity row for it is not consulted for Finance rows (review D7)
   const punches = financePunchFixtures(5, '2026-03-02T04:00:00.000Z');
   punches[1] = { ...punches[1]!, employee_number: 'e0101' };
   punches[2] = { ...punches[2]!, employee_number: 'E9999', pin: '9999' };
@@ -86,7 +87,7 @@ describe('Flowza Finance connector — pull', () => {
     expect(res['inserted']).toBe(5);
     const rows = await rawRows();
     expect(rows).toHaveLength(5);
-    expect(rows.map((r) => r.deviceEmployeeId)).toEqual(['E0100', 'e0101', 'E9999', '3', 'E7777']);
+    expect(rows.map((r) => r.deviceEmployeeId)).toEqual(['E0100', 'e0101', 'E9999', 'pin:FIN-MOBILE:3', 'E7777']);
     expect(rows.every((r) => r.providerKey === 'flowza_finance' && r.source === 'POLL' && r.processingStatus === 'pending')).toBe(true);
     expect(rows[0]!.rawPayload).toMatchObject({ financeId: server.punches[0]!.id, source: 'mobile', connectorSerial: SERIAL });
     const cursor = await h.tdb.adminDb.selectFrom('syncCursors').selectAll().where('deviceId', '=', CONNECTOR).where('stream', '=', 'attendance').executeTakeFirstOrThrow();
@@ -111,19 +112,19 @@ describe('Flowza Finance connector — pull', () => {
     expect(await rawRows()).toHaveLength(5);
   });
 
-  it('resolves pulled punches by the configured employee field, then explicit mappings; everything else stays unmatched for reconciliation', async () => {
+  it('resolves pulled punches by Finance employee number only; everything else stays unmatched for reconciliation', async () => {
     const res = await normalizeRaw(normalizeCtx());
-    expect(res).toMatchObject({ normalized: 3, unmatched: 2, events: 3 });
+    expect(res).toMatchObject({ normalized: 2, unmatched: 3, events: 2 });
     const rows = await rawRows();
     const by = (id: string) => rows.find((r) => r.deviceEmployeeId === id);
     expect(by('E0100')).toMatchObject({ processingStatus: 'normalized', employeeId: EMP.e100 });
     expect(by('e0101')).toMatchObject({ processingStatus: 'normalized', employeeId: EMP.e101 });
-    expect(by('E7777')).toMatchObject({ processingStatus: 'normalized', employeeId: EMP.e102 });
+    expect(by('E7777')).toMatchObject({ processingStatus: 'unmatched', employeeId: null });
     expect(by('E9999')).toMatchObject({ processingStatus: 'unmatched', employeeId: null });
-    // PIN '3' equals an employee's device_user_id, but a Finance identity never falls through to that generic match
-    expect(by('3')).toMatchObject({ processingStatus: 'unmatched', employeeId: null });
+    // PIN '3' equals an employee's device_user_id, but a Finance terminal's PIN is never one of our identities
+    expect(by('pin:FIN-MOBILE:3')).toMatchObject({ processingStatus: 'unmatched', employeeId: null });
     const pulled = await h.tdb.adminDb.selectFrom('attendanceEvents').select(['deviceId', 'employeeId', 'eventType']).where('organizationId', '=', ORG).execute();
-    expect(pulled).toHaveLength(3);
+    expect(pulled).toHaveLength(2);
     expect(pulled.every((e) => e.deviceId === CONNECTOR)).toBe(true);
   });
 });

@@ -89,7 +89,8 @@ export async function meterUsage({ deps, log, job }: JobContext) {
     from public.organizations o
     cross join lateral (
       select 'employees' as metric, count(*)::numeric as value from public.employees e where e.organization_id = o.id and e.deleted_at is null and e.employment_status <> 'terminated'
-      union all select 'devices', count(*) from public.devices d where d.organization_id = o.id and d.status = 'active'
+      -- the Flowza Finance connector is an integration, not a terminal: it takes no plan seat and is not metered as a device
+      union all select 'devices', count(*) from public.devices d where d.organization_id = o.id and d.status = 'active' and d.provider_key <> 'flowza_finance'
       union all select 'branches', count(*) from public.branches b where b.organization_id = o.id and b.status = 'active'
       union all select 'users', count(*) from public.org_memberships mm where mm.organization_id = o.id and mm.status = 'active'
       union all select 'raw_transactions_month', count(*) from public.attendance_raw_transactions r where r.organization_id = o.id and r.received_at >= ${periodStart}

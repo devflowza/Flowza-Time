@@ -85,6 +85,10 @@ insert into public.attendance_day_marks (id, organization_id, employee_id, atten
 insert into public.finance_sync_state (device_id, organization_id, last_pull_count, consecutive_failures) values
   ('0a000000-0000-0000-0000-0000000000d1', '0a000000-0000-0000-0000-000000000000', 3, 0),
   ('0b000000-0000-0000-0000-0000000000d1', '0b000000-0000-0000-0000-000000000000', 1, 2);
+-- Flowza Finance push ledger (migration 20260928000450): same rules as the connector state
+insert into public.finance_pushed_events (organization_id, device_id, event_id, outcome) values
+  ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000d1', '0a000000-0000-0000-0000-0000000003a1', 'pushed'),
+  ('0b000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-0000000000d1', '0b000000-0000-0000-0000-0000000003a1', 'no_pin');
 commit;
 
 -- helper to assert counts
@@ -157,6 +161,12 @@ select pg_temp.assert_eq((select count(*) from public.finance_sync_state where o
 select pg_temp.assert_raises($q$ insert into public.finance_sync_state (device_id, organization_id) values ('0a000000-0000-0000-0000-0000000000d1', '0a000000-0000-0000-0000-000000000000') $q$, 'owner A cannot insert connector state');
 select pg_temp.assert_raises($q$ update public.finance_sync_state set consecutive_failures = 0 where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot update connector state');
 select pg_temp.assert_raises($q$ delete from public.finance_sync_state where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot delete connector state');
+-- finance_pushed_events (the push ledger): the same — device.view reads, no client write of any kind (raises)
+select pg_temp.assert_eq((select count(*) from public.finance_pushed_events), 1, 'owner A sees only own push ledger');
+select pg_temp.assert_eq((select count(*) from public.finance_pushed_events where organization_id = '0b000000-0000-0000-0000-000000000000'), 0, 'owner A cannot see org B push ledger');
+select pg_temp.assert_raises($q$ insert into public.finance_pushed_events (organization_id, device_id, event_id) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000d1', '0a000000-0000-0000-0000-0000000003a2') $q$, 'owner A cannot write the push ledger');
+select pg_temp.assert_raises($q$ update public.finance_pushed_events set outcome = 'pushed' where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot update the push ledger');
+select pg_temp.assert_raises($q$ delete from public.finance_pushed_events where device_id = '0a000000-0000-0000-0000-0000000000d1' $q$, 'owner A cannot delete from the push ledger');
 rollback;
 
 -- ---------- as Branch Manager A (restricted to branch A-2) ----------
@@ -179,6 +189,7 @@ select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organi
 select pg_temp.assert_rows($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e2', '2026-09-02', '0a000000-0000-0000-0000-00000000000c', 'UNEXCUSED', 0, 'HR', 'test') $q$, 1, 'branch manager marks a day in own branch');
 select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where id = '0a000000-0000-0000-0000-0000000002a1' $q$, 0, 'branch manager cannot revoke a mark outside the branch scope');
 select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'connector state is organisation-level (device.view, not branch scoped)');
+select pg_temp.assert_eq((select count(*) from public.finance_pushed_events), 1, 'push ledger is organisation-level (device.view, not branch scoped)');
 rollback;
 
 -- ---------- as Employee (self-service) ----------
@@ -189,6 +200,7 @@ select pg_temp.assert_eq((select count(*) from public.employees), 1, 'employee s
 select pg_temp.assert_eq((select count(*) from public.attendance_daily_records), 1, 'employee sees only own attendance');
 select pg_temp.assert_eq((select count(*) from public.devices), 0, 'employee sees no devices');
 select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 0, 'employee sees no connector state');
+select pg_temp.assert_eq((select count(*) from public.finance_pushed_events), 0, 'employee sees no push ledger');
 select pg_temp.assert_rows($q$ update public.employees set display_name = 'Hacked' where id = '0a000000-0000-0000-0000-0000000000e3' $q$, 0, 'employee cannot update own master record');
 -- e2 reports to this employee, but the `employee` role holds no team key: the relationship alone opens nothing
 select pg_temp.assert_eq((select cardinality(app.team_employee_ids())), 1, 'employee is somebody''s manager (relationship exists)');
@@ -384,6 +396,8 @@ select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organi
 select pg_temp.assert_rows($q$ update public.attendance_day_marks set revoked_at = now(), revoke_reason = 'x' where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'owner B cannot revoke org A marks');
 select pg_temp.assert_eq((select count(*) from public.finance_sync_state), 1, 'owner B sees only own connector state');
 select pg_temp.assert_eq((select count(*) from public.finance_sync_state where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A connector state');
+select pg_temp.assert_eq((select count(*) from public.finance_pushed_events), 1, 'owner B sees only own push ledger');
+select pg_temp.assert_eq((select count(*) from public.finance_pushed_events where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B cannot see org A push ledger');
 rollback;
 
 -- ---------- forged system claim from an authenticated session must NOT work ----------
