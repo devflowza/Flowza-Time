@@ -422,9 +422,21 @@ async function flowCheckIn(flow) {
   });
   flow.cleanup('delete the temporary fence', async () => { expectStatus(await http(hr, 'DELETE', org(`/geofences/${fence.id}`)), 204, 'DELETE geofence'); expectStatus(await http(hr, 'GET', org(`/geofences/${fence.id}`)), 404, 'GET deleted geofence'); return 'deleted'; });
 
+  // The employee may already be checked in when the flow starts: an earlier run, or — in hosted mode during working hours —
+  // the demo tenant's own terminal punches of today. A check-in preview is then (rightly) refused with ALREADY_CHECKED_IN,
+  // so an open check-in is closed first, inside the fence, and the status re-read before anything is asserted.
+  let before = await flow.step('status before punching', 'HTTP 200', async () => expectStatus(await http(employee, 'GET', org('/me/punch/status')), 200, 'status').data);
+  if (before.lastDirection === 'in') {
+    await flow.step('close an open check-in (an earlier run, or a terminal punch of today)', 'HTTP 201', async () => { expectStatus(await http(employee, 'POST', org('/me/punch'), { body: { direction: 'out', channel: 'web', lat: centre.lat, lng: centre.lng, accuracy: 15, idempotencyKey: idemKey('f1-prep-out') } }), 201, 'prep out'); return 'closed'; });
+    before = await flow.step('status after closing it', 'HTTP 200, lastDirection out', async () => {
+      const s = expectStatus(await http(employee, 'GET', org('/me/punch/status')), 200, 'status').data;
+      eq(s.lastDirection, 'out', 'lastDirection');
+      return s;
+    });
+  }
   await flow.step('preview inside the fence', 'verdict allowed, no refusal', async () => {
     const p = expectStatus(await http(employee, 'POST', org('/me/punch/preview'), { body: { direction: 'in', channel: 'web', lat: centre.lat + 0.0003, lng: centre.lng, accuracy: 15 } }), 200, 'preview').data;
-    eq(p.verdict.verdict, 'allowed', 'verdict'); eq(p.verdict.geofenceId, fence.id, 'deciding fence'); eq(p.refusals.length, 0, 'refusals');
+    eq(p.verdict.verdict, 'allowed', 'verdict'); eq(p.verdict.geofenceId, fence.id, 'deciding fence'); eq(p.refusals.length, 0, `refusals (${p.refusals})`);
     return `allowed, ${p.verdict.distanceM} m`;
   });
   await flow.step('preview ~5.5 km outside the fence', 'verdict denied_outside, refusal OUTSIDE_GEOFENCE', async () => {
@@ -432,7 +444,6 @@ async function flowCheckIn(flow) {
     eq(p.verdict.verdict, 'denied_outside', 'verdict'); check(p.refusals.includes('OUTSIDE_GEOFENCE'), `refusals ${p.refusals}`);
     return `${p.verdict.verdict}, ${p.verdict.distanceM} m`;
   });
-  const before = await flow.step('status before punching', 'HTTP 200', async () => expectStatus(await http(employee, 'GET', org('/me/punch/status')), 200, 'status').data);
   await flow.step('punch outside the fence is refused and not stored', '403 OUTSIDE_GEOFENCE, no new punch', async () => {
     const r = await http(employee, 'POST', org('/me/punch'), { body: { direction: before.lastDirection === 'in' ? 'out' : 'in', channel: 'web', lat: centre.lat + 0.05, lng: centre.lng, accuracy: 15, idempotencyKey: idemKey('f1-outside') } });
     expectStatus(r, 403, 'outside punch'); eq(r.details?.reason, 'OUTSIDE_GEOFENCE', 'details.reason');
@@ -440,9 +451,6 @@ async function flowCheckIn(flow) {
     eq(after.punches.length, before.punches.length, 'punches today');
     return '403 OUTSIDE_GEOFENCE';
   });
-  if (before.lastDirection === 'in') {
-    await flow.step('close an open check-in left by an earlier run', 'HTTP 201', async () => { expectStatus(await http(employee, 'POST', org('/me/punch'), { body: { direction: 'out', channel: 'web', lat: centre.lat, lng: centre.lng, accuracy: 15, idempotencyKey: idemKey('f1-prep-out') } }), 201, 'prep out'); return 'closed'; });
-  }
   // the engine attributes a punch to the day whose shift punch window holds it (blueprint §G.3): shortly after midnight that is
   // yesterday's night-side window, so the punches' day is looked for on today and on yesterday
   const punchDays = [S.today, addDays(S.today, -1)];
