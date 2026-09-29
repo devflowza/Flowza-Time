@@ -23,6 +23,8 @@ export function registerMemberRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.post('/invitations/accept', async (c) => ok(c, await members.acceptInvitation(deps, actorOf(c, deps), (await body(c, acceptInvitationSchema)).token)));
   // invitations parity (HR portal Prompt 6b): resend, and FlowZa Time access on an employee profile
   v1.post('/orgs/:orgId/invitations/:id/resend', async (c) => created(c, await members.resendInvitation(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
+  // send the e-mail of the same invitation again after it failed (async: 202 with the queue job id)
+  v1.post('/orgs/:orgId/invitations/:id/send-email', async (c) => c.json({ data: await members.retryInvitationEmail(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id')) }, 202));
   v1.get('/orgs/:orgId/employees/:id/portal-access', async (c) => ok(c, await access.getPortalAccess(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
   v1.post('/orgs/:orgId/employees/:id/portal-access/invite', async (c) => created(c, await access.invitePortalAccess(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await optionalBody(c, portalAccessInviteSchema))));
   v1.post('/orgs/:orgId/employees/:id/portal-access/revoke', async (c) => ok(c, await access.revokePortalAccess(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await optionalBody(c, portalAccessChangeSchema))));

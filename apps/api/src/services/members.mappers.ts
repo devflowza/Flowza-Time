@@ -1,4 +1,4 @@
-import type { InvitationDto, MemberDto } from '@flowza/contracts';
+import { INVITATION_DELIVERY_STATUSES, type InvitationDeliveryStatus, type InvitationDto, type MemberDto } from '@flowza/contracts';
 import { isoDateTime, isoDateTimeOrNull } from '../lib/mappers.js';
 
 export interface MemberRow {
@@ -36,6 +36,13 @@ export interface InvitationRow {
   id: string; organizationId: string; email: string; roleId: string; allBranches: boolean; branchIds: string[]; invitedBy: string | null;
   expiresAt: Date; acceptedAt: Date | null; createdAt: Date; roleName?: string | null; invitedByName?: string | null;
   employeeId?: string | null; employeeNumber?: string | null; deliverySentAt?: Date | null;
+  deliveryStatus?: string; deliveryAttempts?: number; deliveryLastError?: string | null; deliveryLastAttemptAt?: Date | null;
+  deliveryNextAttemptAt?: Date | null; deliveryProvider?: string | null;
+}
+
+/** The column is CHECK-constrained to these values; anything else reads as `none`. */
+function toDeliveryStatus(v: string): InvitationDeliveryStatus {
+  return (INVITATION_DELIVERY_STATUSES as readonly string[]).includes(v) ? (v as InvitationDeliveryStatus) : 'none';
 }
 
 export function toInvitationDto(row: InvitationRow, extra: { token?: string; membershipId?: string | null } = {}): InvitationDto {
@@ -55,6 +62,14 @@ export function toInvitationDto(row: InvitationRow, extra: { token?: string; mem
     acceptedAt: isoDateTimeOrNull(row.acceptedAt),
     createdAt: isoDateTime(row.createdAt),
     ...(row.deliverySentAt !== undefined ? { deliverySentAt: isoDateTimeOrNull(row.deliverySentAt) } : {}),
+    ...(row.deliveryStatus !== undefined ? {
+      deliveryStatus: toDeliveryStatus(row.deliveryStatus),
+      deliveryAttempts: row.deliveryAttempts ?? 0,
+      deliveryLastError: row.deliveryLastError ?? null,
+      deliveryLastAttemptAt: isoDateTimeOrNull(row.deliveryLastAttemptAt ?? null),
+      deliveryNextAttemptAt: isoDateTimeOrNull(row.deliveryNextAttemptAt ?? null),
+      deliveryProvider: row.deliveryProvider ?? null,
+    } : {}),
     ...(extra.token ? { token: extra.token } : {}),
     ...(extra.membershipId !== undefined ? { membershipId: extra.membershipId } : {}),
   };

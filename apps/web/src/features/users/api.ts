@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { EmployeePortalAccessDto, InvitationDto, InviteMemberInput, MemberDto, PermissionDto, PortalAccessInviteInput, PortalAccessResendResultDto, RoleDto, RoleInput, UpdateRoleInput } from '@flowza/contracts';
+import type { EmployeePortalAccessDto, InvitationDto, InvitationEmailQueuedDto, InviteMemberInput, MemberDto, PermissionDto, PortalAccessInviteInput, PortalAccessResendResultDto, RoleDto, RoleInput, UpdateRoleInput } from '@flowza/contracts';
 import type { z } from 'zod';
 import type { updateMemberSchema } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
@@ -13,9 +13,26 @@ export function useMembers(query: ListQuery) {
   const orgId = useOrgId();
   return useQuery({ queryKey: qk.list(orgId, 'members', query), queryFn: () => api.get<PageEnvelope<MemberDto>>(`/orgs/${orgId}/members`, query), placeholderData: keepPreviousData });
 }
-export function useInvitations() {
+/** An open, unexpired invitation whose e-mail the worker is still working on (queued, or retrying after a failed attempt). */
+export function isDeliveryInFlight(inv: Pick<InvitationDto, 'deliveryStatus' | 'expiresAt'>): boolean {
+  return (inv.deliveryStatus === 'queued' || inv.deliveryStatus === 'retrying') && Date.parse(inv.expiresAt) > Date.now();
+}
+
+/** Open invitations. Polls every 5 s while an e-mail is in flight so its status (sent / retrying / failed) shows up on its own. */
+export function useInvitations(enabled = true) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, 'invitations', {}), queryFn: async () => (await api.get<Envelope<InvitationDto[]>>(`/orgs/${orgId}/invitations`)).data });
+  return useQuery({
+    queryKey: qk.list(orgId, 'invitations', {}),
+    enabled,
+    queryFn: async () => (await api.get<Envelope<InvitationDto[]>>(`/orgs/${orgId}/invitations`)).data,
+    refetchInterval: (q) => (q.state.data?.some(isDeliveryInFlight) ? 5_000 : false),
+  });
+}
+
+/** The live copy of one invitation (from the polled list), e.g. to follow its e-mail from the dialog that created it. */
+export function useInvitation(id: string | null | undefined, enabled = true): InvitationDto | undefined {
+  const q = useInvitations(enabled && !!id);
+  return id ? q.data?.find((i) => i.id === id) : undefined;
 }
 export function useRoles() {
   const orgId = useOrgId();
@@ -35,7 +52,9 @@ export function useMemberMutations() {
   const revoke = useMutation({ mutationFn: (id: string) => api.delete<void>(`/orgs/${orgId}/invitations/${id}`), onSuccess: invalidate });
   /** HR portal Prompt 6b (B-67/68): revokes the open token and issues a new 7-day invitation, e-mailed; the answer carries the new link once. */
   const resend = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<InvitationDto>>(`/orgs/${orgId}/invitations/${id}/resend`)).data, onSuccess: invalidate });
-  return { update, suspend, invite, revoke, resend };
+  /** Queue the e-mail of the same invitation again after it failed (202: a queue job; the status on the row follows it). */
+  const sendEmail = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<InvitationEmailQueuedDto>>(`/orgs/${orgId}/invitations/${id}/send-email`)).data, onSuccess: invalidate });
+  return { update, suspend, invite, revoke, resend, sendEmail };
 }
 
 // ----- FlowZa Time access of one employee record (HR portal Prompt 6b, Finance B-69 / B-70 / B-74) -------------------------------

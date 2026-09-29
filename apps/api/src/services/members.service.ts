@@ -1,7 +1,7 @@
 import { type z } from 'zod';
 import { timingSafeEqual } from 'node:crypto';
 import { sql } from 'kysely';
-import { INVITATION_EMAIL_JOB_TYPE, SYSTEM_ROLE_IDS, uuidSchema, type updateMemberSchema, type InviteMemberInput, type InvitationDto, type InvitationPreviewDto, type MemberDto, type MemberListQuery } from '@flowza/contracts';
+import { INVITATION_EMAIL_JOB_TYPE, INVITATION_EMAIL_MAX_ATTEMPTS, SYSTEM_ROLE_IDS, invitationEmailDedupeKey, uuidSchema, type updateMemberSchema, type InviteMemberInput, type InvitationDto, type InvitationEmailQueuedDto, type InvitationPreviewDto, type MemberDto, type MemberListQuery } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { errors, randomToken, sha256Hex } from '@flowza/shared';
@@ -240,6 +240,18 @@ async function membershipByEmail(trx: Trx, orgId: string, email: string): Promis
 }
 
 /**
+ * Queue the e-mail of one invitation inside the caller's transaction (same commit as the state change). One pending job per
+ * invitation (dedupe key): queuing again while one is pending reuses it. The worker records every attempt on the row
+ * (`delivery_status` queued → sent, or retrying → failed after INVITATION_EMAIL_MAX_ATTEMPTS).
+ */
+export async function enqueueInvitationEmail(deps: ApiDeps, trx: Trx, orgId: string, invitationId: string, correlationId: string): Promise<string> {
+  return enqueueJob(deps.queue, trx, {
+    queue: 'notifications', jobType: INVITATION_EMAIL_JOB_TYPE, organizationId: orgId, payload: { organizationId: orgId, invitationId },
+    dedupeKey: invitationEmailDedupeKey(invitationId), correlationId, priority: 3, maxAttempts: INVITATION_EMAIL_MAX_ATTEMPTS,
+  });
+}
+
+/**
  * Insert one invitation (+ an `invited` membership when the invitee already has an account) and queue its e-mail, inside the
  * caller's transaction. The caller has already checked `user.manage`; every rule of the invitation itself lives here:
  * THE member-management rule (member-authority.ts — grantable role, owner-only owner, the caller's branch scope; the
@@ -268,8 +280,8 @@ export async function createInvitation(deps: ApiDeps, trx: Trx, actor: Actor, gr
   // The employee link travels with the invitation so an invitee who has no account yet still lands linked on acceptance.
   const inv = await trx.insertInto('invitations').values({
     organizationId: orgId, email: input.email, roleId: input.roleId, allBranches: input.allBranches, branchIds: input.allBranches ? [] : input.branchIds,
-    employeeId: input.employeeId ?? null, tokenHash: hash, invitedBy: actor.userId, expiresAt,
-  }).returning(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'employeeId', 'invitedBy', 'expiresAt', 'acceptedAt', 'createdAt', 'deliverySentAt']).executeTakeFirstOrThrow();
+    employeeId: input.employeeId ?? null, tokenHash: hash, invitedBy: actor.userId, expiresAt, deliveryStatus: 'queued',
+  }).returning(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'employeeId', 'invitedBy', 'expiresAt', 'acceptedAt', 'createdAt', 'deliverySentAt', 'deliveryStatus', 'deliveryAttempts', 'deliveryLastError', 'deliveryLastAttemptAt', 'deliveryNextAttemptAt', 'deliveryProvider']).executeTakeFirstOrThrow();
 
   // Existing account (visible to us as an org peer or not at all): create the membership up-front as 'invited'.
   let membershipId: string | null = null;
@@ -282,7 +294,7 @@ export async function createInvitation(deps: ApiDeps, trx: Trx, actor: Actor, gr
     if (!input.allBranches) await trx.insertInto('membershipBranches').values(input.branchIds.map((b) => ({ membershipId: m.id, branchId: b }))).execute();
   }
   // B-68: the invitation is e-mailed (same commit as the row: a rolled-back invitation sends nothing)
-  await enqueueJob(deps.queue, trx, { queue: 'notifications', jobType: INVITATION_EMAIL_JOB_TYPE, organizationId: orgId, payload: { organizationId: orgId, invitationId: inv.id }, correlationId: actor.requestId, priority: 3, maxAttempts: 5 });
+  await enqueueInvitationEmail(deps, trx, orgId, inv.id, actor.requestId);
   await audit(trx, actor, orgId, opts.source === 'resend' ? 'member.invitation_resent' : 'member.invited', 'invitation', {
     entityId: inv.id,
     newValue: {
@@ -304,7 +316,7 @@ export async function listInvitations(deps: ApiDeps, actor: Actor, orgId: string
   requirePermission(actor.principal, orgId, 'user.view');
   return runUser(deps.db, actor, async (trx) => {
     const rows = await trx.selectFrom('invitations as i').innerJoin('roles as r', 'r.id', 'i.roleId').leftJoin('userProfiles as u', 'u.id', 'i.invitedBy').leftJoin('employees as e', 'e.id', 'i.employeeId')
-      .select(['i.id', 'i.organizationId', 'i.email', 'i.roleId', 'i.allBranches', 'i.branchIds', 'i.employeeId', 'i.invitedBy', 'i.expiresAt', 'i.acceptedAt', 'i.createdAt', 'i.deliverySentAt', 'r.name as roleName', 'u.fullName as invitedByName', 'e.employeeNumber as employeeNumber'])
+      .select(['i.id', 'i.organizationId', 'i.email', 'i.roleId', 'i.allBranches', 'i.branchIds', 'i.employeeId', 'i.invitedBy', 'i.expiresAt', 'i.acceptedAt', 'i.createdAt', 'i.deliverySentAt', 'i.deliveryStatus', 'i.deliveryAttempts', 'i.deliveryLastError', 'i.deliveryLastAttemptAt', 'i.deliveryNextAttemptAt', 'i.deliveryProvider', 'r.name as roleName', 'u.fullName as invitedByName', 'e.employeeNumber as employeeNumber'])
       .where('i.organizationId', '=', orgId).where('i.acceptedAt', 'is', null).where('i.revokedAt', 'is', null).orderBy('i.createdAt', 'desc').limit(500).execute();
     return rows.map((r) => toInvitationDto(r));
   });
@@ -334,6 +346,31 @@ export async function revokeInvitation(deps: ApiDeps, actor: Actor, orgId: strin
     await assertMayManageMember(trx, actor, grant, invitationTarget(inv), null);
     await revokeInvitationWithin(trx, actor, orgId, inv, 'revoked');
     await audit(trx, actor, orgId, 'member.invitation_revoked', 'invitation', { entityId: id, oldValue: { email: inv.email } });
+  });
+}
+
+/**
+ * Send the e-mail of an open invitation again — the same invitation, no new copy link (a resend issues a new one). For an
+ * invitation whose e-mail failed (every attempt, or refused by the provider) or was never queued; one whose e-mail is queued
+ * or retrying already has a pending job and is refused (409), and a sent one is resent instead. Async: answers the job id.
+ */
+export async function retryInvitationEmail(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<InvitationEmailQueuedDto> {
+  const grant = requirePermission(actor.principal, orgId, 'user.manage');
+  return runUser(deps.db, actor, async (trx) => {
+    const inv = await trx.selectFrom('invitations').select(['id', 'roleId', 'allBranches', 'branchIds', 'expiresAt', 'acceptedAt', 'revokedAt', 'deliveryStatus'])
+      .where('organizationId', '=', orgId).where('id', '=', id).forUpdate().executeTakeFirst();
+    if (!inv || inv.revokedAt) throw errors.notFound('Invitation', id);
+    if (inv.acceptedAt) throw errors.invalidState('The invitation was already accepted.');
+    if (inv.expiresAt.getTime() <= Date.now()) throw errors.invalidState('The invitation has expired. Resend it to issue a new one.');
+    if (inv.deliveryStatus !== 'failed' && inv.deliveryStatus !== 'none') throw errors.conflict('The invitation e-mail is already queued or sent.', { deliveryStatus: inv.deliveryStatus });
+    // only an invitation the caller could have issued (its role and branch scope) is theirs to act on
+    await assertMayManageMember(trx, actor, grant, invitationTarget(inv), null);
+    const row = await trx.updateTable('invitations').set({ deliveryStatus: 'queued', deliveryAttempts: 0, deliveryLastError: null, deliveryNextAttemptAt: null })
+      .where('organizationId', '=', orgId).where('id', '=', id)
+      .returning(['id', 'organizationId', 'email', 'roleId', 'allBranches', 'branchIds', 'employeeId', 'invitedBy', 'expiresAt', 'acceptedAt', 'createdAt', 'deliverySentAt', 'deliveryStatus', 'deliveryAttempts', 'deliveryLastError', 'deliveryLastAttemptAt', 'deliveryNextAttemptAt', 'deliveryProvider']).executeTakeFirstOrThrow();
+    const jobId = await enqueueInvitationEmail(deps, trx, orgId, id, actor.requestId);
+    await audit(trx, actor, orgId, 'member.invitation_email_retried', 'invitation', { entityId: id, newValue: { jobId, previousStatus: inv.deliveryStatus } });
+    return { jobId, status: 'QUEUED', invitation: toInvitationDto(row) };
   });
 }
 

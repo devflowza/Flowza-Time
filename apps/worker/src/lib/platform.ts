@@ -59,13 +59,23 @@ export function createPlatformClients(config: WorkerConfig, log: Logger): { real
   };
 }
 
+/** Resend error names that no retry can fix (the rest — rate limits, 5xx, network — are retried with backoff). */
+const PERMANENT_EMAIL_ERRORS: ReadonlySet<string> = new Set([
+  'validation_error', 'missing_api_key', 'restricted_api_key', 'invalid_api_key', 'not_found', 'method_not_allowed', 'invalid_attachment',
+  'invalid_from_address', 'invalid_access', 'invalid_parameter', 'invalid_region', 'missing_required_field', 'monthly_quota_exceeded', 'security_error',
+]);
+
 export function createMailer(config: WorkerConfig, log: Logger): Mailer {
   if (config.EMAIL_PROVIDER === 'resend' && config.RESEND_API_KEY) {
     const resend = new Resend(config.RESEND_API_KEY);
     return {
       async send(msg) {
         const { data, error } = await resend.emails.send({ from: config.EMAIL_FROM, to: msg.to, subject: msg.subject, html: msg.html, text: msg.text });
-        if (error) throw new Error(`email send failed: ${error.message}`);
+        if (error) {
+          // a message the provider refuses (bad address, unverified sender domain, bad key, quota) fails the same way on every
+          // retry: not retryable, so the job gives up at once and the invitation / delivery reads `failed`
+          throw new AppError('PROVIDER_ERROR', `email send failed: ${error.message}`, { retryable: !PERMANENT_EMAIL_ERRORS.has(error.name), details: { mailer: 'resend', reason: error.name } });
+        }
         return { id: data?.id ?? null, provider: 'resend' };
       },
     };
