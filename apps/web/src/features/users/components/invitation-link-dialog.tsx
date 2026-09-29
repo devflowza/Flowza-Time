@@ -6,6 +6,7 @@ import { fmtDateTime } from '@/lib/format';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { CopyButton } from '@/features/audit/components/copy-button';
 import { invitationUrl } from '@/features/auth/invitation-url';
+import { LiveInvitationDelivery } from './invitation-delivery';
 
 /**
  * A freshly issued invitation (resend, or an invitation from an employee profile): it was e-mailed, and the copy link is shown
@@ -23,6 +24,7 @@ export function InvitationLinkDialog({ invitation, title, onClose }: { invitatio
           <DialogTitle className="flex items-center gap-2"><MailCheck className="size-5 text-emerald-600" /> {title}</DialogTitle>
           <DialogDescription>{t('resend.done', { email: invitation?.email ?? '' })}</DialogDescription>
         </DialogHeader>
+        {invitation ? <LiveInvitationDelivery invitation={invitation} /> : null}
         {link && invitation ? (
           <div className="space-y-2">
             <Label htmlFor="invitation-link">{tc('auth.inviteLinkLabel')}</Label>

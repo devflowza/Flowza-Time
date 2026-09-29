@@ -36,12 +36,35 @@ describe('Invitations list — resend (HR portal Prompt 6b, B-67/68)', () => {
     expect(await screen.findByDisplayValue(/\/auth\/invite\?token=org-1\.new-secret-token-value/)).toBeInTheDocument();
   });
 
+  it('shows the e-mail delivery of each invitation and queues a failed e-mail again', async () => {
+    mockGet({ '/orgs/org-1/invitations': { data: [
+      invitation({ id: 'inv-f', email: 'failed@acme.om', deliverySentAt: null, deliveryStatus: 'failed', deliveryAttempts: 5, deliveryLastError: 'email send failed: The acme.om domain is not verified' }),
+      invitation({ id: 'inv-r', email: 'retry@acme.om', deliverySentAt: null, deliveryStatus: 'retrying', deliveryAttempts: 2, deliveryNextAttemptAt: '2099-10-05T00:00:00Z' }),
+      invitation({ id: 'inv-q', email: 'queued@acme.om', deliverySentAt: null, deliveryStatus: 'queued', deliveryAttempts: 0 }),
+      invitation({ id: 'inv-c', email: 'console@acme.om', deliveryStatus: 'sent', deliveryProvider: 'console' }),
+    ] }, '/orgs/org-1/branches': page([]) });
+    apiMock.post.mockResolvedValue({ data: { jobId: '42', status: 'QUEUED', invitation: invitation({ id: 'inv-f', deliveryStatus: 'queued' }) } });
+    renderWithProviders(<InvitationsTab />);
+    const rows = await screen.findAllByTestId('invitation-row');
+    const [failed, retrying, queued, console] = rows as [HTMLElement, HTMLElement, HTMLElement, HTMLElement];
+    expect(within(failed).getByTestId('invitation-delivery')).toHaveAttribute('data-status', 'failed');
+    expect(failed).toHaveTextContent('E-mail failed');
+    expect(failed).toHaveTextContent('The acme.om domain is not verified');
+    expect(retrying).toHaveTextContent('Attempt 2 of 5 failed — retrying');
+    expect(within(retrying).queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
+    expect(queued).toHaveTextContent('Sending…');
+    expect(console).toHaveTextContent('Not delivered');
+    fireEvent.click(within(failed).getByRole('button', { name: /Retry/ }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/invitations/inv-f/send-email'));
+  });
+
   it('offers no resend or revoke to a user.view-only role', async () => {
     grant('user.view');
-    mockGet({ '/orgs/org-1/invitations': { data: [invitation()] }, '/orgs/org-1/branches': page([]) });
+    mockGet({ '/orgs/org-1/invitations': { data: [invitation({ deliveryStatus: 'failed', deliverySentAt: null })] }, '/orgs/org-1/branches': page([]) });
     renderWithProviders(<InvitationsTab />);
     const row = await screen.findByTestId('invitation-row');
     expect(within(row).queryByRole('button', { name: /Resend/ })).not.toBeInTheDocument();
+    expect(within(row).queryByRole('button', { name: /Retry/ })).not.toBeInTheDocument();
   });
 });
 

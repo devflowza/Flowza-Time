@@ -11,6 +11,7 @@ import { type Actor, runUser, runSystem, audit, PLATFORM_SCOPE_ORG } from '../li
 import { likeContains, pageOf, resolveSort, toCount } from '../lib/pagination.js';
 import { isoDateTime, isoDateTimeOrNull, jsonObject } from '../lib/mappers.js';
 import { ORG_COLUMNS, toOrganizationDto, type OrgRow } from './organizations.mappers.js';
+import { enqueueInvitationEmail } from './members.service.js';
 import { sql } from 'kysely';
 
 type OrgListQuery = z.infer<typeof platformOrgListQuerySchema>;
@@ -96,7 +97,9 @@ export async function createOrganization(deps: ApiDeps, actor: Actor, input: Cre
       // The auth user does not exist yet: hand out an owner invitation (same token format as member invitations).
       const secret = randomToken(32);
       const expiresAt = new Date(Date.now() + INVITATION_TTL_DAYS * 86_400_000);
-      const inv = await trx.insertInto('invitations').values({ organizationId: orgId, email: input.ownerEmail, roleId: SYSTEM_ROLE_IDS.owner, allBranches: true, branchIds: [], tokenHash: sha256Hex(secret), invitedBy: actor.userId, expiresAt }).returning(['id']).executeTakeFirstOrThrow();
+      const inv = await trx.insertInto('invitations').values({ organizationId: orgId, email: input.ownerEmail, roleId: SYSTEM_ROLE_IDS.owner, allBranches: true, branchIds: [], tokenHash: sha256Hex(secret), invitedBy: actor.userId, expiresAt, deliveryStatus: 'queued' }).returning(['id']).executeTakeFirstOrThrow();
+      // the owner gets the invitation by e-mail too (the worker mints its own token; nothing secret is queued)
+      await enqueueInvitationEmail(deps, trx, orgId, inv.id, actor.requestId);
       invitation = { id: inv.id, email: input.ownerEmail, token: `${orgId}.${secret}`, expiresAt: expiresAt.toISOString() };
     }
     await platformAudit(trx, actor, orgId, 'organization.created', 'organization', { entityId: orgId, newValue: { companyCode: input.companyCode, displayName: input.displayName, planKey: input.planKey, ownerEmail: input.ownerEmail, ownerMembershipId, invitationId: invitation?.id ?? null } });
