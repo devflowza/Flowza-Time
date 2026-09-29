@@ -27,3 +27,16 @@ export function notImplemented(providerName: string): ProviderError {
 export function unsupported(operation: string, reason: string): ProviderError {
   return new ProviderError('UNSUPPORTED', `${operation} is not supported: ${reason}`, { retryable: false, details: { operation } });
 }
+
+/**
+ * `details.reason` of the ProviderError a provider raises when it cannot read a stored sync cursor. The worker rewinds a cursor
+ * ONLY on this marker: a missing password, a refused URL or an odd vendor answer (also INVALID_CONFIG / PROTOCOL_ERROR) must
+ * fail the run and keep the cursor, or every unpulled row older than the rewind window would be skipped.
+ */
+export const INVALID_CURSOR_REASON = 'invalid_cursor';
+export function invalidCursor(message: string, details: Record<string, unknown> = {}): ProviderError {
+  return new ProviderError('INVALID_CONFIG', message, { retryable: false, details: { ...details, reason: INVALID_CURSOR_REASON } });
+}
+export function isInvalidCursorError(err: unknown): err is ProviderError {
+  return ProviderError.is(err) && err.details?.['reason'] === INVALID_CURSOR_REASON;
+}

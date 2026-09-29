@@ -5,6 +5,7 @@ import type { DeviceCapabilities, DeviceEmployee } from '@flowza/contracts';
 import { ProviderError, type AttendancePullResult, type ConnectionResult, type DeviceEmployeePage, type DeviceInfo, type DeviceOperationResult, type DeviceProvider, type DeviceStatus, type PageCursor, type ProviderContext, type SyncCursor, type WebhookHandlingResult, type WebhookRequest } from '../../types.js';
 import { MOCK_DEFINITION, MOCK_SCENARIOS, type MockScenario } from './definition.js';
 import { assertTimezone } from '../../protocol-utils.js';
+import { invalidCursor } from '../../errors.js';
 import { countStream, employeeId, employeeName, seqAtOrAfter, sliceStream, unit, type MockStreamConfig } from './stream.js';
 import { handleMockWebhook } from './webhook.js';
 import { createMockPushProtocol } from './push-protocol.js';
@@ -67,12 +68,12 @@ export function parseMockCursor(cursor: SyncCursor | null): MockCursor {
   if (cursor === null) return { lastSeq: 0 };
   const lastSeq = cursor.lastSeq;
   if (typeof lastSeq !== 'number' || !Number.isInteger(lastSeq) || lastSeq < 0) {
-    throw new ProviderError('INVALID_CONFIG', 'Invalid mock cursor: expected { lastSeq: non-negative integer }', { details: { cursor } });
+    throw invalidCursor('Invalid mock cursor: expected { lastSeq: non-negative integer }', { cursor });
   }
   const startDate = cursor.startDate;
   if (startDate === undefined) return { lastSeq };
   if (typeof startDate !== 'string' || !ISO_DATE.test(startDate) || !DateTime.fromISO(startDate, { zone: 'utc' }).isValid) {
-    throw new ProviderError('INVALID_CONFIG', 'Invalid mock cursor: startDate must be YYYY-MM-DD', { details: { cursor } });
+    throw invalidCursor('Invalid mock cursor: startDate must be YYYY-MM-DD', { cursor });
   }
   return { lastSeq, startDate };
 }

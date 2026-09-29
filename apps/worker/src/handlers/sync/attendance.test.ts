@@ -254,6 +254,22 @@ describe('PULL_ATTENDANCE', () => {
     const logs = await h.tdb.adminDb.selectFrom('deviceLogs').select(['event', 'level']).where('deviceId', '=', D.healthy).where('event', '=', 'cursor_reset').execute();
     expect(logs).toEqual([{ event: 'cursor_reset', level: 'warn' }]);
   });
+
+  it('a configuration error (INVALID_CONFIG without the invalid_cursor marker) fails the run and keeps the cursor', async () => {
+    const id = '0a000000-0000-0000-0000-0000000000da';
+    const stored = { v: 1, next: '2026-09-01T00:00:00.000Z' };
+    // http:// is refused by the BioTime adapter outside local development: a config problem, not an unreadable cursor
+    await h.tdb.adminDb.insertInto('devices').values({ id, organizationId: ORG, branchId: BRANCH, code: 'BIOTIME', name: 'BIOTIME', providerKey: 'zkteco_biotime', manufacturer: 'ZKTeco', integrationType: 'ON_PREM_SERVER_API', timezone: 'Asia/Muscat', endpointUrl: 'http://biotime.example.com', config: JSON.stringify({ baseUrl: 'http://biotime.example.com', username: 'api' }), syncIntervalMinutes: 5 }).execute();
+    await h.tdb.adminDb.insertInto('syncCursors').values({ organizationId: ORG, deviceId: id, stream: 'attendance', cursor: JSON.stringify(stored) }).execute();
+    const j = await itemJob(id);
+    await pullAttendance(j.ctx).catch(() => undefined);
+    expect(await item(j.items[0]!.id)).toMatchObject({ lastErrorCode: 'INVALID_CONFIG' });
+    const cursor = await h.tdb.adminDb.selectFrom('syncCursors').selectAll().where('deviceId', '=', id).executeTakeFirstOrThrow();
+    expect(cursor.cursor).toEqual(stored);
+    expect(cursor.invalidSince).toBeNull();
+    const logs = await h.tdb.adminDb.selectFrom('deviceLogs').select('event').where('deviceId', '=', id).where('event', '=', 'cursor_reset').execute();
+    expect(logs).toHaveLength(0);
+  });
 });
 
 describe('sync job roll-up', () => {
