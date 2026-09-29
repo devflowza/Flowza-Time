@@ -192,6 +192,54 @@ describe('device push: ZKTeco iclock protocol', () => {
   });
 });
 
+describe('device push: Hikvision HTTP Listening', () => {
+  const SN = 'DS-K1T341AMF20230101V030500ENK12345678';
+  const tokenPlain = 'hik-token-0123456789abcdef0123456789abcdef';
+  let deviceId: string;
+  beforeAll(async () => {
+    deviceId = await seedDevice(h.admin, f.orgId, f.branchB, { providerKey: 'hikvision_push', integrationType: 'DEVICE_PUSH', serialNumber: SN, pushTokenHash: sha256Hex(tokenPlain), capabilities: { attendancePush: true, devicePush: true }, config: { serialNumber: SN } });
+  });
+  afterAll(async () => { await h.admin.updateTable('devices').set({ status: 'decommissioned' }).where('id', '=', deviceId).execute(); });
+  const url = `/device-push/hikvision/~${tokenPlain}/${SN}`;
+  const event = (sub: number, serialNo: number, time: string, status = 'checkIn') => JSON.stringify({
+    ipAddress: '192.168.1.64', dateTime: time, activePostCount: 1, eventType: 'AccessControllerEvent', eventState: 'active',
+    AccessControllerEvent: { majorEventType: 5, subEventType: sub, name: 'Employee 2', employeeNoString: '1002', serialNo, attendanceStatus: status, FaceRect: { x: 0.1 } },
+  });
+  const multipart = (json: string) => ['--MIME_boundary', 'Content-Disposition: form-data; name="event_log"', 'Content-Type: application/json', '', json,
+    '--MIME_boundary', 'Content-Disposition: form-data; name="Picture"; filename="Picture.jpg"', 'Content-Type: image/jpeg', '', 'JPEGBYTES-FACE', '--MIME_boundary--', ''].join('\r\n');
+  const MP = { 'content-type': 'multipart/form-data; boundary=MIME_boundary' };
+
+  it('ingests a face-pass event in real time, acknowledges door events and replays without duplicates', async () => {
+    const r = await text(url, 'POST', multipart(event(75, 501, '2026-08-04T08:03:00+04:00')), MP);
+    expect(r.status).toBe(200);
+    expect(JSON.parse(r.text)).toMatchObject({ statusCode: 1 });
+    const rows = await h.admin.selectFrom('attendanceRawTransactions').selectAll().where('deviceId', '=', deviceId).execute();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ deviceEmployeeId: '1002', verificationMethod: 'face', direction: 'in', source: 'DEVICE_PUSH', providerKey: 'hikvision_push', providerTransactionId: '501' });
+    expect(rows[0]!.punchedAt.toISOString()).toBe('2026-08-04T04:03:00.000Z');
+    expect(JSON.stringify(rows[0]!.rawPayload)).not.toContain('Employee 2');
+    const again = await text(url, 'POST', multipart(event(75, 501, '2026-08-04T08:03:00+04:00')).replace('"activePostCount":1', '"activePostCount":2'), MP);
+    expect(again.status).toBe(200);
+    const door = await text(url, 'POST', event(21, 502, '2026-08-04T08:03:01+04:00'), { 'content-type': 'application/json' });
+    expect(door.status).toBe(200);
+    expect((await h.admin.selectFrom('attendanceRawTransactions').select('id').where('deviceId', '=', deviceId).execute()).length).toBe(1);
+    const dev = await h.admin.selectFrom('devices').select(['connectionStatus', 'lastHeartbeatAt', 'lastAttendanceSyncAt']).where('id', '=', deviceId).executeTakeFirstOrThrow();
+    expect(dev.connectionStatus).toBe('online');
+    expect(dev.lastAttendanceSyncAt).not.toBeNull();
+    const stored = await h.admin.selectFrom('providerWebhookEvents').select(['payload']).where('deviceId', '=', deviceId).execute();
+    expect(JSON.stringify(stored)).not.toContain('JPEGBYTES'); // the face picture is never persisted
+    expect((await queueJobs(h.admin, 'NORMALIZE_RAW')).some((j) => j.organizationId === f.orgId)).toBe(true);
+  });
+
+  it('refuses a wrong token and does not acknowledge data from an unknown serial', async () => {
+    expect((await text(`/device-push/hikvision/~wrongtoken0000000000000000/${SN}`, 'POST', event(75, 600, '2026-08-04T09:00:00+04:00'), { 'content-type': 'application/json' })).status).toBe(401);
+    const unknown = await text(`/device-push/hikvision/HIK-UNKNOWN-1`, 'POST', event(75, 601, '2026-08-04T09:00:00+04:00'), { 'content-type': 'application/json' });
+    expect(unknown.status).toBe(401);
+    expect((await h.admin.selectFrom('pendingDevices').select('providerKey').where('serialNumber', '=', 'HIK-UNKNOWN-1').executeTakeFirstOrThrow()).providerKey).toBe('hikvision_push');
+    expect((await text('/device-push/hikvision/', 'POST', '{}', { 'content-type': 'application/json' })).status).toBe(400);
+  });
+});
+
 describe('vendor webhooks', () => {
   it('validates token + signature, stores events with replay protection and queues WEBHOOK_EVENT', async () => {
     const r = await h.request('POST', `/api/v1/orgs/${f.orgId}/devices`, { token: f.owner, body: { code: 'WH1', name: 'Cloud device', branchId: f.branchA, providerKey: 'mock', manufacturer: 'FlowZa', config: { scenario: 'healthy', webhookSecret: 'whsec-1' } } });

@@ -255,7 +255,19 @@
     "url": "Push URL",
     "webhookUrl": "Webhook URL",
     "instructions": "Enter the URL and token in the terminal's server settings (or the vendor's webhook configuration). Rotating the token invalidates the previous one immediately.",
-    "rotated": "Push token rotated"
+    "rotated": "Push token rotated",
+    "hikvision": {
+      "title": "Hikvision device settings (HTTP Listening)",
+      "where": "On the terminal's web page open Configuration → Network → Network Service → HTTP(S) Listening (on some firmware: Event → Alarm Server) and enter:",
+      "protocol": "Protocol",
+      "host": "Destination IP / domain",
+      "port": "Port",
+      "path": "URL",
+      "format": "Set the data format to JSON (XML also works on older firmware). Turn picture upload off to save bandwidth — FlowZa discards pictures.",
+      "employeeId": "Enrol each person on the device with Employee ID equal to the employee's device user id in FlowZa, otherwise punches cannot be matched.",
+      "time": "Set the device time zone and NTP; punches without an offset are read in the device time zone configured in FlowZa.",
+      "instructions": "The URL contains the push token: keep it private. Every face, card or fingerprint check-in is sent to FlowZa within seconds. Rotating the token invalidates the previous URL immediately — update the device afterwards."
+    }
   },
   "tags": {
     "placeholder": "Add tag…",
