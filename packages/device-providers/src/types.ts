@@ -124,6 +124,10 @@ export interface DevicePushParseContext { timezone: string; serialNumber: string
 /** Protocol semantics live in the provider package; apps/api only hosts the HTTP route (§E.2). */
 export interface DevicePushProtocolHandler {
   readonly protocolKey: string; // path segment: /device-push/<protocolKey>/*
+  /** Per-serial request budget per minute when the protocol posts once per event (default: the route's generic limit). */
+  readonly maxRequestsPerMinute?: number;
+  /** Path appended to the push URL after the token segment, for protocols whose requests carry no serial of their own. */
+  pushPath?(serialNumber: string): string;
   identifyDevice(req: DevicePushRequest): DevicePushIdentity | null;
   parseInbound(req: DevicePushRequest, ctx: DevicePushParseContext): DevicePushInbound;
   /** Render pending outbound commands into the protocol's response format (employee push/delete…). */

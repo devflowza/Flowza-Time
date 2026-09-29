@@ -4,6 +4,7 @@ import { createPlaceholderProviders } from './providers/placeholders.js';
 import { createMockProvider, type MockProviderOptions } from './providers/mock/mock-provider.js';
 import { FlowzaFinanceProvider, type FlowzaFinanceProviderOptions } from './providers/flowza-finance/provider.js';
 import { ZKTecoPushProvider } from './providers/zkteco/provider.js';
+import { HikvisionPushProvider } from './providers/hikvision/provider.js';
 import { createZkPushProtocol } from './providers/zkteco/push-protocol.js';
 import { ProviderError, type DeviceProvider, type DevicePushProtocolHandler, type ProviderDefinition, type ProviderRegistry } from './types.js';
 
@@ -46,7 +47,7 @@ export interface DefaultRegistryOptions {
   flowzaFinance?: FlowzaFinanceProviderOptions;
 }
 
-/** Every provider FlowZa ships: the simulator, the Flowza Finance connector, the ZKTeco push handler (beta) and the honest placeholders. */
+/** Every provider FlowZa ships: the simulator, the Flowza Finance connector, the ZKTeco and Hikvision push handlers (beta) and the honest placeholders. */
 export function defaultProviders(options: DefaultRegistryOptions = {}): DeviceProvider[] {
   const clock = options.clock;
   const iclock = createZkPushProtocol(); // one handler shared by every ZKTeco-derived provider
@@ -54,6 +55,7 @@ export function defaultProviders(options: DefaultRegistryOptions = {}): DevicePr
     createMockProvider({ ...(clock ? { clock } : {}), ...(options.mock ?? {}) }),
     new FlowzaFinanceProvider({ ...(clock ? { clock } : {}), ...(options.flowzaFinance ?? {}) }),
     new ZKTecoPushProvider({ protocol: iclock, ...(clock ? { clock } : {}) }),
+    new HikvisionPushProvider({ ...(clock ? { clock } : {}) }),
     ...createPlaceholderProviders({ protocol: iclock, ...(clock ? { clock } : {}) }),
   ];
 }
@@ -61,7 +63,7 @@ export const defaultRegistry = (options: DefaultRegistryOptions = {}): ProviderR
 
 /** `sort_order` used by the reference-data migration; unknown keys get 100. */
 export const PROVIDER_SORT_ORDER: Readonly<Record<string, number>> = {
-  mock: 1, flowza_finance: 5, zkteco_push: 10, zkteco_biotime: 11, hikvision_isapi: 20, hikvision_hpp: 21, suprema_biostar2: 30,
+  mock: 1, flowza_finance: 5, zkteco_push: 10, zkteco_biotime: 11, hikvision_push: 19, hikvision_isapi: 20, hikvision_hpp: 21, suprema_biostar2: 30,
   anviz_crosschex_cloud: 40, essl_push: 50, fingertec_push: 60, matrix_cosec: 70, nitgen: 80,
 };
 

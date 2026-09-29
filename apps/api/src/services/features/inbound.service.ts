@@ -26,9 +26,10 @@ export function newClaimCode(): string { let s = ''; for (let i = 0; i < 6; i +=
 export class SerialRateLimiter {
   private readonly hits = new Map<string, number[]>();
   constructor(private readonly max = PER_SERIAL_LIMIT_PER_MINUTE, private readonly windowMs = 60_000) {}
-  allow(serial: string, now = Date.now()): boolean {
+  /** `max` overrides the default budget for protocols that post once per event (DevicePushProtocolHandler.maxRequestsPerMinute). */
+  allow(serial: string, now = Date.now(), max = this.max): boolean {
     const arr = (this.hits.get(serial) ?? []).filter((t) => now - t < this.windowMs);
-    if (arr.length >= this.max) { this.hits.set(serial, arr); return false; }
+    if (arr.length >= max) { this.hits.set(serial, arr); return false; }
     arr.push(now); this.hits.set(serial, arr);
     if (this.hits.size > 50_000) for (const [k, v] of this.hits) if (!v.some((t) => now - t < this.windowMs)) this.hits.delete(k);
     return true;

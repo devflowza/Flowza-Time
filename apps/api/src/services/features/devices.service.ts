@@ -20,14 +20,18 @@ import { DEVICE_COLUMNS, toDeviceCommandDto, toDeviceDto, toDeviceGroupDto, toDe
 
 // ----- providers & models --------------------------------------------------------------------------------------------
 
-/** `provider_<x>` flags gate providers whose key starts with `<x>` (provider_hikvision → hikvision_isapi, hikvision_hpp …). */
+/**
+ * `provider_<x>` flags gate providers whose key starts with `<x>` (provider_hikvision → hikvision_isapi, hikvision_hpp …). The most
+ * specific flag wins, so `provider_hikvision_push` can release one Hikvision provider while `provider_hikvision` keeps the rest hidden.
+ */
 export function providerAllowedByFlags(def: ProviderDefinition, flags: Record<string, boolean>): boolean {
+  let best: { length: number; enabled: boolean } | null = null;
   for (const [key, enabled] of Object.entries(flags)) {
     if (!key.startsWith('provider_')) continue;
     const prefix = key.slice('provider_'.length);
-    if (def.key === prefix || def.key.startsWith(`${prefix}_`)) return enabled;
+    if ((def.key === prefix || def.key.startsWith(`${prefix}_`)) && (best === null || prefix.length > best.length)) best = { length: prefix.length, enabled };
   }
-  return true;
+  return best?.enabled ?? true;
 }
 
 export type DeviceProviderDtoExt = DeviceProviderDto & { secretFields: string[]; throttling: ProviderDefinition['throttling']; supportsWebhook: boolean; pushProtocolKey: string | null };
@@ -110,12 +114,16 @@ export function pushTokenMatches(token: string | undefined | null, hash: string 
   const a = Buffer.from(sha256Hex(token), 'hex'); const b = Buffer.from(hash, 'hex');
   return a.length === b.length && timingSafeEqual(a, b);
 }
-export function pushUrls(deps: ApiDeps, provider: DeviceProvider, deviceId: string, token: string | null): Pick<DevicePushCredentials, 'pushUrl' | 'webhookUrl'> {
+export function pushUrls(deps: ApiDeps, provider: DeviceProvider, deviceId: string, token: string | null, serialNumber?: string | null): Pick<DevicePushCredentials, 'pushUrl' | 'webhookUrl'> {
   const base = deps.config.API_PUBLIC_URL.replace(/\/$/, '');
-  const pushUrl = provider.pushProtocol && provider.definition.integrationType === 'DEVICE_PUSH' && token ? `${base}/device-push/${provider.pushProtocol.protocolKey}/~${token}` : null;
+  const protocol = provider.pushProtocol;
+  // protocols whose requests carry no serial (Hikvision HTTP Listening) get it as a path segment after the token
+  const suffix = protocol?.pushPath && serialNumber ? protocol.pushPath(serialNumber) : '';
+  const pushUrl = protocol && provider.definition.integrationType === 'DEVICE_PUSH' && token ? `${base}/device-push/${protocol.protocolKey}/~${token}${suffix}` : null;
   const webhookUrl = typeof provider.handleWebhook === 'function' && token ? `${base}/webhooks/providers/${provider.definition.key}/${deviceId}/${token}` : null;
   return { pushUrl, webhookUrl };
 }
+const PATH_SERIAL = /^[A-Za-z0-9_-]{1,64}$/;
 function needsToken(p: DeviceProvider): boolean {
   return p.definition.integrationType === 'DEVICE_PUSH' || p.definition.integrationType === 'VENDOR_WEBHOOK' || typeof p.handleWebhook === 'function';
 }
@@ -272,6 +280,8 @@ export async function createDevice(deps: ApiDeps, actor: Actor, orgId: string, i
   const { config, secrets } = splitConfig(def, input.config);
   const serialNumber = input.serialNumber ?? (typeof config.serialNumber === 'string' ? config.serialNumber : undefined);
   if (def.integrationType === 'DEVICE_PUSH' && !serialNumber) throw errors.validation('Push-protocol devices need a serial number.', { issues: [{ path: 'serialNumber', message: 'Required for DEVICE_PUSH providers' }] });
+  // the serial becomes a URL path segment for these protocols; anything the handler would not recognise must be refused now
+  if (provider.pushProtocol?.pushPath && serialNumber && !PATH_SERIAL.test(serialNumber)) throw errors.validation('The serial number may only contain letters, digits, "-" and "_" (max 64).', { issues: [{ path: 'serialNumber', message: 'Invalid characters' }] });
   const token = needsToken(provider) ? newPushToken() : null;
   const created = await runUser(deps.db, actor, async (trx) => {
     await assertProviderEnabled(trx, orgId, def);
@@ -279,7 +289,7 @@ export async function createDevice(deps: ApiDeps, actor: Actor, orgId: string, i
   });
   const stored = await storeSecrets(deps, actor, orgId, created.id, def, secrets);
   const device = await runUser(deps.db, actor, (trx) => loadDeviceRow(trx, orgId, created.id));
-  return { device: toDeviceDto(device, { employeeCount: 0 }), pushToken: token?.token ?? null, ...pushUrls(deps, provider, created.id, token?.token ?? null), credentialsStored: stored.stored, credentialsError: stored.error, testConnectionJobId: created.testJob?.id ?? null };
+  return { device: toDeviceDto(device, { employeeCount: 0 }), pushToken: token?.token ?? null, ...pushUrls(deps, provider, created.id, token?.token ?? null, serialNumber), credentialsStored: stored.stored, credentialsError: stored.error, testConnectionJobId: created.testJob?.id ?? null };
 }
 
 const ENDPOINT_KEYS = ['endpointUrl', 'baseUrl', 'host', 'serverUrl', 'port', 'protocol'];
@@ -346,7 +356,7 @@ export async function rotatePushToken(deps: ApiDeps, actor: Actor, orgId: string
     const token = newPushToken();
     await trx.updateTable('devices').set({ pushTokenHash: token.hash, pushTokenRotatedAt: new Date() }).where('organizationId', '=', orgId).where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'device.push_token_rotated', 'device', { entityId: id, branchId: device.branchId });
-    return { pushToken: token.token, ...pushUrls(deps, provider, id, token.token) };
+    return { pushToken: token.token, ...pushUrls(deps, provider, id, token.token, device.serialNumber) };
   });
 }
 
@@ -650,5 +660,5 @@ export async function claimPending(deps: ApiDeps, actor: Actor, orgId: string, p
     if (typeof info.firmwareVersion === 'string') await trx.updateTable('devices').set({ firmwareVersion: info.firmwareVersion }).where('id', '=', created.id).execute();
   });
   const device = await runUser(deps.db, actor, async (trx) => { await audit(trx, actor, orgId, 'device.claimed', 'device', { entityId: created.id, branchId: input.branchId, newValue: { pendingId, serialNumber: pending.serialNumber, providerKey: def.key } }); return loadDeviceRow(trx, orgId, created.id); });
-  return { device: toDeviceDto(device, { employeeCount: 0 }), pushToken: token?.token ?? null, ...pushUrls(deps, provider, created.id, token?.token ?? null), credentialsStored: false, credentialsError: null, testConnectionJobId: created.testJob?.id ?? null };
+  return { device: toDeviceDto(device, { employeeCount: 0 }), pushToken: token?.token ?? null, ...pushUrls(deps, provider, created.id, token?.token ?? null, pending.serialNumber), credentialsStored: false, credentialsError: null, testConnectionJobId: created.testJob?.id ?? null };
 }

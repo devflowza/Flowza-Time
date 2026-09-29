@@ -147,6 +147,28 @@ licence, NDA or native SDK; covers the MinMoe/K1A families Oman distributors sel
 validated in days with one bench terminal. In parallel start the commercial process for the Hik-Partner Pro cloud-attendance
 API key (true cloud-to-cloud path) and evaluate ISUP 5.0 as phase 2.
 
+**Implemented: `hikvision_push` (ISAPI HTTP Listening, `DEVICE_PUSH`, `beta`)** — part (a) of the recommendation, for real-time
+attendance from MinMoe and other DS-K1T/DS-K1A terminals without VPN or port forwarding:
+
+1. Devices → Add device → *Hikvision ISAPI event push (HTTP Listening)*; enter the serial number (label / System → Device
+   Information). FlowZa issues a push token and shows the device-side values: protocol, host, port and the URL path
+   `/device-push/hikvision/~<push token>/<serial>`.
+2. On the terminal's web page: Configuration → Network → Network Service → HTTP(S) Listening (Event → Alarm Server on some firmware):
+   enter host, port and URL, protocol HTTP/HTTPS, **data format JSON**, picture upload off (FlowZa discards pictures anyway).
+3. Enrol people on the device with **Employee ID = the employee's `device_user_id`** in FlowZa (employee push is not possible on
+   this one-way channel; use the device UI or Hik-Central).
+4. Every successful authentication (major 5; minor face/card/fingerprint/PIN *pass* codes, `HIK_PASS_EVENTS`) becomes a raw
+   punch within seconds: `employeeNoString` → device employee id, `dateTime` (offset honoured, else device time zone), `serialNo`
+   → `provider_transaction_id`, `attendanceStatus` → direction, minor code → verification method. Failed verifications, door,
+   alarm and operation events are acknowledged and dropped. The raw payload is an allowlist (no name, picture, face rectangle,
+   card number, IP). JSON, multipart (`event_log` part) and `EventNotificationAlert` XML bodies are accepted.
+5. Liveness = last post (`config.lastSeenAt`). Terminals are silent between punches, so raise the device's offline threshold
+   (e.g. 12 h) unless the firmware sends heartbeats.
+
+The token is carried in the URL (Hikvision's HTTP host has no HMAC); rotate it from the device page if the URL leaks. The per-serial
+rate limit for this protocol is 600 requests/min because one punch produces several event posts (pass, door unlocked/open/closed).
+Pull/backfill through `AcsEvent` (part b) remains the `hikvision_isapi` placeholder.
+
 **Needs hardware / credentials to verify**
 
 - Everything: register on tpp.hikvision.com and open the ISAPI Access Control wiki pages and the HPP/HCP developer guides.
@@ -383,6 +405,7 @@ Research level is the best level found for that provider's primary path.
 | FlowZa | `mock` | `VENDOR_CLOUD_PULL` (also simulates webhook + device push) | pull yes / push via simulator protocol | yes | yes | yes | yes | yes | yes (simulated, signed) | n/a (`VERIFIED` simulator) | **implemented** (`available`) |
 | ZKTeco | `zkteco_push` | `DEVICE_PUSH` (protocol `iclock`) | pull no / push yes | yes (queued `DATA UPDATE USERINFO`) | yes, asynchronous (`DATA QUERY USERINFO` → OPERLOG) | declared yes | declared yes | declared yes | no | `REPORTED_SECONDARY` | **beta** — protocol handler + provider implemented from public descriptions; **no HTTP route yet**; no hardware run |
 | ZKTeco | `zkteco_biotime` | `ON_PREM_SERVER_API` | pull yes / push no | yes | yes | no | no | yes | no | `VERIFIED_OFFICIAL_DOC` (8.0 manual) | placeholder |
+| Hikvision | `hikvision_push` | `DEVICE_PUSH` (protocol `hikvision`, ISAPI HTTP Listening) | pull no / push yes (real time) | no (one-way channel) | no | yes | yes | yes | no | `REPORTED_SECONDARY` | **beta** — handler + provider + route implemented from public ISAPI descriptions; no hardware run |
 | Hikvision | `hikvision_isapi` | `LAN` | pull yes / push no | yes | yes | yes (+ template push declared) | yes | yes | yes (`httpHosts`, unsigned) | `REPORTED_SECONDARY` | placeholder |
 | Hikvision | `hikvision_hpp` | `VENDOR_CLOUD_PULL` | pull yes / push no | no | no | no | no | no | declared yes — payload UNKNOWN | `REPORTED_SECONDARY` | placeholder (partner credentials required) |
 | Suprema | `suprema_biostar2` | `ON_PREM_SERVER_API` | pull yes / push no | yes | yes | yes (+ template push declared) | yes | yes | no | `VERIFIED_OFFICIAL_DOC` (Postman collection) | placeholder |
@@ -392,8 +415,10 @@ Research level is the best level found for that provider's primary path.
 | Matrix Comsec | `matrix_cosec` | `ON_PREM_SERVER_API` (CENTRA/VYOM) | pull yes / push no | yes | yes | no | no | no | no | `REPORTED_SECONDARY` (PUSH API — a different path than the one modelled) | placeholder |
 | NITGEN | `nitgen` | `ON_PREM_SERVER_API` | pull yes / push no | yes | yes | no | no | no | no | `REPORTED_SECONDARY` (no API found; bridge recommended) | placeholder |
 
-Feature flags gating the wizard (reference data): `provider_zkteco_push` (on, 100 %), `provider_hikvision`,
-`provider_suprema`, `provider_anviz` (all off), `biometric_template_sync` (off, legal review required).
+Feature flags gating the wizard (reference data): `provider_zkteco_push` (on, 100 %), `provider_hikvision_push` (on, 100 %),
+`provider_hikvision`, `provider_suprema`, `provider_anviz` (all off), `biometric_template_sync` (off, legal review required).
+The most specific flag wins: `provider_hikvision_push` releases the push provider while `provider_hikvision` keeps the ISAPI-pull
+and Hik-Partner Pro placeholders hidden.
 
 Known **drift between declared capabilities and the research** that must be resolved before any of these leave
 `placeholder` (see also §8):
@@ -439,6 +464,10 @@ Known **drift between declared capabilities and the research** that must be reso
   `pullAttendance` throws `UNSUPPORTED` (nothing to pull); `listEmployees` throws `UNSUPPORTED` with the `QUERY_USERS` command in
   `details` rather than returning an empty page that would look like "no users"; `upsertEmployee`/`deleteEmployee`/`restart`
   return `async: true` with the protocol commands to persist.
+- **Hikvision event push** (`providers/hikvision/*`, `hikvision_push`, protocol key `hikvision`, `status='beta'`, `REPORTED`):
+  JSON / multipart / XML event decoding, pass-event → `RawTransaction` mapping, heartbeat and GET-probe liveness, pictures and
+  personal fields never stored; the provider derives liveness from `config.lastSeenAt` and honestly throws `UNSUPPORTED` for
+  pull and employee operations (one-way channel). See §2.2 for the device setup.
 - **Placeholders** (`providers/placeholders.ts`): nine definitions with config schemas and declared capabilities so the wizard can
   render them; **every operation throws `ProviderError('NOT_IMPLEMENTED')`** pointing at this document. `essl_push` and
   `fingertec_push` extend `ZKTecoPushProvider` in `mode: 'placeholder'` — they share the `iclock` handler (registry dedupes it) but
@@ -567,6 +596,17 @@ leave `placeholder`. Prerequisites: the `/device-push/iclock/*` route, `device_c
       `pushver`, port 80/90 behaviour, HTTPS support.
 - [ ] Repeat 6.4 and 6.5 per unit. Only if everything passes: switch `EsslPushProvider`/`FingerTecPushProvider` to `mode: 'beta'`,
       set their rows to `beta`/`REPORTED`, and add `device_models` rows for the exact models tested.
+
+### 6.6b Hikvision MinMoe (`hikvision_push`)
+
+- [ ] DS-K1T341/343 and DS-K1T671 on current firmware: HTTP Listening with JSON, HTTPS to a public-CA certificate, custom URL path
+      length (the token path is ~110 characters), multipart vs bare JSON, picture upload off.
+- [ ] Capture face, card, fingerprint and PIN passes plus a failed face: confirm minor codes against `HIK_PASS_EVENTS`,
+      `employeeNoString`, `dateTime` offset, `serialNo` monotonicity across reboot, `attendanceStatus` in attendance mode.
+- [ ] Unplug the network for 10 minutes: does the firmware re-post buffered events (and with `activePostCount` > 1)? Record it.
+- [ ] Heartbeats: does any firmware post `heartBeat` events? If not, document the recommended offline threshold.
+- [ ] Only if everything passes: set `verificationStatus` to `VERIFIED`, promote the provider to `available` and add
+      the exact models tested to `device_models`.
 
 ### 6.7 Security and operations sign-off
 

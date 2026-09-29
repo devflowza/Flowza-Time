@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, Copy, KeyRound } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, Label } from '@/components/ui';
+import { hikvisionListeningFields } from './hikvision-listening';
 
 export interface PushCredentials { pushToken: string | null; pushUrl: string | null; webhookUrl: string | null }
 
@@ -27,6 +28,7 @@ export function PushCredentialsDialog({ credentials, onClose, title }: { credent
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation();
   if (!credentials) return null;
+  const hik = hikvisionListeningFields(credentials.pushUrl);
   return (
     <Dialog open onOpenChange={(o) => !o && onClose()}>
       <DialogContent size="lg">
@@ -38,7 +40,24 @@ export function PushCredentialsDialog({ credentials, onClose, title }: { credent
           {credentials.pushToken ? <CopyField id="push-token" label={t('push.token')} value={credentials.pushToken} /> : null}
           {credentials.pushUrl ? <CopyField id="push-url" label={t('push.url')} value={credentials.pushUrl} /> : null}
           {credentials.webhookUrl ? <CopyField id="webhook-url" label={t('push.webhookUrl')} value={credentials.webhookUrl} /> : null}
-          <div className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{t('push.instructions')}</div>
+          {hik ? (
+            <section aria-labelledby="hik-listening" className="space-y-3 rounded-md border p-3">
+              <h3 id="hik-listening" className="text-sm font-medium">{t('push.hikvision.title')}</h3>
+              <p className="text-xs text-muted-foreground">{t('push.hikvision.where')}</p>
+              <div className="grid gap-3 sm:grid-cols-3">
+                <CopyField id="hik-protocol" label={t('push.hikvision.protocol')} value={hik.protocol} />
+                <CopyField id="hik-host" label={t('push.hikvision.host')} value={hik.host} />
+                <CopyField id="hik-port" label={t('push.hikvision.port')} value={hik.port} />
+              </div>
+              <CopyField id="hik-path" label={t('push.hikvision.path')} value={hik.path} />
+              <ul className="list-disc space-y-1 ps-5 text-xs text-muted-foreground">
+                <li>{t('push.hikvision.format')}</li>
+                <li>{t('push.hikvision.employeeId')}</li>
+                <li>{t('push.hikvision.time')}</li>
+              </ul>
+            </section>
+          ) : null}
+          <div className="rounded-md border border-amber-300/60 bg-amber-50 p-3 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">{t(hik ? 'push.hikvision.instructions' : 'push.instructions')}</div>
         </div>
         <DialogFooter><Button type="button" onClick={onClose}>{tc('common.close')}</Button></DialogFooter>
       </DialogContent>

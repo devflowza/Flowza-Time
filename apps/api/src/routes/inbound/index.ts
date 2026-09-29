@@ -30,7 +30,7 @@ async function readBody(c: Context<AppEnv>): Promise<string | null> {
 }
 
 /**
- * ANY /device-push/:protocolKey/*   — device push protocols (mock, iclock …); see docs/api.md "Inbound".
+ * ANY /device-push/:protocolKey/*   — device push protocols (mock, iclock, hikvision …); see docs/api.md "Inbound".
  * POST /webhooks/providers/:providerKey/:deviceId/:token — vendor cloud webhooks.
  * Responses are protocol text/JSON only; internal errors are never surfaced.
  */
@@ -60,7 +60,7 @@ export function registerInboundRoutes(app: Hono<AppEnv>, deps: ApiDeps): void {
     try { identity = handler.identifyDevice(req); } catch { identity = null; }
     if (!identity) return c.text('device not identified', 400, TEXT);
     const serial = identity.serialNumber;
-    if (!serialLimiter.allow(serial)) { c.header('retry-after', '60'); return c.text('too many requests', 429, TEXT); }
+    if (!serialLimiter.allow(`${protocolKey}:${serial}`, Date.now(), handler.maxRequestsPerMinute)) { c.header('retry-after', '60'); return c.text('too many requests', 429, TEXT); }
     try {
       const candidates = await findPushDevices(deps, handler, serial, requestId);
       if (candidates.length === 0) {
