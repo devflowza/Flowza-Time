@@ -28,4 +28,6 @@ regexes = [
   # explicit placeholders used across docs and examples
   '''replace-me''',
   '''FlowZa-Demo-2026!''',
+  # the temporary super-admin password of supabase/seeds/platform-admin (changed on first sign-in; see its README)
+  '''ChangeMe@FlowZa2026''',
 ]

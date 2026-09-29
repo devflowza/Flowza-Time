@@ -1,0 +1,310 @@
+{
+  "portal": "Admin Portal",
+  "superAdmin": "Super admin",
+  "levels": {
+    "support": "Support",
+    "admin": "Admin",
+    "owner": "Owner"
+  },
+  "mfaOn": "MFA on",
+  "mfaOff": "MFA off",
+  "nav": {
+    "sections": {
+      "people": "People",
+      "business": "Access & plans",
+      "system": "System"
+    },
+    "dashboard": "Dashboard",
+    "tenants": "Tenants",
+    "users": "Users",
+    "team": "Admin team",
+    "grants": "Access grants",
+    "plans": "Plans",
+    "flags": "Feature flags",
+    "activity": "Activity",
+    "health": "System health",
+    "account": "My account",
+    "openApp": "Open FlowZa Time",
+    "signOut": "Sign out",
+    "menu": "Open menu"
+  },
+  "login": {
+    "title": "Admin sign in",
+    "subtitle": "Platform administrators only. Every action is audited.",
+    "heroTitle": "Manage every FlowZa Time tenant from one place.",
+    "heroBody": "Tenants, subscriptions, members, support access and platform health — with multi-factor authentication on every session.",
+    "submit": "Sign in",
+    "invalid": "Invalid email or password.",
+    "notAdmin": "This sign-in is for platform administrators only.",
+    "unreachable": "The API could not be reached. Try again in a moment.",
+    "tenantLogin": "Not an administrator? Go to the FlowZa Time sign-in",
+    "secure": "Secured with MFA",
+    "showPassword": "Show password",
+    "hidePassword": "Hide password"
+  },
+  "gate": {
+    "notAdminTitle": "Not a platform administrator",
+    "notAdminHint": "{{email}} has no platform administrator access. Sign in with an administrator account.",
+    "switchAccount": "Sign in with another account"
+  },
+  "tempPassword": {
+    "banner": "You are signed in with a temporary password. Change it now.",
+    "action": "Change password"
+  },
+  "dashboard": {
+    "title": "Dashboard",
+    "subtitle": "The whole FlowZa Time fleet at a glance.",
+    "tenants": "Tenants",
+    "tenantsHint": "{{count}} new in the last 30 days",
+    "activeSubs": "Active subscriptions",
+    "trialing": "On trial",
+    "users": "User accounts",
+    "employees": "Employees",
+    "devices": "Terminals",
+    "admins": "Platform admins",
+    "grants": "Active support grants",
+    "pendingGrants": "{{count}} awaiting approval",
+    "trialsSoon": "Trials ending in the next 14 days",
+    "trialsSoonEmpty": "No trial ends in the next 14 days.",
+    "endsIn": "ends {{when}}",
+    "recentTenants": "Newest tenants",
+    "byPlan": "Tenants by plan",
+    "byStatus": "Tenants by status",
+    "recentActivity": "Recent platform activity",
+    "activityEmpty": "No platform administrator action yet.",
+    "viewAll": "View all",
+    "newTenant": "New tenant"
+  },
+  "tenants": {
+    "title": "Tenants",
+    "subtitle": "Every organisation on the platform. Open one to edit its details, subscription and account.",
+    "allPlans": "All plans",
+    "allSubscriptions": "All subscriptions",
+    "tags": "Tags",
+    "manager": "Account manager",
+    "people": "People",
+    "unassigned": "Unassigned"
+  },
+  "tenant": {
+    "back": "Tenants",
+    "tabs": {
+      "overview": "Overview",
+      "subscription": "Subscription",
+      "members": "Members",
+      "flags": "Feature flags",
+      "access": "Support access",
+      "notes": "Notes",
+      "activity": "Activity"
+    },
+    "editDetails": "Edit details",
+    "editHint": "Changes are audited on the organisation and visible to its owners.",
+    "saved": "Tenant details saved",
+    "sections": {
+      "identity": "Identity",
+      "locale": "Locale & calendar",
+      "contact": "Contact",
+      "address": "Address"
+    },
+    "fields": {
+      "legalName": "Legal name",
+      "displayName": "Display name",
+      "country": "Country (ISO code)",
+      "timezone": "Timezone (IANA)",
+      "currency": "Currency (ISO code)",
+      "locale": "Default language",
+      "weeklyOff": "Weekly off days",
+      "contactName": "Contact person",
+      "contactEmail": "Contact email",
+      "contactPhone": "Phone",
+      "website": "Website",
+      "line1": "Address line 1",
+      "line2": "Address line 2",
+      "city": "City",
+      "region": "Region / governorate",
+      "postalCode": "Postal code",
+      "addressCountry": "Country (ISO code)"
+    },
+    "locales": {
+      "en": "English",
+      "ar": "Arabic"
+    },
+    "days": {
+      "0": "Sun",
+      "1": "Mon",
+      "2": "Tue",
+      "3": "Wed",
+      "4": "Thu",
+      "5": "Fri",
+      "6": "Sat"
+    },
+    "contact": "Contact",
+    "address": "Address",
+    "noContact": "No contact recorded.",
+    "noAddress": "No address recorded.",
+    "account": {
+      "title": "Account management",
+      "hint": "Platform-only: the tenant never sees these fields.",
+      "manager": "Account manager",
+      "none": "Unassigned",
+      "tags": "Tags",
+      "tagsPlaceholder": "Add a tag and press Enter",
+      "tagsHint": "Up to 20 tags, e.g. enterprise, pilot, partner.",
+      "saved": "Account updated",
+      "removeTag": "Remove {{tag}}"
+    }
+  },
+  "subscription": {
+    "title": "Subscription",
+    "none": "No subscription",
+    "noneHint": "This tenant has no subscription yet. Choose a plan to create one.",
+    "plan": "Plan",
+    "status": "Subscription status",
+    "trialEnds": "Trial ends",
+    "periodStart": "Current period started",
+    "periodEnd": "Current period ends",
+    "cancelAt": "Cancels on",
+    "edit": "Change subscription",
+    "editHint": "Plan and status changes take effect immediately and are audited with your reason.",
+    "extendTrial": "Extend trial",
+    "extendBy": "+{{count}} days",
+    "extended": "Trial extended to {{date}}",
+    "saved": "Subscription updated",
+    "reason": "Reason",
+    "reasonHint": "At least 3 characters, e.g. \"Signed the annual contract\".",
+    "extendReason": "Trial extended by {{count}} days from the admin portal",
+    "clear": "Clear",
+    "dateHint": "Leave empty for no date."
+  },
+  "members": {
+    "title": "Members",
+    "hint": "Everyone with access to this tenant. Directory data only — no employee or attendance records.",
+    "empty": "No members.",
+    "invitations": "Pending invitations",
+    "invitationsEmpty": "No pending invitations.",
+    "role": "Role",
+    "joined": "Joined",
+    "lastLogin": "Last sign-in",
+    "expires": "Expires",
+    "expired": "Expired",
+    "never": "Never",
+    "statuses": {
+      "invited": "Invited",
+      "active": "Active",
+      "suspended": "Suspended"
+    }
+  },
+  "notes": {
+    "title": "Internal notes",
+    "hint": "Visible to platform administrators only. Notes cannot be edited — add a correcting note instead.",
+    "placeholder": "Write a note — a call, an agreement, a follow-up…",
+    "add": "Add note",
+    "added": "Note added",
+    "empty": "No notes yet."
+  },
+  "activity": {
+    "title": "Activity",
+    "subtitle": "Every action a platform administrator took, across all tenants.",
+    "tenantHint": "What platform administrators changed on this tenant.",
+    "when": "When",
+    "actor": "Administrator",
+    "action": "Action",
+    "target": "Tenant",
+    "details": "Details",
+    "reason": "Reason",
+    "platform": "Platform",
+    "filterAction": "Filter by action…",
+    "empty": "No activity.",
+    "before": "Before",
+    "after": "After"
+  },
+  "users": {
+    "title": "Users",
+    "subtitle": "Every FlowZa Time account and the tenants it belongs to.",
+    "searchPlaceholder": "Search email or name…",
+    "all": "All accounts",
+    "adminsOnly": "Platform admins",
+    "nonAdmins": "Tenant users",
+    "email": "Email",
+    "name": "Name",
+    "tenants": "Tenants",
+    "mfa": "MFA",
+    "lastLogin": "Last sign-in",
+    "created": "Created",
+    "memberships": "Memberships",
+    "noMemberships": "This account belongs to no tenant.",
+    "platformRole": "Platform role",
+    "none": "—",
+    "statuses": {
+      "active": "Active",
+      "disabled": "Disabled"
+    }
+  },
+  "team": {
+    "title": "Admin team",
+    "subtitle": "Who can sign in to this portal. Only owners can add administrators or change levels.",
+    "add": "Add administrator",
+    "addHint": "The person must already have a FlowZa Time account (they signed up or accepted an invitation once). They will be asked to set up MFA at their first admin sign-in.",
+    "email": "Email",
+    "level": "Level",
+    "levelHint": "Support and Admin manage tenants; Owners also manage this team.",
+    "added": "{{email}} is now a platform administrator",
+    "updated": "Administrator updated",
+    "you": "You",
+    "grantedBy": "Added by",
+    "since": "Since",
+    "disable": "Disable",
+    "enable": "Enable",
+    "ownerOnly": "Only a platform owner can change the team.",
+    "selfLocked": "You cannot change your own access.",
+    "statuses": {
+      "active": "Active",
+      "disabled": "Disabled"
+    },
+    "disableTitle": "Disable {{email}}?",
+    "disableHint": "They lose access to the admin portal immediately. You can enable them again later."
+  },
+  "grantsPage": {
+    "title": "Access grants",
+    "subtitle": "Time-boxed support access of platform administrators to tenant data. Write access needs a second approver."
+  },
+  "plansPage": {
+    "title": "Plans",
+    "subtitle": "The plan catalogue tenants subscribe to."
+  },
+  "flagsPage": {
+    "title": "Feature flags",
+    "subtitle": "Platform defaults. Tenants can be overridden individually on their Feature flags tab.",
+    "key": "Key",
+    "description": "Description",
+    "default": "Default",
+    "rollout": "Rollout %",
+    "updated": "Updated",
+    "add": "New flag",
+    "addTitle": "New feature flag",
+    "keyHint": "lower_snake_case, e.g. mobile_attendance",
+    "saved": "Feature flag saved",
+    "empty": "No feature flags defined."
+  },
+  "healthPage": {
+    "title": "System health",
+    "subtitle": "Job queue and platform counters, refreshed every 15 seconds."
+  },
+  "account": {
+    "title": "My account",
+    "subtitle": "Your administrator profile and sign-in security.",
+    "profile": "Profile",
+    "email": "Email",
+    "level": "Platform level",
+    "mfa": "Multi-factor authentication",
+    "mfaOn": "Enabled — required for every admin session",
+    "mfaOff": "Not enrolled",
+    "password": "Change password",
+    "passwordHint": "At least 12 characters with upper- and lower-case letters, a digit and a symbol.",
+    "newPassword": "New password",
+    "confirm": "Confirm new password",
+    "mismatch": "The passwords do not match.",
+    "tooWeak": "Use at least 12 characters with upper- and lower-case letters, a digit and a symbol.",
+    "changed": "Password changed",
+    "tempHint": "You are using the temporary password this account was created with."
+  }
+}

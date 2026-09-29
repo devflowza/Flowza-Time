@@ -55,9 +55,9 @@ export function AppShell() {
     return <CreateOrganizationScreen />;
   }
   // A platform admin is let through with no membership on purpose — but the index route is the org-scoped dashboard,
-  // which calls useOrgId() and throws. Send them where they can actually act: the platform console. Below the guard
-  // above so an ordinary member-less user still gets the onboarding screen rather than a 403 from /platform.
-  if (me.data.memberships.length === 0) return <Navigate to="/platform" replace />;
+  // which calls useOrgId() and throws. Send them where they can actually act: the super-admin portal (/adm). Below the
+  // guard above so an ordinary member-less user still gets the onboarding screen rather than the portal's refusal.
+  if (me.data.memberships.length === 0) return <Navigate to="/adm" replace />;
   return (
     <div className="flex min-h-screen">
       <Sidebar />

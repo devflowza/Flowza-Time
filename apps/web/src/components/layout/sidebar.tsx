@@ -128,7 +128,7 @@ export function Sidebar() {
       { to: '/audit', label: t('nav.audit'), icon: FileText, permissions: ['audit.view'] },
     ] },
   ];
-  if (me?.user.isPlatformAdmin) sections.push({ items: [{ to: '/platform', label: t('nav.platform'), icon: Network }] });
+  if (me?.user.isPlatformAdmin) sections.push({ items: [{ to: '/adm', label: t('nav.platform'), icon: Network }] });
   // An item with nested items of its own (/attendance → /attendance/summary) yields to the nested item on that item's paths and
   // stays active on its other sub-paths (/attendance/print is still Attendance) — HR portal Prompt 6a review, minor 15a.
   const navPaths = sections.flatMap((s) => s.items.map((it) => it.to));
