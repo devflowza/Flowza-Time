@@ -1,4 +1,4 @@
--- FlowZa Time · 20260929000400 · Device PIN mappings survive device syncs
+-- FlowZa Time · 20260929000500 · Device PIN mappings survive device syncs
 --
 -- A person maps the device user id a terminal reports with every punch (the "PIN") to an employee on one device: Devices &
 -- punches → PIN mapping, Unmapped punches → Assign, the device's Employees tab and the employee's Devices tab. The mapping is
