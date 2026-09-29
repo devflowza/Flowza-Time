@@ -40,6 +40,8 @@ export const employeeDeviceStateDtoSchema = z.object({
   fingerprintCount: z.number().int(),
   faceEnrolled: z.boolean(),
   cardEnrolled: z.boolean(),
+  /** Set when a person mapped the device user id to the employee on this device (PIN mapping). */
+  mappedAt: isoDateTimeSchema.nullable(),
   updatedAt: isoDateTimeSchema,
 });
 export type EmployeeDeviceStateDto = z.infer<typeof employeeDeviceStateDtoSchema>;

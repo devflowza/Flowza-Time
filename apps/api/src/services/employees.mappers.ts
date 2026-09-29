@@ -50,12 +50,12 @@ export function toHistoryDto(r: HistoryRow): EmploymentHistoryDto {
 
 export interface DeviceStateRow {
   id: string; deviceId: string; deviceCode: string; deviceName: string; branchId: string | null; connectionStatus: string; deviceUserId: string; syncStatus: EmployeeDeviceStateDto['syncStatus']; desired: boolean;
-  lastSyncAt: Date | null; lastSuccessAt: Date | null; lastErrorCode: string | null; lastError: string | null; fingerprintCount: number; faceEnrolled: boolean; cardEnrolled: boolean; updatedAt: Date;
+  lastSyncAt: Date | null; lastSuccessAt: Date | null; lastErrorCode: string | null; lastError: string | null; fingerprintCount: number; faceEnrolled: boolean; cardEnrolled: boolean; mappedAt: Date | null; updatedAt: Date;
 }
 export function toDeviceStateDto(r: DeviceStateRow): EmployeeDeviceStateDto {
   return {
     id: r.id, deviceId: r.deviceId, deviceCode: r.deviceCode, deviceName: r.deviceName, branchId: r.branchId, connectionStatus: r.connectionStatus, deviceUserId: r.deviceUserId, syncStatus: r.syncStatus, desired: r.desired,
-    lastSyncAt: isoDateTimeOrNull(r.lastSyncAt), lastSuccessAt: isoDateTimeOrNull(r.lastSuccessAt), lastErrorCode: r.lastErrorCode, lastError: r.lastError, fingerprintCount: r.fingerprintCount, faceEnrolled: r.faceEnrolled, cardEnrolled: r.cardEnrolled, updatedAt: isoDateTime(r.updatedAt),
+    lastSyncAt: isoDateTimeOrNull(r.lastSyncAt), lastSuccessAt: isoDateTimeOrNull(r.lastSuccessAt), lastErrorCode: r.lastErrorCode, lastError: r.lastError, fingerprintCount: r.fingerprintCount, faceEnrolled: r.faceEnrolled, cardEnrolled: r.cardEnrolled, mappedAt: isoDateTimeOrNull(r.mappedAt), updatedAt: isoDateTime(r.updatedAt),
   };
 }
 

@@ -16,5 +16,9 @@ export const devicesRoutes: RouteObject[] = [
   { path: 'devices', element: wrap(['device.view'], <DevicesListPage />) },
   { path: 'devices/new', element: wrap(['device.create'], <DeviceNewPage />) },
   { path: 'devices/groups', element: wrap(['device.view'], <DeviceGroupsPage />) },
+  // Devices & punches tabs (static segments rank above devices/:id)
+  { path: 'devices/pin-mapping', element: wrap(['device.view', 'employee.view'], <DevicesListPage tab="pins" />) },
+  { path: 'devices/unmapped-punches', element: wrap(['attendance.view_raw'], <DevicesListPage tab="unmapped" />) },
+  { path: 'devices/punch-log', element: wrap(['attendance.view_raw'], <DevicesListPage tab="punches" />) },
   { path: 'devices/:id', element: wrap(['device.view'], <DeviceDetailPage />) },
 ];

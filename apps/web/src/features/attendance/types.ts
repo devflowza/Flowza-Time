@@ -34,6 +34,8 @@ export interface AttendanceEventDto { id: string; punchedAt: string; localDate: 
 export interface RawTransactionDto {
   id: string; deviceId: string | null; deviceName: string | null; providerKey: string; providerTransactionId: string | null; deviceEmployeeId: string | null; employeeId: string | null; employeeName: string | null; punchedAt: string; deviceLocalTime: string | null; assumedTimezone: string | null;
   clockSkewSeconds: number | null; verificationMethod: string | null; direction: string | null; source: string; processingStatus: string; processingError: string | null; processedAt: string | null; receivedAt: string; syncJobId: string | null; deviceGeneration: number; rawPayload: Record<string, unknown>;
+  /** Device code / serial / IANA zone and the employee number (punch log); the dedupe hash identifies the punch across re-deliveries. */
+  deviceCode?: string | null; deviceSerial?: string | null; deviceTimezone?: string | null; employeeNumber?: string | null; dedupeHash?: string;
 }
 export interface RawPage { data: RawTransactionDto[]; meta: { nextCursor: string | null; limit: number } }
 

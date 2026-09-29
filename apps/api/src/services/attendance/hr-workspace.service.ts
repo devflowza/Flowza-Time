@@ -21,6 +21,7 @@ import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.j
 import { loadSettings } from '../../lib/settings.js';
 import { createCorrection } from '../features/attendance.service.js';
 import { systemStep } from '../features/context.js';
+import { mapDevicePin } from '../features/pin-mappings.service.js';
 import { dv } from '../features/sql-helpers.js';
 import { requireDayBranchAccess } from './correction-guards.js';
 
@@ -621,9 +622,10 @@ const ASSIGN_BLOCKED_MESSAGES: Record<UnmatchedAssignBlockedReason, string> = {
 /**
  * POST /attendance/unmatched/assign — map a device user id to an employee on that device and re-queue its unmatched rows.
  * Writes the row the normaliser reads FIRST for a device (`device_employee_states`, before provider identities and
- * employees.device_user_id), so the next normaliser run attributes the punches. A device user id already mapped to someone
- * else, or an employee already mapped to another id on the device, is a conflict — never silently re-pointed. The mapping is
- * `desired` (the person belongs on the device under this id).
+ * employees.device_user_id) through the PIN mapping (`mapDevicePin`: marked `mapped_at`, so device syncs keep it), and the
+ * next normaliser run attributes the punches. A device user id already mapped to someone else, or an employee already mapped
+ * to another id on the device, is a conflict — never silently re-pointed (Devices & punches → PIN mapping can replace). The
+ * mapping is `desired` (the person belongs on the device under this id).
  *
  * Refused (409 INVALID_STATE, `details.reason`) on devices whose punches never go through that mapping (review defect 4): the
  * Flowza Finance connector resolves ONLY by employee number (normalize.ts, finance-identity.ts — review D7 of Prompt 9), the
@@ -641,19 +643,7 @@ export async function assignUnmatched(deps: ApiDeps, actor: Actor, orgId: string
     if (!emp || emp.deletedAt) throw errors.validation('Employee not found.', { issues: [{ path: 'employeeId', message: 'Unknown employee' }] });
     requireBranchAccess(grant, emp.branchId);
     const res = await systemStep(trx, orgId, async (t) => {
-      const states = await t.selectFrom('deviceEmployeeStates').select(['id', 'employeeId', 'deviceUserId']).where('organizationId', '=', orgId).where('deviceId', '=', device.id)
-        .where((eb) => eb.or([eb('deviceUserId', '=', input.deviceEmployeeId), eb('employeeId', '=', emp.id)])).execute();
-      const byUser = states.find((s) => s.deviceUserId === input.deviceEmployeeId);
-      const byEmployee = states.find((s) => s.employeeId === emp.id);
-      if (byUser?.employeeId && byUser.employeeId !== emp.id) throw errors.conflict('This device user is already mapped to another employee on the device.', { employeeId: byUser.employeeId });
-      if (byEmployee && byEmployee.deviceUserId !== input.deviceEmployeeId) throw errors.conflict(`The employee is already mapped to device user ${byEmployee.deviceUserId} on this device.`, { deviceUserId: byEmployee.deviceUserId });
-      let created = false;
-      if (!byUser) {
-        await t.insertInto('deviceEmployeeStates').values({ organizationId: orgId, deviceId: device.id, branchId: device.branchId, deviceUserId: input.deviceEmployeeId, employeeId: emp.id, desired: true, syncStatus: 'IN_SYNC', lastSyncAt: new Date() }).execute();
-        created = true;
-      } else if (!byUser.employeeId) {
-        await t.updateTable('deviceEmployeeStates').set({ employeeId: emp.id, desired: true }).where('id', '=', byUser.id).execute();
-      }
+      const { created } = await mapDevicePin(t, orgId, actor, device, emp.id, input.deviceEmployeeId, false);
       const moved = await sql`update public.attendance_raw_transactions set processing_status = 'pending', processing_error = null, processed_at = null
         where organization_id = ${orgId}::uuid and device_id = ${device.id}::uuid and device_employee_id = ${input.deviceEmployeeId} and processing_status = 'unmatched'`.execute(t);
       const rows = Number(moved.numAffectedRows ?? 0n);

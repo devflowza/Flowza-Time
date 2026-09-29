@@ -121,6 +121,21 @@ function AssignBlocked({ reason, compact = false }: { reason: string; compact?: 
 export default function UnmatchedPunchesPage() {
   const { t } = useTranslation('attendanceWorkspace');
   const { t: ta } = useTranslation('attendance');
+  return (
+    <div className="page-container space-y-4">
+      <PageHeader
+        title={t('unmatched.title')} description={t('unmatched.subtitle')}
+        breadcrumbs={<Link to="/attendance" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3 rtl:rotate-180" /> {ta('title')}</Link>}
+      />
+      <UnmatchedPunchesPanel />
+    </div>
+  );
+}
+
+/** The triage itself — also the "Unmapped punches" tab of Devices & punches (/devices/unmapped-punches). */
+export function UnmatchedPunchesPanel() {
+  const { t } = useTranslation('attendanceWorkspace');
+  const { t: ta } = useTranslation('attendance');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
   const can = useCan();
@@ -158,11 +173,7 @@ export default function UnmatchedPunchesPage() {
   ], [t, ta, tz, status, canAct]);
 
   return (
-    <div className="page-container space-y-4">
-      <PageHeader
-        title={t('unmatched.title')} description={t('unmatched.subtitle')}
-        breadcrumbs={<Link to="/attendance" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"><ArrowLeft className="size-3 rtl:rotate-180" /> {ta('title')}</Link>}
-      />
+    <div className="space-y-4">
       {!canAct ? <p className="text-sm text-muted-foreground">{t('unmatched.readOnly')}</p> : null}
       <Tabs value={status} onValueChange={(v) => table.setFilter('status', v === 'ignored' ? 'ignored' : undefined)}>
         <TabsList aria-label={t('unmatched.title')}>

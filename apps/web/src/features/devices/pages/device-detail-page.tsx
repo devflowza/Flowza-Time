@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft } from 'lucide-react';
-import type { DevicePushCredentials, TestConnectionResultDto } from '@flowza/contracts';
+import { unmatchedAssignBlockedReason, type DevicePushCredentials, type TestConnectionResultDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, ErrorState, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
@@ -97,7 +97,7 @@ export default function DeviceDetailPage() {
             <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
               <TabsList className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`detail.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
               <TabsContent value="overview"><OverviewTab device={d} tz={tz} /></TabsContent>
-              <TabsContent value="employees">{tab === 'employees' ? <EmployeesTab deviceId={d.id} tz={tz} canPush={d.capabilities.employeePush && d.status === 'active'} /> : null}</TabsContent>
+              <TabsContent value="employees">{tab === 'employees' ? <EmployeesTab deviceId={d.id} tz={tz} canPush={d.capabilities.employeePush && d.status === 'active'} canMapPins={unmatchedAssignBlockedReason(d.providerKey) === null && d.status !== 'decommissioned'} /> : null}</TabsContent>
               <TabsContent value="logs">{tab === 'logs' ? <LogsTab deviceId={d.id} tz={tz} /> : null}</TabsContent>
               {isPush ? <TabsContent value="commands">{tab === 'commands' ? <CommandsTab deviceId={d.id} tz={tz} /> : null}</TabsContent> : null}
               <TabsContent value="sync">{tab === 'sync' ? <SyncHistoryTab deviceId={d.id} tz={tz} /> : null}</TabsContent>

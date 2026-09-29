@@ -1,6 +1,6 @@
 import { useMemo } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCommandDto, DeviceCredentialsInput, DeviceDto, DeviceEmployeeSyncStatus, DeviceGroupDto, DeviceGroupInput, DeviceLogDto, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, DeviceSummaryDto, EmploymentStatus, PendingDeviceDto, ProviderThrottling, SyncJobAcceptedDto, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
+import type { ClaimPendingDeviceInput, CreateDeviceInput, CreatePinMappingInput, PinMappingDto, PinMappingResultDto, PinUnmapResultDto, DeviceCommandDto, DeviceCredentialsInput, DeviceDto, DeviceEmployeeSyncStatus, DeviceGroupDto, DeviceGroupInput, DeviceLogDto, DeviceModelDto, DeviceProviderDto, DevicePushCredentials, DeviceSummaryDto, EmploymentStatus, PendingDeviceDto, ProviderThrottling, SyncJobAcceptedDto, TestConnectionInput, TestConnectionResultDto, UpdateDeviceInput } from '@flowza/contracts';
 import type { ComboboxOption } from '@/components/forms';
 import { api, apiFetch, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
@@ -14,7 +14,9 @@ export type DeviceRow = DeviceDto & { hasPushToken?: boolean; consecutiveFailure
 export interface DeviceCreatedDto { device: DeviceDto; pushToken: string | null; pushUrl: string | null; webhookUrl: string | null; credentialsStored: boolean; credentialsError: string | null; testConnectionJobId: string | null }
 export interface DeviceEmployeeStateDto {
   id: string; deviceId: string; employeeId: string | null; employeeNumber: string | null; employeeName: string | null; employmentStatus: EmploymentStatus | null; deviceUserId: string; syncStatus: DeviceEmployeeSyncStatus; desired: boolean;
-  inSync: boolean; deviceOnly: boolean; lastSyncAt: string | null; lastSuccessAt: string | null; lastErrorCode: string | null; lastError: string | null; fingerprintCount: number; faceEnrolled: boolean; cardEnrolled: boolean; deviceRecord: Record<string, unknown> | null; updatedAt: string;
+  inSync: boolean; deviceOnly: boolean; lastSyncAt: string | null; lastSuccessAt: string | null; lastErrorCode: string | null; lastError: string | null; fingerprintCount: number; faceEnrolled: boolean; cardEnrolled: boolean; deviceRecord: Record<string, unknown> | null;
+  /** Set when a person mapped the device user id (PIN) to the employee on this device. */
+  mappedAt: string | null; updatedAt: string;
 }
 export type DeviceAction = 'sync-attendance' | 'sync-employees' | 'health-check' | 'reconcile' | 'restart';
 /** 202 body of POST /devices/:id/actions/:action — same shape as the sync endpoints (status SUCCESS when every item was already in flight). */
@@ -113,4 +115,21 @@ export function useGroupMutations() {
   const addMembers = useMutation({ mutationFn: async ({ id, deviceIds }: { id: string; deviceIds: string[] }) => (await api.post<Envelope<DeviceGroupDto>>(`/orgs/${orgId}/device-groups/${id}/members`, { deviceIds })).data, onSuccess: invalidate });
   const removeMembers = useMutation({ mutationFn: async ({ id, deviceIds }: { id: string; deviceIds: string[] }) => (await apiFetch<Envelope<DeviceGroupDto>>(`/orgs/${orgId}/device-groups/${id}/members`, { method: 'DELETE', body: { deviceIds } })).data, onSuccess: invalidate });
   return { create, update, remove, addMembers, removeMembers };
+}
+
+// ---- PIN mapping (device user id → employee) -------------------------------------------------------------------------------
+
+const PINS = 'pin-mappings';
+export function usePinMappings(query: ListQuery, enabled = true) {
+  const orgId = useOrgId();
+  return useQuery({ queryKey: qk.list(orgId, PINS, query), queryFn: () => api.get<PageEnvelope<PinMappingDto>>(`/orgs/${orgId}/pin-mappings`, query), placeholderData: keepPreviousData, enabled });
+}
+/** A mapping changes who the device's punches belong to: every view of mappings, device users, employees' devices and raw punches refetches. */
+export function usePinMappingMutations() {
+  const orgId = useOrgId();
+  const qc = useQueryClient();
+  const invalidate = () => { for (const entity of [PINS, ENTITY, 'employees', 'attendance-raw', 'attendance-unmatched']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, entity) }); };
+  const create = useMutation({ mutationFn: async (input: CreatePinMappingInput) => (await api.post<Envelope<PinMappingResultDto>>(`/orgs/${orgId}/pin-mappings`, input, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: invalidate });
+  const remove = useMutation({ mutationFn: async (stateId: string) => (await apiFetch<Envelope<PinUnmapResultDto>>(`/orgs/${orgId}/pin-mappings/${stateId}`, { method: 'DELETE' })).data, onSuccess: invalidate });
+  return { create, remove };
 }

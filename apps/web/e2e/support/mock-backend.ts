@@ -835,3 +835,61 @@ export function portalRequestsHandlers(): { get: NonNullable<MockBackendOptions[
     },
   };
 }
+
+/**
+ * Devices & punches (PIN mapping, unmapped punches, punch log): a device-side PIN "2" nobody is mapped to yet, with punches from
+ * the Main gate; the PIN mapping list starts with the employees' default device IDs. POST /pin-mappings maps the PIN (a second
+ * employee on the same PIN is a conflict until replaced), after which the punches come back attributed.
+ */
+export function devicesPunchesHandlers(): { get: NonNullable<MockBackendOptions['get']>; post: NonNullable<MockBackendOptions['post']>; del: NonNullable<MockBackendOptions['del']>; state: { mapped: { employeeId: string; deviceUserId: string } | null } } {
+  const gate = devicesFixture[0]!;
+  const state: { mapped: { employeeId: string; deviceUserId: string } | null } = { mapped: null };
+  const now = Date.now();
+  const at = (minutesAgo: number) => new Date(now - minutesAgo * 60_000).toISOString();
+  const employeeOf = (id: string | null) => employeesFixture.find((e) => e.id === id) ?? null;
+  const punch = (n: number, pin: string, minutesAgo: number, over: Record<string, unknown> = {}) => {
+    const mapped = state.mapped && state.mapped.deviceUserId === pin ? employeeOf(state.mapped.employeeId) : null;
+    const known = typeof over['employeeId'] === 'string' ? employeeOf(over['employeeId']) : mapped;
+    return {
+      id: String(9000 + n), deviceId: gate.id, deviceName: gate.name, deviceCode: gate.code, deviceSerial: 'GN6733356', deviceTimezone: 'Asia/Muscat', providerKey: 'hikvision_push', providerTransactionId: null,
+      deviceEmployeeId: pin, employeeId: known?.id ?? null, employeeName: known?.displayName ?? null, employeeNumber: known?.employeeNumber ?? null, punchedAt: at(minutesAgo), deviceLocalTime: null, assumedTimezone: 'Asia/Muscat',
+      clockSkewSeconds: null, verificationMethod: 'face', direction: n % 2 ? 'in' : 'out', source: 'DEVICE_PUSH', processingStatus: known ? 'normalized' : 'unmatched', processingError: known ? null : 'no employee for device user id',
+      processedAt: at(minutesAgo), receivedAt: at(minutesAgo - 1), syncJobId: null, deviceGeneration: 1, dedupeHash: `c09bdf9aa2bd95f9a17f5b85285${String(n).padStart(5, '0')}`,
+      rawPayload: { eventType: 'AccessControllerEvent', employeeNoString: pin, serialNo: 4200 + n, currentVerifyMode: 'face' }, ...over,
+    };
+  };
+  const salim = employeesFixture[0]!;
+  const punches = () => [punch(1, '2', 20), punch(2, '2', 38), punch(3, '4', 65, { employeeId: salim.id, deviceEmployeeId: salim.deviceUserId }), punch(4, '2', 540)];
+  const mappings = () => [
+    ...(state.mapped ? [{ id: 'device:state-1', scope: 'device', stateId: 'state-1', deviceUserId: state.mapped.deviceUserId, deviceId: gate.id, deviceName: gate.name, deviceCode: gate.code, deviceSerial: 'GN6733356', providerKey: 'hikvision_push', employeeId: state.mapped.employeeId, employeeName: employeeOf(state.mapped.employeeId)!.displayName, employeeNumber: employeeOf(state.mapped.employeeId)!.employeeNumber, employmentStatus: 'active', branchId: gate.branchId, syncStatus: 'IN_SYNC', desired: true, manual: true, mappedAt: at(0), updatedAt: at(0) }] : []),
+    ...employeesFixture.map((e) => ({ id: `default:${e.id}`, scope: 'default', stateId: null, deviceUserId: e.deviceUserId, deviceId: null, deviceName: null, deviceCode: null, deviceSerial: null, providerKey: null, employeeId: e.id, employeeName: e.displayName, employeeNumber: e.employeeNumber, employmentStatus: e.employmentStatus, branchId: e.branchId, syncStatus: null, desired: null, manual: false, mappedAt: null, updatedAt: at(600) })),
+  ];
+  return {
+    state,
+    get: {
+      [`/orgs/${ORG_ID}/pin-mappings`]: () => page(mappings()),
+      [`/orgs/${ORG_ID}/attendance/raw`]: (url: URL) => {
+        const mapping = url.searchParams.get('mapping');
+        const rows = punches().filter((p) => !mapping || (mapping === 'mapped') === (p.employeeId !== null));
+        return { data: rows, meta: { nextCursor: null, limit: Number(url.searchParams.get('limit') ?? 50) } };
+      },
+      [`/orgs/${ORG_ID}/attendance/unmatched`]: () => page(state.mapped ? [] : [{
+        deviceId: gate.id, deviceName: gate.name, deviceCode: gate.code, providerKey: 'hikvision_push', branchId: gate.branchId, branchName: gate.branchName, deviceEmployeeId: '2', status: 'unmatched', count: 3,
+        firstPunchAt: at(540), lastPunchAt: at(20), lastReceivedAt: at(19), suggestions: [], assignBlockedReason: null,
+      }]),
+    },
+    post: {
+      [`/orgs/${ORG_ID}/pin-mappings`]: (body) => {
+        const b = body as { employeeId: string; deviceUserId: string; deviceId: string | null; replace?: boolean };
+        if (state.mapped && state.mapped.deviceUserId === b.deviceUserId && state.mapped.employeeId !== b.employeeId && !b.replace) {
+          return { status: 409, body: { code: 'CONFLICT', message: 'This PIN is already mapped to another employee on the device.', requestId: 'e2e-request', details: { reason: 'PIN_TAKEN', employeeId: state.mapped.employeeId, deviceUserId: b.deviceUserId } } };
+        }
+        state.mapped = { employeeId: b.employeeId, deviceUserId: b.deviceUserId };
+        return { body: { data: { scope: b.deviceId ? 'device' : 'default', employeeId: b.employeeId, deviceId: b.deviceId, deviceUserId: b.deviceUserId, changed: true, previousDeviceUserId: null, rowsRequeued: 3, jobId: '77' } } };
+      },
+    },
+    del: {
+      [`/orgs/${ORG_ID}/pin-mappings/state-1`]: () => { const m = state.mapped; state.mapped = null; return { body: { data: { stateId: 'state-1', deviceId: gate.id, deviceUserId: m?.deviceUserId ?? '2', employeeId: m?.employeeId ?? '', removed: true } } }; },
+    },
+  };
+}

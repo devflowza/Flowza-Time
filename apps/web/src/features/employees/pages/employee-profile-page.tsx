@@ -93,7 +93,7 @@ export default function EmployeeProfilePage() {
               <TabsList className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb} className={tb === 'danger' ? 'data-[state=active]:text-destructive' : undefined}>{t(`profile.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
               <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} />{!isOwn && !e.deletedAt ? <AttendanceGrantsCard employeeId={e.id} /> : null}{!isOwn ? <PortalAccessCard employeeId={e.id} employeeName={e.displayName} /> : null}</TabsContent>
               <TabsContent value="history">{tab === 'history' ? <HistoryTab employeeId={e.id} /> : null}</TabsContent>
-              <TabsContent value="devices">{tab === 'devices' ? <DevicesTab employeeId={e.id} /> : null}</TabsContent>
+              <TabsContent value="devices">{tab === 'devices' ? <DevicesTab employeeId={e.id} employee={{ name: e.displayName, number: e.employeeNumber, deviceUserId: e.deviceUserId }} /> : null}</TabsContent>
               <TabsContent value="attendance">{tab === 'attendance' ? <AttendanceTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="activity">{tab === 'activity' ? <Suspense fallback={<Skeleton className="h-96 w-full" />}><ActivityTab employeeId={e.id} /></Suspense> : null}</TabsContent>
               <TabsContent value="documents">{tab === 'documents' ? <DocumentsTab employeeId={e.id} /> : null}</TabsContent>
