@@ -1,0 +1,65 @@
+name: Migrations
+
+# Cost-trimmed CI (1 of 2, with api-image.yml). Runs only on pull requests that touch the schema or its tooling, never on
+# plain branch pushes. Lint, typecheck, unit/web/API/worker suites, e2e, audit and secret scan no longer run in Actions:
+# run `pnpm verify` and the suites listed in README "Quality gates" locally before merging.
+on:
+  pull_request:
+    paths:
+      - 'supabase/**'
+      - 'scripts/db-reset-local.sh'
+      - 'packages/database/**'
+      - 'pnpm-lock.yaml'
+      - '.github/workflows/migrations.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: migrations-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  PNPM_VERSION: 10.33.0
+  NODE_VERSION: 22
+
+# Note: GitHub's workflow parser rejects `${{ }}` expressions inside YAML flow mappings (`with: { a: ${{ x }} }`),
+# so every `with:` / `env:` that carries an expression is written in block style.
+jobs:
+  migrations:
+    name: Migrations · RLS · generated types
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_HOST_AUTH_METHOD: trust
+        ports:
+          - '54329:5432'
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 5s --health-timeout 5s --health-retries 20
+    env:
+      PGHOST: 127.0.0.1
+      PGPORT: '54329'
+      PGUSER: postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: ${{ env.PNPM_VERSION }}
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+      # The runner image ships a PostgreSQL client; only fall back to apt (slow) if a future image drops it.
+      - run: command -v psql || (sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client)
+      - name: Apply migrations + RLS suites
+        run: bash supabase/tests/run-rls-tests.sh
+      - name: Migration idempotency (second apply on a fresh DB must be identical)
+        run: PGDATABASE=flowza_ci2 bash scripts/db-reset-local.sh >/dev/null && echo ok
+      # Only the database package is installed: codegen needs kysely-codegen, tsx and pg, not the whole workspace.
+      - run: pnpm install --frozen-lockfile --filter "@flowza/database..."
+      - name: Generated types are up to date
+        run: |
+          DATABASE_URL_ADMIN=postgres://postgres@127.0.0.1:54329/flowza_ci2 pnpm --filter @flowza/database run codegen
+          git diff --exit-code -- packages/database/src/generated/db.ts

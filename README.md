@@ -78,8 +78,10 @@ Known limits worth stating: rate limiting and idempotency storage are per API in
 `pnpm verify` runs lint, typecheck, unit tests and builds. `bash supabase/tests/run-rls-tests.sh` and `pnpm test:db`
 prove tenant isolation on a real Postgres; `pnpm --filter @flowza/api test` and `pnpm --filter @flowza/worker test` run the
 API and worker suites against per-file test databases; `pnpm --filter @flowza/web run build:e2e && pnpm --filter @flowza/web
-run test:e2e` runs the Playwright UI suite. CI (`.github/workflows/ci.yml`) runs all of them plus dependency audit and
-secret scanning.
+run test:e2e` runs the Playwright UI suite. To keep GitHub Actions minutes down, CI runs only two checks, and only on pull
+requests whose paths can affect them: `.github/workflows/migrations.yml` (migrations, RLS suites, re-apply, generated types)
+and `.github/workflows/api-image.yml` (API Docker image build). Everything else, including `pnpm audit` and a gitleaks scan,
+is run locally before merging.
 
 ## Licence
 Proprietary — © F & Z Capital. All rights reserved.
