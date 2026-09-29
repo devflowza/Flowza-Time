@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { updateEmployeeSchema } from '@flowza/contracts';
 import { diffEmployee, EFFECTIVE_DATED_FIELDS, toFormValues } from './employee-diff';
 import type { EmployeeDetail } from './api';
 
@@ -38,5 +39,17 @@ describe('employee-diff', () => {
     expect(patch).toEqual({ secondaryManagerEmployeeId: 'm3' });
     expect(EFFECTIVE_DATED_FIELDS.filter((f) => f in patch)).toEqual([]);
     expect(diffEmployee(withSecondary, { ...withSecondary, secondaryManagerEmployeeId: undefined, managerEmployeeId: undefined } as never)).toEqual({ managerEmployeeId: null, secondaryManagerEmployeeId: null });
+  });
+  it('every optional field the form can empty produces a PATCH the API accepts (Save used to fail with "Request validation failed.")', () => {
+    const full = toFormValues({
+      ...employee, middleName: 'bin', displayNameAr: 'علي', dateOfBirth: '1990-05-01', phone: '+968 9000 0000', departmentId: 'dep1', managerEmployeeId: 'm1', secondaryManagerEmployeeId: 'm2',
+      cardNumber: '00123', weeklyOffDays: [5, 6], exitDate: '2026-12-31',
+    });
+    const optional = ['displayName', 'middleName', 'displayNameAr', 'dateOfBirth', 'nationalityCode', 'email', 'phone', 'departmentId', 'designationId', 'managerEmployeeId', 'secondaryManagerEmployeeId', 'cardNumber', 'weeklyOffDays', 'exitDate'] as const;
+    for (const key of optional) {
+      const patch = diffEmployee(full, { ...full, [key]: undefined } as never);
+      expect(patch, key).toEqual({ [key]: null });
+      expect(updateEmployeeSchema.safeParse(patch).success, key).toBe(true);
+    }
   });
 });

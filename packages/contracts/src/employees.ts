@@ -48,8 +48,27 @@ export const createEmployeeSchema = employeeFieldsSchema.extend({
 });
 export type CreateEmployeeInput = z.infer<typeof createEmployeeSchema>;
 
-/** PATCH body: every field optional and NO defaults, so omitted fields are left untouched. */
+/** A field the PATCH may clear: omitted = untouched, `null` = cleared (what the edit form sends for a field the user emptied). */
+const clearable = <T extends z.ZodType>(field: z.ZodOptional<T>) => field.unwrap().nullable().optional();
+
+/**
+ * PATCH body: every field optional and NO defaults, so omitted fields are left untouched. The nullable columns also take
+ * `null` to clear them; the required ones (names, joining date, branch, device user id, …) do not.
+ */
 export const updateEmployeeSchema = employeeFieldsSchema.partial().extend({
+  /** `null` resets the display name to first + last name, as creation does when it is omitted. */
+  displayName: clearable(employeeFieldsSchema.shape.displayName),
+  middleName: clearable(employeeFieldsSchema.shape.middleName),
+  displayNameAr: clearable(employeeFieldsSchema.shape.displayNameAr),
+  dateOfBirth: clearable(employeeFieldsSchema.shape.dateOfBirth),
+  nationalityCode: clearable(employeeFieldsSchema.shape.nationalityCode),
+  email: clearable(employeeFieldsSchema.shape.email),
+  phone: clearable(employeeFieldsSchema.shape.phone),
+  departmentId: clearable(employeeFieldsSchema.shape.departmentId),
+  designationId: clearable(employeeFieldsSchema.shape.designationId),
+  cardNumber: clearable(employeeFieldsSchema.shape.cardNumber),
+  /** `null` = no personal weekly off days: inherit from the branch / organisation. */
+  weeklyOffDays: clearable(employeeFieldsSchema.shape.weeklyOffDays),
   exitDate: isoDateSchema.nullable().optional(),
   /** When branch/department/designation/manager/type/status change, the effective date of the change (defaults to today). */
   effectiveFrom: isoDateSchema.optional(),
