@@ -58,13 +58,14 @@ to "now"), so days already loaded regenerate byte-identical rows that the dedupe
 last load are logins, two e-mail addresses and the secondary managers, none of which feeds punch generation. Nobody had
 used the demo tenant since 27 Sep (only system jobs in the audit log), so the 03b upserts reset nothing a person had done.
 
-**The recalculation** of 1 Mar → 29 Sep (53 employees × 213 days) started at 11:31 UTC; 11,000 employee-days were recomputed,
-6 changed, no errors. It ran as six attempts of a three-attempt job: the worker deploys at 11:57 and 13:03 (§3) stopped the
+**The recalculation** of 1 Mar → 29 Sep started at 11:31 UTC and recomputed all 11,289 employee-days (53 employees × 213
+days) with no errors. It ran as six attempts of a three-attempt job: the worker deploys at 11:57 and 13:03 (§3) stopped the
 first two, and from 13:32 each attempt's one-hour lock expired while it was still running, so a new attempt started next to it
-every hour (§9). Executions finished at 17:20, 18:23 and 19:18 UTC, each marking the request COMPLETED and auditing it again;
-the last one ends at about 20:20. Until then the request keeps reading COMPLETED while its progress summary jumps back to
-whatever that execution has reached. The monthly summaries were rebuilt after the first completion (six
-`BUILD_PERIOD_SUMMARY` jobs, done at 18:49 UTC); September's is of a month still in progress.
+every hour (§9). Executions finished at 17:20, 18:23, 19:18 and 20:20 UTC, each marking the request COMPLETED and auditing it
+again (four audit entries); in between, the request read COMPLETED while its progress figure jumped back to whatever the
+next execution had reached. It has been settled since 20:20: COMPLETED, 11,289 employee-days, no errors, no job running.
+The monthly summaries were rebuilt after the first completion (six `BUILD_PERIOD_SUMMARY` jobs, done at 18:49 UTC);
+September's is of a month still in progress.
 
 ## 3. API and worker
 
@@ -201,13 +202,14 @@ about four hours on the hosted topology, so every such run was started again eac
 |---|---|---|---|
 | 9 Sep (6248) | 3 | `LOCK_EXPIRED` | 00:22 → 05:28 |
 | 27 Sep (284064) | 3 | `LOCK_EXPIRED` | 08:03 → 13:11 |
-| 29 Sep (316173) | 6 | `LOCK_EXPIRED` | 11:19 → 17:20 first completion (then 18:23, 19:18, one still running) |
+| 29 Sep (316173) | 6 | `LOCK_EXPIRED` | 11:19 → 17:20 first completion, then again at 18:23, 19:18 and 20:20 |
 
 On 29 Sep the first two attempts were stopped by the worker deploys and the next four ran side by side. Consequences: the
 same work done up to four times at once (load on the database); `jobs.reap_stale` ignored `max_attempts`, so the attempt
 count ran past its maximum; a superseded execution could still complete, fail or reschedule the job; and each execution
-wrote the request's progress and outcome over the others — the request read COMPLETED with 8,000 of 11,000 days
-recomputed, carried three audit entries, and its `finished_at` moved with every execution. Any job type can hit this once it outlives its lock (imports, large reports, day close on a big tenant).
+wrote the request's progress and outcome over the others — the request read COMPLETED with 8,000 of 11,289 days
+recomputed, ended with four audit entries, and its `finished_at` moved with every execution. Any job type can hit this once
+it outlives its lock (imports, large reports, day close on a big tenant).
 
 **A second, older defect** turned up in the same code: the dedupe index is unique over *pending* jobs only (a job enqueued
 while its twin runs waits as the next run), so moving the running twin back to `pending` — a retry in `jobs.fail`, or a reap
