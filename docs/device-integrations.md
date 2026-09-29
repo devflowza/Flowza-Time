@@ -404,30 +404,34 @@ Research level is the best level found for that provider's primary path.
 |---|---|---|---|---|---|---|---|---|---|---|---|
 | FlowZa | `mock` | `VENDOR_CLOUD_PULL` (also simulates webhook + device push) | pull yes / push via simulator protocol | yes | yes | yes | yes | yes | yes (simulated, signed) | n/a (`VERIFIED` simulator) | **implemented** (`available`) |
 | ZKTeco | `zkteco_push` | `DEVICE_PUSH` (protocol `iclock`) | pull no / push yes | yes (queued `DATA UPDATE USERINFO`) | yes, asynchronous (`DATA QUERY USERINFO` → OPERLOG) | declared yes | declared yes | declared yes | no | `REPORTED_SECONDARY` | **beta** — protocol handler + provider implemented from public descriptions; **no HTTP route yet**; no hardware run |
-| ZKTeco | `zkteco_biotime` | `ON_PREM_SERVER_API` | pull yes / push no | yes | yes | no | no | yes | no | `VERIFIED_OFFICIAL_DOC` (8.0 manual) | placeholder |
+| ZKTeco | `zkteco_biotime` | `ON_PREM_SERVER_API` | pull yes (sliding punch-time window, id dedupe) / push no | yes | yes | no | no | yes (+ PIN) | no | `VERIFIED_OFFICIAL_DOC` (8.0 manual) | **beta** — REST adapter (`providers/zkteco-biotime`), mock-server tested; no live server run |
 | Hikvision | `hikvision_push` | `DEVICE_PUSH` (protocol `hikvision`, ISAPI HTTP Listening) | pull no / push yes (real time) | no (one-way channel) | no | yes | yes | yes | no | `REPORTED_SECONDARY` | **beta** — handler + provider + route implemented from public ISAPI descriptions; no hardware run |
-| Hikvision | `hikvision_isapi` | `LAN` | pull yes / push no | yes | yes | yes (+ template push declared) | yes | yes | yes (`httpHosts`, unsigned) | `REPORTED_SECONDARY` | placeholder |
+| Hikvision | `hikvision_isapi` | `LAN` (Digest) | pull yes (`AcsEvent`, `serialNo`) / push no | yes (`UserInfo`, card best-effort) | yes | yes (verification only, no templates) | yes (verification only) | yes | no (`hikvision_push` covers events) | `REPORTED_SECONDARY` | **beta** — ISAPI adapter (`providers/hikvision-isapi`), shares event mapping with `hikvision_push`; no hardware run |
 | Hikvision | `hikvision_hpp` | `VENDOR_CLOUD_PULL` | pull yes / push no | no | no | no | no | no | declared yes — payload UNKNOWN | `REPORTED_SECONDARY` | placeholder (partner credentials required) |
-| Suprema | `suprema_biostar2` | `ON_PREM_SERVER_API` | pull yes / push no | yes | yes | yes (+ template push declared) | yes | yes | no | `VERIFIED_OFFICIAL_DOC` (Postman collection) | placeholder |
-| Anviz | `anviz_crosschex_cloud` | `VENDOR_CLOUD_PULL` | pull yes / push no | declared yes — research says UNKNOWN | declared yes — UNKNOWN | no | no | yes | declared no — research says webhooks exist (reported) | `REPORTED_SECONDARY` | placeholder |
-| eSSL | `essl_push` | `DEVICE_PUSH` (shares `iclock` handler) | pull no / push yes | yes | yes | yes | yes | yes | no | `REPORTED_SECONDARY` | placeholder (handler shared, every operation throws until hardware-verified) |
-| FingerTec | `fingertec_push` | `DEVICE_PUSH` (shares `iclock` handler) | pull no / push yes | yes | yes | yes | yes | yes | no | `UNKNOWN` (push path) / `REPORTED_SECONDARY` (TimeTec API, not modelled) | placeholder |
-| Matrix Comsec | `matrix_cosec` | `ON_PREM_SERVER_API` (CENTRA/VYOM) | pull yes / push no | yes | yes | no | no | no | no | `REPORTED_SECONDARY` (PUSH API — a different path than the one modelled) | placeholder |
-| NITGEN | `nitgen` | `ON_PREM_SERVER_API` | pull yes / push no | yes | yes | no | no | no | no | `REPORTED_SECONDARY` (no API found; bridge recommended) | placeholder |
+| Suprema | `suprema_biostar2` | `ON_PREM_SERVER_API` | pull yes (event id cursor) / push no | yes (+ PIN; card not applied) | yes | yes (verification only, no templates) | yes (verification only) | no | no | `VERIFIED_OFFICIAL_DOC` (Postman collection) | **beta** — REST adapter (`providers/suprema-biostar2`), mock-server tested; no live server run |
+| Anviz | `anviz_crosschex_cloud` | `VENDOR_CLOUD_PULL` | pull yes (7-day windows, 2 h overlap) / push no | no (UNKNOWN) | no (UNKNOWN) | no | no | no | no (reported to exist; payload/signature UNKNOWN) | `REPORTED_SECONDARY` | **beta** — Open API adapter (`providers/anviz-crosschex`), attendance only; no live account run |
+| eSSL | `essl_push` | `DEVICE_PUSH` (shares `iclock` handler) | pull no / push yes | yes | yes | yes | yes | yes | no | `REPORTED_SECONDARY` | **beta** — same code path as `zkteco_push` (`providers/zkteco/derived.ts`); no hardware run |
+| FingerTec | `fingertec_push` | `DEVICE_PUSH` (shares `iclock` handler) | pull no / push yes | yes | yes | yes | yes | yes | no | `UNKNOWN` (push path) / `REPORTED_SECONDARY` (TimeTec API, not modelled) | **beta** / `UNVERIFIED` — same code path as `zkteco_push`; which FingerTec firmware pushes iclock directly is unconfirmed |
+| Matrix Comsec | `matrix_cosec` | `LAN` (device API `device.cgi`, Basic/Digest) | pull yes (roll-over + sequence cursor) / push no | yes (numeric user ids, card, PIN) | no (no list call) | no | no | yes | no | `REPORTED_SECONDARY` (DAPI, community clients) | **beta** — device-API adapter (`providers/matrix-cosec`); no hardware run |
+| NITGEN | `nitgen` | `ON_PREM_SERVER_API` | pull yes / push no | yes | yes | no | no | no | no | `REPORTED_SECONDARY` (no API found; bridge recommended) | placeholder — nothing to build against without a bridge agent |
 
-Feature flags gating the wizard (reference data): `provider_zkteco_push` (on, 100 %), `provider_hikvision_push` (on, 100 %),
-`provider_hikvision`, `provider_suprema`, `provider_anviz` (all off), `biometric_template_sync` (off, legal review required).
-The most specific flag wins: `provider_hikvision_push` releases the push provider while `provider_hikvision` keeps the ISAPI-pull
-and Hik-Partner Pro placeholders hidden.
+Feature flags gating the wizard (reference data): `provider_zkteco_push`, `provider_hikvision_push`, `provider_hikvision_isapi`,
+`provider_suprema_biostar2`, `provider_anviz_crosschex_cloud` (on, 100 %); `provider_hikvision`, `provider_suprema`, `provider_anviz`
+(off); `biometric_template_sync` (off, legal review required). The most specific flag wins: the provider-level flags release the
+implemented adapters while `provider_hikvision` keeps the Hik-Partner Pro placeholder hidden.
 
-Known **drift between declared capabilities and the research** that must be resolved before any of these leave
-`placeholder` (see also §8):
+**Reachability of server/device API adapters.** `zkteco_biotime`, `suprema_biostar2`, `hikvision_isapi` and `matrix_cosec` are
+called by the worker through the egress guard (`packages/device-providers/src/vendor-http.ts` → `egress.ts`): https only, public
+addresses only, trusted certificates only, no redirects. A server or terminal on a customer LAN therefore needs a published https
+address (reverse proxy / port forward with a real certificate) or a VPN egress; self-signed certificates fail as a TLS error
+(`DEVICE_OFFLINE`). TLS verification is never disabled. `FLOWZA_ALLOW_PRIVATE_EGRESS` relaxes the rule for local development only.
 
-1. `anviz_crosschex_cloud` declares `employeePush/employeePull/employeeDelete = true` and `webhooks = false`; the research
-   has employee endpoints as UNKNOWN and webhooks as reported-existing. The recommended honest definition is the inverse.
+Remaining **drift between declared capabilities and the research** (see also §8):
+
+1. ~~`anviz_crosschex_cloud` employee/webhook capabilities~~ — resolved: attendance pull only, employees and webhooks `false`.
 2. `hikvision_hpp` declares `webhooks = true`; the callback payload and registration are UNKNOWN.
-3. `matrix_cosec` models the CENTRA/VYOM server API (auth UNKNOWN); the research recommends the device PUSH API instead,
-   which would be a `DEVICE_PUSH` provider with its own protocol handler.
+3. ~~`matrix_cosec` models the CENTRA/VYOM server API~~ — resolved: re-modelled as the device API (`LAN`). The PUSH API
+   (`DEVICE_PUSH`) remains the research's recommended cloud-first path and is still to be built.
 4. `nitgen` models a "Server URL + API key" that does not exist in the research; the realistic path is a bridge agent.
 5. `fingertec_push` is modelled only as a ZKTeco-derived push device; the research's recommended first path (TimeTec TA SOAP
    API, `VENDOR_CLOUD_PULL`) is not modelled at all.
@@ -468,10 +472,29 @@ Known **drift between declared capabilities and the research** that must be reso
   JSON / multipart / XML event decoding, pass-event → `RawTransaction` mapping, heartbeat and GET-probe liveness, pictures and
   personal fields never stored; the provider derives liveness from `config.lastSeenAt` and honestly throws `UNSUPPORTED` for
   pull and employee operations (one-way channel). See §2.2 for the device setup.
-- **Placeholders** (`providers/placeholders.ts`): nine definitions with config schemas and declared capabilities so the wizard can
-  render them; **every operation throws `ProviderError('NOT_IMPLEMENTED')`** pointing at this document. `essl_push` and
-  `fingertec_push` extend `ZKTecoPushProvider` in `mode: 'placeholder'` — they share the `iclock` handler (registry dedupes it) but
-  their provider operations still throw until hardware is verified.
+- **Shared vendor HTTP client** (`vendor-http.ts`): every server/device API adapter calls out through it — egress guard (https,
+  public addresses, DNS pinning, no redirects, body cap, timeouts), `ctx.acquire()` per request, HTTP status → `ProviderError`
+  with generic messages (vendor error text is logged bounded, never returned), and RFC 7616 Digest (MD5/MD5-sess, `qop=auth`).
+- **eSSL / FingerTec push** (`providers/zkteco/derived.ts`, `beta`): `ZKTecoPushProvider` in `mode: 'beta'` with their own keys;
+  the registry dedupes the shared `iclock` handler and the inbound route resolves devices of every provider using it.
+- **ZKBio Time** (`providers/zkteco-biotime`, `beta`): JWT login (`/jwt-api-token-auth/`, fallback `/api-token-auth/`), in-memory
+  token cache keyed by a hash of the credentials, `/iclock/api/transactions/` as a frozen-window scan with `lateArrivalHours`
+  overlap (BioTime `id` = `providerTransactionId`), `/personnel/api/employees/` CRUD, `/iclock/api/terminals/` status.
+- **Suprema BioStar 2** (`providers/suprema-biostar2`, `beta`): `bs-session-id` login, `/api/events/search` by `id > lastId`
+  keeping authentication-success event codes only, `/api/users` CRUD (cards and admin level not applied — reported in
+  `details.notApplied`), `/api/devices` status.
+- **Hikvision ISAPI** (`providers/hikvision-isapi`, `beta`): Digest, `AcsEvent` search mapped through the push module's own
+  `mapEvent` (identical classification to `hikvision_push`), `UserInfo` Search/Record/Modify/Delete, best-effort `CardInfo`,
+  `System/deviceInfo`, `System/time` (clock skew), `System/reboot`. A rejected password is never retried (device lockout).
+- **Anviz CrossChex Cloud** (`providers/anviz-crosschex`, `beta`): token envelope API, `attendance.record/getrecord` in 7-day
+  windows with 2 h overlap; employee and device operations `UNSUPPORTED` (undocumented).
+- **Matrix COSEC device API** (`providers/matrix-cosec`, `beta`): `device.cgi` with Basic (Digest when challenged), events by
+  (roll-over count, sequence number), user set/delete with numeric user ids, device clock and user count.
+- **Placeholders** (`providers/placeholders.ts`): `hikvision_hpp` and `nitgen` only — **every operation throws
+  `ProviderError('NOT_IMPLEMENTED')`** pointing at this document.
+- **Cursor rewind rule** (worker `PULL_ATTENDANCE`): a stored cursor is rewound only when the provider raises the
+  `invalid_cursor` marker (`invalidCursor()` / `isInvalidCursorError()` in `errors.ts`); any other `INVALID_CONFIG` or
+  `PROTOCOL_ERROR` fails the run and keeps the cursor.
 
 ### Not implemented (do not describe these as working)
 
@@ -480,9 +503,12 @@ Known **drift between declared capabilities and the research** that must be reso
   today**, including ZKTeco. The handler is a library waiting for its host.
 - **No `device_commands` persistence flow, no stamp persistence, no `lastSeenAt` maintenance** — all of these are
   responsibilities the push route/worker must implement around the handler (the handler is deliberately stateless).
-- **No worker sync handlers wired to providers** yet (`apps/worker/src/handlers/index.ts` is a skeleton).
-- **No vendor adapter other than the ZKTeco push handler has a single line of protocol code.** BioTime, ISAPI, HPP,
-  BioStar 2, CrossChex, COSEC, NITGEN are definitions only.
+- **Hik-Partner Pro and NITGEN** are definitions only (no public API / partner signing; NITGEN needs a bridge agent).
+- **No live vendor system behind the new adapters.** BioTime, BioStar 2, ISAPI, CrossChex and COSEC were built from the documents
+  and open-source clients cited in §2 and tested against in-process mocks (`providers/*/mock-server.ts`). Fields marked REPORTED
+  in their source (event codes, punch-state / verify-type tables, COSEC `getcurrentseqnumber` / `date-time` field names, the
+  CrossChex envelope encoding — JSON here, form-encoded in both open-source clients) must be confirmed on a live system (§6.6c).
+- **No LAN connector agent.** On-prem servers and LAN terminals must be reachable over public https with a trusted certificate.
 - **No biometric template handling anywhere** (by design; flag off).
 - **No hardware has ever been connected.** The ZKTeco handler's field mappings, status/verify codes, handshake format and
   command grammar come from open-source servers and search excerpts of the official (blocked) PUSH SDK PDFs — see the header
@@ -594,8 +620,9 @@ leave `placeholder`. Prerequisites: the `/device-push/iclock/*` route, `device_c
 
 - [ ] Point the eSSL and FingerTec units at the same endpoint; capture handshake, ATTLOG, OPERLOG; note `.aspx` variants,
       `pushver`, port 80/90 behaviour, HTTPS support.
-- [ ] Repeat 6.4 and 6.5 per unit. Only if everything passes: switch `EsslPushProvider`/`FingerTecPushProvider` to `mode: 'beta'`,
-      set their rows to `beta`/`REPORTED`, and add `device_models` rows for the exact models tested.
+- [ ] Repeat 6.4 and 6.5 per unit. Both already run in `beta` on the `zkteco_push` code path (migration 20260929000200). Only if
+      everything passes: set `verificationStatus` to `VERIFIED` (FingerTec first to `REPORTED`), promote to `available`, and add
+      `device_models` rows for the exact models tested.
 
 ### 6.6b Hikvision MinMoe (`hikvision_push`)
 
@@ -607,6 +634,17 @@ leave `placeholder`. Prerequisites: the `/device-push/iclock/*` route, `device_c
 - [ ] Heartbeats: does any firmware post `heartBeat` events? If not, document the recommended offline threshold.
 - [ ] Only if everything passes: set `verificationStatus` to `VERIFIED`, promote the provider to `available` and add
       the exact models tested to `device_models`.
+
+### 6.6c Server / device API adapters (`zkteco_biotime`, `suprema_biostar2`, `hikvision_isapi`, `anviz_crosschex_cloud`, `matrix_cosec`)
+
+- [ ] Per adapter, against a live server/terminal behind a trusted https address: `testConnection`, a first pull (30-day default),
+      an incremental pull, a punch uploaded late (after the overlap window), employee create/update/delete where supported.
+- [ ] BioTime 8.x and 9.x (API licence), `punch_state` / `verify_type` tables, list ordering.
+- [ ] BioStar 2 event row schema and success event codes, "user not found" status, session reuse with simultaneous-login settings.
+- [ ] ISAPI `AcsEvent` page cap, ascending order, inclusive `startTime`, `employeeNoAlreadyExist` status, lockout threshold.
+- [ ] CrossChex JSON vs form-encoded envelope, `begin_time` format, `uuid` / `device.serial_number` presence, exception type strings.
+- [ ] COSEC `detail-1` = user id vs reference id, `getcurrentseqnumber` / `date-time` / `device-basic-config` fields, roll-over.
+- [ ] Only then: `verificationStatus` → `VERIFIED`, status → `available`, results in §7, exact models in `device_models`.
 
 ### 6.7 Security and operations sign-off
 
@@ -639,9 +677,9 @@ leave `placeholder`. Prerequisites: the `/device-push/iclock/*` route, `device_c
    token-authenticated push; hide `remote_ip` from unattributed rows; TTL purge / per-IP cap for pending rows.
 2. Re-derive the `mock` reference row from `definitionToRow(MOCK_DEFINITION)` (scenario list and fields drifted).
 3. Fix blueprint §E.3 keys and modes (`essl_push`, `fingertec_push`; `zkteco_biotime` is `ON_PREM_SERVER_API`).
-4. Correct `anviz_crosschex_cloud` and `hikvision_hpp` declared capabilities to match the research (see §3 drift list).
-5. Decide whether `matrix_cosec` should become a `DEVICE_PUSH` provider (COSEC PUSH API) and whether `nitgen` should be
-   re-modelled as a bridge-agent provider, or both be kept as honest `UNVERIFIED` placeholders with corrected descriptions.
+4. ~~Correct `anviz_crosschex_cloud` capabilities~~ (done: attendance pull only); `hikvision_hpp` still declares `webhooks = true`.
+5. `matrix_cosec` is now the device API (`LAN`); a COSEC PUSH API provider (`DEVICE_PUSH`) is still open. Decide whether `nitgen`
+   should be re-modelled as a bridge-agent provider or kept as an honest `UNVERIFIED` placeholder.
 6. Consider a `fingertec_timetec` (`VENDOR_CLOUD_PULL`) placeholder reflecting the research's recommended first path.
 7. Extend `ZK_VERIFY_METHODS` with `4 → card`, `25 → palm` after hardware confirmation; add `DATA QUERY ATTLOG` to `buildCommands`.
    (Remote restart is implemented: `POST /devices/:id/actions/restart` → `RESTART_DEVICE`; push terminals receive `C:<id>:REBOOT` on their next poll. Hardware confirmation of the reboot is still pending, like the rest of the protocol.)
