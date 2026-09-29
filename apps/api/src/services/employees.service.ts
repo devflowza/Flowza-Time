@@ -175,7 +175,7 @@ export async function getEmployeeDevices(deps: ApiDeps, actor: Actor, orgId: str
   return runUser(deps.db, actor, async (trx) => {
     await loadEmployeeRow(trx, orgId, id);
     const rows = await trx.selectFrom('deviceEmployeeStates as s').innerJoin('devices as dv', 'dv.id', 's.deviceId')
-      .select(['s.id', 's.deviceId', 'dv.code as deviceCode', 'dv.name as deviceName', 's.branchId', 'dv.connectionStatus', 's.deviceUserId', 's.syncStatus', 's.desired', 's.lastSyncAt', 's.lastSuccessAt', 's.lastErrorCode', 's.lastError', 's.fingerprintCount', 's.faceEnrolled', 's.cardEnrolled', 's.updatedAt'])
+      .select(['s.id', 's.deviceId', 'dv.code as deviceCode', 'dv.name as deviceName', 's.branchId', 'dv.connectionStatus', 's.deviceUserId', 's.syncStatus', 's.desired', 's.lastSyncAt', 's.lastSuccessAt', 's.lastErrorCode', 's.lastError', 's.fingerprintCount', 's.faceEnrolled', 's.cardEnrolled', 's.mappedAt', 's.updatedAt'])
       .where('s.organizationId', '=', orgId).where('s.employeeId', '=', id).orderBy('dv.name').execute();
     return rows.map((r) => toDeviceStateDto(r as DeviceStateRow));
   });
@@ -315,7 +315,7 @@ function snapshotChanged(a: EmploymentSnapshot, b: EmploymentSnapshot): boolean 
   return (Object.keys(a) as (keyof EmploymentSnapshot)[]).some((k) => a[k] !== b[k]);
 }
 
-async function maybeEnqueuePush(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, employeeIds: string[], force = false): Promise<string | null> {
+export async function maybeEnqueuePush(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, employeeIds: string[], force = false): Promise<string | null> {
   if (!force) {
     const settings = await loadSettings(trx, orgId);
     if (settings.sync.autoPushNewEmployees === false) return null;

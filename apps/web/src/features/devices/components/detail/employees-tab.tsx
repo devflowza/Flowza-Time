@@ -2,22 +2,27 @@ import { useCallback, useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Fingerprint, ScanFace, CreditCard, Wrench, X } from 'lucide-react';
+import { Fingerprint, Hand, Link2, ScanFace, CreditCard, Trash2, Wrench, X } from 'lucide-react';
 import { DEVICE_EMPLOYEE_SYNC_STATUSES } from '@flowza/contracts';
 import { DataTable } from '@/components/data-table';
-import { Badge, Button, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui';
+import { Badge, Button, ConfirmDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui';
 import { fmtDateTime, fmtRelative } from '@/lib/format';
-import { toastError } from '@/lib/toast';
+import { toast, toastError } from '@/lib/toast';
 import { useCan } from '@/features/me/use-me';
 import { SearchBox } from '@/features/organization/components/search-box';
 import { useSyncMutations } from '@/features/sync/api';
 import { toastJobAccepted } from '@/features/sync/job-toast';
-import { useDeviceEmployees, type DeviceEmployeeStateDto } from '../../api';
+import { useDeviceEmployees, usePinMappingMutations, type DeviceEmployeeStateDto } from '../../api';
 import { EmployeeSyncBadge } from '../device-badges';
+import { PinMappingDialog, type PinMappingDraft } from '../pin-mapping-dialog';
 
 const ALL = '__all__';
 
-export function EmployeesTab({ deviceId, tz, canPush }: { deviceId: string; tz: string; canPush: boolean }) {
+/**
+ * The device's users: employees pushed to it, users it reported (device-only when no employee matches), and PINs a person mapped
+ * (PIN mapping — kept by every sync). Map PIN links a device user id to an employee on this device; Remove unlinks it.
+ */
+export function EmployeesTab({ deviceId, tz, canPush, canMapPins = true }: { deviceId: string; tz: string; canPush: boolean; canMapPins?: boolean }) {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation();
   const navigate = useNavigate();
@@ -30,6 +35,10 @@ export function EmployeesTab({ deviceId, tz, canPush }: { deviceId: string; tz: 
   const q = useDeviceEmployees(deviceId, query);
   const { syncEmployees } = useSyncMutations();
   const [repairing, setRepairing] = useState<string | null>(null);
+  const { remove: unmap } = usePinMappingMutations();
+  const canMap = canMapPins && can('device.sync');
+  const [mapDraft, setMapDraft] = useState<PinMappingDraft | null>(null);
+  const [unmapping, setUnmapping] = useState<DeviceEmployeeStateDto | null>(null);
 
   const canRepair = canPush && can('device.sync');
   const repairPending = syncEmployees.isPending;
@@ -44,7 +53,9 @@ export function EmployeesTab({ deviceId, tz, canPush }: { deviceId: string; tz: 
     { id: 'employee', header: t('employees.employee'), cell: ({ row }) => row.original.employeeId ? (
       <div className="min-w-0"><p className="truncate font-medium">{row.original.employeeName ?? '—'}</p><p className="truncate font-mono text-xs text-muted-foreground" dir="ltr">{row.original.employeeNumber}</p></div>
     ) : <Badge variant="warning">{t('employees.deviceOnly')}</Badge> },
-    { id: 'deviceUserId', header: t('employees.deviceUserId'), cell: ({ row }) => <span className="font-mono text-xs tnum" dir="ltr">{row.original.deviceUserId}</span> },
+    { id: 'deviceUserId', header: t('employees.deviceUserId'), cell: ({ row }) => (
+      <span className="inline-flex items-center gap-1.5"><span className="font-mono text-xs tnum" dir="ltr">{row.original.deviceUserId}</span>{row.original.mappedAt ? <Tooltip><TooltipTrigger asChild><Hand className="size-3.5 text-brand-600" aria-label={t('pins.manual')} /></TooltipTrigger><TooltipContent>{t('pins.manualAt', { at: fmtDateTime(row.original.mappedAt, tz) })}</TooltipContent></Tooltip> : null}</span>
+    ) },
     { id: 'syncStatus', header: t('employees.syncStatus'), cell: ({ row }) => <div className="flex flex-wrap items-center gap-1"><EmployeeSyncBadge status={row.original.syncStatus} />{!row.original.desired ? <Badge variant="outline" className="font-normal">{t('employees.notDesired')}</Badge> : null}</div> },
     { id: 'enrolment', header: t('employees.enrolment'), cell: ({ row }) => (
       <span className="inline-flex items-center gap-2 text-xs text-muted-foreground">
@@ -55,12 +66,17 @@ export function EmployeesTab({ deviceId, tz, canPush }: { deviceId: string; tz: 
     ) },
     { id: 'lastSync', header: t('employees.lastSync'), cell: ({ row }) => <span className="text-xs tnum" title={row.original.lastSyncAt ? fmtDateTime(row.original.lastSyncAt, tz) : ''}>{fmtRelative(row.original.lastSyncAt)}</span> },
     { id: 'error', header: t('employees.lastError'), cell: ({ row }) => row.original.lastError ? <span className="max-w-[260px] truncate text-xs text-destructive" title={row.original.lastError}>{row.original.lastErrorCode ? `${row.original.lastErrorCode}: ` : ''}{row.original.lastError}</span> : <span className="text-muted-foreground">—</span> },
-    { id: 'actions', header: '', enableHiding: false, cell: ({ row }) => (row.original.employeeId && canRepair ? (
-      <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); repair(row.original); }} loading={repairing === row.original.id} disabled={repairPending && repairing !== row.original.id}><Wrench /> {t('employees.repair')}</Button>
-    ) : null) },
-  ], [t, tz, canRepair, repair, repairing, repairPending]);
+    { id: 'actions', header: '', enableHiding: false, cell: ({ row }) => (
+      <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
+        {row.original.employeeId && canRepair ? <Button size="sm" variant="outline" onClick={() => repair(row.original)} loading={repairing === row.original.id} disabled={repairPending && repairing !== row.original.id}><Wrench /> {t('employees.repair')}</Button> : null}
+        {!row.original.employeeId && canMap ? <Button size="sm" variant="outline" onClick={() => setMapDraft({ deviceId, deviceUserId: row.original.deviceUserId })}><Link2 /> {t('pins.add')}</Button> : null}
+        {row.original.employeeId && row.original.mappedAt && canMap ? <Button size="sm" variant="ghost" aria-label={t('pins.remove')} title={t('pins.remove')} onClick={() => setUnmapping(row.original)}><Trash2 className="text-destructive" /></Button> : null}
+      </div>
+    ) },
+  ], [t, tz, canRepair, repair, repairing, repairPending, canMap, deviceId]);
 
   return (
+    <>
     <DataTable
       columns={columns} data={q.data?.data} total={q.data?.meta.total} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(s) => { setPageSize(s); setPage(1); }}
       isLoading={q.isLoading || q.isFetching} error={q.error} onRetry={() => void q.refetch()} storageKey="device-employees"
@@ -72,8 +88,18 @@ export function EmployeesTab({ deviceId, tz, canPush }: { deviceId: string; tz: 
           <SelectContent><SelectItem value={ALL}>{t('employees.allStatuses')}</SelectItem>{DEVICE_EMPLOYEE_SYNC_STATUSES.map((s) => <SelectItem key={s} value={s}>{t(`syncStatus.${s}`)}</SelectItem>)}</SelectContent>
         </Select>
         {status !== ALL || search ? <Button variant="ghost" size="sm" onClick={() => { setStatus(ALL); setSearch(undefined); }}><X /> {tc('common.clearFilters')}</Button> : null}
+        {canMap ? <Button size="sm" className="ms-auto" onClick={() => setMapDraft({ deviceId })}><Link2 /> {t('pins.add')}</Button> : null}
       </>}
       onRowClick={(r) => { if (r.employeeId) navigate(`/employees/${r.employeeId}`); }}
     />
+    {mapDraft ? <PinMappingDialog draft={mapDraft} lockDevice onClose={() => setMapDraft(null)} /> : null}
+    <ConfirmDialog
+      open={!!unmapping} onOpenChange={(o) => !o && setUnmapping(null)} destructive
+      title={unmapping ? t('pins.removeTitle', { pin: unmapping.deviceUserId }) : ''}
+      description={unmapping ? t('pins.removeHintDevice', { pin: unmapping.deviceUserId, employee: unmapping.employeeName ?? '' }) : undefined}
+      confirmLabel={t('pins.remove')} loading={unmap.isPending}
+      onConfirm={() => { if (!unmapping) return; unmap.mutate(unmapping.id, { onSuccess: () => { toast.success(t('pins.removed')); setUnmapping(null); }, onError: toastError }); }}
+    />
+    </>
   );
 }

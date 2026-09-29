@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { claimPendingDeviceSchema, createDeviceSchema, deleteDeviceQuerySchema, deviceCommandQuerySchema, deviceCredentialsInputSchema, deviceEmployeeQuerySchema, deviceGroupInputSchema, deviceGroupMembersSchema, deviceListQuerySchema, deviceLogQuerySchema, deviceModelsQuerySchema, deviceProvidersQuerySchema, deviceSummaryQuerySchema, pendingDevicesQuerySchema, testConnectionSchema, updateDeviceSchema } from '@flowza/contracts';
+import { claimPendingDeviceSchema, createDeviceSchema, createPinMappingSchema, pinMappingListQuerySchema, deleteDeviceQuerySchema, deviceCommandQuerySchema, deviceCredentialsInputSchema, deviceEmployeeQuerySchema, deviceGroupInputSchema, deviceGroupMembersSchema, deviceListQuerySchema, deviceLogQuerySchema, deviceModelsQuerySchema, deviceProvidersQuerySchema, deviceSummaryQuerySchema, pendingDevicesQuerySchema, testConnectionSchema, updateDeviceSchema } from '@flowza/contracts';
 import { z } from 'zod';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
@@ -8,6 +8,7 @@ import { created, noContent, ok, paginated } from '../../../lib/http.js';
 import { body, param, query } from '../../../lib/validate.js';
 import { actorOf } from '../../../lib/service.js';
 import * as devices from '../../../services/features/devices.service.js';
+import * as pins from '../../../services/features/pin-mappings.service.js';
 
 const ACTIONS = ['sync-attendance', 'sync-employees', 'health-check', 'reconcile', 'restart'] as const;
 
@@ -39,6 +40,10 @@ export function registerDeviceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   });
 
   // device groups
+  // PIN mapping: device user id → employee, per device or the employee's default on every device (Devices & punches)
+  v1.get('/orgs/:orgId/pin-mappings', async (c) => { const q = query(c, pinMappingListQuerySchema); const r = await pins.listPinMappings(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
+  v1.post('/orgs/:orgId/pin-mappings', idem, async (c) => ok(c, await pins.createPinMapping(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, createPinMappingSchema))));
+  v1.delete('/orgs/:orgId/pin-mappings/:id', async (c) => ok(c, await pins.deletePinMapping(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
   v1.get('/orgs/:orgId/device-groups', async (c) => ok(c, await devices.listGroups(deps, actorOf(c, deps), param(c, 'orgId'))));
   v1.post('/orgs/:orgId/device-groups', async (c) => created(c, await devices.createGroup(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, deviceGroupInputSchema))));
   v1.get('/orgs/:orgId/device-groups/:id', async (c) => ok(c, await devices.getGroup(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));

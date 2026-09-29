@@ -289,7 +289,7 @@
     "allStatuses": "All statuses",
     "searchPlaceholder": "Search employee…",
     "empty": "No employees on this device",
-    "emptyHint": "Push employees to the device or run a reconciliation to load its user list."
+    "emptyHint": "Push employees to the device, run a reconciliation to load its user list, or map a PIN to an employee."
   },
   "logs": {
     "time": "Time",
@@ -382,5 +382,173 @@
     "danger": "Danger zone",
     "dangerHint": "Disabling keeps the device; decommissioning is permanent.",
     "readOnly": "You do not have permission to change device settings."
+  },
+  "hub": {
+    "title": "Devices & punches",
+    "tabs": {
+      "devices": "Devices",
+      "pins": "PIN mapping",
+      "unmapped": "Unmapped punches",
+      "punches": "Punch log"
+    },
+    "description": {
+      "devices": "Every attendance terminal and vendor connection of the organisation.",
+      "pins": "Which employee each device PIN belongs to. A punch only becomes attendance once its PIN is mapped to an employee.",
+      "unmapped": "Punches whose PIN is not mapped to anyone yet. Map the PIN to an employee and the punches are processed again.",
+      "punches": "Every raw punch received from your devices. Filter by date, device, employee or mapping status to find exactly what came in."
+    },
+    "openUnmapped": "{{count}} device users with unmapped punches"
+  },
+  "pins": {
+    "add": "Map PIN",
+    "addForEmployee": "Map device PIN",
+    "edit": "Change mapping",
+    "remove": "Remove mapping",
+    "searchPlaceholder": "Search PIN or employee…",
+    "anyDevice": "Any device",
+    "allDevices": "All devices (default ID)",
+    "allDevicesHint": "The employee's own device ID, used on every device",
+    "allScopes": "All mappings",
+    "scopeLabel": "Mapping kind",
+    "scopeFilter": {
+      "device": "Device mappings",
+      "default": "Default IDs"
+    },
+    "scope": {
+      "device": "Device",
+      "default": "All devices"
+    },
+    "defaultTooltip": "The employee's default device ID: it matches punches on every device where the PIN is not mapped to someone else.",
+    "columns": {
+      "pin": "PIN",
+      "device": "Device",
+      "employee": "Employee",
+      "status": "On device",
+      "mapped": "Source"
+    },
+    "manual": "Mapped manually",
+    "manualAt": "Mapped manually on {{at}} — device syncs keep it",
+    "fromEmployee": "Employee record",
+    "fromSync": "Device sync",
+    "defaultIdIs": "Default device ID:",
+    "empty": "No PIN mappings",
+    "emptyHint": "Map a device PIN to an employee so their punches become attendance.",
+    "unchanged": "This mapping already exists",
+    "saved": "PIN mapping saved",
+    "requeued": "{{count}} unmapped punches are being processed again.",
+    "removeTitle": "Remove the mapping of PIN {{pin}}?",
+    "removeHint": "New punches with PIN {{pin}} on {{device}} will no longer be attributed to {{employee}}. Punches already attributed stay as they are.",
+    "removeHintDevice": "New punches with PIN {{pin}} on this device will no longer be attributed to {{employee}}. Punches already attributed stay as they are.",
+    "removed": "Mapping removed",
+    "dialog": {
+      "title": "Map a PIN to an employee",
+      "editTitle": "Change the mapping",
+      "description": "The PIN is the user ID the device sends with every punch (shown in the punch log).",
+      "employee": "Employee",
+      "device": "Device",
+      "pin": "PIN on the device",
+      "pinPlaceholder": "e.g. 2",
+      "pickEmployee": "Search employee…",
+      "pickDevice": "Choose a device…",
+      "employeeRequired": "Choose an employee",
+      "deviceRequired": "Choose a device, or All devices",
+      "pinRequired": "Enter the PIN",
+      "pinTooLong": "At most 64 characters",
+      "defaultFormat": "A default device ID is 1–32 letters, digits, - or _. Map the PIN on a device instead.",
+      "deviceHint": "Punches with this PIN on this device belong to the employee. Syncs keep the mapping.",
+      "defaultHint": "Changes the employee's default device ID on every device. Punches under the old ID stop matching; devices receive the new ID on their next employee push.",
+      "requeueHint": "Unmapped punches with this PIN are processed again right away. Punches already attributed are never moved.",
+      "save": "Save mapping"
+    },
+    "conflict": {
+      "PIN_TAKEN": "PIN {{pin}} is already mapped to another employee on this device.",
+      "EMPLOYEE_MAPPED": "This employee already uses PIN {{pin}} on this device.",
+      "replaceHint": "Replace moves the mapping to this employee and PIN. Punches already attributed are not moved.",
+      "replace": "Replace"
+    }
+  },
+  "punchLog": {
+    "device": "Device",
+    "allDevices": "All devices",
+    "mappingLabel": "Mapping",
+    "mapping": {
+      "all": "All",
+      "mapped": "Mapped",
+      "unmapped": "Unmapped"
+    },
+    "employee": "Employee",
+    "allEmployees": "All employees",
+    "pin": "PIN",
+    "pinPlaceholder": "Any",
+    "empty": "No punches in this period",
+    "emptyHint": "Punches appear here as soon as devices push or are polled. Widen the dates or clear the filters.",
+    "columns": {
+      "time": "Punch time",
+      "device": "Device",
+      "pin": "PIN",
+      "employee": "Employee",
+      "state": "Punch state",
+      "status": "Status",
+      "raw": "Raw"
+    },
+    "unmapped": "Unmapped",
+    "mapPin": "Map PIN",
+    "openRaw": "Open raw punch {{id}}",
+    "page": "Page {{page}}",
+    "direction": {
+      "in": "Check in",
+      "out": "Check out",
+      "break_out": "Break out",
+      "break_in": "Break in",
+      "overtime_in": "Overtime in",
+      "overtime_out": "Overtime out",
+      "unknown": "Unknown"
+    },
+    "verify": {
+      "fingerprint": "Fingerprint",
+      "face": "Face",
+      "card": "Card",
+      "pin": "PIN",
+      "password": "Password",
+      "palm": "Palm",
+      "iris": "Iris",
+      "mobile": "Mobile",
+      "manual": "Manual",
+      "unknown": "Unknown"
+    },
+    "source": {
+      "POLL": "Device poll",
+      "WEBHOOK": "Webhook",
+      "DEVICE_PUSH": "Device push",
+      "IMPORT": "Import",
+      "MANUAL": "Manual",
+      "SELF_SERVICE": "Self-service"
+    },
+    "raw": {
+      "title": "Raw punch",
+      "description": "Every stored field of this device transaction.",
+      "copy": "Copy JSON",
+      "copied": "Copied to the clipboard",
+      "copyFailed": "Could not copy to the clipboard",
+      "localTime": "Punch time (local)",
+      "utcTime": "Punch time (UTC)",
+      "deviceTimezone": "Device timezone",
+      "deviceSerial": "Device serial",
+      "pin": "PIN",
+      "employee": "Employee",
+      "employeeId": "Employee ID",
+      "source": "Source",
+      "verifyMode": "Verify mode",
+      "punchState": "Punch state",
+      "workCode": "Work code",
+      "geo": "Geo (lat, lng)",
+      "geoVerdict": "Geo verdict",
+      "receivedAt": "Received at",
+      "deviceClock": "Device clock",
+      "status": "Processing",
+      "transactionId": "Provider transaction ID",
+      "dedupeHash": "Dedup hash",
+      "payload": "Raw device payload"
+    }
   }
 }

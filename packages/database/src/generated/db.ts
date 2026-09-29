@@ -776,6 +776,14 @@ export interface DeviceEmployeeStates {
   lastErrorCode: string | null;
   lastSuccessAt: Timestamp | null;
   lastSyncAt: Timestamp | null;
+  /**
+   * Set when a person mapped this device user id to the employee (PIN mapping); device syncs keep the mapping.
+   */
+  mappedAt: Timestamp | null;
+  /**
+   * User who mapped the device user id to the employee (no FK: the audit log is the record).
+   */
+  mappedBy: string | null;
   organizationId: string;
   syncStatus: Generated<DeviceEmployeeSyncStatus>;
   updatedAt: Generated<Timestamp>;

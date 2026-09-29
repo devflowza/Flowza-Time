@@ -21,6 +21,9 @@ export const rawTransactionsQuerySchema = cursorQuerySchema.extend({
   to: isoDateTimeSchema.optional(),
   processingStatus: z.enum(RAW_PROCESSING_STATUSES).optional(),
   deviceEmployeeId: z.string().max(64).optional(),
+  employeeId: uuidSchema.optional(),
+  /** `mapped` = attributed to an employee; `unmapped` = not (yet) attributed (pending, unmatched, ignored, …). */
+  mapping: z.enum(['mapped', 'unmapped']).optional(),
 });
 export type RawTransactionsQuery = z.infer<typeof rawTransactionsQuerySchema>;
 

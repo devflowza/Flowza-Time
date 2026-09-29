@@ -11,3 +11,4 @@ export * from './leave.js';
 export * from './team.js';
 export * from './attendance-admin.js';
 export * from './roster.js';
+export * from './pin-mappings.js';

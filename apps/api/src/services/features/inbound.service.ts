@@ -175,7 +175,11 @@ async function upsertDeviceEmployees(trx: Trx, device: PushDeviceRow, employees:
   for (const e of employees) latest.set(e.deviceUserId, e); // the last line of a duplicate user id wins (device sends the current state)
   const ids = [...latest.keys()];
   const known = await trx.selectFrom('employees').select(['id', 'deviceUserId', 'branchId']).where('organizationId', '=', device.organizationId).where('deviceUserId', 'in', ids).where('deletedAt', 'is', null).execute();
-  const byDeviceUser = new Map(known.map((k) => [k.deviceUserId, k]));
+  // an employee already linked on this device under another user id (a PIN mapping, a provider identity) keeps that link: the
+  // listed default id is a duplicate user on the device, recorded device-only — linking it too would break (device, employee)
+  const linked = known.length > 0 ? await trx.selectFrom('deviceEmployeeStates').select(['employeeId', 'deviceUserId']).where('deviceId', '=', device.id).where('employeeId', 'in', known.map((k) => k.id)).execute() : [];
+  const linkedElsewhere = new Set(linked.filter((l) => l.employeeId !== null && known.some((k) => k.id === l.employeeId && k.deviceUserId !== l.deviceUserId)).map((l) => l.employeeId as string));
+  const byDeviceUser = new Map(known.filter((k) => !linkedElsewhere.has(k.id)).map((k) => [k.deviceUserId, k]));
   const rows = ids.map((deviceUserId) => {
     const e = latest.get(deviceUserId)!;
     const emp = byDeviceUser.get(deviceUserId);

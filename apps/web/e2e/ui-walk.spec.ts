@@ -2,7 +2,7 @@ import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Browser, type Page } from '@playwright/test';
 import {
-  APPROVAL_ID, EMAIL_TOKEN, HQ_FENCE, PORTAL_EMPLOYEE_ID, approvalsHandlers, financeIntegrationHandlers, hrNotesHandlers, hrWorkspaceHandlers, installMockBackend, meFixture, portalRequestsHandlers,
+  APPROVAL_ID, EMAIL_TOKEN, HQ_FENCE, PORTAL_EMPLOYEE_ID, approvalsHandlers, devicesPunchesHandlers, financeIntegrationHandlers, hrNotesHandlers, hrWorkspaceHandlers, installMockBackend, meFixture, portalRequestsHandlers,
   signInDirectly, teamHandlers, type MockBackendOptions,
 } from './support/mock-backend';
 import { walkGetHandlers } from './support/walk-fixtures';
@@ -48,6 +48,10 @@ const PAGES: WalkPage[] = [
   { slug: 'settings-leave', path: '/settings/leave' },
   { slug: 'settings-reports', path: '/settings/reports' },
   { slug: 'reports', path: '/reports' },
+  { slug: 'devices', path: '/devices', handlers: devicesPunchesHandlers },
+  { slug: 'devices-pin-mapping', path: '/devices/pin-mapping', handlers: devicesPunchesHandlers },
+  { slug: 'devices-unmapped-punches', path: '/devices/unmapped-punches', handlers: devicesPunchesHandlers },
+  { slug: 'devices-punch-log', path: '/devices/punch-log', handlers: devicesPunchesHandlers },
   { slug: 'notifications', path: '/notifications' },
 ];
 const VIEWPORTS = [{ width: 1280, height: 800 }, { width: 390, height: 844 }] as const;

@@ -19,11 +19,39 @@ import { toastJobAccepted } from '@/features/sync/job-toast';
 import { useDeviceSummary, useDevices, useGroupMutations, useGroupOptions, useProviders, type DeviceRow } from '../api';
 import { ConnectionBadge, DeviceStatusBadge, ProviderStatusBadge, TagChips } from '../components/device-badges';
 import { PendingDevicesPanel } from '../components/pending-devices-panel';
+import { DevicesHubTabs } from '../components/hub-tabs';
+import { PinMappingPanel } from '../components/pin-mapping-panel';
+import { PunchLogPanel } from '../components/punch-log-panel';
+import type { DevicesHubTab } from '../hub';
+import { UnmatchedPunchesPanel } from '@/features/attendance/pages/unmatched-page';
 
 const ALL = '__all__';
 type BulkKind = 'sync-attendance' | 'sync-employees' | 'health-check' | 'assign-group';
 
-export default function DevicesListPage() {
+/**
+ * /devices — Devices & punches: the device fleet, the PIN mapping (device user id → employee), the punches no employee could be
+ * found for yet, and the raw punch log. Each tab is its own route (/devices/pin-mapping, /devices/unmapped-punches,
+ * /devices/punch-log) gated by its own permissions.
+ */
+export default function DevicesListPage({ tab = 'devices' }: { tab?: DevicesHubTab }) {
+  const { t } = useTranslation('devices');
+  const navigate = useNavigate();
+  const can = useCan();
+  return (
+    <div className="page-container space-y-4">
+      <PageHeader title={t('hub.title')} description={t(`hub.description.${tab}`)} actions={tab === 'devices' ? (
+        <>
+          <Button variant="outline" size="sm" onClick={() => navigate('/devices/groups')}><FolderKanban /> {t('groups.title')}</Button>
+          {can('device.create') ? <Button size="sm" onClick={() => navigate('/devices/new')}><Plus /> {t('list.register')}</Button> : null}
+        </>
+      ) : undefined} />
+      <DevicesHubTabs value={tab} />
+      {tab === 'devices' ? <DevicesPanel /> : tab === 'pins' ? <PinMappingPanel /> : tab === 'unmapped' ? <UnmatchedPunchesPanel /> : <PunchLogPanel />}
+    </div>
+  );
+}
+
+function DevicesPanel() {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation();
   const navigate = useNavigate();
@@ -99,14 +127,9 @@ export default function DevicesListPage() {
   const isTrulyEmpty = q.data?.meta.total === 0 && !hasFilters;
 
   return (
-    <div className="page-container space-y-4">
-      <PageHeader title={t('title')} description={q.data ? t('list.subtitle', { count: q.data.meta.total }) : undefined} actions={
-        <>
-          <Button variant="outline" size="sm" onClick={() => navigate('/devices/groups')}><FolderKanban /> {t('groups.title')}</Button>
-          {can('device.create') ? <Button size="sm" onClick={() => navigate('/devices/new')}><Plus /> {t('list.register')}</Button> : null}
-        </>
-      } />
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+    <div className="space-y-4">
+      {q.data ? <p className="text-sm text-muted-foreground">{t('list.subtitle', { count: q.data.meta.total })}</p> : null}
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
         <StatCard label={t('summary.online')} value={fmtNumber(counts.online)} icon={Activity} tone="success" loading={summary.isLoading} onClick={() => table.setFilter('connectionStatus', 'online')} />
         <StatCard label={t('summary.offline')} value={fmtNumber(counts.offline)} icon={WifiOff} tone={counts.offline > 0 ? 'danger' : 'default'} loading={summary.isLoading} onClick={() => table.setFilter('connectionStatus', 'offline')} />
         <StatCard label={t('summary.degraded')} value={fmtNumber(counts.degraded)} icon={AlertTriangle} tone={counts.degraded > 0 ? 'warning' : 'default'} loading={summary.isLoading} onClick={() => table.setFilter('connectionStatus', 'degraded')} />

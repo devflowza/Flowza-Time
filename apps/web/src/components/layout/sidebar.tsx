@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, LayoutDashboard, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
 import type { Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -110,6 +110,8 @@ export function Sidebar() {
     ] },
     { label: t('nav.sections.devices'), items: [
       { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'] },
+      { to: '/devices/pin-mapping', label: t('nav.pinMapping'), icon: KeyRound, permissions: ['device.view', 'employee.view'] },
+      { to: '/devices/punch-log', label: t('nav.punchLog'), icon: ListChecks, permissions: ['attendance.view_raw'] },
       { to: '/sync', label: t('nav.sync'), icon: RefreshCw, permissions: ['device.view'] },
       { to: '/reconciliation', label: t('nav.reconciliation'), icon: GitCompare, permissions: ['device.sync'] },
     ] },
