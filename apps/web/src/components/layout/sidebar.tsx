@@ -1,10 +1,10 @@
 import { NavLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
-import type { Permission } from '@flowza/contracts';
+import type { ModuleKey, Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
-import { useActiveMembership, useCan, useEmployeeId, useMe } from '@/features/me/use-me';
+import { useActiveMembership, useModulesEnabled, useCan, useEmployeeId, useMe } from '@/features/me/use-me';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import portalEn from '@/locales/en/portal.json';
@@ -25,7 +25,7 @@ registerNamespace('attendance-review', attendanceReviewEn, attendanceReviewAr);
 // HR portal Prompt 6b: the regularisation register and the comments & approvals report
 registerNamespace('attendance-admin', attendanceAdminEn, attendanceAdminAr);
 
-interface NavItem { to: string; label: string; icon: LucideIcon; permissions?: Permission[]; any?: boolean; /** Overrides `permissions` when set (e.g. any of several keys, or line-manager status). */ visible?: boolean; /** A count shown on the item (0 hides it). */ badge?: number }
+interface NavItem { to: string; label: string; icon: LucideIcon; permissions?: Permission[]; any?: boolean; /** Overrides `permissions` when set (e.g. any of several keys, or line-manager status). */ visible?: boolean; /** A count shown on the item (0 hides it). */ badge?: number; /** Modules the item belongs to (plan / platform switch — migration 20260929000600); hidden when one is off. */ modules?: ModuleKey[] }
 interface NavSection { label?: string; items: NavItem[] }
 
 /**
@@ -59,6 +59,7 @@ export function Sidebar() {
   const { data: me } = useMe();
   const employeeId = useEmployeeId();
   const membership = useActiveMembership();
+  const modulesOn = useModulesEnabled();
   const { pathname } = useLocation();
   // Direct reports (/me: isManager) is a reporting RELATIONSHIP. The approval engine routes MANAGER steps to it whatever
   // the manager's role, and the inbox is actor-scoped (membership only), so it alone opens Approvals.
@@ -82,15 +83,15 @@ export function Sidebar() {
     { items: [{ to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, permissions: ['dashboard.view'] }] },
     // Self-service: every member linked to an employee record (the API scopes each call to that record).
     ...(employeeId ? [{ label: t('portal:nav.section'), items: [
-      { to: '/my', label: t('portal:nav.home'), icon: House },
-      { to: '/my/attendance', label: t('portal:nav.attendance'), icon: CalendarCheck },
-      { to: '/my/leave', label: t('portal:nav.leave'), icon: Palmtree },
-      { to: '/my/profile', label: t('portal:nav.profile'), icon: UserRound },
-      { to: '/my/checkin', label: t('portal-attendance:nav.checkin'), icon: Fingerprint },
-      { to: '/my/requests', label: t('portal-attendance:nav.requests'), icon: Inbox },
-      { to: '/my/shift', label: t('portal-attendance:nav.shift'), icon: CalendarClock },
-    ] }] : []),
-    ...(isManager || team.page ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound }] }] : []),
+      { to: '/my', label: t('portal:nav.home'), icon: House, modules: ['self_service'] },
+      { to: '/my/attendance', label: t('portal:nav.attendance'), icon: CalendarCheck, modules: ['self_service'] },
+      { to: '/my/leave', label: t('portal:nav.leave'), icon: Palmtree, modules: ['self_service', 'leave'] },
+      { to: '/my/profile', label: t('portal:nav.profile'), icon: UserRound, modules: ['self_service'] },
+      { to: '/my/checkin', label: t('portal-attendance:nav.checkin'), icon: Fingerprint, modules: ['self_service', 'geofences'] },
+      { to: '/my/requests', label: t('portal-attendance:nav.requests'), icon: Inbox, modules: ['self_service'] },
+      { to: '/my/shift', label: t('portal-attendance:nav.shift'), icon: CalendarClock, modules: ['self_service'] },
+    ] as NavItem[] }] : []),
+    ...(isManager || team.page ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound, modules: ['manager_workspace'] }] as NavItem[] }] : []),
     { label: t('nav.sections.workforce'), items: [
       { to: '/employees', label: t('nav.employees'), icon: Users, permissions: ['employee.view'] },
       { to: '/attendance', label: t('nav.attendance'), icon: Activity, permissions: ['attendance.view'] },
@@ -98,28 +99,28 @@ export function Sidebar() {
       // engine v2: approvers of attendance or leave, approval admins, line managers (their team's requests) and anybody
       // with approvals waiting for them or a delegation to them in force today
       { to: '/approvals', label: t('nav.approvals'), icon: CheckSquare, visible: can('attendance.approve') || can('leave.approve') || can('approval.manage') || hasDirectReports || approvalsWaiting, badge: approvalsBadge },
-      { to: '/leave', label: t('nav.leave'), icon: CalendarOff, permissions: ['leave.view'] },
+      { to: '/leave', label: t('nav.leave'), icon: CalendarOff, permissions: ['leave.view'], modules: ['leave'] },
       // HR attendance workspace (HR portal Prompt 6a)
       { to: '/attendance/summary', label: t('nav.attendanceSummary'), icon: Sigma, permissions: ['attendance.view', 'attendance.view_team'], any: true },
       { to: '/attendance/unmatched', label: t('nav.unmatchedPunches'), icon: UserX, permissions: ['attendance.view_raw'] },
       // HR portal Prompt 4: reasons (line managers review their team's, HR organisation-wide) and the geofences
       { to: '/attendance/notes', label: t('attendance-review:nav.notes'), icon: MessageSquareText, visible: can('attendance.review_notes') || can('attendance.approve') || hasDirectReports },
-      { to: '/attendance/geofences', label: t('attendance-review:nav.geofences'), icon: MapPinned, permissions: ['attendance.manage_geofences'] },
+      { to: '/attendance/geofences', label: t('attendance-review:nav.geofences'), icon: MapPinned, permissions: ['attendance.manage_geofences'], modules: ['geofences'] },
       // HR portal Prompt 6b: the regularisation register (approvers and reviewers; RLS scopes the rows to their branches)
       { to: '/attendance/regularisations', label: t('attendance-admin:nav.regularisations'), icon: ClipboardCheck, permissions: ['attendance.approve', 'attendance.review_notes'], any: true },
     ] },
     { label: t('nav.sections.devices'), items: [
-      { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'] },
-      { to: '/devices/pin-mapping', label: t('nav.pinMapping'), icon: KeyRound, permissions: ['device.view', 'employee.view'] },
-      { to: '/devices/punch-log', label: t('nav.punchLog'), icon: ListChecks, permissions: ['attendance.view_raw'] },
-      { to: '/sync', label: t('nav.sync'), icon: RefreshCw, permissions: ['device.view'] },
-      { to: '/reconciliation', label: t('nav.reconciliation'), icon: GitCompare, permissions: ['device.sync'] },
+      { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'], modules: ['devices'] },
+      { to: '/devices/pin-mapping', label: t('nav.pinMapping'), icon: KeyRound, permissions: ['device.view', 'employee.view'], modules: ['devices'] },
+      { to: '/devices/punch-log', label: t('nav.punchLog'), icon: ListChecks, permissions: ['attendance.view_raw'], modules: ['devices'] },
+      { to: '/sync', label: t('nav.sync'), icon: RefreshCw, permissions: ['device.view'], modules: ['devices'] },
+      { to: '/reconciliation', label: t('nav.reconciliation'), icon: GitCompare, permissions: ['device.sync'], modules: ['devices'] },
     ] },
     { label: t('nav.sections.time'), items: [
       { to: '/shifts', label: t('nav.shifts'), icon: CalendarDays, permissions: ['shift.view'] },
       { to: '/holidays', label: t('nav.holidays'), icon: CalendarOff, permissions: ['holiday.view'] },
       { to: '/reports', label: t('nav.reports'), icon: BarChart3, permissions: ['report.view'] },
-      { to: '/payroll', label: t('nav.payroll'), icon: Wallet, permissions: ['payroll.view'] },
+      { to: '/payroll', label: t('nav.payroll'), icon: Wallet, permissions: ['payroll.view'], modules: ['payroll'] },
     ] },
     { label: t('nav.sections.admin'), items: [
       { to: '/organization', label: t('nav.structure'), icon: Building2, permissions: ['branch.view'] },
@@ -146,7 +147,7 @@ export function Sidebar() {
 
       <nav className="scrollbar-thin flex-1 overflow-y-auto px-2 py-2">
         {sections.map((section, i) => {
-          const items = section.items.filter((it) => (it.visible !== undefined ? it.visible : !it.permissions || (it.any ? it.permissions.some((p) => can(p)) : can(...it.permissions))));
+          const items = section.items.filter((it) => (!it.modules || modulesOn(...it.modules)) && (it.visible !== undefined ? it.visible : !it.permissions || (it.any ? it.permissions.some((p) => can(p)) : can(...it.permissions))));
           if (items.length === 0) return null;
           return (
             <div key={i} className={i === 0 ? undefined : 'mt-3'}>

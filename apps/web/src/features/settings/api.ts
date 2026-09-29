@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { z } from 'zod';
-import type { OrganizationDto, OrganizationSettings, SettingsGroup, updateOrganizationSchema } from '@flowza/contracts';
+import type { BillingInvoiceDto, OrganizationDto, OrganizationSettings, SettingsGroup, TenantSubscriptionDto, updateOrganizationSchema } from '@flowza/contracts';
 import { api, type Envelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { meQueryKey, useOrgId } from '@/features/me/use-me';
@@ -25,9 +25,15 @@ export function useSettingsMutations() {
   return { updateOrganization, putGroup };
 }
 
-/** Subscription is exposed by the billing module; absent (404) → informative empty state. */
-export interface SubscriptionInfo { planKey: string; planName: string; status: string; trialEndsAt: string | null; currentPeriodEnd: string | null; limits?: Record<string, unknown>; usage?: Record<string, unknown>; features?: string[] }
+/**
+ * The organisation's plan, price, usage, modules and the plans it could move to (GET /orgs/:orgId/subscription, organization.view)
+ * and its invoices (organization.manage) — migration 20260929000600. A 404 / 403 (an API deployed before it) reads as unavailable.
+ */
 export function useSubscription() {
   const orgId = useOrgId();
-  return useQuery({ queryKey: [...qk.org(orgId), 'subscription'], queryFn: async () => (await api.get<Envelope<SubscriptionInfo>>(`/orgs/${orgId}/subscription`)).data, retry: false, staleTime: 5 * 60_000 });
+  return useQuery({ queryKey: [...qk.org(orgId), 'subscription'], queryFn: async () => (await api.get<Envelope<TenantSubscriptionDto>>(`/orgs/${orgId}/subscription`)).data, retry: false, staleTime: 5 * 60_000 });
+}
+export function useTenantInvoices(enabled: boolean) {
+  const orgId = useOrgId();
+  return useQuery({ queryKey: [...qk.org(orgId), 'billing', 'invoices'], queryFn: async () => (await api.get<Envelope<BillingInvoiceDto[]>>(`/orgs/${orgId}/billing/invoices`)).data, enabled, retry: false });
 }

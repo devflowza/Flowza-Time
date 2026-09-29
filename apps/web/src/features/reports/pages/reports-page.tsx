@@ -10,7 +10,7 @@ import { Badge, Button, ConfirmDialog, Select, SelectContent, SelectItem, Select
 import { useServerTable } from '@/hooks/use-server-table';
 import { fmtDate, fmtDateTime, fmtNumber } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
-import { useCan, useOrgTimezone } from '@/features/me/use-me';
+import { useCan, useOrgTimezone, useModuleEnabled } from '@/features/me/use-me';
 import { JobStatusBadge } from '@/features/attendance/components/badges';
 import { openSignedUrl, useReportMutations, useReports, useReportTypes, type ReportDto } from '../api';
 import { ReportRequestPanel } from '../components/report-request-panel';
@@ -45,7 +45,9 @@ export default function ReportsPage() {
   // HR portal Prompt 6a: downloading IS exporting (report.export, enforced by the API); report.schedule adds Send now + schedules
   const can = useCan();
   const canExport = can('report.export');
-  const canSchedule = can('report.schedule');
+  // schedules and sharing are the Scheduled reports module (migration 20260929000600)
+  const schedulesOn = useModuleEnabled('report_schedules');
+  const canSchedule = can('report.schedule') && schedulesOn;
   const [sharing, setSharing] = useState<ShareSpec | null>(null);
   const hasFilters = !!f['status'] || !!f['reportType'];
   const now = q.dataUpdatedAt || 0; // pure: re-evaluated on every refetch (the list polls while reports run)

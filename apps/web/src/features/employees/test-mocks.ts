@@ -62,7 +62,8 @@ export const envModule = { env: { supabaseUrl: 'http://localhost', supabaseAnonK
 /** `teamSize` > 0 models a member whose employee record has direct reports (/me: isManager). */
 /** `approvals` is /me's approval signal for the membership (what waits for the member, a delegation to them today). */
 export const testState = { permissions: new Set<string>(), orgId: 'org-1' as string | null, timezone: 'Asia/Muscat', membershipId: 'mem-1', settings: {} as Record<string, unknown>, employeeId: null as string | null, teamSize: 0, approvals: { actionable: 0, delegatedToMe: false }, /** The signed-in user's id (useMe); tests that switch users set it and reset it to 'u1'. */ userId: 'u1',
-  /** The membership's branch scope and role key (tests of branch-scoped administrators set them and reset them). */ allBranches: true, branchIds: [] as string[], roleKey: 'org_admin' };
+  /** The membership's branch scope and role key (tests of branch-scoped administrators set them and reset them). */ allBranches: true, branchIds: [] as string[], roleKey: 'org_admin',
+  /** Modules that are off for the organisation (migration 20260929000600); tests that switch one off reset it to empty. */ disabledModules: new Set<string>() };
 export function grant(...perms: Permission[]) { testState.permissions = new Set(perms); }
 export function grantAll() { testState.permissions = new Set(['*']); }
 const membership = () =>
@@ -70,6 +71,7 @@ const membership = () =>
     ? null
     : {
         membershipId: testState.membershipId, roleId: 'role-1', roleKey: testState.roleKey, roleName: 'Admin', permissions: [...testState.permissions], allBranches: testState.allBranches, branchIds: testState.branchIds, employeeId: testState.employeeId, isManager: testState.teamSize > 0, teamSize: testState.teamSize, approvals: testState.approvals, featureFlags: {}, settings: testState.settings,
+        modules: Object.fromEntries([...testState.disabledModules].map((k) => [k, false])), subscriptionLapsed: false,
         organization: { id: testState.orgId, companyCode: 'ACME', legalName: 'Acme LLC', displayName: 'Acme', countryCode: 'OM', timezone: testState.timezone, currencyCode: 'OMR', locale: 'en', weeklyOffDays: [5, 6], logoPath: null, contact: {}, address: {}, status: 'active', createdAt: '2024-01-01T00:00:00Z' },
       };
 export const useMeModule = {
@@ -89,4 +91,6 @@ export const useMeModule = {
   useOrgTimezone: () => testState.timezone,
   useEmployeeId: () => (testState.orgId === null ? null : testState.employeeId),
   useFeatureFlag: () => false,
+  useModuleEnabled: (key: string) => !testState.disabledModules.has(key),
+  useModulesEnabled: () => (...keys: string[]) => keys.every((k) => !testState.disabledModules.has(k)),
 };

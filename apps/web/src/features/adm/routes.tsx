@@ -3,7 +3,7 @@ import { Navigate, type RouteObject } from 'react-router';
 import './i18n';
 import { AdminGate } from './admin-gate';
 import { AdminLayout } from './admin-layout';
-import { AccountPage, ActivityPage, AdminLoginPage, DashboardPage, FlagsPage, GrantsPage, HealthPage, LegacyOrgRedirect, PageFallback, PlansPage, TeamPage, TenantDetailPage, TenantsPage, UsersPage } from './pages/lazy';
+import { AccountPage, ActivityPage, AdminLoginPage, BillingPage, DashboardPage, FlagsPage, GrantsPage, HealthPage, LegacyOrgRedirect, ModulesPage, PageFallback, PlansPage, SettingsPage, TeamPage, TenantDetailPage, TenantsPage, UsersPage } from './pages/lazy';
 
 const s = (node: React.ReactNode) => <Suspense fallback={<PageFallback />}>{node}</Suspense>;
 
@@ -26,6 +26,9 @@ export const admRoutes: RouteObject[] = [
         { path: 'team', element: s(<TeamPage />) },
         { path: 'grants', element: s(<GrantsPage />) },
         { path: 'plans', element: s(<PlansPage />) },
+        { path: 'modules', element: s(<ModulesPage />) },
+        { path: 'billing', element: s(<BillingPage />) },
+        { path: 'settings', element: s(<SettingsPage />) },
         { path: 'feature-flags', element: s(<FlagsPage />) },
         { path: 'activity', element: s(<ActivityPage />) },
         { path: 'health', element: s(<HealthPage />) },

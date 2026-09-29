@@ -6,7 +6,7 @@ import { z } from 'zod';
 import { CalendarPlus, Pencil } from 'lucide-react';
 import { SUBSCRIPTION_STATUSES, type PlatformSubscriptionDto, type SubscriptionStatus } from '@flowza/contracts';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, ErrorState, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea } from '@/components/ui';
-import { fmtDateTime } from '@/lib/format';
+import { fmtDateTime, fmtMoney } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { usePlans } from '@/features/platform/api';
 import { useAdmMutations, useTenantSubscription } from '../api';
@@ -24,6 +24,9 @@ function extendedTrialEnd(current: string | null | undefined, days: number): str
 
 const formSchema = z.object({
   planKey: z.string().min(1),
+  billingCycle: z.enum(['monthly', 'yearly']),
+  /** Paid users (licensed employees); empty = the plan's employee limit. */
+  seats: z.string().regex(/^([1-9]\d{0,5})?$/),
   status: z.enum(SUBSCRIPTION_STATUSES),
   trialEndsAt: z.string(),
   currentPeriodEnd: z.string(),
@@ -40,13 +43,16 @@ function EditSubscriptionDialog({ orgId, sub, open, onOpenChange }: { orgId: str
   const { updateSubscription } = useAdmMutations();
   const form = useForm<Values>({
     resolver: zodResolver(formSchema),
-    defaultValues: { planKey: sub?.planKey ?? '', status: sub?.status ?? 'active', trialEndsAt: toDateInput(sub?.trialEndsAt ?? null), currentPeriodEnd: toDateInput(sub?.currentPeriodEnd ?? null), cancelAt: toDateInput(sub?.cancelAt ?? null), reason: '' },
+    defaultValues: { planKey: sub?.planKey ?? '', billingCycle: sub?.billingCycle ?? 'yearly', seats: sub?.seats ? String(sub.seats) : '', status: sub?.status ?? 'active', trialEndsAt: toDateInput(sub?.trialEndsAt ?? null), currentPeriodEnd: toDateInput(sub?.currentPeriodEnd ?? null), cancelAt: toDateInput(sub?.cancelAt ?? null), reason: '' },
   });
   const { register, control, formState: { errors } } = form;
   const submit = form.handleSubmit((v) => {
     const input: Parameters<typeof updateSubscription.mutate>[0]['input'] = { reason: v.reason };
     if (v.planKey !== sub?.planKey) input.planKey = v.planKey;
     if (v.status !== sub?.status) input.status = v.status;
+    if (v.billingCycle !== (sub?.billingCycle ?? 'yearly')) input.billingCycle = v.billingCycle;
+    const seats = v.seats ? Number(v.seats) : null;
+    if (seats !== (sub?.seats ?? null)) input.seats = seats;
     if (v.trialEndsAt !== toDateInput(sub?.trialEndsAt ?? null)) input.trialEndsAt = fromDateInput(v.trialEndsAt);
     if (v.currentPeriodEnd !== toDateInput(sub?.currentPeriodEnd ?? null)) input.currentPeriodEnd = fromDateInput(v.currentPeriodEnd);
     if (v.cancelAt !== toDateInput(sub?.cancelAt ?? null)) input.cancelAt = fromDateInput(v.cancelAt);
@@ -77,6 +83,16 @@ function EditSubscriptionDialog({ orgId, sub, open, onOpenChange }: { orgId: str
                   <SelectContent>{SUBSCRIPTION_STATUSES.map((s) => <SelectItem key={s} value={s}>{tp(`subscription.${s}`)}</SelectItem>)}</SelectContent>
                 </Select>
               )} />
+            </FormField>
+            <FormField label={t('subscription.cycle')} htmlFor="sub-cycle">
+              <Controller control={control} name="billingCycle" render={({ field }) => (
+                <Select value={field.value} onValueChange={field.onChange}><SelectTrigger id="sub-cycle"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="yearly">{t('cycles.yearly')}</SelectItem><SelectItem value="monthly">{t('cycles.monthly')}</SelectItem></SelectContent>
+                </Select>
+              )} />
+            </FormField>
+            <FormField label={t('subscription.seats')} htmlFor="sub-seats" hint={t('subscription.seatsHint')} error={errors.seats ? t('subscription.seatsInvalid') : undefined}>
+              <Input id="sub-seats" inputMode="numeric" dir="ltr" {...register('seats')} />
             </FormField>
             {date('trialEndsAt', t('subscription.trialEnds'))}
             {date('currentPeriodEnd', t('subscription.periodEnd'))}
@@ -129,6 +145,11 @@ export function SubscriptionPanel({ orgId, timezone }: { orgId: string; timezone
               {row(t('subscription.periodStart'), fmtDateTime(sub.currentPeriodStart, timezone))}
               {row(t('subscription.periodEnd'), fmtDateTime(sub.currentPeriodEnd, timezone))}
               {row(t('subscription.cancelAt'), fmtDateTime(sub.cancelAt, timezone))}
+              {row(t('subscription.cycle'), t(`cycles.${sub.billingCycle}`))}
+              {row(t('subscription.seats'), sub.seats ?? t('subscription.planLimit'))}
+              {row(t('subscription.price'), sub.price
+                ? <span className="tnum" dir="ltr">{fmtMoney(sub.price.amount, sub.price.currency)} <span className="text-xs text-muted-foreground">({t(`cycles.${sub.billingCycle}`)}, {t('subscription.exclVat')})</span></span>
+                : (sub.isCustom ? t('subscription.customPrice') : '—'))}
             </dl>
           )}
         </CardContent>

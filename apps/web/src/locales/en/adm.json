@@ -11,7 +11,7 @@
   "nav": {
     "sections": {
       "people": "People",
-      "business": "Access & plans",
+      "business": "Business",
       "system": "System"
     },
     "dashboard": "Dashboard",
@@ -26,7 +26,10 @@
     "account": "My account",
     "openApp": "Open FlowZa Time",
     "signOut": "Sign out",
-    "menu": "Open menu"
+    "menu": "Open menu",
+    "billing": "Subscriptions & billing",
+    "modules": "Modules",
+    "settings": "Platform settings"
   },
   "login": {
     "title": "Admin sign in",
@@ -94,7 +97,9 @@
       "flags": "Feature flags",
       "access": "Support access",
       "notes": "Notes",
-      "activity": "Activity"
+      "activity": "Activity",
+      "modules": "Modules",
+      "billing": "Billing"
     },
     "editDetails": "Edit details",
     "editHint": "Changes are audited on the organisation and visible to its owners.",
@@ -173,7 +178,15 @@
     "reasonHint": "At least 3 characters, e.g. \"Signed the annual contract\".",
     "extendReason": "Trial extended by {{count}} days from the admin portal",
     "clear": "Clear",
-    "dateHint": "Leave empty for no date."
+    "dateHint": "Leave empty for no date.",
+    "cycle": "Billing cycle",
+    "seats": "Paid users",
+    "seatsHint": "Licensed employees the tenant pays for (caps employee creation). Empty = the plan's employee limit.",
+    "seatsInvalid": "Enter a whole number from 1.",
+    "planLimit": "Plan limit",
+    "price": "Price",
+    "exclVat": "excl. VAT",
+    "customPrice": "Custom pricing"
   },
   "members": {
     "title": "Members",
@@ -268,8 +281,8 @@
     "subtitle": "Time-boxed support access of platform administrators to tenant data. Write access needs a second approver."
   },
   "plansPage": {
-    "title": "Plans",
-    "subtitle": "The plan catalogue tenants subscribe to."
+    "title": "Plans & pricing",
+    "subtitle": "The plans tenants subscribe to: price per cycle, users included, modules and limits."
   },
   "flagsPage": {
     "title": "Feature flags",
@@ -306,5 +319,310 @@
     "tooWeak": "Use at least 12 characters with upper- and lower-case letters, a digit and a symbol.",
     "changed": "Password changed",
     "tempHint": "You are using the temporary password this account was created with."
+  },
+  "reason": {
+    "label": "Reason",
+    "hint": "At least 3 characters. The tenant sees it in its audit log."
+  },
+  "cycles": {
+    "monthly": "Monthly",
+    "yearly": "Yearly"
+  },
+  "modules": {
+    "title": "Modules",
+    "subtitle": "Switch product modules on and off — fleet-wide or for every tenant at once. Per-tenant switches are on each tenant's Modules tab.",
+    "rule": "A module is on for a tenant when it is available fleet-wide, the subscription has not lapsed, and the tenant's own switch — or, without one, its plan — includes it.",
+    "core": "Employees, attendance and corrections, shifts and holidays, reports, approvals, users, settings and audit are the core of FlowZa Time and are always on. Switching a module off never deletes data and never stops terminals from recording punches.",
+    "saved": "Module updated",
+    "appliedAll": "Applied to {{count}} tenants",
+    "offFleet": "Off fleet-wide",
+    "availableToggle": "{{name}} available fleet-wide",
+    "more": "More actions for {{name}}",
+    "enableAll": "Turn on for every tenant",
+    "disableAll": "Turn off for every tenant",
+    "resetAll": "Every tenant back to its plan",
+    "tenantsOn": "tenants have it on",
+    "overridesOn": "{{count}} forced on",
+    "overridesOff": "{{count}} forced off",
+    "inPlans": "In plans:",
+    "categories": {
+      "workforce": "Workforce",
+      "time": "Time",
+      "devices": "Devices",
+      "insights": "Insights",
+      "integrations": "Integrations"
+    },
+    "confirm": {
+      "makeAvailable": {
+        "title": "Make {{name}} available",
+        "body": "Tenants whose plan or switch includes {{name}} get it back immediately."
+      },
+      "makeUnavailable": {
+        "title": "Turn {{name}} off fleet-wide",
+        "body": "{{name}} closes for every tenant at once, whatever their plan or switch says. Their data is kept."
+      },
+      "enable": {
+        "title": "Turn {{name}} on for every tenant",
+        "body": "Records an override for each of the {{count}} tenants, whatever their plan says."
+      },
+      "disable": {
+        "title": "Turn {{name}} off for every tenant",
+        "body": "Records an override for each of the {{count}} tenants. Their data is kept."
+      },
+      "reset": {
+        "title": "Every tenant back to its plan for {{name}}",
+        "body": "Removes the per-tenant switches of {{name}}: each tenant gets what its plan includes."
+      }
+    }
+  },
+  "tenantModules": {
+    "title": "Modules",
+    "hint": "What this tenant can use. A switch records an override of the plan, with your reason; the tenant sees it in its audit log.",
+    "saved": "Modules updated",
+    "lapsed": "The subscription is expired or cancelled: only the core is available until it is renewed.",
+    "on": "On",
+    "off": "Off",
+    "inPlan": "In the plan",
+    "notInPlan": "Not in the plan",
+    "forcedOn": "Switched on by FlowZa",
+    "forcedOff": "Switched off by FlowZa",
+    "why": "Reason: {{reason}}",
+    "backToPlan": "Back to plan",
+    "toggle": "{{name}} for this tenant",
+    "enableTitle": "Turn on {{name}}",
+    "disableTitle": "Turn off {{name}}",
+    "resetTitle": "{{name}} back to the plan",
+    "enableBody": "The tenant gets this module now, even if its plan does not include it.",
+    "disableBody": "The module's pages and API close for this tenant now. Nothing is deleted; turning it back on restores everything.",
+    "resetBody": "The switch is removed and the plan decides again (the module will be: {{state}})."
+  },
+  "plans": {
+    "new": "New plan",
+    "saved": "Plan saved",
+    "edit": "Edit",
+    "editTitle": "Edit {{name}}",
+    "newTitle": "New plan",
+    "editorHint": "Prices exclude VAT. A plan's base price includes its users; every user beyond that is charged the extra-user price.",
+    "fields": {
+      "name": "Name",
+      "key": "Key",
+      "sortOrder": "Display order",
+      "trialDays": "Trial days",
+      "description": "Description",
+      "includedUsers": "Users included",
+      "monthly": "Monthly price",
+      "yearly": "Yearly price",
+      "extraUserMonthly": "Extra user / month",
+      "extraUserYearly": "Extra user / year",
+      "isCustom": "Custom pricing (contact sales)",
+      "isActive": "Plan is active",
+      "features": "Feature tags",
+      "plan": "Plan",
+      "cycle": "Billing cycle",
+      "users": "Users"
+    },
+    "keyFixed": "The key cannot change once tenants may use it.",
+    "keyHint": "Lower-case letters, digits and _, e.g. professional.",
+    "trialHint": "Days of trial a new tenant on this plan gets (0 = the default 14).",
+    "pricing": "Pricing",
+    "includedHint": "Users covered by the base price.",
+    "preview": "Yearly for the included users: {{amount}} for {{users}} users (≈ {{perUser}} per user per month).",
+    "noPrice": "No price: free or custom plan.",
+    "yearlyDiscount": "yearly saves {{pct}}%",
+    "modulesTitle": "Modules included",
+    "modulesHint": "What tenants on this plan can use. The core of the product is always included.",
+    "limitsTitle": "Limits",
+    "limitsHint": "Empty = no limit. A tenant's paid users replace the employee limit.",
+    "limitKeys": {
+      "employees": "Employees",
+      "devices": "Terminals",
+      "branches": "Branches",
+      "users": "User logins",
+      "storage_mb": "Storage (MB)",
+      "api_calls_month": "API calls / month",
+      "raw_retention_days": "Raw punch retention (days)"
+    },
+    "featuresHint": "Comma-separated tags, e.g. reports_basic, payroll_export.",
+    "reference": "Reference package",
+    "active": "Active",
+    "inactive": "Inactive",
+    "custom": "Custom",
+    "trialDays": "{{count}}-day trial",
+    "perYear": "/ year",
+    "orMonthly": "or {{amount}} / month",
+    "includes": "Includes {{count}} users",
+    "noIncluded": "Priced per organisation",
+    "extraUser": "+ {{yearly}} per extra user / year ({{monthly}} / month)",
+    "perUser": "≈ {{amount}} per user per month",
+    "contactSales": "Contact sales",
+    "free": "Free",
+    "subscribers": "{{count}} live · {{total}} total",
+    "calculator": "Pricing calculator",
+    "calculatorHint": "What a tenant pays for a plan, cycle and number of users — the same arithmetic as the invoices.",
+    "calc": {
+      "base": "Base price ({{count}} users included)",
+      "extra": "Extra users ({{count}})",
+      "vat": "VAT {{rate}}%",
+      "total": "Total incl. VAT",
+      "perUser": "Per user per month (excl. VAT)"
+    },
+    "noPricedPlans": "No active plan has a price yet.",
+    "kpi": {
+      "plans": "Active plans",
+      "plansHint": "active / all",
+      "live": "Live subscriptions",
+      "popular": "Most popular",
+      "reference": "Reference price",
+      "referenceHint": "{{name}}, yearly, {{count}} users (excl. VAT)"
+    },
+    "filter": "Filter plans",
+    "filters": {
+      "all": "All",
+      "active": "Active",
+      "inactive": "Inactive"
+    }
+  },
+  "billing": {
+    "title": "Subscriptions & billing",
+    "subtitle": "Revenue, invoices and payments across every tenant. Prices exclude VAT; invoices add it.",
+    "tabs": {
+      "overview": "Overview",
+      "invoices": "Invoices",
+      "payments": "Payments"
+    },
+    "kpi": {
+      "mrr": "Monthly recurring revenue",
+      "mrrHint": "Active and past-due subscriptions, yearly ones spread per month",
+      "arr": "Annual run rate",
+      "outstanding": "Outstanding",
+      "overdue": "Overdue invoices",
+      "collected": "Collected (30 days)",
+      "paying": "Paying subscriptions",
+      "trialing": "On trial",
+      "unpriced": "Custom / unpriced",
+      "unpricedHint": "Active subscriptions whose plan has no price"
+    },
+    "byPlan": "By plan",
+    "liveSubscriptions": "Live subscriptions",
+    "subscriptions": "Subscriptions",
+    "subscriptionsHint": "Every tenant's plan, cycle, paid users and price.",
+    "renews": "Renews / ends",
+    "employeesNow": "{{count}} employees now",
+    "trialEnds": "Trial ends {{date}}",
+    "newInvoice": "New invoice",
+    "newInvoiceHint": "A plan priced for a cycle and a number of users, and / or custom lines. VAT is added on the discounted subtotal.",
+    "issue": "Issue invoice",
+    "issued": "Invoice {{number}} issued",
+    "fields": {
+      "tenant": "Tenant",
+      "plan": "Plan",
+      "cycle": "Billing cycle",
+      "users": "Users",
+      "periodStart": "Period starts",
+      "description": "Description",
+      "quantity": "Qty",
+      "unitPrice": "Unit price",
+      "amount": "Amount",
+      "discount": "Discount",
+      "vat": "VAT %",
+      "notes": "Notes",
+      "issueDate": "Issued",
+      "dueDate": "Due",
+      "period": "Period",
+      "method": "Method",
+      "reference": "Reference",
+      "receivedOn": "Received on",
+      "number": "Invoice",
+      "status": "Status",
+      "kind": "Type"
+    },
+    "pickTenant": "Search a tenant…",
+    "customInvoice": "Custom invoice (no plan)",
+    "includedHint": "{{count}} included in the base price",
+    "periodHint": "Empty = today. The period runs one cycle.",
+    "activates": "Activate the subscription when paid",
+    "noPlanPrice": "{{name}} has no price: add the invoice lines below.",
+    "extraLines": "Additional lines",
+    "addLine": "Add line",
+    "removeLine": "Remove line",
+    "noLines": "No lines yet.",
+    "subtotal": "Subtotal",
+    "vatLine": "VAT {{rate}}%",
+    "total": "Total",
+    "paid": "Paid",
+    "balance": "Balance due",
+    "print": {
+      "title": "Tax invoice",
+      "vatNo": "VAT no.",
+      "billTo": "Bill to",
+      "bank": "Pay by bank transfer",
+      "action": "Print / PDF"
+    },
+    "statuses": {
+      "issued": "Issued",
+      "paid": "Paid",
+      "void": "Void",
+      "overdue": "Overdue"
+    },
+    "paymentRecorded": "Payment recorded",
+    "refundRecorded": "Refund recorded",
+    "subscriptionActivated": "Subscription activated for the invoiced plan and period",
+    "users": "{{count}} users",
+    "appliedOn": "Subscription updated from this invoice on {{date}}.",
+    "willActivate": "When fully paid, the tenant's subscription moves to this plan, cycle, users and period.",
+    "voidedBecause": "Voided: {{reason}}",
+    "paymentsTitle": "Payments",
+    "noPayments": "No payments yet.",
+    "kinds": {
+      "payment": "Payment",
+      "refund": "Refund"
+    },
+    "methods": {
+      "bank_transfer": "Bank transfer",
+      "card": "Card",
+      "cash": "Cash",
+      "cheque": "Cheque",
+      "online": "Online",
+      "other": "Other"
+    },
+    "recordPayment": "Record payment",
+    "recordRefund": "Record refund",
+    "void": "Void",
+    "refund": "Refund",
+    "voidTitle": "Void {{number}}",
+    "voidBody": "A void invoice stays on record and takes no payment. Refund any payment first.",
+    "voided": "Invoice voided",
+    "searchInvoices": "Invoice number or tenant",
+    "allStatuses": "All statuses",
+    "noInvoices": "No invoices.",
+    "recordedBy": "Recorded by",
+    "invoicesTitle": "Invoices",
+    "tenantInvoicesHint": "What FlowZa invoiced this tenant. The tenant's owner sees these under Settings → Subscription."
+  },
+  "settings": {
+    "title": "Platform settings",
+    "subtitle": "The product's name and support contact, and how invoices are issued.",
+    "saved": "Settings saved",
+    "general": "General",
+    "generalHint": "Shown to tenants on their subscription page and on invoices.",
+    "billing": "Billing",
+    "billingHint": "Used for every new invoice (issued invoices keep what they were issued with).",
+    "fields": {
+      "platformName": "Platform name",
+      "supportEmail": "Support e-mail",
+      "currency": "Currency",
+      "vatRate": "VAT rate (%)",
+      "invoicePrefix": "Invoice prefix",
+      "paymentTermsDays": "Payment terms (days)",
+      "sellerName": "Seller legal name",
+      "sellerVatNumber": "Seller VAT number",
+      "sellerAddress": "Seller address",
+      "bankDetails": "Bank details"
+    },
+    "currencyHint": "ISO code, e.g. OMR. Plans are priced in this currency.",
+    "vatHint": "Oman: 5",
+    "prefixHint": "Numbers read PREFIX-YEAR-00001.",
+    "bankHint": "Printed on invoices for transfers.",
+    "updated": "Last changed {{when}}"
   }
 }

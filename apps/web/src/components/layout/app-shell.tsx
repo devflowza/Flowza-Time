@@ -4,7 +4,8 @@ import { useTranslation } from 'react-i18next';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
 import { Dialog, DialogContent } from '@/components/ui';
-import { useMe } from '@/features/me/use-me';
+import { useActiveMembership, useMe } from '@/features/me/use-me';
+import { TriangleAlert } from 'lucide-react';
 import { isMfaRequiredError } from '@/lib/api-client';
 import { MfaRequiredGate } from '@/features/auth/mfa-required-gate';
 import { Skeleton } from '@/components/ui';
@@ -20,6 +21,8 @@ export function AppShell() {
   const me = useMe();
   const { signOut } = useAuth();
   const [mobileNav, setMobileNav] = useState(false);
+  // the platform expired / cancelled the subscription: only the core remains (modules, migration 20260929000600)
+  const lapsed = useActiveMembership()?.subscriptionLapsed === true;
   // Before any early return: the tenant's style must be on <html> for every state the shell can render.
   useApplyDashboardTheme();
 
@@ -68,6 +71,12 @@ export function AppShell() {
       </Dialog>
       <div className="flex min-w-0 flex-1 flex-col">
         <Topbar onOpenMobileNav={() => setMobileNav(true)} />
+        {lapsed ? (
+          <div role="status" className="flex flex-wrap items-center gap-2 border-b border-amber-300/60 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+            <TriangleAlert className="size-4 shrink-0" aria-hidden /> {t('modules.lapsedBanner')}
+            <Link to="/settings/subscription" className="font-medium underline underline-offset-4">{t('modules.lapsedAction')}</Link>
+          </div>
+        ) : null}
         <main className="flex-1"><Outlet /></main>
       </div>
     </div>

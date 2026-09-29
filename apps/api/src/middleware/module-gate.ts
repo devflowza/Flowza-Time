@@ -24,7 +24,9 @@ export const MODULE_ROUTE_RULES: ReadonlyArray<{ pattern: RegExp; modules: reado
   { pattern: /^leave-(types|records|balances|allocations|calendar)(\/|$)/, modules: ['leave'] },
   { pattern: /^me\/(leave|comp-off)(\/|$)/, modules: ['leave'] },
   { pattern: /^(me\/)?team\/leave(\/|$)/, modules: ['leave'] },
-  { pattern: /^(me\/)?team(\/|$)/, modules: ['manager_workspace'] },
+  // the manager workspace; team/pending-counts stays core — it is THE "waiting for you" figure of the approvals badge
+  { pattern: /^team\/(summary|attendance|leave)(\/|$)/, modules: ['manager_workspace'] },
+  { pattern: /^me\/team(\/|$)/, modules: ['manager_workspace'] },
   { pattern: /^payroll(\/|$)/, modules: ['payroll'] },
   { pattern: /^(report-schedules|report-deliveries|report-recipients|reports\/share)(\/|$)/, modules: ['report_schedules'] },
   { pattern: /^integrations\/finance(\/|$)/, modules: ['finance_integration'] },
