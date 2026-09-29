@@ -2,7 +2,7 @@ import type { DateTime } from 'luxon';
 import { ATTENDANCE_FLAGS, DEFAULT_ATTENDANCE_SETTINGS, type AttendanceFlag, type AttendanceRules, type AttendanceStatus } from '@flowza/contracts';
 import { addDays, dayOfWeek, minutesBetween } from '@flowza/shared';
 import { attributeEvents } from './attribute.js';
-import { collapseDuplicates, computeBreaks, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
+import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
 import { roundMinutes, roundPunches } from './rounding.js';
 import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EnginePunchPayload, type EngineShift, type TraceStep } from './types.js';
 import { assertTimezone, computePunchWindow, localInstant, parseInstant, toUtcIso, type PunchWindow } from './window.js';
@@ -201,17 +201,24 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
     rec.step('punch.outOfWindow', `${facts.outOfWindow.length} punch(es) outside the policy check-in / check-out window`, { events: facts.outOfWindow });
   }
 
-  // 3. Duplicate collapsing and interpretation (§G.4).
-  const { kept, duplicates } = collapseDuplicates(attributed, rules.duplicatePunchWindowSeconds);
+  // 3. Duplicate collapsing and interpretation (§G.4). An IN keeps the first punch of a burst, an OUT the last.
+  const collapse = collapseDuplicates(attributed, rules.duplicatePunchWindowSeconds);
+  const interpretation = interpretPunches(collapse.kept, rules.punchInterpretation, zone, collapse.duplicates);
+  const duplicates = duplicatesAgainstUsedPunch(collapse.duplicates, interpretation);
   for (const dup of duplicates) {
     const entry = tracePunches.get(dup.event.id);
-    if (entry) tracePunches.set(dup.event.id, { ...entry, role: 'DUPLICATE', note: `${dup.secondsApart}s after ${dup.of.id} (window ${rules.duplicatePunchWindowSeconds}s)` });
+    const apart = dup.secondsApart >= 0 ? `${dup.secondsApart}s after ${dup.of.id}` : `${-dup.secondsApart}s before ${dup.of.id}, OUT takes the latest punch`;
+    if (entry) tracePunches.set(dup.event.id, { ...entry, role: 'DUPLICATE', note: `${apart} (window ${rules.duplicatePunchWindowSeconds}s)` });
   }
   if (duplicates.length > 0) {
     rec.flag('DUPLICATE_PUNCHES_COLLAPSED');
-    rec.step('duplicates', `${duplicates.length} duplicate punch(es) collapsed`, { collapsed: duplicates.map((d) => d.event.id), windowSeconds: rules.duplicatePunchWindowSeconds });
+    const movedOut = interpretation.punches.filter((p) => p.role === 'OUT' && collapse.duplicates.some((d) => d.event.id === p.event.id)).map((p) => p.event.id);
+    rec.step('duplicates', `${duplicates.length} duplicate punch(es) collapsed${movedOut.length > 0 ? '; OUT moved to the latest punch of its burst' : ''}`, {
+      collapsed: duplicates.map((d) => d.event.id),
+      windowSeconds: rules.duplicatePunchWindowSeconds,
+      ...(movedOut.length > 0 ? { outAtLatestPunch: movedOut } : {}),
+    });
   }
-  const interpretation = interpretPunches(kept, rules.punchInterpretation, zone);
   for (const p of interpretation.punches) {
     const entry = tracePunches.get(p.event.id);
     const attributionNote = attributionNotes.get(p.event.id);

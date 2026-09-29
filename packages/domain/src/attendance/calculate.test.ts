@@ -198,6 +198,23 @@ describe('calculateDailyRecord — punch rounding and interpretation', () => {
     expect(r.trace.punches.map((p) => p.role)).toEqual(['IN', 'DUPLICATE', 'OUT']);
   });
 
+  it('takes the LATEST punch as OUT when the last punch was repeated (field report: OUT 19:47:05 + duplicate 19:47:08)', () => {
+    const late = fixedShift({ startTime: '19:00', endTime: '20:00' });
+    const events = ['19:11:22', '19:11:24', '19:16:16', '19:16:19', '19:16:23', '19:47:05', '19:47:08'].map((h) => punch(DATE, h));
+    const r = calculateDailyRecord(input({ events, shift: late }));
+    expect(r.firstInAt).toBe(at(DATE, '19:11:22'));
+    expect(r.lastOutAt).toBe(at(DATE, '19:47:08'));
+    expect(r.punchCount).toBe(7);
+    expect(r.flags).toContain('DUPLICATE_PUNCHES_COLLAPSED');
+    expect(r.trace.punches.map((p) => p.role)).toEqual(['IN', 'DUPLICATE', 'IGNORED', 'DUPLICATE', 'DUPLICATE', 'DUPLICATE', 'OUT']);
+    const out = r.trace.punches[6];
+    const firstOutTap = r.trace.punches[5];
+    expect(out).toMatchObject({ eventId: 'evt-007', role: 'OUT', note: 'last punch in window' });
+    expect(firstOutTap).toMatchObject({ eventId: 'evt-006', role: 'DUPLICATE', note: '3s before evt-007, OUT takes the latest punch (window 60s)' });
+    expect(r.trace.punches[1]).toMatchObject({ role: 'DUPLICATE', note: '2s after evt-001 (window 60s)' });
+    expect(r.trace.steps.find((s) => s.step === 'duplicates')?.values).toMatchObject({ outAtLatestPunch: ['evt-007'] });
+  });
+
   it('flags MANUAL_CORRECTION when a manual event is attributed', () => {
     const r = calculateDailyRecord(input({ events: [punch(DATE, '09:00'), punch(DATE, '17:00', 'PUNCH', MUSCAT, { source: 'MANUAL' })] }));
     expect(r.flags).toContain('MANUAL_CORRECTION');
