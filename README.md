@@ -57,17 +57,20 @@ supabase/migrations · supabase/tests · supabase/functions · scripts · docs
 
 | Area | State |
 |---|---|
-| Database — 21 migrations, 74 base tables, RLS on every tenant table, job queue, partitions, envelope-encrypted credentials | **Working**, proven by the SQL isolation suites and integration tests |
-| Attendance engine, shift/rule resolution, period summaries (pure, traced) | **Working** — 156 tests |
-| Device provider framework, registry, conformance suite, deterministic mock provider | **Working** — 140 tests |
+| Database — 46 migrations; 97 tables in `public` (plus 148 monthly partitions), RLS on every one of them and on every partition, no table reachable through the data API (PostgREST), job queue, envelope-encrypted credentials | **Working**, proven by the SQL isolation and invariant suites (`supabase/tests`) and the integration tests |
+| Attendance engine, shift/rule resolution, day marks (loss of pay, unexcused / excused), punch windows, day close, period summaries (pure, traced) | **Working** — 347 tests in `@flowza/domain` |
+| Device provider framework, registry, conformance suite, deterministic mock provider | **Working** — 286 tests |
 | ZKTeco PUSH/ADMS protocol (handshake, ATTLOG, commands, OPERLOG) | **Beta, never run against hardware** — `verification_status = REPORTED`; see the checklist in `docs/device-integrations.md` §6 |
 | Hikvision, Suprema, Anviz, eSSL, FingerTec, Matrix, NITGEN | **Placeholders that fail with `NOT_IMPLEMENTED`** — never presented as working |
-| API — 178 authenticated endpoints plus device-push and webhook ingress | **Working** — 114 tests incl. an adversarial security suite |
-| Worker — sync, attendance processing, notifications, maintenance | **Working** — 74 tests |
-| Web — 36 routes across dashboard (tenant-selectable styles and layouts), employees, organisation, users, settings, audit, search, devices, sync, attendance, corrections, approvals, schedule, leave, reports, payroll, platform (en + ar, RTL) | **Working** — 125 component tests, 22 UI end-to-end runs (11 scenarios × desktop + tablet) |
-| Seed — 1 organisation, 5 branches, 20 departments, 500 employees, 20 devices, 30 days (~22k punches through the real engine) | **Working** |
-| Supabase hosted project, Auth stack, Storage, Realtime authorisation policies | **Not provisioned** — everything runs against local Postgres with a Supabase-compatibility shim (`supabase/tests/00_local_supabase_shim.sql`) |
-| Platform-wide feature-flag defaults, full-stack E2E against a seeded Supabase stack | **Not implemented** — tracked in `docs/risks.md` and `docs/device-integrations.md` §8 |
+| API — 302 authenticated `/api/v1` endpoints plus device-push and webhook ingress; route authorisation matrix, request caps, abuse tests across two organisations | **Working** — 489 tests incl. an adversarial security suite |
+| Worker — sync, attendance processing, approval reminders and escalation, notifications (e-mail + in-app, missing check-out reminder, retention), report schedules, Flowza Finance sync, maintenance | **Working** — 227 tests |
+| Web — dashboard (tenant-selectable styles and layouts), employees, organisation, users, settings, audit, search, devices, sync, attendance, corrections, approvals inbox and history, schedule, leave, reports, payroll, platform; the employee portal (`/my`), the manager workspace and the HR attendance workspace (en + ar, RTL) | **Working** — 479 component tests, 74 UI end-to-end runs (desktop + tablet) |
+| HR portal (Flowza Finance parity) — roles incl. Line Manager and Auditor, multilevel approvals (any / all / quorum, delegation, escalation, e-mail actions), employee self-service (web check-in with geofences, selfie, late / absence reasons, regularisation, shift swaps, leave, comp-off), leave v2 (allocations, carry-forward, year close), notifications v2 | **Working** — built in `docs/hr-portal/prompt-pack.md` Prompts 1–10; local E2E matrix green (`docs/hr-portal/reports/11-e2e-matrix.md`); hosted run in `docs/hr-portal/reports/12-ship.md` |
+| Flowza Finance attendance sync connector (pull / push through Finance `attendance-export` / `attendance-ingest`) | **Built, disabled in production** — no tenant has a connector device; the Finance-side function is not deployed |
+| Seed — 1 organisation, 5 branches, 20 departments, 500 employees, 20 devices, 30 days (~22k punches through the real engine) | **Working** (local) |
+| Demo tenant seed — Majan Gulf Trading (Oman), 53 employees, 10 logins covering every system role, six months of terminal punches through the real engine (`supabase/seeds/demo-tenant`) | **Loaded on the hosted project** |
+| Hosted stack — Supabase project `liyilmbklsextsggflbb` (Auth, Storage, Realtime policies), API and workers on Fly.io (`time-api.flowza.ai`), web on Cloudflare Pages (`time.flowza.ai`, builds `main`) | **Live** — all 46 migrations applied; see `docs/go-live.md` |
+| Platform-wide feature-flag defaults | **Not implemented** — tracked in `docs/risks.md` and `docs/device-integrations.md` §8 |
 
 Known limits worth stating: rate limiting and idempotency storage are per API instance (multi-instance needs an edge limiter or a shared store), zero-touch device claiming trusts serial knowledge (risk D26), and the web app ships ~188 kB gzipped of application code on top of the vendor chunks (React, Supabase, TanStack Query, i18next, Luxon), all pages beyond the shell being lazy.
 

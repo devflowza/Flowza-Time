@@ -244,3 +244,7 @@ scheduled, audited job. See `docs/risks.md` for GCC regulatory notes (Oman PDPL,
   and Storage signing, never for data access.
 - Dependency audit (`pnpm audit --prod`) + secret scanning in CI (`.github/workflows/ci.yml`), Dependabot weekly.
 - Backups: Supabase daily backups + PITR on paid plans; see `docs/deployment.md` for RPO/RTO.
+- Hosted project (`liyilmbklsextsggflbb`): every migration, including the security gate (`20260928001100` … `001120`), is
+  applied (2026-09-29; `docs/hr-portal/reports/12-ship.md`). Supabase's security and performance advisors report no
+  ERROR-level finding. One project setting is still open: **leaked-password protection** in Supabase Auth (Dashboard →
+  Authentication → password security) is off and should be switched on.

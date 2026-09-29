@@ -37,6 +37,32 @@ recreates the Supabase-provided pieces (auth/storage/realtime schemas, roles). N
 | `1800_auth_hooks` | Supabase Auth password-verification hook → login_history |
 | `20260909000100_reports_settings_leave_present` | `organization_settings.reports` group; `leave_types.treat_as_present` |
 | `20260909000200_dashboard_settings` | `organization_settings.dashboard` group (tenant dashboard style, layout and options) |
+| `20260909000300_principal_snapshot` | `app.principal_snapshot(user_id)`: the request principal in one round trip (see *Request principal*) |
+| `20260927000100_employee_self_service` | Employee portal (`/my`): `leave.request` and `attendance.request_correction` for every system role |
+| `20260928000100_roles_manager_and_permissions` | HR portal P1: 13 permission keys (self-service check-in / notes / shift swaps, team visibility, HR oversight, geofences, overtime, leave approval split from `leave.manage`, approval configuration + delegation, report schedules, integrations); system roles `manager` (Line Manager) and `auditor` (read-only); `employees.secondary_manager_employee_id`; team-scoped RLS |
+| `20260928000150_p1_review_fixes` | P1 review: `employee.view_team` (own record + direct reports) and consistent role supersets |
+| `20260928000200_approval_engine_v2` | P2: approver types SECONDARY_MANAGER / MANAGER_CHAIN / HR_ADMIN / DEPARTMENT_HEAD / BRANCH_MANAGER, new approval entities, INVALIDATED / SKIPPED; approval_step_actors, approval_delegations, approval_request_events (timeline), approval_email_tokens, approval_digest_runs |
+| `20260928000300_attendance_policy_parity` | P3: `attendance_day_marks` (UNEXCUSED / EXCUSED / LOP / PAY_EFFECT, revoked never deleted); `lop_days` and related columns on `attendance_period_summaries`; nested attendance policy groups in `organization_settings.attendance` |
+| `20260928000400_finance_connector` | P9: `flowza_finance` provider (pull from Finance `attendance-export`, push to `attendance-ingest`) and `finance_sync_state` |
+| `20260928000450_finance_connector_fixes` | P9 review: `syncFrom`; `finance_pushed_events` push ledger |
+| `20260928000500_portal_attendance_self_service` | P4: raw source SELF_SERVICE on a per-organisation virtual device; geofences (+ assignments), attendance_notes (late / absence reasons), attendance_regularisation_requests, selfie_checkins, shift_swap_requests, employee_attendance_grants |
+| `20260928000600_hr_attendance_workspace` | P6a: report_schedules and report_deliveries |
+| `20260928000690_leave_v2_enum` | P7, part 1: leave status INFO_REQUESTED (its own transaction; a new enum value cannot be used where it is added) |
+| `20260928000700_leave_v2` | P7, part 2: leave-type policy (approval, count mode, notice, gender, accrual, carry-forward, half day, portal visibility, `system_key` COMP_OFF); leave_allocations, comp_off_credits, comp_off_usages, leave_request_comments |
+| `20260928000800_approval_engine_v2_review_fixes` | P2 review: organisation-local dates (`app.org_date_at`, `app.org_today`) shared by RLS, the inbox and the engine |
+| `20260928000820_hr_workspace_review_fixes` | P6a review: report files readable only within the reader's report scope (storage policies) |
+| `20260928000840_portal_attendance_review_fixes` | P4 review: branch-scoped writes of geofences and their assignments |
+| `20260928000850_leave_v2_review_fixes` | P7 review: nobody writes their own leave, comp-off or allocation rows from a client session; `leave_types.applicable_employment_types`; leave_year_closes |
+| `20260928000900_manager_workspace` | P5 + P6b: invitations gain soft revocation, the resend chain and hashed e-mailed tokens |
+| `20260928000950_manager_workspace_review_fixes` | P5 review: one definition of "waiting for you" (`app.approval_actionable_request_ids`) |
+| `20260928001000_notifications_v2` | P8: notification categories LEAVE / REPORTS, `notifications.in_app`, delivery back-off, retention indexes, missing_punch_reminders, own-row preferences |
+| `20260928001050_notifications_review_fixes` | P8 review: the outbox (`domain_events`) is written by the services only |
+| `20260928001100_security_gate` | P10: partitions locked; `flowza_client` role; `_no_data_api` restrictive policies (no table access through PostgREST); FORCE RLS on tenant tables; immutable `organization_id`; explicit denials on system-written tables. Pinned by `supabase/tests/rls_invariants.sql` |
+| `20260928001110_security_gate_queue_indexes` | P10: indexes for the queue reads measured at a year of volume |
+| `20260928001120_platform_grant_approval` | P10: a platform write access grant starts only when its named second approver approves it |
+
+Hosted project `liyilmbklsextsggflbb`: every migration above is applied (the last 21 on 2026-09-29, each verified against
+its file by md5, see `docs/hr-portal/reports/12-ship.md`); `app.migrations` lists the same 46 files as this directory.
 
 ## Conventions
 
