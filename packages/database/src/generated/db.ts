@@ -1159,7 +1159,28 @@ export interface Invitations {
   allBranches: Generated<boolean>;
   branchIds: Generated<string[]>;
   createdAt: Generated<Timestamp>;
+  /**
+   * Attempts made by the current invitation e-mail job.
+   */
+  deliveryAttempts: Generated<number>;
+  deliveryLastAttemptAt: Timestamp | null;
+  /**
+   * Why the last e-mail attempt failed (provider message, no secrets, at most 500 characters).
+   */
+  deliveryLastError: string | null;
+  /**
+   * Approximately when the queue retries the e-mail (while delivery_status = retrying).
+   */
+  deliveryNextAttemptAt: Timestamp | null;
+  /**
+   * The mailer that accepted the e-mail: resend | console (console = e-mail delivery is not configured).
+   */
+  deliveryProvider: string | null;
   deliverySentAt: Timestamp | null;
+  /**
+   * E-mail delivery of the invitation: none | queued | retrying | sent | failed (written by the SEND_INVITATION_EMAIL worker job).
+   */
+  deliveryStatus: Generated<string>;
   /**
    * sha256 (hex) of the token e-mailed by the worker; the plain token is never stored.
    */

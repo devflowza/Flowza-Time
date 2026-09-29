@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { sql } from 'kysely';
-import { sha256Hex } from '@flowza/shared';
+import { AppError, sha256Hex } from '@flowza/shared';
 import { createHarness, fakeJob, type TestHarness } from '../../test/harness.js';
-import { invitationEmail, sendInvitationEmail } from './index.js';
+import { deliveryErrorText, invitationEmail, sendInvitationEmail } from './index.js';
 
 /**
  * SEND_INVITATION_EMAIL (HR portal Prompt 6b): the worker mints the e-mailed token at send time and stores only its hash;
@@ -10,7 +10,7 @@ import { invitationEmail, sendInvitationEmail } from './index.js';
  */
 const ORG = '0e000000-0000-0000-0000-000000000000';
 const U = { inviter: 'e0000000-0000-0000-0000-000000000001' };
-const INV = { open: '0e000000-0000-0000-0000-0000000000a1', revoked: '0e000000-0000-0000-0000-0000000000a2', expired: '0e000000-0000-0000-0000-0000000000a3', ar: '0e000000-0000-0000-0000-0000000000a4' };
+const INV = { open: '0e000000-0000-0000-0000-0000000000a1', revoked: '0e000000-0000-0000-0000-0000000000a2', expired: '0e000000-0000-0000-0000-0000000000a3', ar: '0e000000-0000-0000-0000-0000000000a4', refused: '0e000000-0000-0000-0000-0000000000a5' };
 const ROLE_EMPLOYEE = '10000000-0000-0000-0000-000000000008';
 let h: TestHarness;
 const sent: Array<{ to: string; subject: string; html: string; text?: string }> = [];
@@ -31,8 +31,8 @@ beforeAll(async () => {
 });
 afterAll(async () => { await h?.close(); });
 
-const job = (invitationId: string) => ({ job: fakeJob('SEND_INVITATION_EMAIL', { organizationId: ORG, invitationId }, ORG), deps: h.deps, log: h.deps.log, signal: new AbortController().signal });
-const row = (id: string) => h.tdb.adminDb.selectFrom('invitations').select(['tokenHash', 'deliveryTokenHash', 'deliverySentAt']).where('id', '=', id).executeTakeFirstOrThrow();
+const job = (invitationId: string, attempt: { attempts: number; maxAttempts: number } = { attempts: 1, maxAttempts: 5 }) => ({ job: { ...fakeJob('SEND_INVITATION_EMAIL', { organizationId: ORG, invitationId }, ORG), ...attempt }, deps: h.deps, log: h.deps.log, signal: new AbortController().signal });
+const row = (id: string) => h.tdb.adminDb.selectFrom('invitations').select(['tokenHash', 'deliveryTokenHash', 'deliverySentAt', 'deliveryStatus', 'deliveryAttempts', 'deliveryLastError', 'deliveryNextAttemptAt', 'deliveryProvider']).where('id', '=', id).executeTakeFirstOrThrow();
 
 describe('SEND_INVITATION_EMAIL', () => {
   it('mails a link whose token only the e-mail carries; the row keeps its hash', async () => {
@@ -48,6 +48,7 @@ describe('SEND_INVITATION_EMAIL', () => {
     expect(r.deliveryTokenHash).toBe(sha256Hex(secret));
     expect(r.tokenHash).toBe(sha256Hex(`copy-${INV.open}`));
     expect(r.deliverySentAt).not.toBeNull();
+    expect(r).toMatchObject({ deliveryStatus: 'sent', deliveryProvider: 'test', deliveryAttempts: 1, deliveryLastError: null, deliveryNextAttemptAt: null });
     expect(mail.html).toContain('Hana HR invited you');
     // nothing secret in the audit trail
     const audit = await h.tdb.adminDb.selectFrom('audit.logs').selectAll().where('action', '=', 'member.invitation_emailed').execute();
@@ -73,7 +74,33 @@ describe('SEND_INVITATION_EMAIL', () => {
     h.deps.mailer = { async send() { throw new Error('provider down'); } };
     await expect(sendInvitationEmail(job(INV.ar))).rejects.toThrow('provider down');
     h.deps.mailer = mailer;
-    expect((await row(INV.ar)).deliveryTokenHash).toBeNull();
+    const r = await row(INV.ar);
+    expect(r.deliveryTokenHash).toBeNull();
+    // the failure is recorded in a transaction of its own: retrying, with when the queue tries again — and no internal text
+    expect(r).toMatchObject({ deliveryStatus: 'retrying', deliveryAttempts: 1, deliveryLastError: 'The e-mail could not be sent (internal error).' });
+    expect(r.deliveryNextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
+  });
+
+  it('the last attempt, or a message the provider refuses, reads failed with the provider\'s reason; a later success reads sent', async () => {
+    await h.tdb.adminDb.insertInto('invitations').values({ id: INV.refused, organizationId: ORG, email: 'refused@t.local', roleId: ROLE_EMPLOYEE, tokenHash: sha256Hex('copy-refused'), invitedBy: U.inviter, expiresAt: new Date(Date.now() + 86_400_000) }).execute();
+    const mailer = h.deps.mailer;
+    const down = new AppError('PROVIDER_ERROR', 'email send failed: service unavailable', { retryable: true });
+    h.deps.mailer = { async send() { throw down; } };
+    await expect(sendInvitationEmail(job(INV.refused, { attempts: 5, maxAttempts: 5 }))).rejects.toThrow('service unavailable');
+    expect(await row(INV.refused)).toMatchObject({ deliveryStatus: 'failed', deliveryAttempts: 5, deliveryLastError: 'email send failed: service unavailable', deliveryNextAttemptAt: null });
+    const refused = new AppError('PROVIDER_ERROR', 'email send failed: The example.com domain is not verified', { retryable: false });
+    h.deps.mailer = { async send() { throw refused; } };
+    await expect(sendInvitationEmail(job(INV.refused, { attempts: 1, maxAttempts: 5 }))).rejects.toThrow('not verified');
+    expect(await row(INV.refused)).toMatchObject({ deliveryStatus: 'failed', deliveryAttempts: 1, deliveryLastError: 'email send failed: The example.com domain is not verified' });
+    h.deps.mailer = mailer;
+    expect(await sendInvitationEmail(job(INV.refused))).toEqual({ sent: true });
+    expect(await row(INV.refused)).toMatchObject({ deliveryStatus: 'sent', deliveryLastError: null });
+  });
+
+  it('never shows an internal error to the administrator', () => {
+    expect(deliveryErrorText(new Error('duplicate key value violates unique constraint "x"'))).toBe('The e-mail could not be sent (internal error).');
+    expect(deliveryErrorText(new AppError('PROVIDER_TIMEOUT', 'job timed out', { retryable: true }))).toBe('The e-mail provider did not answer in time.');
+    expect(deliveryErrorText(new AppError('PROVIDER_ERROR', `email send failed: ${'x'.repeat(600)}`)).length).toBe(500);
   });
 
   it('writes the e-mail in the organisation\'s language', () => {

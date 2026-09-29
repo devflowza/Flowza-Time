@@ -1,0 +1,39 @@
+name: API image
+
+# Cost-trimmed CI (2 of 2, with migrations.yml). apps/api/Dockerfile is what Fly deploys (fly.api.toml); building it on
+# pull requests that can change it turns a broken image into a red PR instead of a failed deploy. No push — building
+# is the test. The worker image is no longer built here; a break there fails `flyctl deploy` before anything is released.
+on:
+  pull_request:
+    paths:
+      - 'apps/api/**'
+      - 'packages/**'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - '.npmrc'
+      - 'tsconfig.base.json'
+      - '.dockerignore'
+      - '.github/workflows/api-image.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: api-image-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  api-image:
+    name: API container image build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build the API image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: apps/api/Dockerfile
+          push: false
+          cache-from: type=gha,scope=api
+          cache-to: type=gha,mode=max,scope=api

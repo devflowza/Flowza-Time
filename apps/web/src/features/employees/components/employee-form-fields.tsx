@@ -125,8 +125,9 @@ export function EmployeeFormFields({ form, mode, excludeEmployeeId }: { form: Us
       <Card>
         <CardHeader><CardTitle>{t('form.device')}</CardTitle><CardDescription>{t('form.deviceHint')}</CardDescription></CardHeader>
         <CardContent className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          <FormField label={t('fields.deviceUserId')} htmlFor="emp-device-id" optional error={errors.deviceUserId?.message} hint={mode === 'create' ? t('fields.deviceUserIdAuto') : t('fields.deviceUserIdEditHint')}>
-            <Input id="emp-device-id" dir="ltr" className="font-mono" placeholder={mode === 'create' ? t('fields.autoAssigned') : undefined} {...register('deviceUserId', { setValueAs: blankToUndefined })} aria-invalid={!!errors.deviceUserId} />
+          {/* blank auto-assigns on create; an existing employee always keeps an id, so emptying it is a validation error, not a PATCH null */}
+          <FormField label={t('fields.deviceUserId')} htmlFor="emp-device-id" optional={mode === 'create'} required={mode === 'edit'} error={errors.deviceUserId?.message} hint={mode === 'create' ? t('fields.deviceUserIdAuto') : t('fields.deviceUserIdEditHint')}>
+            <Input id="emp-device-id" dir="ltr" className="font-mono" placeholder={mode === 'create' ? t('fields.autoAssigned') : undefined} {...register('deviceUserId', mode === 'create' ? { setValueAs: blankToUndefined } : undefined)} aria-invalid={!!errors.deviceUserId} />
           </FormField>
           <FormField label={t('fields.cardNumber')} htmlFor="emp-card" optional error={errors.cardNumber?.message}>
             <Input id="emp-card" dir="ltr" className="font-mono" {...register('cardNumber', { setValueAs: blankToUndefined })} aria-invalid={!!errors.cardNumber} />

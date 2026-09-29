@@ -15,6 +15,7 @@ import { useEmployeeOptions } from '@/features/employees/api';
 import { CopyButton } from '@/features/audit/components/copy-button';
 import { invitationUrl } from '@/features/auth/invitation-url';
 import { useMemberMutations, useRoles } from '../api';
+import { LiveInvitationDelivery } from './invitation-delivery';
 
 type FormValues = z.input<typeof inviteMemberSchema>;
 
@@ -53,6 +54,7 @@ export function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChan
               <DialogTitle className="flex items-center gap-2"><MailCheck className="size-5 text-emerald-600" /> {t('invite.createdTitle')}</DialogTitle>
               <DialogDescription>{result.membershipId ? t('invite.createdExisting', { email: result.email }) : t('invite.createdHint', { email: result.email })}</DialogDescription>
             </DialogHeader>
+            <LiveInvitationDelivery invitation={result} />
             {result.token ? (
               <div className="space-y-2">
                 <Label htmlFor="invite-token">{tc('auth.inviteLinkLabel')}</Label>
