@@ -137,6 +137,32 @@ describe('invitations carry the employee link', () => {
   });
 });
 
+describe('an invitation without an employee link', () => {
+  it('links the invitee to the one employee filed under the invited address, and to none when the address is ambiguous', async () => {
+    const matchedUser = uuid('c'); const MATCHED = 'Matched-Hire-Team@test.local';
+    await h.admin.updateTable('employees').set({ email: MATCHED }).where('id', '=', e5).execute();
+    const inv = await h.request('POST', `${base()}/invitations`, { token: f.owner, body: { email: MATCHED.toLowerCase(), roleId: ROLE.employee } });
+    expect(inv.status).toBe(201);
+    expect(inv.body.data.employeeId).toBeNull();
+    await seedUser(h.admin, matchedUser, MATCHED.toLowerCase(), 'Matched Hire');
+    const accept = await h.request('POST', '/api/v1/invitations/accept', { token: `${matchedUser}:${MATCHED.toLowerCase()}`, body: { token: inv.body.data.token } });
+    expect(accept.status).toBe(200);
+    const membership = await h.admin.selectFrom('orgMemberships').select('employeeId').where('id', '=', accept.body.data.membershipId).executeTakeFirstOrThrow();
+    expect(membership.employeeId).toBe(e5);
+    const audited = await h.admin.selectFrom('audit.logs').select('newValue').where('organizationId', '=', f.orgId).where('action', '=', 'member.invitation_accepted').where('entityId', '=', accept.body.data.membershipId).executeTakeFirstOrThrow();
+    expect(audited.newValue).toMatchObject({ employeeId: e5, employeeLinkedByEmail: true });
+
+    // two records under one address: nothing is guessed
+    const dupUser = uuid('c'); const DUP = 'dup-hire-team@test.local';
+    await h.admin.updateTable('employees').set({ email: DUP }).where('id', 'in', [e6, e8]).execute();
+    const dup = await h.request('POST', `${base()}/invitations`, { token: f.owner, body: { email: DUP, roleId: ROLE.employee } });
+    await seedUser(h.admin, dupUser, DUP, 'Dup Hire');
+    const dupAccept = await h.request('POST', '/api/v1/invitations/accept', { token: `${dupUser}:${DUP}`, body: { token: dup.body.data.token } });
+    expect(dupAccept.status).toBe(200);
+    expect((await h.admin.selectFrom('orgMemberships').select('employeeId').where('id', '=', dupAccept.body.data.membershipId).executeTakeFirstOrThrow()).employeeId).toBeNull();
+  });
+});
+
 describe('auditor is read-only', () => {
   it('reads the directory and attendance; every write is refused at the service layer (and by RLS underneath)', async () => {
     expect((await h.request('GET', `${base()}/employees`, { token: auditor })).status).toBe(200);

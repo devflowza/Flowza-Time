@@ -408,15 +408,34 @@ export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: strin
     // The employee link chosen at invitation time lands on the membership — unless somebody else took that employee in
     // the meantime, in which case the membership is created unlinked (audited) rather than stealing the link or failing onboarding.
     const linkClash = inv.employeeId ? await employeeLinkClash(trx, inv.organizationId, inv.employeeId, { userId: actor.userId, invitationId: inv.id }) : null;
-    const employeeLink = inv.employeeId && !linkClash ? { employeeId: inv.employeeId } : {};
+    // An invitation sent without an employee link (Users → Invite) still lands the invitee on their own record when HR filed
+    // exactly one employee under the invited address: without the link the employee sees no self-service at all.
+    const matched = inv.employeeId ? null : await employeeByInvitedEmail(trx, inv.organizationId, inv.email, actor.userId, inv.id);
+    const linkedEmployeeId = inv.employeeId && !linkClash ? inv.employeeId : matched;
+    const employeeLink = linkedEmployeeId ? { employeeId: linkedEmployeeId } : {};
     const membership = await trx.insertInto('orgMemberships').values({ organizationId: inv.organizationId, userId: actor.userId, roleId: inv.roleId, status: 'active', allBranches: inv.allBranches, joinedAt: new Date(), ...employeeLink })
       .onConflict((oc) => oc.columns(['organizationId', 'userId']).doUpdateSet({ roleId: inv.roleId, status: 'active', allBranches: inv.allBranches, joinedAt: new Date(), ...employeeLink }))
       .returning('id').executeTakeFirstOrThrow();
     await trx.deleteFrom('membershipBranches').where('membershipId', '=', membership.id).execute();
     if (!inv.allBranches && inv.branchIds.length > 0) await trx.insertInto('membershipBranches').values(inv.branchIds.map((b) => ({ membershipId: membership.id, branchId: b }))).execute();
-    await audit(trx, actor, inv.organizationId, 'member.invitation_accepted', 'org_membership', { entityId: membership.id, newValue: { invitationId: inv.id, roleId: inv.roleId, allBranches: inv.allBranches, branchIds: inv.branchIds, employeeId: inv.employeeId && !linkClash ? inv.employeeId : null, ...(linkClash ? { employeeLinkSkipped: linkClash } : {}) } });
+    await audit(trx, actor, inv.organizationId, 'member.invitation_accepted', 'org_membership', { entityId: membership.id, newValue: { invitationId: inv.id, roleId: inv.roleId, allBranches: inv.allBranches, branchIds: inv.branchIds, employeeId: linkedEmployeeId ?? null, ...(matched ? { employeeLinkedByEmail: true } : {}), ...(linkClash ? { employeeLinkSkipped: linkClash } : {}) } });
     return { membershipId: membership.id, organizationId: inv.organizationId };
   });
+}
+
+/**
+ * The one employee record filed under the invited address that the invitee may be linked to on acceptance: not archived,
+ * not left, not linked to another login nor reserved by another invitation — and only when the invitee's membership (an
+ * existing account re-invited) has no link yet. Two records under one address are ambiguous: nothing is linked.
+ */
+async function employeeByInvitedEmail(trx: Trx, orgId: string, email: string, userId: string, invitationId: string): Promise<string | null> {
+  const current = await trx.selectFrom('orgMemberships').select('employeeId').where('organizationId', '=', orgId).where('userId', '=', userId).executeTakeFirst();
+  if (current?.employeeId) return null;
+  const rows = await trx.selectFrom('employees').select(['id', 'employmentStatus']).where('organizationId', '=', orgId).where('deletedAt', 'is', null)
+    .where(sql`lower(email::text)`, '=', email.toLowerCase()).limit(2).execute();
+  const only = rows.length === 1 ? rows[0] : undefined;
+  if (!only || hasLeft(only.employmentStatus)) return null;
+  return (await employeeLinkClash(trx, orgId, only.id, { userId, invitationId })) ? null : only.id;
 }
 
 export async function assertNotLastOwner(trx: Trx, orgId: string, membershipId: string, next: { roleId: string; status: string }): Promise<void> {
