@@ -268,7 +268,7 @@ export async function vetEgressUrl(raw: string | URL, policy: EgressPolicy = {},
 // ----- transport ------------------------------------------------------------------------------------------------------------
 
 export interface EgressRequestInit {
-  method: 'GET' | 'POST';
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
   headers?: Record<string, string>;
   body?: string | Buffer;
   signal?: AbortSignal;

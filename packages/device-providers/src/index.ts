@@ -6,6 +6,7 @@ export * from './throttle.js';
 export * from './conformance.js';
 export * from './egress.js';
 export * from './protocol-utils.js';
+export * from './vendor-http.js';
 export * from './providers/mock/definition.js';
 export * from './providers/mock/stream.js';
 export * from './providers/mock/webhook.js';
