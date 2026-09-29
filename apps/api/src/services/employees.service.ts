@@ -373,6 +373,8 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     const { effectiveFrom: requestedFrom, changeReason, pin, customFields, ...rest } = input;
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(rest)) if (v !== undefined) patch[k] = v;
+    // a cleared display name falls back to first + last name (the column is NOT NULL), as on create
+    if (input.displayName === null) patch['displayName'] = [input.firstName ?? before.firstName, input.lastName ?? before.lastName].filter(Boolean).join(' ');
     if (customFields !== undefined) patch['customFields'] = JSON.stringify(customFields);
     if (pin !== undefined) patch['pinHash'] = hashPin(pin);
     const joiningDate = input.joiningDate ?? isoDate(before.joiningDate);

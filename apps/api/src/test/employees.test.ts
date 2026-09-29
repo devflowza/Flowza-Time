@@ -135,6 +135,23 @@ describe('employees', () => {
     expect(events.filter((e) => e.eventType === 'employee.updated').length).toBeGreaterThanOrEqual(3);
   });
 
+  it('PATCH with null clears optional fields (what the profile form sends for an emptied field); required ones refuse it', async () => {
+    const url = `/orgs/${F.orgA}/employees/${createdId}`;
+    const set = await api.request('PATCH', url, { user: F.ownerA, body: { displayName: 'Noor H.', nationalityCode: 'om', cardNumber: '00123', weeklyOffDays: [5, 6] } });
+    expect(set.status).toBe(200);
+    expect(set.json.data).toMatchObject({ displayName: 'Noor H.', nationalityCode: 'OM', cardNumber: '00123', weeklyOffDays: [5, 6] });
+    const cleared = await api.request('PATCH', url, { user: F.ownerA, body: { displayName: null, displayNameAr: null, nationalityCode: null, email: null, phone: null, cardNumber: null, weeklyOffDays: null } });
+    expect(cleared.status).toBe(200);
+    // the display name falls back to first + last name; the rest is empty
+    expect(cleared.json.data).toMatchObject({ displayName: 'Noor Hamad', displayNameAr: null, nationalityCode: null, email: null, phone: null, cardNumber: null, weeklyOffDays: null });
+    expect((await api.request('GET', `${url}/history`, { user: F.ownerA })).json.data).toHaveLength(2); // none of these is effective-dated
+    for (const key of ['deviceUserId', 'firstName', 'branchId', 'joiningDate']) {
+      const refused = await api.request('PATCH', url, { user: F.ownerA, body: { [key]: null } });
+      expect(refused.status, key).toBe(400);
+      expect(refused.json.code).toBe('VALIDATION_ERROR');
+    }
+  });
+
   it('device states and identity documents (sensitive reads are audited)', async () => {
     const devices = await api.request('GET', `/orgs/${F.orgA}/employees/${F.empE1}/devices`, { user: F.ownerA });
     expect(devices.json.data).toHaveLength(1);
