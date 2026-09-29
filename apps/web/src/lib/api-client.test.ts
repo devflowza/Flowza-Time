@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import { ApiError, apiFetch, isMfaRequiredError, isNetworkError } from './api-client';
+import { ApiError, FEATURE_UNAVAILABLE, apiFetch, isFeatureUnavailableError, isMfaRequiredError, isNetworkError } from './api-client';
 
 describe('isMfaRequiredError', () => {
   it('matches only the 403 the API raises for a session below aal2', () => {
@@ -46,5 +46,38 @@ describe('apiFetch transport failures', () => {
     const err = await apiFetch('/me').catch((e: unknown) => e);
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).code).toBe('INVALID_RESPONSE');
+  });
+});
+
+describe('apiFetch — a path the API does not serve', () => {
+  const realFetch = globalThis.fetch;
+  afterEach(() => { globalThis.fetch = realFetch; });
+  const answer = (status: number, body: unknown) => { globalThis.fetch = vi.fn().mockResolvedValue(new Response(JSON.stringify(body), { status })); };
+
+  // The API in production when the web shipped PIN mapping: its router 404 carries only the message.
+  it('never surfaces the router\'s "Route not found." from an API that predates the marker', async () => {
+    answer(404, { code: 'NOT_FOUND', message: 'Route not found.', requestId: 'req_1' });
+    const err = await apiFetch('/orgs/o1/pin-mappings').catch((e: unknown) => e);
+    expect(isFeatureUnavailableError(err)).toBe(true);
+    expect((err as ApiError).code).toBe(FEATURE_UNAVAILABLE);
+    expect((err as ApiError).status).toBe(404);
+    expect((err as ApiError).message).toBe('Not available yet');
+    expect((err as ApiError).message).not.toMatch(/route/i);
+    expect((err as ApiError).requestId).toBe('req_1');
+    expect((err as ApiError).details).toMatchObject({ path: '/orgs/o1/pin-mappings' });
+  });
+
+  it('recognises the router 404 by its details.reason, whatever its message says', async () => {
+    answer(404, { code: 'NOT_FOUND', message: 'No such path.', requestId: 'req_2', details: { reason: 'ROUTE_NOT_FOUND' } });
+    const err = await apiFetch('/orgs/o1/pin-mappings').catch((e: unknown) => e);
+    expect(isFeatureUnavailableError(err)).toBe(true);
+  });
+
+  it('keeps a missing record a NOT_FOUND with the API\'s own message', async () => {
+    answer(404, { code: 'NOT_FOUND', message: 'Employee not found.', requestId: 'req_3', details: { id: 'e1' } });
+    const err = await apiFetch('/orgs/o1/employees/e1').catch((e: unknown) => e);
+    expect(isFeatureUnavailableError(err)).toBe(false);
+    expect((err as ApiError).code).toBe('NOT_FOUND');
+    expect((err as ApiError).message).toBe('Employee not found.');
   });
 });
