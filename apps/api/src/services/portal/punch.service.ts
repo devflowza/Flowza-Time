@@ -212,13 +212,13 @@ export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string,
     const inWindow = recent.filter((r) => now.getTime() - r.punchedAt.getTime() <= SEQUENCE_WINDOW_MS);
     const last = inWindow[0];
     const lastDirection: SelfPunchDirection | null = last && (last.direction === 'in' || last.direction === 'out') ? last.direction : null;
-    const record = await withSystemScope(trx, orgId, (t) => t.selectFrom('attendanceDailyRecords').select(['status', 'flags', 'firstInAt', 'lastOutAt', 'workedMinutes'])
+    const record = await withSystemScope(trx, orgId, (t) => t.selectFrom('attendanceDailyRecords').select(['status', 'flags', 'firstInAt', 'lastOutAt', 'workedMinutes', 'expectedEndAt', 'scheduledMinutes'])
       .where('organizationId', '=', orgId).where('employeeId', '=', self.employeeId).where('attendanceDate', '=', sql<Date>`${local.date}::date`).executeTakeFirst());
     const blocked = blockers.length > 0;
     return {
       date: local.date, timezone: ctx.emp.timezone, serverTime: now.toISOString(),
       punches: recent.filter((r) => r.punchedAt.getTime() >= todayStart).map(toPunchDto),
-      today: record ? { status: record.status as AttendanceStatus, flags: (record.flags ?? []) as AttendanceFlag[], firstInAt: isoDateTimeOrNull(record.firstInAt), lastOutAt: isoDateTimeOrNull(record.lastOutAt), workedMinutes: Number(record.workedMinutes ?? 0) } : null,
+      today: record ? { status: record.status as AttendanceStatus, flags: (record.flags ?? []) as AttendanceFlag[], firstInAt: isoDateTimeOrNull(record.firstInAt), lastOutAt: isoDateTimeOrNull(record.lastOutAt), workedMinutes: Number(record.workedMinutes ?? 0), expectedEndAt: isoDateTimeOrNull(record.expectedEndAt), scheduledMinutes: Number(record.scheduledMinutes ?? 0) } : null,
       lastDirection, canCheckIn: !blocked && lastDirection !== 'in', canCheckOut: !blocked && lastDirection !== 'out', blockers,
       policy: {
         webCheckIn: ctx.settings.selfService.webCheckIn, mobileCheckIn: ctx.settings.selfService.mobileCheckIn, requireGeofence: ctx.settings.selfService.requireGeofence,

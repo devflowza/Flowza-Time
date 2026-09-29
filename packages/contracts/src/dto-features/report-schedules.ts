@@ -189,8 +189,8 @@ export interface ReportDeliveryDto {
   sentBy: string | null;
   sentByName: string | null;
   channels: ReportDeliveryChannel[];
-  /** The access scope the recipient's copy was generated under (TEAM = the recipient's direct reports). */
-  scope: { kind?: 'ORGANIZATION' | 'BRANCHES' | 'TEAM'; branchCount?: number; employeeCount?: number };
+  /** The access scope the recipient's copy was generated under (TEAM = the recipient's direct reports; SELF = only their own record). */
+  scope: { kind?: 'ORGANIZATION' | 'BRANCHES' | 'TEAM' | 'SELF'; branchCount?: number; employeeCount?: number };
   status: ReportDeliveryStatus;
   skipReason: string | null;
   error: string | null;

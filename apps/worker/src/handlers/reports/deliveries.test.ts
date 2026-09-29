@@ -31,7 +31,7 @@ const FIRST_RUN = '2026-09-01T03:00:00.000Z'; // 1 Sep 07:00 in Muscat
 
 let clock = new Date('2026-09-01T03:04:00Z');
 let h: TestHarness;
-const ctx = (jobType: string, payload: Record<string, unknown>) => ({ job: { ...fakeJob(jobType, payload, ORG), queueName: 'reports' }, log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
+const ctx = (jobType: string, payload: Record<string, unknown>) => ({ job: { ...fakeJob(jobType, payload, ORG), queueName: 'processing' }, log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
 const deliveries = (runKey?: string) => {
   let q = h.tdb.adminDb.selectFrom('reportDeliveries').selectAll().where('organizationId', '=', ORG);
   if (runKey) q = q.where('runKey', '=', runKey);
@@ -84,7 +84,7 @@ describe('reports.schedules scheduler task', () => {
     expect(await scheduleDueReports(h.deps)).toEqual({ due: 1, enqueued: 0, alreadyQueued: 1 });
     const jobs = await runJobs();
     expect(jobs).toHaveLength(1);
-    expect(jobs[0]).toMatchObject({ queueName: 'reports', dedupeKey: `report-schedule:${SCHEDULE}:${FIRST_RUN}`, payload: { mode: 'schedule', scheduleId: SCHEDULE, scheduledFor: FIRST_RUN } });
+    expect(jobs[0]).toMatchObject({ queueName: 'processing', dedupeKey: `report-schedule:${SCHEDULE}:${FIRST_RUN}`, payload: { mode: 'schedule', scheduleId: SCHEDULE, scheduledFor: FIRST_RUN } });
   });
 
   it('6a-M15b an occurrence whose job is running is neither enqueued again nor counted as enqueued', async () => {
@@ -182,7 +182,7 @@ describe('completion → notification', () => {
     expect(events[0]!.payload).toMatchObject({ userIds: [OWNER], channels: ['in_app'], mode: 'schedule', scheduleName: 'Monthly lates', periodFrom: '2026-08-01', periodTo: '2026-08-31' });
     await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
     const n = await h.tdb.adminDb.selectFrom('notifications').select(['id', 'userId', 'type', 'link', 'readAt', 'title']).where('type', '=', 'report.scheduled_delivery').execute();
-    expect(n).toEqual([expect.objectContaining({ userId: OWNER, link: `/reports?download=${d.reportRequestId}`, readAt: null })]);
+    expect(n).toEqual([expect.objectContaining({ userId: OWNER, link: `/reports?view=${d.reportRequestId}`, readAt: null })]);
     expect(n[0]!.title).toMatch(/^Scheduled report: /);
     const emails = await h.tdb.adminDb.selectFrom('notificationDeliveries').select('id').where('notificationId', '=', n[0]!.id).execute();
     expect(emails).toHaveLength(0);
@@ -224,5 +224,62 @@ describe('6a-D3 nextRunAbuse (review worker probe): next_run_at is server-comput
     expect((await runJobs()).length).toBe(jobsBefore);
     expect((await h.tdb.adminDb.selectFrom('reportRequests').select('id').where('organizationId', '=', ORG).execute()).length).toBe(requestsBefore);
     expect((await scheduleRow()).nextRunAt).toEqual(before.nextRunAt);
+  });
+});
+
+describe('each employee receives the report about themselves (Flowza Finance parity, 2026-09-29)', () => {
+  const EMP1_USER = 'c6000000-0000-4000-a000-0000000000a1'; // employee role, linked to E1
+  const EMP2_USER = 'c6000000-0000-4000-a000-0000000000a2'; // employee role, linked to E2
+  const UNLINKED = 'c6000000-0000-4000-a000-0000000000a3';  // employee role, no employee record
+
+  beforeAll(async () => {
+    const a = h.tdb.adminDb;
+    for (const [id, name] of [[EMP1_USER, 'emp1'], [EMP2_USER, 'emp2'], [UNLINKED, 'unlinked']] as const) {
+      await sql`insert into auth.users (id, email) values (${id}::uuid, ${`${name}@rdel.local`})`.execute(a);
+      await a.insertInto('userProfiles').values({ id, email: `${name}@rdel.local`, fullName: name }).execute();
+    }
+    await a.insertInto('orgMemberships').values([
+      { organizationId: ORG, userId: EMP1_USER, roleId: SYSTEM_ROLE_IDS.employee, status: 'active', allBranches: true, employeeId: E1 },
+      { organizationId: ORG, userId: EMP2_USER, roleId: SYSTEM_ROLE_IDS.employee, status: 'active', allBranches: true, employeeId: E2 },
+      { organizationId: ORG, userId: UNLINKED, roleId: SYSTEM_ROLE_IDS.employee, status: 'active', allBranches: true },
+    ]).execute();
+  });
+
+  it('a share to the Employee role sends each employee their own copy (and nobody anybody else\'s)', async () => {
+    const res = await runReportDeliveryHandler(ctx('RUN_REPORT_SCHEDULE', {
+      organizationId: ORG, mode: 'send_now', runKey: 'send:each-own', requestedBy: OWNER,
+      spec: { reportType: 'monthly_attendance', format: 'csv', parameters: { month: '2026-08' }, recipients: { userIds: [], roleKeys: ['employee'] }, channels: ['in_app', 'email'] },
+    }));
+    expect(res).toMatchObject({ outcome: 'delivered', queued: 2, skipped: 1 });
+    const rows = await deliveries('send:each-own');
+    const one = rows.find((r) => r.recipientUserId === EMP1_USER)!;
+    expect(one).toMatchObject({ status: 'queued', scope: { kind: 'SELF', employeeCount: 1 } });
+    expect(rows.find((r) => r.recipientUserId === UNLINKED)).toMatchObject({ status: 'skipped', skipReason: 'missing_permission:report.view' });
+    const request = await h.tdb.adminDb.selectFrom('reportRequests').select(['parameters', 'requestedBy', 'branchId']).where('id', '=', one.reportRequestId!).executeTakeFirstOrThrow();
+    expect(request).toMatchObject({ requestedBy: EMP1_USER, branchId: null, parameters: { month: '2026-08', employeeIds: [E1], selfEmployeeId: E1 } });
+  });
+
+  it('a report the sender chose for one employee reaches that employee only', async () => {
+    await runReportDeliveryHandler(ctx('RUN_REPORT_SCHEDULE', {
+      organizationId: ORG, mode: 'send_now', runKey: 'send:just-e1', requestedBy: OWNER,
+      spec: { reportType: 'employee_attendance', format: 'csv', parameters: { from: '2026-08-01', to: '2026-08-31', employeeIds: [E1] }, recipients: { userIds: [EMP1_USER, EMP2_USER], roleKeys: [] }, channels: ['email'] },
+    }));
+    const rows = await deliveries('send:just-e1');
+    expect(rows.find((r) => r.recipientUserId === EMP1_USER)).toMatchObject({ status: 'queued' });
+    expect(rows.find((r) => r.recipientUserId === EMP2_USER)).toMatchObject({ status: 'skipped', skipReason: 'outside_scope:self' });
+  });
+
+  it('the finished copy contains only the employee, and the notice (in-app + e-mail) opens it in the portal', async () => {
+    const d = (await deliveries('send:each-own')).find((r) => r.recipientUserId === EMP1_USER)!;
+    const done = await generateReportRequest(h.deps, h.deps.log, fakeJob('GENERATE_REPORT', {}, ORG), ORG, d.reportRequestId!);
+    expect(done.status).toBe('COMPLETED');
+    const file = await h.tdb.adminDb.selectFrom('reportRequests').select(['rowCount', 'filePath']).where('id', '=', d.reportRequestId!).executeTakeFirstOrThrow();
+    expect(file.rowCount).toBe(1); // E1 only — never E2 or E3
+    const event = await h.tdb.adminDb.selectFrom('domainEvents').select('payload').where('eventType', '=', 'report.scheduled_delivery').where('aggregateId', '=', d.reportRequestId!).executeTakeFirstOrThrow();
+    expect(event.payload).toMatchObject({ userIds: [EMP1_USER], selfScope: true, channels: ['in_app', 'email'] });
+    await relayOutbox({ job: fakeJob('RELAY_OUTBOX'), log: h.deps.log, deps: h.deps, signal: new AbortController().signal });
+    const n = await h.tdb.adminDb.selectFrom('notifications').select(['id', 'link']).where('userId', '=', EMP1_USER).where('type', '=', 'report.scheduled_delivery').executeTakeFirstOrThrow();
+    expect(n.link).toBe(`/my/reports?view=${d.reportRequestId}`);
+    expect(await h.tdb.adminDb.selectFrom('notificationDeliveries').select('channel').where('notificationId', '=', n.id).execute()).toEqual([{ channel: 'EMAIL' }]);
   });
 });

@@ -57,6 +57,12 @@ describe('notification catalogue — completeness', () => {
 });
 
 describe('deep links', () => {
+  it('report notices open the report in the viewer; an employee\'s own copy opens in the portal', () => {
+    expect(resolveNotification('report.ready', { reportId: REQ }, OTHER)!.link).toBe(`/reports?view=${REQ}`);
+    expect(resolveNotification('report.scheduled_delivery', { reportId: REQ, mode: 'send_now' }, OTHER)!.link).toBe(`/reports?view=${REQ}`);
+    expect(resolveNotification('report.scheduled_delivery', { reportId: REQ, mode: 'send_now', selfScope: true }, SELF)!.link).toBe(`/my/reports?view=${REQ}`);
+    expect(resolveNotification('report.scheduled_delivery', { reportId: REQ, mode: 'send_now', selfScope: 'true' }, OTHER)!.link).toBe(`/reports?view=${REQ}`); // only a real flag
+  });
   it('approval notices open the request in the inbox; the digest opens the inbox', () => {
     expect(resolveNotification('approval.pending', { requestId: REQ }, OTHER)!.link).toBe(`/approvals?request=${REQ}`);
     expect(resolveNotification('approval.decided', { aggregateType: 'approval_request', aggregateId: REQ, decision: 'APPROVED' }, OTHER)!.link).toBe(`/approvals?request=${REQ}`);

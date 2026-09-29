@@ -162,6 +162,11 @@ export interface RecipientGrant {
   branchIds: readonly string[];
   /** Direct reports (primary or secondary manager), leavers excluded — the same set as `app.team_employee_ids()`. */
   teamEmployeeIds?: readonly string[];
+  /**
+   * The recipient's OWN employee record (`org_memberships.employee_id`, only while it is not deleted and not a leaver), with its
+   * branch and department: what a recipient without report access may still receive — a copy of the report about themselves.
+   */
+  self?: { employeeId: string; branchId: string; departmentId: string | null } | null;
 }
 
 /** Line-manager variants of the organisation-wide read permissions a report type can require. */
@@ -171,7 +176,31 @@ export const TEAM_PERMISSION_VARIANTS: Readonly<Record<string, string>> = {
   'employee.view': 'employee.view_team',
 };
 
-export type RecipientScopeKind = 'ORGANIZATION' | 'BRANCHES' | 'TEAM';
+export type RecipientScopeKind = 'ORGANIZATION' | 'BRANCHES' | 'TEAM' | 'SELF';
+
+/**
+ * Report types an employee may receive about THEMSELVES (Flowza Finance parity: "each employee receives their own attendance
+ * report"): the attendance layouts, narrowed to the one employee. Never the employee directory or the audit trail — those are
+ * about other people and about the organisation, not about the recipient.
+ */
+export const SELF_SCOPE_REPORT_TYPES: ReadonlySet<ReportType> = new Set<ReportType>([
+  'daily_attendance', 'employee_attendance', 'monthly_attendance', 'weekly_attendance', 'weekly_in_out', 'attendance_summary', 'monthly_summary',
+  'late_report', 'absence_report', 'missing_punch_report', 'leave_report',
+]);
+/** The permission that lets a member see their own attendance — and so receive a report about it. */
+export const SELF_SCOPE_PERMISSION = 'attendance.view_own';
+/**
+ * The marker a self-scoped copy carries in its parameters (server-written only: every client entry point parses parameters
+ * with `reportParametersSchema`, which strips unknown keys). The download of such a copy re-checks it against the caller.
+ */
+export const SELF_SCOPE_PARAMETER = 'selfEmployeeId';
+
+/** True when `parameters` describe a copy about exactly `employeeId` (the marker and the employee filter agree). */
+export function isSelfScopedReport(reportType: string, parameters: Record<string, unknown>, employeeId: string | null | undefined): boolean {
+  if (!employeeId || !SELF_SCOPE_REPORT_TYPES.has(reportType as ReportType)) return false;
+  const ids = parameters['employeeIds'];
+  return parameters[SELF_SCOPE_PARAMETER] === employeeId && Array.isArray(ids) && ids.length === 1 && ids[0] === employeeId;
+}
 export type RecipientScopeDecision =
   | { ok: true; kind: RecipientScopeKind; parameters: Record<string, unknown>; branchId: string | null; branchCount: number | null; employeeCount: number | null }
   | { ok: false; reason: string };
@@ -195,13 +224,15 @@ export function scopeReportForRecipient(
 ): RecipientScopeDecision {
   const def = REPORT_TYPE_DEFINITIONS.find((d) => d.key === reportType);
   if (!def || def.status !== 'available') return { ok: false, reason: 'report_type_unavailable' };
-  for (const p of ['report.view', 'report.export']) if (!grant.permissions.includes(p)) return { ok: false, reason: `missing_permission:${p}` };
+  // A recipient without report access (an employee) is not refused outright: they receive the report about THEMSELVES when the
+  // type allows it — the sender's choice narrowed to the one person the recipient may see, never widened.
+  for (const p of ['report.view', 'report.export']) if (!grant.permissions.includes(p)) return scopeToSelf(grant, reportType, parameters) ?? { ok: false, reason: `missing_permission:${p}` };
   let teamOnly = false;
   for (const p of def.permissions) {
     if (grant.permissions.includes(p)) continue;
     const variant = TEAM_PERMISSION_VARIANTS[p];
     if (variant && grant.permissions.includes(variant)) { teamOnly = true; continue; }
-    return { ok: false, reason: `missing_permission:${p}` };
+    return scopeToSelf(grant, reportType, parameters) ?? { ok: false, reason: `missing_permission:${p}` };
   }
   const out: Record<string, unknown> = { ...parameters };
   delete out['branchScope']; delete out['branchIds']; delete out['finalizedFigures'];
@@ -236,4 +267,25 @@ export function scopeReportForRecipient(
   out['branchScope'] = [...grant.branchIds];
   if (branchId) out['branchId'] = branchId;
   return { ok: true, kind: teamOnly ? 'TEAM' : 'BRANCHES', parameters: out, branchId: teamOnly ? null : branchId, branchCount: grant.branchIds.length, employeeCount };
+}
+
+/**
+ * The self-scoped copy for a recipient who may see only their own attendance (`attendance.view_own` and a linked, current employee
+ * record), or null when they cannot have one (the caller then reports the permission refusal). The sender's filters still bind:
+ * a report chosen for other employees, another branch or another department is skipped with the reason, not turned into a report
+ * about the recipient.
+ */
+function scopeToSelf(grant: RecipientGrant, reportType: ReportType, parameters: Record<string, unknown>): RecipientScopeDecision | null {
+  const self = grant.self;
+  if (!self || !SELF_SCOPE_REPORT_TYPES.has(reportType) || !grant.permissions.includes(SELF_SCOPE_PERMISSION)) return null;
+  const requested = Array.isArray(parameters['employeeIds']) ? (parameters['employeeIds'] as unknown[]).filter((x): x is string => typeof x === 'string') : [];
+  if (requested.length > 0 && !requested.includes(self.employeeId)) return { ok: false, reason: 'outside_scope:self' };
+  if (typeof parameters['branchId'] === 'string' && parameters['branchId'] !== self.branchId) return { ok: false, reason: 'outside_scope:self' };
+  if (typeof parameters['departmentId'] === 'string' && parameters['departmentId'] !== self.departmentId) return { ok: false, reason: 'outside_scope:self' };
+  const out: Record<string, unknown> = { ...parameters };
+  delete out['branchScope']; delete out['branchIds']; delete out['finalizedFigures']; delete out['search'];
+  if (reportType === 'monthly_summary') out['finalizedFigures'] = false;
+  out['employeeIds'] = [self.employeeId];
+  out[SELF_SCOPE_PARAMETER] = self.employeeId;
+  return { ok: true, kind: 'SELF', parameters: out, branchId: null, branchCount: null, employeeCount: 1 };
 }

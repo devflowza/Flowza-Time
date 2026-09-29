@@ -163,4 +163,8 @@ export interface EngineShiftPattern {
 }
 export interface ShiftResolution { assignment: EngineShiftAssignment | null; shiftId: string | null; isPatternOff: boolean }
 
-export const ENGINE_VERSION = 'attendance-engine/1.0.0';
+/**
+ * 1.1.0 — FLEXIBLE shifts: the expected check-out is the check-in + required minutes + unpaid breaks (the later of that and the
+ * core end); without core hours the employee may check in at any time and is never late.
+ */
+export const ENGINE_VERSION = 'attendance-engine/1.1.0';

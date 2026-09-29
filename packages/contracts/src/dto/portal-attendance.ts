@@ -82,7 +82,16 @@ export interface SelfPunchStatusDto {
   serverTime: string;
   punches: SelfPunchDto[];
   /** Today's computed record, once the engine has run. */
-  today: { status: AttendanceStatus; flags: AttendanceFlag[]; firstInAt: string | null; lastOutAt: string | null; workedMinutes: number } | null;
+  today: {
+    status: AttendanceStatus; flags: AttendanceFlag[]; firstInAt: string | null; lastOutAt: string | null; workedMinutes: number;
+    /**
+     * When the employee may check out: the shift end, or — on a flexible shift — the check-in + the required minutes (+ unpaid
+     * breaks). Absent from an API older than the flexible check-out (engine 1.1.0); null when no shift applies.
+     */
+    expectedEndAt?: string | null;
+    /** Minutes the employee is expected to work today (0 on a day off). */
+    scheduledMinutes?: number;
+  } | null;
   /** 'in' after a check-in, 'out' after a check-out, null before the first punch (or when the last punch's direction is unknown). */
   lastDirection: SelfPunchDirection | null;
   canCheckIn: boolean;

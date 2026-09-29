@@ -10,6 +10,7 @@ import { blankToUndefined, toOptionalNumber } from '@/features/organization/form
 import { useShiftMutations } from '../api';
 import type { ShiftDto } from '../types';
 import { BreaksEditor } from './breaks-editor';
+import { flexibleGuide } from '../flexible-guide';
 
 type FormValues = z.input<typeof shiftInputSchema>;
 const COLORS = ['#0f6e56', '#175cd3', '#b54708', '#7a2e9d', '#b42318', '#0e7490', '#4d7c0f', '#475467'];
@@ -31,6 +32,7 @@ export function ShiftDialog({ open, onOpenChange, shift }: { open: boolean; onOp
   const { register, control, setValue, formState: { errors, isSubmitting } } = form;
   const type = useWatch({ control, name: 'type' }) ?? 'FIXED';
   const color = useWatch({ control, name: 'color' });
+  const flex = flexibleGuide(useWatch({ control, name: 'requiredMinutes' }), useWatch({ control, name: 'coreStart' }), useWatch({ control, name: 'coreEnd' }), useWatch({ control, name: 'breaks' }));
   const onSubmit = form.handleSubmit(async (values) => {
     try {
       const input: ShiftInput = type === 'FIXED' ? { ...values, requiredMinutes: undefined, coreStart: undefined, coreEnd: undefined } : { ...values, startTime: undefined, endTime: undefined };
@@ -72,7 +74,12 @@ export function ShiftDialog({ open, onOpenChange, shift }: { open: boolean; onOp
                 <FormField label={t('shifts.requiredMinutes')} htmlFor="sh-required" required error={errors.requiredMinutes?.message} hint={t('shifts.requiredMinutesHint')}><Input id="sh-required" type="number" min={0} max={1440} dir="ltr" className="tnum" {...register('requiredMinutes', { setValueAs: toOptionalNumber })} aria-invalid={!!errors.requiredMinutes} /></FormField>
                 <FormField label={t('shifts.coreStart')} htmlFor="sh-cstart" optional error={errors.coreStart?.message}><Input id="sh-cstart" type="time" dir="ltr" className="tnum" {...register('coreStart', { setValueAs: blankToUndefined })} /></FormField>
                 <FormField label={t('shifts.coreEnd')} htmlFor="sh-cend" optional error={errors.coreEnd?.message}><Input id="sh-cend" type="time" dir="ltr" className="tnum" {...register('coreEnd', { setValueAs: blankToUndefined })} /></FormField>
-                <FormField label={t('shifts.dayBoundary')} htmlFor="sh-boundary" error={errors.dayBoundary?.message} hint={t('shifts.dayBoundaryHint')}><Input id="sh-boundary" type="time" dir="ltr" className="tnum" {...register('dayBoundary')} aria-invalid={!!errors.dayBoundary} /></FormField>
+                <FormField label={t('shifts.dayBoundary')} htmlFor="sh-boundary" error={errors.dayBoundary?.message} hint={t('shifts.flexDayBoundaryHint')}><Input id="sh-boundary" type="time" dir="ltr" className="tnum" {...register('dayBoundary')} aria-invalid={!!errors.dayBoundary} /></FormField>
+                <div className="space-y-1.5 text-xs sm:col-span-2 lg:col-span-4" data-testid="flex-guide">
+                  <p className="text-muted-foreground">{t('shifts.coreHint')}</p>
+                  {flex.example ? <p className="text-muted-foreground tnum">{t('shifts.checkOutExample', flex.example)}</p> : null}
+                  {flex.coreTooLong ? <p className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" role="status">{t('shifts.coreLongerThanRequired', flex.coreTooLong)}</p> : null}
+                </div>
               </div>
             )}
           </section>

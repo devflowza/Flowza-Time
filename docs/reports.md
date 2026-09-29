@@ -26,6 +26,29 @@ requester only (`payload.userId`), not every holder of `report.view`.
 `EXPORT_EMPLOYEES` (the employee list's bulk export) creates its own `report_requests` row of type
 `employee_directory` and then runs the same pipeline, which is what gives it a download in "My reports".
 
+## Sharing, schedules and each employee's own copy
+
+`POST /reports/share` ("Send to…"), a schedule's run and "Run now" queue ONE `RUN_REPORT_SCHEDULE` job on the **`processing`**
+queue (`REPORT_DELIVERY_QUEUE`, general worker): it only resolves recipients and queues one `GENERATE_REPORT` per copy on the
+`reports` queue (the Chromium machine). Until 2026-09-29 the fan-out also sat on `reports`, and the reports worker — deployed
+separately and not redeployed since 2026-09-09 — had no handler for it: every share died as `NO_HANDLER` and nothing reached a
+recipient. Since then a worker that meets a job type it does not know puts it back for 10 minutes (up to its max attempts)
+instead of dead-lettering it, and the Deploy workflow's default target `all` ships the API, the worker and the reports worker
+together.
+
+Each recipient's copy is generated under their own access (`scopeReportForRecipient`): the organisation, their branches, their
+team — or, for somebody without report access (an employee with `attendance.view_own` and a linked employee record), **the report
+about themselves** (scope `SELF`: `employeeIds = [own]`, marker `selfEmployeeId`; attendance report types only — never the
+employee directory or the audit trail). This is Flowza Finance's "each employee receives their own attendance report": share a
+monthly report with the Employee role and every employee gets theirs, in-app and/or by e-mail. The copy opens in the portal at
+`/my/reports` (`GET /me/reports`); `GET /reports/:id/download` admits such a copy to its employee without `report.export`
+(everything else still needs `report.view` + `report.export`).
+
+**Viewing.** `GET /reports/:id/download?disposition=inline|attachment` (default `attachment`: the signed URL downloads the file
+under the report's name; `inline` lets the browser show it). The web report viewer shows a PDF in place and a CSV as a table
+(first 500 rows); Excel files download. Report notices link to `/reports?view=<id>` (or `/my/reports?view=<id>` for an
+employee's own copy) — the file is always fetched through the reader's session, never a mailed bearer link.
+
 ## Code layout
 
 | Path | Role |

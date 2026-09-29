@@ -9,11 +9,14 @@ on:
       target:
         description: Which application to deploy
         required: true
-        default: both
+        default: all
         type: choice
-        # `reports` is separate on purpose: the flowza-time-reports app needs its secrets set once before its first deploy
-        # (go-live 3b), so it is never swept up by `both`.
-        options: [both, api, worker, reports]
+        # `all` = API + worker + reports worker. The three run the same job registry, so deploying them apart leaves one on an
+        # older build that cannot handle the jobs the others enqueue: on 2026-09-29 every report "Send now" died with "no handler
+        # registered for RUN_REPORT_SCHEDULE" because the reports worker had not been redeployed since 2026-09-09 (`both` never
+        # included it). The flowza-time-reports app and its secrets exist since go-live 3b, so it now ships with every `all`.
+        # `both` (API + worker) and the single targets stay for a targeted redeploy.
+        options: [all, both, api, worker, reports]
       # Lets a first deploy be verified straight against the Fly hostname, before Cloudflare and the certificate are
       # in the path. Only works while EDGE_SHARED_SECRET is unset — once it is set the origin refuses non-edge traffic.
       ready_url:
@@ -49,7 +52,7 @@ jobs:
           fi
 
       - name: Deploy the API
-        if: inputs.target == 'both' || inputs.target == 'api'
+        if: inputs.target == 'all' || inputs.target == 'both' || inputs.target == 'api'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config fly.api.toml --remote-only --wait-timeout 600
@@ -58,7 +61,7 @@ jobs:
       # Cloudflare and the Fly certificate as well as on the app. Those are one-time setup steps, so on a first deploy
       # the probe can be red while both deploys are perfectly good — and the worker deploy must not be collateral.
       - name: Deploy the worker
-        if: inputs.target == 'both' || inputs.target == 'worker'
+        if: inputs.target == 'all' || inputs.target == 'both' || inputs.target == 'worker'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config fly.worker.toml --remote-only --wait-timeout 600
@@ -66,7 +69,7 @@ jobs:
       # PDF reports run on their own machine (docs/adr/ADR-008-report-rendering.md). Created on first use; secrets are a
       # one-time manual step because they are the same credentials as the general worker.
       - name: Deploy the reports worker
-        if: inputs.target == 'reports'
+        if: inputs.target == 'all' || inputs.target == 'reports'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
@@ -78,7 +81,7 @@ jobs:
       # No -f: it makes curl exit non-zero and write nothing, turning a real "503 degraded" — which names the failing
       # dependency — into an indistinguishable 000 with an empty body.
       - name: Verify the API is ready
-        if: inputs.target == 'both' || inputs.target == 'api'
+        if: inputs.target == 'all' || inputs.target == 'both' || inputs.target == 'api'
         env:
           READY_URL: ${{ inputs.ready_url }}
         run: |

@@ -119,9 +119,9 @@ export const en: LocaleTemplates = {
     'leave.comp_off_expired': { title: 'Comp-off credit expired', body: ['{{compOffDays}} unused, expired on {{expiredOn}}'], bodyFallback: 'An unused comp-off credit expired.', cta: 'View my leave' },
 
     // ----- reports --------------------------------------------------------------------------------------------------------
-    'report.ready': { title: 'Report ready: {{reportName}}', body: ['Your report is ready to download from the Reports page'], cta: 'Open reports' },
+    'report.ready': { title: 'Report ready: {{reportName}}', body: ['Your report is ready — open it to view or download it.'], cta: 'View the report' },
     'report.failed': { title: 'Report failed: {{reportName}}', body: ['{{error}}'], bodyFallback: 'The report could not be generated. Try again or contact support.', cta: 'Open reports' },
-    'report.scheduled_delivery': { title: 'Report for you: {{reportName}}', body: ['{{period}}', '{{scheduleName}}'], bodyFallback: 'Download it from the Reports page.', cta: 'Download the report' },
+    'report.scheduled_delivery': { title: 'Report for you: {{reportName}}', body: ['{{period}}', '{{scheduleName}}'], bodyFallback: 'Open it to view or download it.', cta: 'View the report' },
     'report.scheduled_delivery#send_now': { title: 'Report shared with you: {{reportName}}' },
     'report.scheduled_delivery#scheduled': { title: 'Scheduled report: {{reportName}}' },
 
