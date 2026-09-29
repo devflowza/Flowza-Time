@@ -75,7 +75,7 @@ describe('AppShell', () => {
     expect(screen.queryByRole('button', { name: 'Search' })).not.toBeInTheDocument();
   });
 
-  it('sends an org-less platform admin to the platform console instead of the org-scoped dashboard', async () => {
+  it('sends an org-less platform admin to the super-admin portal instead of the org-scoped dashboard', async () => {
     // #10 stopped the shell's own chrome from throwing, but the index route is DashboardPage, which calls useOrgId().
     // Without this redirect the first admin still lands on "No active organisation" before any tenant exists.
     h.me = {
@@ -85,7 +85,7 @@ describe('AppShell', () => {
       refetch: vi.fn(),
     };
     renderWithProviders(<AppShell />, { route: '/' });
-    expect(await screen.findByTestId('location')).toHaveTextContent('/platform');
+    expect(await screen.findByTestId('location')).toHaveTextContent('/adm');
   });
 
   it('keeps showing the skeleton when the query has settled with no data, instead of rendering the page', async () => {
