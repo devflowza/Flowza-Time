@@ -67,13 +67,19 @@ interface StatePatch { employeeId?: string | null; cloudHash?: string | null; de
 /**
  * Upserts the (device, device_user_id) state row. Two unique keys exist — (device, device_user_id) and (device, employee) —
  * so a mapping change (new device user id for a known employee) re-points the employee's row instead of violating the index.
+ * A row a person mapped (PIN mapping, `mapped_at`) is never re-pointed: the patch lands on the mapped device user id.
  */
-async function upsertState(trx: Trx, device: DeviceRow, deviceUserId: string, patch: StatePatch, now: Date): Promise<void> {
+async function upsertState(trx: Trx, device: DeviceRow, requestedUserId: string, patch: StatePatch, now: Date): Promise<void> {
+  let deviceUserId = requestedUserId;
   if (patch.employeeId) {
-    const byEmployee = await trx.selectFrom('deviceEmployeeStates').select(['id', 'deviceUserId']).where('deviceId', '=', device.id).where('employeeId', '=', patch.employeeId).executeTakeFirst();
+    const byEmployee = await trx.selectFrom('deviceEmployeeStates').select(['id', 'deviceUserId', 'mappedAt']).where('deviceId', '=', device.id).where('employeeId', '=', patch.employeeId).executeTakeFirst();
     if (byEmployee && byEmployee.deviceUserId !== deviceUserId) {
-      await trx.deleteFrom('deviceEmployeeStates').where('deviceId', '=', device.id).where('deviceUserId', '=', deviceUserId).where('employeeId', 'is', null).execute();
-      await trx.updateTable('deviceEmployeeStates').set({ deviceUserId }).where('id', '=', byEmployee.id).execute();
+      if (byEmployee.mappedAt) {
+        deviceUserId = byEmployee.deviceUserId;
+      } else {
+        await trx.deleteFrom('deviceEmployeeStates').where('deviceId', '=', device.id).where('deviceUserId', '=', deviceUserId).where('employeeId', 'is', null).execute();
+        await trx.updateTable('deviceEmployeeStates').set({ deviceUserId }).where('id', '=', byEmployee.id).execute();
+      }
     }
   }
   const values = {
@@ -132,9 +138,11 @@ export async function pushEmployee(ctx: JobContext) {
       const provider = deps.providers.get(device.providerKey);
       if (!capabilitiesOf(device, provider).employeePush) return { skip: false as const, unsupported: true as const, device, employee };
       const identity = await loadIdentity(trx, payload.organizationId, employee.id, device.providerKey);
-      const desired = buildDeviceEmployee(employee, identity, { ascii: deviceWantsAscii(device), pin });
+      const state = await trx.selectFrom('deviceEmployeeStates').select(['deviceHash', 'syncStatus', 'deviceUserId', 'mappedAt']).where('deviceId', '=', device.id).where('employeeId', '=', employee.id).executeTakeFirst();
+      // a PIN a person mapped on this device is the employee's device user id there (the punches carry it)
+      const mapped = state?.mappedAt ? { deviceUserId: state.deviceUserId, cardNumber: identity?.cardNumber ?? null } : null;
+      const desired = buildDeviceEmployee(employee, mapped ?? identity, { ascii: deviceWantsAscii(device), pin });
       const cloudHash = hashDeviceEmployee(desired);
-      const state = await trx.selectFrom('deviceEmployeeStates').select(['deviceHash', 'syncStatus', 'deviceUserId']).where('deviceId', '=', device.id).where('employeeId', '=', employee.id).executeTakeFirst();
       if (!force && pin === null && state && state.syncStatus === 'IN_SYNC' && state.deviceHash === cloudHash && state.deviceUserId === desired.deviceUserId) return { skip: true as const, device, desired };
       await upsertState(trx, device, desired.deviceUserId, { employeeId: employee.id, cloudHash, syncStatus: 'PENDING', desired: true }, now);
       const built = await prepareDevice(ctx, trx, device.id, 'employeePush', 'upsertEmployee', now);
@@ -225,19 +233,39 @@ export async function deleteEmployee(ctx: JobContext) {
 
 interface ResolvedEmployee { id: string; branchId: string; employeeNumber: string; displayName: string; deviceUserId: string; cardNumber: string | null; employmentStatus: string; deletedAt: Date | null; identity: IdentityRow | null }
 
-/** device user ids → employees via employee_provider_identities first, then employees.device_user_id (§E.4 resolution order). */
-async function resolveDeviceUsers(trx: Trx, organizationId: string, providerKey: string, deviceUserIds: string[]): Promise<Map<string, ResolvedEmployee>> {
+/**
+ * device user ids → employees (§E.4 resolution order): a PIN a person mapped on this device (`mapped_at`) first, then
+ * employee_provider_identities, then employees.device_user_id. An employee mapped on the device answers ONLY to the mapped id:
+ * another listed user that would resolve to them (their default id, say) is a duplicate on the device, not a second mapping.
+ */
+async function resolveDeviceUsers(trx: Trx, organizationId: string, device: Pick<DeviceRow, 'id' | 'providerKey'>, deviceUserIds: string[]): Promise<Map<string, ResolvedEmployee>> {
   const out = new Map<string, ResolvedEmployee>();
   if (deviceUserIds.length === 0) return out;
+  const providerKey = device.providerKey;
   const cols = ['id', 'branchId', 'employeeNumber', 'displayName', 'deviceUserId', 'cardNumber', 'employmentStatus', 'deletedAt'] as const;
-  const identities = await trx.selectFrom('employeeProviderIdentities as i').innerJoin('employees as e', 'e.id', 'i.employeeId')
-    .select(['i.deviceUserId as identityUserId', 'i.cardNumber as identityCard', 'e.id', 'e.branchId', 'e.employeeNumber', 'e.displayName', 'e.deviceUserId', 'e.cardNumber', 'e.employmentStatus', 'e.deletedAt'])
-    .where('i.organizationId', '=', organizationId).where('i.providerKey', '=', providerKey).where('i.deviceUserId', 'in', deviceUserIds).where('e.deletedAt', 'is', null).execute();
-  for (const r of identities) out.set(r.identityUserId, { id: r.id, branchId: r.branchId, employeeNumber: r.employeeNumber, displayName: r.displayName, deviceUserId: r.deviceUserId, cardNumber: r.cardNumber, employmentStatus: r.employmentStatus, deletedAt: r.deletedAt, identity: { deviceUserId: r.identityUserId, cardNumber: r.identityCard } });
+  const mapped = await trx.selectFrom('deviceEmployeeStates as s').innerJoin('employees as e', 'e.id', 's.employeeId')
+    .leftJoin('employeeProviderIdentities as i', (j) => j.onRef('i.employeeId', '=', 'e.id').on('i.providerKey', '=', providerKey))
+    .select(['s.deviceUserId as mappedUserId', 'i.cardNumber as identityCard', 'e.id', 'e.branchId', 'e.employeeNumber', 'e.displayName', 'e.deviceUserId', 'e.cardNumber', 'e.employmentStatus', 'e.deletedAt'])
+    .where('s.organizationId', '=', organizationId).where('s.deviceId', '=', device.id).where('s.mappedAt', 'is not', null).where('e.deletedAt', 'is', null).execute();
+  const mappedEmployees = new Set(mapped.map((r) => r.id));
+  const wanted = new Set(deviceUserIds);
+  for (const r of mapped) {
+    if (wanted.has(r.mappedUserId)) out.set(r.mappedUserId, { id: r.id, branchId: r.branchId, employeeNumber: r.employeeNumber, displayName: r.displayName, deviceUserId: r.deviceUserId, cardNumber: r.cardNumber, employmentStatus: r.employmentStatus, deletedAt: r.deletedAt, identity: { deviceUserId: r.mappedUserId, cardNumber: r.identityCard } });
+  }
+  const pending = deviceUserIds.filter((id) => !out.has(id));
+  if (pending.length > 0) {
+    const identities = await trx.selectFrom('employeeProviderIdentities as i').innerJoin('employees as e', 'e.id', 'i.employeeId')
+      .select(['i.deviceUserId as identityUserId', 'i.cardNumber as identityCard', 'e.id', 'e.branchId', 'e.employeeNumber', 'e.displayName', 'e.deviceUserId', 'e.cardNumber', 'e.employmentStatus', 'e.deletedAt'])
+      .where('i.organizationId', '=', organizationId).where('i.providerKey', '=', providerKey).where('i.deviceUserId', 'in', pending).where('e.deletedAt', 'is', null).execute();
+    for (const r of identities) {
+      if (mappedEmployees.has(r.id) || out.has(r.identityUserId)) continue;
+      out.set(r.identityUserId, { id: r.id, branchId: r.branchId, employeeNumber: r.employeeNumber, displayName: r.displayName, deviceUserId: r.deviceUserId, cardNumber: r.cardNumber, employmentStatus: r.employmentStatus, deletedAt: r.deletedAt, identity: { deviceUserId: r.identityUserId, cardNumber: r.identityCard } });
+    }
+  }
   const remaining = deviceUserIds.filter((id) => !out.has(id));
   if (remaining.length > 0) {
     const emps = await trx.selectFrom('employees').select([...cols]).where('organizationId', '=', organizationId).where('deletedAt', 'is', null).where('deviceUserId', 'in', remaining).execute();
-    for (const e of emps) if (!out.has(e.deviceUserId)) out.set(e.deviceUserId, { ...e, identity: null });
+    for (const e of emps) if (!mappedEmployees.has(e.id) && !out.has(e.deviceUserId)) out.set(e.deviceUserId, { ...e, identity: null });
   }
   return out;
 }
@@ -271,7 +299,7 @@ export async function pullEmployees(ctx: JobContext) {
         }
         const employees = res.employees;
         await withContext(deps.db, { kind: 'system', organizationId: device.organizationId, jobId: ctx.job.id }, async (trx) => {
-          const resolved = await resolveDeviceUsers(trx, device.organizationId, device.providerKey, employees.map((e) => e.deviceUserId));
+          const resolved = await resolveDeviceUsers(trx, device.organizationId, device, employees.map((e) => e.deviceUserId));
           // existing state rows for this page in one query (by device user id or by resolved employee) — no per-user lookup
           const knownEmployeeIds = [...resolved.values()].map((e) => e.id);
           const existingRows = employees.length > 0 ? await trx.selectFrom('deviceEmployeeStates').select(['deviceUserId', 'employeeId']).where('deviceId', '=', device.id)

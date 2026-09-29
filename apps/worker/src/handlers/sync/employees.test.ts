@@ -20,6 +20,7 @@ const DEV_B = '0c000000-0000-0000-0000-0000000000a2';
 const DEV_ZK = '0c000000-0000-0000-0000-0000000000a3';
 const DEV_OFF = '0c000000-0000-0000-0000-0000000000a4';
 const DEV_AUTH = '0c000000-0000-0000-0000-0000000000a5';
+const DEV_PIN = '0c000000-0000-0000-0000-0000000000a6';
 const EMP = ['0c000000-0000-0000-0000-0000000000e1', '0c000000-0000-0000-0000-0000000000e2', '0c000000-0000-0000-0000-0000000000e3', '0c000000-0000-0000-0000-0000000000e4'] as const;
 const clock = new Date('2026-09-05T08:00:00Z');
 let h: TestHarness;
@@ -311,5 +312,29 @@ describe('scheduler ticks', () => {
     expect(later.jobs).toHaveLength(1); // only org A (1 h interval) is due again
     const jobA = await job(later.jobs[0]!);
     expect(jobA).toMatchObject({ organizationId: ORG, itemsTotal: 5 });
+  });
+});
+
+describe('manual PIN mappings survive device syncs', () => {
+  it('a pull keeps the mapped PIN, records the default id as a duplicate device-only user, and a push goes out under the PIN', async () => {
+    const startDate = DateTime.fromJSDate(clock, { zone: 'utc' }).minus({ days: 2 }).toISODate()!;
+    await h.tdb.adminDb.insertInto('devices').values({ id: DEV_PIN, organizationId: ORG, branchId: BRANCH, code: 'PIN', name: 'PIN', providerKey: 'mock', manufacturer: 'FlowZa', integrationType: 'VENDOR_CLOUD_PULL', config: JSON.stringify({ scenario: 'healthy', employeeCount: 5, startDate }) }).execute();
+    // Fatima (default device user id E002) enrols on this device as E005: a person mapped it (PIN mapping)
+    await h.tdb.adminDb.insertInto('deviceEmployeeStates').values({ organizationId: ORG, deviceId: DEV_PIN, branchId: BRANCH, deviceUserId: 'E005', employeeId: EMP[1], desired: true, syncStatus: 'IN_SYNC', mappedAt: clock }).execute();
+    const pull = await oneItem(DEV_PIN, 'PULL_EMPLOYEES');
+    expect(await pullEmployees(pull.ctx)).toMatchObject({ status: 'SUCCESS', listed: 5 });
+    const after = await states(DEV_PIN);
+    expect(after.find((x) => x.deviceUserId === 'E005')).toMatchObject({ employeeId: EMP[1] });
+    expect(after.find((x) => x.deviceUserId === 'E005')!.mappedAt).not.toBeNull();
+    expect(after.find((x) => x.deviceUserId === 'E002')).toMatchObject({ employeeId: null, desired: false });
+    // the push uses the mapped PIN and never re-points the row to the default id
+    const push = await oneItem(DEV_PIN, 'PUSH_EMPLOYEE', { force: true }, EMP[1]);
+    expect(await pushEmployee(push.ctx)).toMatchObject({ status: 'SUCCESS', async: false, deviceUserId: 'E005' });
+    const pushed = (await states(DEV_PIN)).filter((x) => x.employeeId === EMP[1]);
+    expect(pushed.map((x) => [x.deviceUserId, x.syncStatus])).toEqual([['E005', 'IN_SYNC']]);
+    // a second pull sees the pushed representation in sync
+    const again = await oneItem(DEV_PIN, 'PULL_EMPLOYEES');
+    await pullEmployees(again.ctx);
+    expect((await states(DEV_PIN)).find((x) => x.deviceUserId === 'E005')).toMatchObject({ employeeId: EMP[1], syncStatus: 'IN_SYNC' });
   });
 });
