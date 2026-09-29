@@ -1,11 +1,15 @@
 import { z } from 'zod';
 import { ORG_STATUSES, SUBSCRIPTION_STATUSES } from '../enums.js';
-import { booleanQuerySchema, isoDateTimeSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import { booleanQuerySchema, emailSchema, isoDateTimeSchema, paginationQuerySchema, uuidSchema } from '../common.js';
 import { organizationDtoSchema } from '../organizations.js';
 
 export const platformOrgListQuerySchema = paginationQuerySchema.extend({
   status: z.enum(ORG_STATUSES).optional(),
   search: z.string().trim().max(100).optional(),
+  planKey: z.string().trim().max(64).optional(),
+  subscriptionStatus: z.enum(SUBSCRIPTION_STATUSES).optional(),
+  /** Only tenants whose trial ends within this many days (dashboard "trials ending soon"). */
+  trialEndingWithinDays: z.coerce.number().int().min(1).max(365).optional(),
 });
 
 export const platformOrganizationDtoSchema = organizationDtoSchema.extend({
@@ -19,6 +23,8 @@ export const platformOrganizationDtoSchema = organizationDtoSchema.extend({
     currentPeriodEnd: isoDateTimeSchema.nullable(),
   }).nullable(),
   counts: z.object({ employees: z.number().int(), devices: z.number().int(), branches: z.number().int(), users: z.number().int() }).optional(),
+  /** Platform account management (super-admin portal): account manager and tags — never shown to the tenant. */
+  account: z.object({ accountManagerUserId: uuidSchema.nullable(), accountManagerEmail: z.string().nullable(), tags: z.array(z.string()) }).optional(),
   updatedAt: isoDateTimeSchema,
 });
 export type PlatformOrganizationDto = z.infer<typeof platformOrganizationDtoSchema>;
@@ -137,3 +143,194 @@ export const createOrganizationResultSchema = z.object({
   invitation: z.object({ id: uuidSchema, email: z.string(), token: z.string(), expiresAt: isoDateTimeSchema }).nullable(),
 });
 export type CreateOrganizationResult = z.infer<typeof createOrganizationResultSchema>;
+
+// ------------------------------------------------------------------------------------------------------------------------------
+// Super-admin portal (/adm) — migration 20260929000200
+// ------------------------------------------------------------------------------------------------------------------------------
+
+export const PLATFORM_ADMIN_LEVELS = ['support', 'admin', 'owner'] as const;
+export type PlatformAdminLevel = (typeof PLATFORM_ADMIN_LEVELS)[number];
+
+/** PATCH /platform/orgs/:id/subscription — at least one field besides the reason. Dates are ISO date-times, null clears. */
+export const updateSubscriptionSchema = z.object({
+  planKey: z.string().trim().min(1).max(64).optional(),
+  status: z.enum(SUBSCRIPTION_STATUSES).optional(),
+  trialEndsAt: isoDateTimeSchema.nullable().optional(),
+  currentPeriodEnd: isoDateTimeSchema.nullable().optional(),
+  cancelAt: isoDateTimeSchema.nullable().optional(),
+  reason: z.string().trim().min(3).max(500),
+}).refine((v) => v.planKey !== undefined || v.status !== undefined || v.trialEndsAt !== undefined || v.currentPeriodEnd !== undefined || v.cancelAt !== undefined, {
+  message: 'Change at least one field of the subscription.',
+});
+export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;
+
+export const platformSubscriptionDtoSchema = z.object({
+  planKey: z.string(),
+  planName: z.string(),
+  status: z.enum(SUBSCRIPTION_STATUSES),
+  trialEndsAt: isoDateTimeSchema.nullable(),
+  currentPeriodStart: isoDateTimeSchema.nullable(),
+  currentPeriodEnd: isoDateTimeSchema.nullable(),
+  cancelAt: isoDateTimeSchema.nullable(),
+  updatedAt: isoDateTimeSchema.nullable(),
+});
+export type PlatformSubscriptionDto = z.infer<typeof platformSubscriptionDtoSchema>;
+
+const tagSchema = z.string().trim().toLowerCase().min(1).max(40).regex(/^[\p{L}\p{N}][\p{L}\p{N} _.-]*$/u, 'Letters, digits, space - _ . only');
+
+/** PUT /platform/orgs/:id/account — the platform's account management of a tenant (never visible to the tenant). */
+export const putTenantAccountSchema = z.object({
+  accountManagerUserId: uuidSchema.nullable().optional(),
+  tags: z.array(tagSchema).max(20).optional(),
+});
+export type PutTenantAccountInput = z.infer<typeof putTenantAccountSchema>;
+
+export const tenantAccountDtoSchema = z.object({
+  organizationId: uuidSchema,
+  accountManager: z.object({ userId: uuidSchema, email: z.string(), fullName: z.string() }).nullable(),
+  tags: z.array(z.string()),
+  updatedAt: isoDateTimeSchema.nullable(),
+});
+export type TenantAccountDto = z.infer<typeof tenantAccountDtoSchema>;
+
+export const createTenantNoteSchema = z.object({ body: z.string().trim().min(1).max(4000) });
+export type CreateTenantNoteInput = z.infer<typeof createTenantNoteSchema>;
+export const tenantNoteDtoSchema = z.object({
+  id: uuidSchema,
+  organizationId: uuidSchema,
+  authorUserId: uuidSchema,
+  authorLabel: z.string().nullable(),
+  body: z.string(),
+  createdAt: isoDateTimeSchema,
+});
+export type TenantNoteDto = z.infer<typeof tenantNoteDtoSchema>;
+
+/** A member of a tenant as the platform console sees it (directory data only). */
+export const platformMembershipDtoSchema = z.object({
+  membershipId: uuidSchema,
+  organizationId: uuidSchema,
+  organizationName: z.string(),
+  companyCode: z.string(),
+  organizationStatus: z.enum(ORG_STATUSES),
+  userId: uuidSchema,
+  email: z.string(),
+  fullName: z.string(),
+  roleKey: z.string(),
+  roleName: z.string(),
+  status: z.string(),
+  joinedAt: isoDateTimeSchema.nullable(),
+  lastLoginAt: isoDateTimeSchema.nullable(),
+  mfaEnrolled: z.boolean(),
+});
+export type PlatformMembershipDto = z.infer<typeof platformMembershipDtoSchema>;
+
+export const platformInvitationDtoSchema = z.object({
+  id: uuidSchema,
+  email: z.string(),
+  roleName: z.string(),
+  expiresAt: isoDateTimeSchema,
+  createdAt: isoDateTimeSchema,
+  expired: z.boolean(),
+});
+export type PlatformInvitationDto = z.infer<typeof platformInvitationDtoSchema>;
+
+export const platformOrgMembersDtoSchema = z.object({
+  members: z.array(platformMembershipDtoSchema),
+  /** Pending invitations (not accepted, not revoked). */
+  invitations: z.array(platformInvitationDtoSchema),
+});
+export type PlatformOrgMembersDto = z.infer<typeof platformOrgMembersDtoSchema>;
+
+/** An audit entry written by a platform administrator (GET /platform/activity). */
+export const platformAuditEntryDtoSchema = z.object({
+  id: z.string(),
+  organizationId: uuidSchema.nullable(),
+  organizationName: z.string().nullable(),
+  actorUserId: uuidSchema.nullable(),
+  actorLabel: z.string().nullable(),
+  action: z.string(),
+  entityType: z.string(),
+  entityId: z.string().nullable(),
+  oldValue: z.unknown().nullable(),
+  newValue: z.unknown().nullable(),
+  reason: z.string().nullable(),
+  createdAt: isoDateTimeSchema,
+});
+export type PlatformAuditEntryDto = z.infer<typeof platformAuditEntryDtoSchema>;
+
+export const platformActivityQuerySchema = paginationQuerySchema.extend({
+  organizationId: uuidSchema.optional(),
+  actorUserId: uuidSchema.optional(),
+  action: z.string().trim().max(100).optional(),
+  from: isoDateTimeSchema.optional(),
+  to: isoDateTimeSchema.optional(),
+});
+
+export const platformUserListQuerySchema = paginationQuerySchema.extend({
+  search: z.string().trim().max(100).optional(),
+  platformAdmin: booleanQuerySchema.optional(),
+});
+
+export const platformUserDtoSchema = z.object({
+  id: uuidSchema,
+  email: z.string(),
+  fullName: z.string(),
+  status: z.string(),
+  mfaEnrolled: z.boolean(),
+  lastLoginAt: isoDateTimeSchema.nullable(),
+  createdAt: isoDateTimeSchema,
+  platformAdminLevel: z.enum(PLATFORM_ADMIN_LEVELS).nullable(),
+  platformAdminStatus: z.string().nullable(),
+  membershipCount: z.number().int(),
+});
+export type PlatformUserDto = z.infer<typeof platformUserDtoSchema>;
+
+export const platformUserDetailDtoSchema = platformUserDtoSchema.extend({
+  memberships: z.array(platformMembershipDtoSchema),
+});
+export type PlatformUserDetailDto = z.infer<typeof platformUserDetailDtoSchema>;
+
+export const platformAdminDtoSchema = z.object({
+  userId: uuidSchema,
+  email: z.string(),
+  fullName: z.string(),
+  level: z.enum(PLATFORM_ADMIN_LEVELS),
+  status: z.enum(['active', 'disabled']),
+  mfaEnrolled: z.boolean(),
+  lastLoginAt: isoDateTimeSchema.nullable(),
+  grantedByEmail: z.string().nullable(),
+  createdAt: isoDateTimeSchema,
+  isSelf: z.boolean(),
+});
+export type PlatformAdminDto = z.infer<typeof platformAdminDtoSchema>;
+
+/** POST /platform/admins — the person must already have a FlowZa Time account (they signed up or were invited once). */
+export const createPlatformAdminSchema = z.object({
+  email: emailSchema,
+  level: z.enum(PLATFORM_ADMIN_LEVELS).default('support'),
+});
+export type CreatePlatformAdminInput = z.infer<typeof createPlatformAdminSchema>;
+/** PATCH /platform/admins/:userId — no defaults (a PATCH must not reset omitted fields). */
+export const updatePlatformAdminSchema = z.object({
+  level: z.enum(PLATFORM_ADMIN_LEVELS).optional(),
+  status: z.enum(['active', 'disabled']).optional(),
+}).refine((v) => v.level !== undefined || v.status !== undefined, { message: 'Change the level or the status.' });
+export type UpdatePlatformAdminInput = z.infer<typeof updatePlatformAdminSchema>;
+
+/** GET /platform/overview — the super-admin dashboard. */
+export const platformOverviewDtoSchema = z.object({
+  time: isoDateTimeSchema,
+  organizations: z.object({ total: z.number().int(), byStatus: z.record(z.string(), z.number().int()), newLast30Days: z.number().int() }),
+  subscriptions: z.object({
+    byStatus: z.record(z.string(), z.number().int()),
+    byPlan: z.array(z.object({ planKey: z.string(), planName: z.string(), count: z.number().int() })),
+  }),
+  totals: z.object({ users: z.number().int(), employees: z.number().int(), devices: z.number().int(), branches: z.number().int(), memberships: z.number().int() }),
+  platformAdmins: z.number().int(),
+  activeGrants: z.number().int(),
+  pendingGrants: z.number().int(),
+  trialsEndingSoon: z.array(z.object({ id: uuidSchema, displayName: z.string(), companyCode: z.string(), trialEndsAt: isoDateTimeSchema })),
+  recentOrganizations: z.array(z.object({ id: uuidSchema, displayName: z.string(), companyCode: z.string(), status: z.enum(ORG_STATUSES), planName: z.string().nullable(), createdAt: isoDateTimeSchema })),
+  recentActivity: z.array(platformAuditEntryDtoSchema),
+});
+export type PlatformOverviewDto = z.infer<typeof platformOverviewDtoSchema>;

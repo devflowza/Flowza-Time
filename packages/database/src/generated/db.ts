@@ -1524,6 +1524,24 @@ export interface PlatformAdmins {
   userId: string;
 }
 
+export interface PlatformTenantAccounts {
+  accountManagerUserId: string | null;
+  createdAt: Generated<Timestamp>;
+  organizationId: string;
+  tags: Generated<string[]>;
+  updatedAt: Generated<Timestamp>;
+  updatedBy: string | null;
+}
+
+export interface PlatformTenantNotes {
+  authorLabel: string | null;
+  authorUserId: string;
+  body: string;
+  createdAt: Generated<Timestamp>;
+  id: Generated<string>;
+  organizationId: string;
+}
+
 export interface ProviderCircuitStates {
   accountKey: Generated<string>;
   failureCount: Generated<number>;
@@ -1980,6 +1998,8 @@ export interface DB {
   plans: Plans;
   platformAccessGrants: PlatformAccessGrants;
   platformAdmins: PlatformAdmins;
+  platformTenantAccounts: PlatformTenantAccounts;
+  platformTenantNotes: PlatformTenantNotes;
   providerCircuitStates: ProviderCircuitStates;
   providerWebhookEvents: ProviderWebhookEvents;
   reportDeliveries: ReportDeliveries;

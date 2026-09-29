@@ -13,6 +13,7 @@ import { EmptyState, Skeleton } from '@/components/ui';
 import { FileQuestion } from 'lucide-react';
 import { featureRoutes } from '@/features/routes';
 import { useCan, useEmployeeId } from '@/features/me/use-me';
+import { admRoutes } from '@/features/adm/routes';
 
 function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }
 function NotFound() {
@@ -57,6 +58,8 @@ export const router = createBrowserRouter([
   // Public on purpose: the invitee has no account yet, so this cannot sit behind RequireAuth.
   { path: '/auth/invite', element: <AcceptInvitationPage /> },
   { path: '/auth/callback', element: <Navigate to="/" replace /> },
+  // the super-admin portal: own sign-in (/adm/login) and shell, outside the tenant AppShell
+  ...admRoutes,
   {
     element: <RequireAuth />,
     children: [

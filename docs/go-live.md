@@ -502,6 +502,14 @@ join public.platform_admins a on a.user_id = f.user_id
 where f.status = 'verified';
 ```
 
+**The admin portal.** Platform administrators work in the super-admin portal at **`/adm`** (e.g.
+`https://time.flowza.ai/adm`), which has its own sign-in (`/adm/login`) and shell, modelled on the Flowza Finance
+`/adm` portal: dashboard, tenants (details, subscription, members, feature flags, support access, internal notes,
+activity), users, the admin team (owners add administrators and change levels), access grants, plans, feature flags,
+platform activity and system health. The old in-app `/platform` console redirects there. For a quick bootstrap with a
+temporary password there is also an SQL seed, `supabase/seeds/platform-admin/01_super_admin.sql` (see its README) —
+it resets the password on every run, so do not run it against an account whose password is already in use.
+
 **What this does and does not grant.** A platform admin can manage organisations, plans, feature flags and access
 grants. It does **not** grant access to any tenant's attendance data. Reading a customer's rows requires a
 time-boxed `platform_access_grants` row — capped at 72 hours, and a `write` grant additionally requires a second

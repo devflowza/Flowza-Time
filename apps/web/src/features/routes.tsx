@@ -13,7 +13,6 @@ import { approvalsRoutes } from './approvals/routes';
 import { scheduleRoutes } from './schedule/routes';
 import { reportsRoutes } from './reports/routes';
 import { payrollRoutes } from './payroll/routes';
-import { platformRoutes } from './platform/routes';
 import { leaveRoutes } from './leave/routes';
 import { portalRoutes } from './portal/routes';
 import { teamRoutes } from './team/routes';
@@ -24,7 +23,7 @@ import { attendanceAdminRoutes } from './attendance-admin/routes';
 export const featureRoutes: RouteObject[] = [
   ...employeesRoutes, ...organizationRoutes, ...usersRoutes, ...settingsRoutes, ...auditRoutes, ...searchRoutes,
   ...devicesRoutes, ...syncRoutes, ...attendanceRoutes, ...correctionsRoutes, ...approvalsRoutes, ...scheduleRoutes,
-  ...reportsRoutes, ...payrollRoutes, ...platformRoutes, ...leaveRoutes, ...portalRoutes, ...teamRoutes,
+  ...reportsRoutes, ...payrollRoutes, ...leaveRoutes, ...portalRoutes, ...teamRoutes,
   ...attendanceReviewRoutes,
   ...attendanceAdminRoutes,
 ];

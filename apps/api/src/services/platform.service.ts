@@ -15,7 +15,7 @@ import { sql } from 'kysely';
 
 type OrgListQuery = z.infer<typeof platformOrgListQuerySchema>;
 type GrantListQuery = z.infer<typeof accessGrantListQuerySchema>;
-const ORG_SORT = { createdAt: 'o.created_at', displayName: 'o.display_name', companyCode: 'o.company_code', status: 'o.status' } as const;
+const ORG_SORT = { createdAt: 'o.created_at', displayName: 'o.display_name', companyCode: 'o.company_code', status: 'o.status', trialEndsAt: 's.trial_ends_at' } as const;
 const INVITATION_TTL_DAYS = 14;
 
 /** Platform admin actions are audited with actor type PLATFORM_ADMIN on the target organisation (visible to the tenant) or organisation null. */
@@ -39,6 +39,13 @@ function orgQuery(trx: Trx) {
 }
 const PLATFORM_ORG_SELECT = [...ORG_COLUMNS.map((c) => `o.${c}` as const), 'p.key as planKey', 'p.name as planName', 's.status as subStatus', 's.trialEndsAt', 's.currentPeriodEnd'] as const;
 
+/** Employees / terminals / branches / active members per organisation — `app.platform_org_counts` (platform admins only). */
+export async function orgCounts(trx: Trx, ids: string[] | null): Promise<Map<string, NonNullable<PlatformOrganizationDto['counts']>>> {
+  const { rows } = await sql<{ organizationId: string; employees: string; devices: string; branches: string; users: string }>`
+    select organization_id as "organizationId", employees, devices, branches, users from app.platform_org_counts(${ids ? sql`${ids}::uuid[]` : sql`null`})`.execute(trx);
+  return new Map(rows.map((r) => [r.organizationId, { employees: toCount(r.employees), devices: toCount(r.devices), branches: toCount(r.branches), users: toCount(r.users) }]));
+}
+
 export async function listOrganizations(deps: ApiDeps, actor: Actor, q: OrgListQuery): Promise<{ data: PlatformOrganizationDto[]; total: number }> {
   requirePlatformAdmin(actor.principal);
   const sort = resolveSort(ORG_SORT, q.sort, q.order, 'o.created_at');
@@ -47,9 +54,26 @@ export async function listOrganizations(deps: ApiDeps, actor: Actor, q: OrgListQ
     let base = orgQuery(trx);
     if (q.status) base = base.where('o.status', '=', q.status);
     if (q.search) { const like = likeContains(q.search); base = base.where((eb) => eb.or([eb('o.displayName', 'ilike', like), eb('o.legalName', 'ilike', like), eb(sql`o.company_code::text`, 'ilike', like)])); }
+    if (q.planKey) base = base.where('p.key', '=', q.planKey);
+    if (q.subscriptionStatus) base = base.where('s.status', '=', q.subscriptionStatus);
+    if (q.trialEndingWithinDays) base = base.where('s.status', '=', 'trialing').where('s.trialEndsAt', 'is not', null).where('s.trialEndsAt', '<=', new Date(Date.now() + q.trialEndingWithinDays * 86_400_000));
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const rows = await base.select(PLATFORM_ORG_SELECT).orderBy(sql.raw(sort.column), sort.direction).orderBy('o.id').limit(page.pageSize).offset(page.offset).execute();
-    return { data: rows.map((r) => toPlatformOrgDto(r as unknown as Parameters<typeof toPlatformOrgDto>[0])), total };
+    const ids = rows.map((r) => r.id);
+    // counts and the platform's account fields of the page (migration 20260929000200): one call each, never per row
+    const counts = ids.length ? await orgCounts(trx, ids) : new Map<string, NonNullable<PlatformOrganizationDto['counts']>>();
+    const accounts = ids.length
+      ? new Map((await trx.selectFrom('platformTenantAccounts as a').leftJoin('userProfiles as u', 'u.id', 'a.accountManagerUserId')
+        .select(['a.organizationId', 'a.accountManagerUserId', 'a.tags', 'u.email as managerEmail']).where('a.organizationId', 'in', ids).execute())
+        .map((a) => [a.organizationId, { accountManagerUserId: a.accountManagerUserId, accountManagerEmail: a.managerEmail ?? null, tags: a.tags ?? [] }]))
+      : new Map<string, NonNullable<PlatformOrganizationDto['account']>>();
+    return {
+      data: rows.map((r) => ({
+        ...toPlatformOrgDto(r as unknown as Parameters<typeof toPlatformOrgDto>[0], counts.get(r.id)),
+        account: accounts.get(r.id) ?? { accountManagerUserId: null, accountManagerEmail: null, tags: [] },
+      })),
+      total,
+    };
   });
 }
 
