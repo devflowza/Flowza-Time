@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
 import { rawTransactionSchema, type RawTransaction } from '@flowza/contracts';
 import { withContext, type Trx } from '@flowza/database';
-import { isFinanceCursorError, ProviderError, type AttendancePullResult, type SyncCursor } from '@flowza/device-providers';
+import { isInvalidCursorError, type AttendancePullResult, type ProviderError, type SyncCursor } from '@flowza/device-providers';
 import { nextAdaptiveInterval } from '@flowza/domain';
 import { AppError, event } from '@flowza/shared';
 import type { JobContext } from '../types.js';
@@ -17,7 +17,6 @@ import type { DeviceRow } from './types.js';
 export const DEFAULT_MAX_PAGES = 20;
 export const INVALID_CURSOR_REWIND_DAYS = 7;
 export const FULL_RESYNC_FLOOR_DAYS = 365;
-const CURSOR_RESET_CODES = new Set(['INVALID_CONFIG', 'PROTOCOL_ERROR']);
 
 function num(v: unknown, fallback: number, min = 1, max = 10_000): number {
   return typeof v === 'number' && Number.isFinite(v) ? Math.min(max, Math.max(min, Math.floor(v))) : fallback;
@@ -79,10 +78,10 @@ export async function pullAttendance(ctx: JobContext) {
     let cursor = fullResync ? null : prep.cursor;
     let since: string | undefined = fullResync ? new Date(now.getTime() - FULL_RESYNC_FLOOR_DAYS * 86_400_000).toISOString() : undefined;
     const connector = isFinanceConnector(device);
-    // Only a cursor the provider says it cannot read is reset. For the Flowza Finance connector that is exactly the error its
-    // cursor parser raises: an HTTP-level 400/404/405/3xx/5xx or an unreadable answer is a failed run (counted, retried with
-    // back-off) that keeps the cursor — rewinding on a gateway hiccup skipped every unpulled row older than the rewind (review D10).
-    const isCursorProblem = (err: unknown): err is ProviderError => ProviderError.is(err) && (connector ? isFinanceCursorError(err) : CURSOR_RESET_CODES.has(err.code));
+    // Only a cursor the provider says it cannot read is reset (`details.reason = 'invalid_cursor'`, every provider): a missing
+    // password, a refused URL, an HTTP 400/404/5xx or an unreadable answer is a failed run (counted, retried with back-off) that
+    // keeps the cursor — rewinding on those skipped every unpulled row older than the rewind (review D10).
+    const isCursorProblem = (err: unknown): err is ProviderError => isInvalidCursorError(err);
     let superseded = false;
     try {
       for (let i = 0; i < maxPages; i++) {

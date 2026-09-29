@@ -12,6 +12,7 @@ vi.mock('./auth-provider', () => ({ useAuth: () => ({ session: h.session, user: 
 import { renderWithProviders } from '@/features/employees/test-utils';
 import { apiMock, resetApiMock, supabaseMock, ApiError } from '@/features/employees/test-mocks';
 import { AcceptInvitationPage } from './accept-invitation-page';
+import { readPendingInvitation, rememberPendingInvitation } from './pending-invitation';
 
 const TOKEN = '11111111-1111-1111-1111-111111111111.secret-value-long-enough';
 const at = (token?: string) => ({ route: token ? `/auth/invite?token=${encodeURIComponent(token)}` : '/auth/invite', path: '/auth/invite' });
@@ -19,6 +20,7 @@ const at = (token?: string) => ({ route: token ? `/auth/invite?token=${encodeURI
 describe('AcceptInvitationPage', () => {
   beforeEach(() => {
     h.session = null;
+    localStorage.clear();
     resetApiMock();
     apiMock.post.mockReset();
     supabaseMock.auth.signUp?.mockReset?.();
@@ -56,6 +58,9 @@ describe('AcceptInvitationPage', () => {
     expect(await screen.findByText('Confirm your email')).toBeInTheDocument();
     // only the (read-only) validation reached the API; nothing was accepted
     expect(apiMock.post.mock.calls.some((c) => c[0] === '/invitations/accept')).toBe(false);
+    // ...and the invitation is remembered, so signing in once confirmed joins it (the shell redirects back here)
+    expect(screen.getByRole('link', { name: 'Sign in' })).toHaveAttribute('href', '/auth/sign-in');
+    expect(readPendingInvitation()).toBe(TOKEN);
   });
 
   it('asks Supabase to send the invitee back to this link after they confirm', async () => {
@@ -175,5 +180,11 @@ describe('AcceptInvitationPage', () => {
       expect(await screen.findByLabelText('Password')).toBeInTheDocument();
       expect(screen.queryByTestId('invitation-preview')).not.toBeInTheDocument();
     });
+  });
+
+  it('forgets a remembered invitation once it opens, so the shell never redirects here twice', async () => {
+    rememberPendingInvitation(TOKEN);
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+    await waitFor(() => expect(readPendingInvitation()).toBeNull());
   });
 });

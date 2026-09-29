@@ -14,11 +14,13 @@ vi.mock('@/features/me/use-me', async () => {
 
 import { ApiError, renderWithProviders, supabaseMock } from '@/features/employees/test-utils';
 import { testState } from '@/features/employees/test-mocks';
+import { rememberPendingInvitation } from '@/features/auth/pending-invitation';
 import { AppShell } from './app-shell';
 
 describe('AppShell', () => {
   beforeEach(() => {
     h.me = null;
+    localStorage.clear();
     testState.orgId = 'org-1';
     supabaseMock.auth.mfa.listFactors.mockResolvedValue({ data: { totp: [], all: [] }, error: null });
   });
@@ -51,6 +53,15 @@ describe('AppShell', () => {
     expect(await screen.findByRole('heading', { name: 'Create your organisation' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Create organisation' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+  });
+
+  it('sends an invitee who confirmed their new account back to their invitation, not to "create your organisation"', async () => {
+    // The confirmation link lands on the Site URL whenever the invitation URL is not allow-listed in Supabase.
+    rememberPendingInvitation('org-1.secret-value-long-enough');
+    h.me = { isLoading: false, isError: false, data: { user: { id: 'u9', email: 'new@acme.om', fullName: '', avatarUrl: null, locale: 'en', mfaEnrolled: false, isPlatformAdmin: false }, memberships: [] }, refetch: vi.fn() };
+    renderWithProviders(<AppShell />, { route: '/' });
+    expect(await screen.findByTestId('location')).toHaveTextContent('/auth/invite?token=org-1.secret-value-long-enough');
+    expect(screen.queryByRole('heading', { name: 'Create your organisation' })).not.toBeInTheDocument();
   });
 
   it('renders the shell for a platform admin who has no organisation yet', async () => {

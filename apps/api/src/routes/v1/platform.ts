@@ -27,7 +27,7 @@ export function registerPlatformRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.put('/platform/feature-flags', async (c) => ok(c, await platform.putFeatureFlags(deps, actorOf(c, deps), await body(c, putFeatureFlagsSchema))));
   v1.get('/platform/health', async (c) => ok(c, await platform.health(deps, actorOf(c, deps))));
 
-  // super-admin portal (/adm) — migration 20260929000200
+  // super-admin portal (/adm) — migration 20260929000400
   v1.get('/platform/overview', async (c) => ok(c, await adm.overview(deps, actorOf(c, deps))));
   v1.patch('/platform/orgs/:id', async (c) => ok(c, await adm.updateOrganizationDetails(deps, actorOf(c, deps), param(c, 'id'), await body(c, updateOrganizationSchema))));
   v1.get('/platform/orgs/:id/subscription', async (c) => ok(c, await adm.getSubscription(deps, actorOf(c, deps), param(c, 'id'))));

@@ -1,4 +1,4 @@
--- FlowZa Time · 20260929000200 · Super-admin portal (/adm) — the platform console's own records and read models.
+-- FlowZa Time · 20260929000400 · Super-admin portal (/adm) — the platform console's own records and read models.
 --
 -- The web app gains a separate administration portal at /adm (its own sign-in, layout and pages, modelled on the Flowza
 -- Finance /adm portal). Everything it shows about tenants that is NOT the tenant's own data lives here:

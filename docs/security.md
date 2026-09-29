@@ -242,7 +242,8 @@ scheduled, audited job. See `docs/risks.md` for GCC regulatory notes (Oman PDPL,
 
 - Separate database roles/passwords per environment; the Supabase service-role key is used only for Realtime broadcast
   and Storage signing, never for data access.
-- Dependency audit (`pnpm audit --prod`) + secret scanning in CI (`.github/workflows/ci.yml`), Dependabot weekly.
+- Dependency audit (`pnpm audit --prod`) and secret scanning (`gitleaks detect`, config `.gitleaks.toml`) are run locally, not
+  in CI (removed to cut Actions minutes); Dependabot weekly.
 - Backups: Supabase daily backups + PITR on paid plans; see `docs/deployment.md` for RPO/RTO.
 - Hosted project (`liyilmbklsextsggflbb`): every migration, including the security gate (`20260928001100` … `001120`), is
   applied (2026-09-29; `docs/hr-portal/reports/12-ship.md`). Supabase's security and performance advisors report no

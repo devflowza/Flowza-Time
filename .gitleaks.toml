@@ -1,4 +1,4 @@
-# Gitleaks configuration for CI secret scanning (gitleaks/gitleaks-action, see .github/workflows/ci.yml).
+# Gitleaks configuration for secret scanning (`gitleaks detect` locally; no longer run in CI).
 # Extends the default ruleset; the allowlist below only covers places that hold deliberately fake values.
 title = "FlowZa Time"
 

@@ -6,6 +6,13 @@ import { FlowzaFinanceProvider, type FlowzaFinanceProviderOptions } from './prov
 import { ZKTecoPushProvider } from './providers/zkteco/provider.js';
 import { HikvisionPushProvider } from './providers/hikvision/provider.js';
 import { createZkPushProtocol } from './providers/zkteco/push-protocol.js';
+import { EsslPushProvider, FingerTecPushProvider } from './providers/zkteco/derived.js';
+import { ZKBioTimeProvider } from './providers/zkteco-biotime/provider.js';
+import { HikvisionIsapiProvider } from './providers/hikvision-isapi/provider.js';
+import { SupremaBioStar2Provider } from './providers/suprema-biostar2/provider.js';
+import { AnvizCrossChexCloudProvider } from './providers/anviz-crosschex/provider.js';
+import { MatrixCosecProvider } from './providers/matrix-cosec/provider.js';
+import type { VendorHttpOptions } from './vendor-http.js';
 import { ProviderError, type DeviceProvider, type DevicePushProtocolHandler, type ProviderDefinition, type ProviderRegistry } from './types.js';
 
 export { secretFieldsOf };
@@ -45,18 +52,31 @@ export interface DefaultRegistryOptions {
   clock?: () => Date;
   /** Flowza Finance connector transport options (tests point it at a local mock server with `allowPrivateHosts`). */
   flowzaFinance?: FlowzaFinanceProviderOptions;
+  /** Transport options of the server/device API adapters (BioTime, BioStar 2, ISAPI, CrossChex, COSEC); `allowPrivateHosts` = FLOWZA_ALLOW_PRIVATE_EGRESS. */
+  vendorHttp?: VendorHttpOptions;
 }
 
-/** Every provider FlowZa ships: the simulator, the Flowza Finance connector, the ZKTeco and Hikvision push handlers (beta) and the honest placeholders. */
+/**
+ * Every provider FlowZa ships: the simulator, the Flowza Finance connector, the push handlers (ZKTeco and its eSSL/FingerTec
+ * derivatives, Hikvision), the server/device API adapters (all beta, docs/device-integrations.md §4) and the two honest placeholders.
+ */
 export function defaultProviders(options: DefaultRegistryOptions = {}): DeviceProvider[] {
   const clock = options.clock;
   const iclock = createZkPushProtocol(); // one handler shared by every ZKTeco-derived provider
+  const http = { ...(options.vendorHttp ?? {}), ...(clock ? { clock } : {}) };
   return [
     createMockProvider({ ...(clock ? { clock } : {}), ...(options.mock ?? {}) }),
     new FlowzaFinanceProvider({ ...(clock ? { clock } : {}), ...(options.flowzaFinance ?? {}) }),
     new ZKTecoPushProvider({ protocol: iclock, ...(clock ? { clock } : {}) }),
     new HikvisionPushProvider({ ...(clock ? { clock } : {}) }),
-    ...createPlaceholderProviders({ protocol: iclock, ...(clock ? { clock } : {}) }),
+    new ZKBioTimeProvider(http),
+    new HikvisionIsapiProvider(http),
+    new SupremaBioStar2Provider(http),
+    new AnvizCrossChexCloudProvider(http),
+    new EsslPushProvider({ protocol: iclock, ...(clock ? { clock } : {}) }),
+    new FingerTecPushProvider({ protocol: iclock, ...(clock ? { clock } : {}) }),
+    new MatrixCosecProvider(http),
+    ...createPlaceholderProviders(),
   ];
 }
 export const defaultRegistry = (options: DefaultRegistryOptions = {}): ProviderRegistry => createProviderRegistry(defaultProviders(options));

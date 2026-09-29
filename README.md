@@ -70,7 +70,7 @@ supabase/migrations · supabase/tests · supabase/functions · scripts · docs
 | Seed — 1 organisation, 5 branches, 20 departments, 500 employees, 20 devices, 30 days (~22k punches through the real engine) | **Working** (local) |
 | Demo tenant seed — Majan Gulf Trading (Oman), 53 employees, 10 logins covering every system role, six months of terminal punches through the real engine (`supabase/seeds/demo-tenant`) | **Loaded on the hosted project** |
 | Hosted stack — Supabase project `liyilmbklsextsggflbb` (Auth, Storage, Realtime policies), API and workers on Fly.io (`time-api.flowza.ai`), web on Cloudflare Pages (`time.flowza.ai`, builds `main`) | **Live** — all 46 migrations applied; see `docs/go-live.md` |
-| Super-admin portal (`/adm`, Flowza Finance parity) — own sign-in with MFA, fleet dashboard, tenants (edit details, subscription and trial, members, flags, support access, internal notes, account manager and tags, activity), users directory, admin team, grants, plans, feature flags, platform activity, health | **Working** — migration 20260929000200, API tests in `apps/api/src/test/platform-admin.test.ts` |
+| Super-admin portal (`/adm`, Flowza Finance parity) — own sign-in with MFA, fleet dashboard, tenants (edit details, subscription and trial, members, flags, support access, internal notes, account manager and tags, activity), users directory, admin team, grants, plans, feature flags, platform activity, health | **Working** — migration 20260929000400, API tests in `apps/api/src/test/platform-admin.test.ts` |
 | Platform-wide feature-flag defaults | **Not implemented** — tracked in `docs/risks.md` and `docs/device-integrations.md` §8 |
 
 Known limits worth stating: rate limiting and idempotency storage are per API instance (multi-instance needs an edge limiter or a shared store), zero-touch device claiming trusts serial knowledge (risk D26), and the web app ships ~188 kB gzipped of application code on top of the vendor chunks (React, Supabase, TanStack Query, i18next, Luxon), all pages beyond the shell being lazy.
@@ -79,8 +79,10 @@ Known limits worth stating: rate limiting and idempotency storage are per API in
 `pnpm verify` runs lint, typecheck, unit tests and builds. `bash supabase/tests/run-rls-tests.sh` and `pnpm test:db`
 prove tenant isolation on a real Postgres; `pnpm --filter @flowza/api test` and `pnpm --filter @flowza/worker test` run the
 API and worker suites against per-file test databases; `pnpm --filter @flowza/web run build:e2e && pnpm --filter @flowza/web
-run test:e2e` runs the Playwright UI suite. CI (`.github/workflows/ci.yml`) runs all of them plus dependency audit and
-secret scanning.
+run test:e2e` runs the Playwright UI suite. To keep GitHub Actions minutes down, CI runs only two checks, and only on pull
+requests whose paths can affect them: `.github/workflows/migrations.yml` (migrations, RLS suites, re-apply, generated types)
+and `.github/workflows/api-image.yml` (API Docker image build). Everything else, including `pnpm audit` and a gitleaks scan,
+is run locally before merging.
 
 ## Licence
 Proprietary — © F & Z Capital. All rights reserved.

@@ -7,7 +7,7 @@
  */
 import { sql } from 'kysely';
 import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
-import { INVITATION_EMAIL_JOB_TYPE } from '@flowza/contracts';
+import { INVITATION_EMAIL_JOB_TYPE, invitationEmailDedupeKey } from '@flowza/contracts';
 import { randomToken, sha256Hex } from '@flowza/shared';
 import { databaseSessionRevoker } from '../lib/sessions.js';
 import type { SessionRevoker } from '../deps.js';
@@ -37,6 +37,41 @@ describe('resend + validate + accept', () => {
     const job = (await queueJobs(h.admin, INVITATION_EMAIL_JOB_TYPE)).find((j) => j.payload['invitationId'] === r.body.data.id);
     expect(job).toMatchObject({ queueName: 'notifications', organizationId: f.orgId, payload: { organizationId: f.orgId, invitationId: r.body.data.id } });
     expect(JSON.stringify(job!.payload)).not.toContain(r.body.data.token.split('.')[1]);
+  });
+
+  it('the list shows the e-mail delivery state; a failed e-mail is queued again on request (async, audited, one pending job)', async () => {
+    const r = await h.request('POST', `${base()}/invitations`, { token: f.owner, body: { email: 'bounce@test.local', roleId: ROLE.employee } });
+    expect(r.status).toBe(201);
+    expect(r.body.data).toMatchObject({ deliveryStatus: 'queued', deliveryAttempts: 0, deliveryLastError: null });
+    const id: string = r.body.data.id;
+    const sendAgain = (token: string, inv = id) => h.request('POST', `${base()}/invitations/${inv}/send-email`, { token });
+    const jobsOf = async () => (await queueJobs(h.admin, INVITATION_EMAIL_JOB_TYPE)).filter((j) => j.payload['invitationId'] === id);
+    expect((await jobsOf())[0]).toMatchObject({ dedupeKey: invitationEmailDedupeKey(id), status: 'pending' });
+    // queued (a job is pending): nothing to retry yet
+    expect((await sendAgain(f.owner)).status).toBe(409);
+
+    // the worker gave up (the job is dead-lettered, out of the live queue)
+    await h.admin.deleteFrom('jobs.queue').where('jobType', '=', INVITATION_EMAIL_JOB_TYPE).where(sql<boolean>`payload->>'invitationId' = ${id}`).execute();
+    await h.admin.updateTable('invitations').set({ deliveryStatus: 'failed', deliveryAttempts: 5, deliveryLastError: 'email send failed: domain not verified', deliveryLastAttemptAt: new Date() }).where('id', '=', id).execute();
+    const list = await h.request('GET', `${base()}/invitations`, { token: f.hrAdmin });
+    expect(list.body.data.find((i: { id: string }) => i.id === id)).toMatchObject({ deliveryStatus: 'failed', deliveryAttempts: 5, deliveryLastError: 'email send failed: domain not verified' });
+
+    expect((await sendAgain(f.hrAdmin)).status).toBe(403); // user.view only
+    const retried = await sendAgain(f.owner);
+    expect(retried.status).toBe(202);
+    expect(retried.body.data).toMatchObject({ status: 'QUEUED', invitation: { id, deliveryStatus: 'queued', deliveryAttempts: 0, deliveryLastError: null } });
+    expect(retried.body.data.invitation.token).toBeUndefined(); // the same invitation: no new copy link
+    const jobs = await jobsOf();
+    expect(jobs).toHaveLength(1);
+    expect(jobs[0]).toMatchObject({ id: retried.body.data.jobId, dedupeKey: invitationEmailDedupeKey(id), status: 'pending' });
+    expect((await auditRows(h.admin, 'member.invitation_email_retried')).some((a) => a.entityId === id)).toBe(true);
+    // queued again: a second click does not stack a second job
+    expect((await sendAgain(f.owner)).status).toBe(409);
+
+    // an expired invitation is resent (new invitation), not re-mailed
+    await h.admin.updateTable('invitations').set({ deliveryStatus: 'failed', expiresAt: new Date(Date.now() - 60_000) }).where('id', '=', id).execute();
+    expect((await sendAgain(f.owner)).status).toBe(409);
+    expect((await sendAgain(f.owner, uuid())).status).toBe(404);
   });
 
   it('resend revokes the old token and issues a new 7-day one; validate reports each state; accept is single use', async () => {

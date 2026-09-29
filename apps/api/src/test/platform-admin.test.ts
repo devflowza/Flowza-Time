@@ -1,5 +1,5 @@
 /**
- * Super-admin portal (/adm) API — migration 20260929000200: dashboard overview, tenant details / subscription / members /
+ * Super-admin portal (/adm) API — migration 20260929000400: dashboard overview, tenant details / subscription / members /
  * account / notes, users directory, platform administrator team, platform activity. Authorisation of every route for
  * non-platform-admins is proven generically by route-authz.test.ts (e); this file proves behaviour and the guard rails.
  */

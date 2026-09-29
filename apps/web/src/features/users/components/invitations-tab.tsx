@@ -1,15 +1,16 @@
 import { useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { Mail, MailCheck, RotateCw, Trash2, UserPlus } from 'lucide-react';
+import { Mail, RotateCw, Trash2, UserPlus } from 'lucide-react';
 import type { InvitationDto } from '@flowza/contracts';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, Skeleton, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui';
-import { fmtDateTime, fmtRelative } from '@/lib/format';
+import { fmtDateTime } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useCan, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useInvitations, useMemberMutations } from '../api';
 import { InviteDialog } from './invite-dialog';
 import { InvitationLinkDialog } from './invitation-link-dialog';
+import { InvitationDelivery } from './invitation-delivery';
 
 export function InvitationsTab() {
   const { t } = useTranslation('users');
@@ -19,7 +20,7 @@ export function InvitationsTab() {
   const tz = useOrgTimezone();
   const q = useInvitations();
   const branches = useBranchOptions(true);
-  const { revoke, resend } = useMemberMutations();
+  const { revoke, resend, sendEmail } = useMemberMutations();
   const [revoking, setRevoking] = useState<InvitationDto | null>(null);
   const [resending, setResending] = useState<InvitationDto | null>(null);
   const [resent, setResent] = useState<InvitationDto | null>(null);
@@ -46,7 +47,8 @@ export function InvitationsTab() {
                     <TableCell className="font-medium">
                       <span dir="ltr">{inv.email}</span>
                       {inv.employeeNumber ? <span className="block font-mono text-xs font-normal text-muted-foreground" dir="ltr">{inv.employeeNumber}</span> : null}
-                      <span className="flex items-center gap-1 text-xs font-normal text-muted-foreground"><MailCheck className="size-3" aria-hidden />{inv.deliverySentAt ? t('resend.emailed', { when: fmtRelative(inv.deliverySentAt) }) : t('resend.notEmailed')}</span>
+                      <InvitationDelivery className="mt-1" invitation={inv} retrying={sendEmail.isPending && sendEmail.variables === inv.id}
+                        onRetry={canManage && !expired ? () => sendEmail.mutate(inv.id, { onSuccess: () => toast.success(t('delivery.requeued', { email: inv.email })), onError: toastError }) : undefined} />
                     </TableCell>
                     <TableCell>{inv.roleName ?? '—'}</TableCell>
                     <TableCell>{inv.allBranches ? <Badge variant="outline">{t('fields.allBranches')}</Badge> : <span className="flex flex-wrap gap-1">{inv.branchIds.map((id) => <Badge key={id} variant="secondary">{branches.byId.get(id)?.name ?? id.slice(0, 8)}</Badge>)}</span>}</TableCell>

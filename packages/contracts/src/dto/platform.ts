@@ -145,7 +145,7 @@ export const createOrganizationResultSchema = z.object({
 export type CreateOrganizationResult = z.infer<typeof createOrganizationResultSchema>;
 
 // ------------------------------------------------------------------------------------------------------------------------------
-// Super-admin portal (/adm) — migration 20260929000200
+// Super-admin portal (/adm) — migration 20260929000400
 // ------------------------------------------------------------------------------------------------------------------------------
 
 export const PLATFORM_ADMIN_LEVELS = ['support', 'admin', 'owner'] as const;

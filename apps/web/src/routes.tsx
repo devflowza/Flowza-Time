@@ -14,6 +14,7 @@ import { FileQuestion } from 'lucide-react';
 import { featureRoutes } from '@/features/routes';
 import { useCan, useEmployeeId } from '@/features/me/use-me';
 import { admRoutes } from '@/features/adm/routes';
+import { UnlinkedHome } from '@/components/layout/unlinked-home';
 
 function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }
 function NotFound() {
@@ -46,7 +47,7 @@ function MfaSetupRoute() {
 function HomeRoute() {
   const can = useCan();
   const employeeId = useEmployeeId();
-  if (!can('dashboard.view') && employeeId) return <Navigate to="/my" replace />;
+  if (!can('dashboard.view')) return employeeId ? <Navigate to="/my" replace /> : <UnlinkedHome />;
   return <Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>;
 }
 

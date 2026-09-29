@@ -6,7 +6,7 @@
  * Every handler starts with `requirePlatformAdmin` (the route authorisation matrix proves a tenant owner is refused).
  * A platform admin holds no tenant permission without an access grant (docs/go-live.md §6), so:
  *  - reads use the caller's own session (platform-admin read policies) or the counts / directory functions of migration
- *    20260929000200 (`app.platform_org_counts`, `app.platform_memberships`) — counts and directory data, never a tenant's
+ *    20260929000400 (`app.platform_org_counts`, `app.platform_memberships`) — counts and directory data, never a tenant's
  *    employee or attendance rows;
  *  - writes run in the target organisation's system context after the check and are audited as PLATFORM_ADMIN on that
  *    organisation, so the tenant sees what the platform changed;

@@ -33,6 +33,10 @@ export const memberDtoSchema = z.object({
 });
 export type MemberDto = z.infer<typeof memberDtoSchema>;
 
+/** E-mail delivery state of an invitation (invitations.delivery_status). */
+export const INVITATION_DELIVERY_STATUSES = ['none', 'queued', 'retrying', 'sent', 'failed'] as const;
+export type InvitationDeliveryStatus = (typeof INVITATION_DELIVERY_STATUSES)[number];
+
 export const invitationDtoSchema = z.object({
   id: uuidSchema,
   organizationId: uuidSchema,
@@ -55,10 +59,28 @@ export const invitationDtoSchema = z.object({
   membershipId: uuidSchema.nullable().optional(),
   /** When the worker last e-mailed the invitation (null until it has). */
   deliverySentAt: isoDateTimeSchema.nullable().optional(),
+  /** E-mail delivery: none (not queued) | queued | retrying (an attempt failed, the queue retries) | sent | failed (gave up). */
+  deliveryStatus: z.enum(INVITATION_DELIVERY_STATUSES).optional(),
+  /** Attempts made by the current e-mail job (out of INVITATION_EMAIL_MAX_ATTEMPTS). */
+  deliveryAttempts: z.number().int().optional(),
+  /** The provider's reason for the last failed attempt. */
+  deliveryLastError: z.string().nullable().optional(),
+  deliveryLastAttemptAt: isoDateTimeSchema.nullable().optional(),
+  /** Approximately when the queue retries (while `retrying`). */
+  deliveryNextAttemptAt: isoDateTimeSchema.nullable().optional(),
+  /** The mailer that accepted the e-mail; `console` means e-mail delivery is not configured (nothing reached the inbox). */
+  deliveryProvider: z.string().nullable().optional(),
 });
 export type InvitationDto = z.infer<typeof invitationDtoSchema>;
 /** Worker job that e-mails an invitation (it mints the e-mailed token and stores only its hash). */
 export const INVITATION_EMAIL_JOB_TYPE = 'SEND_INVITATION_EMAIL';
+/** Attempts of one invitation e-mail job (the queue backs off exponentially between them: ~30 s, 1, 2, 4 min). */
+export const INVITATION_EMAIL_MAX_ATTEMPTS = 5;
+/** One pending e-mail job per invitation: queuing it again while one is pending reuses that job. */
+export const invitationEmailDedupeKey = (invitationId: string): string => `invitation-email:${invitationId}`;
+/** Result of queuing an invitation e-mail again (an async job, AGENTS.md rule 5). */
+export const invitationEmailQueuedSchema = z.object({ jobId: z.string(), status: z.literal('QUEUED'), invitation: invitationDtoSchema });
+export type InvitationEmailQueuedDto = z.infer<typeof invitationEmailQueuedSchema>;
 
 export const acceptInvitationSchema = z.object({ token: z.string().min(16).max(256) });
 export type AcceptInvitationInput = z.infer<typeof acceptInvitationSchema>;

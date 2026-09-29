@@ -224,8 +224,11 @@ Notifications are written to the outbox either way, so nothing is lost by starti
 **This is a separate path from Supabase's auth email** (§5c) and the two are easy to confuse. Supabase sends
 confirmation, password-reset and magic-link mail through its own SMTP settings; this variable only governs the
 worker's own notifications — device offline, report ready, and so on. Invited users receive their *account*
-confirmation via Supabase regardless of what `EMAIL_PROVIDER` is set to, and the invitation link itself is delivered by
-the administrator copying it out of the UI. Nothing writes invitations to the outbox.
+confirmation via Supabase regardless of what `EMAIL_PROVIDER` is set to. The invitation itself is e-mailed by the worker
+(`SEND_INVITATION_EMAIL`, 5 attempts with backoff; a message Resend refuses, such as an unverified sender domain, fails at
+once). Users & roles → Invitations shows each e-mail's status (sending, e-mailed, retrying, failed, with the provider's
+reason) and offers **Retry** on a failed one. On `console` the e-mail is only logged: the status reads *Not delivered* and
+the administrator shares the copy link instead. `EMAIL_FROM` must be on a domain verified in Resend.
 
 Confirm from the API side after a minute: `/api/ready` reports queue depth, and it should not be climbing with nothing
 draining it.
