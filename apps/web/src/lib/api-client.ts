@@ -1,6 +1,7 @@
 import type { ApiErrorBody } from '@flowza/contracts';
 import { supabase } from './supabase.js';
 import { env } from './env.js';
+import i18n from './i18n.js';
 
 export class ApiError extends Error {
   constructor(readonly status: number, readonly code: string, message: string, readonly requestId?: string, readonly details?: Record<string, unknown>) {
@@ -27,6 +28,25 @@ export function isMfaRequiredError(error: unknown): boolean {
 /** True when the API could not be reached at all, as opposed to answering with an error. */
 export function isNetworkError(error: unknown): boolean {
   return error instanceof ApiError && error.status === NETWORK_ERROR_STATUS;
+}
+
+/**
+ * Code given to a 404 from the API's router — the API does not serve that path at all. The web is deployed on every merge
+ * and the API by hand, so for a while after a release a new screen can call an endpoint the running API does not have
+ * yet. That is "not available yet", not an error to report: its message is translated here, once, so no screen, toast
+ * or form ever shows the router's "Route not found.".
+ */
+export const FEATURE_UNAVAILABLE = 'FEATURE_UNAVAILABLE';
+
+/** True for the 404 of a path the API does not serve (see FEATURE_UNAVAILABLE), never for a record that does not exist. */
+export function isFeatureUnavailableError(error: unknown): boolean {
+  return error instanceof ApiError && error.code === FEATURE_UNAVAILABLE;
+}
+
+/** The router's 404: tagged with `details.reason` since the API marks it; older APIs only say "Route not found.". */
+function isRouteNotFound(status: number, body: Partial<ApiErrorBody>): boolean {
+  if (status !== 404) return false;
+  return body.details?.reason === 'ROUTE_NOT_FOUND' || body.message === 'Route not found.';
 }
 
 export interface ApiRequestOptions extends Omit<RequestInit, 'body'> {
@@ -71,6 +91,7 @@ export async function apiFetch<T>(path: string, opts: ApiRequestOptions = {}): P
   }
   if (!res.ok) {
     const err = (json ?? {}) as Partial<ApiErrorBody>;
+    if (isRouteNotFound(res.status, err)) throw new ApiError(res.status, FEATURE_UNAVAILABLE, i18n.t('common.featureUnavailable'), err.requestId, { ...err.details, path });
     throw new ApiError(res.status, err.code ?? 'HTTP_ERROR', err.message ?? res.statusText, err.requestId, err.details);
   }
   return json as T;

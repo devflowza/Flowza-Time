@@ -20,6 +20,9 @@ import { edgeGate } from './middleware/edge-gate.js';
 /** The paths of the inbound router (device push protocols, vendor webhooks): its edge gate and limiter apply to these only. */
 export const INBOUND_PREFIXES = ['/device-push', '/webhooks'] as const;
 
+/** `details.reason` of the router's own 404 (no route matched), as opposed to a NOT_FOUND raised for a missing record. */
+export const ROUTE_NOT_FOUND = 'ROUTE_NOT_FOUND';
+
 /** Invitation previews per client IP: enough for a person opening their link, far too few to guess tokens. */
 export const INVITATION_VALIDATE_LIMIT = { windowMs: 60_000, max: 20 } as const;
 
@@ -34,7 +37,9 @@ export function createApp(deps: ApiDeps) {
   // windows of a connection that already pays a long round trip.
   app.use('/api/*', compress());
   app.onError(errorHandler);
-  app.notFound((c) => c.json({ code: 'NOT_FOUND', message: 'Route not found.', requestId: c.get('requestId') }, 404));
+  // details.reason tells the web a path the API does not serve (a web deploy ahead of the API deploy) from a record that
+  // does not exist — both are NOT_FOUND. The web shows the first as "not available yet", never as this message.
+  app.notFound((c) => c.json({ code: 'NOT_FOUND', message: 'Route not found.', requestId: c.get('requestId'), details: { reason: ROUTE_NOT_FOUND } }, 404));
 
   // The edge gate runs before the rate limiters everywhere it applies: a request that did not come through the edge
   // carries an unverifiable client IP, so letting it reach a limiter would let it write to a bucket it chose.

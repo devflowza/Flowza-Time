@@ -17,7 +17,9 @@ export const apiFetchMock = vi.fn();
 export const isMfaRequiredError = (error: unknown): boolean => error instanceof ApiError && error.status === 403 && error.details?.reason === 'MFA_REQUIRED';
 export const NETWORK_ERROR_STATUS = 0;
 export const isNetworkError = (error: unknown): boolean => error instanceof ApiError && error.status === NETWORK_ERROR_STATUS;
-export const apiClientModule = { api: apiMock, apiFetch: apiFetchMock, ApiError, isMfaRequiredError, isNetworkError, NETWORK_ERROR_STATUS };
+export const FEATURE_UNAVAILABLE = 'FEATURE_UNAVAILABLE';
+export const isFeatureUnavailableError = (error: unknown): boolean => error instanceof ApiError && error.code === FEATURE_UNAVAILABLE;
+export const apiClientModule = { api: apiMock, apiFetch: apiFetchMock, ApiError, isMfaRequiredError, isNetworkError, NETWORK_ERROR_STATUS, isFeatureUnavailableError, FEATURE_UNAVAILABLE };
 export function resetApiMock() { for (const fn of Object.values(apiMock)) fn.mockReset(); apiFetchMock.mockReset(); apiMock.get.mockRejectedValue(new ApiError(404, 'NOT_FOUND', 'not mocked')); }
 
 /** Route a GET mock by path (query params are passed as the second argument by the real client). */

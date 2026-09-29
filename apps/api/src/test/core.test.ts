@@ -42,6 +42,16 @@ describe('authentication & bootstrap', () => {
     expect(profile?.email).toBe(`${newUser}@users.flowza.invalid`);
   });
 
+  it('marks the router 404 so the web can tell "path not served" from "record not found"', async () => {
+    const route = await api.request('GET', `/orgs/${F.orgA}/no-such-endpoint`, { user: F.ownerA });
+    expect(route.status).toBe(404);
+    expect(route.json).toMatchObject({ code: 'NOT_FOUND', details: { reason: 'ROUTE_NOT_FOUND' } });
+    expect(route.json.requestId).toBeTruthy();
+    const record = await api.request('GET', `/orgs/${F.orgA}/employees/0a000000-0000-0000-0000-0000000000ff`, { user: F.ownerA });
+    expect(record.status).toBe(404);
+    expect(record.json.details?.reason).toBeUndefined();
+  });
+
   it('PATCH /me updates name and locale', async () => {
     const res = await api.request('PATCH', '/me', { user: F.ownerA, body: { fullName: 'Owner A Full', locale: 'ar' } });
     expect(res.status).toBe(200);
