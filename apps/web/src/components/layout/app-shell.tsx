@@ -11,6 +11,7 @@ import { Skeleton } from '@/components/ui';
 import { ErrorState } from '@/components/ui';
 import { useAuth } from '@/features/auth/auth-provider';
 import { CreateOrganizationScreen } from '@/features/auth/create-organization-screen';
+import { readPendingInvitation } from '@/features/auth/pending-invitation';
 import { Button } from '@/components/ui';
 import { useApplyDashboardTheme } from '@/features/dashboard/theme';
 
@@ -46,8 +47,13 @@ export function AppShell() {
     );
   }
   // No membership yet: self-service onboarding (create the organisation and become its owner), or sign out and wait
-  // for an invitation. This is where a sign-up that needed email confirmation finishes.
-  if (me.data.memberships.length === 0 && !me.data.user.isPlatformAdmin) return <CreateOrganizationScreen />;
+  // for an invitation. This is where a sign-up that needed email confirmation finishes — and an invitee who created
+  // their account from an invitation link is sent back to that invitation to join, not asked to found an organisation.
+  if (me.data.memberships.length === 0 && !me.data.user.isPlatformAdmin) {
+    const invitation = readPendingInvitation();
+    if (invitation) return <Navigate to={`/auth/invite?token=${encodeURIComponent(invitation)}`} replace />;
+    return <CreateOrganizationScreen />;
+  }
   // A platform admin is let through with no membership on purpose — but the index route is the org-scoped dashboard,
   // which calls useOrgId() and throws. Send them where they can actually act: the platform console. Below the guard
   // above so an ordinary member-less user still gets the onboarding screen rather than a 403 from /platform.

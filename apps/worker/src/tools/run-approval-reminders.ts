@@ -57,7 +57,7 @@ async function main(): Promise<number> {
   const deps: WorkerDeps = {
     config, log, db, queue: new PgJobQueue(db),
     credentials: new DeviceCredentialsStore(new SecretsCipher(config.FLOWZA_CREDENTIALS_MASTER_KEYS)),
-    providers: defaultRegistry({ flowzaFinance: { allowPrivateHosts: config.FLOWZA_ALLOW_PRIVATE_EGRESS } }),
+    providers: defaultRegistry({ flowzaFinance: { allowPrivateHosts: config.FLOWZA_ALLOW_PRIVATE_EGRESS }, vendorHttp: { allowPrivateHosts: config.FLOWZA_ALLOW_PRIVATE_EGRESS } }),
     realtime: platform.realtime, storage: platform.storage, mailer: createMailer(config, log), pdf: createPdfRenderer(config, log),
     now: () => parsed.now,
   };

@@ -15,6 +15,7 @@ import invitationEn from '@/locales/en/invitation.json';
 import invitationAr from '@/locales/ar/invitation.json';
 import { useAuth } from './auth-provider';
 import { invitationUrl } from './invitation-url';
+import { forgetPendingInvitation, rememberPendingInvitation } from './pending-invitation';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, FormField, Input } from '@/components/ui';
 import { AuthLayout } from './auth-layout';
 
@@ -94,6 +95,10 @@ export function AcceptInvitationPage() {
 
   const form = useForm<Form>({ resolver: zodResolver(schema), defaultValues: { email: '', password: '', mode: 'signUp' } });
 
+  // The shell sends a signed-in invitee with no membership here while a token is remembered (pending-invitation.ts):
+  // this page has now taken over, so forget it — whatever happens next is explained here, and nothing redirects twice.
+  useEffect(() => { forgetPendingInvitation(); }, []);
+
   // One latch shared by BOTH entry points. supabase-js resolves signIn/signUp only after notifying its subscribers, so
   // the auth provider has already published the new session while the manual accept() is still awaiting its POST — the
   // effect below then sees a signed-in user and fires a second request with the same single-use token, and the loser
@@ -171,6 +176,9 @@ export function AcceptInvitationPage() {
             <CardTitle className="flex items-center gap-2 text-xl"><MailCheck className="size-5 text-brand-700" /> {t('auth.inviteConfirmTitle')}</CardTitle>
             <CardDescription>{t('auth.inviteConfirmHint', { email: phase.email })}</CardDescription>
           </CardHeader>
+          <CardContent>
+            <Button asChild className="w-full"><Link to="/auth/sign-in">{t('auth.signIn')}</Link></Button>
+          </CardContent>
         </Card>
       </AuthLayout>
     );
@@ -195,7 +203,9 @@ export function AcceptInvitationPage() {
     if (err) { setError(err.message); return; }
     // No session means the project requires email confirmation before the account can be used. Say so plainly instead
     // of leaving the invitee on a form that will never succeed.
-    if (!data.session) { setPhase({ kind: 'confirmEmail', email: values.email }); return; }
+    // Remember the invitation, so the invitee joins it however they come back once confirmed — the confirmation link, or
+    // signing in — rather than landing on "create your organisation".
+    if (!data.session) { rememberPendingInvitation(token); setPhase({ kind: 'confirmEmail', email: values.email }); return; }
     await accept();
   };
 
