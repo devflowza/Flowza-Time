@@ -12,7 +12,12 @@ import { applyMigrations } from './tools/migrate.js';
  * provider-writing migration re-run — leave `device_providers` byte-identical (P2-19).
  */
 const MIGRATION = '20260928000840_portal_attendance_review_fixes.sql';
-const PROVIDER_MIGRATIONS = ['20260905001600_reference_data.sql', '20260928000450_finance_connector_fixes.sql', '20260928000500_portal_attendance_self_service.sql', MIGRATION];
+const PROVIDER_MIGRATIONS = ['20260905001600_reference_data.sql', '20260928000450_finance_connector_fixes.sql', '20260928000500_portal_attendance_self_service.sql', MIGRATION, '20260929000100_hikvision_push_provider.sql', '20260929000200_device_provider_adapters.sql'];
+/**
+ * Rows a later migration rewrites (20260929000200 replaced the placeholders the reference data seeded): replaying the chain
+ * really changes them twice (old row, then new row), so their stamp legitimately moves; their CONTENT must still come out identical.
+ */
+const SUPERSEDED = new Set(['zkteco_biotime', 'hikvision_isapi', 'suprema_biostar2', 'anviz_crosschex_cloud', 'essl_push', 'fingertec_push', 'matrix_cosec']);
 const ORG = '0c000000-0000-0000-0000-000000000000';
 const BRANCH = '0c000000-0000-0000-0000-00000000000b';
 const E = { requester: '0c000000-0000-0000-0000-0000000000e1', colleague: '0c000000-0000-0000-0000-0000000000e2', third: '0c000000-0000-0000-0000-0000000000e3' };
@@ -27,7 +32,8 @@ async function reapply(names: readonly string[]): Promise<void> {
   await sql`delete from app.migrations where name in (${sql.join(names.map((n) => sql`${n}`))})`.execute(tdb.adminDb);
   await applyMigrations(tdb.connectionString);
 }
-const providers = async () => (await sql<{ row: unknown }>`select to_jsonb(p) as row from public.device_providers p order by p.key`.execute(tdb.adminDb)).rows.map((r) => r.row);
+const providers = async () => (await sql<{ row: Record<string, unknown> }>`select to_jsonb(p) as row from public.device_providers p order by p.key`.execute(tdb.adminDb)).rows
+  .map(({ row }) => (SUPERSEDED.has(String(row['key'])) ? { ...row, updatedAt: '(superseded)' } : row));
 const providerStamp = async (key: string) => (await tdb.adminDb.selectFrom('deviceProviders').select('updatedAt').where('key', '=', key).executeTakeFirstOrThrow()).updatedAt.toISOString();
 
 beforeAll(async () => {
