@@ -16,6 +16,8 @@ export interface Actor {
   requestId: string;
   ip: string | null;
   userAgent: string | null;
+  /** Organisation id → module keys that are off for it (from the principal snapshot; absent outside an HTTP request). */
+  disabledModules?: ReadonlyMap<string, ReadonlySet<string>>;
 }
 
 export function actorOf(c: Context<AppEnv>, deps: ApiDeps): Actor {
@@ -28,6 +30,7 @@ export function actorOf(c: Context<AppEnv>, deps: ApiDeps): Actor {
     requestId: c.get('requestId'),
     ip: clientIp(c, deps.config),
     userAgent: c.req.header('user-agent')?.slice(0, 500) ?? null,
+    disabledModules: c.get('disabledModules'),
   };
 }
 

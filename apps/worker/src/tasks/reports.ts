@@ -30,6 +30,8 @@ export async function scheduleDueReports(deps: Pick<WorkerDeps, 'db' | 'queue' |
       select s.id, s.organization_id as "organizationId", s.next_run_at as "nextRunAt"
       from public.report_schedules s join public.organizations o on o.id = s.organization_id
       where s.is_active and s.next_run_at is not null and s.next_run_at <= ${now} and o.status in ('active', 'trial')
+        -- the organisation's Scheduled reports module (migration 20260929000600): off ⇒ its schedules wait, untouched
+        and app.org_module_enabled(o.id, 'report_schedules') is not false
       order by s.next_run_at, s.id
       limit ${opts.cap ?? REPORT_SCHEDULE_ADMISSION_CAP}`.execute(trx)).rows;
     const keys = rows.map(keyOf);

@@ -420,6 +420,14 @@ export const meDtoSchema = z.object({
      */
     approvals: z.object({ actionable: z.number().int().min(0), delegatedToMe: z.boolean() }).default({ actionable: 0, delegatedToMe: false }),
     featureFlags: z.record(z.string(), z.boolean()),
+    /**
+     * Module key → enabled (migration 20260929000600): the plan, the platform's per-tenant override, the fleet-wide switch and
+     * a lapsed subscription decide. A key missing here (a /me cached before the field existed) reads as enabled — the API's
+     * module gate is the authority.
+     */
+    modules: z.record(z.string(), z.boolean()).default({}),
+    /** The subscription was expired / cancelled by the platform: only the core of the product remains. */
+    subscriptionLapsed: z.boolean().default(false),
     settings: organizationSettingsSchema,
   })),
 });

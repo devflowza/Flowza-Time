@@ -89,7 +89,9 @@ insert into p10_rpc_only values
   ('provider_circuit_states'), ('provider_webhook_events'), ('usage_quotas'), ('usage_records'), ('platform_access_grants'),
   -- earlier prompts: service-write-only already (portal attendance review 20260928000840, HR workspace 20260928000820)
   ('attendance_notes'), ('attendance_regularisation_requests'), ('employee_attendance_grants'), ('selfie_checkins'),
-  ('shift_swap_requests'), ('geofences'), ('geofence_assignments');
+  ('shift_swap_requests'), ('geofences'), ('geofence_assignments'),
+  -- modules, plans & billing (20260929000600): written by the system context after requirePlatformAdmin only
+  ('organization_modules'), ('billing_invoices'), ('billing_payments');
 grant select on p10_tenant, p10_rpc_only, p10_allow, p10_seen to public;
 grant insert on p10_seen to public;
 set client_min_messages = notice;
@@ -390,6 +392,11 @@ insert into public.user_profiles (id, email, full_name) values ('0d000000-0000-0
 -- (a workflow's steps are validated structurally, beyond what the synthesizer can guess: one written by hand)
 insert into public.approval_workflows (organization_id, entity_type, name, steps, status)
   values ('0a000000-0000-0000-0000-000000000000', 'ATTENDANCE_CORRECTION', 'Probe workflow', '[{"order":1,"approverType":"MANAGER","mode":"ANY"}]', 'active');
+-- (a billing payment must match its invoice's organisation and ISO currency: an invoice and its payment written by hand)
+insert into public.billing_invoices (id, organization_id, invoice_number, currency, subtotal, tax_rate, tax_amount, total)
+  values ('0a000000-0000-0000-0000-0000000008b1', '0a000000-0000-0000-0000-000000000000', 'PROBE-2026-00001', 'OMR', 100, 5, 5, 105);
+insert into public.billing_payments (organization_id, invoice_id, amount, currency, method)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000008b1', 50, 'OMR', 'bank_transfer');
 create temp table p10_synth_a on commit drop as select * from pg_temp.synthesize('0a000000-0000-0000-0000-000000000000', null, array[]::text[]);
 do $$
 declare r record;

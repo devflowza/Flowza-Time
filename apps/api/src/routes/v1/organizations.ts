@@ -9,6 +9,7 @@ import { actorOf } from '../../lib/service.js';
 import { isSettingsGroup } from '../../lib/settings.js';
 import { idempotency } from '../../middleware/idempotency.js';
 import * as orgs from '../../services/organizations.service.js';
+import * as billing from '../../services/billing.service.js';
 
 function groupParam(c: Context<AppEnv>): SettingsGroup {
   const g = param(c, 'group');
@@ -27,4 +28,7 @@ export function registerOrganizationRoutes(v1: Hono<AppEnv>, deps: ApiDeps): voi
     const payload = await c.req.json().catch(() => ({}));
     return ok(c, await orgs.putSettingsGroup(deps, actorOf(c, deps), param(c, 'orgId'), groupParam(c), payload));
   });
+  // the tenant's own plan, price, usage and modules (organization.view) and invoices (organization.manage) — migration 20260929000600
+  v1.get('/orgs/:orgId/subscription', async (c) => ok(c, await billing.getTenantSubscription(deps, actorOf(c, deps), param(c, 'orgId'))));
+  v1.get('/orgs/:orgId/billing/invoices', async (c) => ok(c, await billing.listTenantInvoices(deps, actorOf(c, deps), param(c, 'orgId'))));
 }

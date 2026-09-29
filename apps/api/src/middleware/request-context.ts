@@ -10,6 +10,8 @@ export type AppVariables = {
   aal?: string;
   /** Organisations (of the caller's memberships) whose security settings require MFA. */
   mfaRequiredOrgIds?: ReadonlySet<string>;
+  /** Organisation id → module keys that are OFF for it (plan, platform override, fleet switch, lapsed subscription). */
+  disabledModules?: ReadonlyMap<string, ReadonlySet<string>>;
   startedAt: number;
 };
 export type AppEnv = { Variables: AppVariables };
