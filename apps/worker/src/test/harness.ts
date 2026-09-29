@@ -11,7 +11,7 @@ export async function createHarness(name: string, providers: ProviderRegistry, n
   const published: TestHarness['published'] = [];
   const emails: TestHarness['emails'] = [];
   const mem = new Map<string, Buffer>();
-  const config = { NODE_ENV: 'test', LOG_LEVEL: 'silent', DATABASE_URL_WORKER: tdb.connectionString, DATABASE_POOL_MAX: 4, FLOWZA_CREDENTIALS_MASTER_KEYS: [{ id: 't', material: Buffer.alloc(32, 7) }], WORKER_CONCURRENCY: 2, WORKER_QUEUES: 'sync,processing,reports,notifications,maintenance', WORKER_PER_ORG_CONCURRENCY: 5, WORKER_POLL_INTERVAL_MS: 50, SCHEDULER_ENABLED: false, SCHEDULER_TICK_MS: 1000, EMAIL_PROVIDER: 'console', EMAIL_FROM: 'test', API_PUBLIC_URL: 'http://api.test', WEB_PUBLIC_URL: 'http://web.test', workerId: 'test-worker', queues: ['sync', 'processing', 'reports', 'notifications', 'maintenance'] } as unknown as WorkerConfig;
+  const config = { NODE_ENV: 'test', LOG_LEVEL: 'silent', DATABASE_URL_WORKER: tdb.connectionString, DATABASE_POOL_MAX: 4, FLOWZA_CREDENTIALS_MASTER_KEYS: [{ id: 't', material: Buffer.alloc(32, 7) }], WORKER_CONCURRENCY: 2, WORKER_QUEUES: 'sync,processing,reports,notifications,maintenance', WORKER_PER_ORG_CONCURRENCY: 5, WORKER_POLL_INTERVAL_MS: 50, WORKER_HEARTBEAT_INTERVAL_MS: 10_000, WORKER_SHUTDOWN_GRACE_MS: 3_000, SCHEDULER_ENABLED: false, SCHEDULER_TICK_MS: 1000, EMAIL_PROVIDER: 'console', EMAIL_FROM: 'test', API_PUBLIC_URL: 'http://api.test', WEB_PUBLIC_URL: 'http://web.test', workerId: 'test-worker', queues: ['sync', 'processing', 'reports', 'notifications', 'maintenance'] } as unknown as WorkerConfig;
   const deps: WorkerDeps = {
     config,
     log: createLogger({ name: 'worker-test', level: 'silent' }),

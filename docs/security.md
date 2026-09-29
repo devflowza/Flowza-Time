@@ -165,7 +165,9 @@ delegations, the organisation's display settings and role catalogue, …); each 
 4. Storage object policies derive the tenant from the first path segment and reuse the same helpers.
 5. Realtime private channels `org:<uuid>:*` / `user:<uuid>:*` are authorised via RLS on `realtime.messages`; clients cannot
    publish.
-6. Tests: `supabase/tests/rls_*.sql` (incl. the generated cross-tenant probe of `rls_invariants.sql`),
+6. The job queue (`jobs` schema) serves the API, worker and system roles only: clients have no USAGE on the schema and no
+   privilege on its tables, and EXECUTE on its functions is revoked from PUBLIC (`20260929000600`).
+7. Tests: `supabase/tests/rls_*.sql` (incl. the generated cross-tenant probe of `rls_invariants.sql`),
    `packages/database/src/queue.db.test.ts`, `apps/api/src/test/route-authz.test.ts`.
 
 ## Storage

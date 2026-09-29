@@ -62,7 +62,7 @@ const circuit = () => h.tdb.adminDb.selectFrom('providerCircuitStates').selectAl
 /** A JobQueue whose enqueue fails like a dropped connection (everything else delegates). */
 function failingQueue(): JobQueue {
   const q = h.deps.queue;
-  return { enqueue: async () => { throw new Error('connection reset by peer'); }, dequeue: (...a) => q.dequeue(...a), complete: (...a) => q.complete(...a), fail: (...a) => q.fail(...a), cancel: (...a) => q.cancel(...a), reapStale: (...a) => q.reapStale(...a), stats: () => q.stats() };
+  return { enqueue: async () => { throw new Error('connection reset by peer'); }, dequeue: (...a) => q.dequeue(...a), complete: (...a) => q.complete(...a), fail: (...a) => q.fail(...a), heartbeat: (...a) => q.heartbeat(...a), completeOwned: (...a) => q.completeOwned(...a), failOwned: (...a) => q.failOwned(...a), releaseOwned: (...a) => q.releaseOwned(...a), cancel: (...a) => q.cancel(...a), reapStale: (...a) => q.reapStale(...a), stats: () => q.stats() };
 }
 
 describe('pure helpers', () => {

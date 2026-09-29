@@ -1,4 +1,4 @@
-import { createLogger, event } from '@flowza/shared';
+import { createLogger, event, sleep } from '@flowza/shared';
 import { createDatabase, PgJobQueue, DeviceCredentialsStore, SecretsCipher, SUPABASE_ROOT_CA_2021 } from '@flowza/database';
 import { defaultRegistry } from '@flowza/device-providers';
 import { loadWorkerConfig, looksLikeTransactionPooler } from './config.js';
@@ -48,9 +48,10 @@ if (scheduler) void scheduler.start();
 async function shutdown(signal: string) {
   log.info(event('worker_shutdown', { signal }));
   scheduler?.stop();
-  await runner.stop();
-  await db.destroy().catch(() => undefined);
-  await pool.end().catch(() => undefined);
+  await runner.stop(config.WORKER_SHUTDOWN_GRACE_MS);
+  // A handler of a job handed back may still hold a connection: do not wait on it past a second.
+  const closed = (async () => { await db.destroy().catch(() => undefined); await pool.end().catch(() => undefined); })();
+  await Promise.race([closed, sleep(1_000)]);
   process.exit(0);
 }
 process.on('SIGTERM', () => void shutdown('SIGTERM'));

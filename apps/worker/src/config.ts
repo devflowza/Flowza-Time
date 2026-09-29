@@ -19,6 +19,17 @@ const schema = z.object({
   WORKER_QUEUES: z.string().default(QUEUE_NAMES.join(',')),
   WORKER_PER_ORG_CONCURRENCY: intFromEnv(5),
   WORKER_POLL_INTERVAL_MS: intFromEnv(1000),
+  /**
+   * How often the runner extends the locks of the jobs it is running (jobs.heartbeat). A lock older than its job's
+   * lock_timeout_seconds is treated as abandoned and the job is handed to another worker, so this must stay well below the
+   * shortest lock in use (REAP_STALE, 30 s): capped at 20 s.
+   */
+  WORKER_HEARTBEAT_INTERVAL_MS: z.coerce.number().int().min(1_000).max(20_000).default(10_000),
+  /**
+   * On SIGTERM / SIGINT the worker waits this long for its running jobs, then hands the rest back to the queue for the next
+   * worker (no attempt spent). Keep it below the platform's kill timeout (Fly.io: 5 s unless kill_timeout says otherwise).
+   */
+  WORKER_SHUTDOWN_GRACE_MS: z.coerce.number().int().min(0).max(60_000).default(3_000),
   SCHEDULER_ENABLED: booleanFromEnv.default(true),
   SCHEDULER_TICK_MS: intFromEnv(15_000),
   /**

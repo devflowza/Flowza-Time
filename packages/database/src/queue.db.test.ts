@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'kysely';
 import { createTestDatabase, type TestDatabase } from './testing/index.js';
-import { PgJobQueue } from './queue.js';
+import { DEAD_LETTER_NOW, PgJobQueue } from './queue.js';
 import { withContext } from './context.js';
 import { DeviceCredentialsStore, SecretsCipher } from './secrets.js';
 import { writeAudit } from './audit.js';
@@ -74,6 +74,141 @@ describe('PgJobQueue', () => {
     const back = await q.dequeue('w2', ['maintenance'], 1, 5);
     expect(back[0]!.id).toBe(id);
     await q.complete(id);
+  });
+
+  const lockAge = async (id: string) =>
+    (await sql<{ s: number }>`select extract(epoch from now() - locked_at)::float8 as s from jobs.queue where id = ${id}::bigint`.execute(tdb.adminDb)).rows[0]!.s;
+  const row = async (id: string) =>
+    (await sql<{ status: string; attempts: number; lockedBy: string | null; lastErrorCode: string | null }>`select status, attempts, locked_by, last_error_code from jobs.queue where id = ${id}::bigint`.execute(tdb.adminDb)).rows[0];
+  const archived = async (id: string) =>
+    (await sql<{ status: string; lastErrorCode: string | null; lockedBy: string | null }>`select status, last_error_code, locked_by from jobs.queue_archive where id = ${id}::bigint`.execute(tdb.adminDb)).rows[0];
+
+  it('heartbeat extends only the locks a worker still holds, for the same attempt, and keeps a long job from being reaped', async () => {
+    const q = new PgJobQueue(tdb.workerDb);
+    const id = await q.enqueue({ queue: 'reports', jobType: 'HEARTBEAT', organizationId: null, payload: {}, lockTimeoutSeconds: 30 });
+    const [job] = await q.dequeue('w-hb', ['reports'], 1, 5);
+    expect(job!.id).toBe(id);
+    await sql`update jobs.queue set locked_at = now() - interval '25 seconds' where id = ${id}::bigint`.execute(tdb.adminDb);
+    // another worker, or this worker for another attempt, does not hold the lock
+    expect(await q.heartbeat('w-other', [{ id, attempts: job!.attempts }])).toEqual(new Set());
+    expect(await q.heartbeat('w-hb', [{ id, attempts: job!.attempts + 1 }])).toEqual(new Set());
+    expect(await lockAge(id)).toBeGreaterThan(20);
+    expect(await q.heartbeat('w-hb', [{ id, attempts: job!.attempts }, { id: '999999999', attempts: 1 }])).toEqual(new Set([id]));
+    expect(await lockAge(id)).toBeLessThan(5);
+    // a job whose lock keeps being extended stays with its worker, however long it runs
+    await q.reapStale();
+    expect(await row(id)).toMatchObject({ status: 'running', attempts: 1, lockedBy: 'w-hb' });
+    expect(await q.completeOwned(id, 'w-hb', job!.attempts)).toBe(true);
+    expect(await archived(id)).toMatchObject({ status: 'completed', lockedBy: null });
+    expect(await q.heartbeat('w-hb', [{ id, attempts: job!.attempts }])).toEqual(new Set());
+    expect(await q.heartbeat('w-hb', [])).toEqual(new Set());
+  });
+
+  it('an execution whose lock was reaped can neither complete nor fail the attempt that replaced it', async () => {
+    const q = new PgJobQueue(tdb.workerDb);
+    const id = await q.enqueue({ queue: 'notifications', jobType: 'OWNED', organizationId: null, payload: {}, maxAttempts: 4 });
+    const [first] = await q.dequeue('w-a', ['notifications'], 1, 5);
+    expect(first).toMatchObject({ id, attempts: 1 });
+    await sql`update jobs.queue set locked_at = now() - interval '1 hour' where id = ${id}::bigint`.execute(tdb.adminDb);
+    await q.reapStale();
+    expect(await row(id)).toMatchObject({ status: 'pending', attempts: 1, lockedBy: null, lastErrorCode: 'LOCK_EXPIRED' });
+    const [second] = await q.dequeue('w-b', ['notifications'], 1, 5);
+    expect(second).toMatchObject({ id, attempts: 2 });
+
+    // the superseded execution (attempt 1) finishes late: nothing it reports touches attempt 2
+    expect(await q.completeOwned(id, 'w-a', 1)).toBe(false);
+    expect(await q.failOwned(id, 'w-a', 1, 'X', 'late failure', DEAD_LETTER_NOW)).toBeNull();
+    // a worker id alone is not ownership: the attempt must match too
+    expect(await q.completeOwned(id, 'w-b', 1)).toBe(false);
+    expect(await row(id)).toMatchObject({ status: 'running', attempts: 2, lockedBy: 'w-b' });
+
+    // the owner retries and then completes it
+    expect(await q.failOwned(id, 'w-b', 2, 'TRANSIENT', 'retry me', 0)).toBe('pending');
+    const [third] = await q.dequeue('w-b', ['notifications'], 1, 5);
+    expect(third).toMatchObject({ id, attempts: 3 });
+    expect(await q.completeOwned(id, 'w-b', 3)).toBe(true);
+    expect(await q.completeOwned(id, 'w-b', 3)).toBe(false);
+    expect(await archived(id)).toMatchObject({ status: 'completed', lockedBy: null });
+  });
+
+  it('a worker shutting down hands a job back at once without spending an attempt; only as its owner', async () => {
+    const q = new PgJobQueue(tdb.workerDb);
+    const id = await q.enqueue({ queue: 'sync', jobType: 'RELEASED', organizationId: null, payload: {}, maxAttempts: 2, lockTimeoutSeconds: 3600 });
+    const [first] = await q.dequeue('w-old', ['sync'], 1, 5);
+    expect(first).toMatchObject({ id, attempts: 1 });
+    expect(await q.releaseOwned(id, 'w-other', 1)).toBe(false);
+    expect(await q.releaseOwned(id, 'w-old', 2)).toBe(false);
+    expect(await q.releaseOwned(id, 'w-old', 1)).toBe(true);
+    expect(await row(id)).toMatchObject({ status: 'pending', attempts: 1, lockedBy: null, lastErrorCode: 'WORKER_SHUTDOWN' });
+    // the next worker takes it straight away, and still has every retry it had
+    const [next] = await q.dequeue('w-new', ['sync'], 1, 5);
+    expect(next).toMatchObject({ id, attempts: 2, maxAttempts: 3 });
+    expect(await q.releaseOwned(id, 'w-old', 1)).toBe(false);
+    expect(await q.completeOwned(id, 'w-new', 2)).toBe(true);
+  });
+
+  it('requeueing a job whose dedupe key a newer pending job already holds keeps both runs instead of failing', async () => {
+    const q = new PgJobQueue(tdb.workerDb);
+    // retry (jobs.fail) of a running job while its next run waits
+    const running = await q.enqueue({ queue: 'sync', jobType: 'DEDUPE', organizationId: null, payload: { n: 1 }, dedupeKey: 'dedupe:fail' });
+    await q.dequeue('w-d', ['sync'], 1, 5);
+    const twin = await q.enqueue({ queue: 'sync', jobType: 'DEDUPE', organizationId: null, payload: { n: 2 }, dedupeKey: 'dedupe:fail', runAt: new Date(Date.now() + 3_600_000) });
+    expect(twin).not.toBe(running);
+    expect(await q.failOwned(running, 'w-d', 1, 'TRANSIENT', 'retry', 3_600)).toBe('pending');
+    const keys = await sql<{ id: string; dedupeKey: string | null; status: string }>`select id::text, dedupe_key, status from jobs.queue where id in (${running}::bigint, ${twin}::bigint) order by id`.execute(tdb.adminDb);
+    expect(keys.rows).toEqual([{ id: running, dedupeKey: null, status: 'pending' }, { id: twin, dedupeKey: 'dedupe:fail', status: 'pending' }]);
+    // a new enqueue still merges into the pending job that kept the key
+    expect(await q.enqueue({ queue: 'sync', jobType: 'DEDUPE', organizationId: null, payload: {}, dedupeKey: 'dedupe:fail' })).toBe(twin);
+    await sql`delete from jobs.queue where id in (${running}::bigint, ${twin}::bigint)`.execute(tdb.adminDb);
+
+    // reaping: one stale job with a pending twin, and two stale jobs sharing a key, in one batch
+    const stale = await q.enqueue({ queue: 'maintenance', jobType: 'DEDUPE', organizationId: null, payload: {}, dedupeKey: 'dedupe:reap', lockTimeoutSeconds: 1 });
+    await q.dequeue('w-dead', ['maintenance'], 1, 5);
+    const waiting = await q.enqueue({ queue: 'maintenance', jobType: 'DEDUPE', organizationId: null, payload: {}, dedupeKey: 'dedupe:reap', runAt: new Date(Date.now() + 3_600_000) });
+    const pairA = await q.enqueue({ queue: 'maintenance', jobType: 'DEDUPE', organizationId: null, payload: {}, dedupeKey: 'dedupe:pair', lockTimeoutSeconds: 1 });
+    await q.dequeue('w-dead', ['maintenance'], 1, 5);
+    const pairB = await q.enqueue({ queue: 'maintenance', jobType: 'DEDUPE', organizationId: null, payload: {}, dedupeKey: 'dedupe:pair', lockTimeoutSeconds: 1 });
+    await q.dequeue('w-dead', ['maintenance'], 1, 5);
+    await sql`update jobs.queue set locked_at = now() - interval '1 minute' where id in (${stale}::bigint, ${pairA}::bigint, ${pairB}::bigint)`.execute(tdb.adminDb);
+    expect(await q.reapStale()).toBeGreaterThanOrEqual(3);
+    const after = await sql<{ id: string; dedupeKey: string | null; status: string }>`select id::text, dedupe_key, status from jobs.queue where id in (${stale}::bigint, ${waiting}::bigint, ${pairA}::bigint, ${pairB}::bigint) order by id`.execute(tdb.adminDb);
+    expect(after.rows).toEqual([
+      { id: stale, dedupeKey: null, status: 'pending' },
+      { id: waiting, dedupeKey: 'dedupe:reap', status: 'pending' },
+      { id: pairA, dedupeKey: null, status: 'pending' },
+      { id: pairB, dedupeKey: 'dedupe:pair', status: 'pending' },
+    ]);
+    await sql`delete from jobs.queue where id in (${stale}::bigint, ${waiting}::bigint, ${pairA}::bigint, ${pairB}::bigint)`.execute(tdb.adminDb);
+  });
+
+  it('jobs.complete leaves a job that was already archived as it was', async () => {
+    const q = new PgJobQueue(tdb.workerDb);
+    const id = await q.enqueue({ queue: 'reports', jobType: 'ARCHIVED', organizationId: null, payload: {} });
+    await q.dequeue('w-c', ['reports'], 1, 5);
+    expect(await q.failOwned(id, 'w-c', 1, 'BAD', 'no', DEAD_LETTER_NOW)).toBe('dead');
+    const before = await sql<{ status: string; completedAt: Date }>`select status, completed_at from jobs.queue_archive where id = ${id}::bigint`.execute(tdb.adminDb);
+    await q.complete(id);
+    const after = await sql<{ status: string; completedAt: Date }>`select status, completed_at from jobs.queue_archive where id = ${id}::bigint`.execute(tdb.adminDb);
+    expect(after.rows[0]).toEqual(before.rows[0]);
+    expect(after.rows[0]!.status).toBe('dead');
+  });
+
+  it('reaping counts a lost lock as an attempt and dead-letters a job whose attempts are spent', async () => {
+    const q = new PgJobQueue(tdb.workerDb);
+    const id = await q.enqueue({ queue: 'processing', jobType: 'CRASHES_ITS_WORKER', organizationId: null, payload: {}, maxAttempts: 2, lockTimeoutSeconds: 1 });
+    await q.dequeue('w-crash-1', ['processing'], 1, 5);
+    await sql`update jobs.queue set locked_at = now() - interval '10 seconds' where id = ${id}::bigint`.execute(tdb.adminDb);
+    expect(await q.reapStale()).toBeGreaterThanOrEqual(1);
+    expect(await row(id)).toMatchObject({ status: 'pending', attempts: 1, lastErrorCode: 'LOCK_EXPIRED' });
+
+    const [again] = await q.dequeue('w-crash-2', ['processing'], 1, 5);
+    expect(again).toMatchObject({ id, attempts: 2 });
+    await sql`update jobs.queue set locked_at = now() - interval '10 seconds' where id = ${id}::bigint`.execute(tdb.adminDb);
+    expect(await q.reapStale()).toBeGreaterThanOrEqual(1);
+    expect(await row(id)).toBeUndefined();
+    expect(await archived(id)).toMatchObject({ status: 'dead', lastErrorCode: 'LOCK_EXPIRED', lockedBy: null });
+    // nothing is handed out again
+    expect(await q.dequeue('w-crash-3', ['processing'], 5, 5)).toHaveLength(0);
   });
 });
 
