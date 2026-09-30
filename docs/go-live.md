@@ -302,6 +302,23 @@ doubled paths and 404s.
 Verify by opening the site and watching the network tab: requests should go to `https://<api-host>/api/v1/...` and come
 back 200 or 401 — not fail to connect, and not be blocked by CORS.
 
+### When the app cannot read the API's answers
+
+A request whose response the browser will not hand to the app — no response at all, or one without CORS headers —
+reaches the web as a bare network failure. The web then probes `/api/health` (`no-cors`) and names the case on screen:
+
+| On screen | Meaning | Where to look |
+|---|---|---|
+| **You are offline** | the browser has no network | the device |
+| **Could not reach the API at …** | not even the health check answered: DNS, TLS, a firewall, VPN, DNS filter or extension on that network | the user's network; `curl https://<api-host>/api/health` from elsewhere |
+| **The API at … did not answer normally** | the host answered, but not with the API: a Cloudflare challenge, block or rate limit, or a Fly 502 while the machine restarts. None of these carry CORS headers, so retrying from the browser changes nothing | Cloudflare → Security → Events, host `<api-host>`, the user's IP; `flyctl logs --app flowza-time-api` |
+
+The API's own responses carry CORS headers, errors included, so the third row is something in front of it. A
+Cloudflare rule that challenges or rate-limits `<api-host>` breaks every browser behind the matched IP — an office or a
+mobile carrier's shared address counts as one client. Skip challenges for `<api-host>/api/*` (the API authenticates
+every request itself), and keep any edge rate limit well above the API's own (`RATE_LIMIT_MAX` × 2 per IP per minute).
+The browser's network tab shows the real status of the failed request (403 with `cf-mitigated: challenge`, 429, 502).
+
 ### TLS certificates on Fly — required before Cloudflare can reach the origin
 
 A proxied Cloudflare CNAME does **not** hide the original hostname from the origin. Cloudflare connects sending SNI and

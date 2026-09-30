@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import { ApiError, FEATURE_UNAVAILABLE, NETWORK_ERROR_STATUS, apiFetch, isFeatureUnavailableError, isMfaRequiredError, isNetworkError, shouldRetryQuery } from './api-client';
+import { ApiError, FEATURE_UNAVAILABLE, NETWORK_ERROR_STATUS, apiFetch, isFeatureUnavailableError, isMfaRequiredError, isNetworkError, networkFailureReason, shouldRetryQuery } from './api-client';
 
 describe('shouldRetryQuery', () => {
   const network = new ApiError(NETWORK_ERROR_STATUS, 'NETWORK_ERROR', 'Could not reach the API');
@@ -62,6 +62,67 @@ describe('apiFetch transport failures', () => {
     expect(err).toBeInstanceOf(ApiError);
     expect((err as ApiError).status).toBe(502);
     expect(isNetworkError(err)).toBe(false);
+  });
+
+  // The request itself never gets a readable answer; the reachability probe (/api/health, no-cors) answers as given.
+  const probeAnswers = (answers: boolean) => vi.fn((input: RequestInfo | URL) =>
+    String(input).endsWith('/api/health') && answers ? Promise.resolve(new Response(null, { status: 200 })) : Promise.reject(new TypeError('Failed to fetch')));
+
+  it('says the API host is unreachable when not even its health check answers', async () => {
+    globalThis.fetch = probeAnswers(false);
+    const err = await apiFetch('/me').catch((e: unknown) => e);
+    expect(networkFailureReason(err)).toBe('UNREACHABLE');
+    expect((err as ApiError).message).toBe('Could not reach the API at http://localhost:4000');
+    expect((err as ApiError).details).toMatchObject({ reason: 'UNREACHABLE', cause: 'Failed to fetch' });
+  });
+
+  it('says something in front of the API answered when the host answers but the request got nothing readable', async () => {
+    // A CDN challenge or a gateway 502 has no CORS headers: fetch rejects the request, yet the host is plainly up. This
+    // used to read "check your connection" and was retried like a dropped packet (the #81 fix), and it kept failing.
+    const fetchMock = probeAnswers(true);
+    globalThis.fetch = fetchMock;
+    const err = await apiFetch('/me').catch((e: unknown) => e);
+    expect(isNetworkError(err)).toBe(true);
+    expect(networkFailureReason(err)).toBe('BLOCKED');
+    expect((err as ApiError).message).toBe('The API at http://localhost:4000 did not answer normally');
+    const [probeUrl, probeInit] = fetchMock.mock.calls[1] as unknown as [string, RequestInit];
+    expect(probeUrl).toBe('http://localhost:4000/api/health');
+    // no-cors: resolves for any HTTP answer, and sends no credentials to the host being diagnosed
+    expect(probeInit).toMatchObject({ mode: 'no-cors', credentials: 'omit', cache: 'no-store' });
+  });
+
+  it('does not probe the host when the browser knows it is offline', async () => {
+    vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    const fetchMock = probeAnswers(true);
+    globalThis.fetch = fetchMock;
+    const err = await apiFetch('/me').catch((e: unknown) => e);
+    expect(networkFailureReason(err)).toBe('OFFLINE');
+    expect((err as ApiError).message).toBe('You are offline');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('shares one probe between requests that fail together', async () => {
+    const fetchMock = probeAnswers(true);
+    globalThis.fetch = fetchMock;
+    const errs = await Promise.all(['/me', '/orgs/o1/dashboard', '/me/notifications'].map((p) => apiFetch(p).catch((e: unknown) => e)));
+    expect(errs.map(networkFailureReason)).toEqual(['BLOCKED', 'BLOCKED', 'BLOCKED']);
+    expect(fetchMock.mock.calls.filter(([u]) => String(u).endsWith('/api/health'))).toHaveLength(1);
+  });
+
+  it('rethrows a request the caller cancelled instead of diagnosing it', async () => {
+    const fetchMock = vi.fn().mockRejectedValue(new DOMException('The operation was aborted.', 'AbortError'));
+    globalThis.fetch = fetchMock;
+    const controller = new AbortController();
+    controller.abort();
+    const err = await apiFetch('/me', { signal: controller.signal }).catch((e: unknown) => e);
+    expect(err).not.toBeInstanceOf(ApiError);
+    expect((err as Error).name).toBe('AbortError');
+    expect(fetchMock).toHaveBeenCalledOnce();
+  });
+
+  it('has no network failure reason for an answer from the API', () => {
+    expect(networkFailureReason(new ApiError(503, 'HTTP_ERROR', 'Service Unavailable'))).toBeUndefined();
+    expect(networkFailureReason(new Error('boom'))).toBeUndefined();
   });
 
   it('reports a malformed 200 body rather than leaking a SyntaxError', async () => {

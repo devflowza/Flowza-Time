@@ -17,6 +17,8 @@ export interface CreateDbOptions {
    * system trust store", which is right for a database fronted by a publicly trusted certificate.
    */
   sslCa?: string;
+  /** Told about an idle connection that failed in the background (see the pool's `error` listener below). */
+  onIdleClientError?: (err: Error) => void;
 }
 
 /**
@@ -60,6 +62,11 @@ export function createDatabase(opts: CreateDbOptions): { db: Database; pool: pg.
     ssl: opts.ssl ? { rejectUnauthorized: true, ...(opts.sslCa ? { ca: opts.sslCa } : {}) } : undefined,
     statement_timeout: opts.statementTimeoutMs ?? 30_000,
   });
+  // A connection sitting idle in the pool can still fail — the pooler restarts, a network blip — and pg re-emits that as
+  // the pool's `error` event. An EventEmitter with no `error` listener throws, so the process exited: on the API's single
+  // machine every browser then got the platform proxy's 502, which has no CORS headers and reads as "Could not reach
+  // the API" until the machine came back. pg has already discarded the broken client; the next query opens a new one.
+  pool.on('error', (err) => opts.onIdleClientError?.(err));
   const db = new Kysely<DB>({
     dialect: new PostgresDialect({ pool }),
     plugins: [new CamelCasePlugin()],
