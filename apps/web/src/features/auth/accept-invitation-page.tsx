@@ -16,6 +16,7 @@ import invitationAr from '@/locales/ar/invitation.json';
 import { useAuth } from './auth-provider';
 import { invitationUrl } from './invitation-url';
 import { forgetPendingInvitation, rememberPendingInvitation } from './pending-invitation';
+import { signInErrorKey } from './sign-in-error';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, FormField, Input } from '@/components/ui';
 import { AuthLayout } from './auth-layout';
 
@@ -82,11 +83,12 @@ export function AcceptInvitationPage() {
     queryFn: async () => (await api.post<Envelope<InvitationPreviewDto>>('/invitations/validate', { token })).data,
     enabled: !!token, retry: false, staleTime: 60_000,
   });
+  const { refetch: recheckInvitation } = validation;
   const preview = isPreview(validation.data) ? validation.data : null;
   const unknownToken = validation.error instanceof ApiError && validation.error.status === 404;
   // an accepted / withdrawn / expired invitation, or an unknown token, has nothing left to accept
   const closed = unknownToken || (!!preview && preview.state !== 'valid');
-  const { session } = useAuth();
+  const { session, signOut } = useAuth();
   const navigate = useNavigate();
   const qc = useQueryClient();
   const [phase, setPhase] = useState<Phase>({ kind: 'form' });
@@ -94,6 +96,7 @@ export function AcceptInvitationPage() {
   const [mode, setMode] = useState<'signIn' | 'signUp'>('signUp');
 
   const form = useForm<Form>({ resolver: zodResolver(schema), defaultValues: { email: '', password: '', mode: 'signUp' } });
+  const switchMode = (next: 'signIn' | 'signUp') => { setMode(next); setError(null); form.setValue('mode', next); };
 
   // The shell sends a signed-in invitee with no membership here while a token is remembered (pending-invitation.ts):
   // this page has now taken over, so forget it — whatever happens next is explained here, and nothing redirects twice.
@@ -120,8 +123,11 @@ export function AcceptInvitationPage() {
       setError(e instanceof ApiError ? e.message : t('auth.inviteFailed'));
       setPhase({ kind: 'form' });
       inFlight.current = false;
+      // A request can land while its answer is lost on the way back. The token is single use, so retrying that one only
+      // reports "already accepted": read the invitation's state again, and an accepted one shows the way in instead.
+      void recheckInvitation();
     }
-  }, [token, qc, navigate, t]);
+  }, [token, qc, navigate, t, recheckInvitation]);
 
   // Already signed in (or just signed in): nothing left to collect, redeem straight away. Deferred off the effect body
   // so the first setState inside accept() is not synchronous; accept()'s own latch handles the race with onSubmit.
@@ -184,11 +190,37 @@ export function AcceptInvitationPage() {
     );
   }
 
+  // Signed in already — typically the confirmation link, which brings the invitee back here with a session. There are no
+  // credentials left to collect, so the form must not come back when joining fails (the API was unreachable, the address
+  // does not match): it offered "create account" to someone whose account exists, and each repeat sent them looking for
+  // a confirmation email that never comes, then to a password they were no longer sure of. Retry, or switch account.
+  if (session && phase.kind !== 'done') {
+    const signedInAs = session.user?.email;
+    return (
+      <AuthLayout>
+        <Card className="w-full max-w-sm">
+          <CardHeader>
+            <CardTitle className="text-xl">{t('auth.inviteTitle')}</CardTitle>
+            <CardDescription>{signedInAs ? t('auth.inviteSignedInAs', { email: signedInAs }) : t('auth.inviteSignedIn')}</CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {preview ? <InvitationPreview preview={preview} /> : null}
+            {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
+            <Button className="w-full" loading={phase.kind === 'accepting' || validation.isLoading} onClick={() => void accept()}>
+              {error ? t('auth.inviteRetry') : t('auth.inviteJoin')}
+            </Button>
+            <Button variant="ghost" className="w-full" disabled={phase.kind === 'accepting'} onClick={() => void signOut()}>{t('auth.inviteSwitchAccount')}</Button>
+          </CardContent>
+        </Card>
+      </AuthLayout>
+    );
+  }
+
   const submit = async (values: Form) => {
     setError(null);
     if (mode === 'signIn') {
       const { error: err } = await supabase.auth.signInWithPassword({ email: values.email, password: values.password });
-      if (err) { setError(t('auth.invalid')); return; }
+      if (err) { setError(t(signInErrorKey(err))); return; }
       await accept();
       return;
     }
@@ -201,6 +233,13 @@ export function AcceptInvitationPage() {
       options: { emailRedirectTo: invitationUrl(token) },
     });
     if (err) { setError(err.message); return; }
+    // The address already has a confirmed account. Supabase answers a repeated sign-up with a stand-in user that carries
+    // no identities, no session — and sends no email, so "confirm your email" would have them wait for nothing.
+    if (!data.session && data.user?.identities?.length === 0) {
+      switchMode('signIn');
+      setError(t('auth.inviteAccountExists', { email: values.email }));
+      return;
+    }
     // No session means the project requires email confirmation before the account can be used. Say so plainly instead
     // of leaving the invitee on a form that will never succeed.
     // Remember the invitation, so the invitee joins it however they come back once confirmed — the confirmation link, or
@@ -236,11 +275,18 @@ export function AcceptInvitationPage() {
             </FormField>
             {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
             <Button type="submit" className="w-full" loading={busy}>{mode === 'signUp' ? t('auth.inviteCreateAccount') : t('auth.signIn')}</Button>
+            {/* Remembered first: once the password is reset the invitee lands in the shell with no membership, which
+                sends them back to this invitation instead of "create your organisation". */}
+            {mode === 'signIn' ? (
+              <div className="text-center text-sm">
+                <Link to="/auth/forgot" className="text-primary hover:underline" onClick={() => rememberPendingInvitation(token)}>{t('auth.forgot')}</Link>
+              </div>
+            ) : null}
             <div className="text-center text-sm">
               <button
                 type="button"
                 className="text-primary hover:underline"
-                onClick={() => { setMode(mode === 'signUp' ? 'signIn' : 'signUp'); setError(null); form.setValue('mode', mode === 'signUp' ? 'signIn' : 'signUp'); }}
+                onClick={() => switchMode(mode === 'signUp' ? 'signIn' : 'signUp')}
               >
                 {mode === 'signUp' ? t('auth.inviteHaveAccount') : t('auth.inviteNeedAccount')}
               </button>

@@ -1,13 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor } from '@testing-library/react';
 
-const h = vi.hoisted(() => ({ session: null as unknown }));
+const h = vi.hoisted(() => ({ session: null as unknown, signOut: vi.fn() }));
 
 vi.mock('@/lib/api-client', async () => (await import('@/features/employees/test-mocks')).apiClientModule);
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/test-mocks')).useMeModule);
-vi.mock('./auth-provider', () => ({ useAuth: () => ({ session: h.session, user: null, loading: false, signOut: vi.fn() }) }));
+vi.mock('./auth-provider', () => ({ useAuth: () => ({ session: h.session, user: null, loading: false, signOut: h.signOut }) }));
 
 import { renderWithProviders } from '@/features/employees/test-utils';
 import { apiMock, resetApiMock, supabaseMock, ApiError } from '@/features/employees/test-mocks';
@@ -20,6 +20,7 @@ const at = (token?: string) => ({ route: token ? `/auth/invite?token=${encodeURI
 describe('AcceptInvitationPage', () => {
   beforeEach(() => {
     h.session = null;
+    h.signOut.mockReset();
     localStorage.clear();
     resetApiMock();
     apiMock.post.mockReset();
@@ -128,6 +129,69 @@ describe('AcceptInvitationPage', () => {
     expect(await screen.findByRole('alert')).toHaveTextContent('issued to a different email address');
   });
 
+  it('keeps a signed-in invitee on a retry, not on the create-account form, when joining fails', async () => {
+    // The confirmation link brings the invitee back here signed in. When the accept call then failed (API unreachable),
+    // the page used to fall back to "Create account and join": repeating it sent them waiting for a confirmation email
+    // that never comes, and signing in asked for a password they had typed once and were no longer sure of.
+    h.session = { access_token: 't', user: { email: 'rakshitha@acme.om' } };
+    apiMock.post.mockImplementation((path: string) => (path === '/invitations/accept'
+      ? Promise.reject(new ApiError(0, 'NETWORK_ERROR', 'Could not reach the API at http://localhost:4000'))
+      : Promise.resolve({ data: null })));
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('Could not reach the API');
+    expect(screen.getByText('You are signed in as rakshitha@acme.om.')).toBeInTheDocument();
+    expect(screen.queryByLabelText('Password')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Create account and join' })).not.toBeInTheDocument();
+
+    apiMock.post.mockResolvedValue({ data: { membershipId: 'm1', organizationId: 'o1' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+    await waitFor(() => expect(apiMock.post.mock.calls.filter((c) => c[0] === '/invitations/accept')).toHaveLength(2));
+  });
+
+  it('lets a signed-in invitee switch to another account', async () => {
+    h.session = { access_token: 't', user: { email: 'someone.else@acme.om' } };
+    apiMock.post.mockImplementation((path: string) => (path === '/invitations/accept'
+      ? Promise.reject(new ApiError(403, 'FORBIDDEN', 'This invitation was issued to a different email address.'))
+      : Promise.resolve({ data: null })));
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+    await screen.findByRole('alert');
+    fireEvent.click(screen.getByRole('button', { name: 'Use a different account' }));
+    expect(h.signOut).toHaveBeenCalled();
+  });
+
+  it('sends an address that already has an account to sign in, instead of waiting for an email that never comes', async () => {
+    // Supabase answers a repeated sign-up of a confirmed address with a stand-in user without identities, and no email.
+    supabaseMock.auth.signUp.mockResolvedValue({ data: { session: null, user: { id: 'u2', identities: [] } }, error: null });
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+    fireEvent.change(screen.getByLabelText('Work email'), { target: { value: 'owner@acme.om' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Sup3rSecret!pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create account and join' }));
+
+    expect(await screen.findByRole('alert')).toHaveTextContent('An account already exists for owner@acme.om');
+    expect(screen.queryByText('Confirm your email')).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Sign in' })).toBeInTheDocument();
+    expect(screen.getByRole('link', { name: 'Forgot password?' })).toHaveAttribute('href', '/auth/forgot');
+  });
+
+  it('says the email is unconfirmed rather than that the password is wrong', async () => {
+    supabaseMock.auth.signInWithPassword.mockResolvedValue({ data: { session: null, user: null }, error: { message: 'Email not confirmed', code: 'email_not_confirmed', status: 400 } });
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+    fireEvent.click(screen.getByRole('button', { name: 'I already have an account' }));
+    fireEvent.change(screen.getByLabelText('Work email'), { target: { value: 'owner@acme.om' } });
+    fireEvent.change(screen.getByLabelText('Password'), { target: { value: 'Sup3rSecret!pass' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Sign in' }));
+    expect(await screen.findByRole('alert')).toHaveTextContent('Confirm your email first');
+    expect(screen.queryByText('Invalid email or password.')).not.toBeInTheDocument();
+  });
+
+  it('remembers the invitation when the invitee goes to reset their password', () => {
+    renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+    fireEvent.click(screen.getByRole('button', { name: 'I already have an account' }));
+    fireEvent.click(screen.getByRole('link', { name: 'Forgot password?' }));
+    expect(readPendingInvitation()).toBe(TOKEN);
+  });
+
   it('redeems immediately for someone who is already signed in', async () => {
     h.session = { access_token: 't' };
     apiMock.post.mockResolvedValue({ data: { membershipId: 'm1', organizationId: 'o1' } });
@@ -179,6 +243,20 @@ describe('AcceptInvitationPage', () => {
       await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/invitations/validate', { token: TOKEN }));
       expect(await screen.findByLabelText('Password')).toBeInTheDocument();
       expect(screen.queryByTestId('invitation-preview')).not.toBeInTheDocument();
+    });
+
+    it('re-reads the invitation after a failed accept, so a join whose answer was lost shows the way in', async () => {
+      // The first accept landed but its answer never arrived; the retry is refused as single use. Only the invitation's
+      // state can tell the invitee they are in.
+      h.session = { access_token: 't', user: { email: 'salma@acme.om' } };
+      let validations = 0;
+      apiMock.post.mockImplementation((path: string) => {
+        if (path === '/invitations/validate') { validations += 1; return Promise.resolve(previewOf(validations === 1 ? 'valid' : 'accepted')); }
+        return Promise.reject(new ApiError(0, 'NETWORK_ERROR', 'Could not reach the API at http://localhost:4000'));
+      });
+      renderWithProviders(<AcceptInvitationPage />, at(TOKEN));
+      expect(await screen.findByText('This invitation was already used. Sign in with the invited address to open Acme Trading.')).toBeInTheDocument();
+      expect(screen.getByRole('link', { name: 'Go to sign in' })).toHaveAttribute('href', '/auth/sign-in');
     });
   });
 
