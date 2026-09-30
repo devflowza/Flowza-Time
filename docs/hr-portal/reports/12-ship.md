@@ -39,11 +39,10 @@ The 21 migrations of PR #65 (`20260928000100` … `20260928001120`) were applied
   files are idempotent, and the second application ran the full repo text, post-verify included, without error.
   `app.migrations` lists 000300 and 000400 but not 000100, 000200 or 000500, so the repo migrator run against hosted would
   apply those three again (they are idempotent).
-- **30 Sep.** `modules_plans_billing` was applied at 05:32 UTC by another session; its file is still on branch
-  `claude/elegant-galileo-n2e3cw`, as `20260929000600`. The job-queue migration (§9) had taken that stamp too, so it was
-  renumbered to `20260929000700` before being applied at 05:38 UTC on the owner's approval (recorded as
-  `job_lock_heartbeat`, byte-identical to the file: md5 `2e577f14…`) and added to `app.migrations`. The two touch nothing in
-  common.
+- **30 Sep.** `modules_plans_billing` was applied at 05:32 UTC by another session; its file reached `main` later with PR
+  #77, as `20260929000600`. The job-queue migration (§9) had taken that stamp too, so it was renumbered to `20260929000700`
+  before being applied at 05:38 UTC on the owner's approval (recorded as `job_lock_heartbeat`, byte-identical to the file:
+  md5 `2e577f14…`) and added to `app.migrations`. The two touch nothing in common.
 
 ## 2. Demo tenant data (Majan Gulf Trading)
 
@@ -180,7 +179,7 @@ design.
 1. **Merge `claude/modest-fermi-fnwqq7` into `main`** (the job-queue fix, §9; `main` is already merged into it), then
    **deploy**: GitHub → Actions → **Deploy** → Run workflow on `main` with the default target **`all`** (API, worker and
    reports worker together, new with PR #76). One deploy covers everything still missing: the API and worker run PR #66
-   while `main` carries #67–#76 with their migrations applied (§3, §4), and the reports worker predates PR #65. Afterwards,
+   while `main` carries #67–#77 with their migrations applied (§3, §4), and the reports worker predates PR #65. Afterwards,
    re-run flow 6: `node scripts/e2e-hosted/run.mjs --mode=hosted --i-understand-this-writes-to-the-demo-tenant --flows=6`
    (environment as in `scripts/e2e-hosted/README.md`).
 2. **Switch on leaked-password protection** in Supabase Auth for `liyilmbklsextsggflbb` (Dashboard → Authentication →
@@ -189,10 +188,8 @@ design.
    (`9dbf75f`, `3863dc8`) through Finance's own review and approval into Finance `main`; deploy `attendance-ingest` from it
    so that pushed punches map PINs to employee numbers; designate the Finance tenant; then register the connector in
    FlowZa Time (Settings → Integrations) and run "Test connection".
-4. **`app.migrations`** lacks 000100, 000200 and 000500 (§1). Harmless while migrations are applied through Supabase; record
-   them before anyone runs the repo migrator against hosted, or let it re-apply them (idempotent).
-5. **Branch `claude/elegant-galileo-n2e3cw`**: its `20260929000600_modules_plans_billing.sql` is applied on hosted but not
-   on `main`; it no longer shares a stamp with anything on this branch (§1).
+4. **`app.migrations`** lacks 000100, 000200, 000500 and 000600 (§1). Harmless while migrations are applied through
+   Supabase; record them before anyone runs the repo migrator against hosted, or let it re-apply them (idempotent).
 
 ## 9. Job queue: running jobs were started again while they ran
 

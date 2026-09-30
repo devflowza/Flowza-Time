@@ -58,7 +58,7 @@ supabase/migrations · supabase/tests · supabase/functions · scripts · docs
 
 | Area | State |
 |---|---|
-| Database — 52 migrations; 97 tables in `public` (plus 148 monthly partitions), RLS on every one of them and on every partition, no table reachable through the data API (PostgREST), job queue, envelope-encrypted credentials | **Working**, proven by the SQL isolation and invariant suites (`supabase/tests`) and the integration tests |
+| Database — 53 migrations; 105 tables in `public` (plus 148 monthly partitions), RLS on every one of them and on every partition, no table reachable through the data API (PostgREST), job queue, envelope-encrypted credentials | **Working**, proven by the SQL isolation and invariant suites (`supabase/tests`) and the integration tests |
 | Attendance engine, shift/rule resolution, day marks (loss of pay, unexcused / excused), punch windows, day close, period summaries (pure, traced) | **Working** — 347 tests in `@flowza/domain` |
 | Device provider framework, registry, conformance suite, deterministic mock provider | **Working** — 286 tests |
 | ZKTeco PUSH/ADMS protocol (handshake, ATTLOG, commands, OPERLOG) | **Beta, never run against hardware** — `verification_status = REPORTED`; see the checklist in `docs/device-integrations.md` §6 |

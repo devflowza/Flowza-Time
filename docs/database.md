@@ -65,11 +65,12 @@ recreates the Supabase-provided pieces (auth/storage/realtime schemas, roles). N
 | `20260929000300_invitation_delivery_status` | Invitation e-mail delivery status, retries and manual retry |
 | `20260929000400_super_admin_portal` | `/adm` portal: platform-only tenant accounts and notes, fleet counts and memberships read models, platform admins' own audit entries |
 | `20260929000500_device_pin_mappings` | Device PIN mappings a person made survive device syncs (`device_employee_states` marked as manual) |
+| `20260929000600_modules_plans_billing` | Modules, plans & pricing, billing (`/adm` parity): module catalogue, per-plan modules and users, per-tenant module overrides and the one enabled-module rule, subscription cycle and seats, billing invoices and payments, platform settings — see `docs/pricing.md` |
 | `20260929000700_job_lock_heartbeat` | Job queue: `heartbeat`, `complete_owned` / `fail_owned` / `release_owned` (outcomes only while the worker still holds the same attempt), `reap_stale` dead-letters a job whose attempts are spent, dedupe-safe requeueing, EXECUTE revoked from PUBLIC and a fixed `search_path` on every queue function |
 
 Hosted project `liyilmbklsextsggflbb`: every migration above is applied (PR #65's 21 on 2026-09-29,
 each verified against its file by md5, see `docs/hr-portal/reports/12-ship.md` §1, which also records the later ones and the
-three missing from `app.migrations`); `20260929000700` was applied on 2026-09-30, byte-identical to its file.
+ones missing from `app.migrations`); `20260929000700` was applied on 2026-09-30, byte-identical to its file.
 
 ## Conventions
 
