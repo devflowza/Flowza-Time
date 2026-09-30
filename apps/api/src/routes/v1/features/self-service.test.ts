@@ -49,7 +49,10 @@ describe('self-service profile and attendance', () => {
 });
 
 describe('self-service leave', () => {
-  const start = isoToday(21); const end = isoToday(23);
+  // Leave dates start on a Sunday so that they are working days whatever today is (organisations default to Friday and
+  // Saturday off): a range made only of off days is refused as "no working days" before any other check runs.
+  const sundayFrom = (minDays: number) => { let n = minDays; while (new Date(`${isoToday(n)}T00:00:00Z`).getUTCDay() !== 0) n++; return n; };
+  const start = isoToday(sundayFrom(21)); const end = isoToday(sundayFrom(21) + 2);
 
   it('shows active types with the yearly allowance as the balance', async () => {
     const t = await h.request('POST', `${base()}/leave-types`, { token: f.hrAdmin, body: { code: 'AL', name: 'Annual Leave', annualAllowanceDays: 30 } });
@@ -117,7 +120,7 @@ describe('self-service leave', () => {
   });
 
   it('forbids deciding on one\'s own request', async () => {
-    const r = await h.request('POST', `${base()}/me/leave`, { token: f.managerUser, body: { leaveTypeId: annualId, startDate: isoToday(70), endDate: isoToday(71), reason: 'Rest' } });
+    const r = await h.request('POST', `${base()}/me/leave`, { token: f.managerUser, body: { leaveTypeId: annualId, startDate: isoToday(sundayFrom(70)), endDate: isoToday(sundayFrom(70) + 1), reason: 'Rest' } });
     expect(r.status).toBe(201);
     expect((await h.request('PATCH', `${base()}/leave-records/${r.body.data.id}`, { token: f.managerUser, body: { status: 'APPROVED' } })).status).toBe(403);
     expect((await h.request('PATCH', `${base()}/leave-records/${r.body.data.id}`, { token: f.hrAdmin, body: { status: 'REJECTED', decisionNote: 'Busy week' } })).status).toBe(200);
