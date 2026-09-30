@@ -14,6 +14,10 @@ export const FlagsPage = lazy(() => import('./flags-page'));
 export const ActivityPage = lazy(() => import('./activity-page'));
 export const HealthPage = lazy(() => import('./health-page'));
 export const AccountPage = lazy(() => import('./account-page'));
+// modules, plans & pricing, billing, platform settings (migration 20260929000600)
+export const ModulesPage = lazy(() => import('./modules-page'));
+export const BillingPage = lazy(() => import('./billing-page'));
+export const SettingsPage = lazy(() => import('./settings-page'));
 
 export function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }
 

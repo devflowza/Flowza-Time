@@ -15,9 +15,11 @@ import { ActivityList } from '../components/activity-list';
 import { Pager } from '../components/pager';
 import { EditTenantDialog } from '../components/edit-tenant-dialog';
 import { SubscriptionPanel } from '../components/subscription-panel';
+import { TenantModulesPanel } from '../components/tenant-modules-panel';
+import { TenantBillingPanel } from '../components/tenant-billing-panel';
 import { MembersPanel, NotesPanel, OrgFeatureFlagsCard, TenantAccountCard } from '../components/tenant-panels';
 
-const TABS = ['overview', 'subscription', 'members', 'flags', 'access', 'notes', 'activity'] as const;
+const TABS = ['overview', 'subscription', 'modules', 'billing', 'members', 'flags', 'access', 'notes', 'activity'] as const;
 type Tab = (typeof TABS)[number];
 
 function Item({ label, children, ltr }: { label: string; children: React.ReactNode; ltr?: boolean }) {
@@ -111,6 +113,8 @@ export default function AdmTenantDetailPage() {
           ) : null}
         </TabsContent>
         <TabsContent value="subscription">{tab === 'subscription' ? <SubscriptionPanel orgId={o.id} timezone={o.timezone} /> : null}</TabsContent>
+        <TabsContent value="modules">{tab === 'modules' ? <TenantModulesPanel orgId={o.id} /> : null}</TabsContent>
+        <TabsContent value="billing">{tab === 'billing' ? <TenantBillingPanel orgId={o.id} /> : null}</TabsContent>
         <TabsContent value="members">{tab === 'members' ? <MembersPanel orgId={o.id} /> : null}</TabsContent>
         <TabsContent value="flags">{tab === 'flags' ? <OrgFeatureFlagsCard orgId={o.id} /> : null}</TabsContent>
         <TabsContent value="access">

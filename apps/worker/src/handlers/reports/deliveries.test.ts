@@ -94,6 +94,13 @@ describe('reports.schedules scheduler task', () => {
     expect(await runJobs()).toHaveLength(1);
     await h.tdb.adminDb.updateTable('jobs.queue').set({ status: 'pending', lockedAt: null, lockedBy: null }).where('jobType', '=', 'RUN_REPORT_SCHEDULE').execute();
   });
+
+  it('skips the schedules of an organisation whose Scheduled reports module is off, and picks them up again once it is on', async () => {
+    await h.tdb.adminDb.insertInto('organizationModules').values({ organizationId: ORG, moduleKey: 'report_schedules', enabled: false, reason: 'Not part of the plan' }).execute();
+    expect(await scheduleDueReports(h.deps)).toEqual({ due: 0, enqueued: 0, alreadyQueued: 0 });
+    await h.tdb.adminDb.deleteFrom('organizationModules').where('organizationId', '=', ORG).execute();
+    expect(await scheduleDueReports(h.deps)).toEqual({ due: 1, enqueued: 0, alreadyQueued: 1 });
+  });
 });
 
 describe('RUN_REPORT_SCHEDULE', () => {

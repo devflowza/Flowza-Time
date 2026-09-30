@@ -40,7 +40,9 @@ export interface DuplicateCollapse {
 }
 
 /**
- * Collapse repeated punches within `windowSeconds` of the last kept punch (§G.4). The first punch wins.
+ * Collapse repeated punches within `windowSeconds` of the last kept punch (§G.4). The first punch of a burst
+ * is kept here; `interpretPunches` then moves an OUT to the burst's LATEST punch, so a day's IN is the
+ * earliest tap and its OUT the latest one.
  * Two punches count as repeats when they carry the same direction, or when either is an undirected
  * `PUNCH` (a double tap on a device that cannot report direction). A PUNCH_IN followed by a PUNCH_OUT
  * seconds later is kept — the device explicitly reported two directions.
@@ -67,46 +69,105 @@ function sameDirection(a: AttendanceEventType, b: AttendanceEventType): boolean 
   return a === b || a === 'PUNCH' || b === 'PUNCH';
 }
 
-/** Interpret already de-duplicated, chronologically attributable punches under the rule set's mode. */
-export function interpretPunches(events: readonly EngineEvent[], mode: PunchInterpretation, zone: string): Interpretation {
+/**
+ * Interpret already de-duplicated, chronologically attributable punches under the rule set's mode.
+ *
+ * Pass the `duplicates` from `collapseDuplicates` so an OUT takes the LATEST punch of its burst: an employee
+ * who taps OUT at 19:47:05 and again at 19:47:08 left at 19:47:08 — the day's OUT is the maximum punch, not
+ * the first tap of the last burst. The role is still decided by the burst's first punch (its direction), only
+ * the instant moves; an IN keeps the earliest tap. Every repeat lies between its burst's first punch and the
+ * next kept punch, so moving the OUT never reorders anything.
+ */
+export function interpretPunches(
+  events: readonly EngineEvent[],
+  mode: PunchInterpretation,
+  zone: string,
+  duplicates: DuplicateCollapse['duplicates'] = [],
+): Interpretation {
   const ordered = sortEvents(events).map((event) => ({ event, at: parseInstant(event.punchedAt, zone) }));
+  const latest = latestRepeats(duplicates);
+  const outOf = (p: Timed): Timed => {
+    const repeat = latest.get(p.event.id);
+    return repeat ? { event: repeat, at: parseInstant(repeat.punchedAt, zone) } : p;
+  };
   if (mode === 'DIRECTIONAL') {
     const directed = ordered.some((p) => p.event.eventType !== 'PUNCH');
-    return directed ? interpretDirectional(ordered) : { ...interpretPaired(ordered), mode, effectiveMode: 'PAIRED' };
+    return directed ? interpretDirectional(ordered, outOf) : { ...interpretPaired(ordered, outOf), mode, effectiveMode: 'PAIRED' };
   }
-  if (mode === 'PAIRED') return interpretPaired(ordered);
-  return interpretFirstLast(ordered);
+  if (mode === 'PAIRED') return interpretPaired(ordered, outOf);
+  return interpretFirstLast(ordered, outOf);
 }
 
 type Timed = { event: EngineEvent; at: DateTime };
+/** The punch an OUT is recorded at: the latest repeat of the burst `p` opens, or `p` itself. */
+type OutOf = (p: Timed) => Timed;
 
-function interpretFirstLast(ordered: readonly Timed[]): Interpretation {
+/** Kept punch id → the latest punch collapsed into it. */
+function latestRepeats(duplicates: DuplicateCollapse['duplicates']): Map<string, EngineEvent> {
+  const latest = new Map<string, EngineEvent>();
+  for (const d of duplicates) {
+    const current = latest.get(d.of.id);
+    if (!current || sortEvents([current, d.event])[1] === d.event) latest.set(d.of.id, d.event);
+  }
+  return latest;
+}
+
+/**
+ * Duplicates restated against the punch the day actually uses. When an OUT moved to the latest punch of its
+ * burst, the burst's first punch becomes a duplicate of that latest punch (negative `secondsApart`: it came
+ * before it) and every other repeat is measured from it too. Bursts that stayed on their first punch are
+ * returned unchanged.
+ */
+export function duplicatesAgainstUsedPunch(
+  duplicates: DuplicateCollapse['duplicates'],
+  interpretation: Pick<Interpretation, 'punches'>,
+): DuplicateCollapse['duplicates'] {
+  const firstOf = new Map(duplicates.map((d) => [d.event.id, d.of]));
+  const usedFor = new Map<string, EngineEvent>(); // burst first punch id → the repeat the OUT moved to
+  for (const p of interpretation.punches) {
+    const first = firstOf.get(p.event.id);
+    if (first) usedFor.set(first.id, p.event);
+  }
+  if (usedFor.size === 0) return duplicates;
+  const restated: DuplicateCollapse['duplicates'] = [];
+  for (const d of duplicates) {
+    const used = usedFor.get(d.of.id);
+    if (!used) restated.push(d);
+    else if (d.event.id === used.id) restated.push({ event: d.of, of: used, secondsApart: -d.secondsApart });
+    else restated.push({ event: d.event, of: used, secondsApart: (Date.parse(d.event.punchedAt) - Date.parse(used.punchedAt)) / 1000 });
+  }
+  const order = new Map(sortEvents(restated.map((d) => d.event)).map((e, i) => [e.id, i]));
+  return restated.sort((a, b) => (order.get(a.event.id) ?? 0) - (order.get(b.event.id) ?? 0));
+}
+
+function interpretFirstLast(ordered: readonly Timed[], outOf: OutOf): Interpretation {
   const punches: InterpretedPunch[] = [];
   if (ordered.length === 0) return empty('FIRST_LAST');
   if (ordered.length === 1) {
     const only = ordered[0] as Timed;
     const treatAsOut = only.event.eventType === 'PUNCH_OUT' || only.event.eventType === 'BREAK_END';
-    punches.push({ ...only, role: treatAsOut ? 'OUT' : 'IN', note: treatAsOut ? 'single punch with OUT direction → OUT, IN missing' : 'single punch → IN, OUT missing' });
+    const used = treatAsOut ? outOf(only) : only;
+    punches.push({ ...used, role: treatAsOut ? 'OUT' : 'IN', note: treatAsOut ? 'single punch with OUT direction → OUT, IN missing' : 'single punch → IN, OUT missing' });
     return {
       ...empty('FIRST_LAST'),
       punches,
-      firstIn: treatAsOut ? null : only.at,
-      lastOut: treatAsOut ? only.at : null,
+      firstIn: treatAsOut ? null : used.at,
+      lastOut: treatAsOut ? used.at : null,
       missingIn: treatAsOut,
       missingOut: !treatAsOut,
     };
   }
+  const first = ordered[0] as Timed;
+  const last = outOf(ordered[ordered.length - 1] as Timed);
   ordered.forEach((p, index) => {
     if (index === 0) punches.push({ ...p, role: 'IN', note: 'first punch in window' });
-    else if (index === ordered.length - 1) punches.push({ ...p, role: 'OUT', note: 'last punch in window' });
+    else if (index === ordered.length - 1) punches.push({ ...last, role: 'OUT', note: 'last punch in window' });
     else punches.push({ ...p, role: 'IGNORED', note: 'intermediate punch (FIRST_LAST)' });
   });
-  const first = ordered[0] as Timed;
-  const last = ordered[ordered.length - 1] as Timed;
   return { ...empty('FIRST_LAST'), punches, firstIn: first.at, lastOut: last.at, segments: [{ start: first.at, end: last.at }] };
 }
 
-function interpretPaired(ordered: readonly Timed[]): Interpretation {
+function interpretPaired(ordered: readonly Timed[], outOf: OutOf): Interpretation {
   const punches: InterpretedPunch[] = [];
   const segments: WorkSegment[] = [];
   let open: DateTime | null = null;
@@ -115,8 +176,9 @@ function interpretPaired(ordered: readonly Timed[]): Interpretation {
       punches.push({ ...p, role: 'IN', note: `pair ${index / 2 + 1} IN` });
       open = p.at;
     } else {
-      punches.push({ ...p, role: 'OUT', note: `pair ${(index - 1) / 2 + 1} OUT` });
-      if (open) segments.push({ start: open, end: p.at });
+      const out = outOf(p);
+      punches.push({ ...out, role: 'OUT', note: `pair ${(index - 1) / 2 + 1} OUT` });
+      if (open) segments.push({ start: open, end: out.at });
       open = null;
     }
   });
@@ -129,7 +191,7 @@ function interpretPaired(ordered: readonly Timed[]): Interpretation {
  * State machine for DIRECTIONAL: OUT → (PUNCH_IN) → IN → (BREAK_START) → BREAK → (BREAK_END) → IN → (PUNCH_OUT) → OUT.
  * Undirected PUNCH toggles the state (IN when out, OUT when in, BREAK_END when on break).
  */
-function interpretDirectional(ordered: readonly Timed[]): Interpretation {
+function interpretDirectional(ordered: readonly Timed[], outOf: OutOf): Interpretation {
   const punches: InterpretedPunch[] = [];
   const segments: WorkSegment[] = [];
   const breaks: BreakSegment[] = [];
@@ -147,6 +209,8 @@ function interpretDirectional(ordered: readonly Timed[]): Interpretation {
   ordered.forEach((p) => {
     const type = p.event.eventType;
     const push = (role: PunchRole, note: string): void => { punches.push({ ...p, role, note }); };
+    // An OUT is recorded at the latest punch of its burst; the burst's first punch decided the direction.
+    const pushOut = (note: string): DateTime => { const out = outOf(p); punches.push({ ...out, role: 'OUT', note }); return out.at; };
     switch (type) {
       case 'PUNCH_IN':
         if (state === 'OUT') { startSegment(p.at); push('IN', 'device direction IN'); }
@@ -154,9 +218,9 @@ function interpretDirectional(ordered: readonly Timed[]): Interpretation {
         else push('IGNORED', 'IN while already in');
         break;
       case 'PUNCH_OUT':
-        if (state === 'IN') { endSegment(p.at); push('OUT', 'device direction OUT'); }
-        else if (state === 'BREAK') { endBreak(p.at); endSegment(p.at); push('OUT', 'OUT while on break → break end + out'); }
-        else if (segments.length === 0 && orphanOut === null) { missingIn = true; orphanOut = p.at; push('OUT', 'OUT without prior IN → IN missing'); }
+        if (state === 'IN') endSegment(pushOut('device direction OUT'));
+        else if (state === 'BREAK') { const at = pushOut('OUT while on break → break end + out'); endBreak(at); endSegment(at); }
+        else if (segments.length === 0 && orphanOut === null) { missingIn = true; orphanOut = pushOut('OUT without prior IN → IN missing'); }
         else push('IGNORED', 'OUT while already out');
         break;
       case 'BREAK_START':
@@ -169,7 +233,7 @@ function interpretDirectional(ordered: readonly Timed[]): Interpretation {
         break;
       case 'PUNCH':
         if (state === 'OUT') { startSegment(p.at); push('IN', 'undirected punch while out → IN'); }
-        else if (state === 'IN') { endSegment(p.at); push('OUT', 'undirected punch while in → OUT'); }
+        else if (state === 'IN') endSegment(pushOut('undirected punch while in → OUT'));
         else { endBreak(p.at); push('BREAK_END', 'undirected punch while on break → break end'); }
         break;
       default: {

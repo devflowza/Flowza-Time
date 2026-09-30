@@ -628,7 +628,9 @@ and recorded in the trace. Flexible shifts use a configurable day boundary (defa
 - `FIRST_LAST`: first punch in window = IN, last = OUT; intermediate punches ignored (counted). Default.
 - `PAIRED`: alternate IN/OUT; odd punch count ⇒ `MISSING_OUT` flag; break time = gaps between pairs.
 - `DIRECTIONAL`: trust device direction (in/out/break) where the device supplies it; fall back to PAIRED.
-- Duplicate-punch window (e.g. 60 s) collapses repeated punches from the same device.
+- Duplicate-punch window (e.g. 60 s) collapses repeated punches from the same device. The burst's first punch
+  decides its direction; an IN keeps the earliest tap and an OUT the latest one, so the day's OUT is the maximum
+  punch (OUT 19:47:05 + repeat 19:47:08 ⇒ OUT 19:47:08, the 19:47:05 tap shown as its duplicate).
 
 ### G.5 Rules applied (all from `attendance_rule_sets`, effective-dated)
 

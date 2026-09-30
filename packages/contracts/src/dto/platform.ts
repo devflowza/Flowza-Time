@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { ORG_STATUSES, SUBSCRIPTION_STATUSES } from '../enums.js';
 import { booleanQuerySchema, emailSchema, isoDateTimeSchema, paginationQuerySchema, uuidSchema } from '../common.js';
 import { organizationDtoSchema } from '../organizations.js';
+import { BILLING_CYCLES, subscriptionQuoteSchema } from './billing.js';
 
 export const platformOrgListQuerySchema = paginationQuerySchema.extend({
   status: z.enum(ORG_STATUSES).optional(),
@@ -158,8 +159,13 @@ export const updateSubscriptionSchema = z.object({
   trialEndsAt: isoDateTimeSchema.nullable().optional(),
   currentPeriodEnd: isoDateTimeSchema.nullable().optional(),
   cancelAt: isoDateTimeSchema.nullable().optional(),
+  /** Billing cycle of the subscription (modules, plans & billing — migration 20260929000600). */
+  billingCycle: z.enum(BILLING_CYCLES).optional(),
+  /** Licensed users (active employees) the tenant pays for; null = the plan's employee limit. */
+  seats: z.number().int().min(1).max(100_000).nullable().optional(),
   reason: z.string().trim().min(3).max(500),
-}).refine((v) => v.planKey !== undefined || v.status !== undefined || v.trialEndsAt !== undefined || v.currentPeriodEnd !== undefined || v.cancelAt !== undefined, {
+}).refine((v) => v.planKey !== undefined || v.status !== undefined || v.trialEndsAt !== undefined || v.currentPeriodEnd !== undefined || v.cancelAt !== undefined
+  || v.billingCycle !== undefined || v.seats !== undefined, {
   message: 'Change at least one field of the subscription.',
 });
 export type UpdateSubscriptionInput = z.infer<typeof updateSubscriptionSchema>;
@@ -172,6 +178,12 @@ export const platformSubscriptionDtoSchema = z.object({
   currentPeriodStart: isoDateTimeSchema.nullable(),
   currentPeriodEnd: isoDateTimeSchema.nullable(),
   cancelAt: isoDateTimeSchema.nullable(),
+  billingCycle: z.enum(BILLING_CYCLES),
+  seats: z.number().int().nullable(),
+  includedUsers: z.number().int().nullable(),
+  isCustom: z.boolean(),
+  /** Price of one billing cycle before VAT (null for custom / free plans). */
+  price: subscriptionQuoteSchema.nullable(),
   updatedAt: isoDateTimeSchema.nullable(),
 });
 export type PlatformSubscriptionDto = z.infer<typeof platformSubscriptionDtoSchema>;

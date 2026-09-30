@@ -32,3 +32,12 @@ export function todayIso(zone: string): string {
 export function fmtNumber(n: number): string {
   return new Intl.NumberFormat(i18n.language).format(n);
 }
+/** An amount in a currency (OMR shows its three baisa decimals), e.g. "OMR 500.000"; '—' for null. */
+export function fmtMoney(amount: number | null | undefined, currency: string): string {
+  if (amount === null || amount === undefined || !Number.isFinite(amount)) return '—';
+  try {
+    return new Intl.NumberFormat(i18n.language, { style: 'currency', currency, currencyDisplay: 'code' }).format(amount);
+  } catch {
+    return `${currency} ${amount.toFixed(3)}`;
+  }
+}

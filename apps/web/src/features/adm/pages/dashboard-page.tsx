@@ -1,13 +1,14 @@
 import { useState } from 'react';
 import { Link, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Building2, Clock, Cpu, KeyRound, Plus, ShieldCheck, UserRound, Users } from 'lucide-react';
+import { Banknote, Building2, Clock, Cpu, KeyRound, Plus, Receipt, ShieldCheck, TrendingUp, TriangleAlert, UserRound, Users } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { Button, Card, CardContent, CardHeader, CardTitle, ErrorState, Skeleton, StatCard } from '@/components/ui';
-import { fmtDateTime, fmtNumber, fmtRelative } from '@/lib/format';
+import { fmtDateTime, fmtMoney, fmtNumber, fmtRelative } from '@/lib/format';
 import { CreateOrgDialog } from '@/features/platform/components/create-org-dialog';
 import { OrgStatusBadge } from '@/features/platform/components/org-status-badge';
 import { usePlatformOverview } from '../api';
+import { useBillingSummary } from '../billing-api';
 import { ActivityList } from '../components/activity-list';
 
 function Bars({ rows }: { rows: Array<{ label: string; value: number }> }) {
@@ -21,6 +22,24 @@ function Bars({ rows }: { rows: Array<{ label: string; value: number }> }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** Revenue at a glance (the Billing page's figures): monthly recurring revenue, outstanding and overdue invoices. */
+function RevenueStrip() {
+  const { t } = useTranslation('adm');
+  const navigate = useNavigate();
+  const q = useBillingSummary();
+  const s = q.data;
+  if (q.isError) return null;
+  const c = s?.currency ?? 'OMR';
+  return (
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" data-testid="revenue-strip">
+      <StatCard loading={!s} label={t('billing.kpi.mrr')} value={fmtMoney(s?.mrr ?? 0, c)} icon={TrendingUp} tone="success" onClick={() => navigate('/adm/billing')} />
+      <StatCard loading={!s} label={t('billing.kpi.arr')} value={fmtMoney(s?.arr ?? 0, c)} icon={Banknote} onClick={() => navigate('/adm/billing')} />
+      <StatCard loading={!s} label={t('billing.kpi.outstanding')} value={fmtMoney(s?.outstanding ?? 0, c)} icon={Receipt} tone={(s?.outstanding ?? 0) > 0 ? 'warning' : 'default'} onClick={() => navigate('/adm/billing?tab=invoices')} />
+      <StatCard loading={!s} label={t('billing.kpi.overdue')} value={fmtNumber(s?.overdueInvoices ?? 0)} icon={TriangleAlert} tone={(s?.overdueInvoices ?? 0) > 0 ? 'danger' : 'default'} hint={s ? fmtMoney(s.overdueAmount, c) : undefined} onClick={() => navigate('/adm/billing?tab=invoices')} />
+    </div>
   );
 }
 
@@ -46,6 +65,7 @@ export default function AdmDashboardPage() {
             <StatCard loading={!o} label={t('dashboard.grants')} value={fmtNumber(o?.activeGrants ?? 0)} icon={KeyRound} tone={(o?.activeGrants ?? 0) > 0 ? 'warning' : 'default'} hint={o?.pendingGrants ? t('dashboard.pendingGrants', { count: o.pendingGrants }) : undefined} onClick={() => navigate('/adm/grants')} />
             <StatCard loading={!o} label={t('dashboard.trialsSoon')} value={fmtNumber(o?.trialsEndingSoon.length ?? 0)} icon={Clock} tone={(o?.trialsEndingSoon.length ?? 0) > 0 ? 'warning' : 'default'} onClick={() => navigate('/adm/tenants?subscriptionStatus=trialing&sort=trialEndsAt')} />
           </div>
+          <RevenueStrip />
           <div className="grid gap-4 lg:grid-cols-3">
             <Card className="lg:col-span-2">
               <CardHeader className="flex-row items-center justify-between space-y-0"><CardTitle>{t('dashboard.recentTenants')}</CardTitle><Button variant="link" size="sm" asChild><Link to="/adm/tenants">{t('dashboard.viewAll')}</Link></Button></CardHeader>

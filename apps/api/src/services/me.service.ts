@@ -1,3 +1,4 @@
+import { MODULE_KEYS } from '@flowza/contracts';
 import type { MeDto, NotificationDto, NotificationListQuery, UpdateMeInput, UserProfileDto } from '@flowza/contracts';
 import { sql } from 'kysely';
 import { jsonArrayFrom, jsonObjectFrom } from 'kysely/helpers/postgres';
@@ -43,6 +44,8 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
       jsonArrayFrom(eb.selectFrom('roles').select(['id', 'name']).where('id', 'in', roleKeys)).as('roles'),
       jsonArrayFrom(eb.selectFrom('featureFlags').select(['key', 'defaultEnabled'])).as('flags'),
       jsonArrayFrom(eb.selectFrom('organizationFeatureFlags').select(['organizationId', 'flagKey', 'enabled']).where('organizationId', 'in', orgKeys)).as('overrides'),
+      // a subscription the platform expired / cancelled leaves only the core of the product (modules, migration 20260929000600)
+      jsonArrayFrom(eb.selectFrom('subscriptions').select(['organizationId', 'status']).where('organizationId', 'in', orgKeys)).as('subscriptions'),
       // the caller's approval work per active membership (review P1-6 / P2-11): one indexed query, the inbox's own definition
       jsonArrayFrom(eb.selectFrom(sql<{ organizationId: string; actionable: number; delegatedToMe: boolean }>`app.approval_inbox_summary()`.as('s')).select(['s.organizationId', 's.actionable', 's.delegatedToMe'])).as('approvals'),
     ]).executeTakeFirstOrThrow();
@@ -55,6 +58,9 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
     const settingsById = new Map(bundle.settings.map((s) => [s.organizationId, s]));
     const roleName = new Map(bundle.roles.map((r) => [r.id, r.name]));
     const approvalsByOrg = new Map(bundle.approvals.map((a) => [a.organizationId, { actionable: Number(a.actionable) || 0, delegatedToMe: a.delegatedToMe === true }]));
+    const lapsedOrgIds = new Set(bundle.subscriptions.filter((s) => s.status === 'expired' || s.status === 'cancelled').map((s) => s.organizationId));
+    // the same set the API's module gate refuses (principal snapshot): what the navigation hides is exactly what the API closes
+    const modulesOf = (orgId: string) => { const off = actor.disabledModules?.get(orgId); return Object.fromEntries(MODULE_KEYS.map((k) => [k, !off?.has(k)])); };
     const memberships: MeDto['memberships'] = [];
     for (const m of actor.principal.memberships) {
       const org = orgById.get(m.organizationId);
@@ -74,6 +80,8 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
         teamSize: m.teamEmployeeIds.length,
         approvals: approvalsByOrg.get(m.organizationId) ?? { actionable: 0, delegatedToMe: false },
         featureFlags: flags.get(m.organizationId) ?? {},
+        modules: modulesOf(m.organizationId),
+        subscriptionLapsed: lapsedOrgIds.has(m.organizationId),
         settings: parseSettings(settingsById.get(m.organizationId)),
       });
     }

@@ -1,6 +1,6 @@
 import { Suspense } from 'react';
 import { Navigate, type RouteObject } from 'react-router';
-import { RequirePermission } from '@/components/layout/protected-route';
+import { RequireModule, RequirePermission } from '@/components/layout/protected-route';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/settings.json';
 import ar from '@/locales/ar/settings.json';
@@ -23,7 +23,7 @@ export const settingsRoutes: RouteObject[] = [
       { path: 'attendance', element: section(<AttendanceSection />) },
       { path: 'sync', element: section(<SyncSection />) },
       // Flowza Finance connector: its own permission (the connector is platform plumbing, delegated independently of organization.manage)
-      { path: 'integrations', element: <RequirePermission permissions={['integration.manage']}>{section(<IntegrationsSection />)}</RequirePermission> },
+      { path: 'integrations', element: <RequireModule modules={['finance_integration']}><RequirePermission permissions={['integration.manage']}>{section(<IntegrationsSection />)}</RequirePermission></RequireModule> },
       { path: 'reports', element: section(<ReportsSection />) },
       { path: 'notifications', element: section(<NotificationsSection />) },
       { path: 'security', element: section(<SecuritySection />) },

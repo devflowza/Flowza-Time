@@ -2,14 +2,14 @@ import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
 import { CalendarDays, ChevronLeft, ChevronRight } from 'lucide-react';
-import type { DashboardTrendRange } from '@flowza/contracts';
+import type { DashboardTrendRange, Permission } from '@flowza/contracts';
 import { Button, ErrorState } from '@/components/ui';
 import { fmtDate, fmtRelative, todayIso } from '@/lib/format';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import { cn } from '@/lib/utils';
 import en from '@/locales/en/dashboard.json';
 import ar from '@/locales/ar/dashboard.json';
-import { useActiveMembership, useCan, useMe, useOrgTimezone } from '@/features/me/use-me';
+import { useActiveMembership, useCan, useMe, useModuleEnabled, useOrgTimezone } from '@/features/me/use-me';
 import { useDashboardBranches, useDashboardSummary, useDashboardTrends } from './api';
 import { daypart, firstName, shiftDate, toTrendPoints, trendWindow } from './model';
 import { useDashboardSettings } from './theme';
@@ -26,7 +26,11 @@ export default function DashboardPage() {
   const tz = useOrgTimezone();
   const membership = useActiveMembership();
   const user = useMe().data?.user;
-  const can = useCan();
+  const canKey = useCan();
+  // the terminal cards need the Devices & sync module, the team board the Manager workspace (migration 20260929000600)
+  const devicesOn = useModuleEnabled('devices');
+  const teamOn = useModuleEnabled('manager_workspace');
+  const can = (...perms: Permission[]) => canKey(...perms) && (devicesOn || !perms.some((p) => p.startsWith('device.')));
   const today = todayIso(tz);
   const [date, setDate] = useState(today);
   const [range, setRange] = useState<DashboardTrendRange>(settings.trendDays);
@@ -48,7 +52,7 @@ export default function DashboardPage() {
     viewer: {
       hasReports: membership?.isManager ?? false,
       approver: can('attendance.approve') || can('leave.approve') || can('approval.manage'),
-      teamAttendance: can('attendance.view_team') || can('attendance.view'),
+      teamAttendance: teamOn && (can('attendance.view_team') || can('attendance.view')),
     },
   };
 

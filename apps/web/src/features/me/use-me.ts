@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import type { MeDto, Permission } from '@flowza/contracts';
+import type { MeDto, ModuleKey, Permission } from '@flowza/contracts';
 import { api, type Envelope } from '@/lib/api-client';
 import { useUiStore } from '@/stores/ui-store';
 import { readCachedMe, writeCachedMe } from './me-cache';
@@ -51,4 +51,19 @@ export function useOrgTimezone(): string {
 
 export function useFeatureFlag(key: string): boolean {
   return useActiveMembership()?.featureFlags[key] ?? false;
+}
+
+/**
+ * Whether a module (migration 20260929000600) is on for the active organisation: the plan, the platform's per-tenant switch,
+ * the fleet-wide switch and a lapsed subscription decide, server-side. A key the cached /me does not carry reads as on —
+ * the API's module gate is the authority; this only hides navigation.
+ */
+export function useModuleEnabled(key: ModuleKey): boolean {
+  return useActiveMembership()?.modules?.[key] ?? true;
+}
+
+/** Every listed module is on (see useModuleEnabled). */
+export function useModulesEnabled() {
+  const m = useActiveMembership();
+  return (...keys: ModuleKey[]) => keys.every((k) => m?.modules?.[k] ?? true);
 }

@@ -2,7 +2,7 @@ import { keepPreviousData, useQuery, useQueryClient } from '@tanstack/react-quer
 import type { TeamAttendanceRowDto, TeamLeaveOverviewDto, TeamPendingCountsDto, TeamSummaryDto } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
-import { meQueryKey, useActiveMembership, useCan, useOrgId } from '@/features/me/use-me';
+import { meQueryKey, useActiveMembership, useCan, useModuleEnabled, useOrgId } from '@/features/me/use-me';
 
 /** Query-key entities of the team workspace (HR portal Prompt 5); the approvals views invalidate them after a decision. */
 export const TEAM_SUMMARY = 'team-summary';
@@ -23,8 +23,11 @@ export function useTeamAccess() {
   const can = useCan();
   const m = useActiveMembership();
   const hasReports = m?.isManager ?? false;
+  // the workspace is the Manager workspace module, its leave tab also Leave management (migration 20260929000600)
+  const workspaceOn = useModuleEnabled('manager_workspace');
+  const leaveOn = useModuleEnabled('leave');
   const attendance = can('attendance.view_team') || can('attendance.view');
-  const leave = can('leave.view_team') || can('leave.view');
+  const leave = leaveOn && (can('leave.view_team') || can('leave.view'));
   const teamKey = can('employee.view_team') || can('attendance.view_team') || can('leave.view_team');
   const approver = can('attendance.approve') || can('leave.approve');
   const signal = m?.approvals as { actionable?: number; delegatedToMe?: boolean } | undefined;
@@ -34,7 +37,7 @@ export function useTeamAccess() {
     attendance,
     leave,
     approver,
-    page: hasReports && (teamKey || can('employee.view') || attendance || leave),
+    page: workspaceOn && hasReports && (teamKey || can('employee.view') || attendance || leave),
     pendingChip: hasReports || approver || can('approval.manage') || can('attendance.review_notes') || waiting,
     approvalsHome: approver || !hasReports ? '/approvals' : '/team?tab=approvals',
     correct: can('attendance.correct'),

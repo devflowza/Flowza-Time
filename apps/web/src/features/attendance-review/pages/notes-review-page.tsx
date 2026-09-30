@@ -13,6 +13,7 @@ import { NoteReviewDialog } from '../components/note-review-dialog';
 import { SelfieReviewPanel } from '../components/selfie-review';
 import { AA_NS } from '@/features/attendance-admin/i18n';
 import { NotesReport } from '@/features/attendance-admin/components/notes-report';
+import { useModuleEnabled } from '@/features/me/use-me';
 
 // 'report': the comments & approvals report (HR portal Prompt 6b, features/attendance-admin)
 const TABS = ['reasons', 'selfies', 'report'] as const;
@@ -127,7 +128,10 @@ function ReasonsTab({ scope, status, onScope, onStatus, oversight }: { scope: No
 export default function NotesReviewPage() {
   const { t } = useTranslation(AR_NS);
   const { t: ta } = useTranslation(AA_NS);
-  const access = useReviewAccess();
+  const reviewAccess = useReviewAccess();
+  // selfie check-ins belong to the Web check-in & geofencing module (migration 20260929000600)
+  const geofencesOn = useModuleEnabled('geofences');
+  const access = { ...reviewAccess, selfies: reviewAccess.selfies && geofencesOn };
   const [params, setParams] = useSearchParams();
   const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') && (params.get('tab') !== 'selfies' || access.selfies) ? (params.get('tab') as Tab) : 'reasons';
   const scopeParam = params.get('scope');

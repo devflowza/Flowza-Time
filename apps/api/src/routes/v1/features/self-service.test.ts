@@ -48,11 +48,16 @@ describe('self-service profile and attendance', () => {
   });
 });
 
+// The first Monday on/after `offsetDays` from today. Monday–Wednesday are working days under a Friday/Saturday or a
+// Saturday/Sunday weekend, so a short range built on it never trips NO_DAYS (every date a weekly off day) on the day
+// the suite happens to run — before, a run on a day whose today+23 was a Friday answered 400 instead of the overlap 409.
+const mondayOffset = (offsetDays: number): number => {
+  const d = new Date(); d.setUTCDate(d.getUTCDate() + offsetDays);
+  return offsetDays + ((8 - d.getUTCDay()) % 7);
+};
+
 describe('self-service leave', () => {
-  // Leave dates start on a Sunday so that they are working days whatever today is (organisations default to Friday and
-  // Saturday off): a range made only of off days is refused as "no working days" before any other check runs.
-  const sundayFrom = (minDays: number) => { let n = minDays; while (new Date(`${isoToday(n)}T00:00:00Z`).getUTCDay() !== 0) n++; return n; };
-  const start = isoToday(sundayFrom(21)); const end = isoToday(sundayFrom(21) + 2);
+  const start = isoToday(mondayOffset(21)); const end = isoToday(mondayOffset(21) + 2);
 
   it('shows active types with the yearly allowance as the balance', async () => {
     const t = await h.request('POST', `${base()}/leave-types`, { token: f.hrAdmin, body: { code: 'AL', name: 'Annual Leave', annualAllowanceDays: 30 } });
@@ -120,7 +125,7 @@ describe('self-service leave', () => {
   });
 
   it('forbids deciding on one\'s own request', async () => {
-    const r = await h.request('POST', `${base()}/me/leave`, { token: f.managerUser, body: { leaveTypeId: annualId, startDate: isoToday(sundayFrom(70)), endDate: isoToday(sundayFrom(70) + 1), reason: 'Rest' } });
+    const r = await h.request('POST', `${base()}/me/leave`, { token: f.managerUser, body: { leaveTypeId: annualId, startDate: isoToday(mondayOffset(70)), endDate: isoToday(mondayOffset(70) + 1), reason: 'Rest' } });
     expect(r.status).toBe(201);
     expect((await h.request('PATCH', `${base()}/leave-records/${r.body.data.id}`, { token: f.managerUser, body: { status: 'APPROVED' } })).status).toBe(403);
     expect((await h.request('PATCH', `${base()}/leave-records/${r.body.data.id}`, { token: f.hrAdmin, body: { status: 'REJECTED', decisionNote: 'Busy week' } })).status).toBe(200);
