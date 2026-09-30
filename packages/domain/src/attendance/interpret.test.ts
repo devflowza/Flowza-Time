@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it } from 'vitest';
 import { DateTime } from 'luxon';
-import { collapseDuplicates, computeBreaks, interpretPunches, scheduledBreakMinutes } from './interpret.js';
+import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, scheduledBreakMinutes } from './interpret.js';
 import { DATE, MUSCAT, punch, resetIds } from './testing.js';
 
 const t = (time: string) => DateTime.fromISO(`${DATE}T${time}`, { zone: MUSCAT });
@@ -116,6 +116,90 @@ describe('collapseDuplicates', () => {
   it('is disabled when the window is 0', () => {
     const { kept } = collapseDuplicates([punch(DATE, '09:00:00'), punch(DATE, '09:00:01')], 0);
     expect(kept).toHaveLength(2);
+  });
+});
+
+describe('OUT takes the latest punch of its burst', () => {
+  beforeEach(resetIds);
+
+  it('FIRST_LAST: a repeat after the last punch becomes the OUT; the IN keeps the earliest tap', () => {
+    const inFirst = punch(DATE, '09:00:00');
+    const inRepeat = punch(DATE, '09:00:02');
+    const middle = punch(DATE, '12:00:00');
+    const outFirst = punch(DATE, '17:00:05');
+    const outRepeat = punch(DATE, '17:00:08');
+    const { kept, duplicates } = collapseDuplicates([inFirst, inRepeat, middle, outFirst, outRepeat], 60);
+    const r = interpretPunches(kept, 'FIRST_LAST', MUSCAT, duplicates);
+    expect(r.firstIn?.equals(t('09:00:00'))).toBe(true);
+    expect(r.lastOut?.equals(t('17:00:08'))).toBe(true);
+    expect(r.segments[0]?.end?.equals(t('17:00:08'))).toBe(true);
+    expect(r.punches.map((p) => [p.event.id, p.role])).toEqual([[inFirst.id, 'IN'], [middle.id, 'IGNORED'], [outRepeat.id, 'OUT']]);
+
+    const restated = duplicatesAgainstUsedPunch(duplicates, r);
+    expect(restated.map((d) => [d.event.id, d.of.id, d.secondsApart])).toEqual([[inRepeat.id, inFirst.id, 2], [outFirst.id, outRepeat.id, -3]]);
+  });
+
+  it('uses the LATEST of several repeats and measures the others from it', () => {
+    const first = punch(DATE, '09:00');
+    const outFirst = punch(DATE, '17:00:00');
+    const outMid = punch(DATE, '17:00:20');
+    const outLast = punch(DATE, '17:00:50');
+    const { kept, duplicates } = collapseDuplicates([first, outLast, outFirst, outMid], 60);
+    const r = interpretPunches(kept, 'FIRST_LAST', MUSCAT, duplicates);
+    expect(r.lastOut?.equals(t('17:00:50'))).toBe(true);
+    expect(duplicatesAgainstUsedPunch(duplicates, r).map((d) => [d.event.id, d.of.id, d.secondsApart])).toEqual([[outFirst.id, outLast.id, -50], [outMid.id, outLast.id, -30]]);
+  });
+
+  it('without duplicates passed in, behaviour is unchanged (first tap of the burst)', () => {
+    const { kept } = collapseDuplicates([punch(DATE, '09:00'), punch(DATE, '17:00:05'), punch(DATE, '17:00:08')], 60);
+    expect(interpretPunches(kept, 'FIRST_LAST', MUSCAT).lastOut?.equals(t('17:00:05'))).toBe(true);
+  });
+
+  it('a lone punch stays the IN at its earliest tap; a lone directed OUT moves to its latest', () => {
+    const lone = collapseDuplicates([punch(DATE, '09:00:00'), punch(DATE, '09:00:03')], 60);
+    const r = interpretPunches(lone.kept, 'FIRST_LAST', MUSCAT, lone.duplicates);
+    expect(r.firstIn?.equals(t('09:00:00'))).toBe(true);
+    expect(duplicatesAgainstUsedPunch(lone.duplicates, r)).toEqual(lone.duplicates);
+
+    const out = collapseDuplicates([punch(DATE, '17:00:00', 'PUNCH_OUT'), punch(DATE, '17:00:04', 'PUNCH_OUT')], 60);
+    const o = interpretPunches(out.kept, 'FIRST_LAST', MUSCAT, out.duplicates);
+    expect(o).toMatchObject({ missingIn: true, missingOut: false });
+    expect(o.lastOut?.equals(t('17:00:04'))).toBe(true);
+  });
+
+  it('PAIRED: each OUT moves to its latest repeat, so the measured gap shrinks accordingly', () => {
+    const events = ['09:00:00', '13:00:00', '13:00:30', '14:00:00', '18:00:00', '18:00:10'].map((h) => punch(DATE, h));
+    const { kept, duplicates } = collapseDuplicates(events, 60);
+    const r = interpretPunches(kept, 'PAIRED', MUSCAT, duplicates);
+    expect(roles(r)).toEqual(['IN', 'OUT', 'IN', 'OUT']);
+    expect(r.segments[0]?.end?.equals(t('13:00:30'))).toBe(true);
+    expect(r.lastOut?.equals(t('18:00:10'))).toBe(true);
+    expect(r.measuredBreakMinutes).toBe(60); // 13:00:30 → 14:00:00 = 59.5 min, rounded
+  });
+
+  it('PAIRED: an IN burst keeps its first tap', () => {
+    const events = ['09:00:00', '09:00:40', '17:00:00'].map((h) => punch(DATE, h));
+    const { kept, duplicates } = collapseDuplicates(events, 60);
+    const r = interpretPunches(kept, 'PAIRED', MUSCAT, duplicates);
+    expect(r.firstIn?.equals(t('09:00:00'))).toBe(true);
+    expect(r.lastOut?.equals(t('17:00:00'))).toBe(true);
+  });
+
+  it('DIRECTIONAL: the direction comes from the first tap, the OUT instant from the latest', () => {
+    const events = [punch(DATE, '09:00', 'PUNCH_IN'), punch(DATE, '17:00:00', 'PUNCH_OUT'), punch(DATE, '17:00:09', 'PUNCH')];
+    const { kept, duplicates } = collapseDuplicates(events, 60);
+    const r = interpretPunches(kept, 'DIRECTIONAL', MUSCAT, duplicates);
+    expect(roles(r)).toEqual(['IN', 'OUT']);
+    expect(r.lastOut?.equals(t('17:00:09'))).toBe(true);
+    expect(r.missingOut).toBe(false);
+  });
+
+  it('DIRECTIONAL: OUT while on break ends the break and the day at the latest tap', () => {
+    const events = [punch(DATE, '09:00', 'PUNCH_IN'), punch(DATE, '13:00', 'BREAK_START'), punch(DATE, '13:30:00', 'PUNCH_OUT'), punch(DATE, '13:30:30', 'PUNCH_OUT')];
+    const { kept, duplicates } = collapseDuplicates(events, 60);
+    const r = interpretPunches(kept, 'DIRECTIONAL', MUSCAT, duplicates);
+    expect(r.lastOut?.equals(t('13:30:30'))).toBe(true);
+    expect(r.measuredBreakMinutes).toBe(31); // 13:00 → 13:30:30 = 30.5 min, rounded
   });
 });
 
