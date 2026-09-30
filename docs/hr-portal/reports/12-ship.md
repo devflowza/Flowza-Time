@@ -8,7 +8,8 @@ was shipped; `main` has since moved to `e9645e2` with other work (PRs #66–#75,
 it runs except the report-schedule step of flow 6, which needs the `reports` worker deployed (§8). Following the six-month
 recalculation through exposed a defect in the job queue that predates this work: a job that runs longer than its lock
 timeout is started again while it is still running; the three six-month recalculations run on the hosted project all show
-it. It is fixed in code and in migration `20260929000700` (§9), which waits for approval and a deploy. Also for the owner: switch on
+it. It is fixed in code and in migration `20260929000700` (§9): the migration is applied (30 Sep); the worker code waits
+for a merge and a deploy. Also for the owner: switch on
 leaked-password protection; the Finance-side branch matters only once the Finance connector is switched on.
 
 ## 1. Migrations
@@ -38,6 +39,11 @@ The 21 migrations of PR #65 (`20260928000100` … `20260928001120`) were applied
   files are idempotent, and the second application ran the full repo text, post-verify included, without error.
   `app.migrations` lists 000300 and 000400 but not 000100, 000200 or 000500, so the repo migrator run against hosted would
   apply those three again (they are idempotent).
+- **30 Sep.** `modules_plans_billing` was applied at 05:32 UTC by another session; its file is still on branch
+  `claude/elegant-galileo-n2e3cw`, as `20260929000600`. The job-queue migration (§9) had taken that stamp too, so it was
+  renumbered to `20260929000700` before being applied at 05:38 UTC on the owner's approval (recorded as
+  `job_lock_heartbeat`, byte-identical to the file: md5 `2e577f14…`) and added to `app.migrations`. The two touch nothing in
+  common.
 
 ## 2. Demo tenant data (Majan Gulf Trading)
 
@@ -171,8 +177,10 @@ design.
 
 ## 8. Owner actions
 
-1. **Deploy the reports worker** (needed now): GitHub → Actions → **Deploy** → Run workflow on `main` with target
-   **`reports`**. Until then, report schedules and "run now" fail, and reports come from the old definitions. Afterwards,
+1. **Merge `claude/modest-fermi-fnwqq7` into `main`** (the job-queue fix, §9; `main` is already merged into it), then
+   **deploy**: GitHub → Actions → **Deploy** → Run workflow on `main` with the default target **`all`** (API, worker and
+   reports worker together, new with PR #76). One deploy covers everything still missing: the API and worker run PR #66
+   while `main` carries #67–#76 with their migrations applied (§3, §4), and the reports worker predates PR #65. Afterwards,
    re-run flow 6: `node scripts/e2e-hosted/run.mjs --mode=hosted --i-understand-this-writes-to-the-demo-tenant --flows=6`
    (environment as in `scripts/e2e-hosted/README.md`).
 2. **Switch on leaked-password protection** in Supabase Auth for `liyilmbklsextsggflbb` (Dashboard → Authentication →
@@ -181,14 +189,10 @@ design.
    (`9dbf75f`, `3863dc8`) through Finance's own review and approval into Finance `main`; deploy `attendance-ingest` from it
    so that pushed punches map PINs to employee numbers; designate the Finance tenant; then register the connector in
    FlowZa Time (Settings → Integrations) and run "Test connection".
-4. **Deploy the API and worker from `main`** (target `both`): they run PR #66, while `main` carries #67–#75 with their
-   migrations already applied (§3, §4). Do it together with item 5 if that is approved first.
-5. **Job-queue fix (§9)**: approve migration `20260929000700`, merge the branch `claude/modest-fermi-fnwqq7` into `main`,
-   then deploy the worker and the reports worker. Either order of migration and deploy is safe: the new worker falls back to
-   the previous queue calls while the migration is missing (the heartbeat then logs a warning), and the previous worker keeps
-   working on the migrated queue.
-6. **`app.migrations`** lacks 000100, 000200 and 000500 (§1). Harmless while migrations are applied through Supabase; record
+4. **`app.migrations`** lacks 000100, 000200 and 000500 (§1). Harmless while migrations are applied through Supabase; record
    them before anyone runs the repo migrator against hosted, or let it re-apply them (idempotent).
+5. **Branch `claude/elegant-galileo-n2e3cw`**: its `20260929000600_modules_plans_billing.sql` is applied on hosted but not
+   on `main`; it no longer shares a stamp with anything on this branch (§1).
 
 ## 9. Job queue: running jobs were started again while they ran
 
@@ -216,7 +220,7 @@ while its twin runs waits as the next run), so moving the running twin back to `
 — raised `unique_violation`. For a reap that would fail the whole batch, every minute, so no stale job would be recovered
 again. It has not happened on hosted yet (no failed reap in the archive); it reproduced locally at once.
 
-**Fix** (branch `claude/modest-fermi-fnwqq7`, not yet on `main` or hosted):
+**Fix** (branch `claude/modest-fermi-fnwqq7`; the migration is applied to hosted, the worker code is not on `main` yet):
 
 - Migration `20260929000700_job_lock_heartbeat.sql`: `jobs.heartbeat(worker, ids, attempts)` extends the locks of the
   jobs a worker still runs and returns the ones it still owns; `jobs.complete_owned` / `jobs.fail_owned` record an outcome
@@ -235,6 +239,13 @@ again. It has not happened on hosted yet (no failed reap in the archive); it rep
   dedupe cases; runner tests for heartbeats, lock loss, a job finishing during a heartbeat, a superseded execution that
   outlives its lock, shutdown release, and queue errors (the three runner guards were mutation-tested: removing any one
   fails its test); a recalculation test for lock loss and for a timeout that must not cut a range short.
+
+**Applied** 2026-09-30 05:38 UTC on the owner's approval, after a last check that nothing had applied it or run a job in
+the meantime. The recorded text is byte-identical to the file (md5 `2e577f14…`, 14,262 characters); all twelve queue
+functions carry a fixed `search_path`, none is executable by `anon` or `authenticated`, and the API, worker and system roles
+keep theirs. The previous worker kept working on the migrated queue: in the first two minutes the reaper ran twice under the
+new function and 28 other jobs completed, none failed, and `/api/ready` reported the queue healthy (0 pending, 0 running, 0
+dead). The heartbeat, owned outcomes and shutdown hand-back start working once the new worker is deployed (§8).
 
 Known limits: a job dead-lettered by the reaper (its worker died three times) runs no handler, so a recalculation request in
 that state keeps reading RUNNING; deploys no longer cost attempts, so this needs repeated crashes. And a job is now taken
