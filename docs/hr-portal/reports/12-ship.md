@@ -1,12 +1,16 @@
 # Prompt 12 — Ship: hosted migrations, deploy, seeds, hosted verification
 
 **Date:** 2026-09-29. **Hosted project:** Supabase `liyilmbklsextsggflbb` (PostgreSQL 17.6). **API:** `https://time-api.flowza.ai`
-(Fly.io). **Web:** `https://time.flowza.ai` (Cloudflare Pages). **Code:** `main` @ `afe719c` (PR #65, squash-merged).
+(Fly.io). **Web:** `https://time.flowza.ai` (Cloudflare Pages). **Code:** `main` @ `afe719c` (PR #65, squash-merged) when this
+was shipped; `main` has since moved to `e9645e2` with other work (PRs #66–#75, §3).
 
 **Status:** migrations, API, worker, web and demo data are live and verified; the hosted end-to-end matrix passes every flow
-it runs except the report-schedule step of flow 6. That step needs the one open action (§8): deploy the `reports` worker.
-Also for the owner: switch on leaked-password protection; the Finance-side branch matters only once the Finance
-connector is switched on.
+it runs except the report-schedule step of flow 6, which needs the `reports` worker deployed (§8). Following the six-month
+recalculation through exposed a defect in the job queue that predates this work: a job that runs longer than its lock
+timeout is started again while it is still running; the three six-month recalculations run on the hosted project all show
+it. It is fixed in code and in migration `20260929000700` (§9): the migration is applied (30 Sep); the worker code waits
+for a merge and a deploy. Also for the owner: switch on
+leaked-password protection; the Finance-side branch matters only once the Finance connector is switched on.
 
 ## 1. Migrations
 
@@ -22,8 +26,23 @@ The 21 migrations of PR #65 (`20260928000100` … `20260928001120`) were applied
   `organization_id` immutability triggers, every partition locked (RLS on, no client privileges — 148 of 148), the explicit
   denials on system-written tables, and the `domain_events` insert policy that only admits the API and worker sessions: all
   present. `public` holds 97 tables, all with RLS.
-- **Order of events.** The owner's Deploy #6 (10:38–10:42 UTC) put the new API and worker on the old schema a few minutes
-  before the migrations were applied (10:42–10:53 UTC). The Postgres logs show no errors in that window or after it.
+- **Order of events** (corrected). The 21 migrations were applied between 06:06 and 10:53 UTC. The owner's Deploy #6
+  (10:38–10:42 UTC) put the new API and worker live while the last three were still pending (`security_gate` 10:52,
+  `security_gate_queue_indexes` 10:52, `platform_grant_approval` 10:53). The Postgres logs show no errors in that window or
+  after it.
+- **Migrations that reached `main` later the same day** (with PRs #66–#74, not part of this work), all applied:
+  `20260929000100_hikvision_push_provider` and `000200_device_provider_adapters` (14:40–14:41 UTC) and
+  `000500_device_pin_mappings` (17:12) by other sessions, each as a shortened text (md5 `beff92ec…`, `823308a3…`,
+  `9b633c1a…` against the repo files' `af6ac627…`, `95da2fe6…`, `d0b6a20b…`); `000300_invitation_delivery_status` and
+  `000400_super_admin_portal` by this session on the owner's instruction (17:13 and 17:15), byte-identical to the repo
+  (`3e925eb2…`, `500388cf…`). Another session had applied shortened texts of those two one to three minutes earlier; both
+  files are idempotent, and the second application ran the full repo text, post-verify included, without error.
+  `app.migrations` lists 000300 and 000400 but not 000100, 000200 or 000500, so the repo migrator run against hosted would
+  apply those three again (they are idempotent).
+- **30 Sep.** `modules_plans_billing` was applied at 05:32 UTC by another session; its file reached `main` later with PR
+  #77, as `20260929000600`. The job-queue migration (§9) had taken that stamp too, so it was renumbered to `20260929000700`
+  before being applied at 05:38 UTC on the owner's approval (recorded as `job_lock_heartbeat`, byte-identical to the file:
+  md5 `2e577f14…`) and added to `app.migrations`. The two touch nothing in common.
 
 ## 2. Demo tenant data (Majan Gulf Trading)
 
@@ -44,14 +63,26 @@ to "now"), so days already loaded regenerate byte-identical rows that the dedupe
 last load are logins, two e-mail addresses and the secondary managers, none of which feeds punch generation. Nobody had
 used the demo tenant since 27 Sep (only system jobs in the audit log), so the 03b upserts reset nothing a person had done.
 
-The full recalculation of the six months runs in the background (the previous one took five hours on this database); the
-monthly summaries it feeds are rebuilt once it finishes (§8).
+**The recalculation** of 1 Mar → 29 Sep started at 11:31 UTC and recomputed all 11,289 employee-days (53 employees × 213
+days) with no errors. It ran as six attempts of a three-attempt job: the worker deploys at 11:57 and 13:03 (§3) stopped the
+first two, and from 13:32 each attempt's one-hour lock expired while it was still running, so a new attempt started next to it
+every hour (§9). Executions finished at 17:20, 18:23, 19:18 and 20:20 UTC, each marking the request COMPLETED and auditing it
+again (four audit entries); in between, the request read COMPLETED while its progress figure jumped back to whatever the
+next execution had reached. It has been settled since 20:20: COMPLETED, 11,289 employee-days, no errors, no job running.
+The monthly summaries were rebuilt after the first completion (six `BUILD_PERIOD_SUMMARY` jobs, done at 18:49 UTC);
+September's is of a month still in progress.
 
 ## 3. API and worker
 
 - **Deploy #6** (`deploy.yml`, dispatched by the owner on `main` @ `afe719c`): API and worker deployed, API readiness verified.
   The **reports worker step was skipped** (target `both`) — see §8. This session could not dispatch the workflow itself: the
   GitHub integration answers `403 Resource not accessible by integration` on workflow dispatch.
+- **Deploy runs 7 and 8** (11:55 on `afe719c`; 12:59 on `77e5314`, the merge of PR #66), also target `both`: the API and
+  worker were redeployed and the reports worker skipped again. The API and worker therefore run PR #66. `main` has moved on
+  to `e9645e2` — PRs #67 (this report) and #68–#75 (device-provider HTTP client, invitee onboarding fix, CI split, employee
+  profile save fix, invitation delivery status, the `/adm` super-admin portal, device PIN mapping and punch log, and a web
+  fallback for routes the API does not serve yet). Their migrations are applied (§1); the code of #68–#75 is not deployed
+  to the API or worker yet.
 - `GET /api/ready` → 200 `{"status":"ready","checks":{"database":{"ok":true},"queue":{"ok":true,"dead":0},"providers":12}}`.
 - The worker picked the seed's jobs up at once: the 218 new punches were normalised within two minutes.
 - `/api/v1/me` and the `/api/v1/orgs/:orgId/me/*` routes (404 before this deploy), read-only probe as three logins:
@@ -70,6 +101,10 @@ alias `flowza-time-prd.pages.dev` serves `assets/index-D02KIbtU.js`, which conta
 exists nowhere in the PR #64 tree and was added by PR #65. **Cloudflare deploys `main` to production, and the web half went
 live when PR #65 was merged.** `time.flowza.ai` answers non-browser clients with Cloudflare's managed challenge
 (`403`, `cf-mitigated: challenge`), which is why the bundle was checked on the Pages alias.
+
+Because Cloudflare deploys every merge while the API is deployed by hand, the web is now ahead of the API: screens added by
+PRs #72–#74 call routes the deployed API does not have. Since PR #75 those screens say "Not available yet" instead of
+showing the router's "Route not found."; deploying the API from `main` (§8) makes them work.
 
 ## 5. Flowza Finance connector
 
@@ -116,8 +151,12 @@ half-days set back to PRESENT, delegation revoked) and the temporary attendance 
   (`flowza-time-reports`) took it within two seconds and dead-lettered it: `NO_HANDLER — no handler registered for
   RUN_REPORT_SCHEDULE`. Deploy #6 skipped that app (§3), so it lacks everything PR #65 added to reports: schedule runs and
   deliveries, the monthly summary report and the updated daily / monthly / summary definitions.
-- **Latency.** Self-service calls took 2.6–3.7 s each on hosted during these runs, and `/api/ready` measured 0.5–1.1 s for
-  its database check, while the six-month recalculation was running. To be measured again once it has finished.
+- **Latency.** Self-service calls took 2.6–3.7 s each during these runs, while the recalculation was running. Measured again
+  later with the read-only route probe of §3: the readiness database check held at about 58 ms, one round trip between
+  the API (Fly.io `sin`, Singapore — Fly has no region in India) and the database (`ap-south-1`, Mumbai); the self-service
+  routes took 1.7 s median, 3.5 s at the 90th percentile and 7.2 s at worst. The time is round trips, not database work:
+  `/me/overview` makes about 120 sequential queries, each paying that 58 ms. Reducing the round trips per route, as PR #50
+  did for `/me` and the dashboard, is the remedy; not part of this prompt.
 
 What the runs leave in the demo tenant, all tagged `e2e:<runId>`: the employee's web punches of today (the abuse pass and
 flow 1), the approved absence reason (flow 2), the applied regularisation (flow 3), the approved shift swap and its
@@ -137,8 +176,10 @@ design.
 
 ## 8. Owner actions
 
-1. **Deploy the reports worker** (needed now): GitHub → Actions → **Deploy** → Run workflow on `main` with target
-   **`reports`**. Until then, report schedules and "run now" fail, and reports come from the old definitions. Afterwards,
+1. **Merge `claude/modest-fermi-fnwqq7` into `main`** (the job-queue fix, §9; `main` is already merged into it), then
+   **deploy**: GitHub → Actions → **Deploy** → Run workflow on `main` with the default target **`all`** (API, worker and
+   reports worker together, new with PR #76). One deploy covers everything still missing: the API and worker run PR #66
+   while `main` carries #67–#77 with their migrations applied (§3, §4), and the reports worker predates PR #65. Afterwards,
    re-run flow 6: `node scripts/e2e-hosted/run.mjs --mode=hosted --i-understand-this-writes-to-the-demo-tenant --flows=6`
    (environment as in `scripts/e2e-hosted/README.md`).
 2. **Switch on leaked-password protection** in Supabase Auth for `liyilmbklsextsggflbb` (Dashboard → Authentication →
@@ -147,5 +188,63 @@ design.
    (`9dbf75f`, `3863dc8`) through Finance's own review and approval into Finance `main`; deploy `attendance-ingest` from it
    so that pushed punches map PINs to employee numbers; designate the Finance tenant; then register the connector in
    FlowZa Time (Settings → Integrations) and run "Test connection".
-4. **Monthly summaries**: the six-month recalculation queued by seed 04 was expected to finish around 16:15 UTC. The six
-   monthly summaries it feeds are rebuilt once it has finished, so they reflect every recomputed day.
+4. **`app.migrations`** lacks 000100, 000200, 000500 and 000600 (§1). Harmless while migrations are applied through
+   Supabase; record them before anyone runs the repo migrator against hosted, or let it re-apply them (idempotent).
+
+## 9. Job queue: running jobs were started again while they ran
+
+**Found** while following the six-month recalculation (§2). A worker marks a job `running` with `locked_at` / `locked_by`;
+`jobs.reap_stale` (every minute) hands back any `running` job whose lock is older than the job's `lock_timeout_seconds`, on
+the assumption that its worker died. Nothing refreshed the lock while a handler ran, so any job that ran longer than its lock
+timeout was handed out again while it was still running. A recalculation holds a one-hour lock and a six-month range takes
+about four hours on the hosted topology, so every such run was started again each hour next to itself:
+
+| Recalculation (queue job) | Attempts (max 3) | Last requeue | Queued → completed (UTC) |
+|---|---|---|---|
+| 9 Sep (6248) | 3 | `LOCK_EXPIRED` | 00:22 → 05:28 |
+| 27 Sep (284064) | 3 | `LOCK_EXPIRED` | 08:03 → 13:11 |
+| 29 Sep (316173) | 6 | `LOCK_EXPIRED` | 11:19 → 17:20 first completion, then again at 18:23, 19:18 and 20:20 |
+
+On 29 Sep the first two attempts were stopped by the worker deploys and the next four ran side by side. Consequences: the
+same work done up to four times at once (load on the database); `jobs.reap_stale` ignored `max_attempts`, so the attempt
+count ran past its maximum; a superseded execution could still complete, fail or reschedule the job; and each execution
+wrote the request's progress and outcome over the others — the request read COMPLETED with 8,000 of 11,289 days
+recomputed, ended with four audit entries, and its `finished_at` moved with every execution. Any job type can hit this once
+it outlives its lock (imports, large reports, day close on a big tenant).
+
+**A second, older defect** turned up in the same code: the dedupe index is unique over *pending* jobs only (a job enqueued
+while its twin runs waits as the next run), so moving the running twin back to `pending` — a retry in `jobs.fail`, or a reap
+— raised `unique_violation`. For a reap that would fail the whole batch, every minute, so no stale job would be recovered
+again. It has not happened on hosted yet (no failed reap in the archive); it reproduced locally at once.
+
+**Fix** (branch `claude/modest-fermi-fnwqq7`; the migration is applied to hosted, the worker code is not on `main` yet):
+
+- Migration `20260929000700_job_lock_heartbeat.sql`: `jobs.heartbeat(worker, ids, attempts)` extends the locks of the
+  jobs a worker still runs and returns the ones it still owns; `jobs.complete_owned` / `jobs.fail_owned` record an outcome
+  only while the caller holds the same attempt; `jobs.release_owned` hands a job back at shutdown without spending an
+  attempt; `jobs.reap_stale` counts a lost lock as an attempt and dead-letters a job whose attempts are spent; requeueing
+  drops the dedupe key of a job whose key a pending twin already holds (both runs are kept); `jobs.complete` no longer
+  rewrites a job that was already archived; EXECUTE on the queue functions is revoked from PUBLIC and every one of them
+  runs with a fixed `search_path` (clearing the queue's 7 `function_search_path_mutable` advisor warnings).
+- Worker: the runner heartbeats every `WORKER_HEARTBEAT_INTERVAL_MS` (10 s); when a job turns out not to be its own any more
+  it aborts the handler (reason `LOCK_LOST`) and records nothing; it records outcomes through the owned calls; a queue
+  error while recording is logged instead of crashing the process; on shutdown (a deploy) it waits
+  `WORKER_SHUTDOWN_GRACE_MS` (3 s, under Fly's 5 s kill) and hands the jobs still running back to the queue, so the next
+  worker takes them at once instead of an hour later. The recalculation stops between chunks once its lock is lost and
+  writes no progress or outcome after that point.
+- Tests: queue DB tests for heartbeat ownership, owned completion and failure, release, reaping, dead-lettering and the
+  dedupe cases; runner tests for heartbeats, lock loss, a job finishing during a heartbeat, a superseded execution that
+  outlives its lock, shutdown release, and queue errors (the three runner guards were mutation-tested: removing any one
+  fails its test); a recalculation test for lock loss and for a timeout that must not cut a range short.
+
+**Applied** 2026-09-30 05:38 UTC on the owner's approval, after a last check that nothing had applied it or run a job in
+the meantime. The recorded text is byte-identical to the file (md5 `2e577f14…`, 14,262 characters); all twelve queue
+functions carry a fixed `search_path`, none is executable by `anon` or `authenticated`, and the API, worker and system roles
+keep theirs. The previous worker kept working on the migrated queue: in the first two minutes the reaper ran twice under the
+new function and 28 other jobs completed, none failed, and `/api/ready` reported the queue healthy (0 pending, 0 running, 0
+dead). The heartbeat, owned outcomes and shutdown hand-back start working once the new worker is deployed (§8).
+
+Known limits: a job dead-lettered by the reaper (its worker died three times) runs no handler, so a recalculation request in
+that state keeps reading RUNNING; deploys no longer cost attempts, so this needs repeated crashes. And a job is now taken
+back only when its worker is gone: a handler that hung inside a live worker would keep its job until the worker restarts.
+Database statements (120 s) and outbound provider calls carry their own timeouts, which is what bounds that.

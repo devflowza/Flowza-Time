@@ -536,8 +536,12 @@ Dequeue algorithm (`jobs.dequeue(worker, queues[], limit, per_org_cap)`):
 1. Count running jobs per organisation.
 2. Select pending jobs with `run_at <= now()` whose org is under `per_org_cap`, ordered by
    `org_running_count asc, priority desc, run_at asc` (least-served tenant first), `FOR UPDATE SKIP LOCKED`.
-3. Mark running with `locked_by`, `locked_at`, `attempts+1`; a reaper requeues jobs whose lock is older
-   than the job type's `lock_timeout` (crash safety).
+3. Mark running with `locked_by`, `locked_at`, `attempts+1`. While a handler runs, its worker extends the lock every
+   10 s (`jobs.heartbeat`), so a reaper that requeues jobs whose lock is older than the job type's `lock_timeout` only
+   takes back jobs whose worker is gone (crash safety); a lost lock counts as an attempt, and a job whose attempts are
+   spent is dead-lettered. The attempt number is the fencing token: `jobs.complete_owned` / `jobs.fail_owned` record an
+   outcome only while the worker still holds the same attempt, and a worker whose job was taken back aborts the handler.
+   A worker that is shutting down hands its unfinished jobs back at once (`jobs.release_owned`, no attempt spent).
 
 ### F.2 Sync job model
 

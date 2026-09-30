@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { isoDateSchema, uuidSchema } from '@flowza/contracts';
 import { eachDate, errors, event } from '@flowza/shared';
 import { withContext, writeAudit, type JobQueue, type Trx } from '@flowza/database';
-import type { HandlerRegistry, JobContext } from '../types.js';
+import { isLockLost, type HandlerRegistry, type JobContext } from '../types.js';
 import { asDate, chunk, isoDate, parsePayload } from './common.js';
 import { recomputeDaily } from './recompute.js';
 
@@ -74,8 +74,12 @@ async function employeesInScope(trx: Trx, organizationId: string, req: { fromDat
  * RECALCULATE_RANGE handler (§G.7): employees in scope × dates, recomputed inline in chunks of 200 pairs per transaction
  * with reason RECALCULATION. Locked dates are skipped and counted; per-pair failures are isolated with savepoints and
  * listed in the summary. The request row tracks RUNNING → COMPLETED/FAILED with `summary` and `finished_at`.
+ *
+ * If this worker loses the job's lock (it was taken back and another attempt restarts the request from the first pair),
+ * the execution stops at the next chunk boundary and writes nothing more to the request: its progress, FAILED or
+ * COMPLETED would overwrite the attempt that now owns it.
  */
-export async function recalculateRange({ job, deps, log }: JobContext) {
+export async function recalculateRange({ job, deps, log, signal }: JobContext) {
   const { organizationId, requestId } = parsePayload(recalculatePayloadSchema, job.payload);
   const ctx = { kind: 'system' as const, organizationId, jobId: job.id };
   const req = await withContext(deps.db, ctx, async (trx) => {
@@ -96,8 +100,13 @@ export async function recalculateRange({ job, deps, log }: JobContext) {
   const pairs: Array<{ employeeId: string; date: string }> = [];
   for (const employeeId of employees) for (const date of dates) pairs.push({ employeeId, date });
 
+  const abandon = () => {
+    log.warn(event('recalculation_abandoned', { requestId, recomputed: summary.recomputed, pairs: pairs.length }));
+    return { abandoned: true as const, recomputed: summary.recomputed };
+  };
   try {
     for (const batch of chunk(pairs, RECALC_CHUNK_SIZE)) {
+      if (isLockLost(signal)) return abandon();
       await withContext(deps.db, ctx, async (trx) => {
         for (const pair of batch) {
           await sql`savepoint recalc_pair`.execute(trx);
@@ -118,15 +127,18 @@ export async function recalculateRange({ job, deps, log }: JobContext) {
             log.warn(event('recalculation_pair_failed', { requestId, employeeId: pair.employeeId, date: pair.date, err: (err as Error).message }));
           }
         }
-        // progress is visible to the UI between chunks
-        await trx.updateTable('attendanceRecalculationRequests').set({ summary: JSON.stringify(summary) }).where('id', '=', requestId).execute();
+        // progress is visible to the UI between chunks (not once another attempt owns the request)
+        if (!isLockLost(signal)) await trx.updateTable('attendanceRecalculationRequests').set({ summary: JSON.stringify(summary) }).where('id', '=', requestId).execute();
       });
     }
   } catch (err) {
-    await withContext(deps.db, ctx, (trx) => trx.updateTable('attendanceRecalculationRequests').set({ status: 'FAILED', finishedAt: deps.now(), summary: JSON.stringify({ ...summary, fatal: String((err as Error).message).slice(0, 500) }) }).where('id', '=', requestId).execute());
+    if (!isLockLost(signal)) {
+      await withContext(deps.db, ctx, (trx) => trx.updateTable('attendanceRecalculationRequests').set({ status: 'FAILED', finishedAt: deps.now(), summary: JSON.stringify({ ...summary, fatal: String((err as Error).message).slice(0, 500) }) }).where('id', '=', requestId).execute());
+    }
     throw err;
   }
 
+  if (isLockLost(signal)) return abandon();
   await withContext(deps.db, ctx, async (trx) => {
     await trx.updateTable('attendanceRecalculationRequests').set({ status: 'COMPLETED', finishedAt: deps.now(), summary: JSON.stringify(summary) }).where('id', '=', requestId).execute();
     await writeAudit(trx, {
@@ -140,6 +152,8 @@ export async function recalculateRange({ job, deps, log }: JobContext) {
 }
 
 export function registerRecalculateHandlers(registry: HandlerRegistry): void {
+  // The timeout is not enforced part-way through a range: its duration grows with employees × days, and stopping early
+  // would only restart the request from its first pair. The handler stops between chunks when its lock is lost.
   registry.register({ jobType: 'RECALCULATE_RANGE', handler: recalculateRange, timeoutMs: 3_600_000 });
 }
 

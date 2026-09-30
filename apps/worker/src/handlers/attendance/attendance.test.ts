@@ -14,7 +14,7 @@ import { normaliseRamadanMode, loadDailyInputs } from './load-inputs.js';
 import { enqueueRecompute, recomputeDedupeKey } from './common.js';
 import { attendanceTasks } from './tasks.js';
 import { registerAttendanceHandlers } from './index.js';
-import { HandlerRegistry } from '../types.js';
+import { HandlerRegistry, lockLostError } from '../types.js';
 
 // ids are RFC-4122 shaped because job payloads are validated with z.uuid()
 const ORG = '0a000000-0000-4000-a000-000000000001';
@@ -419,6 +419,23 @@ describe('period locks and RECALCULATE_RANGE', () => {
       enqueueRecalculationForScope(trx, h.deps.queue, { organizationId: ORG, fromDate: '2026-03-14', toDate: '2026-03-14', reason: 'Everyone' }));
     expect(await recalculateRange(ctx('RECALCULATE_RANGE', { organizationId: ORG, requestId: r3 }))).toMatchObject({ employees: 3, dates: 1, recomputed: 3, created: 3 });
     expect((await record(E2, '2026-03-14')).status).toBe('WEEKLY_OFF');
+  });
+
+  it('stops at the next chunk once its job lock is lost and writes nothing more to the request; a timeout does not cut a range short', async () => {
+    const { requestId } = await withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) =>
+      enqueueRecalculationForScope(trx, h.deps.queue, { organizationId: ORG, fromDate: '2026-03-09', toDate: '2026-03-11', employeeIds: [E1], reason: 'Lock lost part-way' }));
+    const lost = new AbortController();
+    lost.abort(lockLostError('1'));
+    expect(await recalculateRange({ ...ctx('RECALCULATE_RANGE', { organizationId: ORG, requestId }), signal: lost.signal })).toEqual({ abandoned: true, recomputed: 0 });
+    // the attempt that owns the job now is the one that records progress and the outcome
+    const req = await h.tdb.adminDb.selectFrom('attendanceRecalculationRequests').selectAll().where('id', '=', requestId).executeTakeFirstOrThrow();
+    expect(req).toMatchObject({ status: 'RUNNING', finishedAt: null, summary: null });
+    expect(await h.tdb.adminDb.selectFrom('audit.logs').select('id').where('action', '=', 'attendance.recalculated').where('entityId', '=', requestId).execute()).toHaveLength(0);
+
+    const timedOut = new AbortController();
+    timedOut.abort(new AppError('PROVIDER_TIMEOUT', 'job timed out', { retryable: true }));
+    expect(await recalculateRange({ ...ctx('RECALCULATE_RANGE', { organizationId: ORG, requestId }), signal: timedOut.signal })).toMatchObject({ recomputed: 3, unchanged: 3 });
+    expect((await h.tdb.adminDb.selectFrom('attendanceRecalculationRequests').select('status').where('id', '=', requestId).executeTakeFirstOrThrow()).status).toBe('COMPLETED');
   });
 });
 

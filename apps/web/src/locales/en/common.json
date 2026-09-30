@@ -33,7 +33,8 @@
     "queued": "Queued successfully", "queuedHint": "Follow progress in Sync jobs.", "copy": "Copy", "copied": "Copied", "timezone": "Timezone",
     "createdAt": "Created", "updatedAt": "Updated", "language": "Language", "theme": "Theme", "light": "Light", "dark": "Dark", "system": "System",
     "switchOrg": "Switch organisation", "comingSoon": "Coming soon", "permissionDenied": "You do not have permission to view this page.", "notFound": "Page not found",
-    "notFoundHint": "The page you are looking for does not exist or has moved.", "goHome": "Go to dashboard", "unlinkedHomeTitle": "Welcome to {{org}}", "unlinkedHomeHint": "Your login is not linked to your employee record yet, so there is no attendance, leave or shift to show you. Ask your HR administrator to link your account to your employee profile (Users → your name → Employee record).", "minutes": "min", "hours": "h", "days": "days"
+    "notFoundHint": "The page you are looking for does not exist or has moved.", "goHome": "Go to dashboard", "unlinkedHomeTitle": "Welcome to {{org}}", "unlinkedHomeHint": "Your login is not linked to your employee record yet, so there is no attendance, leave or shift to show you. Ask your HR administrator to link your account to your employee profile (Users → your name → Employee record).", "minutes": "min", "hours": "h", "days": "days",
+    "appUpdated": "FlowZa Time has been updated", "appUpdatedReloading": "Loading the latest version…", "appUpdatedHint": "Reload the page to continue with the latest version.", "reloadPage": "Reload page", "pageErrorHint": "This page could not be displayed. Reload the page, or go back to the dashboard."
   },
   "dashboard": {
     "title": "Dashboard", "subtitle": "Attendance overview for {{date}}", "employees": "Employees", "presentToday": "Present today", "absent": "Absent", "late": "Late",
