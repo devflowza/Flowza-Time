@@ -4,7 +4,30 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import { ApiError, FEATURE_UNAVAILABLE, apiFetch, isFeatureUnavailableError, isMfaRequiredError, isNetworkError } from './api-client';
+import { ApiError, FEATURE_UNAVAILABLE, NETWORK_ERROR_STATUS, apiFetch, isFeatureUnavailableError, isMfaRequiredError, isNetworkError, shouldRetryQuery } from './api-client';
+
+describe('shouldRetryQuery', () => {
+  const network = new ApiError(NETWORK_ERROR_STATUS, 'NETWORK_ERROR', 'Could not reach the API');
+
+  it('retries a request that never got an answer, although its status (0) is below 500', () => {
+    // The old predicate read status 0 as a client error: one dropped /me took the whole app to "Could not reach the API".
+    expect(shouldRetryQuery(0, network)).toBe(true);
+    expect(shouldRetryQuery(1, network)).toBe(true);
+  });
+
+  it('retries server errors and non-API failures, never a 4xx answer', () => {
+    expect(shouldRetryQuery(0, new ApiError(503, 'HTTP_ERROR', 'Service Unavailable'))).toBe(true);
+    expect(shouldRetryQuery(0, new Error('boom'))).toBe(true);
+    expect(shouldRetryQuery(0, new ApiError(401, 'UNAUTHENTICATED', 'no'))).toBe(false);
+    expect(shouldRetryQuery(0, new ApiError(403, 'FORBIDDEN', 'MFA needed', 'r1', { reason: 'MFA_REQUIRED' }))).toBe(false);
+    expect(shouldRetryQuery(0, new ApiError(404, 'NOT_FOUND', 'gone'))).toBe(false);
+  });
+
+  it('gives up after two retries', () => {
+    expect(shouldRetryQuery(2, network)).toBe(false);
+    expect(shouldRetryQuery(2, new ApiError(500, 'INTERNAL', 'x'))).toBe(false);
+  });
+});
 
 describe('isMfaRequiredError', () => {
   it('matches only the 403 the API raises for a session below aal2', () => {

@@ -31,6 +31,17 @@ export function isNetworkError(error: unknown): boolean {
 }
 
 /**
+ * Retry policy for queries: a 4xx is an answer and will not change on a retry, anything else might. A network failure
+ * is an `ApiError` too, with status 0 — and 0 < 500, so a bare "retry unless status < 500" test reads it as a client
+ * error and never retries it. One dropped request on a flaky connection then became the full-screen "Could not reach
+ * the API", because /me failed on its first and only attempt.
+ */
+export function shouldRetryQuery(failureCount: number, error: unknown): boolean {
+  if (failureCount >= 2) return false;
+  return isNetworkError(error) || !(error instanceof ApiError && error.status < 500);
+}
+
+/**
  * Code given to a 404 from the API's router — the API does not serve that path at all. The web is deployed on every merge
  * and the API by hand, so for a while after a release a new screen can call an endpoint the running API does not have
  * yet. That is "not available yet", not an error to report: its message is translated here, once, so no screen, toast

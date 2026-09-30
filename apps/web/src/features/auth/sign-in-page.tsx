@@ -6,6 +6,7 @@ import { Link, Navigate, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './auth-provider';
+import { signInErrorKey } from './sign-in-error';
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, FormField, Input } from '@/components/ui';
 import { AuthLayout } from './auth-layout';
 
@@ -26,7 +27,7 @@ export function SignInPage() {
   const onSubmit = form.handleSubmit(async (values) => {
     setError(null);
     const { error: err } = await supabase.auth.signInWithPassword(values);
-    if (err) { setError(t('auth.invalid')); return; }
+    if (err) { setError(t(signInErrorKey(err))); return; }
     const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
     if (data && data.nextLevel === 'aal2' && data.nextLevel !== data.currentLevel) {
       const factors = await supabase.auth.mfa.listFactors();

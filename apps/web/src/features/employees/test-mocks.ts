@@ -38,7 +38,8 @@ export const page = <T,>(data: T[], total = data.length, pageNo = 1, pageSize = 
 interface MfaFactor { id: string; status: string; friendly_name?: string; factor_type?: string }
 type MfaListResult = { data: { totp: MfaFactor[]; all: MfaFactor[] } | null; error: { message: string } | null };
 /** Mirrors supabase-js: `session` is null when the project requires email confirmation before the account is usable. */
-type AuthResult = { data: { session: { access_token: string } | null; user: { id: string } | null }; error: { message: string } | null };
+// A repeated sign-up of a confirmed address returns a stand-in user with `identities: []`; errors carry supabase's `code`.
+type AuthResult = { data: { session: { access_token: string } | null; user: { id: string; identities?: unknown[] } | null }; error: { message: string; code?: string; status?: number } | null };
 export const supabaseMock = {
   auth: {
     getSession: vi.fn(async () => ({ data: { session: { access_token: 'token' } } })),

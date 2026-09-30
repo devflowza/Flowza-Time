@@ -3,7 +3,7 @@ import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { RouterProvider } from 'react-router';
 import { Toaster } from 'sonner';
 import { useTranslation } from 'react-i18next';
-import { ApiError } from '@/lib/api-client';
+import { shouldRetryQuery } from '@/lib/api-client';
 import { AuthProvider } from '@/features/auth/auth-provider';
 import { TooltipProvider } from '@/components/ui';
 import { applyTheme, useUiStore } from '@/stores/ui-store';
@@ -13,7 +13,7 @@ const queryClient = new QueryClient({
   defaultOptions: {
     queries: {
       staleTime: 15_000,
-      retry: (count, err) => !(err instanceof ApiError && err.status < 500) && count < 2,
+      retry: shouldRetryQuery,
       refetchOnWindowFocus: false,
     },
     mutations: { retry: 0 },
