@@ -209,6 +209,8 @@ FLOWZA_CREDENTIALS_MASTER_KEYS=<identical to the API's>
 WORKER_CONCURRENCY=8
 WORKER_QUEUES=sync,processing,reports,notifications,maintenance
 WORKER_PER_ORG_CONCURRENCY=5
+WORKER_HEARTBEAT_INTERVAL_MS=10000
+WORKER_SHUTDOWN_GRACE_MS=3000
 SCHEDULER_ENABLED=true
 API_PUBLIC_URL=https://<api-host>
 WEB_PUBLIC_URL=https://time.flowza.ai
@@ -217,6 +219,11 @@ EMAIL_PROVIDER=console
 
 Run **two or more instances** for availability. Leave `SCHEDULER_ENABLED=true` on all of them: the scheduler leader is
 elected with a Postgres advisory lock, so exactly one instance ticks and the others take over if it dies.
+
+A worker keeps the lock of every job it runs alive (`WORKER_HEARTBEAT_INTERVAL_MS`, well under the shortest job lock of
+30 s); only a job whose worker is gone is handed to another one. On a deploy the worker waits `WORKER_SHUTDOWN_GRACE_MS` for
+its running jobs and hands the rest back to the queue, so keep that below the platform's kill timeout (Fly.io: 5 s by
+default).
 
 Email stays on `console` (logged, not sent) until you set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` and `EMAIL_FROM`.
 Notifications are written to the outbox either way, so nothing is lost by starting on `console`.

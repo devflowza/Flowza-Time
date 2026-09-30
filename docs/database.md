@@ -25,7 +25,7 @@ recreates the Supabase-provided pieces (auth/storage/realtime schemas, roles). N
 | `0600_employees` | employees, team_members, employment_history (effective-dated, exclusion constraint), employee_identity_documents, employee_provider_identities |
 | `0700_devices` | device_providers, device_models, devices, device_credentials, pending_devices, device_groups(+members), device_employee_states, device_commands, device_logs (partitioned), `app.ensure_month_partitions` |
 | `0800_sync_engine` | sync_jobs, sync_job_items, sync_attempts, sync_cursors, sync_logs (partitioned), provider_webhook_events |
-| `0900_jobs_queue` | `jobs.queue`, archive, `enqueue`, fair `dequeue`, `complete`, `fail` (backoff/dead-letter), `cancel`, `reap_stale`, `stats` |
+| `0900_jobs_queue` | `jobs.queue`, archive, `enqueue`, fair `dequeue`, `complete`, `fail` (backoff/dead-letter), `cancel`, `reap_stale`, `stats` (lock heartbeat and owned outcomes: `20260929000700`) |
 | `1000_shifts_rules_holidays_leave` | shifts, shift_patterns, shift_assignments, attendance_rule_sets, holiday_calendars, holidays, leave_types, leave_records |
 | `1100_attendance` | attendance_raw_transactions (partitioned, immutable), attendance_events (partitioned, void-only), attendance_daily_records, history, approval_workflows/requests/steps, attendance_corrections, recalculation_requests, period_locks (+ trigger), period_summaries |
 | `1200_reports_imports_notifications_audit` | report_requests, import_jobs(+rows), notifications(+preferences, deliveries), `audit.logs` |
@@ -60,9 +60,17 @@ recreates the Supabase-provided pieces (auth/storage/realtime schemas, roles). N
 | `20260928001100_security_gate` | P10: partitions locked; `flowza_client` role; `_no_data_api` restrictive policies (no table access through PostgREST); FORCE RLS on tenant tables; immutable `organization_id`; explicit denials on system-written tables. Pinned by `supabase/tests/rls_invariants.sql` |
 | `20260928001110_security_gate_queue_indexes` | P10: indexes for the queue reads measured at a year of volume |
 | `20260928001120_platform_grant_approval` | P10: a platform write access grant starts only when its named second approver approves it |
+| `20260929000100_hikvision_push_provider` | Hikvision ISAPI event push provider (`hikvision_push`, real-time punches over HTTP Listening) and MinMoe model rows |
+| `20260929000200_device_provider_adapters` | Seven placeholder providers become real adapters (`beta`): provider and model rows mirroring `packages/device-providers` |
+| `20260929000300_invitation_delivery_status` | Invitation e-mail delivery status, retries and manual retry |
+| `20260929000400_super_admin_portal` | `/adm` portal: platform-only tenant accounts and notes, fleet counts and memberships read models, platform admins' own audit entries |
+| `20260929000500_device_pin_mappings` | Device PIN mappings a person made survive device syncs (`device_employee_states` marked as manual) |
+| `20260929000600_modules_plans_billing` | Modules, plans & pricing, billing (`/adm` parity): module catalogue, per-plan modules and users, per-tenant module overrides and the one enabled-module rule, subscription cycle and seats, billing invoices and payments, platform settings — see `docs/pricing.md` |
+| `20260929000700_job_lock_heartbeat` | Job queue: `heartbeat`, `complete_owned` / `fail_owned` / `release_owned` (outcomes only while the worker still holds the same attempt), `reap_stale` dead-letters a job whose attempts are spent, dedupe-safe requeueing, EXECUTE revoked from PUBLIC and a fixed `search_path` on every queue function |
 
-Hosted project `liyilmbklsextsggflbb`: every migration above is applied (the last 21 on 2026-09-29, each verified against
-its file by md5, see `docs/hr-portal/reports/12-ship.md`); `app.migrations` lists the same 46 files as this directory.
+Hosted project `liyilmbklsextsggflbb`: every migration above is applied (PR #65's 21 on 2026-09-29,
+each verified against its file by md5, see `docs/hr-portal/reports/12-ship.md` §1, which also records the later ones and the
+ones missing from `app.migrations`); `20260929000700` was applied on 2026-09-30, byte-identical to its file.
 
 ## Conventions
 
