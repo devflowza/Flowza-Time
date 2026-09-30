@@ -11,7 +11,7 @@ the auth hook, the first platform admin and the first organisation, in the order
 | `apps/api` | Container (Fly.io / Railway / Render / Cloud Run) | `apps/api/Dockerfile`; stateless; scale horizontally; `/api/health`, `/api/ready` |
 | `apps/worker` | Container (same platform) | `apps/worker/Dockerfile`; run ≥2 instances for HA — the scheduler leader is elected with a Postgres advisory lock |
 | Database/Auth/Storage/Realtime | Supabase project per environment | Region closest to customers (see residency) |
-| Email | Resend (or console in dev) | `EMAIL_PROVIDER`, `RESEND_API_KEY` |
+| Email | Resend (or console in dev) | `EMAIL_PROVIDER`, `RESEND_API_KEY` (worker); `RESEND_WEBHOOK_SECRET` (API, delivery events for the e-mail log) |
 
 ## Static hosting for `apps/web` (Cloudflare Pages, Netlify, Vercel)
 

@@ -32,7 +32,9 @@ beforeAll(async () => {
 afterAll(async () => { await h?.close(); });
 
 const job = (invitationId: string, attempt: { attempts: number; maxAttempts: number } = { attempts: 1, maxAttempts: 5 }) => ({ job: { ...fakeJob('SEND_INVITATION_EMAIL', { organizationId: ORG, invitationId }, ORG), ...attempt }, deps: h.deps, log: h.deps.log, signal: new AbortController().signal });
-const row = (id: string) => h.tdb.adminDb.selectFrom('invitations').select(['tokenHash', 'deliveryTokenHash', 'deliverySentAt', 'deliveryStatus', 'deliveryAttempts', 'deliveryLastError', 'deliveryNextAttemptAt', 'deliveryProvider']).where('id', '=', id).executeTakeFirstOrThrow();
+const row = (id: string) => h.tdb.adminDb.selectFrom('invitations').select(['tokenHash', 'deliveryTokenHash', 'deliverySentAt', 'deliveryStatus', 'deliveryAttempts', 'deliveryLastError', 'deliveryNextAttemptAt', 'deliveryProvider', 'deliveryMessageId']).where('id', '=', id).executeTakeFirstOrThrow();
+const logOf = (id: string) => h.tdb.adminDb.selectFrom('emailMessages').select(['status', 'provider', 'providerMessageId', 'recipient', 'kind', 'attempts', 'lastError']).where('invitationId', '=', id).executeTakeFirst();
+const eventsOf = async (id: string) => (await h.tdb.adminDb.selectFrom('emailEvents as e').innerJoin('emailMessages as m', 'm.id', 'e.messageId').select('e.event').where('m.invitationId', '=', id).orderBy('e.id').execute()).map((e) => e.event);
 
 describe('SEND_INVITATION_EMAIL', () => {
   it('mails a link whose token only the e-mail carries; the row keeps its hash', async () => {
@@ -48,8 +50,10 @@ describe('SEND_INVITATION_EMAIL', () => {
     expect(r.deliveryTokenHash).toBe(sha256Hex(secret));
     expect(r.tokenHash).toBe(sha256Hex(`copy-${INV.open}`));
     expect(r.deliverySentAt).not.toBeNull();
-    expect(r).toMatchObject({ deliveryStatus: 'sent', deliveryProvider: 'test', deliveryAttempts: 1, deliveryLastError: null, deliveryNextAttemptAt: null });
+    expect(r).toMatchObject({ deliveryStatus: 'sent', deliveryProvider: 'test', deliveryMessageId: `m${sent.length}`, deliveryAttempts: 1, deliveryLastError: null, deliveryNextAttemptAt: null });
     expect(mail.html).toContain('Hana HR invited you');
+    // the e-mail activity log follows the row (trigger): one message, sent, with the id the provider's webhook will name
+    expect(await logOf(INV.open)).toMatchObject({ status: 'sent', provider: 'test', providerMessageId: `m${sent.length}`, recipient: 'new.hire@t.local', kind: 'invitation', attempts: 1 });
     // nothing secret in the audit trail
     const audit = await h.tdb.adminDb.selectFrom('audit.logs').selectAll().where('action', '=', 'member.invitation_emailed').execute();
     expect(audit).toHaveLength(1);
@@ -79,6 +83,7 @@ describe('SEND_INVITATION_EMAIL', () => {
     // the failure is recorded in a transaction of its own: retrying, with when the queue tries again — and no internal text
     expect(r).toMatchObject({ deliveryStatus: 'retrying', deliveryAttempts: 1, deliveryLastError: 'The e-mail could not be sent (internal error).' });
     expect(r.deliveryNextAttemptAt!.getTime()).toBeGreaterThan(Date.now());
+    expect(await logOf(INV.ar)).toMatchObject({ status: 'retrying', attempts: 1, lastError: 'The e-mail could not be sent (internal error).', providerMessageId: null });
   });
 
   it('the last attempt, or a message the provider refuses, reads failed with the provider\'s reason; a later success reads sent', async () => {
@@ -95,6 +100,9 @@ describe('SEND_INVITATION_EMAIL', () => {
     h.deps.mailer = mailer;
     expect(await sendInvitationEmail(job(INV.refused))).toEqual({ sent: true });
     expect(await row(INV.refused)).toMatchObject({ deliveryStatus: 'sent', deliveryLastError: null });
+    // the log keeps the whole story of the e-mail, not just where it ended
+    expect(await eventsOf(INV.refused)).toEqual(['failed', 'sent']);
+    expect(await logOf(INV.refused)).toMatchObject({ status: 'sent', lastError: null });
   });
 
   it('never shows an internal error to the administrator', () => {

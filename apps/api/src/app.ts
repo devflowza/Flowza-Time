@@ -16,6 +16,7 @@ import { healthRoutes } from './routes/health.js';
 import { registerV1Routes } from './routes/v1/index.js';
 import { registerPublicInvitationRoutes } from './routes/v1/members.js';
 import { registerInboundRoutes } from './routes/inbound/index.js';
+import { registerEmailWebhookRoutes } from './routes/inbound/email-webhooks.js';
 import { edgeGate } from './middleware/edge-gate.js';
 
 /** The paths of the inbound router (device push protocols, vendor webhooks): its edge gate and limiter apply to these only. */
@@ -58,6 +59,7 @@ export function createApp(deps: ApiDeps) {
   const inboundLimit = rateLimit({ name: 'inbound', windowMs: 60_000, max: 1200, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' });
   for (const prefix of INBOUND_PREFIXES) inbound.use(`${prefix}/*`, edge, inboundLimit);
   registerInboundRoutes(inbound, deps);
+  registerEmailWebhookRoutes(inbound, deps);
   app.route('/', inbound);
 
   // Public invitation preview (HR portal Prompt 6b, B-70): no session; edge-gated and limited per client IP before the

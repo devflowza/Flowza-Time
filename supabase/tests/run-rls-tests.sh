@@ -16,6 +16,8 @@ psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_portal
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_leave.sql"
 # notifications & reminders (HR portal Prompt 8): self-contained, every block rolls back
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_notifications.sql"
+# e-mail activity log (20260930000500): self-contained, every block rolls back
+psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_email_log.sql"
 # approval engine v2 (after the other suites: it commits fixtures of its own on top of the isolation ones)
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_approvals.sql"
 # security gate (HR portal Prompt 10): the data API login (PostgREST / pg_graphql) reads and writes nothing

@@ -633,6 +633,13 @@ describe('8-P2-3 delivery: one failing row never aborts, re-mails or stalls the 
     clock = new Date(clock.getTime() + deliveryBackoffMs(1));
     await deliver();
     expect(await deliveryOf('approval.pending', middle, U.approver)).toMatchObject({ status: 'sent', attempts: 2 });
+    // the e-mail activity log (trigger, migration 20260930000500) keeps the whole story of that e-mail
+    const middleNotice = (await outcome('approval.pending', middle, U.approver)).n!;
+    const logged = await a().selectFrom('emailMessages as m').innerJoin('notificationDeliveries as d', 'd.id', 'm.notificationDeliveryId')
+      .select(['m.id', 'm.status', 'm.attempts', 'm.provider', 'm.providerMessageId', 'm.recipient', 'm.category', 'm.kind']).where('d.notificationId', '=', middleNotice.id).executeTakeFirstOrThrow();
+    expect(logged).toMatchObject({ status: 'sent', attempts: 2, provider: 'test', providerMessageId: 'm1', recipient: 'approver@n.local', category: 'approval.pending', kind: 'notification' });
+    const timeline = await a().selectFrom('emailEvents').select(['event', 'detail']).where('messageId', '=', logged.id).orderBy('id').execute();
+    expect(timeline).toEqual([{ event: 'queued', detail: null }, { event: 'attempt_failed', detail: 'token store down' }, { event: 'sent', detail: 'test' }]);
     const mails = h.emails.slice(sentBefore);
     expect(mails.filter((m) => m.to === 'owner@n.local')).toHaveLength(2); // never mailed twice
     expect(mails.filter((m) => m.to === 'approver@n.local')).toHaveLength(1);

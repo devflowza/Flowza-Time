@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, Mail, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
 import type { ModuleKey, Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -128,6 +128,8 @@ export function Sidebar() {
       { to: '/users', label: t('nav.users'), icon: ShieldCheck, permissions: ['user.view'] },
       { to: '/settings', label: t('nav.settings'), icon: Settings, permissions: ['organization.view'] },
       { to: '/audit', label: t('nav.audit'), icon: FileText, permissions: ['audit.view'] },
+      // the e-mail activity log names recipients across the organisation: audit viewers with access to every branch
+      { to: '/email-log', label: t('nav.emailLog'), icon: Mail, visible: can('audit.view') && (membership?.allBranches ?? false) },
     ] },
   ];
   if (me?.user.isPlatformAdmin) sections.push({ items: [{ to: '/adm', label: t('nav.platform'), icon: Network }] });

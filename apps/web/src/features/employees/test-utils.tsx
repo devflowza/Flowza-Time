@@ -18,6 +18,8 @@ import enAudit from '@/locales/en/audit.json';
 import arAudit from '@/locales/ar/audit.json';
 import enSearch from '@/locales/en/search.json';
 import arSearch from '@/locales/ar/search.json';
+import enEmailLog from '@/locales/en/email-log.json';
+import arEmailLog from '@/locales/ar/email-log.json';
 
 /**
  * Shared test harness for the workforce/administration features (employees, organization, users, settings, audit, search).
@@ -54,6 +56,7 @@ registerNamespace('users', enUsers, arUsers);
 registerNamespace('settings', enSettings, arSettings);
 registerNamespace('audit', enAudit, arAudit);
 registerNamespace('search', enSearch, arSearch);
+registerNamespace('email-log', enEmailLog, arEmailLog);
 void i18n.changeLanguage('en');
 
 export function LocationDisplay() {
