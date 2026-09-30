@@ -1,5 +1,5 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { EmployeePortalAccessDto, InvitationDto, InvitationEmailQueuedDto, InviteMemberInput, MemberDto, PermissionDto, PortalAccessInviteInput, PortalAccessResendResultDto, RoleDto, RoleInput, UpdateRoleInput } from '@flowza/contracts';
+import type { EmployeePortalAccessDto, InvitationDeliveryStatus, InvitationDto, InvitationEmailQueuedDto, InviteMemberInput, MemberDto, PermissionDto, PortalAccessInviteInput, PortalAccessResendResultDto, RoleDto, RoleInput, UpdateRoleInput } from '@flowza/contracts';
 import type { z } from 'zod';
 import type { updateMemberSchema } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
@@ -13,9 +13,21 @@ export function useMembers(query: ListQuery) {
   const orgId = useOrgId();
   return useQuery({ queryKey: qk.list(orgId, 'members', query), queryFn: () => api.get<PageEnvelope<MemberDto>>(`/orgs/${orgId}/members`, query), placeholderData: keepPreviousData });
 }
+/**
+ * The e-mail status to show AND to poll on — one derivation for both, so the dialog can never spin on a status it does not
+ * refresh. The row's own status, except: an API that predates the status (a web deploy ahead of the API deploy) sends none,
+ * and a row written by a worker that predates it reads `none` although `delivery_sent_at` is stamped — both are `sent` once
+ * `deliverySentAt` is set, else `queued` (which polls, so the answer shows up on its own).
+ */
+export function invitationDeliveryStatus(inv: Pick<InvitationDto, 'deliveryStatus' | 'deliverySentAt'>): InvitationDeliveryStatus {
+  if (inv.deliveryStatus && !(inv.deliveryStatus === 'none' && inv.deliverySentAt)) return inv.deliveryStatus;
+  return inv.deliverySentAt ? 'sent' : 'queued';
+}
+
 /** An open, unexpired invitation whose e-mail the worker is still working on (queued, or retrying after a failed attempt). */
-export function isDeliveryInFlight(inv: Pick<InvitationDto, 'deliveryStatus' | 'expiresAt'>): boolean {
-  return (inv.deliveryStatus === 'queued' || inv.deliveryStatus === 'retrying') && Date.parse(inv.expiresAt) > Date.now();
+export function isDeliveryInFlight(inv: Pick<InvitationDto, 'deliveryStatus' | 'deliverySentAt' | 'expiresAt'>): boolean {
+  const status = invitationDeliveryStatus(inv);
+  return (status === 'queued' || status === 'retrying') && Date.parse(inv.expiresAt) > Date.now();
 }
 
 /** Open invitations. Polls every 5 s while an e-mail is in flight so its status (sent / retrying / failed) shows up on its own. */

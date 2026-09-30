@@ -13,9 +13,11 @@ import { classify } from '../../runner.js';
  * in the same transaction that sends: a send that throws rolls it back and the retry mints a fresh token. An invitation that
  * was accepted, revoked or has expired by the time the job runs is not sent.
  *
- * Every attempt is recorded on the row for the users page: `sent` (with the mailer that accepted it) in the sending
- * transaction; a failure in a transaction of its own after the sending one rolled back — `retrying` (with when the queue
- * tries again) while attempts remain, `failed` once they are spent or the provider refused the message outright.
+ * Every attempt is recorded on the row for the users page: `sent` (with the mailer that accepted it and its message id) in
+ * the sending transaction; a failure in a transaction of its own after the sending one rolled back — `retrying` (with when
+ * the queue tries again) while attempts remain, `failed` once they are spent or the provider refused the message outright.
+ * The e-mail activity log (public.email_messages / email_events) follows these writes through a trigger on the row
+ * (migration 20260930000500); the provider's message id is what its delivery webhook matches.
  */
 export const invitationEmailPayloadSchema = z.object({ organizationId: uuidSchema, invitationId: uuidSchema });
 
@@ -69,7 +71,7 @@ async function deliver({ job, deps, log }: JobContext, p: InvitationEmailPayload
     const link = `${deps.config.WEB_PUBLIC_URL}/auth/invite?token=${encodeURIComponent(`${p.organizationId}.${secret}`)}`;
     const mail = invitationEmail({ locale: inv.locale, orgName: inv.orgName, inviterName: inv.inviterName?.trim() || null, employeeName: inv.employeeName, link, expiresAt: inv.expiresAt });
     const res = await deps.mailer.send({ to: inv.email, subject: mail.subject, html: mail.html, text: mail.text });
-    await trx.updateTable('invitations').set({ deliveryStatus: 'sent', deliveryProvider: res.provider, deliveryAttempts: job.attempts, deliveryLastAttemptAt: now, deliveryLastError: null, deliveryNextAttemptAt: null })
+    await trx.updateTable('invitations').set({ deliveryStatus: 'sent', deliveryProvider: res.provider, deliveryMessageId: res.id, deliveryAttempts: job.attempts, deliveryLastAttemptAt: now, deliveryLastError: null, deliveryNextAttemptAt: null })
       .where('organizationId', '=', p.organizationId).where('id', '=', inv.id).execute();
     // the address is already on the invitation row; the audit records the delivery, never the token
     await writeAudit(trx, { organizationId: p.organizationId, actorUserId: null, action: 'member.invitation_emailed', entityType: 'invitation', entityId: inv.id, newValue: { provider: res.provider, messageId: res.id }, jobId: job.id });

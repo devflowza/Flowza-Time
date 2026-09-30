@@ -963,6 +963,45 @@ export interface DomainEvents {
   requestId: string | null;
 }
 
+export interface EmailEvents {
+  attempt: number | null;
+  createdAt: Generated<Timestamp>;
+  detail: string | null;
+  event: string;
+  id: Generated<Int8>;
+  messageId: string;
+  occurredAt: Generated<Timestamp>;
+  organizationId: string | null;
+  providerEventId: string | null;
+}
+
+export interface EmailMessages {
+  attempts: Generated<number>;
+  bouncedAt: Timestamp | null;
+  category: string;
+  clickedAt: Timestamp | null;
+  complainedAt: Timestamp | null;
+  createdAt: Generated<Timestamp>;
+  deliveredAt: Timestamp | null;
+  id: Generated<string>;
+  invitationId: string | null;
+  kind: Generated<string>;
+  lastAttemptAt: Timestamp | null;
+  lastError: string | null;
+  nextAttemptAt: Timestamp | null;
+  notificationDeliveryId: Int8 | null;
+  openedAt: Timestamp | null;
+  organizationId: string | null;
+  provider: string | null;
+  providerMessageId: string | null;
+  recipient: string;
+  recipientUserId: string | null;
+  sentAt: Timestamp | null;
+  status: Generated<string>;
+  subject: string | null;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface EmployeeAttendanceGrants {
   createdAt: Generated<Timestamp>;
   employeeId: string;
@@ -1225,6 +1264,10 @@ export interface Invitations {
    * Why the last e-mail attempt failed (provider message, no secrets, at most 500 characters).
    */
   deliveryLastError: string | null;
+  /**
+   * The provider's message id of the last invitation e-mail it accepted (links the invitation to its e-mail log entry and provider events).
+   */
+  deliveryMessageId: string | null;
   /**
    * Approximately when the queue retries the e-mail (while delivery_status = retrying).
    */
@@ -2097,6 +2140,8 @@ export interface DB {
   deviceProviders: DeviceProviders;
   devices: Devices;
   domainEvents: DomainEvents;
+  emailEvents: EmailEvents;
+  emailMessages: EmailMessages;
   employeeAttendanceGrants: EmployeeAttendanceGrants;
   employeeIdentityDocuments: EmployeeIdentityDocuments;
   employeeProviderIdentities: EmployeeProviderIdentities;

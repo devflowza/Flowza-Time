@@ -230,6 +230,29 @@ once). Users & roles → Invitations shows each e-mail's status (sending, e-mail
 reason) and offers **Retry** on a failed one. On `console` the e-mail is only logged: the status reads *Not delivered* and
 the administrator shares the copy link instead. `EMAIL_FROM` must be on a domain verified in Resend.
 
+### E-mail activity log (Audit → E-mail log)
+
+Every invitation and notification e-mail is logged (`public.email_messages` + its timeline `public.email_events`, migration
+`20260930000500`, kept by triggers on `invitations` / `notification_deliveries`): queued, each failed attempt with the
+provider's reason, sent (with Resend's message id), skipped. The page (`/email-log`, audit viewers with access to every
+branch) also warns when e-mails have waited more than 5 minutes for a worker — the symptom of a worker that is down **or
+was not redeployed with the API** (on 2026-09-30 the web was on the delivery-status build while the API and worker were
+not: Resend accepted every invitation, but the dialog said *Sending…* forever) — and when the worker "sent" with the
+console mailer. Deploy with target `all` whenever a change spans the API and the worker.
+
+*Sent* only means Resend accepted the message. To see **delivered, bounced, spam complaints and opens**, connect Resend's
+webhook to the API:
+
+1. Resend dashboard → Webhooks → Add endpoint: `https://<api-host>/webhooks/email/resend`, events `email.delivered`,
+   `email.delivery_delayed`, `email.bounced`, `email.complained`, `email.opened`, `email.clicked`, `email.failed`,
+   `email.suppressed`.
+2. Copy the endpoint's signing secret (`whsec_…`) and set it on the **API**:
+   `flyctl secrets set --app flowza-time-api RESEND_WEBHOOK_SECRET='whsec_…'`.
+3. The path is under `/webhooks/*`, so it goes through the edge gate like the device webhooks — Resend must reach the API
+   through Cloudflare. Requests are verified with the Svix signature (5-minute replay window) and a redelivered event is
+   recorded once; a click's URL is never stored (the invitation link carries its token). Without the secret the endpoint
+   answers 404 and the log shows what the worker did only.
+
 Confirm from the API side after a minute: `/api/ready` reports queue depth, and it should not be climbing with nothing
 draining it.
 

@@ -1,0 +1,29 @@
+{
+  "title": "E-mail log",
+  "subtitle": "Every invitation and notification e-mail this organisation sent: when it was queued, whether it went out, and what the mail provider reported back.",
+  "footnote": "Sent means the e-mail provider accepted the message. Delivered, bounced and spam reports come from the provider's webhook; opens are recorded once. Notification e-mails are kept 90 days.",
+  "empty": "No e-mails yet", "emptyHint": "Invitations and e-mail notifications appear here as soon as they are queued.",
+  "columns": { "time": "Queued", "recipient": "Recipient", "subject": "Subject", "type": "Type", "status": "Status", "attempts": "Attempts", "sentAt": "Sent" },
+  "kinds": { "invitation": "Invitation", "notification": "Notification" },
+  "status": { "queued": "Queued", "retrying": "Retrying", "sent": "Sent", "delivered": "Delivered", "delayed": "Delayed", "bounced": "Bounced", "complained": "Marked as spam", "failed": "Failed", "skipped": "Skipped", "notDelivered": "Not delivered" },
+  "events": {
+    "queued": "Queued", "attempt_failed": "Attempt {{attempt}} failed — will retry", "sent": "Accepted by {{provider}}", "failed": "Sending failed", "skipped": "Not sent",
+    "delivered": "Delivered to the recipient's mail server", "delayed": "Delivery delayed", "bounced": "Bounced", "complained": "Marked as spam by the recipient",
+    "opened": "Opened", "clicked": "Link clicked", "provider_failed": "The provider could not send it", "suppressed": "Suppressed by the provider"
+  },
+  "reasons": {
+    "invitation_revoked": "The invitation was revoked before the e-mail went out.", "invitation_accepted": "The invitation was accepted (with the copied link) before the e-mail went out.",
+    "recipient_disabled": "The recipient's account is disabled.", "recipient_not_member": "The recipient is no longer a member of the organisation.", "invalid_recipient_address": "The recipient has no valid e-mail address."
+  },
+  "filters": { "searchPlaceholder": "Recipient or subject", "allStatuses": "All statuses", "allKinds": "All types" },
+  "summary": {
+    "label": "Last 7 days", "period": "Last 7 days", "sent": "Sent", "sentHint": "Accepted, not confirmed yet", "delivered": "Delivered", "waiting": "Waiting",
+    "problems": "Failed or bounced", "problemsHint": "Failed, bounced or spam"
+  },
+  "banner": {
+    "stalledTitle_one": "{{count}} e-mail has been waiting for more than {{minutes}} minutes", "stalledTitle_other": "{{count}} e-mails have been waiting for more than {{minutes}} minutes",
+    "stalled": "The oldest was queued {{since}}. No worker is sending e-mails: check that the worker is running and was deployed together with the API. Invitation links can still be copied and shared meanwhile.",
+    "console_one": "{{count}} e-mail was not sent: the server has no e-mail provider configured (EMAIL_PROVIDER / RESEND_API_KEY on the worker).", "console_other": "{{count}} e-mails in the last 7 days were not sent: the server has no e-mail provider configured (EMAIL_PROVIDER / RESEND_API_KEY on the worker)."
+  },
+  "detail": { "title": "E-mail", "queuedAt": "Queued", "sentAt": "Sent", "provider": "Provider", "messageId": "Provider message id", "nextAttempt": "Next attempt", "timeline": "Timeline", "awaitingProvider": "No delivery report from the provider yet. Delivery, bounce and spam reports appear here once the provider's webhook is connected." }
+}

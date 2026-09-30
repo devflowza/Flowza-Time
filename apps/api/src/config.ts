@@ -33,6 +33,10 @@ const schema = z.object({
   // what makes CLIENT_IP_HEADER and TRUSTED_PROXY_HOPS trustworthy, since both assume the expected proxy chain. Unset
   // for local development and deployments with no CDN in front.
   EDGE_SHARED_SECRET: z.string().min(16).optional(),
+  // Signing secret of the Resend webhook endpoint (`whsec_…`, Resend dashboard → Webhooks) that feeds the e-mail activity log
+  // with delivered / bounced / complained / opened events at POST /webhooks/email/resend. Unset = the endpoint is off (404);
+  // the log still records what the worker did (queued, retried, sent, failed).
+  RESEND_WEBHOOK_SECRET: z.string().min(16).optional(),
   /**
    * Local development only: lets the Flowza Finance connector be pointed at an http:// / private-host base URL (a mock Finance
    * server). Production keeps the default: https and a public host, validated on save and on every test/sync call.

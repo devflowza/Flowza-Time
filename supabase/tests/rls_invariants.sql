@@ -91,7 +91,9 @@ insert into p10_rpc_only values
   ('attendance_notes'), ('attendance_regularisation_requests'), ('employee_attendance_grants'), ('selfie_checkins'),
   ('shift_swap_requests'), ('geofences'), ('geofence_assignments'),
   -- modules, plans & billing (20260929000600): written by the system context after requirePlatformAdmin only
-  ('organization_modules'), ('billing_invoices'), ('billing_payments');
+  ('organization_modules'), ('billing_invoices'), ('billing_payments'),
+  -- e-mail activity log (20260930000500): written only by the SECURITY DEFINER triggers / provider-event function
+  ('email_messages'), ('email_events');
 grant select on p10_tenant, p10_rpc_only, p10_allow, p10_seen to public;
 grant insert on p10_seen to public;
 set client_min_messages = notice;

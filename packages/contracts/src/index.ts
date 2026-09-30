@@ -14,6 +14,7 @@ export * from './dto/members.js';
 export * from './dto/notifications.js';
 export * from './notifications/catalogue.js';
 export * from './dto/audit-log.js';
+export * from './dto/email-log.js';
 export * from './dto/import-job.js';
 export * from './dto/search-result.js';
 export * from './dto/employee-details.js';

@@ -108,6 +108,17 @@ keys and per-operation options are documented in `apps/worker/src/handlers/sync/
 | `POST /orgs/:orgId/payroll/periods/finalize` | `payroll.finalize` | Requires an active lock covering the period (else 409) → same job with `finalize: true`. |
 | `GET /orgs/:orgId/payroll/summaries?periodStart&periodEnd&branchId&status&search` | `payroll.view` | Paginated `attendance_period_summaries` with employee info. |
 
+## E-mail activity log (migration 20260930000500)
+
+`audit.view` **and access to every branch** (the log names recipients across the organisation; the read policy says the
+same). Rows are written only by the database: triggers on `invitations` / `notification_deliveries` and the provider webhook.
+
+| Endpoint | Notes |
+|---|---|
+| `GET /orgs/:orgId/email-log?status&kind&search&invitationId&from&to&sort&order&page&pageSize` | Paginated `EmailMessageDto` (newest first by default; `sort` = `createdAt`, `status`, `recipient`, `sentAt`). `search` matches the recipient's address or name and the subject. `status` (one, or several comma-separated): `queued`, `retrying`, `sent`, `failed`, `skipped`, `delivered`, `delayed`, `bounced`, `complained`. |
+| `GET /orgs/:orgId/email-log/summary?from&to` | Counts by status for the period (default: the last 7 days), `stalled` (queued / past their retry time for more than 5 minutes — no worker is sending) with `oldestStalledAt`, and `consoleSent` (messages the console mailer "sent": they never left the server). |
+| `GET /orgs/:orgId/email-log/:id` | One message with its timeline (`events`: queued, attempt_failed, sent, failed, skipped, delivered, delayed, bounced, complained, opened, clicked, provider_failed, suppressed). Another organisation's id → 404. |
+
 ## Modules, plans & billing (migration 20260929000600 — full model in `docs/pricing.md`)
 
 Every organisation route of a switchable module answers **`403 FEATURE_DISABLED`** with `details: { reason: 'MODULE_DISABLED', module }`
@@ -168,6 +179,14 @@ over the raw bytes **exactly once**; invalid signature → row `rejected` (body 
 normalised result `{ vendorDeviceId, eventType, transactions, rawBodySha256, rawBodyBytes, verifiedAt }` (never the raw body) +
 `WEBHOOK_EVENT` (`sync`, `{ organizationId, webhookEventId, deviceId }`) and the provider's response. The worker ingests the
 stored transactions and never re-parses or re-verifies (docs/sync-engine.md).
+
+### `POST /webhooks/email/resend`
+Resend's delivery events for the e-mail activity log. Off (404) until the API has `RESEND_WEBHOOK_SECRET`; the Svix
+signature (`svix-id` / `svix-timestamp` / `svix-signature`, or the `webhook-*` names) is verified over the raw body with a
+5-minute replay window (401 otherwise); the body is capped at 64 KB. `email.delivered`, `delivery_delayed`, `bounced`,
+`complained`, `opened`, `clicked`, `failed`, `suppressed` are recorded against the message whose provider id they name
+(`app.record_email_provider_event`, platform context), once per svix id; other types and unknown messages → 200 with
+`result: ignored | unknown_message`. Kept: the event, its time and a bounce / failure reason — never a click's URL.
 
 ## Follow-ups for the integrator
 - ZKTeco terminals post to `/iclock/*` at the root of the configured server URL: a reverse-proxy rewrite
