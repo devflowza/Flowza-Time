@@ -1,4 +1,4 @@
--- FlowZa Time · 20260929000600 · Job queue: lock heartbeat, owned outcomes, bounded and dedupe-safe requeueing
+-- FlowZa Time · 20260929000700 · Job queue: lock heartbeat, owned outcomes, bounded and dedupe-safe requeueing
 --
 -- A running job holds a lock (`locked_at`, `locked_by`) that `jobs.reap_stale` treats as abandoned once it is older than the
 -- job's `lock_timeout_seconds`. Nothing refreshed that lock while a handler ran, so a job that ran longer than its lock
@@ -19,8 +19,8 @@
 -- 5. Requeueing no longer collides with the dedupe index. That index is unique over PENDING rows only, so a job enqueued
 --    while its twin runs waits as the next run; moving the running twin back to 'pending' (a retry in `jobs.fail`, a reap)
 --    then raised unique_violation. For a reap that would fail the whole batch, every minute, so no stale job would be
---    recovered again. A job whose key is already held by a pending job now goes back to the queue without its key (both runs are
---    kept: the key only merges enqueues). `jobs.complete` also no longer rewrites a job that was already archived.
+--    recovered again. A job whose key is already held by a pending job now goes back to the queue without its key (both
+--    runs are kept: the key only merges enqueues). `jobs.complete` also no longer rewrites a job that was already archived.
 -- 6. EXECUTE on the queue functions is revoked from PUBLIC (the API, worker and system roles keep their explicit grants),
 --    and every queue function runs with an empty search_path.
 --

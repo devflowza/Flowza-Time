@@ -107,7 +107,7 @@ export class PgJobQueue implements JobQueue {
       const res = await sql<{ ok: boolean }>`select jobs.complete_owned(${jobId}::bigint, ${workerId}, ${attempt}::int) as ok`.execute(this.db);
       return res.rows[0]?.ok ?? false;
     } catch (err) {
-      // A worker released before migration 20260929000600 is applied completes as the previous release did.
+      // A worker released before migration 20260929000700 is applied completes as the previous release did.
       if (!isUndefinedFunction(err)) throw err;
       await this.complete(jobId);
       return true;
@@ -129,7 +129,7 @@ export class PgJobQueue implements JobQueue {
       const res = await sql<{ ok: boolean }>`select jobs.release_owned(${jobId}::bigint, ${workerId}, ${attempt}::int) as ok`.execute(this.db);
       return res.rows[0]?.ok ?? false;
     } catch (err) {
-      // Without migration 20260929000600 a job cannot be handed back: its lock times out and it is reaped, as before.
+      // Without migration 20260929000700 a job cannot be handed back: its lock times out and it is reaped, as before.
       if (!isUndefinedFunction(err)) throw err;
       return false;
     }

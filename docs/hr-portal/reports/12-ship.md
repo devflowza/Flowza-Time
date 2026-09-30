@@ -8,7 +8,7 @@ was shipped; `main` has since moved to `e9645e2` with other work (PRs #66–#75,
 it runs except the report-schedule step of flow 6, which needs the `reports` worker deployed (§8). Following the six-month
 recalculation through exposed a defect in the job queue that predates this work: a job that runs longer than its lock
 timeout is started again while it is still running; the three six-month recalculations run on the hosted project all show
-it. It is fixed in code and in migration `20260929000600` (§9), which waits for approval and a deploy. Also for the owner: switch on
+it. It is fixed in code and in migration `20260929000700` (§9), which waits for approval and a deploy. Also for the owner: switch on
 leaked-password protection; the Finance-side branch matters only once the Finance connector is switched on.
 
 ## 1. Migrations
@@ -183,7 +183,7 @@ design.
    FlowZa Time (Settings → Integrations) and run "Test connection".
 4. **Deploy the API and worker from `main`** (target `both`): they run PR #66, while `main` carries #67–#75 with their
    migrations already applied (§3, §4). Do it together with item 5 if that is approved first.
-5. **Job-queue fix (§9)**: approve migration `20260929000600`, merge the branch `claude/modest-fermi-fnwqq7` into `main`,
+5. **Job-queue fix (§9)**: approve migration `20260929000700`, merge the branch `claude/modest-fermi-fnwqq7` into `main`,
    then deploy the worker and the reports worker. Either order of migration and deploy is safe: the new worker falls back to
    the previous queue calls while the migration is missing (the heartbeat then logs a warning), and the previous worker keeps
    working on the migrated queue.
@@ -218,7 +218,7 @@ again. It has not happened on hosted yet (no failed reap in the archive); it rep
 
 **Fix** (branch `claude/modest-fermi-fnwqq7`, not yet on `main` or hosted):
 
-- Migration `20260929000600_job_lock_heartbeat.sql`: `jobs.heartbeat(worker, ids, attempts)` extends the locks of the
+- Migration `20260929000700_job_lock_heartbeat.sql`: `jobs.heartbeat(worker, ids, attempts)` extends the locks of the
   jobs a worker still runs and returns the ones it still owns; `jobs.complete_owned` / `jobs.fail_owned` record an outcome
   only while the caller holds the same attempt; `jobs.release_owned` hands a job back at shutdown without spending an
   attempt; `jobs.reap_stale` counts a lost lock as an attempt and dead-letters a job whose attempts are spent; requeueing

@@ -25,7 +25,7 @@ recreates the Supabase-provided pieces (auth/storage/realtime schemas, roles). N
 | `0600_employees` | employees, team_members, employment_history (effective-dated, exclusion constraint), employee_identity_documents, employee_provider_identities |
 | `0700_devices` | device_providers, device_models, devices, device_credentials, pending_devices, device_groups(+members), device_employee_states, device_commands, device_logs (partitioned), `app.ensure_month_partitions` |
 | `0800_sync_engine` | sync_jobs, sync_job_items, sync_attempts, sync_cursors, sync_logs (partitioned), provider_webhook_events |
-| `0900_jobs_queue` | `jobs.queue`, archive, `enqueue`, fair `dequeue`, `complete`, `fail` (backoff/dead-letter), `cancel`, `reap_stale`, `stats` (lock heartbeat and owned outcomes: `20260929000600`) |
+| `0900_jobs_queue` | `jobs.queue`, archive, `enqueue`, fair `dequeue`, `complete`, `fail` (backoff/dead-letter), `cancel`, `reap_stale`, `stats` (lock heartbeat and owned outcomes: `20260929000700`) |
 | `1000_shifts_rules_holidays_leave` | shifts, shift_patterns, shift_assignments, attendance_rule_sets, holiday_calendars, holidays, leave_types, leave_records |
 | `1100_attendance` | attendance_raw_transactions (partitioned, immutable), attendance_events (partitioned, void-only), attendance_daily_records, history, approval_workflows/requests/steps, attendance_corrections, recalculation_requests, period_locks (+ trigger), period_summaries |
 | `1200_reports_imports_notifications_audit` | report_requests, import_jobs(+rows), notifications(+preferences, deliveries), `audit.logs` |
@@ -65,11 +65,11 @@ recreates the Supabase-provided pieces (auth/storage/realtime schemas, roles). N
 | `20260929000300_invitation_delivery_status` | Invitation e-mail delivery status, retries and manual retry |
 | `20260929000400_super_admin_portal` | `/adm` portal: platform-only tenant accounts and notes, fleet counts and memberships read models, platform admins' own audit entries |
 | `20260929000500_device_pin_mappings` | Device PIN mappings a person made survive device syncs (`device_employee_states` marked as manual) |
-| `20260929000600_job_lock_heartbeat` | Job queue: `heartbeat`, `complete_owned` / `fail_owned` / `release_owned` (outcomes only while the worker still holds the same attempt), `reap_stale` dead-letters a job whose attempts are spent, dedupe-safe requeueing, EXECUTE revoked from PUBLIC and a fixed `search_path` on every queue function |
+| `20260929000700_job_lock_heartbeat` | Job queue: `heartbeat`, `complete_owned` / `fail_owned` / `release_owned` (outcomes only while the worker still holds the same attempt), `reap_stale` dead-letters a job whose attempts are spent, dedupe-safe requeueing, EXECUTE revoked from PUBLIC and a fixed `search_path` on every queue function |
 
 Hosted project `liyilmbklsextsggflbb`: every migration above up to `20260929000500` is applied (PR #65's 21 on 2026-09-29,
 each verified against its file by md5, see `docs/hr-portal/reports/12-ship.md` §1, which also records the later ones and the
-three missing from `app.migrations`); `20260929000600` waits for approval.
+three missing from `app.migrations`); `20260929000700` waits for approval.
 
 ## Conventions
 
