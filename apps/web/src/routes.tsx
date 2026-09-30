@@ -15,6 +15,7 @@ import { featureRoutes } from '@/features/routes';
 import { useCan, useEmployeeId } from '@/features/me/use-me';
 import { admRoutes } from '@/features/adm/routes';
 import { UnlinkedHome } from '@/components/layout/unlinked-home';
+import { RouteError } from '@/components/layout/route-error';
 
 function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }
 function NotFound() {
@@ -51,32 +52,41 @@ function HomeRoute() {
   return <Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>;
 }
 
-export const router = createBrowserRouter([
-  { path: '/auth/sign-in', element: <SignInPage /> },
-  { path: '/auth/sign-up', element: <SignUpPage /> },
-  { path: '/auth/forgot', element: <ForgotPasswordPage /> },
-  { path: '/auth/reset', element: <ResetPasswordPage /> },
-  // Public on purpose: the invitee has no account yet, so this cannot sit behind RequireAuth.
-  { path: '/auth/invite', element: <AcceptInvitationPage /> },
-  { path: '/auth/callback', element: <Navigate to="/" replace /> },
-  // the super-admin portal: own sign-in (/adm/login) and shell, outside the tenant AppShell
-  ...admRoutes,
-  {
-    element: <RequireAuth />,
-    children: [
-      { path: 'auth/mfa', element: <MfaSetupRoute /> },
-      {
-        element: <AppShell />,
-        children: [
-          { index: true, element: <HomeRoute /> },
-          { path: 'notifications', element: <NotificationsPage /> },
-          // membership only (no permission, no employee link): the e-mail footer of a member without an employee link lands here
-          { path: 'account/notifications', element: <Suspense fallback={<PageFallback />}><AccountNotificationsPage /></Suspense> },
-          ...featureRoutes,
-          { path: '*', element: <Suspense fallback={<PageFallback />}><Outlet /><NotFound /></Suspense> },
-        ],
-      },
-    ],
-  },
-]);
+export const router = createBrowserRouter([{
+  // Everything sits under one pathless route so no error ever reaches React Router's developer screen; the AppShell and
+  // admin layouts catch their own pages' errors first, inside the shell.
+  errorElement: <RouteError fullScreen />,
+  children: [
+    { path: '/auth/sign-in', element: <SignInPage /> },
+    { path: '/auth/sign-up', element: <SignUpPage /> },
+    { path: '/auth/forgot', element: <ForgotPasswordPage /> },
+    { path: '/auth/reset', element: <ResetPasswordPage /> },
+    // Public on purpose: the invitee has no account yet, so this cannot sit behind RequireAuth.
+    { path: '/auth/invite', element: <AcceptInvitationPage /> },
+    { path: '/auth/callback', element: <Navigate to="/" replace /> },
+    // the super-admin portal: own sign-in (/adm/login) and shell, outside the tenant AppShell
+    ...admRoutes,
+    {
+      element: <RequireAuth />,
+      children: [
+        { path: 'auth/mfa', element: <MfaSetupRoute /> },
+        {
+          element: <AppShell />,
+          // A page that fails to render (e.g. its chunk was replaced by a deploy) is shown inside the shell, not over it.
+          children: [{
+            errorElement: <RouteError />,
+            children: [
+              { index: true, element: <HomeRoute /> },
+              { path: 'notifications', element: <NotificationsPage /> },
+              // membership only (no permission, no employee link): the e-mail footer of a member without an employee link lands here
+              { path: 'account/notifications', element: <Suspense fallback={<PageFallback />}><AccountNotificationsPage /></Suspense> },
+              ...featureRoutes,
+              { path: '*', element: <Suspense fallback={<PageFallback />}><Outlet /><NotFound /></Suspense> },
+            ],
+          }],
+        },
+      ],
+    },
+  ],
+}]);
 export { ComingSoon, PageFallback };
