@@ -30,4 +30,15 @@ describe('ErrorState', () => {
     render(<ErrorState error={new ApiError(NETWORK_ERROR_STATUS, 'NETWORK_ERROR', 'Could not reach the API')} />);
     expect(screen.getByRole('alert')).not.toHaveTextContent('request id');
   });
+
+  it('does not blame the reader\'s connection when something in front of the API answered', () => {
+    render(<ErrorState error={new ApiError(NETWORK_ERROR_STATUS, 'NETWORK_ERROR', 'The API did not answer normally', undefined, { reason: 'BLOCKED' })} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('this is not your connection');
+    expect(screen.getByRole('alert')).not.toHaveTextContent('Check the internet connection');
+  });
+
+  it('points at this device\'s network when the API host did not answer at all', () => {
+    render(<ErrorState error={new ApiError(NETWORK_ERROR_STATUS, 'NETWORK_ERROR', 'Could not reach the API', undefined, { reason: 'UNREACHABLE' })} />);
+    expect(screen.getByRole('alert')).toHaveTextContent('Check the internet connection');
+  });
 });

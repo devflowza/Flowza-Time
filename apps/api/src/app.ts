@@ -1,6 +1,5 @@
 import { Hono } from 'hono';
 import { cors } from 'hono/cors';
-import { secureHeaders } from 'hono/secure-headers';
 import { bodyLimit } from 'hono/body-limit';
 import { compress } from 'hono/compress';
 import type { ApiDeps } from './deps.js';
@@ -18,6 +17,7 @@ import { registerPublicInvitationRoutes } from './routes/v1/members.js';
 import { registerInboundRoutes } from './routes/inbound/index.js';
 import { registerEmailWebhookRoutes } from './routes/inbound/email-webhooks.js';
 import { edgeGate } from './middleware/edge-gate.js';
+import { securityHeaders } from './middleware/security-headers.js';
 
 /** The paths of the inbound router (device push protocols, vendor webhooks): its edge gate and limiter apply to these only. */
 export const INBOUND_PREFIXES = ['/device-push', '/webhooks'] as const;
@@ -32,7 +32,7 @@ export const INVITATION_VALIDATE_LIMIT = { windowMs: 60_000, max: 20 } as const;
 export function createApp(deps: ApiDeps) {
   const app = new Hono<AppEnv>();
   app.use('*', requestContext(deps.log));
-  app.use('*', secureHeaders());
+  app.use('*', securityHeaders());
   app.use('*', bodyLimit({ maxSize: 25 * 1024 * 1024 }));
   app.use('/api/*', cors({ origin: deps.config.webOrigins, allowHeaders: ['Authorization', 'Content-Type', 'X-Request-Id', 'Idempotency-Key'], exposeHeaders: ['X-Request-Id', 'Retry-After'], maxAge: 600, credentials: false }));
   // JSON lists (a day of attendance, an org's employees) are 20–60 KB; gzip keeps them inside the first congestion

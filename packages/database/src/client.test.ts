@@ -51,6 +51,27 @@ describe('createDatabase TLS', () => {
   });
 });
 
+describe('createDatabase idle connection failures', () => {
+  const connectionString = 'postgresql://postgres:postgres@127.0.0.1:54329/flowza';
+  // pg re-emits an idle client's failure on the pool (pg-pool's idleListener); without a listener `emit` throws and the
+  // process exits — which on the API's one machine made every browser report "Could not reach the API".
+  const dropped = Object.assign(new Error('Connection terminated unexpectedly'), { code: 'ECONNRESET' });
+
+  it('does not let a background connection failure crash the process', () => {
+    const { pool } = createDatabase({ connectionString });
+    pools.push(pool);
+    expect(() => pool.emit('error', dropped)).not.toThrow();
+  });
+
+  it('reports the failure to the caller', () => {
+    const seen: Error[] = [];
+    const { pool } = createDatabase({ connectionString, onIdleClientError: (err) => seen.push(err) });
+    pools.push(pool);
+    pool.emit('error', dropped);
+    expect(seen).toEqual([dropped]);
+  });
+});
+
 describe('SUPABASE_ROOT_CA_2021', () => {
   it('is a single PEM certificate', () => {
     expect(SUPABASE_ROOT_CA_2021.match(/-----BEGIN CERTIFICATE-----/g)).toHaveLength(1);

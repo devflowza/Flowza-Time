@@ -31,6 +31,51 @@ export function isNetworkError(error: unknown): boolean {
 }
 
 /**
+ * Why a request got no readable answer (`details.reason` of a network error). `fetch` rejects with the same opaque
+ * TypeError in every case, and all of them used to read "check your connection" — so a security rule in front of the
+ * API, which no connection check will ever clear, was reported as the user's own network and retried as if it were a
+ * dropped packet.
+ * - OFFLINE: the browser says it has no network.
+ * - UNREACHABLE: not even the API host's health check answers — DNS, TLS, a firewall, a VPN or an extension.
+ * - BLOCKED: the host answers, but not with the API: a CDN challenge, block or rate limit, or a gateway error while the
+ *   API restarts. Those responses carry no CORS headers, so the browser hides them from the app.
+ */
+export type NetworkFailureReason = 'OFFLINE' | 'UNREACHABLE' | 'BLOCKED';
+
+/** The network failure's reason, when the error is one (see NetworkFailureReason). */
+export function networkFailureReason(error: unknown): NetworkFailureReason | undefined {
+  if (!isNetworkError(error)) return undefined;
+  const reason = (error as ApiError).details?.reason;
+  return reason === 'OFFLINE' || reason === 'UNREACHABLE' || reason === 'BLOCKED' ? reason : undefined;
+}
+
+const PROBE_TIMEOUT_MS = 5_000;
+let probeInFlight: Promise<boolean> | null = null;
+
+/**
+ * Whether the API host answers at all. A `no-cors` fetch resolves with an opaque response for ANY HTTP answer — a CDN's
+ * 403 challenge or a gateway's 502 included — and rejects only when nothing answered. The API serves /api/health with
+ * `Cross-Origin-Resource-Policy: cross-origin` for this probe (apps/api `middleware/security-headers.ts`). Requests
+ * that fail together share one probe.
+ */
+function apiHostAnswers(): Promise<boolean> {
+  probeInFlight ??= fetch(`${env.apiUrl}/api/health`, {
+    mode: 'no-cors',
+    cache: 'no-store',
+    credentials: 'omit',
+    signal: typeof AbortSignal.timeout === 'function' ? AbortSignal.timeout(PROBE_TIMEOUT_MS) : undefined,
+  }).then(() => true, () => false).finally(() => { probeInFlight = null; });
+  return probeInFlight;
+}
+
+async function diagnoseNetworkFailure(): Promise<NetworkFailureReason> {
+  if (typeof navigator !== 'undefined' && navigator.onLine === false) return 'OFFLINE';
+  return (await apiHostAnswers()) ? 'BLOCKED' : 'UNREACHABLE';
+}
+
+const NETWORK_FAILURE_MESSAGE_KEYS = { OFFLINE: 'common.network.offline', UNREACHABLE: 'common.network.unreachable', BLOCKED: 'common.network.blocked' } as const;
+
+/**
  * Retry policy for queries: a 4xx is an answer and will not change on a retry, anything else might. A network failure
  * is an `ApiError` too, with status 0 — and 0 < 500, so a bare "retry unless status < 500" test reads it as a client
  * error and never retries it. One dropped request on a flaky connection then became the full-screen "Could not reach
@@ -84,9 +129,12 @@ export async function apiFetch<T>(path: string, opts: ApiRequestOptions = {}): P
   try {
     res = await fetch(url, { ...opts, headers, body: opts.body instanceof FormData ? opts.body : opts.body !== undefined ? JSON.stringify(opts.body) : undefined });
   } catch (cause) {
-    // No response at all. Carry the API origin in the message: there is no request id to quote, and "which host could
-    // I not reach" is the only actionable detail a user or a support ticket can act on.
-    throw new ApiError(NETWORK_ERROR_STATUS, 'NETWORK_ERROR', `Could not reach the API at ${env.apiUrl}`, undefined, {
+    // No readable response. Carry the API origin in the message: there is no request id to quote, and "which host" plus
+    // "unreachable or answered by something else" is what a user or a support ticket can act on.
+    if (opts.signal?.aborted) throw cause; // the caller cancelled it: not a network failure, nothing to diagnose
+    const reason = await diagnoseNetworkFailure();
+    throw new ApiError(NETWORK_ERROR_STATUS, 'NETWORK_ERROR', i18n.t(NETWORK_FAILURE_MESSAGE_KEYS[reason], { url: env.apiUrl }), undefined, {
+      reason,
       cause: cause instanceof Error ? cause.message : String(cause),
     });
   }

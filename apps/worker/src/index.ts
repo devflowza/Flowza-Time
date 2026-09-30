@@ -22,6 +22,7 @@ const { db, pool } = createDatabase({
   statementTimeoutMs: 120_000,
   ssl: config.databaseSsl,
   sslCa: config.databaseSsl ? (config.DATABASE_SSL_CA ?? SUPABASE_ROOT_CA_2021) : undefined,
+  onIdleClientError: (err) => log.warn(event('db_idle_client_error', { code: (err as { code?: unknown }).code, message: err.message })),
 });
 const platform = createPlatformClients(config, log);
 
