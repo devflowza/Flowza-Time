@@ -13,6 +13,7 @@ export interface ShiftResolution {
   shift: ShiftDto | null; ruleSet: { id: string; name: string; branchId: string | null } | null; scope: { employeeId: string; teamIds: string[]; departmentId: string | null; branchId: string; organizationId: string };
 }
 export type RuleSetDto = AttendanceRuleSetInput & { id: string; version: number; createdAt: string; updatedAt: string };
-export interface HolidayCalendarDto { id: string; name: string; countryCode: string | null; isDefault: boolean; holidayCount?: number; createdAt: string; updatedAt: string }
+/** `branchCount` = branches that picked this calendar (absent from an older API); the default also applies to branches without one. */
+export interface HolidayCalendarDto { id: string; name: string; countryCode: string | null; isDefault: boolean; holidayCount?: number; branchCount?: number; createdAt: string; updatedAt: string }
 export interface HolidayDto { id: string; calendarId: string; name: string; nameAr: string | null; date: string; endDate: string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; createdAt: string }
 export type WithRecalc<T> = T & { recalculationJobId: string | null };

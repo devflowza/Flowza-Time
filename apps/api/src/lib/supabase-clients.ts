@@ -29,8 +29,8 @@ export function createSupabasePlatformClients(opts: { url: string; serviceRoleKe
       },
     },
     storage: {
-      async signedUrl(bucket, path, expiresInSeconds = 300) {
-        const { data, error } = await client.storage.from(bucket).createSignedUrl(path, expiresInSeconds);
+      async signedUrl(bucket, path, expiresInSeconds = 300, sign) {
+        const { data, error } = await client.storage.from(bucket).createSignedUrl(path, expiresInSeconds, sign?.download ? { download: sign.download } : undefined);
         if (error) { opts.log.warn({ event: 'storage_sign_failed', bucket, err: error.message }); return null; }
         return data.signedUrl;
       },

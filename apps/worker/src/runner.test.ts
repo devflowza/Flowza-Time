@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { JobLease, JobQueue, QueuedJob } from '@flowza/database';
 import type { Logger } from '@flowza/shared';
 import type { WorkerDeps } from './deps.js';
-import { Runner } from './runner.js';
+import { Runner, UNKNOWN_JOB_RETRY_SECONDS } from './runner.js';
 import { HandlerRegistry, isLockLost, type JobHandler } from './handlers/types.js';
 
 interface Deferred<T = void> { promise: Promise<T>; resolve: (v: T) => void }
@@ -275,12 +275,12 @@ describe('Runner job locks', () => {
     expect(q.calls.released).toEqual([]);
   });
 
-  it('dead-letters a job without a handler as its owner', async () => {
+  it('puts a job without a handler back for a newer worker, as its owner', async () => {
     const { q, logger, shutdown } = setup(async () => undefined);
     q.push(job('8', 1, 'NO_SUCH_JOB'));
-    await until(() => q.calls.failed.length === 1, 'dead-letter');
-    expect(q.calls.failed).toEqual([{ id: '8', attempt: 1, code: 'NO_HANDLER', retryAfterSeconds: -1 }]);
-    expect(logger.has('job_handler_missing')).toBe(true);
+    await until(() => q.calls.failed.length === 1, 'retry scheduled');
+    expect(q.calls.failed).toEqual([{ id: '8', attempt: 1, code: 'NO_HANDLER', retryAfterSeconds: UNKNOWN_JOB_RETRY_SECONDS }]);
+    expect(logger.events.find((e) => e.event === 'job_handler_missing')?.fields).toMatchObject({ queue: 'maintenance', retryInSeconds: UNKNOWN_JOB_RETRY_SECONDS });
     await shutdown();
   });
 

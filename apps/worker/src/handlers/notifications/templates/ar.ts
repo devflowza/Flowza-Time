@@ -119,9 +119,9 @@ export const ar: LocaleTemplates = {
     'leave.comp_off_expired': { title: 'انتهت صلاحية رصيد إجازة تعويضية', body: ['رصيد غير مستخدم: {{compOffDays}}، انتهى في {{expiredOn}}'], bodyFallback: 'انتهت صلاحية رصيد تعويضي غير مستخدم.', cta: 'عرض إجازاتي' },
 
     // ----- التقارير -------------------------------------------------------------------------------------------------------
-    'report.ready': { title: 'التقرير جاهز: {{reportName}}', body: ['تقريرك جاهز للتنزيل من صفحة التقارير'], cta: 'فتح التقارير' },
+    'report.ready': { title: 'التقرير جاهز: {{reportName}}', body: ['تقريرك جاهز — افتحه لعرضه أو تنزيله.'], cta: 'عرض التقرير' },
     'report.failed': { title: 'تعذّر إنشاء التقرير: {{reportName}}', body: ['{{error}}'], bodyFallback: 'تعذّر إنشاء التقرير. حاول مرة أخرى أو تواصل مع الدعم.', cta: 'فتح التقارير' },
-    'report.scheduled_delivery': { title: 'تقرير لك: {{reportName}}', body: ['{{period}}', '{{scheduleName}}'], bodyFallback: 'نزّله من صفحة التقارير.', cta: 'تنزيل التقرير' },
+    'report.scheduled_delivery': { title: 'تقرير لك: {{reportName}}', body: ['{{period}}', '{{scheduleName}}'], bodyFallback: 'افتحه لعرضه أو تنزيله.', cta: 'عرض التقرير' },
     'report.scheduled_delivery#send_now': { title: 'تمت مشاركة تقرير معك: {{reportName}}' },
     'report.scheduled_delivery#scheduled': { title: 'تقرير مجدول: {{reportName}}' },
 

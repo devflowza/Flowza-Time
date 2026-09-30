@@ -1,11 +1,11 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, REPORT_TYPE_DEFINITIONS, type CreateReportRequest, type PayrollPeriodActionInput, type PayrollPeriodDto, type ReportRequestDto, type ReportTypeDefinition } from '@flowza/contracts';
+import { DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, REPORT_TYPE_DEFINITIONS, type CreateReportRequest, type ReportDisposition, type PayrollPeriodActionInput, type PayrollPeriodDto, type ReportRequestDto, type ReportTypeDefinition } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
-import type { MembershipGrant } from '@flowza/domain';
+import { isSelfScopedReport, SELF_SCOPE_PARAMETER, SELF_SCOPE_PERMISSION, type MembershipGrant } from '@flowza/domain';
 import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
-import { branchFilter, hasPermission, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
+import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
 import { type Actor, audit, runUser } from '../../lib/service.js';
 import { enqueueJob } from '../../lib/jobs.js';
 import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
@@ -121,17 +121,49 @@ export async function getReport(deps: ApiDeps, actor: Actor, orgId: string, id: 
   const grant = requirePermission(actor.principal, orgId, 'report.view');
   return runUser(deps.db, actor, async (trx) => toReportDto(await loadReport(trx, actor, orgId, id, grant)));
 }
-export async function downloadReport(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<{ url: string; expiresInSeconds: number; fileName: string }> {
-  // a download IS the export: report.export was declared for it and is enforced here (HR portal Prompt 6a), on top of report.view
-  const grant = requirePermission(actor.principal, orgId, 'report.view', 'report.export');
+/**
+ * A report shared with an employee about THEMSELVES (a self-scoped copy, @flowza/domain `scopeReportForRecipient` kind SELF): the
+ * recipient holds no report permission, only `attendance.view_own`. They may open exactly the copies addressed to them whose
+ * parameters are about their own employee record — never anybody else's report, never a report they merely requested.
+ */
+async function loadOwnSelfReport(trx: Trx, actor: Actor, orgId: string, id: string, grant: MembershipGrant): Promise<ReportRow> {
+  const row = (await reportQuery(trx, orgId).select(REPORT_COLUMNS).where('r.id', '=', id).where('r.requestedBy', '=', actor.userId).executeTakeFirst()) as ReportRow | undefined;
+  // anything but their own copy is refused exactly as before the self path existed: the export permissions are missing (403)
+  if (!row || !isSelfScopedReport(row.reportType, jsonObject(row.parameters), grant.employeeId)) requirePermission(actor.principal, orgId, 'report.view', 'report.export');
+  return row!;
+}
+
+export async function downloadReport(deps: ApiDeps, actor: Actor, orgId: string, id: string, disposition: ReportDisposition = 'attachment'): Promise<{ url: string; expiresInSeconds: number; fileName: string; disposition: ReportDisposition }> {
+  // a download IS the export: report.export was declared for it and is enforced here (HR portal Prompt 6a), on top of report.view —
+  // except for a copy of a report about the caller themselves, shared with them (they see that attendance anyway)
+  const member = requireMembership(actor.principal, orgId);
+  const full = hasPermission(member, 'report.view') && hasPermission(member, 'report.export');
+  const grant = full || (member.employeeId && hasPermission(member, SELF_SCOPE_PERMISSION)) ? member : requirePermission(actor.principal, orgId, 'report.view', 'report.export');
   return runUser(deps.db, actor, async (trx) => {
-    const r = await loadReport(trx, actor, orgId, id, grant);
+    const r = full ? await loadReport(trx, actor, orgId, id, grant) : await loadOwnSelfReport(trx, actor, orgId, id, grant);
     if (r.status !== 'COMPLETED' || !r.filePath) throw errors.invalidState(`The report is ${r.status}; only completed reports can be downloaded.`);
     if (r.expiresAt && r.expiresAt < new Date()) throw errors.invalidState('The report file has expired; request it again.');
-    const url = await deps.storage.signedUrl('reports', r.filePath, 300);
+    const fileName = `${r.reportType}-${isoDate(r.createdAt)}.${r.format}`;
+    const url = await deps.storage.signedUrl('reports', r.filePath, 300, disposition === 'attachment' ? { download: fileName } : undefined);
     if (!url) throw errors.dependency('Report storage');
-    await audit(trx, actor, orgId, 'report.exported', 'report_request', { entityId: id, branchId: r.branchId, newValue: { reportType: r.reportType, format: r.format, rowCount: r.rowCount } });
-    return { url, expiresInSeconds: 300, fileName: `${r.reportType}-${isoDate(r.createdAt)}.${r.format}` };
+    await audit(trx, actor, orgId, 'report.exported', 'report_request', { entityId: id, branchId: r.branchId, newValue: { reportType: r.reportType, format: r.format, rowCount: r.rowCount, disposition, ...(full ? {} : { selfCopy: true }) } });
+    return { url, expiresInSeconds: 300, fileName, disposition };
+  });
+}
+
+/** GET /orgs/:orgId/me/reports — the reports about the caller shared with them (self-scoped copies), newest first. */
+export async function listMyReports(deps: ApiDeps, actor: Actor, orgId: string, q: { page: number; pageSize: number; status?: string }) {
+  const member = requireMembership(actor.principal, orgId);
+  if (!member.employeeId) throw errors.forbidden('Your account is not linked to an employee record in this organisation.');
+  if (!hasPermission(member, SELF_SCOPE_PERMISSION)) requirePermission(actor.principal, orgId, SELF_SCOPE_PERMISSION);
+  const employeeId = member.employeeId;
+  return runUser(deps.db, actor, async (trx) => {
+    let base = reportQuery(trx, orgId).where('r.requestedBy', '=', actor.userId).where(sql<boolean>`r.parameters ->> ${SELF_SCOPE_PARAMETER} = ${employeeId}`);
+    if (q.status) base = base.where('r.status', '=', q.status as never);
+    const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
+    const page = pageOf(q);
+    const rows = (await base.select(REPORT_COLUMNS).orderBy('r.createdAt', 'desc').limit(page.pageSize).offset(page.offset).execute()) as ReportRow[];
+    return { data: rows.filter((r) => isSelfScopedReport(r.reportType, jsonObject(r.parameters), employeeId)).map(toReportDto), total };
   });
 }
 export async function cancelReport(deps: ApiDeps, actor: Actor, orgId: string, id: string) {

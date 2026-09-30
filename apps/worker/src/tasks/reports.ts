@@ -1,4 +1,5 @@
 import { sql } from 'kysely';
+import { REPORT_DELIVERY_QUEUE } from '@flowza/contracts';
 import { withContext } from '@flowza/database';
 import { event } from '@flowza/shared';
 import type { WorkerDeps } from '../deps.js';
@@ -46,7 +47,7 @@ export async function scheduleDueReports(deps: Pick<WorkerDeps, 'db' | 'queue' |
     if (inFlight.has(dedupeKey)) { alreadyQueued += 1; continue; }
     try {
       await deps.queue.enqueue({
-        queue: 'reports', jobType: REPORT_DELIVERY_JOB_TYPE, organizationId: s.organizationId,
+        queue: REPORT_DELIVERY_QUEUE, jobType: REPORT_DELIVERY_JOB_TYPE, organizationId: s.organizationId,
         payload: { organizationId: s.organizationId, mode: 'schedule', scheduleId: s.id, scheduledFor },
         priority: 4, dedupeKey, maxAttempts: 3,
       });

@@ -89,6 +89,7 @@ export function Sidebar() {
       { to: '/my/checkin', label: t('portal-attendance:nav.checkin'), icon: Fingerprint },
       { to: '/my/requests', label: t('portal-attendance:nav.requests'), icon: Inbox },
       { to: '/my/shift', label: t('portal-attendance:nav.shift'), icon: CalendarClock },
+      { to: '/my/reports', label: t('portal:nav.reports'), icon: FileText },
     ] }] : []),
     ...(isManager || team.page ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound }] }] : []),
     { label: t('nav.sections.workforce'), items: [

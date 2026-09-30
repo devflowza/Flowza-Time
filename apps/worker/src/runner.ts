@@ -128,8 +128,12 @@ export class Runner {
     const log = rootLog.child({ jobId: job.id, jobType: job.jobType, organizationId: job.organizationId, correlationId: job.correlationId, attempt: job.attempts });
     const reg = this.handlers.get(job.jobType);
     if (!reg) {
-      log.error(event('job_handler_missing'));
-      await this.settle(log, () => queue.failOwned(job.id, config.workerId, job.attempts, 'NO_HANDLER', `no handler registered for ${job.jobType}`, DEAD_LETTER_NOW));
+      // A job type this build does not know was almost always enqueued by a NEWER API or worker (one app redeployed before the
+      // other — how every "Send now" of a report died on 2026-09-29: the reports worker predated RUN_REPORT_SCHEDULE). Killing it
+      // loses the user's request for good; putting it back lets a current worker take it, or this one once it is redeployed. It
+      // still dead-letters after the job's max attempts, so a type nobody knows cannot circulate for ever.
+      log.error(event('job_handler_missing', { queue: job.queueName, retryInSeconds: UNKNOWN_JOB_RETRY_SECONDS }), `no handler for ${job.jobType} in this build — released for a newer worker`);
+      await this.settle(log, () => queue.failOwned(job.id, config.workerId, job.attempts, 'NO_HANDLER', `no handler registered for ${job.jobType} on this worker (an older build?)`, UNKNOWN_JOB_RETRY_SECONDS));
       return;
     }
     const lease: Lease = { attempts: job.attempts, controller: new AbortController(), lost: false, settling: false };
@@ -186,6 +190,9 @@ export class Runner {
     }
   }
 }
+
+/** How long a job whose type this worker does not know waits before any worker may try it again. */
+export const UNKNOWN_JOB_RETRY_SECONDS = 600;
 
 export function classify(err: unknown): { code: string; message: string; retryable: boolean; retryAfterMs?: number } {
   if (ProviderError.is(err)) return { code: err.code, message: err.message, retryable: err.retryable, retryAfterMs: err.retryAfterMs };

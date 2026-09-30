@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
-import { Ban, Download, Lock, RefreshCw, X } from 'lucide-react';
+import { Ban, Download, Eye, Lock, RefreshCw, X } from 'lucide-react';
 import { REPORT_STATUSES } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
@@ -16,6 +16,7 @@ import { openSignedUrl, useReportMutations, useReports, useReportTypes, type Rep
 import { ReportRequestPanel } from '../components/report-request-panel';
 import { ShareReportDialog, type ShareSpec } from '../components/share-report-dialog';
 import { SchedulesPanel } from '../components/schedules-panel';
+import { ReportViewerDialog, type ViewableReport } from '../components/report-viewer';
 import '../schedules-i18n';
 
 const ALL = '__all__';
@@ -50,19 +51,27 @@ export default function ReportsPage() {
   const hasFilters = !!f['status'] || !!f['reportType'];
   const now = q.dataUpdatedAt || 0; // pure: re-evaluated on every refetch (the list polls while reports run)
   const isExpired = (r: ReportDto) => r.status === 'EXPIRED' || (!!r.expiresAt && new Date(r.expiresAt).getTime() < now);
-  const doDownload = (r: Pick<ReportDto, 'id'>) => download.mutate(r.id, { onSuccess: (res) => { openSignedUrl(res.url, res.fileName); toast.success(t('list.downloadStarted'), { description: t('list.linkExpires', { seconds: res.expiresInSeconds }) }); }, onError: toastError });
-  // ?download=<reportId>: the link of a "report shared with you" notification — the file is fetched now, through this session
+  const doDownload = (r: Pick<ReportDto, 'id'>) => download.mutate({ id: r.id, disposition: 'attachment' }, { onSuccess: (res) => { openSignedUrl(res.url, res.fileName); toast.success(t('list.downloadStarted'), { description: t('list.linkExpires', { seconds: res.expiresInSeconds }) }); }, onError: toastError });
+  // ?view=<reportId> (a "report ready" / "report shared with you" notification — in-app or e-mailed) opens the report in the
+  // viewer while the parameter is in the URL (closing the viewer removes it); ?download=<reportId> (links sent before the viewer
+  // existed) downloads it once. The file is always fetched through this session.
   const [params, setParams] = useSearchParams();
-  const pending = params.get('download');
+  const urlView = params.get('view');
+  const pendingDownload = params.get('download');
+  const [picked, setViewing] = useState<ViewableReport | null>(null);
+  const viewing = picked ?? (urlView && canExport ? { id: urlView } : null);
+  const dropParam = (key: 'view' | 'download') => setParams((prev) => { const n = new URLSearchParams(prev); n.delete(key); return n; }, { replace: true });
+  const closeViewer = () => { setViewing(null); if (urlView) dropParam('view'); };
   const handled = useRef<string | null>(null);
   useEffect(() => {
-    if (!pending || handled.current === pending) return;
-    handled.current = pending;
-    setParams((prev) => { const n = new URLSearchParams(prev); n.delete('download'); return n; }, { replace: true });
+    const id = pendingDownload ?? (urlView && !canExport ? urlView : null);
+    if (!id || handled.current === id) return;
+    handled.current = id;
+    dropParam(pendingDownload ? 'download' : 'view');
     if (!canExport) { toast.error(t('reportSchedules:download.noExport')); return; }
-    doDownload({ id: pending });
+    doDownload({ id });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [pending, canExport]);
+  }, [urlView, pendingDownload, canExport]);
 
   const columns = useMemo<ColumnDef<ReportDto, unknown>[]>(() => [
     { id: 'type', header: t('list.type'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{t(`types.${row.original.reportType}.name`, { defaultValue: row.original.reportType })}</p><p className="text-xs text-muted-foreground tnum">{paramsSummary(row.original.parameters, t as unknown as (k: string, o?: Record<string, unknown>) => string)}</p></div> },
@@ -76,7 +85,7 @@ export default function ReportsPage() {
       return (
         <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
           {r.status === 'COMPLETED' && !isExpired(r) ? (canExport
-            ? <Button size="sm" onClick={() => doDownload(r)} loading={download.isPending && download.variables === r.id}><Download /> {tc('common.download')}</Button>
+            ? <><Button size="sm" variant="outline" onClick={() => setViewing(r)}><Eye /> {t('list.view')}</Button><Button size="sm" onClick={() => doDownload(r)} loading={download.isPending && typeof download.variables === 'object' && download.variables.id === r.id}><Download /> {tc('common.download')}</Button></>
             : <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title={t('reportSchedules:download.noExport')}><Lock className="size-3" /> {t('reportSchedules:download.locked')}</span>) : null}
           {r.status === 'QUEUED' ? <Button size="sm" variant="ghost" onClick={() => setCancelling(r)}><Ban /> {t('list.cancel')}</Button> : null}
           {isExpired(r) && r.status !== 'FAILED' ? <span className="text-xs text-muted-foreground">{t('list.expiredHint')}</span> : null}
@@ -110,10 +119,11 @@ export default function ReportsPage() {
               {hasFilters ? <Button variant="ghost" size="sm" onClick={table.clearFilters}><X /> {tc('common.clearFilters')}</Button> : null}
             </>
           }
-          renderCard={(r) => <div className="space-y-1"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{t(`types.${r.reportType}.name`, { defaultValue: r.reportType })}</span><JobStatusBadge status={isExpired(r) && r.status === 'COMPLETED' ? 'EXPIRED' : r.status} /></div><p className="text-xs text-muted-foreground tnum">{fmtDateTime(r.createdAt, tz)}</p>{r.status === 'COMPLETED' && !isExpired(r) && canExport ? <Button size="sm" onClick={(e) => { e.stopPropagation(); doDownload(r); }}><Download /> {tc('common.download')}</Button> : null}</div>}
+          renderCard={(r) => <div className="space-y-1"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{t(`types.${r.reportType}.name`, { defaultValue: r.reportType })}</span><JobStatusBadge status={isExpired(r) && r.status === 'COMPLETED' ? 'EXPIRED' : r.status} /></div><p className="text-xs text-muted-foreground tnum">{fmtDateTime(r.createdAt, tz)}</p>{r.status === 'COMPLETED' && !isExpired(r) && canExport ? <div className="flex gap-1"><Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setViewing(r); }}><Eye /> {t('list.view')}</Button><Button size="sm" onClick={(e) => { e.stopPropagation(); doDownload(r); }}><Download /> {tc('common.download')}</Button></div> : null}</div>}
         />
       </section>
       {sharing ? <ShareReportDialog spec={sharing} onClose={() => setSharing(null)} /> : null}
+      <ReportViewerDialog report={viewing} onClose={closeViewer} />
       <ConfirmDialog open={!!cancelling} onOpenChange={(o) => !o && setCancelling(null)} title={t('list.cancelTitle')} description={t('list.cancelHint')} confirmLabel={t('list.cancel')} destructive loading={cancel.isPending}
         onConfirm={() => { if (!cancelling) return; cancel.mutate(cancelling.id, { onSuccess: () => { toast.success(t('list.cancelled')); setCancelling(null); }, onError: toastError }); }} />
     </div>
