@@ -23,7 +23,7 @@
   "banner": {
     "stalledTitle_one": "{{count}} e-mail has been waiting for more than {{minutes}} minutes", "stalledTitle_other": "{{count}} e-mails have been waiting for more than {{minutes}} minutes",
     "stalled": "The oldest was queued {{since}}. No worker is sending e-mails: check that the worker is running and was deployed together with the API. Invitation links can still be copied and shared meanwhile.",
-    "console_one": "{{count}} e-mail was not sent: the server has no e-mail provider configured (EMAIL_PROVIDER / RESEND_API_KEY on the worker).", "console_other": "{{count}} e-mails in the last 7 days were not sent: the server has no e-mail provider configured (EMAIL_PROVIDER / RESEND_API_KEY on the worker)."
+    "console_one": "{{count}} e-mail was not sent: the server has no e-mail provider configured (EMAIL_PROVIDER on the worker).", "console_other": "{{count}} e-mails in the last 7 days were not sent: the server has no e-mail provider configured (EMAIL_PROVIDER on the worker)."
   },
   "detail": { "title": "E-mail", "queuedAt": "Queued", "sentAt": "Sent", "provider": "Provider", "messageId": "Provider message id", "nextAttempt": "Next attempt", "timeline": "Timeline", "awaitingProvider": "No delivery report from the provider yet. Delivery, bounce and spam reports appear here once the provider's webhook is connected." }
 }
