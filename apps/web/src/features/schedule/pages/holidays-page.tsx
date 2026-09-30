@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
 import { useSearchParams } from 'react-router';
-import { CalendarOff, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+import { AlertTriangle, CalendarOff, CalendarPlus, Pencil, Plus, Star, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ConfirmDialog, EmptyState, ErrorState, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@/components/ui';
 import { fmtDate, todayIso } from '@/lib/format';
@@ -30,9 +30,10 @@ export default function HolidaysPage() {
   const calendars = useHolidayCalendars();
   const calendarId = params.get('calendarId') ?? calendars.data?.find((c) => c.isDefault)?.id ?? calendars.data?.[0]?.id ?? null;
   const holidays = useHolidays({ calendarId: calendarId ?? undefined, year }, !!calendarId);
-  const { removeCalendar, removeHoliday } = useHolidayMutations();
+  const { removeCalendar, removeHoliday, updateCalendar } = useHolidayMutations();
   const [calDialog, setCalDialog] = useState<{ open: boolean; calendar: HolidayCalendarDto | null }>({ open: false, calendar: null });
-  const [holDialog, setHolDialog] = useState<{ open: boolean; holiday: HolidayDto | null }>({ open: false, holiday: null });
+  // calendarId null = "mark a holiday" without a calendar chosen: the default one (created by the API when the organisation has none)
+  const [holDialog, setHolDialog] = useState<{ open: boolean; holiday: HolidayDto | null; calendarId: string | null }>({ open: false, holiday: null, calendarId: null });
   const [deletingCal, setDeletingCal] = useState<HolidayCalendarDto | null>(null);
   const [deletingHol, setDeletingHol] = useState<HolidayDto | null>(null);
   const setParam = (k: string, v: string) => setParams((p) => { const n = new URLSearchParams(p); n.set(k, v); return n; });
@@ -47,13 +48,13 @@ export default function HolidaysPage() {
 
   return (
     <div className="page-container">
-      <PageHeader title={t('holidays.title')} description={t('holidays.subtitle')} actions={canManage ? <Button variant="outline" size="sm" onClick={() => setCalDialog({ open: true, calendar: null })}><Plus /> {t('holidays.addCalendar')}</Button> : undefined} />
+      <PageHeader title={t('holidays.title')} description={t('holidays.subtitle')} actions={canManage ? <div className="flex gap-2"><Button variant="outline" size="sm" onClick={() => setCalDialog({ open: true, calendar: null })}><Plus /> {t('holidays.addCalendar')}</Button><Button size="sm" onClick={() => setHolDialog({ open: true, holiday: null, calendarId: calendarId })}><CalendarPlus /> {t('holidays.mark')}</Button></div> : undefined} />
       <div className="grid gap-4 lg:grid-cols-[300px_1fr]">
         <aside className="space-y-2">
           <h2 className="px-1 text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('holidays.calendars')}</h2>
           {calendars.isLoading ? <div className="space-y-2">{[0, 1].map((i) => <Skeleton key={i} className="h-14 w-full" />)}</div>
             : calendars.isError ? <ErrorState error={calendars.error} onRetry={() => void calendars.refetch()} />
-            : !calendars.data || calendars.data.length === 0 ? <EmptyState icon={CalendarOff} title={t('holidays.noCalendars')} description={t('holidays.noCalendarsHint')} action={canManage ? <Button size="sm" onClick={() => setCalDialog({ open: true, calendar: null })}><Plus /> {t('holidays.addCalendar')}</Button> : undefined} />
+            : !calendars.data || calendars.data.length === 0 ? <EmptyState icon={CalendarOff} title={t('holidays.noCalendars')} description={canManage ? t('holidays.noCalendarsMarkHint') : t('holidays.noCalendarsHint')} action={canManage ? <Button size="sm" onClick={() => setHolDialog({ open: true, holiday: null, calendarId: null })}><CalendarPlus /> {t('holidays.mark')}</Button> : undefined} />
             : (
               <ul className="space-y-1.5">
                 {calendars.data.map((c) => (
@@ -61,7 +62,7 @@ export default function HolidaysPage() {
                     <div className={cn('flex w-full items-center gap-2 rounded-lg border bg-card p-2 ps-3 transition-colors hover:border-brand-300', c.id === calendarId && 'border-brand-500 ring-1 ring-brand-500')}>
                       <button type="button" aria-current={c.id === calendarId} onClick={() => setParam('calendarId', c.id)} className="min-w-0 flex-1 rounded text-start focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
                         <p className="flex items-center gap-1.5 truncate text-sm font-medium">{c.name}{c.isDefault ? <Star className="size-3.5 fill-amber-400 text-amber-400" aria-label={t('holidays.default')} /> : null}</p>
-                        <p className="text-xs text-muted-foreground">{c.countryCode ?? '—'} · {t('holidays.count', { count: c.holidayCount ?? 0 })}</p>
+                        <p className="text-xs text-muted-foreground">{c.countryCode ?? '—'} · {t('holidays.count', { count: c.holidayCount ?? 0 })}{c.branchCount ? ` · ${t('holidays.usedBy', { count: c.branchCount })}` : ''}</p>
                       </button>
                       {canManage ? <RowActions actions={[{ key: 'edit', label: tc('common.edit'), icon: <Pencil />, onSelect: () => setCalDialog({ open: true, calendar: c }) }, { key: 'delete', label: tc('common.delete'), icon: <Trash2 />, destructive: true, onSelect: () => setDeletingCal(c) }]} /> : null}
                     </div>
@@ -77,12 +78,19 @@ export default function HolidaysPage() {
               <SelectContent>{years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
             </Select>
             {selected ? <p className="text-sm text-muted-foreground">{selected.name}</p> : null}
-            {canManage && calendarId ? <Button size="sm" className="ms-auto" onClick={() => setHolDialog({ open: true, holiday: null })}><Plus /> {t('holidays.add')}</Button> : null}
+            {canManage && calendarId ? <Button size="sm" className="ms-auto" onClick={() => setHolDialog({ open: true, holiday: null, calendarId })}><Plus /> {t('holidays.add')}</Button> : null}
           </div>
+          {selected && !selected.isDefault && selected.branchCount === 0 ? (
+            <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" role="status" data-testid="calendar-unused">
+              <AlertTriangle className="size-4 shrink-0" aria-hidden />
+              <p className="min-w-0 flex-1">{t('holidays.appliesToNobody')}</p>
+              {canManage ? <Button size="sm" variant="outline" loading={updateCalendar.isPending} onClick={() => updateCalendar.mutate({ id: selected.id, input: { isDefault: true } }, { onSuccess: () => toast.success(t('holidays.madeDefault')), onError: toastError })}><Star /> {t('holidays.makeDefault')}</Button> : null}
+            </div>
+          ) : null}
           {!calendarId ? <EmptyState icon={CalendarOff} title={t('holidays.selectCalendar')} />
             : holidays.isLoading && !holidays.data ? <div className="space-y-2">{[0, 1, 2].map((i) => <Skeleton key={i} className="h-16 w-full" />)}</div>
             : holidays.isError ? <ErrorState error={holidays.error} onRetry={() => void holidays.refetch()} />
-            : groups.length === 0 ? <EmptyState icon={CalendarOff} title={t('holidays.empty', { year })} description={t('holidays.emptyHint')} action={canManage ? <Button onClick={() => setHolDialog({ open: true, holiday: null })}><Plus /> {t('holidays.add')}</Button> : undefined} />
+            : groups.length === 0 ? <EmptyState icon={CalendarOff} title={t('holidays.empty', { year })} description={t('holidays.emptyHint')} action={canManage ? <Button onClick={() => setHolDialog({ open: true, holiday: null, calendarId })}><Plus /> {t('holidays.add')}</Button> : undefined} />
             : (
               <div className={cn('space-y-4', holidays.isFetching && 'opacity-70')}>
                 {groups.map(([month, items]) => (
@@ -96,7 +104,7 @@ export default function HolidaysPage() {
                             <p className="flex flex-wrap items-center gap-2 text-sm font-medium"><span className="truncate">{h.name}</span>{h.nameAr ? <span className="text-xs font-normal text-muted-foreground" dir="rtl">{h.nameAr}</span> : null}{h.isTentative ? <Badge variant="warning">{t('holidays.tentative')}</Badge> : null}{h.isHalfDay ? <Badge variant="outline">{t('holidays.halfDay')}</Badge> : null}</p>
                             <p className="text-xs text-muted-foreground">{h.endDate && h.endDate !== h.date ? <span className="tnum">{fmtDate(h.date)} → {fmtDate(h.endDate)} · </span> : null}<Badge variant={TYPE_TONE[h.type] ?? 'secondary'} className="me-1">{t(`holidays.types.${h.type}`, { defaultValue: h.type })}</Badge>{h.branchIds && h.branchIds.length ? h.branchIds.map((b) => branches.byId.get(b)?.name ?? b.slice(0, 8)).join(', ') : t('holidays.allBranches')}</p>
                           </div>
-                          {canManage ? <RowActions actions={[{ key: 'edit', label: tc('common.edit'), icon: <Pencil />, onSelect: () => setHolDialog({ open: true, holiday: h }) }, { key: 'delete', label: tc('common.delete'), icon: <Trash2 />, destructive: true, onSelect: () => setDeletingHol(h) }]} /> : null}
+                          {canManage ? <RowActions actions={[{ key: 'edit', label: tc('common.edit'), icon: <Pencil />, onSelect: () => setHolDialog({ open: true, holiday: h, calendarId: h.calendarId }) }, { key: 'delete', label: tc('common.delete'), icon: <Trash2 />, destructive: true, onSelect: () => setDeletingHol(h) }]} /> : null}
                         </div>
                       ))}
                     </CardContent>
@@ -106,8 +114,9 @@ export default function HolidaysPage() {
             )}
         </section>
       </div>
-      <CalendarDialog key={`${calDialog.open}-${calDialog.calendar?.id ?? 'new'}`} open={calDialog.open} onOpenChange={(o) => setCalDialog((d) => ({ ...d, open: o }))} calendar={calDialog.calendar} />
-      {calendarId ? <HolidayDialog key={`${holDialog.open}-${holDialog.holiday?.id ?? 'new'}`} open={holDialog.open} onOpenChange={(o) => setHolDialog((d) => ({ ...d, open: o }))} calendarId={calendarId} holiday={holDialog.holiday} /> : null}
+      <CalendarDialog key={`${calDialog.open}-${calDialog.calendar?.id ?? 'new'}`} open={calDialog.open} onOpenChange={(o) => setCalDialog((d) => ({ ...d, open: o }))} calendar={calDialog.calendar} first={calendars.isSuccess && calendars.data.length === 0} />
+      <HolidayDialog key={`${holDialog.open}-${holDialog.holiday?.id ?? 'new'}-${holDialog.calendarId ?? 'default'}`} open={holDialog.open} onOpenChange={(o) => setHolDialog((d) => ({ ...d, open: o }))} calendarId={holDialog.calendarId} holiday={holDialog.holiday}
+        onCreated={(h) => { if (h.calendarId !== calendarId || h.date.slice(0, 4) !== String(year)) setParams((p) => { const n = new URLSearchParams(p); n.set('calendarId', h.calendarId); n.set('year', h.date.slice(0, 4)); return n; }); }} />
       <ConfirmDialog open={!!deletingCal} onOpenChange={(o) => !o && setDeletingCal(null)} title={t('holidays.deleteCalendarTitle', { name: deletingCal?.name ?? '' })} description={t('holidays.deleteCalendarHint')} confirmLabel={tc('common.delete')} destructive loading={removeCalendar.isPending}
         onConfirm={() => { if (!deletingCal) return; removeCalendar.mutate(deletingCal.id, { onSuccess: () => { toast.success(t('holidays.calendarDeleted')); setDeletingCal(null); if (deletingCal.id === calendarId) setParams((p) => { const n = new URLSearchParams(p); n.delete('calendarId'); return n; }); }, onError: toastError }); }} />
       <ConfirmDialog open={!!deletingHol} onOpenChange={(o) => !o && setDeletingHol(null)} title={t('holidays.deleteTitle', { name: deletingHol?.name ?? '' })} description={t('holidays.deleteHint')} confirmLabel={tc('common.delete')} destructive loading={removeHoliday.isPending}

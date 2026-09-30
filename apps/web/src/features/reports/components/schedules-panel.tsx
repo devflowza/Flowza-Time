@@ -1,16 +1,17 @@
 import { useMemo, useState } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
-import { Bell, CalendarClock, Mail, Pencil, Play, Plus, Trash2 } from 'lucide-react';
+import { Bell, CalendarClock, Eye, Mail, Pencil, Play, Plus, Trash2 } from 'lucide-react';
 import type { ReportDeliveryDto, ReportScheduleDto } from '@flowza/contracts';
 import { DataTable } from '@/components/data-table';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, ConfirmDialog, Switch } from '@/components/ui';
 import { fmtDate, fmtDateTime } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
-import { useOrgTimezone } from '@/features/me/use-me';
+import { useCan, useMe, useOrgTimezone } from '@/features/me/use-me';
 import '../schedules-i18n';
 import { useReportDeliveries, useReportSchedules, useScheduleMutations } from '../schedules-api';
 import { ScheduleDialog } from './schedule-dialog';
+import { ReportViewerDialog, type ViewableReport } from './report-viewer';
 import { cadenceSummary, skipReasonLabel } from '../schedule-utils';
 
 type T = (k: string, o?: Record<string, unknown>) => string;
@@ -21,6 +22,7 @@ function scopeLabel(t: T, d: ReportDeliveryDto): string {
   if (d.scope.kind === 'TEAM') return t('scope.team', { count: d.scope.employeeCount ?? 0 });
   if (d.scope.kind === 'BRANCHES') return t('scope.branches', { count: d.scope.branchCount ?? 0 });
   if (d.scope.kind === 'ORGANIZATION') return t('scope.organization');
+  if (d.scope.kind === 'SELF') return t('scope.self');
   return '—';
 }
 
@@ -33,6 +35,11 @@ export function DeliveryLog({ scheduleId }: { scheduleId?: string }) {
   const [pageSize, setPageSize] = useState(10);
   const q = useReportDeliveries({ page, pageSize, scheduleId });
   const tt = t as unknown as T;
+  // a delivered copy can be opened by its recipient, or by a report.manage holder (the API re-checks both, and the branch scope)
+  const can = useCan();
+  const me = useMe().data?.user.id;
+  const [viewing, setViewing] = useState<ViewableReport | null>(null);
+  const canOpen = (d: ReportDeliveryDto) => d.status === 'delivered' && !!d.reportRequestId && can('report.export') && (can('report.manage') || d.recipientUserId === me);
   const columns = useMemo<ColumnDef<ReportDeliveryDto, unknown>[]>(() => [
     { id: 'createdAt', header: t('log.when'), cell: ({ row }) => <span className="whitespace-nowrap text-xs tnum">{fmtDateTime(row.original.createdAt, tz)}</span> },
     { id: 'report', header: t('log.report'), cell: ({ row }) => <div className="min-w-0 text-xs"><p className="truncate font-medium">{tr(`types.${row.original.reportType}.name`, { defaultValue: row.original.reportType })}</p><p className="text-muted-foreground">{row.original.scheduleName ?? t(`mode.${row.original.mode}`)}{row.original.periodFrom ? ` · ${fmtDate(row.original.periodFrom)} → ${fmtDate(row.original.periodTo)}` : ''}</p></div> },
@@ -40,13 +47,18 @@ export function DeliveryLog({ scheduleId }: { scheduleId?: string }) {
     { id: 'status', header: t('log.status'), cell: ({ row }) => <div className="flex flex-col gap-0.5"><Badge variant={DELIVERY_TONE[row.original.status] ?? 'neutral'} dot>{t(`deliveryStatus.${row.original.status}`)}</Badge>{row.original.skipReason ? <span className="max-w-[220px] truncate text-[11px] text-muted-foreground" title={row.original.skipReason}>{skipReasonLabel(tt, row.original.skipReason)}</span> : null}{row.original.error ? <span className="max-w-[220px] truncate text-[11px] text-destructive" title={row.original.error}>{row.original.error}</span> : null}</div> },
     { id: 'scope', header: t('log.scope'), cell: ({ row }) => <span className="text-xs">{scopeLabel(tt, row.original)}</span> },
     { id: 'channels', header: t('channels.label'), cell: ({ row }) => <span className="flex gap-1 text-muted-foreground">{row.original.channels.includes('in_app') ? <Bell className="size-3.5" aria-label={t('channels.in_app')} /> : null}{row.original.channels.includes('email') ? <Mail className="size-3.5" aria-label={t('channels.email')} /> : null}</span> },
-  ], [t, tr, tt, tz]);
+    { id: 'open', header: '', cell: ({ row }) => (canOpen(row.original) ? <Button size="sm" variant="ghost" onClick={() => setViewing({ id: row.original.reportRequestId!, reportType: row.original.reportType, format: row.original.format })}><Eye /> {tr('list.view')}</Button> : null) },
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  ], [t, tr, tt, tz, me]);
   return (
+    <>
     <DataTable
       columns={columns} data={q.data?.data} total={q.data?.meta.total} page={page} pageSize={pageSize} onPageChange={setPage} onPageSizeChange={(n) => { setPageSize(n); setPage(1); }}
       isLoading={q.isLoading} error={q.error} onRetry={() => void q.refetch()} emptyTitle={t('log.empty')} emptyDescription={t('log.emptyHint')}
-      renderCard={(d) => <div className="space-y-1 text-xs"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{d.recipientName ?? '—'}</span><Badge variant={DELIVERY_TONE[d.status] ?? 'neutral'} dot>{t(`deliveryStatus.${d.status}`)}</Badge></div><p className="text-muted-foreground">{tr(`types.${d.reportType}.name`, { defaultValue: d.reportType })} · {fmtDateTime(d.createdAt, tz)}</p>{d.skipReason ? <p className="text-muted-foreground">{skipReasonLabel(tt, d.skipReason)}</p> : null}</div>}
+      renderCard={(d) => <div className="space-y-1 text-xs"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{d.recipientName ?? '—'}</span><Badge variant={DELIVERY_TONE[d.status] ?? 'neutral'} dot>{t(`deliveryStatus.${d.status}`)}</Badge></div><p className="text-muted-foreground">{tr(`types.${d.reportType}.name`, { defaultValue: d.reportType })} · {fmtDateTime(d.createdAt, tz)}</p>{d.skipReason ? <p className="text-muted-foreground">{skipReasonLabel(tt, d.skipReason)}</p> : null}{canOpen(d) ? <Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setViewing({ id: d.reportRequestId!, reportType: d.reportType, format: d.format }); }}><Eye /> {tr('list.view')}</Button> : null}</div>}
     />
+    <ReportViewerDialog report={viewing} onClose={() => setViewing(null)} />
+    </>
   );
 }
 

@@ -24,6 +24,8 @@ export function cadenceSummary(t: T, s: Pick<ReportScheduleDto, 'cadence' | 'run
 /** Why a recipient was skipped: `missing_permission:report.export` → "Lacks report.export". */
 export function skipReasonLabel(t: T, reason: string | null): string {
   if (!reason) return '';
+  // an employee (no report access) can only ever receive the report about themselves
+  if (reason === 'outside_scope:self') return t('skip.outside_self');
   const [code, detail] = reason.split(':');
   return t(`skip.${code}`, { defaultValue: reason, detail: detail ?? '' });
 }

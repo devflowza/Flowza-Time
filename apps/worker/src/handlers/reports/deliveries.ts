@@ -64,7 +64,7 @@ const toStrings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x 
 async function loadRecipientGrants(trx: Trx, organizationId: string, recipients: { userIds: string[]; roleKeys: string[] }): Promise<RecipientGrant[]> {
   if (!recipients.userIds.length && !recipients.roleKeys.length) return [];
   const members = await trx.selectFrom('orgMemberships as m').innerJoin('roles as r', 'r.id', 'm.roleId')
-    .select(['m.id', 'm.userId', 'm.roleId', 'm.allBranches'])
+    .select(['m.id', 'm.userId', 'm.roleId', 'm.allBranches', 'm.employeeId'])
     .where('m.organizationId', '=', organizationId).where('m.status', '=', 'active')
     .where((eb) => eb.or([
       ...(recipients.userIds.length ? [eb('m.userId', 'in', recipients.userIds)] : []),
@@ -93,10 +93,21 @@ async function loadRecipientGrants(trx: Trx, organizationId: string, recipients:
     where m.id = any(${unique.map((m) => m.id)}::uuid[])`.execute(trx);
   const teamByMembership = new Map<string, string[]>();
   for (const t of team.rows) teamByMembership.set(t.membershipId, [...(teamByMembership.get(t.membershipId) ?? []), t.employeeId]);
-  return unique.map((m) => ({
-    userId: m.userId, permissions: permsByRole.get(m.roleId) ?? [], allBranches: m.allBranches,
-    branchIds: branchesByMembership.get(m.id) ?? [], teamEmployeeIds: teamByMembership.get(m.id) ?? [],
-  }));
+  // the recipient's own employee record — what somebody without report access may still receive a copy about (self scope);
+  // a leaver or a deleted record is nobody's self any more
+  const ownIds = [...new Set(unique.map((m) => m.employeeId).filter((id): id is string => typeof id === 'string'))];
+  const own = ownIds.length
+    ? new Map((await trx.selectFrom('employees').select(['id', 'branchId', 'departmentId']).where('organizationId', '=', organizationId).where('id', 'in', ownIds)
+      .where('deletedAt', 'is', null).where('employmentStatus', 'not in', ['terminated', 'resigned']).execute()).map((e) => [e.id, e]))
+    : new Map<string, { id: string; branchId: string; departmentId: string | null }>();
+  return unique.map((m) => {
+    const e = m.employeeId ? own.get(m.employeeId) : undefined;
+    return {
+      userId: m.userId, permissions: permsByRole.get(m.roleId) ?? [], allBranches: m.allBranches,
+      branchIds: branchesByMembership.get(m.id) ?? [], teamEmployeeIds: teamByMembership.get(m.id) ?? [],
+      self: e ? { employeeId: e.id, branchId: e.branchId, departmentId: e.departmentId } : null,
+    };
+  });
 }
 
 /**
@@ -252,7 +263,7 @@ export async function runReportDeliveryHandler({ job, deps, log }: JobContext): 
  */
 export async function settleDelivery(trx: Trx, organizationId: string, reportRequestId: string, outcome: { ok: true; reportTitle: string; rowCount: number } | { ok: false; error: string }, now: Date): Promise<boolean> {
   const d = await trx.selectFrom('reportDeliveries as d').leftJoin('reportSchedules as s', 's.id', 'd.scheduleId')
-    .select(['d.id', 'd.recipientUserId', 'd.sentBy', 'd.mode', 'd.scheduleId', 's.name as scheduleName', 'd.channels', 'd.reportType', 'd.format', 'd.periodFrom', 'd.periodTo'])
+    .select(['d.id', 'd.recipientUserId', 'd.sentBy', 'd.mode', 'd.scheduleId', 's.name as scheduleName', 'd.channels', 'd.reportType', 'd.format', 'd.periodFrom', 'd.periodTo', 'd.scope'])
     .where('d.organizationId', '=', organizationId).where('d.reportRequestId', '=', reportRequestId).executeTakeFirst();
   if (!d) return false;
   const isoDay = (v: Date | string | null) => (v === null ? null : typeof v === 'string' ? v.slice(0, 10) : v.toISOString().slice(0, 10));
@@ -263,6 +274,8 @@ export async function settleDelivery(trx: Trx, organizationId: string, reportReq
       payload: {
         reportId: reportRequestId, deliveryId: d.id, reportType: d.reportType, reportTitle: outcome.reportTitle, format: d.format, rowCount: outcome.rowCount, mode: d.mode,
         scheduleId: d.scheduleId, scheduleName: d.scheduleName ?? null, periodFrom: isoDay(d.periodFrom), periodTo: isoDay(d.periodTo), channels: d.channels, userIds: [d.recipientUserId],
+        // a copy about the recipient themselves opens in the employee portal (/my/reports), not on the Reports page they cannot open
+        selfScope: asObject(d.scope)['kind'] === 'SELF',
       },
       actorUserId: d.sentBy,
     });

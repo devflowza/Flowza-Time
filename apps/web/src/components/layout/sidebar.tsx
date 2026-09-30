@@ -90,6 +90,7 @@ export function Sidebar() {
       { to: '/my/checkin', label: t('portal-attendance:nav.checkin'), icon: Fingerprint, modules: ['self_service', 'geofences'] },
       { to: '/my/requests', label: t('portal-attendance:nav.requests'), icon: Inbox, modules: ['self_service'] },
       { to: '/my/shift', label: t('portal-attendance:nav.shift'), icon: CalendarClock, modules: ['self_service'] },
+      { to: '/my/reports', label: t('portal:nav.reports'), icon: FileText, modules: ['self_service'] },
     ] as NavItem[] }] : []),
     ...(isManager || team.page ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound, modules: ['manager_workspace'] }] as NavItem[] }] : []),
     { label: t('nav.sections.workforce'), items: [

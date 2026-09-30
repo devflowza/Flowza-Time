@@ -11,17 +11,18 @@ import { toast, toastError } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { blankToUndefined } from '@/features/organization/form-utils';
-import { useHolidayMutations, type HolidayCalendarInput } from '../api';
+import { useHolidayCalendars, useHolidayMutations, type HolidayCalendarInput } from '../api';
 import type { HolidayCalendarDto, HolidayDto } from '../types';
 
 type CalendarValues = z.input<typeof holidayCalendarInputSchema>;
 type HolidayValues = z.input<typeof holidayInputSchema>;
 
-export function CalendarDialog({ open, onOpenChange, calendar }: { open: boolean; onOpenChange: (o: boolean) => void; calendar: HolidayCalendarDto | null }) {
+/** `first` = the organisation has no calendar yet: the new one starts as the default (the API makes the first calendar the default anyway). */
+export function CalendarDialog({ open, onOpenChange, calendar, first = false }: { open: boolean; onOpenChange: (o: boolean) => void; calendar: HolidayCalendarDto | null; first?: boolean }) {
   const { t } = useTranslation('schedule');
   const { t: tc } = useTranslation();
   const { createCalendar, updateCalendar } = useHolidayMutations();
-  const form = useForm<CalendarValues, unknown, HolidayCalendarInput>({ resolver: zodResolver(holidayCalendarInputSchema), defaultValues: calendar ? { name: calendar.name, countryCode: calendar.countryCode ?? undefined, isDefault: calendar.isDefault } : { name: '', countryCode: 'OM', isDefault: false } });
+  const form = useForm<CalendarValues, unknown, HolidayCalendarInput>({ resolver: zodResolver(holidayCalendarInputSchema), defaultValues: calendar ? { name: calendar.name, countryCode: calendar.countryCode ?? undefined, isDefault: calendar.isDefault } : { name: '', countryCode: 'OM', isDefault: first } });
   const { register, control, formState: { errors, isSubmitting } } = form;
   const onSubmit = form.handleSubmit(async (v) => {
     try {
@@ -50,13 +51,21 @@ export function CalendarDialog({ open, onOpenChange, calendar }: { open: boolean
   );
 }
 
-/** Add / edit a holiday (holidayInputSchema): date or range, half day, type, tentative flag and optional branch scope. */
-export function HolidayDialog({ open, onOpenChange, calendarId, holiday }: { open: boolean; onOpenChange: (o: boolean) => void; calendarId: string; holiday: HolidayDto | null }) {
+/**
+ * Add / edit a holiday (holidayInputSchema): date or range, half day, type, tentative flag and optional branch scope.
+ * `calendarId` null = "mark a holiday" from anywhere (the attendance day view, an empty Holidays page): the organisation's calendars
+ * are offered with the default preselected, and with none the API creates the default calendar on the spot — marking a holiday
+ * never needs a calendar set up first. `presetDate` opens the form on that day. `onCreated` hears about a new holiday.
+ */
+export function HolidayDialog({ open, onOpenChange, calendarId, holiday, presetDate, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; calendarId: string | null; holiday: HolidayDto | null; presetDate?: string; onCreated?: (h: HolidayDto) => void }) {
   const { t } = useTranslation('schedule');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
   const branches = useBranchOptions();
   const { createHoliday, updateHoliday } = useHolidayMutations();
+  const calendars = useHolidayCalendars(open && !holiday && calendarId === null);
+  const pickCalendar = !holiday && calendarId === null;
+  const defaultCalendarId = calendars.data?.find((c) => c.isDefault)?.id;
   // Same contract schema the API validates, plus the two service-level checks so they fail inline instead of as a 400 toast.
   const schema = useMemo(() => holidayInputSchema.superRefine((v, ctx) => {
     if (v.endDate && v.endDate < v.date) ctx.addIssue({ code: 'custom', path: ['endDate'], message: t('holidays.endBeforeStart') });
@@ -65,7 +74,7 @@ export function HolidayDialog({ open, onOpenChange, calendarId, holiday }: { ope
   const form = useForm<HolidayValues, unknown, HolidayInput>({
     resolver: zodResolver(schema),
     defaultValues: holiday ? { calendarId: holiday.calendarId, name: holiday.name, nameAr: holiday.nameAr ?? undefined, date: holiday.date, endDate: holiday.endDate, isHalfDay: holiday.isHalfDay, type: holiday.type as HolidayValues['type'], branchIds: holiday.branchIds, isTentative: holiday.isTentative }
-      : { calendarId, name: '', date: todayIso(tz), endDate: null, isHalfDay: false, type: 'PUBLIC', branchIds: null, isTentative: false },
+      : { calendarId: calendarId ?? undefined, name: '', date: presetDate ?? todayIso(tz), endDate: null, isHalfDay: false, type: 'PUBLIC', branchIds: null, isTentative: false },
   });
   const { register, control, setValue, formState: { errors, isSubmitting } } = form;
   const branchIds = useWatch({ control, name: 'branchIds' });
@@ -73,7 +82,13 @@ export function HolidayDialog({ open, onOpenChange, calendarId, holiday }: { ope
   const onSubmit = form.handleSubmit(async (v) => {
     try {
       if (holiday) { await updateHoliday.mutateAsync({ id: holiday.id, input: v }); toast.success(t('holidays.updated')); }
-      else { await createHoliday.mutateAsync(v); toast.success(t('holidays.created')); }
+      else {
+        // no calendar picked → the API adds it to the default calendar (created when there is none)
+        const input = { ...v, calendarId: v.calendarId ?? (pickCalendar ? defaultCalendarId : undefined) };
+        const created = await createHoliday.mutateAsync(input);
+        toast.success(t('holidays.created'), input.date <= todayIso(tz) ? { description: t('holidays.recalcQueued') } : undefined);
+        onCreated?.(created);
+      }
       onOpenChange(false);
     } catch (e) { toastError(e); }
   });
@@ -82,6 +97,18 @@ export function HolidayDialog({ open, onOpenChange, calendarId, holiday }: { ope
       <DialogContent>
         <DialogHeader><DialogTitle>{holiday ? t('holidays.edit') : t('holidays.add')}</DialogTitle><DialogDescription>{t('holidays.dialogHint')}</DialogDescription></DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
+          {pickCalendar ? (
+            calendars.data && calendars.data.length > 0 ? (
+              <FormField label={t('holidays.calendar')} htmlFor="hd-calendar" hint={t('holidays.defaultCalendarNote')}>
+                <Controller control={control} name="calendarId" render={({ field }) => (
+                  <Select value={field.value ?? defaultCalendarId ?? calendars.data![0]!.id} onValueChange={field.onChange}>
+                    <SelectTrigger id="hd-calendar"><SelectValue /></SelectTrigger>
+                    <SelectContent>{calendars.data!.map((c) => <SelectItem key={c.id} value={c.id}>{c.name}{c.isDefault ? ` · ${t('holidays.default')}` : ''}</SelectItem>)}</SelectContent>
+                  </Select>
+                )} />
+              </FormField>
+            ) : calendars.isSuccess ? <p className="rounded-md border bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="new-default-calendar">{t('holidays.newDefaultCalendar')}</p> : null
+          ) : null}
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label={tc('common.name')} htmlFor="hd-name" required error={errors.name?.message}><Input id="hd-name" {...register('name')} aria-invalid={!!errors.name} /></FormField>
             <FormField label={t('fields.nameAr')} htmlFor="hd-nameAr" optional error={errors.nameAr?.message}><Input id="hd-nameAr" dir="rtl" {...register('nameAr', { setValueAs: blankToUndefined })} /></FormField>

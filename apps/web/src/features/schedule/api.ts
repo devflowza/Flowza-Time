@@ -83,9 +83,9 @@ export function useRuleSetMutations() {
 }
 
 // ---- holidays ---------------------------------------------------------------------------------------------------------
-export function useHolidayCalendars() {
+export function useHolidayCalendars(enabled = true) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, 'holiday-calendars', {}), queryFn: async () => (await api.get<Envelope<HolidayCalendarDto[]>>(`/orgs/${orgId}/holiday-calendars`)).data });
+  return useQuery({ queryKey: qk.list(orgId, 'holiday-calendars', {}), queryFn: async () => (await api.get<Envelope<HolidayCalendarDto[]>>(`/orgs/${orgId}/holiday-calendars`)).data, enabled });
 }
 export function useHolidays(query: ListQuery, enabled = true) {
   const orgId = useOrgId();
@@ -94,7 +94,8 @@ export function useHolidays(query: ListQuery, enabled = true) {
 export function useHolidayMutations() {
   const orgId = useOrgId();
   const qc = useQueryClient();
-  const invalidate = () => { void qc.invalidateQueries({ queryKey: qk.entity(orgId, 'holidays') }); void qc.invalidateQueries({ queryKey: qk.entity(orgId, 'holiday-calendars') }); };
+  // a holiday changes attendance days (the API queues their recalculation): the attendance views refetch too
+  const invalidate = () => { for (const e of ['holidays', 'holiday-calendars', 'attendance-daily', 'attendance-monthly']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
   const createCalendar = useMutation({ mutationFn: async (input: HolidayCalendarInput) => (await api.post<Envelope<HolidayCalendarDto>>(`/orgs/${orgId}/holiday-calendars`, input)).data, onSuccess: invalidate });
   const updateCalendar = useMutation({ mutationFn: async ({ id, input }: { id: string; input: Partial<HolidayCalendarInput> }) => (await api.patch<Envelope<HolidayCalendarDto>>(`/orgs/${orgId}/holiday-calendars/${id}`, input)).data, onSuccess: invalidate });
   const removeCalendar = useMutation({ mutationFn: (id: string) => api.delete<void>(`/orgs/${orgId}/holiday-calendars/${id}`), onSuccess: invalidate });
