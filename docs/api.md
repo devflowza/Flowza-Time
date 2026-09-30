@@ -108,6 +108,27 @@ keys and per-operation options are documented in `apps/worker/src/handlers/sync/
 | `POST /orgs/:orgId/payroll/periods/finalize` | `payroll.finalize` | Requires an active lock covering the period (else 409) → same job with `finalize: true`. |
 | `GET /orgs/:orgId/payroll/summaries?periodStart&periodEnd&branchId&status&search` | `payroll.view` | Paginated `attendance_period_summaries` with employee info. |
 
+## Modules, plans & billing (migration 20260929000600 — full model in `docs/pricing.md`)
+
+Every organisation route of a switchable module answers **`403 FEATURE_DISABLED`** with `details: { reason: 'MODULE_DISABLED', module }`
+when the module is off for the organisation (plan, platform override, fleet switch or lapsed subscription) — `moduleGate()`,
+after the tenant and MFA gates, before any body is read. `/me` carries `memberships[].modules` and `subscriptionLapsed`.
+
+| Method & path | Permission | Notes |
+|---|---|---|
+| `GET /orgs/:orgId/subscription` | `organization.view` | Plan, status, cycle, paid users, price quote (excl. VAT), VAT rate, limits and usage, module states, the plans to compare, billing contact. |
+| `GET /orgs/:orgId/billing/invoices` | `organization.manage` | The organisation's invoices with their payments (RLS again). |
+| `GET /platform/modules` · `PATCH /platform/modules/:key` | platform admin | Catalogue with adoption (`enabledCount / totalOrganizations`, overrides, plans); the fleet-wide switch `{ isAvailable, reason }`. |
+| `POST /platform/modules/:key/apply-all` | platform admin | `{ action: enable \| disable \| reset, reason }` for every tenant, audited on each; returns the number changed. |
+| `GET/PUT /platform/orgs/:id/modules` | platform admin | Per-tenant states; PUT `{ modules: { <key>: true \| false \| null }, reason }` (null = back to the plan). |
+| `GET/POST /platform/plans` · `PATCH /platform/plans/:key` | platform admin | Plans with prices, included users, modules, limits and subscriber counts; unknown module / limit keys → 400. |
+| `PATCH /platform/orgs/:id/subscription` | platform admin | Also `billingCycle` and `seats` (paid users; they cap employee creation). |
+| `GET /platform/billing/summary` | platform admin | MRR / ARR, outstanding, overdue, collected (30 days), by plan, every subscription priced. |
+| `GET/POST /platform/billing/invoices` · `GET …/:id` | platform admin | Issue: `{ organizationId, planKey?, billingCycle?, seats?, periodStart?, lines?, discount?, taxRate?, dueDate?, notes?, activatesSubscription? }`. |
+| `POST /platform/billing/invoices/:id/payments` · `…/void` | platform admin | Payment (≤ balance) or refund (≤ paid); a fully paid plan invoice activates the subscription. Void only with nothing paid. |
+| `GET /platform/billing/payments` | platform admin | Payments and refunds, newest first. |
+| `GET/PUT /platform/settings` | platform admin | `{ general: { platformName, supportEmail }, billing: { currency, vatRate, invoicePrefix, paymentTermsDays, sellerName, sellerVatNumber, sellerAddress, bankDetails } }` (PUT: any subset). |
+
 ## Inbound (no JWT; device / vendor authentication)
 
 ### `ANY /device-push/:protocolKey/*`

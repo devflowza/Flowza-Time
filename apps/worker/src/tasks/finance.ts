@@ -33,6 +33,8 @@ export async function scheduleFinancePushes(deps: WorkerDeps, opts: { cap?: numb
         where d.status = 'active' and d.provider_key = ${FLOWZA_FINANCE_PROVIDER_KEY}
           and coalesce(d.config->>'direction', 'both') in ('push', 'both')
           and o.status in ('active', 'trial')
+          -- the organisation's Flowza Finance integration module (migration 20260929000600): off ⇒ nothing is pushed
+          and app.org_module_enabled(o.id, 'finance_integration') is not false
           and (s.next_push_at is null or s.next_push_at <= ${now})
           and not exists (
             select 1 from public.sync_job_items i

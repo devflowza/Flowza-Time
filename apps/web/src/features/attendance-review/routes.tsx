@@ -3,6 +3,7 @@ import { registerNamespace } from '@/lib/i18n-namespace';
 import attendanceEn from '@/locales/en/attendance.json';
 import attendanceAr from '@/locales/ar/attendance.json';
 import './i18n';
+import { RequireModule } from '@/components/layout/protected-route';
 import { GeofencesRoute, NotesRoute } from './components/route-guards';
 
 // the review pages reuse the attendance badges (status / flags)
@@ -14,5 +15,5 @@ registerNamespace('attendance', attendanceEn, attendanceAr);
  */
 export const attendanceReviewRoutes: RouteObject[] = [
   { path: 'attendance/notes', element: <NotesRoute /> },
-  { path: 'attendance/geofences', element: <GeofencesRoute /> },
+  { path: 'attendance/geofences', element: <RequireModule modules={['geofences']}><GeofencesRoute /></RequireModule> },
 ];

@@ -14,7 +14,7 @@ import { qk } from '@/lib/query-keys';
 import { todayIso } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
-import { useOrgId, useOrgTimezone } from '@/features/me/use-me';
+import { useModuleEnabled, useOrgId, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { blankToUndefined } from '@/features/organization/form-utils';
 import { toastJobQueued } from '@/features/employees/job-toast';
@@ -30,7 +30,8 @@ const isEmpty = (v: unknown) => v === undefined || v === null || v === '' || (Ar
 
 function useDeviceOptions() {
   const orgId = useOrgId();
-  const q = useQuery({ queryKey: qk.list(orgId, 'devices', { pageSize: 200 }), queryFn: () => api.get<PageEnvelope<{ id: string; name: string; code: string }>>(`/orgs/${orgId}/devices`, { pageSize: 200 }), staleTime: 60_000 });
+  const enabled = useModuleEnabled('devices');
+  const q = useQuery({ queryKey: qk.list(orgId, 'devices', { pageSize: 200 }), queryFn: () => api.get<PageEnvelope<{ id: string; name: string; code: string }>>(`/orgs/${orgId}/devices`, { pageSize: 200 }), staleTime: 60_000, enabled });
   return { options: (q.data?.data ?? []).map((d) => ({ value: d.id, label: d.name, description: d.code })), byId: new Map((q.data?.data ?? []).map((d) => [d.id, d])), isLoading: q.isLoading };
 }
 

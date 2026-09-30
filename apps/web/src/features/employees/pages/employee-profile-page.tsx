@@ -6,7 +6,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Avatar, Badge, Button, ErrorState, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
 import { toastError } from '@/lib/toast';
-import { useCan, useEmployeeId } from '@/features/me/use-me';
+import { useCan, useEmployeeId, useModuleEnabled } from '@/features/me/use-me';
 import { useEmployee, useEmployeeMutations } from '../api';
 import { EmploymentStatusBadge } from '../components/employee-badges';
 import { OverviewTab } from '../components/profile/overview-tab';
@@ -38,6 +38,9 @@ export default function EmployeeProfilePage() {
   const { bulk } = useEmployeeMutations();
   const e = q.data;
   const isOwn = !!e && e.id === ownEmployeeId;
+  // the Devices & sync and self-service portal modules (migration 20260929000600)
+  const devicesOn = useModuleEnabled('devices');
+  const selfServiceOn = useModuleEnabled('self_service');
   // A line manager (employee.view_team) opens a direct report's profile too. Tabs whose data sits behind other keys stay
   // hidden instead of rendering an empty list — or, for attendance, the viewer's OWN month (the attendance API scopes an
   // attendance.view_own caller to their own record whatever employee is asked for). Own record: RLS self rows apply.
@@ -47,7 +50,7 @@ export default function EmployeeProfilePage() {
       case 'danger': return can('employee.delete');
       case 'activity': return can('attendance.view');
       case 'history': return can('employee.view') || isOwn;
-      case 'devices': return can('device.view') || isOwn;
+      case 'devices': return devicesOn && (can('device.view') || isOwn);
       case 'attendance': return can('attendance.view') || isOwn;
       default: return true;
     }
@@ -73,7 +76,7 @@ export default function EmployeeProfilePage() {
                   {e.deletedAt ? <Badge variant="neutral">{t('profile.archived')}</Badge> : null}
                   <Badge variant="outline" className="font-mono" dir="ltr">ID {e.deviceUserId}</Badge>
                   <span className="text-xs text-muted-foreground tnum">{t('profile.joined', { date: fmtDate(e.joiningDate) })}</span>
-                  {can('device.sync') && !e.deletedAt ? <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.mutate({ action: 'sync_devices', employeeIds: [e.id] }, { onSuccess: (r) => { if (r.kind === 'job') toastJobQueued(r.jobId, navigate, undefined, { to: '/sync' }); }, onError: toastError })}><RefreshCw /> {t('devices.syncNow')}</Button> : null}
+                  {can('device.sync') && devicesOn && !e.deletedAt ? <Button size="sm" variant="outline" loading={bulk.isPending} onClick={() => bulk.mutate({ action: 'sync_devices', employeeIds: [e.id] }, { onSuccess: (r) => { if (r.kind === 'job') toastJobQueued(r.jobId, navigate, undefined, { to: '/sync' }); }, onError: toastError })}><RefreshCw /> {t('devices.syncNow')}</Button> : null}
                 </div>
               }
             />
@@ -91,7 +94,7 @@ export default function EmployeeProfilePage() {
             </div>
             <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
               <TabsList className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb} className={tb === 'danger' ? 'data-[state=active]:text-destructive' : undefined}>{t(`profile.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
-              <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} />{!isOwn && !e.deletedAt ? <AttendanceGrantsCard employeeId={e.id} /> : null}{!isOwn ? <PortalAccessCard employeeId={e.id} employeeName={e.displayName} /> : null}</TabsContent>
+              <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} />{!isOwn && !e.deletedAt ? <AttendanceGrantsCard employeeId={e.id} /> : null}{!isOwn && selfServiceOn ? <PortalAccessCard employeeId={e.id} employeeName={e.displayName} /> : null}</TabsContent>
               <TabsContent value="history">{tab === 'history' ? <HistoryTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="devices">{tab === 'devices' ? <DevicesTab employeeId={e.id} employee={{ name: e.displayName, number: e.employeeNumber, deviceUserId: e.deviceUserId }} /> : null}</TabsContent>
               <TabsContent value="attendance">{tab === 'attendance' ? <AttendanceTab employeeId={e.id} /> : null}</TabsContent>

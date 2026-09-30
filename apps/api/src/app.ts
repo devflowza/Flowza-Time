@@ -9,6 +9,7 @@ import { errorHandler } from './middleware/error-handler.js';
 import { requireAuth } from './middleware/auth.js';
 import { rateLimit } from './middleware/rate-limit.js';
 import { orgMfaGate } from './middleware/mfa.js';
+import { moduleGate } from './middleware/module-gate.js';
 import { orgAccessGate, platformAccessGate } from './middleware/org-access.js';
 import { clientIp } from './lib/http.js';
 import { healthRoutes } from './routes/health.js';
@@ -79,6 +80,8 @@ export function createApp(deps: ApiDeps) {
   v1.use('/platform/*', platformAccessGate());
   v1.use('/orgs/:orgId', orgMfaGate());
   v1.use('/orgs/:orgId/*', orgMfaGate());
+  // then the organisation's modules (plan, platform override, fleet switch, lapsed subscription): 403 for a module that is off
+  v1.use('/orgs/:orgId/*', moduleGate());
   registerV1Routes(v1, deps);
   app.route('/api/v1', v1);
   return app;

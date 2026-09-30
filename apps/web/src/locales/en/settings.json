@@ -336,7 +336,7 @@
   },
   "subscription": {
     "title": "Subscription",
-    "hint": "Plan, status and limits for this organisation. Changes are handled by FlowZa support.",
+    "hint": "Your plan, its price, what it includes and your invoices. Plan changes are handled by FlowZa.",
     "plan": "Plan",
     "status": "Status",
     "trialEnds": "Trial ends",
@@ -344,7 +344,7 @@
     "unavailable": "Subscription details are not available here yet",
     "unavailableHint": "Your organisation is {{status}}. Contact support for plan details.",
     "limits": "Plan limits",
-    "limitsHint": "Usage against the limits of your plan.",
+    "limitsHint": "Usage against the limits of your plan. Users are the licensed employees you pay for.",
     "features": "Included features",
     "statuses": {
       "trialing": "Trial",
@@ -357,9 +357,42 @@
       "employees": "Employees",
       "devices": "Devices",
       "branches": "Branches",
-      "users": "Users",
+      "users": "User logins",
       "retentionDays": "Retention (days)"
-    }
+    },
+    "cycle": "Billing cycle",
+    "users": "Paid users",
+    "price": "Price",
+    "custom": "Custom pricing",
+    "priceNote": "per {{cycle}} cycle, excl. {{vat}}% VAT · ≈ {{perUser}} per user per month",
+    "cycles": {
+      "monthly": "Monthly",
+      "yearly": "Yearly"
+    },
+    "change": "To change your plan or number of users, write to",
+    "modules": "Modules",
+    "modulesHint": "What your subscription includes. The core of FlowZa Time is always included.",
+    "moduleOff": "Not part of your subscription",
+    "plans": "Plans",
+    "plansHint": "Yearly prices for the users each plan includes, excl. {{vat}}% VAT.",
+    "current": "Current",
+    "perYear": "/ year",
+    "includesUsers": "Includes {{count}} users",
+    "invoices": "Invoices",
+    "invoicesHint": "Invoices FlowZa issued to your organisation.",
+    "noInvoices": "No invoices yet.",
+    "invoice": "Invoice",
+    "issued": "Issued",
+    "due": "Due",
+    "total": "Total",
+    "balance": "Balance",
+    "invoiceStatuses": {
+      "issued": "Open",
+      "paid": "Paid",
+      "void": "Void",
+      "overdue": "Overdue"
+    },
+    "howToPay": "How to pay"
   },
   "reports": {
     "title": "Reports",

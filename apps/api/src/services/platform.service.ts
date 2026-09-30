@@ -1,7 +1,7 @@
 import { type z } from 'zod';
 import { provisionTenant } from './tenant-provisioning.js';
 import { ACCESS_GRANT_APPROVAL_WINDOW_HOURS } from '@flowza/contracts';
-import type { AccessGrantDto, CreateAccessGrantInput, CreateOrganizationInput, CreateOrganizationResult, FeatureFlagDto, OrgFeatureFlagDto, OrgStatus, PlanDto, PlatformHealthDto, PlatformOrganizationDto, accessGrantListQuerySchema, platformOrgListQuerySchema, putFeatureFlagsSchema, putOrgFeatureFlagsSchema, updateOrganizationStatusSchema } from '@flowza/contracts';
+import type { AccessGrantDto, CreateAccessGrantInput, CreateOrganizationInput, CreateOrganizationResult, FeatureFlagDto, OrgFeatureFlagDto, OrgStatus, PlatformHealthDto, PlatformOrganizationDto, accessGrantListQuerySchema, platformOrgListQuerySchema, putFeatureFlagsSchema, putOrgFeatureFlagsSchema, updateOrganizationStatusSchema } from '@flowza/contracts';
 import { FLOWZA_FINANCE_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY, SYSTEM_ROLE_IDS } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { errors, isValidTimezone, newId, randomToken, sha256Hex } from '@flowza/shared';
@@ -9,7 +9,7 @@ import type { ApiDeps } from '../deps.js';
 import { requirePlatformAdmin } from '../lib/authorize.js';
 import { type Actor, runUser, runSystem, audit, PLATFORM_SCOPE_ORG } from '../lib/service.js';
 import { likeContains, pageOf, resolveSort, toCount } from '../lib/pagination.js';
-import { isoDateTime, isoDateTimeOrNull, jsonObject } from '../lib/mappers.js';
+import { isoDateTime, isoDateTimeOrNull } from '../lib/mappers.js';
 import { ORG_COLUMNS, toOrganizationDto, type OrgRow } from './organizations.mappers.js';
 import { enqueueInvitationEmail } from './members.service.js';
 import { sql } from 'kysely';
@@ -253,11 +253,6 @@ export async function revokeGrant(deps: ApiDeps, actor: Actor, id: string): Prom
 }
 
 // Plans & feature flags --------------------------------------------------------------------------
-export async function listPlans(deps: ApiDeps, actor: Actor): Promise<PlanDto[]> {
-  requirePlatformAdmin(actor.principal);
-  return runUser(deps.db, actor, async (trx) => (await trx.selectFrom('plans').select(['id', 'key', 'name', 'description', 'prices', 'limits', 'features', 'isActive', 'sortOrder']).orderBy('sortOrder').execute())
-    .map((p): PlanDto => ({ id: p.id, key: p.key, name: p.name, description: p.description, prices: jsonObject(p.prices), limits: jsonObject(p.limits), features: p.features, isActive: p.isActive, sortOrder: p.sortOrder })));
-}
 
 const toFlagDto = (f: { key: string; description: string; defaultEnabled: boolean; rolloutPercentage: number; updatedAt: Date }): FeatureFlagDto => ({ key: f.key, description: f.description, defaultEnabled: f.defaultEnabled, rolloutPercentage: f.rolloutPercentage, updatedAt: isoDateTime(f.updatedAt) });
 

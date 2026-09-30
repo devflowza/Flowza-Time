@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link, NavLink, Outlet, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, ArrowLeftFromLine, Building2, Flag, HeartPulse, KeyRound, LayoutDashboard, LogOut, Menu, ShieldAlert, ShieldCheck, Tags, TriangleAlert, UserCog, Users, type LucideIcon } from 'lucide-react';
+import { Activity, ArrowLeftFromLine, Blocks, Building2, Flag, HeartPulse, KeyRound, LayoutDashboard, LogOut, Menu, Receipt, Settings, ShieldAlert, ShieldCheck, Tags, TriangleAlert, UserCog, Users, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { supabase } from '@/lib/supabase';
 import { useMe } from '@/features/me/use-me';
@@ -30,10 +30,13 @@ function Nav({ onNavigate }: { onNavigate?: () => void }) {
       { to: '/adm/team', icon: UserCog, label: t('nav.team') },
     ] },
     { label: t('nav.sections.business'), items: [
-      { to: '/adm/grants', icon: KeyRound, label: t('nav.grants'), badge: overview.data?.pendingGrants },
+      { to: '/adm/billing', icon: Receipt, label: t('nav.billing') },
       { to: '/adm/plans', icon: Tags, label: t('nav.plans') },
+      { to: '/adm/modules', icon: Blocks, label: t('nav.modules') },
+      { to: '/adm/grants', icon: KeyRound, label: t('nav.grants'), badge: overview.data?.pendingGrants },
     ] },
     { label: t('nav.sections.system'), items: [
+      { to: '/adm/settings', icon: Settings, label: t('nav.settings') },
       { to: '/adm/feature-flags', icon: Flag, label: t('nav.flags') },
       { to: '/adm/activity', icon: Activity, label: t('nav.activity') },
       { to: '/adm/health', icon: HeartPulse, label: t('nav.health') },

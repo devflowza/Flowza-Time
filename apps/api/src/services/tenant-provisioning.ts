@@ -46,6 +46,9 @@ export async function provisionTenant(trx: Trx, input: ProvisionTenantInput): Pr
   await trx.insertInto('branches').values({
     organizationId: input.orgId, code: DEFAULT_BRANCH.code, name: DEFAULT_BRANCH.name, nameAr: DEFAULT_BRANCH.nameAr, countryCode: input.countryCode, timezone: input.timezone,
   }).execute();
-  await trx.insertInto('subscriptions').values({ organizationId: input.orgId, planId: input.plan.id, status: trial ? 'trialing' : 'active', trialEndsAt: trial ? new Date(Date.now() + TRIAL_DAYS * 86_400_000) : null }).execute();
+  // the trial length is the plan's own (Plans & Pricing in /adm), TRIAL_DAYS when the plan does not say
+  const planTrialDays = (await trx.selectFrom('plans').select('trialDays').where('id', '=', input.plan.id).executeTakeFirst())?.trialDays ?? 0;
+  const trialDays = planTrialDays > 0 ? planTrialDays : TRIAL_DAYS;
+  await trx.insertInto('subscriptions').values({ organizationId: input.orgId, planId: input.plan.id, status: trial ? 'trialing' : 'active', trialEndsAt: trial ? new Date(Date.now() + trialDays * 86_400_000) : null }).execute();
   return org;
 }

@@ -15,6 +15,7 @@
  */
 import { type z } from 'zod';
 import { sql } from 'kysely';
+import { quoteSubscription, type BillingCycle } from '@flowza/contracts';
 import type {
   CreatePlatformAdminInput, CreateTenantNoteInput, PlatformAdminDto, PlatformAdminLevel, PlatformAuditEntryDto, PlatformMembershipDto,
   PlatformOrgMembersDto, PlatformOverviewDto, PlatformSubscriptionDto, PlatformUserDetailDto, PlatformUserDto, PutTenantAccountInput,
@@ -27,8 +28,9 @@ import type { ApiDeps } from '../deps.js';
 import { requirePlatformAdmin } from '../lib/authorize.js';
 import { type Actor, runUser, runSystem, audit, diffObjects, PLATFORM_SCOPE_ORG } from '../lib/service.js';
 import { likeContains, pageOf, toCount } from '../lib/pagination.js';
-import { isoDateTime, isoDateTimeOrNull } from '../lib/mappers.js';
+import { isoDateTime, isoDateTimeOrNull, jsonObject } from '../lib/mappers.js';
 import { ORG_COLUMNS, toOrganizationDto } from './organizations.mappers.js';
+import { loadPlatformSettings } from './billing.service.js';
 import { getOrganization, orgCounts } from './platform.service.js';
 
 type ActivityQuery = z.infer<typeof platformActivityQuerySchema>;
@@ -100,12 +102,17 @@ export async function updateOrganizationDetails(deps: ApiDeps, actor: Actor, org
 
 async function loadSubscription(trx: Trx, orgId: string): Promise<PlatformSubscriptionDto | null> {
   const s = await trx.selectFrom('subscriptions as s').innerJoin('plans as p', 'p.id', 's.planId')
-    .select(['p.key as planKey', 'p.name as planName', 's.status', 's.trialEndsAt', 's.currentPeriodStart', 's.currentPeriodEnd', 's.cancelAt', 's.updatedAt'])
+    .select(['p.key as planKey', 'p.name as planName', 'p.prices', 'p.includedUsers', 'p.isCustom', 's.status', 's.trialEndsAt', 's.currentPeriodStart', 's.currentPeriodEnd',
+      's.cancelAt', 's.billingCycle', 's.seats', 's.updatedAt'])
     .where('s.organizationId', '=', orgId).executeTakeFirst();
   if (!s) return null;
+  const billingCycle: BillingCycle = s.billingCycle === 'monthly' ? 'monthly' : 'yearly';
+  const { billing } = await loadPlatformSettings(trx);
   return {
     planKey: s.planKey, planName: s.planName, status: s.status, trialEndsAt: isoDateTimeOrNull(s.trialEndsAt), currentPeriodStart: isoDateTimeOrNull(s.currentPeriodStart),
-    currentPeriodEnd: isoDateTimeOrNull(s.currentPeriodEnd), cancelAt: isoDateTimeOrNull(s.cancelAt), updatedAt: isoDateTimeOrNull(s.updatedAt),
+    currentPeriodEnd: isoDateTimeOrNull(s.currentPeriodEnd), cancelAt: isoDateTimeOrNull(s.cancelAt), billingCycle, seats: s.seats, includedUsers: s.includedUsers,
+    isCustom: s.isCustom, price: quoteSubscription({ prices: jsonObject(s.prices), includedUsers: s.includedUsers, currency: billing.currency, cycle: billingCycle, seats: s.seats }),
+    updatedAt: isoDateTimeOrNull(s.updatedAt),
   };
 }
 
@@ -132,9 +139,11 @@ export async function updateSubscription(deps: ApiDeps, actor: Actor, orgId: str
       planId = plan.id;
     }
     const before = await loadSubscription(trx, orgId);
-    const patch: { planId?: string; status?: SubscriptionStatus; trialEndsAt?: Date | null; currentPeriodEnd?: Date | null; cancelAt?: Date | null } = {};
+    const patch: { planId?: string; status?: SubscriptionStatus; trialEndsAt?: Date | null; currentPeriodEnd?: Date | null; cancelAt?: Date | null; billingCycle?: BillingCycle; seats?: number | null } = {};
     if (planId) patch.planId = planId;
     if (input.status) patch.status = input.status;
+    if (input.billingCycle) patch.billingCycle = input.billingCycle;
+    if (input.seats !== undefined) patch.seats = input.seats;
     const trialEndsAt = toDate(input.trialEndsAt); if (trialEndsAt !== undefined) patch.trialEndsAt = trialEndsAt;
     const periodEnd = toDate(input.currentPeriodEnd); if (periodEnd !== undefined) patch.currentPeriodEnd = periodEnd;
     const cancelAt = toDate(input.cancelAt); if (cancelAt !== undefined) patch.cancelAt = cancelAt;
@@ -142,7 +151,8 @@ export async function updateSubscription(deps: ApiDeps, actor: Actor, orgId: str
       await trx.updateTable('subscriptions').set(patch).where('organizationId', '=', orgId).execute();
     } else {
       if (!planId) throw errors.validation('This organisation has no subscription yet: choose a plan.', { issues: [{ path: 'planKey', message: 'Required' }] });
-      await trx.insertInto('subscriptions').values({ organizationId: orgId, planId, status: patch.status ?? 'active', trialEndsAt: patch.trialEndsAt ?? null, currentPeriodEnd: patch.currentPeriodEnd ?? null, cancelAt: patch.cancelAt ?? null }).execute();
+      await trx.insertInto('subscriptions').values({ organizationId: orgId, planId, status: patch.status ?? 'active', trialEndsAt: patch.trialEndsAt ?? null, currentPeriodEnd: patch.currentPeriodEnd ?? null, cancelAt: patch.cancelAt ?? null,
+        billingCycle: patch.billingCycle ?? 'yearly', seats: patch.seats ?? null }).execute();
     }
     const after = (await loadSubscription(trx, orgId))!;
     const diff = diffObjects((before ?? {}) as Record<string, unknown>, after as unknown as Record<string, unknown>);

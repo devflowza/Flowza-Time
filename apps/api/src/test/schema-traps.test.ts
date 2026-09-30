@@ -48,6 +48,9 @@ const STRICT: Record<string, string> = {
   'PUT /me/notification-preferences body.preferences[]': 'each (category, channel) row is stored as sent',
   'POST /orgs/:orgId/report-schedules body.filters': 'stored and replayed by every scheduled run: a key the server did not validate must never reach the report generator',
   'PATCH /orgs/:orgId/report-schedules/:id body.filters': 'the same stored filters',
+  'PUT /platform/orgs/:id/modules body.modules': 'module key → on / off / back to the plan: the keys are the module catalogue, a misspelt module must not be silently ignored',
+  'POST /platform/plans body.limits': 'plan limits are enforced by key (employees, devices, …): an unknown limit is refused, never stored as if it meant something',
+  'PATCH /platform/plans/:key body.limits': 'the same plan limits',
 };
 
 /** Self-service requests that legitimately carry an organisation id: /me is not organisation-scoped (membership is checked). */

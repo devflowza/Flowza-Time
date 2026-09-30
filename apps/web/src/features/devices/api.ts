@@ -4,7 +4,7 @@ import type { ClaimPendingDeviceInput, CreateDeviceInput, CreatePinMappingInput,
 import type { ComboboxOption } from '@/components/forms';
 import { api, apiFetch, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
-import { useOrgId } from '@/features/me/use-me';
+import { useModuleEnabled, useOrgId } from '@/features/me/use-me';
 
 export type ListQuery = Record<string, string | number | boolean | undefined>;
 /** GET /device-providers adds registry details to the contract DTO. */
@@ -52,7 +52,8 @@ export function useDevice(id: string | undefined) {
 }
 /** Small option list for pickers (devices are few per organisation). */
 export function useDeviceOptions(branchId?: string | null) {
-  const q = useDevices({ pageSize: 200, sort: 'name', branchId: branchId ?? undefined });
+  // pickers on core pages (unmatched punches, …): without the Devices & sync module there are no terminals to offer
+  const q = useDevices({ pageSize: 200, sort: 'name', branchId: branchId ?? undefined }, useModuleEnabled('devices'));
   const options = useMemo<ComboboxOption[]>(() => (q.data?.data ?? []).map((d) => ({ value: d.id, label: d.name, description: d.code })), [q.data]);
   return { options, isLoading: q.isLoading, data: q.data?.data ?? [] };
 }

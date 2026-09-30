@@ -9,7 +9,12 @@ import type { Database } from '@flowza/database';
  * 20260909000300, extended by 20260928000100 with the team) returns everything as a single document, where the
  * previous transaction needed up to ten statements — and each of those is a trip from the API's region to the database's.
  */
-export interface LoadedPrincipal { principal: Principal; mfaRequiredOrgIds: ReadonlySet<string> }
+export interface LoadedPrincipal {
+  principal: Principal;
+  mfaRequiredOrgIds: ReadonlySet<string>;
+  /** Organisation id → module keys that are off for it (migration 20260929000600); an organisation absent here has every module on. */
+  disabledModules: ReadonlyMap<string, ReadonlySet<string>>;
+}
 
 interface Snapshot {
   profile: { id: string; email: string; status: string } | null;
@@ -18,6 +23,8 @@ interface Snapshot {
   grants: Array<{ organizationId: string; accessLevel: 'read' | 'write' }>;
   allPermissions: string[];
   mfaRequiredOrgIds: string[];
+  /** Absent until migration 20260929000600 is applied (the API deploy may precede it): then no module is off. */
+  disabledModules?: Record<string, string[]>;
 }
 
 export async function loadPrincipal(db: Database, userId: string, email: string | undefined): Promise<LoadedPrincipal> {
@@ -57,5 +64,6 @@ export async function loadPrincipal(db: Database, userId: string, email: string 
   return {
     principal: { userId, email: snap.profile?.email ?? email ?? '', isPlatformAdmin: snap.isPlatformAdmin, memberships },
     mfaRequiredOrgIds: new Set(snap.mfaRequiredOrgIds),
+    disabledModules: new Map(Object.entries(snap.disabledModules ?? {}).map(([orgId, keys]) => [orgId, new Set(keys)])),
   };
 }

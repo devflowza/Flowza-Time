@@ -637,6 +637,63 @@ export interface AuditLogs {
   userAgent: string | null;
 }
 
+export interface BillingInvoiceCounters {
+  lastNumber: Generated<number>;
+  prefix: string;
+  year: number;
+}
+
+export interface BillingInvoices {
+  activatesSubscription: Generated<boolean>;
+  amountPaid: Generated<Numeric>;
+  billingCycle: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  createdByLabel: string | null;
+  currency: Generated<string>;
+  customer: Generated<Json>;
+  discount: Generated<Numeric>;
+  dueDate: Timestamp | null;
+  id: Generated<string>;
+  invoiceNumber: string;
+  issueDate: Generated<Timestamp>;
+  lines: Generated<Json>;
+  notes: string | null;
+  organizationId: string;
+  paidAt: Timestamp | null;
+  periodEnd: Timestamp | null;
+  periodStart: Timestamp | null;
+  planKey: string | null;
+  planName: string | null;
+  seats: number | null;
+  seller: Generated<Json>;
+  status: Generated<string>;
+  subscriptionAppliedAt: Timestamp | null;
+  subtotal: Numeric;
+  taxAmount: Generated<Numeric>;
+  taxRate: Generated<Numeric>;
+  total: Numeric;
+  updatedAt: Generated<Timestamp>;
+  voidedAt: Timestamp | null;
+  voidReason: string | null;
+}
+
+export interface BillingPayments {
+  amount: Numeric;
+  createdAt: Generated<Timestamp>;
+  currency: string;
+  id: Generated<string>;
+  invoiceId: string;
+  kind: Generated<string>;
+  method: string;
+  notes: string | null;
+  organizationId: string;
+  receivedOn: Generated<Timestamp>;
+  recordedBy: string | null;
+  recordedByLabel: string | null;
+  reference: string | null;
+}
+
 export interface Branches {
   address: Generated<Json>;
   city: string | null;
@@ -1371,6 +1428,18 @@ export interface MissingPunchReminders {
   remindedAt: Generated<Timestamp>;
 }
 
+export interface Modules {
+  category: Generated<string>;
+  createdAt: Generated<Timestamp>;
+  description: Generated<string>;
+  isAvailable: Generated<boolean>;
+  key: string;
+  name: string;
+  sortOrder: Generated<number>;
+  updatedAt: Generated<Timestamp>;
+  updatedBy: string | null;
+}
+
 export interface NotificationDeliveries {
   attempts: Generated<number>;
   channel: NotificationChannel;
@@ -1420,6 +1489,16 @@ export interface OrganizationFeatureFlags {
   enabled: boolean;
   flagKey: string;
   organizationId: string;
+  updatedAt: Generated<Timestamp>;
+  updatedBy: string | null;
+}
+
+export interface OrganizationModules {
+  createdAt: Generated<Timestamp>;
+  enabled: boolean;
+  moduleKey: string;
+  organizationId: string;
+  reason: string | null;
   updatedAt: Generated<Timestamp>;
   updatedBy: string | null;
 }
@@ -1513,12 +1592,25 @@ export interface Plans {
   description: string | null;
   features: Generated<string[]>;
   id: Generated<string>;
+  /**
+   * Users (licensed employees) included in the base price; extra users are priced by prices.<CUR>.extraUserMonthly / extraUserYearly.
+   */
+  includedUsers: number | null;
   isActive: Generated<boolean>;
+  /**
+   * Priced per customer ("contact sales"); prices may be empty.
+   */
+  isCustom: Generated<boolean>;
   key: string;
   limits: Generated<Json>;
+  /**
+   * Module keys (public.modules) the plan includes. Unknown keys are refused by plans_modules_known.
+   */
+  modules: Generated<string[]>;
   name: string;
   prices: Generated<Json>;
   sortOrder: Generated<number>;
+  trialDays: Generated<number>;
   updatedAt: Generated<Timestamp>;
 }
 
@@ -1551,6 +1643,15 @@ export interface PlatformAdmins {
   level: Generated<PlatformAdminLevel>;
   status: Generated<string>;
   userId: string;
+}
+
+export interface PlatformSettings {
+  description: Generated<string>;
+  isPublic: Generated<boolean>;
+  key: string;
+  updatedAt: Generated<Timestamp>;
+  updatedBy: string | null;
+  value: Json;
 }
 
 export interface PlatformTenantAccounts {
@@ -1789,6 +1890,7 @@ export interface ShiftSwapRequests {
 }
 
 export interface Subscriptions {
+  billingCycle: Generated<string>;
   cancelAt: Timestamp | null;
   createdAt: Generated<Timestamp>;
   currentPeriodEnd: Timestamp | null;
@@ -1798,6 +1900,10 @@ export interface Subscriptions {
   id: Generated<string>;
   organizationId: string;
   planId: string;
+  /**
+   * Licensed users (active employees) the tenant pays for; null = the plan's employee limit. Caps employee creation.
+   */
+  seats: number | null;
   status: Generated<SubscriptionStatus>;
   trialEndsAt: Timestamp | null;
   updatedAt: Generated<Timestamp>;
@@ -1972,6 +2078,9 @@ export interface DB {
   attendanceRegularisationRequests: AttendanceRegularisationRequests;
   attendanceRuleSets: AttendanceRuleSets;
   "audit.logs": AuditLogs;
+  billingInvoiceCounters: BillingInvoiceCounters;
+  billingInvoices: BillingInvoices;
+  billingPayments: BillingPayments;
   branches: Branches;
   compOffCredits: CompOffCredits;
   compOffUsages: CompOffUsages;
@@ -2014,10 +2123,12 @@ export interface DB {
   loginHistory: LoginHistory;
   membershipBranches: MembershipBranches;
   missingPunchReminders: MissingPunchReminders;
+  modules: Modules;
   notificationDeliveries: NotificationDeliveries;
   notificationPreferences: NotificationPreferences;
   notifications: Notifications;
   organizationFeatureFlags: OrganizationFeatureFlags;
+  organizationModules: OrganizationModules;
   organizations: Organizations;
   organizationSettings: OrganizationSettings;
   orgMemberships: OrgMemberships;
@@ -2027,6 +2138,7 @@ export interface DB {
   plans: Plans;
   platformAccessGrants: PlatformAccessGrants;
   platformAdmins: PlatformAdmins;
+  platformSettings: PlatformSettings;
   platformTenantAccounts: PlatformTenantAccounts;
   platformTenantNotes: PlatformTenantNotes;
   providerCircuitStates: ProviderCircuitStates;
