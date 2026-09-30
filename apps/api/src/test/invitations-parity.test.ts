@@ -139,6 +139,21 @@ describe('resend + validate + accept', () => {
     expect((await accept(user, 'mailed@test.local', inv.body.data.token)).status).toBe(409);
   });
 
+  it('a brand-new account (signed up on the invitation page, no profile yet) accepts: its profile is created before the claim', async () => {
+    const e7 = await seedEmployee(h.admin, f.orgId, f.branchA, 7);
+    const inv = await h.request('POST', `${base()}/invitations`, { token: f.owner, body: { email: 'First.Timer@test.local', roleId: ROLE.employee, employeeId: e7 } });
+    expect(inv.status).toBe(201);
+    // what Supabase Auth leaves behind after sign-up: the auth user, and nothing in public.user_profiles
+    const newcomer = uuid('c');
+    await sql`insert into auth.users (id, email) values (${newcomer}::uuid, ${'first.timer@test.local'})`.execute(h.admin);
+    const r = await accept(newcomer, 'first.timer@test.local', inv.body.data.token);
+    expect(r.status).toBe(200);
+    expect(await invitation(inv.body.data.id)).toMatchObject({ acceptedBy: newcomer });
+    expect(await h.admin.selectFrom('userProfiles').select(['email']).where('id', '=', newcomer).executeTakeFirst()).toEqual({ email: 'first.timer@test.local' });
+    const m = await h.admin.selectFrom('orgMemberships').select(['status', 'employeeId']).where('userId', '=', newcomer).executeTakeFirstOrThrow();
+    expect(m).toEqual({ status: 'active', employeeId: e7 });
+  });
+
   it('validation is rate limited per client IP', async () => {
     const token = `${f.orgId}.${'y'.repeat(40)}`;
     let limited = 0;

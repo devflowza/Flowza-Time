@@ -427,6 +427,9 @@ export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: strin
     if (inv.employeeId && (await employeeHasLeft(trx, inv.organizationId, inv.employeeId))) {
       throw errors.invalidState('This invitation is no longer valid: the employee record it was issued for has left the organisation.');
     }
+    // A brand-new account (signed up on the invitation page) has no profile yet, and invitations.accepted_by references
+    // user_profiles: create it BEFORE the claim, or the claim fails its foreign key and the invitee never gets in.
+    await trx.insertInto('userProfiles').values({ id: actor.userId, email: actor.email, fullName: '' }).onConflict((oc) => oc.column('id').doNothing()).execute();
     const claimed = await trx.updateTable('invitations').set({ acceptedAt: new Date(), acceptedBy: actor.userId })
       .where('organizationId', '=', inv.organizationId).where('id', '=', inv.id).where('acceptedAt', 'is', null).where('revokedAt', 'is', null)
       .returning('id').executeTakeFirst();
@@ -440,8 +443,6 @@ export async function acceptInvitation(deps: ApiDeps, actor: Actor, token: strin
       if (now?.revokedAt) throw errors.invalidState('This invitation was revoked.');
       throw errors.invalidState('This invitation was already accepted.');
     }
-    const profile = await trx.selectFrom('userProfiles').select('id').where('id', '=', actor.userId).executeTakeFirst();
-    if (!profile) await trx.insertInto('userProfiles').values({ id: actor.userId, email: actor.email, fullName: '' }).execute();
     // The employee link chosen at invitation time lands on the membership — unless somebody else took that employee in
     // the meantime, in which case the membership is created unlinked (audited) rather than stealing the link or failing onboarding.
     const linkClash = inv.employeeId ? await employeeLinkClash(trx, inv.organizationId, inv.employeeId, { userId: actor.userId, invitationId: inv.id }) : null;
