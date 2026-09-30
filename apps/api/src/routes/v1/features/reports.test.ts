@@ -87,6 +87,44 @@ describe('reports', () => {
   });
 });
 
+describe('an employee\'s own copy of a shared report (each employee receives the report about themselves)', () => {
+  // what the worker writes for a self-scoped delivery (RUN_REPORT_SCHEDULE → scopeReportForRecipient kind SELF)
+  const selfCopy = async (userId: string, employeeId: string, over: Record<string, unknown> = {}) => (await h.admin.insertInto('reportRequests').values({
+    organizationId: f.orgId, reportType: 'monthly_attendance', format: 'pdf', status: 'COMPLETED', requestedBy: userId, filePath: `${f.orgId}/self-${employeeId}.pdf`, rowCount: 1, completedAt: new Date(),
+    expiresAt: new Date(Date.now() + 86_400_000), parameters: JSON.stringify({ month: '2026-09', employeeIds: [employeeId], selfEmployeeId: employeeId, ...over }),
+  }).returning('id').executeTakeFirstOrThrow()).id;
+
+  it('lists the employee\'s own copies at /me/reports and lets them view (inline) and download (attachment) them', async () => {
+    const mine = await selfCopy(f.employeeUser, f.e1);
+    const list = await h.request('GET', `${base()}/me/reports`, { token: f.employeeUser });
+    expect(list.status).toBe(200);
+    expect(list.body.data.map((r: { id: string }) => r.id)).toEqual([mine]);
+    const view = await h.request('GET', `${base()}/reports/${mine}/download?disposition=inline`, { token: f.employeeUser });
+    expect(view.status).toBe(200);
+    expect(view.body.data).toMatchObject({ disposition: 'inline', fileName: expect.stringMatching(/^monthly_attendance-\d{4}-\d{2}-\d{2}\.pdf$/) });
+    expect(view.body.data.url).not.toContain('download=');
+    const dl = await h.request('GET', `${base()}/reports/${mine}/download`, { token: f.employeeUser });
+    expect(dl.body.data.disposition).toBe('attachment');
+    expect(dl.body.data.url).toContain('download=monthly_attendance-');
+    const trail = (await auditRows(h.admin, 'report.exported')).filter((a) => a.entityId === mine);
+    expect(trail.map((a) => (a.newValue as { disposition: string; selfCopy?: boolean }))).toEqual(expect.arrayContaining([expect.objectContaining({ disposition: 'inline', selfCopy: true }), expect.objectContaining({ disposition: 'attachment', selfCopy: true })]));
+  });
+
+  it('never opens anything else to an employee: another person\'s copy, a copy about somebody else, a report they merely requested', async () => {
+    const other = await selfCopy(f.managerUser, f.e3);                              // somebody else's own copy
+    const forged = await selfCopy(f.employeeUser, f.e1, { employeeIds: [f.e1, f.e2] }); // marker without the one-employee filter
+    const aboutE2 = await selfCopy(f.employeeUser, f.e2);                            // requested by them, about somebody else
+    // refused as it always was without report.view / report.export (403), whether the report exists or not
+    for (const id of [other, forged, aboutE2, '00000000-0000-4000-8000-000000000000']) expect((await h.request('GET', `${base()}/reports/${id}/download`, { token: f.employeeUser })).status).toBe(403);
+    const ids = (await h.request('GET', `${base()}/me/reports`, { token: f.employeeUser })).body.data.map((r: { id: string }) => r.id);
+    expect(ids).not.toContain(other); expect(ids).not.toContain(forged); expect(ids).not.toContain(aboutE2);
+    // the Reports page itself stays closed to them
+    expect((await h.request('GET', `${base()}/reports`, { token: f.employeeUser })).status).toBe(403);
+    // a member without an employee record has no "own" reports
+    expect((await h.request('GET', `${base()}/me/reports`, { token: f.hrAdmin })).status).toBe(403);
+  });
+});
+
 describe('payroll', () => {
   it('derives periods from settings and requires a lock to finalise', async () => {
     const periods = await h.request('GET', `${base()}/payroll/periods?year=2026`, { token: f.payrollUser });

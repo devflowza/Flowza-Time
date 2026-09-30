@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dueOccurrence, latestScheduleRunAtOrBefore, nextScheduleRun, periodParameters, schedulePeriod, scopeReportForRecipient } from './schedule.js';
+import { dueOccurrence, isSelfScopedReport, latestScheduleRunAtOrBefore, nextScheduleRun, periodParameters, schedulePeriod, scopeReportForRecipient } from './schedule.js';
 
 const at = (iso: string) => new Date(iso);
 
@@ -160,5 +160,38 @@ describe('scopeReportForRecipient', () => {
     expect(scopeReportForRecipient({ ...g, permissions: ['report.view', 'attendance.view'] }, 'late_report', {}, emps)).toEqual({ ok: false, reason: 'missing_permission:report.export' });
     expect(scopeReportForRecipient({ ...g, permissions: ['report.view', 'report.export'] }, 'late_report', {}, emps)).toEqual({ ok: false, reason: 'missing_permission:attendance.view' });
     expect(scopeReportForRecipient({ ...g, permissions: ['report.view', 'report.export', 'attendance.view'] }, 'audit_report', {}, emps)).toEqual({ ok: false, reason: 'missing_permission:audit.view' });
+  });
+
+  describe('an employee without report access receives the report about themselves (Finance parity: "each employee their own")', () => {
+    const employee = { userId: 'e', permissions: ['attendance.view_own', 'attendance.checkin'], allBranches: true, branchIds: [] as string[], self: { employeeId: 'e-a', branchId: 'b-a', departmentId: 'd-1' } };
+    it('narrows an organisation-wide monthly report to their own record and marks it as theirs', () => {
+      const d = scopeReportForRecipient(employee, 'monthly_attendance', { month: '2026-09', branchScope: ['b-b'], search: 'x' }, emps);
+      expect(d).toEqual({ ok: true, kind: 'SELF', parameters: { month: '2026-09', employeeIds: ['e-a'], selfEmployeeId: 'e-a' }, branchId: null, branchCount: null, employeeCount: 1 });
+      expect(isSelfScopedReport('monthly_attendance', (d as { parameters: Record<string, unknown> }).parameters, 'e-a')).toBe(true);
+    });
+    it('a report chosen for them (or for several people including them) becomes their own; one for somebody else is skipped', () => {
+      expect(scopeReportForRecipient(employee, 'employee_attendance', { from: '2026-09-01', to: '2026-09-30', employeeIds: ['e-a', 'e-b'] }, emps)).toMatchObject({ ok: true, kind: 'SELF', parameters: { employeeIds: ['e-a'] } });
+      expect(scopeReportForRecipient(employee, 'employee_attendance', { employeeIds: ['e-b'] }, emps)).toEqual({ ok: false, reason: 'outside_scope:self' });
+      expect(scopeReportForRecipient(employee, 'late_report', { branchId: 'b-b' }, emps)).toEqual({ ok: false, reason: 'outside_scope:self' });
+      expect(scopeReportForRecipient(employee, 'late_report', { departmentId: 'd-2' }, emps)).toEqual({ ok: false, reason: 'outside_scope:self' });
+      expect(scopeReportForRecipient(employee, 'late_report', { branchId: 'b-a', departmentId: 'd-1' }, emps)).toMatchObject({ ok: true, kind: 'SELF', parameters: { branchId: 'b-a', employeeIds: ['e-a'] } });
+    });
+    it('never for reports about other people or the organisation, never without view_own or a linked employee record', () => {
+      expect(scopeReportForRecipient(employee, 'employee_directory', {}, emps)).toEqual({ ok: false, reason: 'missing_permission:report.view' });
+      expect(scopeReportForRecipient(employee, 'audit_report', {}, emps)).toEqual({ ok: false, reason: 'missing_permission:report.view' });
+      expect(scopeReportForRecipient({ ...employee, permissions: ['attendance.checkin'] }, 'monthly_attendance', { month: '2026-09' }, emps)).toEqual({ ok: false, reason: 'missing_permission:report.view' });
+      expect(scopeReportForRecipient({ ...employee, self: null }, 'monthly_attendance', { month: '2026-09' }, emps)).toEqual({ ok: false, reason: 'missing_permission:report.view' });
+    });
+    it('the monthly summary copy never shows finalised payroll figures', () => {
+      expect(scopeReportForRecipient(employee, 'monthly_summary', { month: '2026-09', finalizedFigures: true }, emps)).toMatchObject({ ok: true, parameters: { finalizedFigures: false } });
+    });
+    it('isSelfScopedReport needs the marker AND the one-employee filter to agree with the caller', () => {
+      expect(isSelfScopedReport('monthly_attendance', { selfEmployeeId: 'e-a', employeeIds: ['e-a'] }, 'e-a')).toBe(true);
+      expect(isSelfScopedReport('monthly_attendance', { selfEmployeeId: 'e-a', employeeIds: ['e-a', 'e-b'] }, 'e-a')).toBe(false);
+      expect(isSelfScopedReport('monthly_attendance', { selfEmployeeId: 'e-b', employeeIds: ['e-b'] }, 'e-a')).toBe(false);
+      expect(isSelfScopedReport('monthly_attendance', { employeeIds: ['e-a'] }, 'e-a')).toBe(false);
+      expect(isSelfScopedReport('employee_directory', { selfEmployeeId: 'e-a', employeeIds: ['e-a'] }, 'e-a')).toBe(false);
+      expect(isSelfScopedReport('monthly_attendance', { selfEmployeeId: 'e-a', employeeIds: ['e-a'] }, null)).toBe(false);
+    });
   });
 });

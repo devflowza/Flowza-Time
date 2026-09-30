@@ -2,18 +2,19 @@ import { useMemo, useState } from 'react';
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
-import { CalendarCheck, ChevronLeft, ChevronRight, ListChecks, ListTree, X } from 'lucide-react';
+import { CalendarCheck, CalendarPlus, ChevronLeft, ChevronRight, ListChecks, ListTree, X } from 'lucide-react';
 import { ATTENDANCE_FLAGS, ATTENDANCE_STATUSES } from '@flowza/contracts';
 import { DataTable } from '@/components/data-table';
 import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StatCard } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { fmtDate, fmtMinutes, fmtNumber, fmtTime, todayIso } from '@/lib/format';
 import { cn } from '@/lib/utils';
-import { useOrgTimezone } from '@/features/me/use-me';
+import { useCan, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { SearchBox } from '@/features/organization/components/search-box';
 import { useTabTable } from '@/features/organization/use-tab-table';
 import { useShiftOptions } from '@/features/schedule/api';
+import { HolidayDialog } from '@/features/schedule/components/holiday-dialogs';
 import { useDailyAttendance } from '../api';
 import { useManualStatuses } from '../workspace-api';
 import type { DailyRecord } from '../types';
@@ -30,6 +31,7 @@ const STAT_TONE: Record<(typeof STAT_KEYS)[number], 'success' | 'danger' | 'info
 export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (preset: CorrectionPreset) => void }) {
   const { t } = useTranslation('attendance');
   const { t: tw } = useTranslation('attendanceWorkspace');
+  const { t: ts } = useTranslation('schedule');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
   const table = useTabTable();
@@ -41,6 +43,10 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
   const departments = useDepartmentOptions(f['branchId']);
   const shifts = useShiftOptions();
   const [recordId, setRecordId] = useState<string | null>(null);
+  // "Mark as holiday" for the day on screen (holiday.manage): into the default calendar, created when there is none; the API
+  // recalculates the day, so its records turn HOLIDAY once the worker has run
+  const canMarkHoliday = useCan()('holiday.manage');
+  const [markingHoliday, setMarkingHoliday] = useState(false);
   // HR workspace (Prompt 6a): Auto / Manual source per row, bulk "Set status", punch timeline, Add / Edit record
   const { canEdit, openEdit, openTimeline, dialogs } = useWorkspaceDialogs();
   const manual = useManualStatuses({ from: date, to: date, branchId: f['branchId'] });
@@ -90,7 +96,9 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
         </div>
         <Button variant="outline" size="sm" onClick={() => setDate(todayIso(tz))} disabled={date === todayIso(tz)}><CalendarCheck /> {tc('common.today')}</Button>
         <p className="text-sm text-muted-foreground">{fmtDate(date, 'EEEE, dd MMMM yyyy')}</p>
+        {canMarkHoliday ? <Button variant="outline" size="sm" className="ms-auto" onClick={() => setMarkingHoliday(true)} data-testid="mark-holiday"><CalendarPlus /> {ts('holidays.markDate')}</Button> : null}
       </div>
+      <HolidayDialog key={`${markingHoliday}-${date}`} open={markingHoliday} onOpenChange={setMarkingHoliday} calendarId={null} holiday={null} presetDate={date} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
         {STAT_KEYS.map((k) => <StatCard key={k} label={t(`status.${k}`)} value={fmtNumber(statValue(k))} tone={STAT_TONE[k]} loading={q.isLoading} onClick={() => table.setFilter('status', f['status'] === k ? undefined : k)} />)}
       </div>

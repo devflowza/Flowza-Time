@@ -6,7 +6,7 @@ import { resolveShift, resolveRuleSet, type EngineShiftAssignment, type EngineSh
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
-import { type Actor, audit, diffObjects, runUser } from '../../lib/service.js';
+import { type Actor, audit, diffObjects, runUser, withSystemScope } from '../../lib/service.js';
 import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
 import { isoDate, isoDateOrNull, isoDateTime, jsonArray, jsonObject } from '../../lib/mappers.js';
 import { enqueueRecalculation, orgToday } from './recalc.js';
@@ -273,8 +273,12 @@ export async function resolveEmployeeShift(deps: ApiDeps, actor: Actor, orgId: s
 
 // ----- holidays --------------------------------------------------------------------------------------------------------------
 
-export interface HolidayCalendarDto { id: string; name: string; countryCode: string | null; isDefault: boolean; holidayCount?: number; createdAt: string; updatedAt: string }
-const toCalendarDto = (c: { id: string; name: string; countryCode: string | null; isDefault: boolean; createdAt: Date; updatedAt: Date }, holidayCount?: number): HolidayCalendarDto => ({ id: c.id, name: c.name, countryCode: c.countryCode, isDefault: c.isDefault, ...(holidayCount !== undefined ? { holidayCount } : {}), createdAt: isoDateTime(c.createdAt), updatedAt: isoDateTime(c.updatedAt) });
+/**
+ * `branchCount` = branches whose calendar this is. A calendar applies to a branch when it is that branch's calendar, or — for a
+ * branch with none — when it is the organisation's default; a calendar that is neither the default nor any branch's applies to nobody.
+ */
+export interface HolidayCalendarDto { id: string; name: string; countryCode: string | null; isDefault: boolean; holidayCount?: number; branchCount?: number; createdAt: string; updatedAt: string }
+const toCalendarDto = (c: { id: string; name: string; countryCode: string | null; isDefault: boolean; createdAt: Date; updatedAt: Date }, holidayCount?: number, branchCount?: number): HolidayCalendarDto => ({ id: c.id, name: c.name, countryCode: c.countryCode, isDefault: c.isDefault, ...(holidayCount !== undefined ? { holidayCount } : {}), ...(branchCount !== undefined ? { branchCount } : {}), createdAt: isoDateTime(c.createdAt), updatedAt: isoDateTime(c.updatedAt) });
 export interface HolidayDto { id: string; calendarId: string; name: string; nameAr: string | null; date: string; endDate: string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; createdAt: string }
 const toHolidayDto = (h: { id: string; calendarId: string; name: string; nameAr: string | null; date: Date | string; endDate: Date | string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; createdAt: Date }): HolidayDto => ({ id: h.id, calendarId: h.calendarId, name: h.name, nameAr: h.nameAr, date: isoDate(h.date), endDate: isoDateOrNull(h.endDate), isHalfDay: h.isHalfDay, type: h.type, branchIds: h.branchIds, isTentative: h.isTentative, createdAt: isoDateTime(h.createdAt) });
 
@@ -284,15 +288,22 @@ export async function listCalendars(deps: ApiDeps, actor: Actor, orgId: string):
     const rows = await trx.selectFrom('holidayCalendars').selectAll().where('organizationId', '=', orgId).orderBy('name').execute();
     const counts = rows.length ? await trx.selectFrom('holidays').select(['calendarId', (eb) => eb.fn.countAll().as('n')]).where('organizationId', '=', orgId).where('calendarId', 'in', rows.map((r) => r.id)).groupBy('calendarId').execute() : [];
     const by = new Map(counts.map((c) => [c.calendarId, toCount(c.n)]));
-    return rows.map((r) => toCalendarDto(r, by.get(r.id) ?? 0));
+    // branches are branch-scoped by RLS; the count is the organisation's (a branch-scoped holder must not read "applies to nobody")
+    const used = rows.length ? await withSystemScope(trx, orgId, (t) => t.selectFrom('branches').select(['holidayCalendarId', (eb) => eb.fn.countAll().as('n')]).where('organizationId', '=', orgId).where('holidayCalendarId', 'in', rows.map((r) => r.id)).groupBy('holidayCalendarId').execute()) : [];
+    const branches = new Map(used.map((b) => [b.holidayCalendarId, toCount(b.n)]));
+    return rows.map((r) => toCalendarDto(r, by.get(r.id) ?? 0, branches.get(r.id) ?? 0));
   });
 }
 export async function createCalendar(deps: ApiDeps, actor: Actor, orgId: string, input: HolidayCalendarInput): Promise<HolidayCalendarDto> {
   requirePermission(actor.principal, orgId, 'holiday.manage');
   return runUser(deps.db, actor, async (trx) => {
+    // the organisation's first calendar is its default whatever the switch said: otherwise its holidays would apply to nobody until
+    // somebody found the switch (the default is the calendar of every branch that has none of its own)
+    const hasDefault = !!(await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('isDefault', '=', true).executeTakeFirst());
+    const isDefault = input.isDefault || !hasDefault;
     if (input.isDefault) await trx.updateTable('holidayCalendars').set({ isDefault: false }).where('organizationId', '=', orgId).where('isDefault', '=', true).execute();
-    const row = await trx.insertInto('holidayCalendars').values({ organizationId: orgId, name: input.name, countryCode: input.countryCode ?? null, isDefault: input.isDefault }).returningAll().executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'holiday_calendar.created', 'holiday_calendar', { entityId: row.id, newValue: input });
+    const row = await trx.insertInto('holidayCalendars').values({ organizationId: orgId, name: input.name, countryCode: input.countryCode ?? null, isDefault }).returningAll().executeTakeFirstOrThrow();
+    await audit(trx, actor, orgId, 'holiday_calendar.created', 'holiday_calendar', { entityId: row.id, newValue: { ...input, isDefault } });
     return toCalendarDto(row, 0);
   });
 }
@@ -347,14 +358,29 @@ async function holidayRecalc(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
   if (h.branchIds && h.branchIds.length) { for (const b of h.branchIds) await recalcIfPast(deps, trx, actor, orgId, h.date, h.endDate, { branchId: b, reason }); }
   else await recalcIfPast(deps, trx, actor, orgId, h.date, h.endDate, { reason });
 }
+/**
+ * "Mark a holiday" without choosing a calendar: the organisation's default calendar — the calendar of every branch without one of
+ * its own — created on the spot (named for the organisation's country) when the organisation has no default yet.
+ */
+async function defaultCalendarFor(trx: Trx, actor: Actor, orgId: string): Promise<string> {
+  const existing = await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('isDefault', '=', true).executeTakeFirst();
+  if (existing) return existing.id;
+  const org = await trx.selectFrom('organizations').select('countryCode').where('id', '=', orgId).executeTakeFirst();
+  const countryCode = org?.countryCode && /^[A-Z]{2}$/.test(org.countryCode) ? org.countryCode : null;
+  const row = await trx.insertInto('holidayCalendars').values({ organizationId: orgId, name: 'Public holidays', countryCode, isDefault: true }).returning('id').executeTakeFirstOrThrow();
+  await audit(trx, actor, orgId, 'holiday_calendar.created', 'holiday_calendar', { entityId: row.id, newValue: { name: 'Public holidays', countryCode, isDefault: true, createdFor: 'first holiday' } });
+  return row.id;
+}
+
 export async function createHoliday(deps: ApiDeps, actor: Actor, orgId: string, input: HolidayInput): Promise<HolidayDto> {
   const grant = requirePermission(actor.principal, orgId, 'holiday.manage');
   requireHolidayScope(grant, input.branchIds ?? null);
   if (input.endDate && input.endDate < input.date) throw errors.validation('endDate must be on/after date.', { issues: [{ path: 'endDate', message: 'Before date' }] });
   return runUser(deps.db, actor, async (trx) => {
-    if (!(await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('id', '=', input.calendarId).executeTakeFirst())) throw errors.validation('Holiday calendar not found.', { issues: [{ path: 'calendarId', message: 'Unknown calendar' }] });
-    const row = await trx.insertInto('holidays').values({ organizationId: orgId, calendarId: input.calendarId, name: input.name, nameAr: input.nameAr ?? null, date: input.date, endDate: input.endDate ?? null, isHalfDay: input.isHalfDay, type: input.type, branchIds: input.branchIds ?? null, isTentative: input.isTentative }).returningAll().executeTakeFirstOrThrow();
-    await audit(trx, actor, orgId, 'holiday.created', 'holiday', { entityId: row.id, newValue: input });
+    const calendarId = input.calendarId ?? (await defaultCalendarFor(trx, actor, orgId));
+    if (!(await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('id', '=', calendarId).executeTakeFirst())) throw errors.validation('Holiday calendar not found.', { issues: [{ path: 'calendarId', message: 'Unknown calendar' }] });
+    const row = await trx.insertInto('holidays').values({ organizationId: orgId, calendarId, name: input.name, nameAr: input.nameAr ?? null, date: input.date, endDate: input.endDate ?? null, isHalfDay: input.isHalfDay, type: input.type, branchIds: input.branchIds ?? null, isTentative: input.isTentative }).returningAll().executeTakeFirstOrThrow();
+    await audit(trx, actor, orgId, 'holiday.created', 'holiday', { entityId: row.id, newValue: { ...input, calendarId } });
     await holidayRecalc(deps, trx, actor, orgId, { date: input.date, endDate: input.endDate ?? null, branchIds: input.branchIds ?? null }, `holiday ${input.name} added`);
     return toHolidayDto(row);
   });

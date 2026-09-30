@@ -7,7 +7,7 @@ import type { SelfPunchDirection, SelfPunchPreviewDto, SelfPunchRefusal, SelfPun
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, EmptyState, ErrorState, Skeleton } from '@/components/ui';
 import { ApiError } from '@/lib/api-client';
-import { fmtDateTime, fmtTime } from '@/lib/format';
+import { fmtDateTime, fmtMinutes, fmtTime } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useOrgId } from '@/features/me/use-me';
 import { AttendanceStatusBadge, FlagChips } from '@/features/attendance/components/badges';
@@ -38,6 +38,30 @@ const ACCURACY_WARNING_M = 50;
 function nextDirection(status: SelfPunchStatusDto | undefined, queued: ReadonlyArray<{ direction: SelfPunchDirection }>): SelfPunchDirection {
   const last = queued.length ? queued[queued.length - 1]!.direction : status?.lastDirection ?? null;
   return last === 'in' ? 'out' : 'in';
+}
+
+/**
+ * While checked in: when the employee may check out — the shift end, or on a flexible shift the check-in + the required hours
+ * (the record's expected end, computed by the engine) — and how long is left. Hidden before the first check-in and after the check-out.
+ */
+function CheckOutFrom({ status, clock }: { status: SelfPunchStatusDto | undefined; clock: DateTime }) {
+  const { t } = useTranslation(PA_NS);
+  const end = status?.today?.expectedEndAt;
+  const firstIn = status?.today?.firstInAt;
+  if (!status || status.lastDirection !== 'in' || !end || !firstIn) return null;
+  const tz = status.timezone;
+  const left = Math.ceil((Date.parse(end) - clock.toMillis()) / 60_000);
+  const span = Math.round((Date.parse(end) - Date.parse(firstIn)) / 60_000);
+  return (
+    <div className="mt-2 rounded-md border bg-muted/40 px-3 py-2 text-start" data-testid="checkout-from">
+      <p className="text-sm font-medium tnum">{t('checkin.checkOutFrom', { time: fmtTime(end, tz) })}</p>
+      <p className="text-xs text-muted-foreground tnum">
+        {span > 0 ? t('checkin.checkOutFromHint', { duration: fmtMinutes(span) }) : null}
+        {left > 0 ? ` · ${t('checkin.remaining', { duration: fmtMinutes(left) })}` : null}
+      </p>
+      {left <= 0 ? <p className="text-xs text-emerald-700 dark:text-emerald-300">{t('checkin.hoursDone')}</p> : null}
+    </div>
+  );
 }
 
 /**
@@ -144,6 +168,7 @@ export default function CheckInPage() {
                 <p data-testid="punch-state">{t(lastPunch.direction === 'out' ? 'checkin.checkedOutAt' : 'checkin.checkedInAt', { time: fmtTime(lastPunch.punchedAt, tz) })}</p>
               ) : <p data-testid="punch-state" className="text-muted-foreground">{t('checkin.notYet')}</p>}
               {s?.today ? <span className="mt-1 inline-flex flex-wrap items-center justify-end gap-1.5"><AttendanceStatusBadge status={s.today.status} /><FlagChips flags={s.today.flags} max={2} size="xs" /></span> : null}
+              <CheckOutFrom status={s} clock={clock} />
             </div>
           </div>
 

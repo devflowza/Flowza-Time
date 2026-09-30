@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type Selectable } from 'kysely';
 import {
-  createReportScheduleSchema, DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, REPORT_RECIPIENT_MAX_RESOLVED, REPORT_SHARES_PER_HOUR, REPORT_TYPE_DEFINITIONS, SCHEDULABLE_REPORT_TYPES,
+  createReportScheduleSchema, DAILY_REPORT_MAX_DAYS, REPORT_DELIVERY_QUEUE, dailyReportRangeTooLong, REPORT_RECIPIENT_MAX_RESOLVED, REPORT_SHARES_PER_HOUR, REPORT_TYPE_DEFINITIONS, SCHEDULABLE_REPORT_TYPES,
   type CreateReportScheduleInput, type ReportDeliveryChannel, type ReportDeliveryDto, type ReportDeliveryMode, type ReportDeliveryStatus, type ReportPeriodRule, type ReportRecipientOptionsDto,
   type ReportRecipients, type ReportRunNowResultDto, type ReportRunSummaryDto, type ReportScheduleCadence, type ReportScheduleDto, type ReportScheduleFilters, type ReportScheduleRunStatus,
   type ReportShareResultDto, type ReportType, type ReportTypeDefinition, type ShareReportInput, type UpdateReportScheduleInput,
@@ -315,7 +315,7 @@ export async function runScheduleNow(deps: ApiDeps, actor: Actor, orgId: string,
     const timing = await orgTiming(trx, orgId);
     const period = schedulePeriod({ periodRule: row.periodRule as ReportPeriodRule, customFromDay: row.customFromDay, customToDay: row.customToDay, firstDayOfWeek: timing.firstDayOfWeek }, new Date(), timing.timezone);
     const runKey = `manual:${randomUUID()}`;
-    const jobId = await enqueueJob(deps.queue, trx, { queue: 'reports', jobType: REPORT_DELIVERY_JOB_TYPE, organizationId: orgId, payload: { organizationId: orgId, mode: 'manual', scheduleId: id, runKey, requestedBy: actor.userId }, correlationId: actor.requestId, priority: 5 });
+    const jobId = await enqueueJob(deps.queue, trx, { queue: REPORT_DELIVERY_QUEUE, jobType: REPORT_DELIVERY_JOB_TYPE, organizationId: orgId, payload: { organizationId: orgId, mode: 'manual', scheduleId: id, runKey, requestedBy: actor.userId }, correlationId: actor.requestId, priority: 5 });
     await audit(trx, actor, orgId, 'report_schedule.run_requested', 'report_schedule', { entityId: id, branchId: row.branchId, newValue: { runKey, period, jobId } });
     return { jobId, runKey, status: 'QUEUED', period };
   });
@@ -334,7 +334,7 @@ export async function shareReport(deps: ApiDeps, actor: Actor, orgId: string, in
     await systemStep(trx, orgId, (t) => consumeShareQuota(t, orgId));
     const runKey = `send:${randomUUID()}`;
     const spec = { reportType: input.reportType, format: input.format, parameters, recipients: input.recipients, channels: input.channels, note: input.note ?? null };
-    const jobId = await enqueueJob(deps.queue, trx, { queue: 'reports', jobType: REPORT_DELIVERY_JOB_TYPE, organizationId: orgId, payload: { organizationId: orgId, mode: 'send_now', runKey, requestedBy: actor.userId, spec }, correlationId: actor.requestId, priority: 5 });
+    const jobId = await enqueueJob(deps.queue, trx, { queue: REPORT_DELIVERY_QUEUE, jobType: REPORT_DELIVERY_JOB_TYPE, organizationId: orgId, payload: { organizationId: orgId, mode: 'send_now', runKey, requestedBy: actor.userId, spec }, correlationId: actor.requestId, priority: 5 });
     await audit(trx, actor, orgId, 'report.shared', 'report_delivery', { branchId: typeof parameters['branchId'] === 'string' ? (parameters['branchId'] as string) : null, newValue: { runKey, jobId, reportType: input.reportType, format: input.format, parameters, recipients: input.recipients, resolvedRecipients: recipients.length, channels: input.channels } });
     return { jobId, runKey, status: 'QUEUED', recipients: recipients.length };
   });

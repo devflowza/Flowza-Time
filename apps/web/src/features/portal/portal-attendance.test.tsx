@@ -99,6 +99,31 @@ describe('CheckInPage', () => {
     expect(screen.getByTestId('punch-button')).toBeDisabled();
   });
 
+  it('once checked in, says when the employee may check out (flexible: check-in + required hours) and how long is left', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    // checked in 19:11 Muscat on an 8-hour flexible shift; the engine put the expected check-out at 03:11
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({
+      serverTime: '2026-09-27T20:00:00Z', lastDirection: 'in', canCheckIn: false, canCheckOut: true,
+      punches: [{ id: 'p1', punchedAt: '2026-09-27T15:11:00Z', direction: 'in', source: 'SELF_SERVICE', channel: 'web', verdict: 'allowed', deviceName: null, processingStatus: 'processed' }],
+      today: { status: 'PENDING', flags: [], firstInAt: '2026-09-27T15:11:00Z', lastOutAt: null, workedMinutes: 0, expectedEndAt: '2026-09-27T23:11:00Z', scheduledMinutes: 480 },
+    }) } });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    renderWithProviders(<CheckInPage />);
+    const line = await screen.findByTestId('checkout-from');
+    expect(line).toHaveTextContent(/You can check out from/);
+    expect(line).toHaveTextContent('8h 00m after your check-in');
+    expect(line).toHaveTextContent(/to go/);
+  });
+
+  it('hides the check-out time before the first check-in and on an API that does not send it', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ lastDirection: 'in', today: { status: 'PENDING', flags: [], firstInAt: '2026-09-27T04:00:00Z', lastOutAt: null, workedMinutes: 0 } }) } });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    renderWithProviders(<CheckInPage />);
+    await screen.findByTestId('verdict-banner');
+    expect(screen.queryByTestId('checkout-from')).not.toBeInTheDocument();
+  });
+
   it('keeps a punch taken offline on the device and sends it when asked', async () => {
     mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
     mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status() } });

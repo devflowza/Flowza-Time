@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { createReportRequestSchema, payrollPeriodActionSchema, payrollPeriodsQuerySchema, payrollSummariesQuerySchema, reportListQuerySchema, reportTypesQuerySchema } from '@flowza/contracts';
+import { createReportRequestSchema, myReportListQuerySchema, payrollPeriodActionSchema, reportDownloadQuerySchema, payrollPeriodsQuerySchema, payrollSummariesQuerySchema, reportListQuerySchema, reportTypesQuerySchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { idempotency } from '../../../middleware/idempotency.js';
@@ -14,7 +14,9 @@ export function registerReportRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.post('/orgs/:orgId/reports', idem, async (c) => c.json({ data: await reports.createReport(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, createReportRequestSchema)) }, 202));
   v1.get('/orgs/:orgId/reports', async (c) => { const q = query(c, reportListQuerySchema); const r = await reports.listReports(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.get('/orgs/:orgId/reports/:id', async (c) => ok(c, await reports.getReport(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
-  v1.get('/orgs/:orgId/reports/:id/download', async (c) => ok(c, await reports.downloadReport(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
+  v1.get('/orgs/:orgId/reports/:id/download', async (c) => ok(c, await reports.downloadReport(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), query(c, reportDownloadQuerySchema).disposition)));
+  // the employee portal: reports about the caller that were shared with them (each employee's own copy)
+  v1.get('/orgs/:orgId/me/reports', async (c) => { const q = query(c, myReportListQuerySchema); const r = await reports.listMyReports(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.post('/orgs/:orgId/reports/:id/cancel', async (c) => ok(c, await reports.cancelReport(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
   // payroll
   v1.get('/orgs/:orgId/payroll/periods', async (c) => ok(c, await reports.listPayrollPeriods(deps, actorOf(c, deps), param(c, 'orgId'), query(c, payrollPeriodsQuerySchema))));

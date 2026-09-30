@@ -105,7 +105,7 @@ function expectedLink(key: string): string {
     'leave.comment_added#approvers': `/approvals?request=${ID.approvalRequest}`,
     'leave.year_closed': '/leave?tab=allocations',
     'leave.comp_off_expired': '/my/leave',
-    'report.ready': '/reports',
+    'report.ready': `/reports?view=${ID.report}`,
     'report.failed': '/reports',
     'device.offline': `/devices/${ID.device}`,
     'device.online': `/devices/${ID.device}`,
@@ -122,7 +122,8 @@ function expectedLink(key: string): string {
     'attendance.regularisation_decided': '/my/requests?tab=regularisations&date=2026-09-15',
     'punch.missing_out': '/my',
     'shift.swap_decided': '/my/shift?date=2026-09-15',
-    'report.scheduled_delivery': `/reports?download=${ID.report}`,
+    // the sample payload sets every flag, selfScope included: an employee's own copy opens in the portal (the other branch: catalogue.test)
+    'report.scheduled_delivery': `/my/reports?view=${ID.report}`,
     'sync.finance.failed': '/settings/integrations',
     'employee.imported': `/employees/import?importId=${ID.aggregate}`,
   };

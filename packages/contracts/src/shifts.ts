@@ -50,7 +50,12 @@ export const shiftAssignmentInputSchema = z.object({
 export type ShiftAssignmentInput = z.infer<typeof shiftAssignmentInputSchema>;
 
 export const holidayInputSchema = z.object({
-  calendarId: uuidSchema,
+  /**
+   * The calendar the holiday belongs to. Absent = the organisation's DEFAULT calendar — created on the spot when the organisation
+   * has none — so a holiday can be marked in one step and always applies (a holiday in a calendar that is neither the default nor
+   * any branch's calendar applies to nobody).
+   */
+  calendarId: uuidSchema.optional(),
   name: z.string().trim().min(1).max(160),
   nameAr: z.string().trim().max(160).optional(),
   date: isoDateSchema,

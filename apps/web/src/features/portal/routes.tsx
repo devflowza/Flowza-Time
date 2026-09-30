@@ -11,7 +11,7 @@ import employeesEn from '@/locales/en/employees.json';
 import employeesAr from '@/locales/ar/employees.json';
 import { RequireEmployeeLink } from './components/parts';
 import { MyAttendancePage, MyLeavePage, MyProfilePage, PageFallback, PortalHomePage } from './pages/lazy';
-import { CheckInPage, MyRequestsPage, MyShiftPage } from './pages/lazy';
+import { CheckInPage, MyReportsPage, MyRequestsPage, MyShiftPage } from './pages/lazy';
 import './attendance-i18n';
 
 registerNamespace('portal', en, ar);
@@ -35,4 +35,6 @@ export const portalRoutes: RouteObject[] = [
   { path: 'my/checkin', element: page(<CheckInPage />) },
   { path: 'my/requests', element: page(<MyRequestsPage />) },
   { path: 'my/shift', element: page(<MyShiftPage />) },
+  // reports about the employee that HR / a manager sent them — viewed and downloaded through their own session
+  { path: 'my/reports', element: page(<MyReportsPage />) },
 ];

@@ -179,7 +179,7 @@ describe('report schedules — CRUD and permissions', () => {
     expect(run.body.data.runKey).toMatch(/^manual:/);
     const job = (await queueJobs(h.admin, 'RUN_REPORT_SCHEDULE')).find((j) => j.payload['runKey'] === run.body.data.runKey);
     expect(job?.payload).toMatchObject({ mode: 'manual', scheduleId: id, organizationId: f.orgId, requestedBy: f.owner });
-    expect(job?.queueName).toBe('reports');
+    expect(job?.queueName).toBe('processing'); // the fan-out is database work: the general worker, not the Chromium reports machine
     const today = DateTime.now().setZone('Asia/Muscat');
     expect(run.body.data.period.from).toBe(today.startOf('month').minus({ months: 1 }).toISODate());
     const hrUser = await h.request('POST', `${base()}/report-schedules/${id}/run-now`, { token: f.hrUser });

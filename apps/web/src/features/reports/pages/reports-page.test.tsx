@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, waitFor, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('@/lib/api-client', async () => (await import('@/features/employees/test-mocks')).apiClientModule);
 vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/test-mocks')).useMeModule);
@@ -37,7 +37,7 @@ describe('ReportsPage — report.export and schedules', () => {
     grant('report.view', 'report.export', 'report.schedule');
     routes({ '/orgs/org-1/reports/rep-1/download': { data: { url: 'https://storage.local/signed', expiresInSeconds: 300, fileName: 'late_report-2026-09-26.pdf' } } });
     renderWithProviders(<ReportsPage />, { route: '/reports?download=rep-1' });
-    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/reports/rep-1/download'));
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/reports/rep-1/download', { disposition: 'attachment' }));
     await waitFor(() => expect(click).toHaveBeenCalled());
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/reports$/));
     expect(await screen.findByTestId('schedules-panel')).toBeInTheDocument();
@@ -49,6 +49,32 @@ describe('ReportsPage — report.export and schedules', () => {
     routes();
     renderWithProviders(<ReportsPage />, { route: '/reports?download=rep-1' });
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/reports$/));
-    expect(apiMock.get).not.toHaveBeenCalledWith('/orgs/org-1/reports/rep-1/download');
+    expect(apiMock.get.mock.calls.some((c) => c[0] === '/orgs/org-1/reports/rep-1/download')).toBe(false);
+  });
+
+  it('opens the report a notification points at (?view=) in the viewer — a PDF in place, fetched inline through the session', async () => {
+    grant('report.view', 'report.export');
+    routes({ '/orgs/org-1/reports/rep-1/download': { data: { url: 'https://storage.local/signed-inline', expiresInSeconds: 300, fileName: 'late_report-2026-09-26.pdf', disposition: 'inline' } } });
+    renderWithProviders(<ReportsPage />, { route: '/reports?view=rep-1' });
+    const frame = await screen.findByTestId('report-frame');
+    expect(frame).toHaveAttribute('src', 'https://storage.local/signed-inline');
+    expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/reports/rep-1/download', { disposition: 'inline' });
+    expect(screen.getByRole('dialog')).toHaveTextContent('Staff Late Attendance Report');
+    expect(click).not.toHaveBeenCalled(); // viewing is not downloading
+    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
+    await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent(/^\/reports$/));
+  });
+
+  it('View on a completed row opens the viewer; a CSV is shown as a table', async () => {
+    grant('report.view', 'report.export');
+    routes({ '/orgs/org-1/reports': page([{ ...report, format: 'csv' }]), '/orgs/org-1/reports/rep-1/download': { data: { url: 'https://storage.local/signed.csv', expiresInSeconds: 300, fileName: 'late_report-2026-09-26.csv' } } });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('Name,Late days\n"Al Harthy, Ahmed",3\n'));
+    renderWithProviders(<ReportsPage />, { route: '/reports' });
+    const table = (await screen.findAllByRole('table'))[0]!;
+    (await within(table).findByRole('button', { name: /View/ })).click();
+    const csv = await screen.findByTestId('report-csv');
+    expect(csv).toHaveTextContent('Al Harthy, Ahmed');
+    expect(fetchSpy).toHaveBeenCalledWith('https://storage.local/signed.csv');
+    fetchSpy.mockRestore();
   });
 });
