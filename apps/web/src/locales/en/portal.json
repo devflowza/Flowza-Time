@@ -4,7 +4,8 @@
     "home": "My overview",
     "attendance": "My attendance",
     "leave": "My leave",
-    "profile": "My profile"
+    "profile": "My profile",
+    "reports": "My reports"
   },
   "notLinked": {
     "title": "No employee record linked",

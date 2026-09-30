@@ -426,20 +426,53 @@ describe('calculateDailyRecord — employment boundaries', () => {
 describe('calculateDailyRecord — flexible shifts and no shift', () => {
   beforeEach(resetIds);
 
-  it('flexible 8h: over hours earn overtime, under hours are flagged', () => {
+  it('flexible 8h: over hours earn overtime, leaving before the 8 hours is an early departure', () => {
     const over = calculateDailyRecord(input({ shift: flexibleShift(), events: day('10:00', '19:00') }));
-    expect(over).toMatchObject({ status: 'PRESENT', scheduledMinutes: 480, workedMinutes: 540, overtimeMinutes: 30, overtimeCategory: 'REGULAR', expectedStartAt: null, expectedEndAt: null, lateMinutes: 0 });
+    expect(over).toMatchObject({ status: 'PRESENT', scheduledMinutes: 480, workedMinutes: 540, overtimeMinutes: 30, overtimeCategory: 'REGULAR', expectedStartAt: at(DATE, '10:00'), expectedEndAt: at(DATE, '18:00'), lateMinutes: 0, earlyDepartureMinutes: 0 });
     expect(over.flags).toEqual(['OVERTIME']);
     const under = calculateDailyRecord(input({ shift: flexibleShift(), events: day('10:00', '15:00') }));
-    expect(under).toMatchObject({ status: 'PRESENT', workedMinutes: 300, overtimeMinutes: 0 });
-    expect(under.flags).toEqual(['UNDER_HOURS']);
+    expect(under).toMatchObject({ status: 'PRESENT', workedMinutes: 300, overtimeMinutes: 0, expectedEndAt: at(DATE, '18:00'), earlyDepartureMinutes: 180 });
+    expect(under.flags).toEqual(['EARLY_DEPARTURE', 'UNDER_HOURS']);
   });
 
-  it('flexible core hours drive late and early departure', () => {
+  it('flexible without core hours: check in at any time, the expected check-out is the check-in + the required minutes', () => {
+    // an evening start: 19:11 in, out 8 hours later at 03:11 — before the 04:00 day boundary, so still the same attendance day
+    const r = calculateDailyRecord(input({ shift: flexibleShift(), events: [punch(DATE, '19:11'), punch(D1, '03:11')] }));
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 480, lateMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 0, expectedStartAt: at(DATE, '19:11'), expectedEndAt: at(D1, '03:11') });
+    expect(r.flags).toEqual([]);
+    expect(r.trace.steps.find((s) => s.step === 'late')?.detail).toMatch(/any time/);
+    // leaving at 01:00 is 131 minutes early
+    resetIds();
+    const early = calculateDailyRecord(input({ shift: flexibleShift(), events: [punch(DATE, '19:11'), punch(D1, '01:00')] }));
+    expect(early).toMatchObject({ lateMinutes: 0, earlyDepartureMinutes: 131, expectedEndAt: at(D1, '03:11') });
+    expect(early.flags).toContain('EARLY_DEPARTURE');
+    expect(early.flags).not.toContain('LATE');
+  });
+
+  it('flexible: while the employee is still in, the record already carries the check-out time (portal and reminder read it)', () => {
+    const r = calculateDailyRecord(input({ shift: flexibleShift(), events: [punch(DATE, '09:40')], now: at(DATE, '12:00') }));
+    expect(r).toMatchObject({ status: 'PENDING', firstInAt: at(DATE, '09:40'), expectedStartAt: at(DATE, '09:40'), expectedEndAt: at(DATE, '17:40'), lastOutAt: null });
+  });
+
+  it('flexible: unpaid breaks extend the expected check-out; a half day does not add the break', () => {
+    const shift = flexibleShift({ breaks: [{ minutes: 60, paid: false }] });
+    const r = calculateDailyRecord(input({ shift, events: day('08:00', '17:00') }));
+    expect(r).toMatchObject({ expectedEndAt: at(DATE, '17:00'), workedMinutes: 480, earlyDepartureMinutes: 0, status: 'PRESENT' });
+    resetIds();
+    const half = calculateDailyRecord(input({ shift, events: day('08:00', '12:00'), leave: { id: 'lv', leaveTypeCode: 'AL', isPaid: true, isHalfDay: true, halfDayPart: 'SECOND_HALF' } }));
+    expect(half).toMatchObject({ scheduledMinutes: 240, expectedEndAt: at(DATE, '12:00'), earlyDepartureMinutes: 0, status: 'HALF_DAY' });
+  });
+
+  it('flexible core hours: arriving after the core start is late; the check-out is the later of check-in + required and the core end', () => {
     const shift = flexibleShift({ coreStart: '10:00', coreEnd: '15:00' });
     const r = calculateDailyRecord(input({ shift, events: day('10:20', '14:30') }));
-    expect(r).toMatchObject({ lateMinutes: 10, earlyDepartureMinutes: 30, expectedStartAt: at(DATE, '10:00'), expectedEndAt: at(DATE, '15:00') });
+    // 10:20 + 8 h = 18:20, later than the 15:00 core end
+    expect(r).toMatchObject({ lateMinutes: 10, earlyDepartureMinutes: 230, expectedStartAt: at(DATE, '10:00'), expectedEndAt: at(DATE, '18:20') });
     expect(r.flags).toEqual(expect.arrayContaining(['LATE', 'EARLY_DEPARTURE']));
+    // in early at 06:00: 06:00 + 8 h = 14:00, but the core runs to 15:00 → leaving at 14:00 is 60 minutes early
+    resetIds();
+    const earlyBird = calculateDailyRecord(input({ shift, events: day('06:00', '14:00') }));
+    expect(earlyBird).toMatchObject({ lateMinutes: 0, expectedEndAt: at(DATE, '15:00'), earlyDepartureMinutes: 60, workedMinutes: 480 });
   });
 
   it('flexible day boundary keeps a 02:00 OUT on the previous day', () => {

@@ -6,6 +6,15 @@ import { isoDateSchema, paginationQuerySchema, uuidSchema } from '../common.js';
 /** Query for GET /report-types: `allowed` is computed against the caller's membership in `orgId`. */
 export const reportTypesQuerySchema = z.object({ orgId: uuidSchema.optional() });
 export const reportListQuerySchema = paginationQuerySchema.extend({ status: z.enum(REPORT_STATUSES).optional(), reportType: z.enum(REPORT_TYPES).optional() });
+/**
+ * GET …/reports/:id/download — `attachment` (default) signs a URL that downloads the file under the report's name; `inline`
+ * one the browser opens in place (the report viewer). Both are the same export, audited with the disposition.
+ */
+export const REPORT_DISPOSITIONS = ['inline', 'attachment'] as const;
+export type ReportDisposition = (typeof REPORT_DISPOSITIONS)[number];
+export const reportDownloadQuerySchema = z.object({ disposition: z.enum(REPORT_DISPOSITIONS).default('attachment') });
+/** GET /orgs/:orgId/me/reports — the reports about the caller that were shared with them (self-scoped copies), newest first. */
+export const myReportListQuerySchema = paginationQuerySchema.extend({ status: z.enum(REPORT_STATUSES).optional() });
 
 export interface ReportTypeDefinition {
   key: ReportType;

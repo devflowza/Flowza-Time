@@ -82,6 +82,11 @@ interface Schedule {
   ratio: number;
   unpaidFixedBreakMinutes: number;
   halfDayOff: HalfDayOff;
+  /**
+   * FLEXIBLE only: the employee may check in at any time — `expectedStart` is their own check-in, never a time they can be late
+   * for. False when the shift has core hours (arriving after the core start is late) and for every other kind.
+   */
+  checkInAnyTime: boolean;
 }
 
 /** Everything `measureWork` needs besides the punches themselves. */
@@ -296,8 +301,10 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   const dayType = classifyDay(input, rec);
   const halfDayOff: HalfDayOff = dayType === 'WORKING' ? halfDayPart(input, rec) : null;
 
-  // 6. Expectations.
-  const schedule = buildSchedule(input, window, halfDayOff, rec);
+  // 6. Expectations. A FLEXIBLE day is anchored on the check-in: the employee is expected to leave once the required minutes
+  // (plus unpaid breaks) are done — rounded like the worked minutes, so leaving at the expected end is never "under hours".
+  const anchorIn = roundPunches(interpretation.firstIn, null, rules.punchRoundingMinutes, rules.punchRoundingMode).firstIn;
+  const schedule = buildSchedule(input, window, halfDayOff, rec, anchorIn);
   const ctx: WorkContext = { rules, shift, date, zone, window, rec };
   const now = input.now ? parseInstant(input.now, zone) : null;
   const dayOver = now === null || now >= window.windowEnd;
@@ -425,7 +432,7 @@ function ramadanApplies(input: DailyCalculationInput): number | null {
   return mode.scheduledMinutes;
 }
 
-function buildSchedule(input: DailyCalculationInput, window: PunchWindow, halfDayOff: HalfDayOff, rec: Recorder): Schedule {
+function buildSchedule(input: DailyCalculationInput, window: PunchWindow, halfDayOff: HalfDayOff, rec: Recorder, anchorIn: DateTime | null = null): Schedule {
   const { shift, attendanceDate: date, timezone: zone } = input;
   let expectedStart: DateTime | null = null;
   let expectedEnd: DateTime | null = null;
@@ -439,13 +446,18 @@ function buildSchedule(input: DailyCalculationInput, window: PunchWindow, halfDa
     scheduled = Math.max(0, minutesBetween(expectedStart, expectedEnd) - unpaidFixed);
     rec.step('schedule', `FIXED ${shift.startTime}–${shift.endTime}: ${minutesBetween(expectedStart, expectedEnd)} min span − ${unpaidFixed} min unpaid breaks = ${scheduled} scheduled`, { expectedStart: toUtcIso(expectedStart), expectedEnd: toUtcIso(expectedEnd), unpaidBreakMinutes: unpaidFixed, scheduledMinutes: scheduled });
   } else if (shift && window.kind === 'FLEXIBLE') {
+    unpaidFixed = scheduledBreakMinutes(shift.breaks).unpaid;
     scheduled = Math.max(0, shift.requiredMinutes ?? 0);
+    // core hours (optional) are the part of the day the employee must be present for; expected start / end are completed
+    // below, once the required minutes are final (Ramadan, half day)
     if (shift.coreStart) expectedStart = localInstant(date, shift.coreStart, zone);
     if (shift.coreEnd) {
       expectedEnd = localInstant(date, shift.coreEnd, zone);
-      if (expectedStart && expectedEnd <= expectedStart) expectedEnd = localInstant(date, shift.coreEnd, zone, 1);
+      // a core window that ends at or before its start runs past midnight; without a core start it is read from the day boundary
+      const from = expectedStart ?? window.scheduledStart;
+      if (expectedEnd <= from) expectedEnd = localInstant(date, shift.coreEnd, zone, 1);
     }
-    rec.step('schedule', `FLEXIBLE: ${scheduled} required minutes${shift.coreStart && shift.coreEnd ? `, core ${shift.coreStart}–${shift.coreEnd}` : ''}`, { requiredMinutes: scheduled, coreStart: iso(expectedStart), coreEnd: iso(expectedEnd) });
+    rec.step('schedule', `FLEXIBLE: ${scheduled} required minutes${unpaidFixed ? ` + ${unpaidFixed} min unpaid breaks` : ''}${shift.coreStart || shift.coreEnd ? `, core ${shift.coreStart ?? '—'}–${shift.coreEnd ?? '—'}` : ', check in at any time'}`, { requiredMinutes: scheduled, unpaidBreakMinutes: unpaidFixed, coreStart: iso(expectedStart), coreEnd: iso(expectedEnd) });
   } else {
     rec.step('schedule', 'no shift assigned → no expectations; worked hours from first/last punch on the calendar day');
   }
@@ -471,7 +483,24 @@ function buildSchedule(input: DailyCalculationInput, window: PunchWindow, halfDa
     scheduled = half;
   }
 
-  return { kind: window.kind, expectedStart, expectedEnd, scheduledMinutes: scheduled, baseScheduledMinutes: baseScheduled, ratio: baseScheduled > 0 ? scheduled / baseScheduled : 1, unpaidFixedBreakMinutes: unpaidFixed, halfDayOff };
+  let checkInAnyTime = false;
+  if (shift && window.kind === 'FLEXIBLE') {
+    // "Check in at any time, leave after the required hours": the expected end is the check-in + the required minutes + the
+    // unpaid breaks (none on a half day — the break falls in the half not worked). Core hours still bind: a core start is the
+    // latest on-time arrival and a core end the earliest departure, whichever comes later.
+    const coreStart = expectedStart;
+    const coreEnd = expectedEnd;
+    checkInAnyTime = coreStart === null;
+    const breakMinutes = halfDayOff === null ? unpaidFixed : 0;
+    const fromCheckIn = anchorIn ? anchorIn.plus({ minutes: scheduled + breakMinutes }) : null;
+    expectedStart = coreStart ?? anchorIn;
+    expectedEnd = fromCheckIn && coreEnd ? (fromCheckIn > coreEnd ? fromCheckIn : coreEnd) : (fromCheckIn ?? coreEnd);
+    if (anchorIn) {
+      rec.step('schedule.flexible', `checked in ${toUtcIso(anchorIn)} + ${scheduled} required${breakMinutes ? ` + ${breakMinutes} unpaid break` : ''} min → may leave at ${toUtcIso(fromCheckIn!)}${coreEnd && expectedEnd === coreEnd && fromCheckIn! < coreEnd ? `; core hours end later (${toUtcIso(coreEnd)})` : ''}`, { checkIn: toUtcIso(anchorIn), expectedEnd: iso(expectedEnd), fromCheckIn: iso(fromCheckIn), coreEnd: iso(coreEnd), checkInAnyTime });
+    }
+  }
+
+  return { kind: window.kind, expectedStart, expectedEnd, scheduledMinutes: scheduled, baseScheduledMinutes: baseScheduled, ratio: baseScheduled > 0 ? scheduled / baseScheduled : 1, unpaidFixedBreakMinutes: unpaidFixed, halfDayOff, checkInAnyTime };
 }
 
 /** Punch rounding, breaks, worked, late/early and regular overtime for a day with at least one punch. */
@@ -509,7 +538,9 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
   if (!punctuality) {
     rec.step('punctuality', 'late / early departure not evaluated: nothing was scheduled on this day');
   }
-  if (punctuality && firstIn && schedule.expectedStart && !assumed.firstIn) {
+  if (punctuality && firstIn && schedule.checkInAnyTime) {
+    rec.step('late', 'FLEXIBLE without core hours: the employee may check in at any time → never late', { checkInAnyTime: true });
+  } else if (punctuality && firstIn && schedule.expectedStart && !assumed.firstIn) {
     lateMinutes = Math.max(0, minutesBetween(schedule.expectedStart.plus({ minutes: graceIn }), firstIn));
     const flagged = lateMinutes > rules.lateThresholdMinutes;
     if (flagged) rec.flag('LATE');

@@ -151,6 +151,27 @@
     "linkExpires": "The link is valid for {{seconds}} seconds.",
     "expiredHint": "File expired — request again",
     "empty": "No reports yet",
-    "emptyHint": "Requested reports appear here with their status; completed files can be downloaded until they expire."
+    "emptyHint": "Requested reports appear here with their status; completed files can be downloaded until they expire.",
+    "view": "View",
+    "download": "Download"
+  },
+  "viewer": {
+    "title": "View report",
+    "loading": "Opening the report…",
+    "openInTab": "Open in a new tab",
+    "download": "Download",
+    "noPreview": "Excel files cannot be shown here — download the file to open it.",
+    "truncated": "Showing the first {{count}} rows — download the file for all of them.",
+    "empty": "The file has no rows.",
+    "failed": "The report could not be opened.",
+    "frameTitle": "Report preview"
+  },
+  "mine": {
+    "title": "My reports",
+    "subtitle": "Attendance reports about you that HR or your manager sent you. Open them here or download a copy.",
+    "empty": "No reports yet",
+    "emptyHint": "When someone sends you a report about your attendance, it appears here and you get a notification.",
+    "period": "Period",
+    "received": "Received"
   }
 }

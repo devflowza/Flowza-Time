@@ -338,7 +338,9 @@ const ENTRIES: readonly NotificationCatalogueEntry[] = [
   entry({
     type: 'report.ready', category: 'REPORTS', recipients: 'payload.userId — who requested the report',
     orgSetting: 'reportReady', vars: { reportTitle: 'text', reportType: 'code', format: 'code' },
-    route: (p) => route({ entityType: 'REPORT', entityId: R.id(p['reportId']) ?? R.id(p['aggregateId']) }), deepLink: () => '/reports',
+    route: (p) => route({ entityType: 'REPORT', entityId: R.id(p['reportId']) ?? R.id(p['aggregateId']) }),
+    // opens the report straight in the viewer (the file is fetched through the reader's own session, never a mailed bearer link)
+    deepLink: (p) => path('/reports', { view: R.id(p['reportId']) ?? R.id(p['aggregateId']) }),
   }),
   entry({
     type: 'report.failed', category: 'REPORTS', recipients: 'payload.userId — who requested (or shared / scheduled) the report',
@@ -347,10 +349,12 @@ const ENTRIES: readonly NotificationCatalogueEntry[] = [
   }),
   entry({
     type: 'report.scheduled_delivery', category: 'REPORTS', recipients: 'payload.userIds — the recipient of the delivered copy (channels chosen by the sender / schedule)',
-    orgSetting: 'reportScheduledDelivery', vars: { reportTitle: 'text', reportType: 'code', mode: 'code', periodFrom: 'date', periodTo: 'date', scheduleName: 'text' },
+    orgSetting: 'reportScheduledDelivery', vars: { reportTitle: 'text', reportType: 'code', mode: 'code', periodFrom: 'date', periodTo: 'date', scheduleName: 'text', selfScope: 'flag' },
     variants: { send_now: {}, scheduled: {} }, variant: (p) => (p['mode'] === 'send_now' ? 'send_now' : 'scheduled'),
     route: (p) => route({ entityType: 'REPORT', entityId: R.id(p['reportId']) ?? R.id(p['aggregateId']), date: R.date(p['periodTo']) }),
-    deepLink: (p) => path('/reports', { download: R.id(p['reportId']) ?? R.id(p['aggregateId']) }),
+    // a copy about the recipient themselves (an employee without report access) opens in the employee portal; the others open the
+    // report viewer on the Reports page — both through the reader's own session
+    deepLink: (p) => path(p['selfScope'] === true ? '/my/reports' : '/reports', { view: R.id(p['reportId']) ?? R.id(p['aggregateId']) }),
   }),
 
   // ----- devices, sync, system --------------------------------------------------------------------------------------------------

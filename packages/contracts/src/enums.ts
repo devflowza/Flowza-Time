@@ -206,6 +206,12 @@ export type LogLevel = (typeof LOG_LEVELS)[number];
 /** Queue names used by the worker; each has its own concurrency budget. */
 export const QUEUE_NAMES = ['sync', 'processing', 'reports', 'notifications', 'maintenance'] as const;
 export type QueueName = (typeof QUEUE_NAMES)[number];
+/**
+ * RUN_REPORT_SCHEDULE (a share, a schedule's run, "Run now") only resolves recipients and queues one GENERATE_REPORT per copy —
+ * database work, no renderer — so it runs on the general worker's `processing` queue. Only GENERATE_REPORT needs the Chromium
+ * reports machine (`reports`); tying the fan-out to that machine too made every share wait on (and die with) its deploy.
+ */
+export const REPORT_DELIVERY_QUEUE: QueueName = 'processing';
 
 // ----- employee portal attendance (HR portal Prompt 4) -----------------------------------------------------------------------
 

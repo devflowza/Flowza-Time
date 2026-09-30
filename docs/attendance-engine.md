@@ -34,8 +34,14 @@ Records inside a locked period are skipped and listed in the recalculation summa
    symmetric with `graceOutMinutes` / `earlyDepartureThresholdMinutes`; worked = span − unpaid breaks (worked rounding);
    overtime = after `expectedEnd + overtimeStartAfterMinutes` (optionally early-in), rounded DOWN to
    `overtimeRoundingMinutes`, whole `overtimeMinBlockMinutes` blocks, capped by `overtimeMaxMinutesPerDay`;
-   flexible shifts: OT = worked − required − threshold, late/early against core hours; `UNDER_HOURS` when
-   worked < `minFullDayMinutes`; `HALF_DAY` when worked < `halfDayThresholdMinutes`.
+   flexible shifts (engine 1.1.0): **check in at any time, leave after the required time** — the expected check-out
+   (`expected_end_at`) is the (rounded) first IN + required minutes + the shift's unpaid breaks (no break on a half day),
+   or the core end when that is later; `expected_start_at` is the core start, else the check-in itself. Without core hours
+   the employee is never late; early departure is measured against that expected check-out. The expected check-out is on
+   the record from the moment of the check-in (PENDING day), so the portal's check-in page ("You can check out from …")
+   and the missing check-out reminder use it. OT = worked − required − threshold. A check-out after the shift's day
+   boundary belongs to the next attendance day — set the boundary to a time nobody works (e.g. 12:00 for night work);
+   `UNDER_HOURS` when worked < `minFullDayMinutes`; `HALF_DAY` when worked < `halfDayThresholdMinutes`.
 4. No punches: `ABSENT` when `autoAbsentWithoutPunches` and the day is over (`now` past the window end); otherwise `PENDING`.
    **Callers must pass `now`** when computing the current day; without it the day is treated as finished (historical recompute).
 5. Missing punch (IN only / OUT only): `FLAG_ONLY` → `PRESENT` + `MISSING_OUT`/`MISSING_IN` with 0 worked minutes;
