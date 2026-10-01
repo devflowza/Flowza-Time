@@ -29,7 +29,11 @@ primary_region = "sin"
   LOG_LEVEL = "info"
   API_PORT = "4000"
   API_PUBLIC_URL = "https://time-api.flowza.ai"
-  WEB_ORIGINS = "https://time.flowza.ai"
+  # Every hostname the web app is served from, comma-separated and exact (scheme + host, no path or trailing slash).
+  # The Pages project answers on both custom domains; an origin missing here gets no Access-Control-Allow-Origin, so
+  # the browser discards every API answer and the app reports the API as unreachable while it is up. Keep this list in
+  # step with the Pages project's custom domains and docs/go-live.md.
+  WEB_ORIGINS = "https://time.flowza.ai,https://time.flowza.com"
   SUPABASE_URL = "https://liyilmbklsextsggflbb.supabase.co"
   SUPABASE_ANON_KEY = "sb_publishable_SDK8x_KVhjgXxrk-xvJ0Xw__LWSJIQF"
   DATABASE_POOL_MAX = "10"

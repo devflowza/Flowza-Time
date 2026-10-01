@@ -41,6 +41,19 @@ describe('AdminLoginPage (/adm/login)', () => {
     expect(supabaseMock.auth.signOut).not.toHaveBeenCalled();
   });
 
+  it('says which API host failed and why, instead of a bare "could not be reached"', async () => {
+    // The browser hides a CORS rejection behind the same TypeError as an outage; the API client tells them apart by
+    // probing the host, and the sign-in must pass that diagnosis on rather than reading every case as "down".
+    apiMock.get.mockRejectedValue(new ApiError(0, 'NETWORK_ERROR', 'The API at https://time-api.flowza.ai did not answer normally', undefined, { reason: 'BLOCKED' }));
+    renderWithProviders(<AdminLoginPage />, { route: '/adm/login' });
+    await signIn();
+    const alert = await screen.findByRole('alert');
+    expect(alert).toHaveTextContent('The API at https://time-api.flowza.ai did not answer normally');
+    expect(alert).toHaveTextContent('does not accept requests from this site\'s address');
+    expect(alert).not.toHaveTextContent('platform administrators only');
+    expect(supabaseMock.auth.signOut).toHaveBeenCalledTimes(1);
+  });
+
   it('reports wrong credentials without calling the API', async () => {
     supabaseMock.auth.signInWithPassword.mockResolvedValueOnce({ data: { session: null, user: null }, error: { message: 'Invalid login credentials' } } as never);
     renderWithProviders(<AdminLoginPage />, { route: '/adm/login' });

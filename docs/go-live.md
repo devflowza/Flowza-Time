@@ -116,7 +116,7 @@ DATABASE_POOL_MAX=10
 FLOWZA_CREDENTIALS_MASTER_KEYS=<from step 0>
 FLOWZA_DEVICE_PUSH_SECRET=<from step 0>
 API_PUBLIC_URL=https://<api-host>
-WEB_ORIGINS=https://time.flowza.ai
+WEB_ORIGINS=https://time.flowza.ai,https://time.flowza.com
 TRUST_PROXY=true
 ```
 
@@ -140,7 +140,18 @@ Optional:
 `WEB_ORIGINS` must be the exact browser origin, comma-separated for more than one. A mismatch shows up as a CORS
 failure in the browser with the API logging nothing — the request never reaches a handler.
 
-The canonical origin is the custom domain, `https://time.flowza.ai`. Deliberately **not** listed: the
+The canonical origin is the custom domain, `https://time.flowza.ai`; the Pages project also answers on
+`https://time.flowza.com`, so that origin is listed too. Every custom domain added to the Pages project must be added
+here in the same change — otherwise the app loads on it, sign-in succeeds (that goes straight to Supabase Auth), and
+then every API call fails with "could not reach the API" / "did not answer normally" while the API itself is healthy.
+Check an origin with a preflight; an accepted one gets `access-control-allow-origin` back:
+
+```bash
+curl -si -X OPTIONS https://time-api.flowza.ai/api/v1/me \
+  -H 'Origin: https://time.flowza.com' -H 'Access-Control-Request-Method: GET' | grep -i access-control-allow-origin
+```
+
+Deliberately **not** listed: the
 `*.pages.dev` deployment URLs. Every Cloudflare preview build gets its own hostname, so allowing them either means an
 unmaintainable list or a wildcard that lets any preview talk to production data. If you want previews to work, point
 them at a separate staging API rather than widening this one.

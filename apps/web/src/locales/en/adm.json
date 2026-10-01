@@ -39,7 +39,6 @@
     "submit": "Sign in",
     "invalid": "Invalid email or password.",
     "notAdmin": "This sign-in is for platform administrators only.",
-    "unreachable": "The API could not be reached. Try again in a moment.",
     "tenantLogin": "Not an administrator? Go to the FlowZa Time sign-in",
     "secure": "Secured with MFA",
     "showPassword": "Show password",
