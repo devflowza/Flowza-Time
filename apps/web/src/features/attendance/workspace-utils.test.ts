@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { AttendanceCalendarDayDto } from '@flowza/contracts';
-import { calendarDayLabel, checkOutBeforeIn, dotsOf, FINANCE_STATUS_MAPPING, isManualStatus, localToUtcIso, monthWeeks, syncRangeOf, utcToLocalTime, weekdayOrder } from './workspace-utils';
+import { calendarDayLabel, checkOutBeforeIn, dotsOf, FINANCE_STATUS_MAPPING, isFuturePunch, isManualStatus, issueField, localToUtcIso, monthWeeks, syncRangeOf, utcToLocalTime, weekdayOrder } from './workspace-utils';
 import type { CorrectionDto } from './types';
 
 const day = (over: Partial<AttendanceCalendarDayDto> = {}): AttendanceCalendarDayDto => ({
@@ -30,6 +30,24 @@ describe('workspace utils', () => {
     expect(checkOutBeforeIn('2026-09-01T04:30:00Z', '2026-09-01T04:00:00Z')).toBe(true);
     expect(checkOutBeforeIn('2026-09-01T04:30:00Z', '2026-09-01T04:30:00Z')).toBe(true);
     expect(checkOutBeforeIn('2026-09-01T04:30:00Z', null)).toBe(false);
+  });
+
+  it('refuses a punch later than now, with the API\'s five-minute clock tolerance', () => {
+    const now = Date.parse('2026-10-01T08:00:00Z'); // 12:00 in Muscat
+    expect(isFuturePunch(localToUtcIso('2026-10-01', '16:46', 'Asia/Muscat'), now)).toBe(true);
+    expect(isFuturePunch(localToUtcIso('2026-10-01', '03:50', 'Asia/Muscat', true), now)).toBe(true);
+    expect(isFuturePunch(localToUtcIso('2026-10-01', '11:45', 'Asia/Muscat'), now)).toBe(false);
+    expect(isFuturePunch('2026-10-01T08:05:00Z', now)).toBe(false);
+    expect(isFuturePunch('2026-10-01T08:05:01Z', now)).toBe(true);
+    expect(isFuturePunch(null, now)).toBe(false);
+  });
+
+  it('reads the field a validation error names', () => {
+    expect(issueField({ issues: [{ path: 'outAt', message: 'In the future' }] })).toBe('outAt');
+    expect(issueField({ issues: [{ path: 'date', message: 'x' }, { path: 'inAt', message: 'y' }] })).toBe('inAt');
+    expect(issueField({ issues: [{ path: 'date', message: 'x' }] })).toBeNull();
+    expect(issueField({ issues: 'nope' })).toBeNull();
+    expect(issueField(undefined)).toBeNull();
   });
 
   it('describes a calendar day for its tooltip and picks one dot per colour', () => {
