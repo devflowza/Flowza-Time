@@ -17,6 +17,7 @@ import { CalendarView } from '../components/calendar-view';
 import { SyncPunchesButton } from '../components/sync-punches-button';
 import { HR_EDIT_PERMISSIONS } from '../components/workspace-dialogs';
 import { RecordEditDialog } from '../components/record-edit-dialog';
+import { LiveIndicator } from '../components/live-indicator';
 import { useAttendanceLive } from '../live';
 import '../workspace-i18n';
 
@@ -40,7 +41,7 @@ export default function AttendancePage() {
   const setTab = (v: string) => setParams((prev) => { const n = new URLSearchParams(prev); n.set('tab', v); n.delete('page'); return n; });
   const requestCorrection = (preset?: CorrectionPreset) => setCorrection({ open: true, preset });
   // new device punches reach the register on their own (realtime signal + polling); "Sync punches" is not needed for that
-  useAttendanceLive();
+  const liveMode = useAttendanceLive();
 
   return (
     <div className="page-container">
@@ -53,9 +54,12 @@ export default function AttendancePage() {
         </>
       } />
       <Tabs value={tab} onValueChange={setTab}>
-        <TabsList aria-label={t('title')} className="max-w-full overflow-x-auto">
-          {visible.map((tb) => <TabsTrigger key={tb} value={tb}>{tb === 'calendar' ? tw('tabs.calendar') : t(`tabs.${tb}`)}</TabsTrigger>)}
-        </TabsList>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <TabsList aria-label={t('title')} className="max-w-full overflow-x-auto">
+            {visible.map((tb) => <TabsTrigger key={tb} value={tb}>{tb === 'calendar' ? tw('tabs.calendar') : t(`tabs.${tb}`)}</TabsTrigger>)}
+          </TabsList>
+          <LiveIndicator mode={liveMode} />
+        </div>
         <TabsContent value="daily">{tab === 'daily' ? <DailyView onRequestCorrection={can('attendance.correct') ? requestCorrection : undefined} /> : null}</TabsContent>
         <TabsContent value="monthly">{tab === 'monthly' ? <MonthlyView onRequestCorrection={can('attendance.correct') ? requestCorrection : undefined} /> : null}</TabsContent>
         <TabsContent value="calendar">{tab === 'calendar' ? <CalendarView onRequestCorrection={can('attendance.correct') ? requestCorrection : undefined} /> : null}</TabsContent>
