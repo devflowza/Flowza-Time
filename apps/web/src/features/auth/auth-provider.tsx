@@ -1,16 +1,22 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import type { Session, User } from '@supabase/supabase-js';
 import { useQueryClient } from '@tanstack/react-query';
 import { supabase } from '@/lib/supabase';
 import { clearCachedMe, readCachedMe, storedSessionUserId } from '@/features/me/me-cache';
+import { passwordRecoveryUserId, subscribePasswordRecovery } from './password-recovery';
 
-interface AuthState { session: Session | null; user: User | null; loading: boolean; signOut: () => Promise<void> }
+/**
+ * `recovery`: the session was opened by a password-reset link and no new password has been chosen yet (password-recovery.ts);
+ * routes.tsx keeps such a session on /auth/reset.
+ */
+interface AuthState { session: Session | null; user: User | null; loading: boolean; recovery: boolean; signOut: () => Promise<void> }
 const AuthContext = createContext<AuthState | null>(null);
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const queryClient = useQueryClient();
+  const recoveryUserId = useSyncExternalStore(subscribePasswordRecovery, passwordRecoveryUserId);
   useEffect(() => {
     let mounted = true;
     // Seeded from storage so the INITIAL_SESSION event for the user already signed in is not mistaken for a switch.
@@ -27,7 +33,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
     return () => { mounted = false; sub.subscription.unsubscribe(); };
   }, [queryClient]);
-  const value = useMemo<AuthState>(() => ({ session, user: session?.user ?? null, loading, signOut: async () => { await supabase.auth.signOut(); } }), [session, loading]);
+  const recovery = !!session && recoveryUserId === session.user.id;
+  const value = useMemo<AuthState>(() => ({ session, user: session?.user ?? null, loading, recovery, signOut: async () => { await supabase.auth.signOut(); } }), [session, loading, recovery]);
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
 }
 

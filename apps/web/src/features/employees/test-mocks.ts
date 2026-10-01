@@ -41,6 +41,7 @@ type MfaListResult = { data: { totp: MfaFactor[]; all: MfaFactor[] } | null; err
 /** Mirrors supabase-js: `session` is null when the project requires email confirmation before the account is usable. */
 // A repeated sign-up of a confirmed address returns a stand-in user with `identities: []`; errors carry supabase's `code`.
 type AuthResult = { data: { session: { access_token: string } | null; user: { id: string; identities?: unknown[] } | null }; error: { message: string; code?: string; status?: number } | null };
+type AuthCallResult = { data: unknown; error: { message: string; code?: string; status?: number; name?: string } | null };
 export interface RealtimeChannelDouble {
   topic: string; handlers: Array<(msg: { event?: string; payload?: unknown }) => void>; statusListeners: Array<(status: string) => void>;
   on: ReturnType<typeof vi.fn>; subscribe: ReturnType<typeof vi.fn>;
@@ -57,6 +58,11 @@ export const supabaseMock = {
     // signUp resolves with `session: null` when the project requires email confirmation — the invitation flow has to
     // handle both shapes, so the double must be able to produce both.
     signUp: vi.fn<() => Promise<AuthResult>>(async () => ({ data: { session: { access_token: 'token' }, user: { id: 'u2' } }, error: null })),
+    // the password-reset flow: request the e-mail, verify a `token_hash` link, set the new password
+    resetPasswordForEmail: vi.fn<(email: string, options?: { redirectTo?: string }) => Promise<AuthCallResult>>(async () => ({ data: {}, error: null })),
+    verifyOtp: vi.fn<(params: { token_hash: string; type: string }) => Promise<AuthResult>>(async () => ({ data: { session: { access_token: 'token' }, user: { id: 'u1' } }, error: null })),
+    updateUser: vi.fn<(attrs: { password?: string }) => Promise<AuthCallResult>>(async () => ({ data: {}, error: null })),
+    onAuthStateChange: vi.fn(() => ({ data: { subscription: { unsubscribe: vi.fn() } } })),
     mfa: {
       listFactors: vi.fn<() => Promise<MfaListResult>>(async () => ({ data: { totp: [], all: [] }, error: null })),
       enroll: vi.fn(), challenge: vi.fn(), verify: vi.fn(), unenroll: vi.fn(),
