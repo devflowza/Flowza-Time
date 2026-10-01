@@ -564,16 +564,22 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
   } else if (assumedPunch) {
     rec.step('overtime', 'no overtime on an assumed punch', { assumed: true });
   } else if (firstIn && lastOut && schedule.kind === 'FIXED' && schedule.expectedStart && schedule.expectedEnd) {
-    // §G.5: overtime is work beyond the scheduled minutes — and only the part outside the shift hours counts
-    // (after the expected end; before the expected start only when countEarlyInAsOvertime). A late arrival
-    // who merely completes the scheduled hours after the shift end earns nothing.
-    const afterEnd = Math.max(0, minutesBetween(schedule.expectedEnd > firstIn ? schedule.expectedEnd : firstIn, lastOut));
-    const earlyIn = rules.countEarlyInAsOvertime ? Math.max(0, minutesBetween(firstIn, lastOut < schedule.expectedStart ? lastOut : schedule.expectedStart)) : 0;
+    // §G.5 (engine 1.2.0): regular overtime is the time WORKED outside the shift hours — after the expected end, and before the
+    // expected start when countEarlyInAsOvertime — measured on the worked spans (a punched break out there is not work) and
+    // never more than the minutes worked: an employee who checks out after the shift end earns the additional time. With
+    // `overtimeRequiresScheduledHours` (the stricter policy) only the part beyond the scheduled minutes counts, so a late
+    // arrival who merely completes the scheduled hours after the shift end earns nothing.
+    const spans = workedSpans(interpretation, firstIn, lastOut);
+    const afterEnd = minutesWithin(spans, schedule.expectedEnd, null);
+    const earlyIn = rules.countEarlyInAsOvertime ? minutesWithin(spans, null, schedule.expectedStart) : 0;
+    const outsideShift = Math.min(afterEnd + earlyIn, workedMinutes);
     const beyondScheduled = Math.max(0, workedMinutes - schedule.scheduledMinutes);
-    const outsideShift = afterEnd + earlyIn;
-    const raw = Math.max(0, Math.min(beyondScheduled, outsideShift) - rules.overtimeStartAfterMinutes);
+    const strict = rules.overtimeRequiresScheduledHours;
+    const basis = strict ? Math.min(beyondScheduled, outsideShift) : outsideShift;
+    const raw = Math.max(0, basis - rules.overtimeStartAfterMinutes);
     overtimeMinutes = finaliseOvertime(raw, rules);
-    rec.step('overtime', `min(${workedMinutes} worked − ${schedule.scheduledMinutes} scheduled = ${beyondScheduled}, ${afterEnd} min after expected end${rules.countEarlyInAsOvertime ? ` + ${earlyIn} min early in` : ''}) − ${rules.overtimeStartAfterMinutes} min threshold = ${raw} raw → ${overtimeMinutes} min (round DOWN ${rules.overtimeRoundingMinutes}, block ${rules.overtimeMinBlockMinutes}, cap ${rules.overtimeMaxMinutesPerDay ?? '∞'})`, { workedMinutes, scheduledMinutes: schedule.scheduledMinutes, beyondScheduledMinutes: beyondScheduled, afterEndMinutes: afterEnd, earlyInMinutes: earlyIn, rawOvertimeMinutes: raw, overtimeMinutes });
+    const outside = `${afterEnd} min worked after the expected end${rules.countEarlyInAsOvertime ? ` + ${earlyIn} min early in` : ''}${outsideShift < afterEnd + earlyIn ? ` (at most the ${workedMinutes} worked)` : ''}`;
+    rec.step('overtime', `${strict ? `min(${workedMinutes} worked − ${schedule.scheduledMinutes} scheduled = ${beyondScheduled}, ${outside})` : outside} − ${rules.overtimeStartAfterMinutes} min threshold = ${raw} raw → ${overtimeMinutes} min (round DOWN ${rules.overtimeRoundingMinutes}, block ${rules.overtimeMinBlockMinutes}, cap ${rules.overtimeMaxMinutesPerDay ?? '∞'})`, { workedMinutes, scheduledMinutes: schedule.scheduledMinutes, beyondScheduledMinutes: beyondScheduled, afterEndMinutes: afterEnd, earlyInMinutes: earlyIn, outsideShiftMinutes: outsideShift, requiresScheduledHours: strict, rawOvertimeMinutes: raw, overtimeMinutes });
   } else if (firstIn && lastOut && schedule.kind === 'FLEXIBLE') {
     const raw = Math.max(0, workedMinutes - schedule.scheduledMinutes - rules.overtimeStartAfterMinutes);
     overtimeMinutes = finaliseOvertime(raw, rules);
@@ -587,6 +593,38 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
   }
 
   return { firstIn, lastOut, workedMinutes, breakMinutes, lateMinutes, earlyDepartureMinutes, overtimeMinutes, overtimeCategory };
+}
+
+type Span = { start: DateTime; end: DateTime };
+
+/**
+ * The spans actually worked between the (rounded) first IN and last OUT: the closed work segments — the first starting at
+ * `firstIn`, the last ending at `lastOut` — minus the explicit break spans; [firstIn, lastOut] when the interpretation measured
+ * nothing finer (FIRST_LAST).
+ */
+function workedSpans(interpretation: Interpretation, firstIn: DateTime, lastOut: DateTime): Span[] {
+  const closed = interpretation.segments.filter((s): s is Span => s.end !== null);
+  let spans: Span[] = closed.length === 0
+    ? [{ start: firstIn, end: lastOut }]
+    : closed.map((s, i) => ({ start: i === 0 ? firstIn : s.start, end: i === closed.length - 1 ? lastOut : s.end }));
+  for (const b of interpretation.breakSpans) {
+    spans = spans.flatMap((s) => (b.end <= s.start || b.start >= s.end ? [s] : [
+      ...(b.start > s.start ? [{ start: s.start, end: b.start }] : []),
+      ...(b.end < s.end ? [{ start: b.end, end: s.end }] : []),
+    ]));
+  }
+  return spans.filter((s) => s.end > s.start);
+}
+
+/** Minutes of `spans` inside [from, to); a null bound is open. */
+function minutesWithin(spans: readonly Span[], from: DateTime | null, to: DateTime | null): number {
+  let total = 0;
+  for (const s of spans) {
+    const start = from !== null && from > s.start ? from : s.start;
+    const end = to !== null && to < s.end ? to : s.end;
+    if (end > start) total += end.diff(start, 'minutes').minutes;
+  }
+  return Math.round(total);
 }
 
 /** Round DOWN to the OT rounding interval, keep whole minimum blocks, apply the daily cap. */

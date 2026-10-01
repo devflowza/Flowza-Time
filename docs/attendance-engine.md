@@ -32,8 +32,12 @@ Records inside a locked period are skipped and listed in the recalculation summa
    `HOLIDAY` / `WEEKLY_OFF`. Half-day leave/holiday halves expectations and thresholds (`HALF_DAY_LEAVE`).
 3. Punches: late = `firstIn − (expectedStart + grace)`, flagged `LATE` only above `lateThresholdMinutes`; early departure
    symmetric with `graceOutMinutes` / `earlyDepartureThresholdMinutes`; worked = span − unpaid breaks (worked rounding);
-   overtime = after `expectedEnd + overtimeStartAfterMinutes` (optionally early-in), rounded DOWN to
-   `overtimeRoundingMinutes`, whole `overtimeMinBlockMinutes` blocks, capped by `overtimeMaxMinutesPerDay`;
+   overtime (engine 1.2.0) = the minutes WORKED after the expected end (before the expected start too with
+   `countEarlyInAsOvertime`) — measured on the worked spans, so a punched break out there does not count, and never more than
+   the minutes worked — less `overtimeStartAfterMinutes`, rounded DOWN to `overtimeRoundingMinutes`, whole
+   `overtimeMinBlockMinutes` blocks, capped by `overtimeMaxMinutesPerDay`. By default every minute after the shift end counts
+   (threshold, rounding and block 0); `overtimeRequiresScheduledHours` keeps only the part beyond the scheduled minutes (a late
+   arrival who makes up the time after the end earns none — the rule of engines ≤ 1.1.0, kept by rule sets saved before 1.2.0);
    flexible shifts (engine 1.1.0): **check in at any time, leave after the required time** — the expected check-out
    (`expected_end_at`) is the (rounded) first IN + required minutes + the shift's unpaid breaks (no break on a half day),
    or the core end when that is later; `expected_start_at` is the core start, else the check-in itself. Without core hours

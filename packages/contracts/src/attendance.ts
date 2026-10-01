@@ -24,11 +24,15 @@ export const attendanceRuleSetInputSchema = z.object({
   minFullDayMinutes: z.number().int().min(0).max(1440).default(420),
   halfDayThresholdMinutes: z.number().int().min(0).max(1440).default(240),
   overtimeEnabled: z.boolean().default(true),
-  overtimeStartAfterMinutes: z.number().int().min(0).max(480).default(30),
-  overtimeMinBlockMinutes: z.number().int().min(0).max(480).default(30),
-  overtimeRoundingMinutes: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30), z.literal(60)]).default(15),
+  // Regular overtime is the time worked after the shift end (before its start too with `countEarlyInAsOvertime`); by default
+  // every minute counts. The threshold, rounding, minimum block and cap below are the organisation's policy on top of it.
+  overtimeStartAfterMinutes: z.number().int().min(0).max(480).default(0),
+  overtimeMinBlockMinutes: z.number().int().min(0).max(480).default(0),
+  overtimeRoundingMinutes: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30), z.literal(60)]).default(0),
   overtimeMaxMinutesPerDay: z.number().int().min(0).max(1440).nullable().optional(),
   countEarlyInAsOvertime: z.boolean().default(false),
+  /** Only the work beyond the scheduled minutes is overtime: a late arrival who makes up the time after the shift end earns none. */
+  overtimeRequiresScheduledHours: z.boolean().default(false),
   punchRoundingMinutes: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30)]).default(0),
   punchRoundingMode: z.enum(ROUNDING_MODES).default('NONE'),
   workedRoundingMinutes: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30)]).default(0),

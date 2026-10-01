@@ -166,5 +166,7 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
 /**
  * 1.1.0 — FLEXIBLE shifts: the expected check-out is the check-in + required minutes + unpaid breaks (the later of that and the
  * core end); without core hours the employee may check in at any time and is never late.
+ * 1.2.0 — FIXED shifts: regular overtime is the time worked after the shift end (before its start with early-in), measured on
+ * the worked spans; "beyond the scheduled minutes only" is the rule set's `overtimeRequiresScheduledHours`.
  */
-export const ENGINE_VERSION = 'attendance-engine/1.1.0';
+export const ENGINE_VERSION = 'attendance-engine/1.2.0';

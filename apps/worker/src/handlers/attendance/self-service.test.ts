@@ -125,3 +125,27 @@ describe('day close and the employee\'s reasons', () => {
     expect(marks.map((m) => `${m.employeeId === E1 ? 'E1' : 'E2'}:${isoDate(m.attendanceDate)}:${m.kind}`)).toEqual(['E2:2026-03-04:UNEXCUSED']);
   });
 });
+
+describe('overtime after the shift end', () => {
+  const date = '2026-03-11'; // Wednesday, a working day on the 08:00–17:00 shift every employee is assigned
+  it('a self-service check-out after the shift end puts the additional time on the record as overtime', async () => {
+    await raw({ device: deviceId, providerKey: 'self_service', deviceEmployeeId: E2, employeeId: E2, punchedAt: at(date, '08:30'), direction: 'in', source: 'SELF_SERVICE', payload: { channel: 'web', verdict: 'no_fence', withinGeofence: null } });
+    await raw({ device: deviceId, providerKey: 'self_service', deviceEmployeeId: E2, employeeId: E2, punchedAt: at(date, '17:45'), direction: 'out', source: 'SELF_SERVICE', payload: { channel: 'web', verdict: 'no_fence', withinGeofence: null } });
+    expect(await normalizeRaw(ctx('NORMALIZE_RAW', { organizationId: ORG }))).toMatchObject({ normalized: 2 });
+    await recomputeDailyHandler(ctx('RECOMPUTE_DAILY', { organizationId: ORG, employeeId: E2, date }));
+    // no rule set: the defaults count every minute after 17:00 — the 30-minute late arrival does not cancel them
+    const r = await record(E2, date);
+    expect(r).toMatchObject({ status: 'PRESENT', shiftId: SHIFT, workedMinutes: 555, scheduledMinutes: 540, lateMinutes: 20, overtimeMinutes: 45, overtimeCategory: 'REGULAR' });
+    expect(r.flags).toEqual(['LATE', 'OVERTIME', 'SELF_SERVICE_PUNCH']);
+  });
+
+  it('a rule set that requires the scheduled hours first keeps only the part beyond them', async () => {
+    const rs = await h.tdb.adminDb.insertInto('attendanceRuleSets').values({ organizationId: ORG, name: 'Strict overtime', effectiveFrom: '2026-01-01', overtimeRequiresScheduledHours: true, ramadanMode: JSON.stringify({}) }).returning('id').executeTakeFirstOrThrow();
+    try {
+      await recomputeDailyHandler(ctx('RECOMPUTE_DAILY', { organizationId: ORG, employeeId: E2, date }));
+      expect(await record(E2, date)).toMatchObject({ workedMinutes: 555, overtimeMinutes: 15, ruleSetId: rs.id }); // 555 worked − 540 scheduled
+    } finally {
+      await h.tdb.adminDb.deleteFrom('attendanceRuleSets').where('id', '=', rs.id).execute();
+    }
+  });
+});

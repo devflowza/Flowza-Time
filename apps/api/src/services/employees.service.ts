@@ -12,6 +12,7 @@ import { enqueueJob } from '../lib/jobs.js';
 import { hashPin } from '../lib/hashing.js';
 import { loadSettings } from '../lib/settings.js';
 import { assertWithinLimit } from './features/entitlements.js';
+import { enqueueRecalculation } from './features/recalc.js';
 import { likeContains, pageOf, prefixTsQuery, resolveSort, toCount } from '../lib/pagination.js';
 import { isoDate } from '../lib/mappers.js';
 import { DOCUMENT_COLUMNS, EMPLOYEE_COLUMNS, EMPTY_SYNC_SUMMARY, HISTORY_COLUMNS, toDeviceStateDto, toDocumentDto, toEmployeeDto, toHistoryDto, type DeviceSyncSummary, type DeviceStateRow, type EmployeeRow, type HistoryRow } from './employees.mappers.js';
@@ -468,6 +469,13 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
           await trx.insertInto('shiftAssignments').values({ organizationId: orgId, targetType: 'EMPLOYEE', targetId: e.id, branchId: e.branchId, shiftId: input.shiftId, shiftPatternId: null, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo ?? null, createdBy: actor.userId }).execute();
         }
         await audit(trx, actor, orgId, 'employee.bulk_shift_assigned', 'employee', { newValue: { employeeIds: employees.map((e) => e.id), shiftId: input.shiftId, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo ?? null } });
+        // §G.7, as an assignment made on the Schedule page: the days the change covers that already started (today included)
+        // are recomputed, so a record computed before the assignment does not keep "No shift"; later days compute when they come
+        const today = await orgToday(trx, orgId);
+        if (employees.length > 0 && input.effectiveFrom <= today) {
+          const until = input.effectiveTo && input.effectiveTo < today ? input.effectiveTo : today;
+          await enqueueRecalculation(deps, trx, actor, orgId, { fromDate: input.effectiveFrom, toDate: until, employeeIds: employees.map((e) => e.id), reason: 'shift assigned to employees' });
+        }
         return { kind: 'sync', updated: employees.length, employeeIds: employees.map((e) => e.id) };
       });
     }

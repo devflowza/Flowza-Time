@@ -30,6 +30,8 @@ export interface Interpretation {
   segments: WorkSegment[];
   /** Measured, unpaid-by-default break minutes (gaps between segments + explicit BREAK_* spans). */
   measuredBreakMinutes: number;
+  /** The explicit BREAK_START → BREAK_END spans (DIRECTIONAL), closed ones only — inside the segments they interrupt. */
+  breakSpans: Array<{ start: DateTime; end: DateTime }>;
   /** True when the interpretation produced any measured gap information (PAIRED/DIRECTIONAL with ≥ 2 segments or BREAK_* events). */
   hasMeasuredBreaks: boolean;
 }
@@ -262,7 +264,8 @@ function finish(mode: PunchInterpretation, punches: InterpretedPunch[], segments
   }
   let breakMinutes = 0;
   for (const b of breaks) if (b.end) breakMinutes += Math.max(0, b.end.diff(b.start, 'minutes').minutes);
-  const hasMeasuredBreaks = closed.length > 1 || breaks.some((b) => b.end !== null);
+  const breakSpans = breaks.filter((b): b is { start: DateTime; end: DateTime } => b.end !== null);
+  const hasMeasuredBreaks = closed.length > 1 || breakSpans.length > 0;
   return {
     mode,
     effectiveMode: mode,
@@ -273,12 +276,13 @@ function finish(mode: PunchInterpretation, punches: InterpretedPunch[], segments
     missingOut,
     segments,
     measuredBreakMinutes: Math.round(gapMinutes + breakMinutes),
+    breakSpans,
     hasMeasuredBreaks,
   };
 }
 
 function empty(mode: PunchInterpretation): Interpretation {
-  return { mode, effectiveMode: mode, punches: [], firstIn: null, lastOut: null, missingIn: false, missingOut: false, segments: [], measuredBreakMinutes: 0, hasMeasuredBreaks: false };
+  return { mode, effectiveMode: mode, punches: [], firstIn: null, lastOut: null, missingIn: false, missingOut: false, segments: [], measuredBreakMinutes: 0, breakSpans: [], hasMeasuredBreaks: false };
 }
 
 /* ------------------------------------------------------------------------------------------------ */

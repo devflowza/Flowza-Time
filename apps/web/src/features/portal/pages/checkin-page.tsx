@@ -2,8 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
-import { AlertTriangle, Camera, CloudOff, Crosshair, LogIn, LogOut, MapPin, RefreshCw, ShieldOff, Trash2 } from 'lucide-react';
-import type { SelfPunchDirection, SelfPunchPreviewDto, SelfPunchRefusal, SelfPunchStatusDto } from '@flowza/contracts';
+import { AlertTriangle, CalendarClock, Camera, CloudOff, Crosshair, LogIn, LogOut, MapPin, RefreshCw, ShieldOff, Trash2 } from 'lucide-react';
+import type { SelfPunchDirection, SelfPunchPreviewDto, SelfPunchRefusal, SelfPunchStatusDto, SelfShiftTodayDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, EmptyState, ErrorState, Skeleton } from '@/components/ui';
 import { ApiError } from '@/lib/api-client';
@@ -15,6 +15,7 @@ import { PA_NS } from '../attendance-i18n';
 import { usePunchMutations, usePunchStatus } from '../attendance-api';
 import { fmtDistance, getCurrentFix, GeoFailure, nearestFence, type GeoFailureKind, type GeoFix } from '../geo';
 import { useOfflinePunches } from '../use-offline-punches';
+import { dayShiftText } from '../shift-format';
 import { VerdictChip } from '../components/attendance-badges';
 import { LocationProblem, VerdictBanner } from '../components/verdict-banner';
 import { SelfieDialog } from '../components/selfie-dialog';
@@ -64,6 +65,18 @@ function CheckOutFrom({ status, clock }: { status: SelfPunchStatusDto | undefine
   );
 }
 
+/** Today's shift as the shift tab names it (assignment, rotation or the organisation's default; day off, holiday, leave). */
+function TodayShift({ day }: { day: SelfShiftTodayDto }) {
+  const { t } = useTranslation(PA_NS);
+  return (
+    <p className="mt-2 flex min-w-0 flex-wrap items-center gap-1.5 text-sm" data-testid="today-shift">
+      <CalendarClock className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+      <span className="text-muted-foreground">{t('checkin.shiftToday')}</span>
+      <Link to="/my/shift" className="truncate font-medium hover:underline" dir="auto">{dayShiftText(day, t)}</Link>
+    </p>
+  );
+}
+
 /**
  * /my/checkin — check in / out from the browser. The location is read here and judged by the server (geofences, windows,
  * the IP allow-list, the selfie requirement); the punch time is always the server's. Without a connection a punch is kept
@@ -85,8 +98,10 @@ export default function CheckInPage() {
   const tz = s?.timezone ?? 'UTC';
   const clock = useServerClock(s?.serverTime, status.dataUpdatedAt, tz);
   const direction = nextDirection(s, offline.items);
-  const selfieOnly = !!s?.blockers.includes('SELFIE_REQUIRED');
-  const hardBlockers = (s?.blockers ?? []).filter((b) => b !== 'SELFIE_REQUIRED');
+  // a required selfie replaces the punch button only while the selfie check-in is offered (the API drops the requirement
+  // when the organisation turns it off); a requirement without a way to meet it stays a visible blocker
+  const selfieOnly = !!s?.selfieAvailable && s.blockers.includes('SELFIE_REQUIRED');
+  const hardBlockers = (s?.blockers ?? []).filter((b) => b !== 'SELFIE_REQUIRED' || !s?.selfieAvailable);
   const previewMutate = preview.mutate;
   const previewSeq = useRef(0);
 
@@ -150,6 +165,9 @@ export default function CheckInPage() {
   const near = fix && s && s.fences.length ? nearestFence(fix, s.fences) : null;
   const lastPunch = s?.punches.length ? s.punches[s.punches.length - 1] : null;
   const punchWindow = direction === 'in' ? s?.policy.checkInWindow : s?.policy.checkOutWindow;
+  // the shift line names today's shift (resolved live), so the record's NO_SHIFT chip would only repeat it — or contradict it
+  // while the record waits for its recalculation after a shift change
+  const dayFlags = s?.today ? (s.shift ? s.today.flags.filter((f) => f !== 'NO_SHIFT') : s.today.flags) : [];
 
   return (
     <div className="page-container space-y-5">
@@ -162,12 +180,13 @@ export default function CheckInPage() {
               <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">{t('checkin.serverTime')}</p>
               {s ? <p className="text-4xl font-semibold tracking-tight tnum" dir="ltr" data-testid="server-clock">{clock.toFormat('HH:mm:ss')}</p> : <Skeleton className="h-10 w-40" />}
               {s ? <p className="text-sm text-muted-foreground">{clock.setLocale(i18n.language).toFormat('EEEE, dd MMMM yyyy')} · {tz}</p> : null}
+              {s?.shift ? <TodayShift day={s.shift} /> : null}
             </div>
             <div className="text-end text-sm">
               {status.isLoading ? <Skeleton className="h-5 w-40" /> : lastPunch ? (
                 <p data-testid="punch-state">{t(lastPunch.direction === 'out' ? 'checkin.checkedOutAt' : 'checkin.checkedInAt', { time: fmtTime(lastPunch.punchedAt, tz) })}</p>
               ) : <p data-testid="punch-state" className="text-muted-foreground">{t('checkin.notYet')}</p>}
-              {s?.today ? <span className="mt-1 inline-flex flex-wrap items-center justify-end gap-1.5"><AttendanceStatusBadge status={s.today.status} /><FlagChips flags={s.today.flags} max={2} size="xs" /></span> : null}
+              {s?.today ? <span className="mt-1 inline-flex flex-wrap items-center justify-end gap-1.5"><AttendanceStatusBadge status={s.today.status} /><FlagChips flags={dayFlags} max={2} size="xs" /></span> : null}
               <CheckOutFrom status={s} clock={clock} />
             </div>
           </div>

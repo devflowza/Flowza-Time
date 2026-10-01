@@ -1,6 +1,6 @@
 import { type z } from 'zod';
 import { sql } from 'kysely';
-import { organizationSettingsSchema, SYSTEM_ROLE_IDS, type createOwnOrganizationSchema, type updateOrganizationSchema, type CreateOwnOrganizationResult, type OrganizationDto, type OrganizationSettings, type SettingsGroup } from '@flowza/contracts';
+import { organizationSettingsSchema, resolveAttendanceSettings, SYSTEM_ROLE_IDS, type createOwnOrganizationSchema, type updateOrganizationSchema, type CreateOwnOrganizationResult, type OrganizationDto, type OrganizationSettings, type SettingsGroup } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { errors, isValidTimezone, newId } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
@@ -8,6 +8,7 @@ import { requireMembership, requirePermission } from '../lib/authorize.js';
 import { type Actor, runUser, runSystem, audit, diffObjects } from '../lib/service.js';
 import { loadSettings } from '../lib/settings.js';
 import { ORG_COLUMNS, toOrganizationDto, type OrgRow } from './organizations.mappers.js';
+import { enqueueRecalculation, orgToday } from './features/recalc.js';
 import { provisionTenant } from './tenant-provisioning.js';
 
 export type UpdateOrganizationInput = z.infer<typeof updateOrganizationSchema>;
@@ -126,6 +127,22 @@ export function settingsGroupPermission(group: SettingsGroup): 'notification.man
   return group === 'notifications' ? 'notification.manage' : 'organization.manage';
 }
 
+/**
+ * The engine reads two keys of the attendance group: the default shift (applied wherever no assignment resolves) and the
+ * non-working-day policy. Changing either recalculates TODAY's records organisation-wide (§G.7), so the day under way — the
+ * check-in page, the portal overview — follows the change instead of keeping a stale "No shift"; earlier days are recomputed
+ * on request (Attendance → Recalculate), never rewritten wholesale by a settings save.
+ */
+async function recalcTodayOnEngineChange(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, stored: OrganizationSettings['attendance'], saved: OrganizationSettings['attendance']): Promise<void> {
+  // the group is stored partial: compare what the engine reads, defaults filled in
+  const before = resolveAttendanceSettings(stored); const after = resolveAttendanceSettings(saved);
+  const shiftChanged = (before.defaultShiftId ?? null) !== (after.defaultShiftId ?? null);
+  const nonWorkingChanged = before.nonWorkingDay.action !== after.nonWorkingDay.action;
+  if (!shiftChanged && !nonWorkingChanged) return;
+  const today = await orgToday(trx, orgId);
+  await enqueueRecalculation(deps, trx, actor, orgId, { fromDate: today, toDate: today, reason: shiftChanged ? 'default shift changed' : 'non-working day policy changed' });
+}
+
 export async function putSettingsGroup(deps: ApiDeps, actor: Actor, orgId: string, group: SettingsGroup, payload: unknown): Promise<OrganizationSettings[SettingsGroup]> {
   requirePermission(actor.principal, orgId, settingsGroupPermission(group));
   const groupSchema = organizationSettingsSchema.shape[group];
@@ -143,6 +160,7 @@ export async function putSettingsGroup(deps: ApiDeps, actor: Actor, orgId: strin
       .onConflict((oc) => oc.column('organizationId').doUpdateSet({ [group]: JSON.stringify(value), updatedBy: actor.userId } as never))
       .execute();
     await audit(trx, actor, orgId, 'organization.settings_updated', 'organization_settings', { entityId: `${orgId}:${group}`, oldValue: before[group], newValue: value, reason: null });
+    if (group === 'attendance') await recalcTodayOnEngineChange(deps, trx, actor, orgId, before.attendance, value as OrganizationSettings['attendance']);
     return (await loadSettings(trx, orgId))[group];
   });
 }

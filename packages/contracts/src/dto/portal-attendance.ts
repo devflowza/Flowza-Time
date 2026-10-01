@@ -103,7 +103,16 @@ export interface SelfPunchStatusDto {
   /** Whether the selfie check-in is available to the caller (organisation switch + grant). */
   selfieAvailable: boolean;
   fences: SelfGeofenceDto[];
+  /**
+   * The shift that applies to the employee on `date`, resolved live from the assignments (the resolver of the shift tab and
+   * the engine: assignment, rotation pattern or the organisation's default shift) — what the check-in page names, even before
+   * today's record exists. Absent from an older API.
+   */
+  shift?: SelfShiftTodayDto;
 }
+
+/** The shift of one day as the check-in page shows it (the shift tab's day without the swap). */
+export type SelfShiftTodayDto = Omit<SelfShiftDayDto, 'swap'>;
 
 export interface SelfPunchPreviewDto {
   verdict: GeofenceVerdictDto;
@@ -177,7 +186,11 @@ export const portalCancelSchema = z.object({ reason: z.string().trim().min(3).ma
 
 export const attendanceGrantsInputSchema = z.object({ openAttendance: z.boolean(), selfieRequired: z.boolean() });
 export type AttendanceGrantsInput = z.infer<typeof attendanceGrantsInputSchema>;
-export interface AttendanceGrantsDto { employeeId: string; openAttendance: boolean; selfieRequired: boolean; grantedBy: string | null; grantedByName: string | null; grantedAt: string | null }
+export interface AttendanceGrantsDto {
+  employeeId: string; openAttendance: boolean; selfieRequired: boolean; grantedBy: string | null; grantedByName: string | null; grantedAt: string | null;
+  /** The organisation's selfie check-in switch (Settings → Attendance): while it is off "selfie required" asks for nothing. */
+  selfieCheckInEnabled: boolean;
+}
 
 // ----- attendance notes (per-day reasons) ----------------------------------------------------------------------------------------
 

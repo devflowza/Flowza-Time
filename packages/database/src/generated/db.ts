@@ -604,6 +604,10 @@ export interface AttendanceRuleSets {
   overtimeEnabled: Generated<boolean>;
   overtimeMaxMinutesPerDay: number | null;
   overtimeMinBlockMinutes: Generated<number>;
+  /**
+   * Regular overtime only beyond the scheduled minutes (a late arrival making up the time after the shift end earns none). Off: every minute worked after the shift end counts.
+   */
+  overtimeRequiresScheduledHours: Generated<boolean>;
   overtimeRoundingMinutes: Generated<number>;
   overtimeStartAfterMinutes: Generated<number>;
   punchInterpretation: Generated<PunchInterpretation>;

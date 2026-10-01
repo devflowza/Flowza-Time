@@ -46,7 +46,7 @@
     "noRounding": "بدون تقريب", "minutesValue": "{{count}} د", "noLimit": "بدون حد", "ramadanAll": "كل الموظفين", "ramadanFlagged": "الموظفون المحددون فقط",
     "sections": {
       "grace": "السماح والحدود", "graceHint": "مقدار التأخير المسموح وما يُعتبر يوماً كاملاً أو نصف يوم.",
-      "overtime": "العمل الإضافي", "overtimeHint": "متى تبدأ الدقائق الإضافية بالاحتساب وكيف تُقرَّب وتُحدَّد.",
+      "overtime": "العمل الإضافي", "overtimeHint": "وقت العمل بعد نهاية الوردية عمل إضافي؛ وهنا متى يبدأ احتسابه وكيف يُقرَّب ويُحدَّد.",
       "rounding": "التقريب", "roundingHint": "تقريب البصمات الفردية و/أو مجموع وقت العمل.",
       "punches": "تفسير البصمات", "punchesHint": "كيف تُزاوَج البصمات الخام إلى دخول/خروج وتُزال التكرارات.",
       "missing": "البصمة المفقودة", "missingHint": "ما يحدث عند وجود بصمة واحدة فقط في اليوم.",
@@ -55,7 +55,7 @@
     "fields": {
       "graceInMinutes": "سماح الدخول (د)", "graceOutMinutes": "سماح الخروج (د)", "lateThresholdMinutes": "حد التأخير (د)", "earlyDepartureThresholdMinutes": "حد الخروج المبكر (د)", "minFullDayMinutes": "اليوم الكامل (د)", "halfDayThresholdMinutes": "نصف اليوم (د)",
       "overtimeEnabled": "تفعيل العمل الإضافي", "overtimeStartAfterMinutes": "يبدأ الإضافي بعد (د)", "overtimeMinBlockMinutes": "أقل كتلة إضافي (د)", "overtimeRoundingMinutes": "تقريب الإضافي", "overtimeMaxMinutesPerDay": "أقصى إضافي يومياً (د)",
-      "countEarlyInAsOvertime": "الحضور المبكر يُحسب إضافياً", "weeklyOffWorkCountsAsOvertime": "العمل في الراحة الأسبوعية إضافي", "holidayWorkCountsAsOvertime": "العمل في العطلة إضافي",
+      "countEarlyInAsOvertime": "الحضور المبكر يُحسب إضافياً", "overtimeRequiresScheduledHours": "الإضافي بعد اكتمال الساعات المجدولة فقط", "weeklyOffWorkCountsAsOvertime": "العمل في الراحة الأسبوعية إضافي", "holidayWorkCountsAsOvertime": "العمل في العطلة إضافي",
       "punchRoundingMinutes": "تقريب البصمة", "punchRoundingMode": "طريقة تقريب البصمة", "workedRoundingMinutes": "تقريب وقت العمل", "workedRoundingMode": "طريقة تقريب وقت العمل",
       "punchInterpretation": "التفسير", "duplicatePunchWindowSeconds": "نافذة التكرار (ث)", "missingPunchBehavior": "السلوك", "autoAbsentWithoutPunches": "غياب تلقائي بدون بصمات",
       "ramadanEnabled": "تفعيل ساعات رمضان", "ramadanMinutes": "الدقائق المقررة", "ramadanAppliesTo": "ينطبق على"
@@ -63,7 +63,7 @@
     "hints": {
       "lateThresholdMinutes": "التأخير فوق هذا الحد يُعلَّم (0 = أي تأخير).", "minFullDayMinutes": "دقائق العمل اللازمة ليوم كامل.", "halfDayThresholdMinutes": "أقل من يوم كامل لكن على الأقل هذا = نصف يوم.",
       "overtimeEnabled": "أوقفه لعدم احتساب الإضافي مطلقاً.", "overtimeStartAfterMinutes": "الدقائق بعد نهاية الوردية قبل احتساب الإضافي.", "overtimeMinBlockMinutes": "يُهمل الإضافي الأقل من هذا.", "overtimeMaxMinutesPerDay": "فارغ = بدون حد أقصى.",
-      "countEarlyInAsOvertime": "الدقائق قبل بداية الوردية تُحسب إضافياً.", "weeklyOffWorkCountsAsOvertime": "كل دقائق العمل في يوم الراحة الأسبوعية إضافي.", "holidayWorkCountsAsOvertime": "كل دقائق العمل في العطلة إضافي.",
+      "countEarlyInAsOvertime": "الدقائق قبل بداية الوردية تُحسب إضافياً.", "overtimeRequiresScheduledHours": "عند التفعيل: من يتأخر في الحضور ويعوّض الوقت بعد نهاية الوردية لا يحصل على إضافي. عند الإيقاف: كل دقيقة عمل بعد نهاية الوردية إضافي.", "weeklyOffWorkCountsAsOvertime": "كل دقائق العمل في يوم الراحة الأسبوعية إضافي.", "holidayWorkCountsAsOvertime": "كل دقائق العمل في العطلة إضافي.",
       "punchInterpretation": "FIRST_LAST: أول بصمة دخول وآخرها خروج. PAIRED: تبادل دخول/خروج. DIRECTIONAL: الاعتماد على اتجاه الجهاز.", "duplicatePunchWindowSeconds": "البصمات الأقرب من هذا تُدمج.",
       "autoAbsentWithoutPunches": "اعتبار الموظفين بدون بصمات غائبين بعد نهاية الوردية.", "ramadanMinutes": "الدقائق المقررة يومياً خلال رمضان (60–600)."
     },

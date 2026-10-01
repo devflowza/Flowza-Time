@@ -209,6 +209,28 @@ describe('selfie check-in and attendance grants', () => {
     expect(plain.body.details.reason).toBe('SELFIE_REQUIRED');
   });
 
+  it('a required selfie never locks the employee out: with the organisation\'s selfie check-in off the plain punch is judged as usual', async () => {
+    await setSelfService({ allowSelfieCheckIn: false });
+    const status = await h.request('GET', `${base()}/me/punch/status`, { token: f.employeeUser });
+    expect(status.status).toBe(200);
+    expect(status.body.data).toMatchObject({ grant: { selfieRequired: true }, selfieAvailable: false, policy: { allowSelfieCheckIn: false } });
+    expect(status.body.data.blockers).not.toContain('SELFIE_REQUIRED');
+    const preview = await h.request('POST', `${base()}/me/punch/preview`, { token: f.employeeUser, body: { direction: 'out', ...OFFICE, accuracy: 10 } });
+    expect(preview.body.data.refusals).not.toContain('SELFIE_REQUIRED');
+    const out = await punch({ direction: 'out', ...OFFICE, accuracy: 10 });
+    expect(out.status).toBe(201);
+    expect(out.body.data.punch).toMatchObject({ direction: 'out', source: 'SELF_SERVICE' });
+    // the manager's card says the requirement is dormant
+    const grants = await h.request('GET', `${base()}/employees/${f.e1}/attendance-grants`, { token: f.managerUser });
+    expect(grants.body.data).toMatchObject({ selfieRequired: true, selfieCheckInEnabled: false });
+    // switched back on, the requirement binds again and the selfie is the way to punch
+    await setSelfService({ allowSelfieCheckIn: true });
+    const on = await h.request('GET', `${base()}/me/punch/status`, { token: f.employeeUser });
+    expect(on.body.data).toMatchObject({ selfieAvailable: true });
+    expect(on.body.data.blockers).toContain('SELFIE_REQUIRED');
+    expect((await h.request('GET', `${base()}/employees/${f.e1}/attendance-grants`, { token: f.managerUser })).body.data.selfieCheckInEnabled).toBe(true);
+  });
+
   let selfieId: string;
   it('stores the photo privately, queues it for the manager, and approval records a face punch', async () => {
     const bad = await h.request('POST', `${base()}/me/selfie-checkin`, { token: f.employeeUser, body: { direction: 'out', imageBase64: Buffer.from('not an image at all, just text').toString('base64') } });
@@ -381,5 +403,19 @@ describe('an employee of another team', () => {
     expect((await h.request('PUT', `${base()}/employees/${f.e1}/attendance-grants`, { token: otherManager, body: { openAttendance: true, selfieRequired: false } })).status).toBe(403);
     const list = await h.request('GET', `${base()}/attendance/selfie-checkins`, { token: otherManager });
     expect(list.status).toBe(403);
+  });
+});
+
+describe("today's shift on the check-in page", () => {
+  it('names the shift the employee works today, resolved live from the assignments (none → source NONE)', async () => {
+    const none = await h.request('GET', `${base()}/me/punch/status`, { token: f.employeeUser });
+    expect(none.status).toBe(200);
+    expect(none.body.data.shift).toMatchObject({ date: none.body.data.date, shift: null, source: 'NONE', holidayName: null, onLeave: false });
+    const s = await h.request('POST', `${base()}/shifts`, { token: f.hrAdmin, body: { code: 'GEN', name: 'General', type: 'FIXED', startTime: '09:00', endTime: '18:00' } });
+    expect(s.status).toBe(201);
+    const assigned = await h.request('POST', `${base()}/shift-assignments`, { token: f.hrAdmin, body: { targetType: 'EMPLOYEE', targetId: f.e1, shiftId: s.body.data.id, effectiveFrom: none.body.data.date } });
+    expect(assigned.status).toBe(201);
+    const status = await h.request('GET', `${base()}/me/punch/status`, { token: f.employeeUser });
+    expect(status.body.data.shift).toMatchObject({ date: status.body.data.date, source: 'ASSIGNMENT', shift: { id: s.body.data.id, code: 'GEN', name: 'General', type: 'FIXED', startTime: '09:00', endTime: '18:00' } });
   });
 });
