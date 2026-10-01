@@ -17,6 +17,17 @@ on:
         # included it). The flowza-time-reports app and its secrets exist since go-live 3b, so it now ships with every `all`.
         # `both` (API + worker) and the single targets stay for a targeted redeploy.
         options: [all, both, api, worker, reports]
+      # Migrations run before the API and the workers (expand first: every migration is additive, so the code that needs it
+      # never starts against an older schema). On 2026-10-01 three releases (#97, #99, #101) went live without theirs: #101's
+      # API calls `app.org_user_limits` on every "add employee", and production had no such function until it was applied by
+      # hand. `check` deploys only when nothing is pending and writes nothing; `skip` is the escape hatch for a deploy that
+      # must not touch the database.
+      migrations:
+        description: Database migrations before the deploy (apply / check = fail if any are pending / skip)
+        required: true
+        default: apply
+        type: choice
+        options: [apply, check, skip]
       # Lets a first deploy be verified straight against the Fly hostname, before Cloudflare and the certificate are
       # in the path. Only works while EDGE_SHARED_SECRET is unset — once it is set the origin refuses non-edge traffic.
       ready_url:
@@ -50,6 +61,28 @@ jobs:
             echo "::error::FLY_API_TOKEN is not set. Create a deploy token in the Fly dashboard and add it as a repository secret."
             exit 1
           fi
+
+      # scripts/db-migrate-hosted.sh: the pending files of supabase/migrations, in order, each in one transaction with its
+      # row in supabase_migrations.schema_migrations (matched by name, as every hosted migration so far was recorded). A
+      # failing file is rolled back and the deploy stops before any code ships. DATABASE_URL_ADMIN is the `postgres` role
+      # through the Supabase *session* pooler (port 5432, user postgres.<project ref>): GitHub's runners have no IPv6, and
+      # the direct db.<ref>.supabase.co host is IPv6-only. It is used here only, never by the running apps.
+      - name: Apply database migrations
+        if: inputs.migrations != 'skip'
+        env:
+          DATABASE_URL_ADMIN: ${{ secrets.DATABASE_URL_ADMIN }}
+          MODE: ${{ inputs.migrations }}
+        run: |
+          if [ -z "$DATABASE_URL_ADMIN" ]; then
+            echo "::error::DATABASE_URL_ADMIN is not set. Add it as a repository secret (the session pooler URL of the postgres role, see docs/deployment.md), or run the deploy with migrations: skip."
+            exit 1
+          fi
+          command -v psql >/dev/null || (sudo apt-get update -qq && sudo apt-get install -y -qq postgresql-client)
+          if [ "$MODE" = "check" ]; then bash scripts/db-migrate-hosted.sh --check; else bash scripts/db-migrate-hosted.sh; fi
+
+      - name: Migrations skipped
+        if: inputs.migrations == 'skip'
+        run: echo "::warning::Deployed without checking migrations. Code that needs a migration not yet applied will fail until it is."
 
       - name: Deploy the API
         if: inputs.target == 'all' || inputs.target == 'both' || inputs.target == 'api'
