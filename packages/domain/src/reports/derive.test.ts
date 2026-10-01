@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveHours, pairPunches } from './derive.js';
+import { deriveHours, pairPunches, shiftHoursVerdict } from './derive.js';
 
 const base = { status: 'PRESENT', flags: [] as string[], firstInAt: '2017-11-01T03:30:00Z', lastOutAt: '2017-11-01T14:30:00Z', workedMinutes: 600, scheduledMinutes: 540, overtimeMinutes: 60, overtimeCategory: 'REGULAR' as string | null };
 
@@ -21,6 +21,29 @@ describe('deriveHours', () => {
     for (const status of ['ABSENT', 'LEAVE', 'HOLIDAY', 'WEEKLY_OFF', 'PENDING']) {
       expect(deriveHours({ ...base, status, firstInAt: null, lastOutAt: null, workedMinutes: 0, overtimeMinutes: 0 })).toEqual({ span: null, worked: null, scheduled: null, ot1: null, ot2: null, ut: null });
     }
+  });
+});
+
+describe('shiftHoursVerdict', () => {
+  // an 8-hour shift: 08:00 → 17:00 with a one-hour unpaid break
+  const day = { ...base, scheduledMinutes: 480, overtimeMinutes: 0 };
+  it('is MET when the worked hours reach the shift hours, exactly or beyond', () => {
+    expect(shiftHoursVerdict({ ...day, workedMinutes: 480 })).toBe('MET');
+    expect(shiftHoursVerdict({ ...day, workedMinutes: 540, overtimeMinutes: 60 })).toBe('MET');
+  });
+  it('is SHORT when they fall below, by a minute or more', () => {
+    expect(shiftHoursVerdict({ ...day, workedMinutes: 479 })).toBe('SHORT');
+    expect(shiftHoursVerdict({ ...day, status: 'HALF_DAY', workedMinutes: 240 })).toBe('SHORT');
+  });
+  it('is MISSED_PUNCH when the check-in or check-out is missing, whatever the minutes say', () => {
+    expect(shiftHoursVerdict({ ...day, status: 'MISSING_PUNCH', flags: ['MISSING_OUT'], lastOutAt: null, workedMinutes: 0 })).toBe('MISSED_PUNCH');
+  });
+  it('judges nothing on a day not worked, or a worked day that required no hours', () => {
+    for (const status of ['ABSENT', 'LEAVE', 'HOLIDAY', 'WEEKLY_OFF', 'PENDING']) {
+      expect(shiftHoursVerdict({ ...day, status, firstInAt: null, lastOutAt: null, workedMinutes: 0 })).toBeNull();
+    }
+    expect(shiftHoursVerdict({ ...day, status: 'WEEKLY_OFF', flags: ['WORKED_ON_WEEKLY_OFF'], scheduledMinutes: 0, workedMinutes: 300, overtimeMinutes: 300, overtimeCategory: 'WEEKLY_OFF' })).toBeNull();
+    expect(shiftHoursVerdict({ ...day, scheduledMinutes: 0, workedMinutes: 300 })).toBeNull();
   });
 });
 

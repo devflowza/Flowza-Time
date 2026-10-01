@@ -40,7 +40,7 @@ export const en: LocaleTemplates = {
     daily_attendance: 'Daily attendance', monthly_attendance: 'Monthly attendance', employee_attendance: 'Employee attendance', branch_attendance: 'Branch attendance',
     department_attendance: 'Department attendance', late_report: 'Late arrivals', absence_report: 'Absences', overtime_report: 'Overtime', missing_punch_report: 'Missing punches',
     device_sync_report: 'Device sync', device_health_report: 'Device health', audit_report: 'Audit', payroll_summary: 'Payroll summary', employee_directory: 'Employee directory',
-    leave_report: 'Leave', attendance_summary: 'Attendance summary', weekly_attendance: 'Weekly attendance', weekly_in_out: 'Weekly in / out', monthly_summary: 'Monthly attendance summary', monthly_detail: 'Monthly attendance detail',
+    leave_report: 'Leave', attendance_summary: 'Attendance summary', weekly_attendance: 'Weekly attendance', weekly_in_out: 'Weekly in / out', monthly_summary: 'Monthly attendance summary', monthly_detail: 'Monthly attendance detail', monthly_timesheet: 'Monthly timesheet',
   },
   syncJobTypes: {
     PULL_ATTENDANCE: 'Attendance pull', PULL_EMPLOYEES: 'Employee pull', PUSH_EMPLOYEE: 'Employee push', PUSH_EMPLOYEES: 'Employee push', DEVICE_HEALTH_CHECK: 'Health check',

@@ -184,7 +184,7 @@ export type RecipientScopeKind = 'ORGANIZATION' | 'BRANCHES' | 'TEAM' | 'SELF';
  * about other people and about the organisation, not about the recipient.
  */
 export const SELF_SCOPE_REPORT_TYPES: ReadonlySet<ReportType> = new Set<ReportType>([
-  'daily_attendance', 'employee_attendance', 'monthly_attendance', 'weekly_attendance', 'weekly_in_out', 'attendance_summary', 'monthly_summary', 'monthly_detail',
+  'daily_attendance', 'employee_attendance', 'monthly_attendance', 'weekly_attendance', 'weekly_in_out', 'attendance_summary', 'monthly_summary', 'monthly_detail', 'monthly_timesheet',
   'late_report', 'absence_report', 'missing_punch_report', 'leave_report',
 ]);
 /** The permission that lets a member see their own attendance — and so receive a report about it. */

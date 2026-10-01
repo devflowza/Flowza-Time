@@ -3,7 +3,7 @@ import type { CellTone, ReportDocument } from '../model.js';
 import { escapeSpreadsheetText } from './csv.js';
 import { flatten } from './flatten.js';
 
-const TONE_ARGB: Partial<Record<CellTone, string>> = { off: 'FF1D4ED8', leave: 'FF15803D', absent: 'FFB91C1C', holiday: 'FF6D28D9', muted: 'FF6B7280', warning: 'FFB45309', danger: 'FFB91C1C' };
+const TONE_ARGB: Partial<Record<CellTone, string>> = { off: 'FF1D4ED8', leave: 'FF15803D', absent: 'FFB91C1C', holiday: 'FF6D28D9', muted: 'FF6B7280', warning: 'FFB45309', danger: 'FFB91C1C', success: 'FF15803D' };
 
 /** One sheet, bold frozen header, typed numbers, tone colours carried over, columns sized to their content. */
 export async function renderXlsx(doc: ReportDocument): Promise<Buffer> {

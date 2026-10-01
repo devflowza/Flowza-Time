@@ -8,6 +8,7 @@ import { missingPunchReport } from './missed-punch.js';
 import { monthlyAttendance } from './monthly.js';
 import { monthlyDetail } from './monthly-detail.js';
 import { monthlySummary } from './monthly-summary.js';
+import { monthlyTimesheet } from './monthly-timesheet.js';
 import { attendanceSummary } from './summary.js';
 import { weeklyAttendance, weeklyInOut } from './weekly.js';
 import type { ReportDefinition } from './types.js';
@@ -31,6 +32,7 @@ export const REPORT_DEFINITIONS: Partial<Record<ReportType, ReportDefinition>> =
   audit_report: auditReport,
   monthly_summary: monthlySummary,
   monthly_detail: monthlyDetail,
+  monthly_timesheet: monthlyTimesheet,
 };
 
 export type { ReportDefinition } from './types.js';

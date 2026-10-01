@@ -332,6 +332,52 @@ describe('Phase 1 · the five layouts with existing keys', () => {
     expect(html).toContain('Late / Early = time after the shift start / before its end');
   });
 
+  it('Monthly Timesheet Report: one page per employee, a row per day with shift, check-in / check-out, shift hours met, overtime and under time', async () => {
+    const id = await request('monthly_timesheet', 'csv', { month: '2017-11' });
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    // five employees employed in November (never 9001, who left in June) × thirty days; the total rows stay out of the sheet
+    expect(res).toMatchObject({ status: 'COMPLETED', rowCount: 150 });
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toBe('Employee,Dept,Card No,Designation,Shift Hours Met,Date,Shift,Att Code,Check In,Check Out,Shift Hrs,Worked Hrs,Hours Met,Overtime,Under Time,Late,Early');
+    expect(lines.some((l) => l.startsWith('9001'))).toBe(false);
+    // FAISAL on a 9-hour shift: 8.30 then 8.18 worked (late 0.15 on the 2nd) — short both days; off, off, absent, then no record
+    const faisal = lines.filter((l) => l.startsWith('2011  FAISAL,EL BEIT,,Carpenter,0 of 2,'));
+    expect(faisal).toHaveLength(30);
+    expect(faisal.slice(0, 6).map((l) => l.replace('2011  FAISAL,EL BEIT,,Carpenter,0 of 2,', ''))).toEqual([
+      '01-Nov-17 Wed,STAFF,PR,8:39 am,6:09 pm,540,510,No,0,30,0,0',
+      '02-Nov-17 Thu,STAFF,PR,8:45 am,5:52 pm,540,498,No,0,42,15,0',
+      '03-Nov-17 Fri,STAFF,OF,,,,,,,,,',
+      '04-Nov-17 Sat,STAFF,OF,,,,,,,,,',
+      '05-Nov-17 Sun,STAFF,AB,,,,,,,,,',
+      '06-Nov-17 Mon,,,,,,,,,,,',
+    ]);
+    // 14.15 worked against 9.00 → met, with 5.15 overtime; a single IN cannot be judged: missed punch, the whole base short
+    expect(lines).toContain('2076  SALEH AL AGHBARI,ADMIN,,,1 of 1,01-Nov-17 Wed,STAFF,PR,5:32 am,9:16 pm,540,855,Yes,315,0,0,0');
+    expect(lines).toContain('2010  ABDUL SATTHAR,ADMIN,2010,,0 of 1,01-Nov-17 Wed,STAFF,PR,2:49 pm,,540,0,Missed punch,0,540,0,0');
+
+    const pdfId = await request('monthly_timesheet', 'pdf', { month: '2017-11' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('<div class="title">Monthly Timesheet Report</div>');
+    expect(html).toContain('For the Period : 01-Nov-2017 To 30-Nov-2017');
+    expect((html.match(/class="section break"/g) ?? []).length).toBe(4); // one page per employee
+    expect(html).toContain('<span class="k">Shift Hours Met:</span><span class="v">0 of 2</span>');
+    expect(html).toContain('<td class="center" style="color:#15803d;font-weight:700">Yes</td>');
+    expect(html).toContain('<td class="center" style="color:#b91c1c;font-weight:700">No</td>');
+    expect(html).toContain('<td class="center" style="color:#b45309;font-weight:700">Missed punch</td>');
+    // FAISAL's row for the 2nd in the tenant's notation, zeros as dashes; his totals: 18.00 required, 16.48 worked, 1.12 under
+    expect(html).toMatch(/5:52 pm<\/td><td class="end mono">9\.00<\/td><td class="end mono">8\.18<\/td><td class="center" style="color:#b91c1c;font-weight:700">No<\/td><td class="end mono">-<\/td><td class="end mono">0\.42<\/td><td class="end mono">0\.15<\/td><td class="end mono">-<\/td>/);
+    expect(html).toMatch(/<tr class="total"><td class="mono" style="font-weight:700">Total<\/td>(<td[^>]*><\/td>){4}<td class="end mono" style="font-weight:700">18\.00<\/td><td class="end mono" style="font-weight:700">16\.48<\/td><td class="center mono" style="font-weight:700">0\/2<\/td><td class="end mono" style="font-weight:700">0\.00<\/td><td class="end mono" style="font-weight:700">1\.12<\/td><td class="end mono" style="font-weight:700">0\.15<\/td>/);
+    expect(html).toContain('Hours Met = Yes when Worked Hrs reach Shift Hrs');
+
+    const arId = await request('monthly_timesheet', 'pdf', { month: '2017-11', locale: 'ar', employeeIds: [E2] });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: arId }));
+    const ar = fileText(`${ORG}/${arId}.pdf`);
+    expect(ar).toContain('dir="rtl"');
+    expect(ar).toContain('<div class="title">تقرير سجل الدوام الشهري</div>');
+    expect(ar).toContain('style="color:#15803d;font-weight:700">نعم</td>');
+  });
+
   it('Staff Absents Monthly Report: per department, numbered, day numbers and a count', async () => {
     const id = await request('absence_report', 'csv', { from: DATE, to: '2017-11-30' });
     expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }))).rowCount).toBe(3);

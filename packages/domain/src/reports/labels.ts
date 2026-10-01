@@ -21,6 +21,7 @@ const en = {
   'report.audit_report.title': 'Audit Trail Report',
   'report.monthly_summary.title': 'Monthly Attendance Summary',
   'report.monthly_detail.title': 'Monthly Detail Report',
+  'report.monthly_timesheet.title': 'Monthly Timesheet Report',
 
   'period.fromTo': 'From {{from}} To {{to}}',
   'period.forPeriod': 'For the period : {{from}} to {{to}}',
@@ -104,6 +105,18 @@ const en = {
   'col.day': 'Day',
   'col.early': 'Early',
   'col.total': 'Total',
+  // monthly_timesheet: each day's check-in / check-out against the shift's hours
+  'col.checkIn': 'Check In',
+  'col.checkOut': 'Check Out',
+  'col.shiftHrs': 'Shift Hrs',
+  'col.workedHrs': 'Worked Hrs',
+  'col.hoursMet': 'Hours Met',
+  'col.overtime': 'Overtime',
+  'col.underTime': 'Under Time',
+  'hoursMet.MET': 'Yes',
+  'hoursMet.SHORT': 'No',
+  'hoursMet.MISSED_PUNCH': 'Missed punch',
+  'hoursMet.summary': '{{met}} of {{days}}',
   'source.live': 'Live',
   'source.finalized': 'Finalised',
 
@@ -113,6 +126,7 @@ const en = {
   'field.dept': 'Dept:',
   'field.designation': 'Designation:',
   'field.days': 'Days:',
+  'field.hoursMet': 'Shift Hours Met:',
 
   'status.active': 'Active',
   'status.inactive': 'Inactive',
@@ -132,6 +146,7 @@ const en = {
   'footer.lop': 'LOP = loss-of-pay days (half days = .5), after paid leave was charged first.',
   'footer.summary': 'Present counts a half day as ½ (the other half is leave or absent). Finalised = the day counts of the finalised payroll period. Hours as {{notation}}.',
   'footer.monthlyDetail': 'IN = first IN, OUT = last OUT of the day; Wrk Hrs = the time between them (h:mm); Late / Early = time after the shift start / before its end. Days = days per attendance code in the grid.',
+  'footer.timesheet': 'Check In = first IN, Check Out = last OUT of the day. Shift Hrs = the hours the day\'s shift requires (its span less unpaid breaks); Worked Hrs = the time worked less unpaid breaks. Hours Met = Yes when Worked Hrs reach Shift Hrs, No when they fall short (the gap is Under Time), Missed punch when a check-in or check-out is missing. Overtime includes work on weekly offs and holidays. Late / Early = time after the shift start / before its end. Hours as {{notation}}.',
   'notation.h.mm': 'hours.minutes (9.45 = 9 h 45 min)',
   'notation.hh:mm': 'hours:minutes',
 
@@ -159,6 +174,7 @@ const ar: Record<ReportLabelKey, string> = {
   'report.audit_report.title': 'تقرير سجل التعديلات',
   'report.monthly_summary.title': 'ملخص الحضور الشهري',
   'report.monthly_detail.title': 'التقرير الشهري التفصيلي',
+  'report.monthly_timesheet.title': 'تقرير سجل الدوام الشهري',
 
   'period.fromTo': 'من {{from}} إلى {{to}}',
   'period.forPeriod': 'للفترة : {{from}} إلى {{to}}',
@@ -240,6 +256,17 @@ const ar: Record<ReportLabelKey, string> = {
   'col.day': 'اليوم',
   'col.early': 'خروج مبكر',
   'col.total': 'المجموع',
+  'col.checkIn': 'الدخول',
+  'col.checkOut': 'الخروج',
+  'col.shiftHrs': 'ساعات الوردية',
+  'col.workedHrs': 'ساعات العمل',
+  'col.hoursMet': 'مكتملة؟',
+  'col.overtime': 'إضافي',
+  'col.underTime': 'نقص',
+  'hoursMet.MET': 'نعم',
+  'hoursMet.SHORT': 'لا',
+  'hoursMet.MISSED_PUNCH': 'بصمة ناقصة',
+  'hoursMet.summary': '{{met}} من {{days}}',
   'source.live': 'مباشر',
   'source.finalized': 'معتمد',
 
@@ -249,6 +276,7 @@ const ar: Record<ReportLabelKey, string> = {
   'field.dept': 'القسم:',
   'field.designation': 'المسمى الوظيفي:',
   'field.days': 'الأيام:',
+  'field.hoursMet': 'اكتمال الساعات:',
 
   'status.active': 'نشط',
   'status.inactive': 'غير نشط',
@@ -268,6 +296,7 @@ const ar: Record<ReportLabelKey, string> = {
   'footer.lop': 'خصم = أيام الخصم من الراتب (نصف اليوم = .5) بعد الخصم من الإجازة المدفوعة أولًا.',
   'footer.summary': 'يُحسب نصف اليوم ½ حضور (والنصف الآخر إجازة أو غياب). معتمد = أيام فترة الرواتب المعتمدة. الساعات بصيغة {{notation}}.',
   'footer.monthlyDetail': 'الدخول = أول دخول، الخروج = آخر خروج في اليوم؛ ساعات العمل = المدة بينهما (س:د)؛ التأخير / الخروج المبكر = الوقت بعد بداية الوردية / قبل نهايتها. الأيام = عدد الأيام لكل رمز حضور في الجدول.',
+  'footer.timesheet': 'الدخول = أول دخول، الخروج = آخر خروج في اليوم. ساعات الوردية = الساعات التي تتطلبها وردية اليوم (مدتها ناقص الاستراحات غير المدفوعة)؛ ساعات العمل = وقت العمل ناقص الاستراحات غير المدفوعة. مكتملة = نعم عندما تبلغ ساعات العمل ساعات الوردية، لا عندما تقل عنها (والفرق هو النقص)، بصمة ناقصة عند غياب الدخول أو الخروج. يشمل الإضافي العمل في العطل الأسبوعية والرسمية. التأخير / الخروج المبكر = الوقت بعد بداية الوردية / قبل نهايتها. الساعات بصيغة {{notation}}.',
   'notation.h.mm': 'ساعات.دقائق (9.45 = 9 س 45 د)',
   'notation.hh:mm': 'ساعات:دقائق',
 
