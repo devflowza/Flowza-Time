@@ -19,18 +19,13 @@ A complete quotation package for implementing FlowZa Time attendance management 
 
 ## Line Items & Pricing
 
-### 1. Device Setup & Configuration
-- **Description:** Complete setup and configuration of biometric/RFID attendance devices for 20 users
+### 1. Attendance Management System with Device & 2-Year Subscription
+- **Description:** Complete attendance solution for 20 users including device setup and 24 months of cloud platform subscription
 - **Includes:**
-  - Device provisioning and network integration
+  - Biometric/RFID device provisioning and network integration
   - Employee enrollment and system configuration
   - Initial staff training and onboarding
-- **Price:** 300 OMR (One-time)
-- **Duration:** Typical implementation within 2-3 weeks
-
-### 2. Year 1 Annual Subscription
-- **Description:** Cloud-based attendance platform subscription for 20 users
-- **Includes:**
+  - 24 months (2 years) of cloud-based attendance platform subscription
   - Real-time attendance tracking
   - Automated daily/weekly/monthly reports
   - Leave management system
@@ -40,22 +35,23 @@ A complete quotation package for implementing FlowZa Time attendance management 
   - Weekly cloud backups
   - 24/7 technical support
   - User training and administration tools
-- **Price:** 80 OMR/Year
-- **Duration:** 12 months from implementation date
+- **Price:** 300 OMR (One-time)
+- **Duration:** 24 months from implementation date
+- **Implementation:** Typical go-live within 2-3 weeks
 
-### 3. Year 2 Annual Subscription (Renewal)
-- **Description:** Cloud-based attendance platform subscription renewal for 20 users
+### 2. Year 3+ Annual Subscription (Optional Renewal)
+- **Description:** Optional annual renewal to continue service beyond the initial 2-year period
 - **Price:** 80 OMR/Year
-- **Duration:** 12 months (Year 2)
-- **Notes:** Same features and support as Year 1
+- **Duration:** 12 months per renewal (starts after 24 months)
+- **Notes:** Same features and support as the initial 2-year package
 
 ## Payment Schedule
 
 | Payment Item | Amount | Due Date | Details |
 |---|---|---|---|
-| Setup + Year 1 | 380 OMR | Upon contract signing | Device setup (300) + Subscription (80) |
-| Year 2 Subscription | 80 OMR | On anniversary date | Annual renewal |
-| **Total (24 months)** | **460 OMR** | - | Complete solution |
+| Device & 2-Year Subscription Package | 300 OMR | Upon contract signing | Complete package includes device setup and 24 months of service |
+| Year 3+ Annual Renewal (Optional) | 80 OMR | After 24 months | Optional annual renewal for continued service |
+| **Total (24 months, minimum)** | **300 OMR** | - | Complete initial solution |
 
 ## Key Features Included
 
