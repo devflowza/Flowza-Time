@@ -71,7 +71,7 @@
     "noDefaultShift": "No default shift",
     "shiftsUnavailable": "Shifts module not available yet.",
     "processingDelay": "Processing delay (seconds)",
-    "processingDelayHint": "Wait after a punch before recalculating the day, to batch bursts of punches.",
+    "processingDelayHint": "Wait after a punch before recalculating the day, to batch bursts of punches. The attendance register shows a new punch once its day is recalculated: a lower value (e.g. 5) shows it sooner.",
     "payrollPeriod": "Payroll period",
     "calendarMonth": "Calendar month",
     "customCutoff": "Custom cut-off day",
