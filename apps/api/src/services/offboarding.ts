@@ -1,11 +1,13 @@
-import { SYSTEM_ROLE_IDS, type EmployeeDto } from '@flowza/contracts';
+import { FLOWZA_FINANCE_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY, SYSTEM_ROLE_IDS, type EmployeeDto } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { type Actor, audit, withSystemScope } from '../lib/service.js';
 import { revokeSessions } from '../lib/sessions.js';
+import { jsonObject } from '../lib/mappers.js';
 import { toCount } from '../lib/pagination.js';
+import { createSyncJob } from './features/sync-jobs.js';
 
 /** Employment statuses that mean the person has left the organisation (B-75). Archiving a record counts as leaving too. */
 export const LEFT_EMPLOYMENT_STATUSES = ['terminated', 'resigned'] as const satisfies readonly EmployeeDto['employmentStatus'][];
@@ -88,4 +90,67 @@ export async function offboardLinkedLogins(deps: ApiDeps, trx: Trx, actor: Actor
       reason: 'Employee left the organisation',
     });
   }
+}
+
+/** Why a leaver's device row got no removal: the terminal is switched off, or its provider cannot delete users. */
+export type DeviceRemovalSkip = 'device_inactive' | 'delete_unsupported';
+export interface DeviceRemovalOutcome { syncJobId: string | null; items: number; skipped: Array<{ deviceId: string; deviceUserId: string; reason: DeviceRemovalSkip }> }
+
+/** Device users that are gone or on their way out already: nothing left to remove. */
+const ALREADY_LEAVING = ['REMOVED', 'REMOVING'] as const;
+/** Device rows these keys carry are not terminal users (the portal's virtual device, the Flowza Finance connector). */
+const NOT_TERMINALS = [SELF_SERVICE_PROVIDER_KEY, FLOWZA_FINANCE_PROVIDER_KEY];
+
+/**
+ * AGENTS.md "Termination": an employee who leaves (terminated/resigned, or archived) is taken off every terminal they are
+ * enrolled on, so they can no longer punch or open a door with it:
+ *  - every device row of the employee becomes `desired = false` (no sync or reconciliation puts them back);
+ *  - each row still on a device — anything but REMOVED/REMOVING, whether the user came from a push, a device pull or a
+ *    manual PIN mapping — gets a DELETE_EMPLOYEE item for its own PIN, in one sync job queued in this transaction
+ *    (rule 5). The worker moves the row to REMOVING/REMOVED; a push device applies it when it next polls;
+ *  - an inactive device, or one whose provider cannot delete users, gets no item: it is listed in the audit row, and the
+ *    row keeps its sync status so the PIN mapping page still shows the person on that terminal.
+ *
+ * Re-activating the employee re-enrols them through the normal push (employees.service maybeEnqueuePush). Removing a user
+ * also removes their fingerprint/face templates from the terminal, so a returning employee enrols again.
+ *
+ * Runs in the organisation's system scope inside the caller's transaction, as offboardLinkedLogins: the actor was
+ * authorised for the employee change, and device rows / sync jobs need device permissions the HR actor may not hold.
+ */
+export async function removeLeaversFromDevices(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, employeeIds: string[], context: LeaverContext): Promise<DeviceRemovalOutcome> {
+  const ids = [...new Set(employeeIds)];
+  if (ids.length === 0) return { syncJobId: null, items: 0, skipped: [] };
+  const rows = await withSystemScope(trx, orgId, async (t) => {
+    const enrolled = await t.selectFrom('deviceEmployeeStates as s')
+      .innerJoin('devices as d', (j) => j.onRef('d.id', '=', 's.deviceId').onRef('d.organizationId', '=', 's.organizationId'))
+      .select(['s.deviceId', 's.employeeId', 's.deviceUserId', 'd.branchId', 'd.status', 'd.capabilities'])
+      .where('s.organizationId', '=', orgId).where('s.employeeId', 'in', ids).where('s.syncStatus', 'not in', [...ALREADY_LEAVING])
+      .where('d.providerKey', 'not in', NOT_TERMINALS).orderBy('s.deviceId').orderBy('s.deviceUserId').execute();
+    await t.updateTable('deviceEmployeeStates').set({ desired: false }).where('organizationId', '=', orgId).where('employeeId', 'in', ids).where('desired', '=', true).execute();
+    return enrolled;
+  });
+  const skipped: DeviceRemovalOutcome['skipped'] = [];
+  const items: Array<{ deviceId: string; employeeId: string; branchId: string | null; operation: 'DELETE_EMPLOYEE'; options: { deviceUserId: string } }> = [];
+  for (const r of rows) {
+    if (r.status !== 'active') skipped.push({ deviceId: r.deviceId, deviceUserId: r.deviceUserId, reason: 'device_inactive' });
+    else if (jsonObject(r.capabilities)['employeeDelete'] !== true) skipped.push({ deviceId: r.deviceId, deviceUserId: r.deviceUserId, reason: 'delete_unsupported' });
+    // the row's own PIN: a manual mapping may differ from the employee's default device user id
+    else items.push({ deviceId: r.deviceId, employeeId: r.employeeId as string, branchId: r.branchId, operation: 'DELETE_EMPLOYEE', options: { deviceUserId: r.deviceUserId } });
+  }
+  if (items.length === 0 && skipped.length === 0) return { syncJobId: null, items: 0, skipped };
+  const job = items.length > 0
+    ? await createSyncJob(deps, trx, {
+      organizationId: orgId, jobType: 'DELETE_EMPLOYEE', trigger: 'SYSTEM', scope: { employeeIds: ids, cause: 'employee_left', source: context.source },
+      branchId: items.every((i) => i.branchId === items[0]!.branchId) ? items[0]!.branchId : null, requestedBy: actor.userId, correlationId: actor.requestId, priority: 6, items,
+    })
+    : null;
+  await audit(trx, actor, orgId, 'employee.device_removal_requested', 'employee', {
+    entityId: ids.length === 1 ? ids[0] : null,
+    newValue: {
+      employeeIds: ids, cause: 'employee_left', source: context.source, employmentStatus: context.employmentStatus, syncJobId: job?.id ?? null,
+      removals: items.map((i) => ({ deviceId: i.deviceId, employeeId: i.employeeId, deviceUserId: i.options.deviceUserId })), skipped,
+    },
+    reason: 'Employee left the organisation',
+  });
+  return { syncJobId: job?.id ?? null, items: items.length, skipped };
 }

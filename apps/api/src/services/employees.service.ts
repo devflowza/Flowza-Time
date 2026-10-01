@@ -16,7 +16,7 @@ import { enqueueRecalculation } from './features/recalc.js';
 import { likeContains, pageOf, prefixTsQuery, resolveSort, toCount } from '../lib/pagination.js';
 import { isoDate } from '../lib/mappers.js';
 import { DOCUMENT_COLUMNS, EMPLOYEE_COLUMNS, EMPTY_SYNC_SUMMARY, HISTORY_COLUMNS, toDeviceStateDto, toDocumentDto, toEmployeeDto, toHistoryDto, type DeviceSyncSummary, type DeviceStateRow, type EmployeeRow, type HistoryRow } from './employees.mappers.js';
-import { LEFT_EMPLOYMENT_STATUSES, hasLeft, offboardLinkedLogins } from './offboarding.js';
+import { LEFT_EMPLOYMENT_STATUSES, hasLeft, offboardLinkedLogins, removeLeaversFromDevices } from './offboarding.js';
 
 type IdentityDocumentInput = z.infer<typeof identityDocumentInputSchema>;
 
@@ -396,7 +396,8 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     // B-75: becoming terminated/resigned ends every login linked to the record (a refusal rolls the whole change back).
     // The reverse is deliberately NOT automatic: re-activating the employee leaves the login suspended until an
     // administrator re-activates the member.
-    if (hasLeft(nextSnapshot.employmentStatus) && !hasLeft(before.employmentStatus)) {
+    const leaving = hasLeft(nextSnapshot.employmentStatus) && !hasLeft(before.employmentStatus);
+    if (leaving) {
       await offboardLinkedLogins(deps, trx, actor, grant, orgId, [id], { source: 'update', employmentStatus: nextSnapshot.employmentStatus });
     }
     const after = await loadEmployeeDto(trx, orgId, id);
@@ -405,9 +406,11 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     if (pin !== undefined) (diff.newValue as Record<string, unknown>)['pinSet'] = true;
     await audit(trx, actor, orgId, 'employee.updated', 'employee', { entityId: id, branchId: after.branchId, ...diff, reason: changeReason ?? null });
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.updated', aggregateType: 'employee', aggregateId: id, payload: { changed: Object.keys(diff.newValue), transition, branchId: after.branchId }, actorUserId: actor.userId, requestId: actor.requestId });
-    // device-relevant changes (name, card, pin, branch, status) are re-pushed when auto push is enabled
+    // a leaver is taken off every terminal (whatever the auto push setting); a re-activated employee is pushed back like
+    // any other device-relevant change (name, card, pin, branch, status) when auto push is enabled — a leaver is never pushed
     const deviceRelevant = ['displayName', 'firstName', 'lastName', 'cardNumber', 'branchId', 'employmentStatus', 'deviceUserId'].some((k) => k in diff.newValue) || pin !== undefined;
-    if (deviceRelevant) await maybeEnqueuePush(deps, trx, actor, orgId, [id]);
+    if (leaving) await removeLeaversFromDevices(deps, trx, actor, orgId, [id], { source: 'update', employmentStatus: nextSnapshot.employmentStatus });
+    else if (deviceRelevant && !hasLeft(nextSnapshot.employmentStatus)) await maybeEnqueuePush(deps, trx, actor, orgId, [id]);
     return maskSensitive(after, grant);
   });
 }
@@ -423,12 +426,12 @@ export async function deleteEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     if (exitDate < joiningDate) throw errors.validation('exitDate cannot be before the joining date.', { issues: [{ path: 'exitDate', message: `Must be on/after ${joiningDate}` }] });
     await applyHistoryTransition(trx, orgId, id, { ...snapshotOf(before), employmentStatus: 'terminated' }, exitDate, input.reason ?? 'Deleted', actor.userId, joiningDate);
     await trx.updateTable('employees').set({ deletedAt: new Date(), employmentStatus: 'terminated', exitDate, updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', id).execute();
-    await trx.updateTable('deviceEmployeeStates').set({ desired: false }).where('organizationId', '=', orgId).where('employeeId', '=', id).execute();
     // B-75: archiving is leaving — every login still linked to the record ends (whatever the previous status was)
     await offboardLinkedLogins(deps, trx, actor, grant, orgId, [id], { source: 'delete', employmentStatus: 'terminated' });
     await audit(trx, actor, orgId, 'employee.deleted', 'employee', { entityId: id, branchId: before.branchId, oldValue: { employmentStatus: before.employmentStatus, exitDate: before.exitDate }, newValue: { employmentStatus: 'terminated', exitDate, deleted: true }, reason: input.reason ?? null });
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.deleted', aggregateType: 'employee', aggregateId: id, payload: { employeeNumber: before.employeeNumber, branchId: before.branchId, exitDate }, actorUserId: actor.userId, requestId: actor.requestId });
-    await maybeEnqueuePush(deps, trx, actor, orgId, [id]);
+    // ... and so does every terminal: also for a record that left earlier and is still on a device
+    await removeLeaversFromDevices(deps, trx, actor, orgId, [id], { source: 'delete', employmentStatus: 'terminated' });
     return maskSensitive(await loadEmployeeDto(trx, orgId, id), grant);
   });
 }
@@ -512,7 +515,10 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
         }
         const { employeeIds: _ids, ...rest } = input;
         await audit(trx, actor, orgId, 'employee.bulk_updated', 'employee', { newValue: { ...rest, effectiveFrom, employeeIds: changed } });
-        if (changed.length && (input.action === 'assign_branch' || input.action === 'set_status')) await maybeEnqueuePush(deps, trx, actor, orgId, changed);
+        // leavers come off every terminal; anybody else whose branch or status changed is pushed (a leaver never is)
+        if (input.action === 'set_status' && leavers.length) await removeLeaversFromDevices(deps, trx, actor, orgId, leavers, { source: 'bulk_set_status', employmentStatus: input.employmentStatus });
+        const toPush = input.action === 'set_status' && hasLeft(input.employmentStatus) ? [] : changed;
+        if (toPush.length && (input.action === 'assign_branch' || input.action === 'set_status')) await maybeEnqueuePush(deps, trx, actor, orgId, toPush);
         return { kind: 'sync', updated: changed.length, employeeIds: changed };
       });
     }

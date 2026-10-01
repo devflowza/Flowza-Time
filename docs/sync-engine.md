@@ -90,7 +90,12 @@ marked `SKIPPED` (`result.skipped = 'duplicate_in_flight'`) and the 202 reply re
 `device_employee_states` holds the desired/actual state per (device, employee): `cloud_hash` vs `device_hash` decides whether a
 push is needed; `PULL_EMPLOYEES` marks `OUT_OF_SYNC` / device-only users; `RECONCILIATION` produces a diff summary on the job
 (cloud-only, device-only, differing, unmatched punches, duplicates) which the UI turns into *Repair* actions (new push/delete jobs).
-Terminations enqueue `DELETE_EMPLOYEE` on every enrolled device.
+Terminations enqueue `DELETE_EMPLOYEE` on every enrolled device: when an employee becomes terminated/resigned (edit or bulk
+*Set status*) or is archived, `removeLeaversFromDevices` (apps/api/src/services/offboarding.ts) sets `desired = false` on all
+their rows and, in the same transaction, queues one `DELETE_EMPLOYEE` sync job (trigger `SYSTEM`) with an item per row still
+on a device (anything but `REMOVED`/`REMOVING`), under that row's own PIN. Inactive devices and devices without the
+`employeeDelete` capability get no item and are listed in the `employee.device_removal_requested` audit row. A leaver is never
+pushed; re-activating the employee pushes them back (auto push).
 
 ## Scaling path
 Postgres queue → batching per vendor account → adaptive intervals → separate worker pools per queue family → move `jobs` to its
