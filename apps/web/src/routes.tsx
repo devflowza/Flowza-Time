@@ -5,7 +5,9 @@ import { AppShell } from '@/components/layout/app-shell';
 import { RequireAuth } from '@/components/layout/protected-route';
 import { SignInPage } from '@/features/auth/sign-in-page';
 import { SignUpPage } from '@/features/auth/sign-up-page';
-import { ForgotPasswordPage, ResetPasswordPage } from '@/features/auth/forgot-password-page';
+import { ForgotPasswordPage } from '@/features/auth/forgot-password-page';
+import { ResetPasswordPage } from '@/features/auth/reset-password-page';
+import { AuthGate } from '@/features/auth/auth-gate';
 import { AcceptInvitationPage } from '@/features/auth/accept-invitation-page';
 import { MfaRequiredGate } from '@/features/auth/mfa-required-gate';
 import { NotificationsPage } from '@/features/notifications/notifications-page';
@@ -54,8 +56,10 @@ function HomeRoute() {
 
 export const router = createBrowserRouter([{
   // Everything sits under one pathless route so no error ever reaches React Router's developer screen; the AppShell and
-  // admin layouts catch their own pages' errors first, inside the shell.
+  // admin layouts catch their own pages' errors first, inside the shell. AuthGate keeps a password-reset session on
+  // /auth/reset until a new password is chosen, and reports an e-mail link that had expired.
   errorElement: <RouteError fullScreen />,
+  element: <AuthGate />,
   children: [
     { path: '/auth/sign-in', element: <SignInPage /> },
     { path: '/auth/sign-up', element: <SignUpPage /> },

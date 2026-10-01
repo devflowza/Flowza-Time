@@ -7,6 +7,7 @@ import { useTranslation } from 'react-i18next';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from './auth-provider';
 import { signInErrorKey } from './sign-in-error';
+import { clearPasswordRecovery } from './password-recovery';
 import { Button, Card, CardContent, CardDescription, CardHeader, CardTitle, FormField, Input } from '@/components/ui';
 import { AuthLayout } from './auth-layout';
 
@@ -28,6 +29,8 @@ export function SignInPage() {
     setError(null);
     const { error: err } = await supabase.auth.signInWithPassword(values);
     if (err) { setError(t(signInErrorKey(err))); return; }
+    // signed in with a password: a reset link opened earlier in this browser no longer holds the account on /auth/reset
+    clearPasswordRecovery();
     const { data } = await supabase.auth.mfa.getAuthenticatorAssuranceLevel();
     if (data && data.nextLevel === 'aal2' && data.nextLevel !== data.currentLevel) {
       const factors = await supabase.auth.mfa.listFactors();
@@ -66,7 +69,8 @@ export function SignInPage() {
   );
 }
 
-function MfaChallenge({ factorId, onDone }: { factorId: string; onDone: () => void }) {
+/** The authenticator-code step: after a password sign-in, and before an MFA-protected account may change its password. */
+export function MfaChallenge({ factorId, onDone }: { factorId: string; onDone: () => void }) {
   const { t } = useTranslation();
   const [code, setCode] = useState('');
   const [error, setError] = useState<string | null>(null);

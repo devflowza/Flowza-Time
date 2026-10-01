@@ -9,6 +9,7 @@ import type { MeDto } from '@flowza/contracts';
 import { supabase } from '@/lib/supabase';
 import { api, isMfaRequiredError, isNetworkError, type Envelope } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/auth-provider';
+import { clearPasswordRecovery } from '@/features/auth/password-recovery';
 import { Button, FormField, Input } from '@/components/ui';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { AdmBrand } from './components/adm-brand';
@@ -42,6 +43,7 @@ export default function AdminLoginPage() {
     setChecking(true);
     const { error: err } = await supabase.auth.signInWithPassword(values);
     if (err) { setChecking(false); setError(t('login.invalid')); return; }
+    clearPasswordRecovery(); // signed in with a password: an earlier reset link no longer holds the account on /auth/reset
     try {
       const me = (await api.get<Envelope<MeDto>>('/me')).data;
       if (!me.user.isPlatformAdmin) {

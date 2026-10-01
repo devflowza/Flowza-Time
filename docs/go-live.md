@@ -425,6 +425,36 @@ The web app calls `resetPasswordForEmail(email, { redirectTo: `${window.location
 origin it sends is whatever host the browser is on. Supabase rejects any `redirectTo` that is not on the allow list and
 silently falls back to the Site URL, which looks like "the reset link goes to the wrong page" rather than an error.
 
+**One host.** The Pages project also answers on `time.flowza.com`. Requests from there sent
+`redirect_to=https://time.flowza.com/auth/reset`, which is not on the list, so the e-mailed link opened the bare Site URL
+on the other origin. There, no PKCE verifier exists, so no "choose a new password" form ever appeared; the API's
+`WEB_ORIGINS` refuses that host anyway. The bundle now sends any host other than `VITE_PUBLIC_APP_URL`
+(`apps/web/.env.production`) to the same path on `https://time.flowza.ai` before it starts (`src/lib/canonical-origin.ts`;
+localhost and `*.pages.dev` previews are exempt). A Cloudflare redirect rule `time.flowza.com/* → https://time.flowza.ai/$1`
+(301), or removing that custom domain, does the same at the edge.
+
+**Reset e-mail template (Dashboard → Authentication → Emails → Reset Password).** Replace the link's `{{ .ConfirmationURL }}`
+with:
+
+```
+{{ .SiteURL }}/auth/reset?token_hash={{ .TokenHash }}&type=recovery
+```
+
+The default link points straight at Supabase's `/verify`, which spends the one-time token on the first GET. Outlook /
+Defender Safe Links fetch every link in a message before the recipient does. The auth logs of 2026-09-30/10-01 show
+`GET /verify` from Microsoft addresses consuming the token seconds before the person's own click, which then got
+`403 One-time token not found`. A PKCE link also works only in the browser that requested it. With the template above, the
+link only loads `/auth/reset`. The token is verified (`verifyOtp`) when the person submits the new password, so scanners
+spend nothing, and the link works on any device. `/auth/reset` handles the default link as well, so the change can be made
+at any time:
+
+- a `?code=` link opened in the requesting browser is exchanged on load and shows the form;
+- one opened elsewhere says so;
+- `otp_expired` offers a new link.
+
+Until a new password is chosen, a session opened by a reset link can use only `/auth/reset` (`features/auth/auth-gate.tsx`).
+The old password keeps working until it is replaced, as with any reset: requesting a link must not let anyone lock a user out.
+
 ### 5b. The password verification hook
 
 `app.on_password_verification_attempt(jsonb)` exists in the database and is already granted to `supabase_auth_admin`,

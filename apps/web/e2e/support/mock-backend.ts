@@ -458,6 +458,10 @@ export interface MockBackendOptions {
   rejectSignUp?: boolean;
   /** sign-up creates the user but withholds the session, as a project that requires email confirmation does */
   confirmEmailOnSignUp?: boolean;
+  /** password reset: reset-link token hashes GoTrue refuses as used or expired (`otp_expired`) */
+  spentResetTokens?: string[];
+  /** password reset: the GoTrue error code the next `PUT /user` with a password answers (e.g. `weak_password`), once */
+  refusePasswordOnce?: string;
 }
 
 export interface MockBackend {
@@ -469,6 +473,8 @@ export interface MockBackend {
   portal: { punches: SelfPunchDto[]; notes: AttendanceNoteDto[] };
   /** the member's notification preferences the SPA saved (HR portal Prompt 8), `CATEGORY:CHANNEL` → enabled */
   notificationPreferences: Record<string, boolean>;
+  /** what the SPA asked of Supabase Auth in the password-reset flow */
+  auth: { recoverRequests: Array<{ email: string; redirectTo: string | null }>; verified: string[]; passwords: string[]; logoutScopes: string[] };
 }
 
 /** The employee record the portal scenarios link the signed-in member to. */
@@ -488,7 +494,8 @@ const apiError = (route: Route, status: number, code: string, message: string) =
 /** Install the backend double on `page`. Call before `page.goto`. */
 export async function installMockBackend(page: Page, opts: MockBackendOptions = {}): Promise<MockBackend> {
   const me = opts.me ?? meFixture();
-  const state: MockBackend = { calls: [], unmatched: [], portal: { punches: [], notes: [] }, notificationPreferences: {} };
+  const state: MockBackend = { calls: [], unmatched: [], portal: { punches: [], notes: [] }, notificationPreferences: {}, auth: { recoverRequests: [], verified: [], passwords: [], logoutScopes: [] } };
+  let refusePassword = opts.refusePasswordOnce;
   const portal = portalAttendanceDouble(state);
   const preferences = notificationPreferencesDouble(state);
   const leave: LeaveState = { records: [], comments: [] };
@@ -538,8 +545,30 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
       // GoTrue answers with a bare user (no tokens) while the address is unconfirmed, and with a full session otherwise
       return json(route, 200, opts.confirmEmailOnSignUp ? { ...sessionBody().user, email_confirmed_at: null } : sessionBody());
     }
+    if (url.pathname.endsWith('/recover')) {
+      const body = req.postDataJSON() as { email: string };
+      state.auth.recoverRequests.push({ email: body.email, redirectTo: url.searchParams.get('redirect_to') });
+      return json(route, 200, {});
+    }
+    if (url.pathname.endsWith('/verify') && req.method() === 'POST') {
+      // verifyOtp({ token_hash, type: 'recovery' }): a session (supabase-js then reports PASSWORD_RECOVERY), or GoTrue's refusal
+      const body = req.postDataJSON() as { token_hash?: string; type?: string };
+      if (!body.token_hash || opts.spentResetTokens?.includes(body.token_hash)) return json(route, 403, { code: 403, error_code: 'otp_expired', msg: 'Email link is invalid or has expired' });
+      state.auth.verified.push(body.token_hash);
+      return json(route, 200, sessionBody());
+    }
+    if (url.pathname.endsWith('/user') && req.method() === 'PUT') {
+      const body = req.postDataJSON() as { password?: string };
+      if (body.password !== undefined && refusePassword) {
+        const code = refusePassword;
+        refusePassword = undefined;
+        return json(route, 422, { code: 422, error_code: code, msg: `refused: ${code}` });
+      }
+      if (body.password !== undefined) state.auth.passwords.push(body.password);
+      return json(route, 200, sessionBody().user);
+    }
     if (url.pathname.endsWith('/user')) return json(route, 200, sessionBody().user);
-    if (url.pathname.endsWith('/logout')) return route.fulfill({ status: 204, headers: CORS });
+    if (url.pathname.endsWith('/logout')) { state.auth.logoutScopes.push(url.searchParams.get('scope') ?? 'global'); return route.fulfill({ status: 204, headers: CORS }); }
     if (url.pathname.endsWith('/factors')) return json(route, 200, { totp: [], all: [] });
     return json(route, 404, { msg: `no e2e handler for ${url.pathname}` });
   });
