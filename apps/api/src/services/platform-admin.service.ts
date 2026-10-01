@@ -15,7 +15,7 @@
  */
 import { type z } from 'zod';
 import { sql } from 'kysely';
-import { quoteSubscription, type BillingCycle } from '@flowza/contracts';
+import { quoteSubscription, toUserLimit, type BillingCycle } from '@flowza/contracts';
 import type {
   CreatePlatformAdminInput, CreateTenantNoteInput, PlatformAdminDto, PlatformAdminLevel, PlatformAuditEntryDto, PlatformMembershipDto,
   PlatformOrgMembersDto, PlatformOverviewDto, PlatformSubscriptionDto, PlatformUserDetailDto, PlatformUserDto, PutTenantAccountInput,
@@ -32,6 +32,7 @@ import { isoDateTime, isoDateTimeOrNull, jsonObject } from '../lib/mappers.js';
 import { ORG_COLUMNS, toOrganizationDto } from './organizations.mappers.js';
 import { loadPlatformSettings } from './billing.service.js';
 import { getOrganization, orgCounts } from './platform.service.js';
+import { readUserLimits } from './features/user-limit.js';
 
 type ActivityQuery = z.infer<typeof platformActivityQuerySchema>;
 type UserListQuery = z.infer<typeof platformUserListQuerySchema>;
@@ -108,11 +109,13 @@ async function loadSubscription(trx: Trx, orgId: string): Promise<PlatformSubscr
   if (!s) return null;
   const billingCycle: BillingCycle = s.billingCycle === 'monthly' ? 'monthly' : 'yearly';
   const { billing } = await loadPlatformSettings(trx);
+  // read as the platform admin or in the organisation's system context: both may see the organisation's user limit
+  const userLimit = (await readUserLimits(trx, [orgId])).get(orgId) ?? toUserLimit(0, null, null);
   return {
     planKey: s.planKey, planName: s.planName, status: s.status, trialEndsAt: isoDateTimeOrNull(s.trialEndsAt), currentPeriodStart: isoDateTimeOrNull(s.currentPeriodStart),
     currentPeriodEnd: isoDateTimeOrNull(s.currentPeriodEnd), cancelAt: isoDateTimeOrNull(s.cancelAt), billingCycle, seats: s.seats, includedUsers: s.includedUsers,
     isCustom: s.isCustom, price: quoteSubscription({ prices: jsonObject(s.prices), includedUsers: s.includedUsers, currency: billing.currency, cycle: billingCycle, seats: s.seats }),
-    updatedAt: isoDateTimeOrNull(s.updatedAt),
+    userLimit, updatedAt: isoDateTimeOrNull(s.updatedAt),
   };
 }
 

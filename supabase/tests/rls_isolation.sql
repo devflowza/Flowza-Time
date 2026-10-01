@@ -501,3 +501,29 @@ select pg_temp.assert_rows($q$ update public.employees set display_name = 'x' wh
 select pg_temp.assert_eq((select count(*) from public.attendance_day_marks), 3, 'platform admin WITH a read grant reads org A day marks');
 select pg_temp.assert_raises($q$ insert into public.attendance_day_marks (organization_id, employee_id, attendance_date, branch_id, kind, pay_effect_days, source, reason) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '2026-09-02', '0a000000-0000-0000-0000-00000000000b', 'EXCUSED', 0, 'HR', 'test') $q$, 'a read grant cannot mark days');
 rollback;
+
+-- ---------- user limit (20261001000300): counts only — platform admins and the organisation's own system context ----------
+begin;
+insert into public.subscriptions (organization_id, plan_id, status, seats)
+  select '0a000000-0000-0000-0000-000000000000', p.id, 'active', 7 from public.plans p where p.key = 'professional'
+  on conflict (organization_id) do update set plan_id = excluded.plan_id, status = 'active', seats = 7;
+select set_config('test.ul_used', (select count(*)::text from public.employees where organization_id = '0a000000-0000-0000-0000-000000000000'
+  and deleted_at is null and employment_status not in ('terminated', 'resigned')), true);
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from app.org_user_limits(array['0a000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-000000000000']::uuid[])), 0,
+  'user limit: a member (even the owner) reads none directly — the API answers it after a permission check');
+select set_config('request.jwt.claims', '{"sub":"c0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
+select pg_temp.assert_eq((select count(*) from app.org_user_limits(array['0a000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-000000000000']::uuid[])), 2,
+  'user limit: a platform admin reads every organisation asked for');
+select pg_temp.assert_eq((select count(*) from app.org_user_limits(array['0a000000-0000-0000-0000-000000000000']::uuid[]) u
+  where u.user_limit = 7 and u.limit_source = 'seats' and u.used = current_setting('test.ul_used')::bigint), 1,
+  'user limit: the seats set by the platform are the limit; used = active employees');
+reset role;
+set local role flowza_system;
+select set_config('request.jwt.claims', '{"role":"flowza_system","org_id":"0a000000-0000-0000-0000-000000000000"}', true);
+select pg_temp.assert_eq((select count(*) from app.org_user_limits(array['0a000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-000000000000']::uuid[]) u
+  where u.organization_id = '0a000000-0000-0000-0000-000000000000'), 1, 'user limit: the system context reads its own organisation');
+select pg_temp.assert_eq((select count(*) from app.org_user_limits(array['0b000000-0000-0000-0000-000000000000']::uuid[])), 0,
+  'user limit: the system context of org A never reads org B');
+rollback;

@@ -15,16 +15,17 @@ import {
   type ApplyModuleToAllInput, type ApplyModuleToAllResult, type BillingCycle, type BillingInvoiceDto, type BillingPaymentDto, type BillingSummaryDto,
   type CreateInvoiceInput, type CreatePlanInput, type InvoiceLineInput, type ModuleCategory, type OrgModuleStateDto, type PlatformModuleDto,
   type PlatformPlanDto, type PlatformSettings, type PlatformSettingsDto, type PutOrgModulesInput, type PutPlatformSettingsInput, type RecordPaymentInput,
-  type TenantSubscriptionDto, type UpdatePlanInput, type UpdatePlatformModuleInput, type VoidInvoiceInput,
+  type TenantSubscriptionDto, type UpdatePlanInput, type UpdatePlatformModuleInput, type UserLimitDto, type VoidInvoiceInput,
   type invoiceListQuerySchema, type paymentListQuerySchema,
 } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
-import { requirePermission, requirePlatformAdmin } from '../lib/authorize.js';
+import { requireAnyPermission, requirePermission, requirePlatformAdmin } from '../lib/authorize.js';
 import { type Actor, runUser, runSystem, audit, diffObjects, PLATFORM_SCOPE_ORG } from '../lib/service.js';
 import { likeContains, pageOf, toCount } from '../lib/pagination.js';
 import { isoDate, isoDateOrNull, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject, numberOrNull } from '../lib/mappers.js';
+import { readUserLimits } from './features/user-limit.js';
 
 type InvoiceListQuery = z.infer<typeof invoiceListQuerySchema>;
 type PaymentListQuery = z.infer<typeof paymentListQuerySchema>;
@@ -601,10 +602,13 @@ export async function getTenantSubscription(deps: ApiDeps, actor: Actor, orgId: 
     const cycle = (s.billingCycle === 'monthly' ? 'monthly' : 'yearly') as BillingCycle;
     const limits: Record<string, number> = {};
     for (const [k, v] of Object.entries(jsonObject(s.limits))) { const n = numberOrNull(v as number); if (n !== null) limits[k] = n; }
-    if (s.seats !== null) limits.employees = s.seats;
+    // licensed users and their cap: the one rule of migration 20261001000300 (override › seats › plan)
+    const userLimit = (await readUserLimits(trx, [orgId])).get(orgId)!;
+    delete limits.employees;
+    if (userLimit.limit !== null) limits.employees = userLimit.limit;
     const count = async (q: Promise<{ n: string | number | bigint } | undefined>) => toCount((await q)?.n);
     const usage = {
-      employees: await count(trx.selectFrom('employees').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('employmentStatus', 'not in', ['terminated', 'resigned']).executeTakeFirst()),
+      employees: userLimit.used,
       devices: await count(trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', '<>', 'decommissioned').where('providerKey', 'not in', ['flowza_finance', 'self_service']).executeTakeFirst()),
       branches: await count(trx.selectFrom('branches').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', '<>', 'archived').executeTakeFirst()),
       users: await count(trx.selectFrom('orgMemberships').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('status', '=', 'active').executeTakeFirst()),
@@ -615,10 +619,23 @@ export async function getTenantSubscription(deps: ApiDeps, actor: Actor, orgId: 
       planKey: s.planKey, planName: s.planName, status: s.status, trialEndsAt: isoDateTimeOrNull(s.trialEndsAt), currentPeriodStart: isoDateTimeOrNull(s.currentPeriodStart),
       currentPeriodEnd: isoDateTimeOrNull(s.currentPeriodEnd), cancelAt: isoDateTimeOrNull(s.cancelAt), billingCycle: cycle, seats: s.seats, includedUsers: s.includedUsers,
       isCustom: s.isCustom, price: quoteSubscription({ prices: jsonObject(s.prices), includedUsers: s.includedUsers, currency: settings.billing.currency, cycle, seats: s.seats }),
-      vatRate: settings.billing.vatRate, limits, usage, features: s.features, modules: await orgModules(trx, orgId),
+      vatRate: settings.billing.vatRate, limits, usage, userLimit, features: s.features, modules: await orgModules(trx, orgId),
       availablePlans: plans.map((p) => ({ key: p.key, name: p.name, description: p.description, includedUsers: p.includedUsers, isCustom: p.isCustom, modules: p.modules, prices: jsonObject(p.prices) })),
       billingContact: { supportEmail: settings.general.supportEmail, sellerName: settings.billing.sellerName, bankDetails: settings.billing.bankDetails, currency: settings.billing.currency },
     };
+  });
+}
+
+/**
+ * GET /orgs/:orgId/user-limit — licensed users in use against the user limit the platform set, for the screens that add
+ * employees ("Maximum users reached"). Counts only, org-wide (read in the organisation's system context after the check).
+ */
+export async function getTenantUserLimit(deps: ApiDeps, actor: Actor, orgId: string): Promise<UserLimitDto> {
+  requireAnyPermission(actor.principal, orgId, 'employee.create', 'employee.import', 'employee.update', 'organization.view');
+  return runSystem(deps.db, orgId, actor.requestId, async (trx) => {
+    const limit = (await readUserLimits(trx, [orgId])).get(orgId);
+    if (!limit) throw errors.notFound('Organisation', orgId);
+    return limit;
   });
 }
 

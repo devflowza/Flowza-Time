@@ -2,7 +2,7 @@ import { z } from 'zod';
 import { ORG_STATUSES, SUBSCRIPTION_STATUSES } from '../enums.js';
 import { booleanQuerySchema, emailSchema, isoDateTimeSchema, paginationQuerySchema, uuidSchema } from '../common.js';
 import { organizationDtoSchema } from '../organizations.js';
-import { BILLING_CYCLES, subscriptionQuoteSchema } from './billing.js';
+import { BILLING_CYCLES, subscriptionQuoteSchema, userLimitDtoSchema } from './billing.js';
 
 export const platformOrgListQuerySchema = paginationQuerySchema.extend({
   status: z.enum(ORG_STATUSES).optional(),
@@ -24,6 +24,8 @@ export const platformOrganizationDtoSchema = organizationDtoSchema.extend({
     currentPeriodEnd: isoDateTimeSchema.nullable(),
   }).nullable(),
   counts: z.object({ employees: z.number().int(), devices: z.number().int(), branches: z.number().int(), users: z.number().int() }).optional(),
+  /** Licensed users (active employees) against the tenant's user limit — "used / limit" (migration 20261001000300). */
+  userLimit: userLimitDtoSchema.optional(),
   /** Platform account management (super-admin portal): account manager and tags — never shown to the tenant. */
   account: z.object({ accountManagerUserId: uuidSchema.nullable(), accountManagerEmail: z.string().nullable(), tags: z.array(z.string()) }).optional(),
   updatedAt: isoDateTimeSchema,
@@ -161,7 +163,7 @@ export const updateSubscriptionSchema = z.object({
   cancelAt: isoDateTimeSchema.nullable().optional(),
   /** Billing cycle of the subscription (modules, plans & billing — migration 20260929000600). */
   billingCycle: z.enum(BILLING_CYCLES).optional(),
-  /** Licensed users (active employees) the tenant pays for; null = the plan's employee limit. */
+  /** The tenant's user limit: licensed users (active employees) it may have and pays for; null = the plan's employee limit. */
   seats: z.number().int().min(1).max(100_000).nullable().optional(),
   reason: z.string().trim().min(3).max(500),
 }).refine((v) => v.planKey !== undefined || v.status !== undefined || v.trialEndsAt !== undefined || v.currentPeriodEnd !== undefined || v.cancelAt !== undefined
@@ -184,6 +186,8 @@ export const platformSubscriptionDtoSchema = z.object({
   isCustom: z.boolean(),
   /** Price of one billing cycle before VAT (null for custom / free plans). */
   price: subscriptionQuoteSchema.nullable(),
+  /** Licensed users in use against the effective user limit (seats, else the plan's employee limit, unless overridden). */
+  userLimit: userLimitDtoSchema,
   updatedAt: isoDateTimeSchema.nullable(),
 });
 export type PlatformSubscriptionDto = z.infer<typeof platformSubscriptionDtoSchema>;

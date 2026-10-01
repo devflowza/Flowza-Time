@@ -180,7 +180,7 @@
     "dateHint": "Leave empty for no date.",
     "cycle": "Billing cycle",
     "seats": "Paid users",
-    "seatsHint": "Licensed employees the tenant pays for (caps employee creation). Empty = the plan's employee limit.",
+    "seatsHint": "The tenant's user limit: licensed employees it may have and pays for (caps adding employees). Empty = the plan's employee limit.",
     "seatsInvalid": "Enter a whole number from 1.",
     "planLimit": "Plan limit",
     "price": "Price",
@@ -623,5 +623,24 @@
     "prefixHint": "Numbers read PREFIX-YEAR-00001.",
     "bankHint": "Printed on invoices for transfers.",
     "updated": "Last changed {{when}}"
+  },
+  "userLimit": {
+    "title": "User limit",
+    "column": "Users",
+    "cardHint": "Licensed users (active employees) against the limit. Only platform administrators change it; the tenant sees “Maximum users reached” once it is full.",
+    "set": "Set user limit",
+    "dialogTitle": "Set user limit",
+    "dialogHint": "How many users {{name}} may have. Adding or re-activating an employee beyond it is refused, and the tenant's admins see “Maximum users reached”.",
+    "current": "Now",
+    "after": "After saving",
+    "limit": "User limit",
+    "limitHint": "A whole number from 1, saved as the subscription's paid users.",
+    "limitInvalid": "Enter a whole number from 1 to 100,000.",
+    "increaseBy": "Increase by {{n}}",
+    "belowUsage": "This tenant already has {{used}} users. Below that, nobody can be added or re-activated until users leave.",
+    "overrideNote": "An entitlement override decides this tenant's limit right now; the limit set here applies when it ends.",
+    "planNote": "No user limit set yet: the plan's employee limit applies.",
+    "noSubscription": "Create a subscription first (Subscription tab).",
+    "saved": "{{name}} can now have {{limit}} users"
   }
 }

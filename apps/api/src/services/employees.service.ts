@@ -11,7 +11,7 @@ import { type Actor, runUser, audit, diffObjects, withSystemScope } from '../lib
 import { enqueueJob } from '../lib/jobs.js';
 import { hashPin } from '../lib/hashing.js';
 import { loadSettings } from '../lib/settings.js';
-import { assertWithinLimit } from './features/entitlements.js';
+import { assertUserCapacity } from './features/user-limit.js';
 import { enqueueRecalculation } from './features/recalc.js';
 import { likeContains, pageOf, prefixTsQuery, resolveSort, toCount } from '../lib/pagination.js';
 import { isoDate } from '../lib/mappers.js';
@@ -329,12 +329,8 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
   requireBranchAccess(grant, input.branchId);
   return runUser(deps.db, actor, async (trx) => {
     await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId, secondaryManagerEmployeeId: input.secondaryManagerEmployeeId });
-    // plan entitlement: count active employees org-wide (system scope, since branch-restricted creators only see their branch)
-    const activeCount = await withSystemScope(trx, orgId, async (t) => {
-      const row = await t.selectFrom('employees').select(({ fn }) => fn.countAll<string>().as('c')).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('employmentStatus', 'not in', ['terminated', 'resigned']).executeTakeFirstOrThrow();
-      return Number(row.c);
-    });
-    await assertWithinLimit(trx, orgId, 'employees', activeCount);
+    // the user limit the platform set (licensed users = active employees, counted org-wide whatever the creator's branch scope)
+    if (!hasLeft(input.employmentStatus)) await assertUserCapacity(trx, orgId, 1);
     const displayName = input.displayName ?? [input.firstName, input.lastName].filter(Boolean).join(' ');
     const pinHash = input.pin ? hashPin(input.pin) : null;
     const insert = (deviceUserId: string) => trx.insertInto('employees').values({
@@ -388,6 +384,8 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
       employmentType: input.employmentType ?? before.employmentType,
       employmentStatus: input.employmentStatus ?? before.employmentStatus,
     };
+    // re-activating an employee who left takes a user again: refused past the user limit
+    if (hasLeft(before.employmentStatus) && !hasLeft(nextSnapshot.employmentStatus)) await assertUserCapacity(trx, orgId, 1);
     const transition = snapshotChanged(snapshotOf(before), nextSnapshot);
     if (transition) {
       const effectiveFrom = requestedFrom ?? (await orgToday(trx, orgId));
@@ -489,6 +487,11 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
         if (input.action === 'assign_department') await assertReferences(trx, orgId, { departmentId: input.departmentId });
         const effectiveFrom = input.effectiveFrom ?? (await orgToday(trx, orgId));
         const employees = await visibleEmployees(trx, orgId, grant, input.employeeIds);
+        // re-activating leavers takes users again: all of them fit under the user limit, or the whole change is refused
+        if (input.action === 'set_status' && !hasLeft(input.employmentStatus)) {
+          const rejoining = employees.filter((e) => hasLeft(e.employmentStatus)).length;
+          if (rejoining > 0) await assertUserCapacity(trx, orgId, rejoining);
+        }
         const changed: string[] = [];
         const leavers: string[] = [];
         for (const e of employees) {

@@ -9,6 +9,7 @@ import { enqueueJob } from '../lib/jobs.js';
 import { csvToObjects, parseCsv, toCsvLine } from '../lib/csv.js';
 import { pageOf, toCount } from '../lib/pagination.js';
 import { isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject } from '../lib/mappers.js';
+import { assertUserCapacity } from './features/user-limit.js';
 
 const MAX_ROWS = 5000;
 const PREVIEW_ROWS = 50;
@@ -180,6 +181,13 @@ export async function confirmImport(deps: ApiDeps, actor: Actor, orgId: string, 
     const job = await loadJob(trx, orgId, id);
     if (job.status !== 'VALIDATED') throw errors.invalidState(`Only validated imports can be confirmed (current status ${job.status}).`);
     if (job.validRows === 0) throw errors.invalidState('The import has no valid rows.');
+    // every new employee who has not left takes a user: all of them must fit under the user limit the platform set, or the
+    // import is refused before anything is queued. The EXECUTE_IMPORT handler (not written yet) must call assertUserCapacity
+    // again in the transaction that inserts.
+    const adding = toCount((await trx.selectFrom('importJobRows').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('importJobId', '=', id)
+      .where('status', '=', 'valid').where(sql`data ->> 'existingEmployeeId'`, 'is', null)
+      .where(sql`coalesce(data ->> 'employmentStatus', 'active')`, 'not in', ['terminated', 'resigned']).executeTakeFirst())?.n);
+    if (adding > 0) await assertUserCapacity(trx, orgId, adding);
     const jobId = await enqueueJob(deps.queue, trx, { queue: 'processing', jobType: 'EXECUTE_IMPORT', organizationId: orgId, payload: { importJobId: id, requestedBy: actor.userId }, dedupeKey: `import:${id}`, correlationId: actor.requestId, maxAttempts: 3, lockTimeoutSeconds: 1800 });
     await trx.updateTable('importJobs').set({ status: 'IMPORTING', confirmedBy: actor.userId, confirmedAt: new Date(), queueJobId: jobId }).where('organizationId', '=', orgId).where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'employee.import_confirmed', 'import_job', { entityId: id, newValue: { validRows: job.validRows, errorRows: job.errorRows, jobId } });

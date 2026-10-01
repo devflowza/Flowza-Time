@@ -213,6 +213,30 @@ export const subscriptionQuoteSchema = z.object({
   base: z.number(), extraUnit: z.number(), extraAmount: z.number(), amount: z.number(), monthlyEquivalent: z.number(), perUserMonthly: z.number(),
 });
 
+/** Where a tenant's user limit comes from (migration 20261001000300, `app.org_user_limits`). */
+export const USER_LIMIT_SOURCES = ['override', 'seats', 'plan'] as const;
+export type UserLimitSource = (typeof USER_LIMIT_SOURCES)[number];
+
+/**
+ * Licensed users (active employees) against the tenant's user limit — what the super-admin portal and the tenant show as
+ * "used / limit". Only a platform admin changes the limit (the subscription's seats); `limit` null = no limit configured.
+ */
+export const userLimitDtoSchema = z.object({
+  used: z.number().int().min(0),
+  limit: z.number().int().min(0).nullable(),
+  /** Users that can still be added (null without a limit; 0 when the limit is reached or exceeded). */
+  remaining: z.number().int().min(0).nullable(),
+  /** No more users can be added: `used >= limit`. */
+  reached: z.boolean(),
+  source: z.enum(USER_LIMIT_SOURCES).nullable(),
+});
+export type UserLimitDto = z.infer<typeof userLimitDtoSchema>;
+
+/** The one shape of a user limit, from users in use and the effective limit. */
+export function toUserLimit(used: number, limit: number | null, source: UserLimitSource | null): UserLimitDto {
+  return { used, limit, remaining: limit === null ? null : Math.max(0, limit - used), reached: limit !== null && used >= limit, source: limit === null ? null : source };
+}
+
 // ------------------------------------------------------------------------------------------------------------------------------
 // Invoices & payments
 // ------------------------------------------------------------------------------------------------------------------------------
@@ -437,6 +461,8 @@ export const tenantSubscriptionDtoSchema = z.object({
   vatRate: z.number(),
   limits: z.record(z.string(), z.number()),
   usage: z.record(z.string(), z.number()),
+  /** Licensed users (active employees) against the user limit the platform set — `limits.employees` / `usage.employees`. */
+  userLimit: userLimitDtoSchema,
   features: z.array(z.string()),
   modules: z.array(orgModuleStateDtoSchema),
   /** Plans a tenant may move to (active, priced or custom), for comparison. */

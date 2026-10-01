@@ -219,6 +219,85 @@ describe('billing', () => {
   });
 });
 
+describe('user limit (migration 20261001000300)', () => {
+  const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
+  const newEmployee = (n: string) => ({ employeeNumber: n, firstName: 'Limit', lastName: n, joiningDate: '2026-02-01', branchId: F.branchHQ });
+  let used = 0;
+  let firstId = '';
+
+  it('the platform sets the user limit; the tenant page, the tenants list and the tenant itself see "used / limit"', async () => {
+    used = (await api.request('GET', `/platform/orgs/${F.orgA}/subscription`, asAdmin)).json.data.userLimit.used;
+    expect(used).toBeGreaterThan(0);
+    const patch = await api.request('PATCH', `/platform/orgs/${F.orgA}/subscription`, { ...asAdmin, body: { seats: used + 1, reason: 'One more licensed user' } });
+    expect(patch.status).toBe(200);
+    const expected = { used, limit: used + 1, remaining: 1, reached: false, source: 'seats' };
+    expect(patch.json.data.userLimit).toEqual(expected);
+    expect((await api.request('GET', `/platform/orgs/${F.orgA}`, asAdmin)).json.data.userLimit).toEqual(expected);
+    const list = await api.request('GET', '/platform/orgs?search=TEST-A', asAdmin);
+    expect(list.json.data.find((o: { id: string }) => o.id === F.orgA).userLimit).toEqual(expected);
+    // org B keeps its own: the 11 users of the Professional invoice it paid above
+    expect(list.json.data.find((o: { id: string }) => o.id === F.orgB)).toBeUndefined();
+    expect((await api.request('GET', `/platform/orgs/${F.orgB}`, asAdmin)).json.data.userLimit).toEqual({ used: 1, limit: 11, remaining: 10, reached: false, source: 'seats' });
+    // the tenant reads it, never changes it
+    const mine = await api.request('GET', `/orgs/${F.orgA}/user-limit`, { user: F.ownerA });
+    expect(mine.status).toBe(200);
+    expect(mine.json.data).toEqual(expected);
+    const sub = await api.request('GET', `/orgs/${F.orgA}/subscription`, { user: F.ownerA });
+    expect(sub.json.data).toMatchObject({ seats: used + 1, userLimit: expected, limits: { employees: used + 1 }, usage: { employees: used } });
+    expect((await api.request('GET', `/orgs/${F.orgA}/user-limit`, { user: F.ownerB })).status).toBe(403);
+    expect((await api.request('PATCH', `/platform/orgs/${F.orgA}/subscription`, { user: F.ownerA, body: { seats: 500, reason: 'More users please' } })).status).toBe(403);
+  });
+
+  it('adding employees stops at the limit with "Maximum users reached"', async () => {
+    const first = await api.request('POST', `/orgs/${F.orgA}/employees`, { user: F.ownerA, body: newEmployee('UL-1') });
+    expect(first.status).toBe(201);
+    firstId = first.json.data.id;
+    expect((await api.request('GET', `/orgs/${F.orgA}/user-limit`, { user: F.ownerA })).json.data).toMatchObject({ used: used + 1, remaining: 0, reached: true });
+    expect((await api.request('GET', `/platform/orgs/${F.orgA}/subscription`, asAdmin)).json.data.userLimit).toMatchObject({ used: used + 1, limit: used + 1, reached: true });
+    const refused = await api.request('POST', `/orgs/${F.orgA}/employees`, { user: F.ownerA, body: newEmployee('UL-2') });
+    expect(refused.status).toBe(402);
+    expect(refused.json).toMatchObject({ code: 'ENTITLEMENT_EXCEEDED', details: { metric: 'employees', reason: 'USER_LIMIT_REACHED', limit: used + 1, used: used + 1 } });
+    expect(refused.json.message).toContain('Maximum users reached');
+    expect((await api.tdb.adminDb.selectFrom('employees').select('id').where('employeeNumber', '=', 'UL-2').execute())).toHaveLength(0);
+  });
+
+  it('a leaver frees a user; re-activating one (alone or in bulk) is refused while the limit is reached', async () => {
+    const left = await api.request('PATCH', `/orgs/${F.orgA}/employees/${firstId}`, { user: F.ownerA, body: { employmentStatus: 'resigned', exitDate: '2026-09-30' } });
+    expect(left.status).toBe(200);
+    expect((await api.request('GET', `/orgs/${F.orgA}/user-limit`, { user: F.ownerA })).json.data).toMatchObject({ used, remaining: 1, reached: false });
+    expect((await api.request('POST', `/orgs/${F.orgA}/employees`, { user: F.ownerA, body: newEmployee('UL-3') })).status).toBe(201);
+    const back = await api.request('PATCH', `/orgs/${F.orgA}/employees/${firstId}`, { user: F.ownerA, body: { employmentStatus: 'active' } });
+    expect(back.status).toBe(402);
+    expect(back.json.details).toMatchObject({ reason: 'USER_LIMIT_REACHED' });
+    const bulk = await api.request('POST', `/orgs/${F.orgA}/employees/bulk`, { user: F.ownerA, body: { action: 'set_status', employeeIds: [firstId], employmentStatus: 'active' } });
+    expect(bulk.status).toBe(402);
+    expect((await api.tdb.adminDb.selectFrom('employees').select('employmentStatus').where('id', '=', firstId).executeTakeFirstOrThrow()).employmentStatus).toBe('resigned');
+  });
+
+  it('an import that would take the tenant past the limit cannot be confirmed', async () => {
+    await api.request('PATCH', `/platform/orgs/${F.orgA}/subscription`, { ...asAdmin, body: { seats: used + 2, reason: 'One more user' } });
+    const csv = ['employeeNumber,firstName,lastName,joiningDate,branchCode', 'UL-10,One,Import,2026-03-01,A-HQ', 'UL-11,Two,Import,2026-03-01,A-HQ'].join('\r\n');
+    const up = await api.request('POST', `/orgs/${F.orgA}/employees/imports`, { user: F.ownerA, body: { fileName: 'limit.csv', contentBase64: b64(csv) } });
+    expect(up.json.data).toMatchObject({ status: 'VALIDATED', validRows: 2 });
+    const confirm = await api.request('POST', `/orgs/${F.orgA}/employees/imports/${up.json.data.id}/confirm`, { user: F.ownerA, headers: { 'idempotency-key': 'user-limit-import' } });
+    expect(confirm.status).toBe(402);
+    expect(confirm.json).toMatchObject({ code: 'ENTITLEMENT_EXCEEDED', details: { reason: 'USER_LIMIT_REACHED', limit: used + 2, used: used + 1, adding: 2 } });
+    expect(confirm.json.message).toContain('Only 1 of');
+    expect((await api.request('GET', `/orgs/${F.orgA}/employees/imports/${up.json.data.id}`, { user: F.ownerA })).json.data.status).toBe('VALIDATED');
+  });
+
+  it('only the platform raises the limit; then the leaver can come back, and the change is on the tenant\'s audit log', async () => {
+    const raised = await api.request('PATCH', `/platform/orgs/${F.orgA}/subscription`, { ...asAdmin, body: { seats: used + 5, reason: 'Customer bought more users' } });
+    expect(raised.json.data.userLimit).toMatchObject({ used: used + 1, limit: used + 5, remaining: 4, reached: false });
+    expect((await api.request('PATCH', `/orgs/${F.orgA}/employees/${firstId}`, { user: F.ownerA, body: { employmentStatus: 'active', exitDate: null } })).status).toBe(200);
+    const log = await api.request('GET', `/orgs/${F.orgA}/audit?action=organization.subscription_changed`, { user: F.ownerA });
+    expect(log.json.data[0]).toMatchObject({ actorType: 'PLATFORM_ADMIN', reason: 'Customer bought more users' });
+    // back to the plan's employee limit for the suites that follow
+    const reset = await api.request('PATCH', `/platform/orgs/${F.orgA}/subscription`, { ...asAdmin, body: { seats: null, reason: 'Back to the plan limit' } });
+    expect(reset.json.data.userLimit).toMatchObject({ source: 'plan' });
+  });
+});
+
 describe('platform settings', () => {
   it('reads and updates settings; the invoice prefix applies to the next invoice', async () => {
     const get = await api.request('GET', '/platform/settings', asAdmin);

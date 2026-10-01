@@ -7,9 +7,12 @@ import { CalendarPlus, Pencil } from 'lucide-react';
 import { SUBSCRIPTION_STATUSES, type PlatformSubscriptionDto, type SubscriptionStatus } from '@flowza/contracts';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, ErrorState, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton, Textarea } from '@/components/ui';
 import { fmtDateTime, fmtMoney } from '@/lib/format';
+import { cn } from '@/lib/utils';
 import { toast, toastError } from '@/lib/toast';
 import { usePlans } from '@/features/platform/api';
+import { UserLimitMeter } from '@/components/user-limit-meter';
 import { useAdmMutations, useTenantSubscription } from '../api';
+import { UserLimitDialog } from './user-limit-dialog';
 
 const statusVariant = (s: SubscriptionStatus): 'success' | 'info' | 'warning' | 'neutral' => (s === 'active' ? 'success' : s === 'trialing' ? 'info' : s === 'past_due' ? 'warning' : 'neutral');
 /** ISO date-time → the `yyyy-MM-dd` a date input takes (UTC), and back to end-of-day UTC. */
@@ -112,12 +115,13 @@ function EditSubscriptionDialog({ orgId, sub, open, onOpenChange }: { orgId: str
 }
 
 /** Tenant → Subscription: plan, status, trial and billing period, with one-click trial extensions. */
-export function SubscriptionPanel({ orgId, timezone }: { orgId: string; timezone: string }) {
+export function SubscriptionPanel({ orgId, orgName, timezone }: { orgId: string; orgName: string; timezone: string }) {
   const { t } = useTranslation('adm');
   const { t: tp } = useTranslation('platform');
   const q = useTenantSubscription(orgId);
   const { updateSubscription } = useAdmMutations();
   const [editing, setEditing] = useState(false);
+  const [editingLimit, setEditingLimit] = useState(false);
   const sub = q.data ?? null;
   const extend = (days: number) => {
     const trialEndsAt = extendedTrialEnd(sub?.trialEndsAt, days);
@@ -128,7 +132,7 @@ export function SubscriptionPanel({ orgId, timezone }: { orgId: string; timezone
   };
   if (q.isLoading) return <Skeleton className="h-48 w-full" />;
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
-  const row = (label: string, value: React.ReactNode) => <div className="min-w-0"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 text-sm">{value}</dd></div>;
+  const row = (label: string, value: React.ReactNode, className?: string) => <div className={cn('min-w-0', className)}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-0.5 text-sm">{value}</dd></div>;
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <Card className="lg:col-span-2">
@@ -146,7 +150,12 @@ export function SubscriptionPanel({ orgId, timezone }: { orgId: string; timezone
               {row(t('subscription.periodEnd'), fmtDateTime(sub.currentPeriodEnd, timezone))}
               {row(t('subscription.cancelAt'), fmtDateTime(sub.cancelAt, timezone))}
               {row(t('subscription.cycle'), t(`cycles.${sub.billingCycle}`))}
-              {row(t('subscription.seats'), sub.seats ?? t('subscription.planLimit'))}
+              {row(t('subscription.seats'), sub.userLimit ? (
+                <div className="flex flex-wrap items-end gap-x-4 gap-y-2" data-testid="subscription-user-limit">
+                  <UserLimitMeter value={sub.userLimit} className="min-w-48 flex-1" />
+                  <Button size="sm" variant="outline" onClick={() => setEditingLimit(true)}><Pencil /> {t('userLimit.set')}</Button>
+                </div>
+              ) : (sub.seats ?? t('subscription.planLimit')), 'sm:col-span-2')}
               {row(t('subscription.price'), sub.price
                 ? <span className="tnum" dir="ltr">{fmtMoney(sub.price.amount, sub.price.currency)} <span className="text-xs text-muted-foreground">({t(`cycles.${sub.billingCycle}`)}, {t('subscription.exclVat')})</span></span>
                 : (sub.isCustom ? t('subscription.customPrice') : '—'))}
@@ -161,6 +170,7 @@ export function SubscriptionPanel({ orgId, timezone }: { orgId: string; timezone
         </CardContent>
       </Card>
       {editing ? <EditSubscriptionDialog orgId={orgId} sub={sub} open onOpenChange={(v) => !v && setEditing(false)} /> : null}
+      {editingLimit && sub?.userLimit ? <UserLimitDialog orgId={orgId} orgName={orgName} value={sub.userLimit} open onOpenChange={(v) => !v && setEditingLimit(false)} /> : null}
     </div>
   );
 }

@@ -5,6 +5,7 @@ import { Badge, Card, CardContent, CardDescription, CardHeader, CardTitle, Empty
 import { ApiError } from '@/lib/api-client';
 import { fmtDate, fmtDateTime, fmtMoney, fmtNumber } from '@/lib/format';
 import { cn } from '@/lib/utils';
+import { UserLimitMeter } from '@/components/user-limit-meter';
 import { useActiveMembership, useCan, useOrgTimezone } from '@/features/me/use-me';
 import { useSubscription, useTenantInvoices } from '../api';
 import { SectionSkeleton, SectionError } from '../components/settings-section';
@@ -22,6 +23,10 @@ function Usage({ sub }: { sub: TenantSubscriptionDto }) {
       <CardContent>
         <ul className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           {keys.map((k) => {
+            // licensed users against the user limit the platform set (only FlowZa changes it): "Max users reached" when full
+            if (k === 'employees' && sub.userLimit) {
+              return <li key={k} className="rounded-md border p-3" data-testid="usage-employees"><p className="mb-1 text-sm font-medium">{t('subscription.users')}</p><UserLimitMeter value={sub.userLimit} /></li>;
+            }
             const used = sub.usage[k] ?? 0; const limit = sub.limits[k] ?? null;
             const pct = limit ? Math.min(100, Math.round((used / limit) * 100)) : null;
             return (

@@ -12,7 +12,8 @@ import { fmtNumber } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useOrgId } from '@/features/me/use-me';
-import { downloadImportTemplate, fileToBase64, useImportJob, useImportMutations } from '../api';
+import { downloadImportTemplate, fileToBase64, useImportJob, useImportMutations, useUserLimit } from '../api';
+import { UserLimitBanner } from '../components/user-limit-banner';
 import { toastJobQueued } from '../job-toast';
 
 const STEPS = ['template', 'upload', 'review', 'done'] as const;
@@ -34,6 +35,7 @@ export default function EmployeeImportPage() {
   const [downloading, setDownloading] = useState(false);
   const [queuedJobId, setQueuedJobId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
+  const userLimit = useUserLimit();
 
   const detail = job.data?.data;
   const step: (typeof STEPS)[number] = queuedJobId || (detail && detail.status !== 'VALIDATED') ? 'done' : importId ? 'review' : 'upload';
@@ -63,6 +65,7 @@ export default function EmployeeImportPage() {
   return (
     <div className="page-container">
       <PageHeader title={t('import.title')} description={t('import.subtitle')} breadcrumbs={<Link to="/employees" className="inline-flex items-center gap-1 hover:underline"><ArrowLeft className="size-3 rtl:rotate-180" /> {t('title')}</Link>} />
+      {step !== 'done' ? <UserLimitBanner value={userLimit.data} /> : null}
       <ol className="mb-5 flex flex-wrap gap-2 text-xs" aria-label={t('import.steps')}>
         {STEPS.map((s, i) => { const idx = STEPS.indexOf(step); const state = i < idx ? 'done' : i === idx ? 'current' : 'todo'; return (
           <li key={s} aria-current={state === 'current' ? 'step' : undefined} className={cn('flex items-center gap-1.5 rounded-full border px-3 py-1', state === 'current' && 'border-primary bg-accent font-medium', state === 'done' && 'text-muted-foreground')}>

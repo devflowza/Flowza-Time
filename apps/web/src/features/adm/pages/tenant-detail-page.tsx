@@ -18,6 +18,7 @@ import { SubscriptionPanel } from '../components/subscription-panel';
 import { TenantModulesPanel } from '../components/tenant-modules-panel';
 import { TenantBillingPanel } from '../components/tenant-billing-panel';
 import { MembersPanel, NotesPanel, OrgFeatureFlagsCard, TenantAccountCard } from '../components/tenant-panels';
+import { UserLimitCard } from '../components/user-limit-dialog';
 
 const TABS = ['overview', 'subscription', 'modules', 'billing', 'members', 'flags', 'access', 'notes', 'activity'] as const;
 type Tab = (typeof TABS)[number];
@@ -85,7 +86,7 @@ export default function AdmTenantDetailPage() {
                 <StatCard label={tp('orgs.counts.employees')} value={fmtNumber(o.counts?.employees ?? 0)} icon={Users} />
                 <StatCard label={tp('orgs.counts.devices')} value={fmtNumber(o.counts?.devices ?? 0)} icon={Cpu} />
                 <StatCard label={tp('orgs.counts.branches')} value={fmtNumber(o.counts?.branches ?? 0)} icon={Building2} />
-                <StatCard label={tp('orgs.counts.users')} value={fmtNumber(o.counts?.users ?? 0)} icon={UserRound} onClick={() => setParams({ tab: 'members' }, { replace: true })} />
+                <StatCard label={t('dashboard.users')} value={fmtNumber(o.counts?.users ?? 0)} icon={UserRound} onClick={() => setParams({ tab: 'members' }, { replace: true })} />
               </div>
               <div className="grid gap-4 lg:grid-cols-3">
                 <Card className="lg:col-span-2">
@@ -107,12 +108,15 @@ export default function AdmTenantDetailPage() {
                     </dl>
                   </CardContent>
                 </Card>
-                <TenantAccountCard orgId={o.id} />
+                <div className="space-y-4">
+                  <UserLimitCard orgId={o.id} orgName={o.displayName} value={o.userLimit} hasSubscription={!!o.subscription} />
+                  <TenantAccountCard orgId={o.id} />
+                </div>
               </div>
             </div>
           ) : null}
         </TabsContent>
-        <TabsContent value="subscription">{tab === 'subscription' ? <SubscriptionPanel orgId={o.id} timezone={o.timezone} /> : null}</TabsContent>
+        <TabsContent value="subscription">{tab === 'subscription' ? <SubscriptionPanel orgId={o.id} orgName={o.displayName} timezone={o.timezone} /> : null}</TabsContent>
         <TabsContent value="modules">{tab === 'modules' ? <TenantModulesPanel orgId={o.id} /> : null}</TabsContent>
         <TabsContent value="billing">{tab === 'billing' ? <TenantBillingPanel orgId={o.id} /> : null}</TabsContent>
         <TabsContent value="members">{tab === 'members' ? <MembersPanel orgId={o.id} /> : null}</TabsContent>
