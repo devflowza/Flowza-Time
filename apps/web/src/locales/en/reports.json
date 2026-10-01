@@ -21,7 +21,7 @@
     },
     "monthly_attendance": {
       "name": "Monthly Attendance Report",
-      "description": "Employees by days of the month with the attendance code in every cell and an absence count."
+      "description": "Employees by days of the month with the attendance code in every cell and an absence count — or, with the Detailed layout, each employee's IN/OUT times and hours for every day, as the Daily Report prints them."
     },
     "employee_attendance": {
       "name": "Detail Report",
@@ -138,6 +138,11 @@
     "scopes": {
       "attendance": "Attendance edits (In/Out time, attendance code)",
       "all": "Entire audit log"
+    },
+    "layout": "Layout",
+    "layouts": {
+      "summary": "Summary — attendance code per day",
+      "detailed": "Detailed — IN/OUT times and hours per day"
     },
     "weekOf": "Week containing"
   },

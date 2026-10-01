@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import { REPORT_FORMATS, REPORT_TYPES, type ReportFormat, type ReportType } from '../enums.js';
 import { codeSchema, isoDateSchema, paginationQuerySchema, timeSchema, uuidSchema } from '../common.js';
-import { reportParametersSchema } from '../reports.js';
+import { MONTHLY_ATTENDANCE_LAYOUTS, reportParametersSchema } from '../reports.js';
 import { updateSchemaOf } from './devices.js';
 import { REPORT_TYPE_DEFINITIONS } from './reports.js';
 
@@ -62,6 +62,7 @@ export const reportScheduleFiltersSchema = z.object({
   leaveTypeCode: codeSchema.optional(),
   employmentStatus: z.enum(['active', 'inactive', 'all']).optional(),
   scope: z.enum(['attendance', 'all']).optional(),
+  layout: z.enum(MONTHLY_ATTENDANCE_LAYOUTS).optional(),
   locale: z.enum(['en', 'ar']).optional(),
 }).strict();
 export type ReportScheduleFilters = z.infer<typeof reportScheduleFiltersSchema>;

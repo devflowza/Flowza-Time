@@ -9,6 +9,7 @@ const en = {
   'report.daily_attendance.title': 'Daily Report',
   'report.employee_attendance.title': 'Detail Report',
   'report.monthly_attendance.title': 'Monthly Attendance Report',
+  'report.monthly_attendance.detailedTitle': 'Monthly Attendance Report (Detailed)',
   'report.attendance_summary.title': 'Summary Report',
   'report.weekly_attendance.title': 'Weekly Report',
   'report.weekly_in_out.title': 'Weekly In/Out Report',
@@ -147,6 +148,7 @@ const en = {
   'footer.summary': 'Present counts a half day as ½ (the other half is leave or absent). Finalised = the day counts of the finalised payroll period. Hours as {{notation}}.',
   'footer.monthlyDetail': 'IN = first IN, OUT = last OUT of the day; Wrk Hrs = the time between them (h:mm); Late / Early = time after the shift start / before its end. Days = days per attendance code in the grid.',
   'footer.timesheet': 'Check In = first IN, Check Out = last OUT of the day. Shift Hrs = the hours the day\'s shift requires (its span less unpaid breaks); Worked Hrs = the time worked less unpaid breaks. Hours Met = Yes when Worked Hrs reach Shift Hrs, No when they fall short (the gap is Under Time), Missed punch when a check-in or check-out is missing. Overtime includes work on weekly offs and holidays. Late / Early = time after the shift start / before its end. Hours as {{notation}}.',
+  'footer.monthlyDetailed': 'One row per IN/OUT pair, as the Daily Report prints them: a day with several visits shows its hours on its last row, and Wrk Hrs is that visit\'s IN → OUT time (h:mm). Days = days per attendance code.',
   'notation.h.mm': 'hours.minutes (9.45 = 9 h 45 min)',
   'notation.hh:mm': 'hours:minutes',
 
@@ -162,6 +164,7 @@ const ar: Record<ReportLabelKey, string> = {
   'report.daily_attendance.title': 'التقرير اليومي',
   'report.employee_attendance.title': 'التقرير التفصيلي',
   'report.monthly_attendance.title': 'تقرير الحضور الشهري',
+  'report.monthly_attendance.detailedTitle': 'تقرير الحضور الشهري (تفصيلي)',
   'report.attendance_summary.title': 'التقرير الموجز',
   'report.weekly_attendance.title': 'التقرير الأسبوعي',
   'report.weekly_in_out.title': 'تقرير الدخول والخروج الأسبوعي',
@@ -297,6 +300,7 @@ const ar: Record<ReportLabelKey, string> = {
   'footer.summary': 'يُحسب نصف اليوم ½ حضور (والنصف الآخر إجازة أو غياب). معتمد = أيام فترة الرواتب المعتمدة. الساعات بصيغة {{notation}}.',
   'footer.monthlyDetail': 'الدخول = أول دخول، الخروج = آخر خروج في اليوم؛ ساعات العمل = المدة بينهما (س:د)؛ التأخير / الخروج المبكر = الوقت بعد بداية الوردية / قبل نهايتها. الأيام = عدد الأيام لكل رمز حضور في الجدول.',
   'footer.timesheet': 'الدخول = أول دخول، الخروج = آخر خروج في اليوم. ساعات الوردية = الساعات التي تتطلبها وردية اليوم (مدتها ناقص الاستراحات غير المدفوعة)؛ ساعات العمل = وقت العمل ناقص الاستراحات غير المدفوعة. مكتملة = نعم عندما تبلغ ساعات العمل ساعات الوردية، لا عندما تقل عنها (والفرق هو النقص)، بصمة ناقصة عند غياب الدخول أو الخروج. يشمل الإضافي العمل في العطل الأسبوعية والرسمية. التأخير / الخروج المبكر = الوقت بعد بداية الوردية / قبل نهايتها. الساعات بصيغة {{notation}}.',
+  'footer.monthlyDetailed': 'صف لكل زوج دخول/خروج كما يطبعه التقرير اليومي: اليوم الذي فيه أكثر من زيارة تظهر ساعاته في آخر صف، وساعات العمل هي مدة تلك الزيارة من الدخول إلى الخروج (س:د). الأيام = عدد الأيام لكل رمز حضور.',
   'notation.h.mm': 'ساعات.دقائق (9.45 = 9 س 45 د)',
   'notation.hh:mm': 'ساعات:دقائق',
 

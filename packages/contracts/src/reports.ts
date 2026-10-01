@@ -2,6 +2,10 @@ import { z } from 'zod';
 import { REPORT_FORMATS, REPORT_STATUSES, REPORT_TYPES } from './enums.js';
 import { codeSchema, isoDateSchema, isoDateTimeSchema, uuidSchema } from './common.js';
 
+/** monthly_attendance: the codes grid (the sample layout), or each day's IN/OUT pairs and hours per employee (the Daily Report's rows for a month). */
+export const MONTHLY_ATTENDANCE_LAYOUTS = ['summary', 'detailed'] as const;
+export type MonthlyAttendanceLayout = (typeof MONTHLY_ATTENDANCE_LAYOUTS)[number];
+
 export const reportParametersSchema = z.object({
   from: isoDateSchema.optional(),
   to: isoDateSchema.optional(),
@@ -23,6 +27,8 @@ export const reportParametersSchema = z.object({
   scope: z.enum(['attendance', 'all']).optional(),
   /** monthly_summary: the summary page's name / employee-number search (HR portal Prompt 6a review, defect 10). */
   search: z.string().trim().max(100).optional(),
+  /** monthly_attendance: `summary` (default) or `detailed`. */
+  layout: z.enum(MONTHLY_ATTENDANCE_LAYOUTS).optional(),
 });
 export type ReportParameters = z.infer<typeof reportParametersSchema>;
 

@@ -7,6 +7,7 @@ import { loadRoster } from '../data/roster.js';
 import { cell, countRows, EMPTY_CELL, num, type ReportColumn, type ReportDocument, type ReportSection } from '../model.js';
 import { TONE_OF_GROUP } from './daily.js';
 import { monthPeriod } from './month-period.js';
+import { buildMonthlyDetailed } from './monthly-detailed.js';
 import type { ReportDefinition } from './types.js';
 
 /**
@@ -14,12 +15,15 @@ import type { ReportDefinition } from './types.js';
  * code (coloured as the samples print them), and an absence count. Landscape. Employees employed at any point in the
  * month appear; a day without a record is blank. A trailing LOP column (HR portal Prompt 3) carries the loss-of-pay days
  * of the month (0.5 steps, `lopDaysOf`), after the sample's own columns so their positions do not move.
+ * `layout: detailed` prints the Daily Report's rows for every day of the month instead (`monthly-detailed.ts`).
  */
 export const monthlyAttendance: ReportDefinition = {
   key: 'monthly_attendance',
   async build(trx: Trx, ctx: ReportContext): Promise<ReportDocument> {
     // the month, or its first days up to `to` for a month-to-date run (review minor 13: never a day after the period)
-    const { month, from, to, whole } = monthPeriod(ctx.params);
+    const period = monthPeriod(ctx.params);
+    if (ctx.params.layout === 'detailed') return buildMonthlyDetailed(trx, ctx, period);
+    const { month, from, to, whole } = period;
     const days = eachDateInclusive(from, to);
     const roster = await loadRoster(trx, ctx, { employedBetween: { from, to } });
     const records = await loadRecords(trx, ctx, { from, to, employeeIds: roster.map((e) => e.id) });

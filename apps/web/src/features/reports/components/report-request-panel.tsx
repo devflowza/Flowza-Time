@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { BarChart3, Lock, Send, Share2 } from 'lucide-react';
-import { createReportRequestSchema, DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
+import { createReportRequestSchema, DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, MONTHLY_ATTENDANCE_LAYOUTS, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
 import type { z } from 'zod';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, ErrorState, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@/components/ui';
 import { Combobox } from '@/components/forms';
@@ -59,7 +59,7 @@ function ReportForm({ def, onQueued, onShare }: { def: ReportTypeDef; onQueued: 
   const form = useForm<FormValues, unknown, CreateReportRequest>({
     resolver: zodResolver(schema),
     // the catalogue names the format its layout was designed for (the sample reports are print documents → PDF)
-    defaultValues: { reportType: def.key, format: def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: required.has('to') ? today.slice(0, 8) + '01' : today, ...(required.has('to') ? { to: today } : {}) } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}), ...(params.has('employmentStatus') ? { employmentStatus: 'active' as const } : {}), ...(params.has('scope') ? { scope: 'attendance' as const } : {}) } },
+    defaultValues: { reportType: def.key, format: def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats.includes('xlsx') ? 'xlsx' : def.formats[0], parameters: { ...(params.has('from') ? { from: required.has('to') ? today.slice(0, 8) + '01' : today, ...(required.has('to') ? { to: today } : {}) } : {}), ...(params.has('month') ? { month: today.slice(0, 7) } : {}), ...(params.has('employeeIds') ? { employeeIds: [] } : {}), ...(params.has('deviceIds') ? { deviceIds: [] } : {}), ...(params.has('employmentStatus') ? { employmentStatus: 'active' as const } : {}), ...(params.has('scope') ? { scope: 'attendance' as const } : {}), ...(params.has('layout') ? { layout: 'summary' as const } : {}) } },
   });
   const { register, control, formState: { errors, isSubmitting } } = form;
   const branchId = useWatch({ control, name: 'parameters.branchId' });
@@ -88,6 +88,14 @@ function ReportForm({ def, onQueued, onShare }: { def: ReportTypeDef; onQueued: 
           {params.has('to') ? <FormField label={tc('common.to')} htmlFor="rp-to" required={required.has('to')} optional={!required.has('to')} hint={def.key === 'daily_attendance' ? t('request.dailyRangeHint', { max: DAILY_REPORT_MAX_DAYS }) : undefined} error={pErr?.['to']?.message}><Input id="rp-to" type="date" dir="ltr" {...register('parameters.to', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['to']} /></FormField> : null}
         </> : null}
         {params.has('month') ? <FormField label={t('request.month')} htmlFor="rp-month" required={required.has('month')} error={pErr?.['month']?.message}><Input id="rp-month" type="month" dir="ltr" {...register('parameters.month', { setValueAs: blankToUndefined })} aria-invalid={!!pErr?.['month']} /></FormField> : null}
+        {params.has('layout') ? <FormField label={t('request.layout')} htmlFor="rp-layout" optional error={pErr?.['layout']?.message}>
+          <Controller control={control} name="parameters.layout" render={({ field }) => (
+            <Select value={field.value ?? 'summary'} onValueChange={field.onChange}>
+              <SelectTrigger id="rp-layout"><SelectValue /></SelectTrigger>
+              <SelectContent>{MONTHLY_ATTENDANCE_LAYOUTS.map((v) => <SelectItem key={v} value={v}>{t(`request.layouts.${v}`)}</SelectItem>)}</SelectContent>
+            </Select>
+          )} />
+        </FormField> : null}
         {params.has('branchId') ? <FormField label={tc('common.branch')} htmlFor="rp-branch" required={required.has('branchId')} optional={!required.has('branchId')} error={pErr?.['branchId']?.message}>
           <Controller control={control} name="parameters.branchId" render={({ field }) => <Combobox id="rp-branch" value={field.value ?? null} onChange={(v) => { field.onChange(v ?? undefined); form.setValue('parameters.departmentId', undefined); }} options={branches.options} loading={branches.isLoading} clearable placeholder={t('request.allBranches')} aria-invalid={!!pErr?.['branchId']} />} />
         </FormField> : null}

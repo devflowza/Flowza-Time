@@ -19,7 +19,7 @@ registerNamespace('reports', en, ar);
 
 const types = [
   { key: 'late_report', name: 'Late arrivals', description: 'Late arrivals with minutes per employee.', requiredParameters: ['from', 'to'], optionalParameters: ['branchId', 'departmentId', 'employeeIds'], permissions: ['report.view', 'attendance.view'], formats: ['csv', 'xlsx', 'pdf'], allowed: true },
-  { key: 'monthly_attendance', name: 'Monthly attendance', description: 'Per-employee day grid.', requiredParameters: ['month'], optionalParameters: ['branchId'], permissions: ['report.view', 'attendance.view'], formats: ['csv', 'xlsx', 'pdf'], allowed: true },
+  { key: 'monthly_attendance', name: 'Monthly attendance', description: 'Per-employee day grid.', requiredParameters: ['month'], optionalParameters: ['branchId', 'layout'], permissions: ['report.view', 'attendance.view'], formats: ['csv', 'xlsx', 'pdf'], allowed: true },
   { key: 'audit_report', name: 'Audit log', description: 'Audit trail export.', requiredParameters: ['from', 'to'], optionalParameters: [], permissions: ['report.view', 'audit.view'], formats: ['csv', 'xlsx'], allowed: false },
 ];
 
@@ -108,5 +108,19 @@ describe('ReportRequestPanel', () => {
     fireEvent.click(await screen.findByRole('radio', { name: /Monthly Attendance Report/ }));
     expect((await screen.findByLabelText(/Month/) as HTMLInputElement).value).toMatch(/^\d{4}-\d{2}$/);
     expect(screen.queryByLabelText(/^From/)).not.toBeInTheDocument();
+  });
+
+  it('offers the Monthly Attendance Report\'s Detailed layout (each day\'s IN/OUT and hours) and sends it; Summary stays the default', async () => {
+    apiMock.post.mockResolvedValue({ data: { id: 'rep-2', status: 'QUEUED', jobId: 'job-2' } });
+    renderWithProviders(<ReportRequestPanel onQueued={() => {}} />);
+    fireEvent.click(await screen.findByRole('radio', { name: /Monthly Attendance Report/ }));
+    const layout = await screen.findByRole('combobox', { name: /Layout/ });
+    expect(layout).toHaveTextContent('Summary — attendance code per day');
+    fireEvent.keyDown(layout, { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Detailed — IN/OUT times and hours per day' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Queue report' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
+    const [, body] = apiMock.post.mock.calls[0] as [string, { parameters: Record<string, unknown> }];
+    expect(body.parameters).toEqual({ month: expect.stringMatching(/^\d{4}-\d{2}$/), layout: 'detailed' });
   });
 });

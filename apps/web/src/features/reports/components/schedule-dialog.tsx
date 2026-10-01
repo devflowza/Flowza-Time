@@ -5,7 +5,7 @@ import { useTranslation } from 'react-i18next';
 import type { z } from 'zod';
 import { CalendarClock } from 'lucide-react';
 import {
-  createReportScheduleSchema, SCHEDULABLE_REPORT_TYPES, WEEK_PARAMETER_REPORT_TYPES,
+  createReportScheduleSchema, MONTHLY_ATTENDANCE_LAYOUTS, SCHEDULABLE_REPORT_TYPES, WEEK_PARAMETER_REPORT_TYPES,
   type CreateReportScheduleInput, type ReportPeriodRule, type ReportScheduleCadence, type ReportScheduleDto, type ReportType,
 } from '@flowza/contracts';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/components/ui';
@@ -171,6 +171,14 @@ export function ScheduleDialog({ schedule, onClose }: { schedule: ReportSchedule
                   <Select value={field.value ?? 'attendance'} onValueChange={field.onChange}>
                     <SelectTrigger id="sc-scope"><SelectValue /></SelectTrigger>
                     <SelectContent>{(['attendance', 'all'] as const).map((v) => <SelectItem key={v} value={v}>{tr(`request.scopes.${v}`)}</SelectItem>)}</SelectContent>
+                  </Select>
+                )} />
+              </FormField> : null}
+              {params.has('layout') ? <FormField label={tr('request.layout')} htmlFor="sc-layout" optional>
+                <Controller control={control} name="filters.layout" render={({ field }) => (
+                  <Select value={field.value ?? 'summary'} onValueChange={field.onChange}>
+                    <SelectTrigger id="sc-layout"><SelectValue /></SelectTrigger>
+                    <SelectContent>{MONTHLY_ATTENDANCE_LAYOUTS.map((v) => <SelectItem key={v} value={v}>{tr(`request.layouts.${v}`)}</SelectItem>)}</SelectContent>
                   </Select>
                 )} />
               </FormField> : null}
