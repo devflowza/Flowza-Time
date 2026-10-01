@@ -5,7 +5,7 @@ import { defaultRegistry } from '@flowza/device-providers';
 import { withContext } from '@flowza/database';
 import { AppError } from '@flowza/shared';
 import { createHarness, fakeJob, type TestHarness } from '../../test/harness.js';
-import { normalizeRaw, eventTypeForDirection, historyOn } from './normalize.js';
+import { normalizeRaw, eventTypeForDirection, historyOn, recomputeRunAt } from './normalize.js';
 import { recomputeDailyHandler, recomputeDaily } from './recompute.js';
 import { applyApprovedCorrection, applyCorrectionHandler } from './corrections.js';
 import { enqueueRecalculationForScope, recalculateRange } from './recalculate.js';
@@ -145,7 +145,7 @@ describe('NORMALIZE_RAW', () => {
     expect(raw.map((r) => r.processingStatus).filter((s) => s === 'held' || s === 'quarantined').sort()).toEqual(['held', 'quarantined']);
   });
 
-  it('enqueues debounced, deduped RECOMPUTE_DAILY jobs incl. the previous local date for pre-noon punches', async () => {
+  it('enqueues deduped RECOMPUTE_DAILY jobs incl. the previous local date for pre-noon punches, at once for days never computed', async () => {
     const jobs = await sql<{ dedupeKey: string; runAt: Date; payload: Record<string, unknown>; queueName: string; status: string }>`select dedupe_key as "dedupeKey", run_at as "runAt", payload, queue_name as "queueName", status from jobs.queue where job_type = 'RECOMPUTE_DAILY' order by dedupe_key`.execute(h.tdb.adminDb);
     const keys = jobs.rows.map((j) => j.dedupeKey);
     expect(keys).toEqual([
@@ -156,7 +156,7 @@ describe('NORMALIZE_RAW', () => {
     for (const j of jobs.rows) {
       expect(j.queueName).toBe('processing');
       expect(j.status).toBe('pending');
-      expect(j.runAt.getTime() - NOW.getTime()).toBe(30_000); // org has no settings row → default processingDelaySeconds 30
+      expect(j.runAt.getTime()).toBe(NOW.getTime()); // no daily record yet → nothing to throttle: a pushed punch shows at once
       expect(j.payload).toMatchObject({ organizationId: ORG, reason: 'NEW_EVENT' });
     }
     // dedupe: the night employee's two punches touched 2026-03-10 twice → one job
@@ -253,7 +253,9 @@ describe('corrections', () => {
   it('ADD_PUNCH inserts a CORRECTION event, marks the correction APPLIED and enqueues an immediate recompute', async () => {
     const a = h.tdb.adminDb;
     const c = await a.insertInto('attendanceCorrections').values({ organizationId: ORG, employeeId: E1, branchId: BRANCH_A, attendanceDate: '2026-03-17', type: 'ADD_PUNCH', proposedPunchedAt: at('2026-03-17', '08:00'), proposedEventType: 'PUNCH_IN', reason: 'Forgot to punch in', requestedBy: OWNER, status: 'APPROVED' }).returning('id').executeTakeFirstOrThrow();
-    // a debounced NEW_EVENT recompute is already waiting for the same (employee, date) — it must not swallow the immediate correction recompute
+    // a throttled NEW_EVENT recompute is already waiting for the same (employee, date) — it must not swallow the immediate correction
+    // recompute (the normaliser's own job for this day was queued at once: replace it by one that waits for its window)
+    await sql`delete from jobs.queue where dedupe_key = ${recomputeDedupeKey(E1, '2026-03-17')} and status = 'pending'`.execute(a);
     await enqueueRecompute(h.deps.queue, { organizationId: ORG, employeeId: E1, date: '2026-03-17', reason: 'NEW_EVENT', runAt: new Date(NOW.getTime() + 30_000) });
     const res = await withContext(h.deps.db, { kind: 'system', organizationId: ORG }, (trx) => applyApprovedCorrection(trx, c.id, { queue: h.deps.queue, appliedBy: OWNER, now: NOW }));
     expect(res).toMatchObject({ status: 'APPLIED', voidedEventId: null, recomputeDates: ['2026-03-17'] });
@@ -262,7 +264,7 @@ describe('corrections', () => {
     const corr = await a.selectFrom('attendanceCorrections').selectAll().where('id', '=', c.id).executeTakeFirstOrThrow();
     expect(corr).toMatchObject({ status: 'APPLIED', appliedEventId: res.appliedEventId, appliedBy: OWNER });
     expect(corr.appliedAt).not.toBeNull();
-    // the debounced job keeps waiting; the correction gets its own immediate job with the CORRECTION reason
+    // the throttled job keeps waiting; the correction gets its own immediate job with the CORRECTION reason
     const debounced = await pendingJobs(recomputeDedupeKey(E1, '2026-03-17'));
     expect(debounced).toHaveLength(1);
     expect(debounced[0]).toMatchObject({ payload: { reason: 'NEW_EVENT' }, runAt: new Date(NOW.getTime() + 30_000) });
@@ -531,5 +533,42 @@ describe('normaliser neighbour dates and sources', () => {
     expect(await normalizeRaw(ctx('NORMALIZE_RAW', { organizationId: ORG }))).toMatchObject({ fetched: 1, events: 1 });
     const ev = await h.tdb.adminDb.selectFrom('attendanceEvents').select(['source', 'eventType']).where('employeeId', '=', E1).where('punchedAt', '=', at('2026-04-06', '08:00')).executeTakeFirstOrThrow();
     expect(ev).toEqual({ source: 'IMPORT', eventType: 'PUNCH_IN' });
+  });
+});
+
+describe('recompute throttle (processingDelaySeconds)', () => {
+  const T = new Date('2026-03-19T06:00:00Z');
+  const plus = (d: Date, s: number) => new Date(d.getTime() + s * 1000);
+
+  it('runs at once unless the day was recalculated within the window, then at the end of that window', () => {
+    expect(recomputeRunAt(T, 30, null)).toEqual(T); // never computed
+    expect(recomputeRunAt(T, 30, plus(T, -31))).toEqual(T); // window over
+    expect(recomputeRunAt(T, 30, plus(T, -30))).toEqual(T); // window ends now
+    expect(recomputeRunAt(T, 30, plus(T, -10))).toEqual(plus(T, 20)); // inside the window → its end
+    expect(recomputeRunAt(T, 0, plus(T, -1))).toEqual(T); // delay 0: always at once
+    expect(recomputeRunAt(T, 30, plus(T, 3600))).toEqual(plus(T, 30)); // a computed_at ahead of this clock: at most one window away
+  });
+
+  it('a punch for a day just recalculated waits for the window; one recalculated long ago is recomputed at once', async () => {
+    const a = h.tdb.adminDb;
+    const key = recomputeDedupeKey(E1, '2026-02-24');
+    const clear = () => sql`delete from jobs.queue where dedupe_key = ${key}`.execute(a);
+    await insertRaw([{ deviceUserId: '101', punchedAt: at('2026-02-24', '08:00'), direction: 'in' }]);
+    await normalizeRaw(ctx('NORMALIZE_RAW', { organizationId: ORG }));
+    expect((await pendingJobs(key)).map((j) => j.runAt.getTime())).toEqual([NOW.getTime()]);
+
+    // the job runs (computed_at = NOW); the out punch arrives inside the 30 s default window → one recompute at its end
+    await clear();
+    expect(await recompute(E1, '2026-02-24')).toMatchObject({ outcome: 'created' });
+    await insertRaw([{ deviceUserId: '101', punchedAt: at('2026-02-24', '17:00'), direction: 'out' }]);
+    await normalizeRaw(ctx('NORMALIZE_RAW', { organizationId: ORG }));
+    expect((await pendingJobs(key)).map((j) => j.runAt.getTime())).toEqual([NOW.getTime() + 30_000]);
+
+    // a day last recalculated an hour ago is not throttled
+    await clear();
+    await sql`update public.attendance_daily_records set computed_at = ${plus(NOW, -3600)} where employee_id = ${E1}::uuid and attendance_date = '2026-02-24'::date`.execute(a);
+    await insertRaw([{ deviceUserId: '101', punchedAt: at('2026-02-24', '17:30'), direction: 'out' }]);
+    await normalizeRaw(ctx('NORMALIZE_RAW', { organizationId: ORG }));
+    expect((await pendingJobs(key)).map((j) => j.runAt.getTime())).toEqual([NOW.getTime()]);
   });
 });

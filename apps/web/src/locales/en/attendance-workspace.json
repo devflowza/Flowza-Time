@@ -60,6 +60,10 @@
     "pickBranch": "Choose a branch or an employee first — your access covers selected branches only.", "future": "Nothing to sync yet for a future period.",
     "thisRequest": "This request", "jobIdHint": "Background job id (for support)"
   },
+  "live": {
+    "on": "Live", "onHint": "New punches appear here on their own a few seconds after the device sends them.",
+    "polling": "Auto-refresh", "pollingHint": "Live updates are not connected: this page refreshes every 15 seconds."
+  },
   "summary": {
     "title": "Attendance summary", "subtitle": "One row per employee for the month: days, hours and overtime from the daily records you can see.",
     "export": "Export", "exportAs": { "csv": "CSV", "xlsx": "Excel (XLSX)", "pdf": "PDF" }, "finalized": "Finalised", "live": "Live",

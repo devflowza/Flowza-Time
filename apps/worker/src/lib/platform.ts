@@ -35,9 +35,11 @@ export function createPlatformClients(config: WorkerConfig, log: Logger): { real
       async publish(channel, ev, payload) {
         try {
           const ch = client.channel(channel, { config: { private: true } });
-          await ch.send({ type: 'broadcast', event: ev, payload });
+          // an unjoined channel broadcasts over REST and reports a failure as its result ('error' / 'timed out'), never by throwing
+          const result = await ch.send({ type: 'broadcast', event: ev, payload });
           await client.removeChannel(ch);
-        } catch (err) { log.warn({ event: 'realtime_publish_failed', channel, err: (err as Error).message }); }
+          if (result !== 'ok') log.warn({ event: 'realtime_publish_failed', channel, eventType: ev, result });
+        } catch (err) { log.warn({ event: 'realtime_publish_failed', channel, eventType: ev, err: (err as Error).message }); }
       },
     },
     storage: {
