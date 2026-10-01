@@ -36,7 +36,6 @@ const PUBLIC_VITE_VARS: Record<string, string> = {
   VITE_SUPABASE_URL: 'the project URL every browser talks to',
   VITE_SUPABASE_ANON_KEY: 'the publishable key: the anon role holds no table privilege and RLS denies it every row',
   VITE_API_URL: 'the API origin',
-  VITE_PUBLIC_APP_URL: "the web app's own public address (other hosts serving the build redirect to it)",
 };
 const SECRET_NAME = /(SECRET|PASSWORD|PASSWD|SERVICE_ROLE|PRIVATE_KEY|MASTER_KEY|API_KEY|TOKEN|CREDENTIAL)/;
 const PLACEHOLDER = /^(|replace-me|changeme|REPLACE_[A-Z0-9_]*|k1:REPLACE_WITH_BASE64_32_BYTES|e2e-anon-key|test-anon-key)$/;

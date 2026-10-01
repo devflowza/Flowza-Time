@@ -43,6 +43,15 @@ test.describe('password reset', () => {
     await expect(page.getByRole('button', { name: 'Switch organisation' })).toContainText('Al Bahja Trading');
   });
 
+  test('a link built on the bare Site URL is forwarded to the reset page', async ({ page }) => {
+    const backend = await installMockBackend(page);
+    await page.goto('/?token_hash=pkce_e2e3&type=recovery');
+    await expect(page).toHaveURL(/\/auth\/reset\?token_hash=pkce_e2e3&type=recovery$/);
+    await choosePassword(page);
+    await expect(page.getByText('Password changed')).toBeVisible();
+    expect(backend.auth.verified).toEqual(['pkce_e2e3']);
+  });
+
   test('a session opened by the link cannot use the app until the password is set — not by typing another address, not after a reload', async ({ page }) => {
     const backend = await installMockBackend(page, { refusePasswordOnce: 'weak_password' });
     await page.goto('/auth/reset?token_hash=pkce_e2e2&type=recovery');

@@ -33,6 +33,12 @@ describe('AuthGate', () => {
     expect(router.state.location.pathname).toBe('/auth/reset');
   });
 
+  it('takes a token-hash reset link that opened another page to the reset page, parameters and all', async () => {
+    const router = renderAt('/?token_hash=pkce_abc&type=recovery');
+    expect(await screen.findByText('reset page')).toBeInTheDocument();
+    expect(router.state.location.pathname + router.state.location.search).toBe('/auth/reset?token_hash=pkce_abc&type=recovery');
+  });
+
   it('lets every other session through', () => {
     renderAt('/my');
     expect(screen.getByText('portal')).toBeInTheDocument();

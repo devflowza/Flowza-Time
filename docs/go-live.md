@@ -431,13 +431,11 @@ The web app calls `resetPasswordForEmail(email, { redirectTo: `${window.location
 origin it sends is whatever host the browser is on. Supabase rejects any `redirectTo` that is not on the allow list and
 silently falls back to the Site URL, which looks like "the reset link goes to the wrong page" rather than an error.
 
-**One host.** The Pages project also answers on `time.flowza.com`. Requests from there sent
-`redirect_to=https://time.flowza.com/auth/reset`, which is not on the list, so the e-mailed link opened the bare Site URL
-on the other origin. There, no PKCE verifier exists, so no "choose a new password" form ever appeared; the API's
-`WEB_ORIGINS` refuses that host anyway. The bundle now sends any host other than `VITE_PUBLIC_APP_URL`
-(`apps/web/.env.production`) to the same path on `https://time.flowza.ai` before it starts (`src/lib/canonical-origin.ts`;
-localhost and `*.pages.dev` previews are exempt). A Cloudflare redirect rule `time.flowza.com/* → https://time.flowza.ai/$1`
-(301), or removing that custom domain, does the same at the edge.
+**Both hosts.** Since `time.flowza.com` serves the same build, its three redirect URLs must be listed too. Before they
+were, reset requests made there asked for `redirect_to=https://time.flowza.com/auth/reset` (Supabase's logs of
+2026-09-30/10-01). Supabase fell back to the bare Site URL, so the link opened `https://time.flowza.ai/?code=…`. That is
+another origin, holding no PKCE verifier, so no "choose a new password" form ever appeared. The template below removes
+that dependency altogether: a token-hash link works on either host, in any browser and on any device.
 
 **Reset e-mail template (Dashboard → Authentication → Emails → Reset Password).** Replace the link's `{{ .ConfirmationURL }}`
 with:
@@ -450,9 +448,9 @@ The default link points straight at Supabase's `/verify`, which spends the one-t
 Defender Safe Links fetch every link in a message before the recipient does. The auth logs of 2026-09-30/10-01 show
 `GET /verify` from Microsoft addresses consuming the token seconds before the person's own click, which then got
 `403 One-time token not found`. A PKCE link also works only in the browser that requested it. With the template above, the
-link only loads `/auth/reset`. The token is verified (`verifyOtp`) when the person submits the new password, so scanners
-spend nothing, and the link works on any device. `/auth/reset` handles the default link as well, so the change can be made
-at any time:
+link only loads `/auth/reset` (a link that opens another page with these parameters is forwarded there). The token is
+verified (`verifyOtp`) when the person submits the new password, so scanners spend nothing, and the link works on any
+device. `/auth/reset` handles the default link as well, so the change can be made at any time:
 
 - a `?code=` link opened in the requesting browser is exchanged on load and shows the form;
 - one opened elsewhere says so;
