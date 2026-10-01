@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { flexibleGuide } from './flexible-guide';
+import { dayBoundaryGuide, flexibleGuide, joinMinutes, splitMinutes } from './flexible-guide';
 
 describe('flexibleGuide — the flexible shift rule in the author\'s numbers', () => {
   it('shows the check-out as check-in + required minutes + unpaid breaks', () => {
@@ -17,5 +17,38 @@ describe('flexibleGuide — the flexible shift rule in the author\'s numbers', (
 
   it('says nothing until the required minutes are known', () => {
     expect(flexibleGuide(undefined, '10:00', '15:00', [])).toEqual({ example: null, coreTooLong: null });
+  });
+});
+
+describe('dayBoundaryGuide — which day the sample night (Mon 20:00 → Tue 03:00) lands on', () => {
+  it('keeps the night on Monday when the boundary falls after the check-out and before the check-in', () => {
+    expect(dayBoundaryGuide('04:00')).toEqual({ boundary: '04:00', last: '03:59', lastDay: 'tue', inDay: 'mon', outDay: 'mon', split: false });
+    expect(dayBoundaryGuide('12:00')).toMatchObject({ last: '11:59', inDay: 'mon', outDay: 'mon', split: false });
+    expect(dayBoundaryGuide('03:01')).toMatchObject({ split: false });
+  });
+
+  it('flags a boundary that splits the night across two days', () => {
+    expect(dayBoundaryGuide('00:00')).toEqual({ boundary: '00:00', last: '23:59', lastDay: 'mon', inDay: 'mon', outDay: 'tue', split: true });
+    expect(dayBoundaryGuide('03:00')).toMatchObject({ inDay: 'mon', outDay: 'tue', split: true }); // a punch AT the boundary starts the new day
+    expect(dayBoundaryGuide('21:00')).toMatchObject({ inDay: 'sun', outDay: 'mon', split: true });
+  });
+
+  it('says nothing for a missing or malformed boundary', () => {
+    expect(dayBoundaryGuide(undefined)).toBeNull();
+    expect(dayBoundaryGuide('')).toBeNull();
+    expect(dayBoundaryGuide('4am')).toBeNull();
+  });
+});
+
+describe('required time as hours + minutes', () => {
+  it('splits and joins minutes', () => {
+    expect(splitMinutes(480)).toEqual({ hours: '8', minutes: '0' });
+    expect(splitMinutes(450)).toEqual({ hours: '7', minutes: '30' });
+    expect(splitMinutes(undefined)).toEqual({ hours: '', minutes: '' });
+    expect(joinMinutes('8', '')).toBe(480);
+    expect(joinMinutes('', '45')).toBe(45);
+    expect(joinMinutes('7', '30')).toBe(450);
+    expect(joinMinutes('7.5', '')).toBe(450);
+    expect(joinMinutes('', '')).toBeUndefined();
   });
 });
