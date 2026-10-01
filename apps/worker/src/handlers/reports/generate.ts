@@ -1,8 +1,9 @@
 import { z } from 'zod';
-import { uuidSchema, type ReportFormat, type ReportType } from '@flowza/contracts';
+import { REPORT_TYPES, uuidSchema, type ReportFormat, type ReportType } from '@flowza/contracts';
 import { AppError, errors, event } from '@flowza/shared';
 import { emitDomainEvent, withContext } from '@flowza/database';
 import type { WorkerDeps } from '../../deps.js';
+import { UNKNOWN_JOB_RETRY_SECONDS } from '../../runner.js';
 import type { HandlerRegistry, JobContext } from '../types.js';
 import { parsePayload } from '../attendance/common.js';
 import { loadReportContext } from './context.js';
@@ -32,6 +33,24 @@ export const MAX_REPORT_CELLS = 250_000;
 export interface GenerateResult { reportRequestId: string; status: 'COMPLETED' | 'FAILED' | 'SKIPPED'; rowCount?: number; bytes?: number; reason?: string }
 
 const RETRYABLE_MAX_STATUS_RESET = 'QUEUED';
+
+const KNOWN_REPORT_TYPES: ReadonlySet<string> = new Set(REPORT_TYPES);
+
+/**
+ * A report type this build has never heard of was queued by a NEWER API: the reports worker is deployed on its own and lags
+ * behind (2026-10-01: every Monthly Attendance Summary failed with "This report type is not available yet." because the
+ * 2026-09-29 deploys skipped flowza-time-reports, whose build predates `monthly_summary`). Failing it loses the request for good, so
+ * it goes back to QUEUED for a current worker — or this one once it is redeployed — on the same 10-minute cadence as a job
+ * type nobody here knows (runner.ts). The final attempt fails it with a message that says what to do. A type this build
+ * knows but cannot generate (status other than `available`) still fails at once: no redeploy changes that.
+ */
+function reportTypeFromNewerBuild(reportType: string, job: JobContext['job']): AppError {
+  const details = { reportType, reason: 'REPORT_TYPE_UNKNOWN_TO_THIS_BUILD' };
+  if (job.attempts < job.maxAttempts) {
+    return new AppError('DEPENDENCY_UNAVAILABLE', 'The report service is being updated for this report. It will start automatically once the update is live.', { retryable: true, retryAfterMs: UNKNOWN_JOB_RETRY_SECONDS * 1000, details });
+  }
+  return new AppError('DEPENDENCY_UNAVAILABLE', 'The report service has not been updated for this report yet. Please request it again later.', { details });
+}
 
 /**
  * Generate one report request end to end.
@@ -65,6 +84,7 @@ export async function generateReportRequest(deps: WorkerDeps, log: Logger, job: 
 
   try {
     const def = REPORT_DEFINITIONS[reportType];
+    if (!def && !KNOWN_REPORT_TYPES.has(reportType)) throw reportTypeFromNewerBuild(reportType, job);
     if (!def) throw errors.validation('This report type is not available yet.', { reportType });
     const doc = await withContext(deps.db, { kind: 'system', organizationId, jobId: job.id }, async (trx) => {
       const ctx = await loadReportContext(trx, organizationId, { parameters: row.parameters, format }, now);
