@@ -2,6 +2,7 @@ import { Navigate, Outlet, useLocation } from 'react-router';
 import type { ModuleKey, Permission } from '@flowza/contracts';
 import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/features/auth/auth-provider';
+import { LandingPage } from '@/features/landing/landing-page';
 import { useCan, useEmployeeId, useModulesEnabled } from '@/features/me/use-me';
 import { EmptyState } from '@/components/ui';
 import { PackageX, ShieldOff } from 'lucide-react';
@@ -10,7 +11,11 @@ export function RequireAuth() {
   const { session, loading } = useAuth();
   const location = useLocation();
   if (loading) return null;
-  if (!session) return <Navigate to="/auth/sign-in" replace state={{ from: location.pathname + location.search }} />;
+  if (!session) {
+    // The bare root is the public front page; any deeper path is a link into the app and needs a sign-in first.
+    if (location.pathname === '/') return <LandingPage />;
+    return <Navigate to="/auth/sign-in" replace state={{ from: location.pathname + location.search }} />;
+  }
   return <Outlet />;
 }
 

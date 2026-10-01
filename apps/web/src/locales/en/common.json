@@ -9,6 +9,12 @@
     "attendanceSummary": "Attendance summary", "unmatchedPunches": "Unmatched punches", "pinMapping": "PIN mapping", "punchLog": "Punch log",
     "sections": { "workforce": "Workforce", "devices": "Devices & sync", "time": "Time", "admin": "Administration", "team": "My team" }
   },
+  "landing": {
+    "nav": "Site", "home": "Home", "taglineStrong": "Time", "taglineSoft": "in flow",
+    "title": "FlowZa Time — Cloud Attendance System",
+    "description": "Multi-branch attendance, device synchronisation and payroll-ready summaries — built for the GCC.",
+    "rights": "All rights reserved."
+  },
   "auth": {
     "signIn": "Sign in", "signInTitle": "Sign in to FlowZa Time", "email": "Work email", "password": "Password",
     "forgot": "Forgot password?", "reset": "Reset password", "resetSent": "If an account exists for {{email}}, a reset link has been sent.",
