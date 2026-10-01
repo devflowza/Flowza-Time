@@ -72,11 +72,35 @@ the **Supavisor transaction pooler** URL (port 6543) in `DATABASE_URL_API` / `DA
 scheduler holds a session-level advisory lock on a dedicated connection; with transaction pooling that connection must
 be a direct (session) connection — set `DATABASE_URL_WORKER` to the session pooler (port 5432) or direct host.
 
+## Migrations in the Deploy workflow
+`.github/workflows/deploy.yml` applies the pending migrations **before** it deploys any code (input `migrations`, default
+`apply`), with `scripts/db-migrate-hosted.sh`:
+
+- **Ledger.** `supabase_migrations.schema_migrations`, matched by **name**: the file name without its timestamp and `.sql`
+  (the first 21 files are recorded as `flowza_<last four digits of the version>_<name>`). That is how every hosted migration
+  was recorded by the Supabase MCP `apply_migration`, and the script records the same way — version = when it ran,
+  `statements[1]` = the file's exact bytes, `created_by = 'deploy-workflow'` — plus `app.migrations`, the repo migrator's
+  ledger. Do not use `supabase db push` on production: it matches by version, which the hosted ledger does not share with the
+  files, and would replay the schema.
+- **Safety.** Each file runs in one transaction with its ledger row; a failure rolls it back and stops the deploy before the
+  API ships, and the files after it do not run. A file with an uncommented `concurrently` runs outside a transaction (it
+  cannot run in one) and is recorded once it completes. A ledger that does not list the first migration is refused (wrong
+  database). File names must be `<14 digits>_<snake_case>.sql`.
+- **Modes.** `apply` (default) · `check` — deploy only if nothing is pending, write nothing · `skip` — no database access
+  (warns). Locally: `DATABASE_URL_ADMIN=… bash scripts/db-migrate-hosted.sh --check`.
+- **Secret.** `DATABASE_URL_ADMIN` (repository or `production` environment secret): the `postgres` role through the
+  **session pooler** — `postgresql://postgres.<project ref>:<password>@<pooler host>:5432/postgres` (Supabase → Connect →
+  Session pooler). GitHub-hosted runners have no IPv6 and `db.<ref>.supabase.co` is IPv6-only without the IPv4 add-on. The
+  running apps never receive it. Without it the deploy stops at the migration step (or run it with `migrations: skip`).
+- **Applying by hand** (Supabase MCP / SQL editor) still works: record the migration under its name and the script treats
+  it as applied.
+
 ## Release procedure
 1. CI green on the PR (lint, typecheck, unit, migrations + RLS suites, DB integration tests, audit, secret scan).
 2. `supabase db push` against staging (CI job with `SUPABASE_ACCESS_TOKEN` + `SUPABASE_DB_PASSWORD`), deploy API/worker
    images to staging, run smoke tests (`/api/ready`, sign-in, sync a mock device).
-3. Promote the same images + migrations to production. Migrations are forward-only and additive; destructive changes
+3. Promote the same images + migrations to production (the Deploy workflow applies the migrations first, above).
+   Migrations are forward-only and additive; destructive changes
    ship in two releases (add → backfill → switch → drop).
 4. Post-deploy: watch `job_failed` / `unhandled_error` log events, queue depth in `/api/ready`, Supabase advisors.
 

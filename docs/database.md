@@ -118,5 +118,5 @@ bash scripts/db-reset-local.sh          # shim + all migrations into database `f
 bash supabase/tests/run-rls-tests.sh    # RLS suites (fresh database flowza_test)
 pnpm test:db                            # Kysely integration tests
 supabase start && supabase db reset     # full Supabase stack when Docker is available
-supabase db push                        # apply to a linked hosted project (CI, never by hand in production)
+DATABASE_URL_ADMIN=… bash scripts/db-migrate-hosted.sh --check   # what production lacks (the Deploy workflow applies it)
 ```

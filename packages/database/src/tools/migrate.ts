@@ -1,6 +1,7 @@
 /**
  * Applies supabase/migrations to a PostgreSQL database (used for local development, tests and CI).
- * For hosted Supabase projects use `supabase db push`; this tool exists so tests can run on plain Postgres.
+ * Hosted projects are migrated by the Deploy workflow (scripts/db-migrate-hosted.sh, docs/deployment.md); this tool exists so
+ * tests can run on plain Postgres.
  *   DATABASE_URL_ADMIN=postgres://postgres@127.0.0.1:54329/flowza pnpm --filter @flowza/database migrate:local
  * Options: --shim (apply the local Supabase shim first), --reset (drop & recreate the database)
  */
