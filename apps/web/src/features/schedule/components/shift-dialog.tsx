@@ -1,16 +1,17 @@
+import { useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
 import type { z } from 'zod';
 import { RECORD_STATUSES, SHIFT_TYPES, shiftInputSchema, type ShiftInput } from '@flowza/contracts';
-import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
+import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { blankToUndefined, toOptionalNumber } from '@/features/organization/form-utils';
 import { useShiftMutations } from '../api';
 import type { ShiftDto } from '../types';
 import { BreaksEditor } from './breaks-editor';
-import { flexibleGuide } from '../flexible-guide';
+import { dayBoundaryGuide, flexibleGuide, joinMinutes, SAMPLE_NIGHT, splitMinutes } from '../flexible-guide';
 
 type FormValues = z.input<typeof shiftInputSchema>;
 const COLORS = ['#0f6e56', '#175cd3', '#b54708', '#7a2e9d', '#b42318', '#0e7490', '#4d7c0f', '#475467'];
@@ -23,19 +24,45 @@ function toDefaults(s: ShiftDto | null): FormValues {
   };
 }
 
-/** Shift editor (shiftInputSchema): FIXED start/end vs FLEXIBLE required minutes + core hours; breaks, punch windows, grace overrides, colour. */
+/** The required time of a flexible shift as hours + minutes (stored as `requiredMinutes`); both blank = not entered. */
+function RequiredTimeInput({ value, onChange, invalid }: { value: unknown; onChange: (minutes: number | undefined) => void; invalid: boolean }) {
+  const { t } = useTranslation('schedule');
+  const [text, setText] = useState(() => splitMinutes(value));
+  const set = (next: { hours: string; minutes: string }) => { setText(next); onChange(joinMinutes(next.hours, next.minutes)); };
+  return (
+    <div className="flex items-center gap-2">
+      <Input id="sh-required" type="number" dir="ltr" min={0} max={24} inputMode="numeric" className="w-20 tnum" aria-label={t('shifts.requiredHours')} aria-invalid={invalid} value={text.hours} onChange={(e) => set({ ...text, hours: e.target.value })} />
+      <span className="text-sm text-muted-foreground">{t('shifts.hoursUnit')}</span>
+      <Input id="sh-required-min" type="number" dir="ltr" min={0} max={59} inputMode="numeric" className="w-20 tnum" aria-label={t('shifts.requiredMins')} aria-invalid={invalid} value={text.minutes} onChange={(e) => set({ ...text, minutes: e.target.value })} />
+      <span className="text-sm text-muted-foreground">{t('shifts.minutesUnit')}</span>
+    </div>
+  );
+}
+
+/** Shift editor (shiftInputSchema): FIXED start/end vs FLEXIBLE required time + day boundary + opt-in core hours; breaks, punch windows, grace overrides, colour. */
 export function ShiftDialog({ open, onOpenChange, shift }: { open: boolean; onOpenChange: (o: boolean) => void; shift: ShiftDto | null }) {
   const { t } = useTranslation('schedule');
   const { t: tc } = useTranslation();
   const { create, update } = useShiftMutations();
   const form = useForm<FormValues, unknown, ShiftInput>({ resolver: zodResolver(shiftInputSchema), defaultValues: toDefaults(shift) });
-  const { register, control, setValue, formState: { errors, isSubmitting } } = form;
+  const { register, control, setValue, setError, formState: { errors, isSubmitting } } = form;
   const type = useWatch({ control, name: 'type' }) ?? 'FIXED';
   const color = useWatch({ control, name: 'color' });
-  const flex = flexibleGuide(useWatch({ control, name: 'requiredMinutes' }), useWatch({ control, name: 'coreStart' }), useWatch({ control, name: 'coreEnd' }), useWatch({ control, name: 'breaks' }));
+  // Core hours are opt-in: they only apply while switched on; switched off they are cleared on save (null), never left behind.
+  const [coreOn, setCoreOn] = useState(() => !!(shift?.coreStart || shift?.coreEnd));
+  const coreStart = useWatch({ control, name: 'coreStart' });
+  const coreEnd = useWatch({ control, name: 'coreEnd' });
+  const flex = flexibleGuide(useWatch({ control, name: 'requiredMinutes' }), coreOn ? coreStart : null, coreOn ? coreEnd : null, useWatch({ control, name: 'breaks' }));
+  const boundary = dayBoundaryGuide(useWatch({ control, name: 'dayBoundary' }));
   const onSubmit = form.handleSubmit(async (values) => {
+    if (type === 'FLEXIBLE' && coreOn && (!values.coreStart || !values.coreEnd)) {
+      setError(values.coreStart ? 'coreEnd' : 'coreStart', { message: t('shifts.coreBothNeeded') });
+      return;
+    }
     try {
-      const input: ShiftInput = type === 'FIXED' ? { ...values, requiredMinutes: undefined, coreStart: undefined, coreEnd: undefined } : { ...values, startTime: undefined, endTime: undefined };
+      const input: ShiftInput = type === 'FIXED'
+        ? { ...values, requiredMinutes: undefined, coreStart: null, coreEnd: null }
+        : { ...values, startTime: undefined, endTime: undefined, ...(coreOn ? {} : { coreStart: null, coreEnd: null }) };
       if (shift) { await update.mutateAsync({ id: shift.id, input }); toast.success(t('shifts.updated')); }
       else { await create.mutateAsync(input); toast.success(t('shifts.created')); }
       onOpenChange(false);
@@ -64,21 +91,42 @@ export function ShiftDialog({ open, onOpenChange, shift }: { open: boolean; onOp
           <section className="space-y-3">
             <h4 className="text-sm font-semibold">{t('shifts.timing')}</h4>
             {type === 'FIXED' ? (
-              <div className="grid gap-4 sm:grid-cols-3">
+              <div className="grid gap-4 sm:grid-cols-2">
                 <FormField label={t('shifts.startTime')} htmlFor="sh-start" required error={errors.startTime?.message}><Input id="sh-start" type="time" dir="ltr" className="tnum" {...register('startTime', { setValueAs: blankToUndefined })} aria-invalid={!!errors.startTime} /></FormField>
                 <FormField label={t('shifts.endTime')} htmlFor="sh-end" required error={errors.endTime?.message} hint={t('shifts.endTimeHint')}><Input id="sh-end" type="time" dir="ltr" className="tnum" {...register('endTime', { setValueAs: blankToUndefined })} aria-invalid={!!errors.endTime} /></FormField>
-                <FormField label={t('shifts.dayBoundary')} htmlFor="sh-boundary" error={errors.dayBoundary?.message} hint={t('shifts.dayBoundaryHint')}><Input id="sh-boundary" type="time" dir="ltr" className="tnum" {...register('dayBoundary')} aria-invalid={!!errors.dayBoundary} /></FormField>
               </div>
             ) : (
-              <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
-                <FormField label={t('shifts.requiredMinutes')} htmlFor="sh-required" required error={errors.requiredMinutes?.message} hint={t('shifts.requiredMinutesHint')}><Input id="sh-required" type="number" min={0} max={1440} dir="ltr" className="tnum" {...register('requiredMinutes', { setValueAs: toOptionalNumber })} aria-invalid={!!errors.requiredMinutes} /></FormField>
-                <FormField label={t('shifts.coreStart')} htmlFor="sh-cstart" optional error={errors.coreStart?.message}><Input id="sh-cstart" type="time" dir="ltr" className="tnum" {...register('coreStart', { setValueAs: blankToUndefined })} /></FormField>
-                <FormField label={t('shifts.coreEnd')} htmlFor="sh-cend" optional error={errors.coreEnd?.message}><Input id="sh-cend" type="time" dir="ltr" className="tnum" {...register('coreEnd', { setValueAs: blankToUndefined })} /></FormField>
-                <FormField label={t('shifts.dayBoundary')} htmlFor="sh-boundary" error={errors.dayBoundary?.message} hint={t('shifts.flexDayBoundaryHint')}><Input id="sh-boundary" type="time" dir="ltr" className="tnum" {...register('dayBoundary')} aria-invalid={!!errors.dayBoundary} /></FormField>
-                <div className="space-y-1.5 text-xs sm:col-span-2 lg:col-span-4" data-testid="flex-guide">
-                  <p className="text-muted-foreground">{t('shifts.coreHint')}</p>
-                  {flex.example ? <p className="text-muted-foreground tnum">{t('shifts.checkOutExample', flex.example)}</p> : null}
-                  {flex.coreTooLong ? <p className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" role="status">{t('shifts.coreLongerThanRequired', flex.coreTooLong)}</p> : null}
+              <div className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label={t('shifts.requiredTime')} htmlFor="sh-required" required error={errors.requiredMinutes?.message} hint={flex.example ? `${t('shifts.requiredTimeHint')} ${t('shifts.checkOutExample', flex.example)}` : t('shifts.requiredTimeHint')}>
+                    <Controller control={control} name="requiredMinutes" render={({ field }) => <RequiredTimeInput value={field.value} onChange={field.onChange} invalid={!!errors.requiredMinutes} />} />
+                  </FormField>
+                  <FormField label={t('shifts.dayBoundary')} htmlFor="sh-boundary" error={errors.dayBoundary?.message} hint={t('shifts.dayBoundaryHint')}><Input id="sh-boundary" type="time" dir="ltr" className="w-36 tnum" {...register('dayBoundary')} aria-invalid={!!errors.dayBoundary} /></FormField>
+                </div>
+                {boundary ? (
+                  <div className={cn('space-y-1 rounded-md border px-3 py-2 text-xs', boundary.split ? 'border-amber-300 bg-amber-50 text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200' : 'bg-muted/40 text-muted-foreground')} data-testid="boundary-guide" role={boundary.split ? 'status' : undefined}>
+                    <p className="tnum">{t('shifts.boundaryRange', { boundary: boundary.boundary, last: boundary.last, lastDay: t(`shifts.sampleDays.${boundary.lastDay}`) })}</p>
+                    <p className="tnum">{boundary.split
+                      ? t('shifts.boundarySplit', { in: SAMPLE_NIGHT.in, out: SAMPLE_NIGHT.out, inDay: t(`shifts.sampleDays.${boundary.inDay}`), outDay: t(`shifts.sampleDays.${boundary.outDay}`) })
+                      : t('shifts.boundaryTogether', { in: SAMPLE_NIGHT.in, out: SAMPLE_NIGHT.out, boundary: boundary.boundary })}</p>
+                  </div>
+                ) : null}
+
+                <div className="space-y-3 rounded-md border p-3" data-testid="core-hours">
+                  <label className="flex items-start gap-3">
+                    <Switch className="mt-0.5" checked={coreOn} onCheckedChange={setCoreOn} aria-label={t('shifts.useCore')} />
+                    <span className="space-y-0.5">
+                      <span className="block text-sm font-medium">{t('shifts.useCore')}</span>
+                      <span className="block text-xs text-muted-foreground">{coreOn ? t('shifts.coreHint') : t('shifts.coreOffHint')}</span>
+                    </span>
+                  </label>
+                  {coreOn ? (
+                    <div className="grid gap-4 sm:grid-cols-2">
+                      <FormField label={t('shifts.coreStart')} htmlFor="sh-cstart" required error={errors.coreStart?.message}><Input id="sh-cstart" type="time" dir="ltr" className="tnum" {...register('coreStart', { setValueAs: blankToUndefined })} aria-invalid={!!errors.coreStart} /></FormField>
+                      <FormField label={t('shifts.coreEnd')} htmlFor="sh-cend" required error={errors.coreEnd?.message}><Input id="sh-cend" type="time" dir="ltr" className="tnum" {...register('coreEnd', { setValueAs: blankToUndefined })} aria-invalid={!!errors.coreEnd} /></FormField>
+                    </div>
+                  ) : null}
+                  {coreOn && flex.coreTooLong ? <p className="rounded-md border border-amber-300 bg-amber-50 px-2 py-1.5 text-xs text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" role="status">{t('shifts.coreLongerThanRequired', flex.coreTooLong)}</p> : null}
                 </div>
               </div>
             )}

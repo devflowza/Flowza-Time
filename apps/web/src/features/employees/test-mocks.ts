@@ -41,6 +41,9 @@ type MfaListResult = { data: { totp: MfaFactor[]; all: MfaFactor[] } | null; err
 /** Mirrors supabase-js: `session` is null when the project requires email confirmation before the account is usable. */
 // A repeated sign-up of a confirmed address returns a stand-in user with `identities: []`; errors carry supabase's `code`.
 type AuthResult = { data: { session: { access_token: string } | null; user: { id: string; identities?: unknown[] } | null }; error: { message: string; code?: string; status?: number } | null };
+export interface RealtimeChannelDouble { topic: string; handlers: Array<(msg: { event?: string; payload?: unknown }) => void>; on: ReturnType<typeof vi.fn>; subscribe: ReturnType<typeof vi.fn>; emit: (event: string) => void }
+/** Every channel opened through `supabaseMock.channel` (tests clear it in their setup). */
+export const realtimeChannels: RealtimeChannelDouble[] = [];
 export const supabaseMock = {
   auth: {
     getSession: vi.fn(async () => ({ data: { session: { access_token: 'token' } } })),
@@ -54,6 +57,19 @@ export const supabaseMock = {
       enroll: vi.fn(), challenge: vi.fn(), verify: vi.fn(), unenroll: vi.fn(),
     },
   },
+  /** Realtime: `channel(topic)` records the broadcast handlers so a test can fire a signal through `realtimeChannels`. */
+  channel: vi.fn((topic: string) => {
+    const ch: RealtimeChannelDouble = {
+      topic,
+      handlers: [],
+      on: vi.fn((_type: string, _filter: unknown, cb: (msg: { event?: string; payload?: unknown }) => void) => { ch.handlers.push(cb); return ch; }),
+      subscribe: vi.fn((cb?: (status: string) => void) => { cb?.('SUBSCRIBED'); return ch; }),
+      emit: (event: string) => { for (const h of ch.handlers) h({ event, payload: {} }); },
+    };
+    realtimeChannels.push(ch);
+    return ch;
+  }),
+  removeChannel: vi.fn(async () => 'ok'),
 };
 export const supabaseModule = { supabase: supabaseMock };
 export const envModule = { env: { supabaseUrl: 'http://localhost', supabaseAnonKey: 'anon', apiUrl: 'http://localhost:4000' } };

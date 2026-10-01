@@ -108,6 +108,7 @@ employee's own copy) — the file is always fetched through the reader's session
 | 13 | Audit Trail Report | `audit_report` (`scope=attendance`) | available (Phase 3) |
 | 14 | Weekly In/Out Report | `weekly_in_out` | available (Phase 2) |
 | — | Monthly Attendance Summary (the attendance summary page as a file) | `monthly_summary` | available (HR portal Prompt 6a review) |
+| — | Monthly Detail Report (the Daily Report's detail for a whole month) | `monthly_detail` | available |
 
 The **Daily Report** takes an optional `to` (HR portal Prompt 6a review, ATT-21): each day of a range of at most
 `DAILY_REPORT_MAX_DAYS` (62) days, the date heading each day's departments (a Date column in spreadsheets); the API, the
@@ -117,6 +118,16 @@ the period's last complete day. **`monthly_summary`** reads `attendanceSummaryRo
 summary page, the profile's month strip and the print statement use; its scope (the requester's branches — days included —, a
 line manager's team, the page's search) and `finalizedFigures` (payroll.view) travel in the parameters; the total row prints in
 PDF (a spreadsheet recomputes it). `POST /attendance/summary/export` queues it (202 + report id).
+
+The **Monthly Detail Report** (`monthly_detail`) is the Daily Report's detail for a whole month, for every employee the Monthly
+Attendance Report lists: one block per employee — the identity block (Employee, Dept, Card No, Shift, Designation, and **Days**:
+days per attendance code in the legend's order, plus loss-of-pay days when there are any) above a grid whose columns are the days
+of the month (weekday under the day number) and whose rows are Att Code, IN Time (first IN), OUT Time (last OUT), Wrk Hrs (the
+IN → OUT span, `h:mm`), Tot Hrs, Base Hrs, OT1, OT2, UT, Late and Early, with a Total column for the hour rows. A zero prints
+as an empty cell (spreadsheets keep the 0 for a worked day) so overtime, under time and lateness stand out across the month.
+It prints landscape with `density: 'compact'` (7 pt, ruled rows) and `keepTogether` sections, so a block never splits across
+pages — two blocks on the first page, three on the next. Spreadsheets get the identity block as leading columns and one row per
+grid row (eleven per employee, which is what `row_count` records), so the cell cap allows about 680 employees per file (narrow by branch or department beyond that).
 
 Types not in the sample set (`branch_attendance`, `department_attendance`, `overtime_report`, `device_sync_report`,
 `device_health_report`, `payroll_summary`) are `planned`: hidden from `/report-types`, refused by `POST /reports`, and
