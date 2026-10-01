@@ -120,6 +120,15 @@ summary page, the profile's month strip and the print statement use; its scope (
 line manager's team, the page's search) and `finalizedFigures` (payroll.view) travel in the parameters; the total row prints in
 PDF (a spreadsheet recomputes it). `POST /attendance/summary/export` queues it (202 + report id).
 
+The **Monthly Attendance Report** has a **Layout** parameter (`layout`, request form, schedules and "Send to…"): `summary`
+(default — the sample's codes grid) or `detailed` (`definitions/monthly-detailed.ts`, asked for on 2026-10-01: "as the daily report
+shows each person's logs, in the monthly report"). Detailed is the Daily Report's rows for every day of the month, one portrait page
+per employee: the identity block (Employee, Dept, Card No, Shift, Designation, Days per code + LOP) above Date | Att Code | IN Time
+| OUT Time | Wrk Hrs | Tot Hrs | Base Hrs | OT1 | OT2 | UT — one row per IN/OUT pair with the hours on the day's last row
+(`punchRows`, shared with the Daily Report), the code alone on a day without punches, the date alone on a day without a record —
+and a Total row (Tot, Base, OT1, OT2, UT; Wrk Hrs has none, since a multi-visit day prints only its last visit's span). Spreadsheets
+get the identity block as leading columns and one row per printed row.
+
 The **Monthly Detail Report** (`monthly_detail`) is the Daily Report's detail for a whole month, for every employee the Monthly
 Attendance Report lists: one block per employee — the identity block (Employee, Dept, Card No, Shift, Designation, and **Days**:
 days per attendance code in the legend's order, plus loss-of-pay days when there are any) above a grid whose columns are the days

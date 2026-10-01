@@ -37,7 +37,7 @@ function hourRows(ctx: ReportContext): HourRow[] {
 }
 
 /** `PR 20 · OF 8 · AB 2` — days per code as the grid prints them, in the legend's order (codes it does not list last). */
-function dayCounts(ctx: ReportContext, codes: readonly string[], order: readonly string[]): string {
+export function dayCounts(ctx: ReportContext, codes: readonly string[], order: readonly string[]): string {
   const counts = new Map<string, number>();
   for (const c of codes) if (c) counts.set(c, (counts.get(c) ?? 0) + 1);
   const rank = (c: string) => { const i = order.indexOf(c); return i === -1 ? order.length : i; };

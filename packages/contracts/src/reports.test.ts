@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, inclusiveDayCount, REPORT_TYPE_DEFINITIONS } from './dto-features/reports.js';
 import { unmatchedAssignBlockedReason } from './dto-features/hr-workspace.js';
+import { reportScheduleFiltersSchema } from './dto-features/report-schedules.js';
+import { createReportRequestSchema } from './reports.js';
 
 /**
  * Report-catalogue rules shared by the API, the worker and the web form (HR portal Prompt 6a review). One definition each, so
@@ -27,6 +29,24 @@ describe('6a-ATT21 the Daily Report range', () => {
     expect(daily.optionalParameters).toContain('to');
     const summary = REPORT_TYPE_DEFINITIONS.find((d) => d.key === 'monthly_summary')!;
     expect(summary).toMatchObject({ status: 'available', requiredParameters: ['month'], permissions: ['report.view', 'attendance.view'] });
+  });
+});
+
+describe('the Monthly Attendance Report layout', () => {
+  it('is offered on the monthly report only, summary by default (absent), detailed on request', () => {
+    const monthly = REPORT_TYPE_DEFINITIONS.find((d) => d.key === 'monthly_attendance')!;
+    expect(monthly.optionalParameters).toContain('layout');
+    expect(REPORT_TYPE_DEFINITIONS.filter((d) => d.optionalParameters.includes('layout')).map((d) => d.key)).toEqual(['monthly_attendance']);
+    const parse = (layout?: string) => createReportRequestSchema.safeParse({ reportType: 'monthly_attendance', parameters: { month: '2026-10', ...(layout ? { layout } : {}) } });
+    expect(parse().success && parse().data?.parameters.layout).toBeUndefined();
+    expect(parse('detailed').data?.parameters.layout).toBe('detailed');
+    expect(parse('summary').data?.parameters.layout).toBe('summary');
+    expect(parse('codes').success).toBe(false);
+  });
+  it('travels in a schedule\'s filters (a strict schema), and nothing else new does', () => {
+    expect(reportScheduleFiltersSchema.safeParse({ layout: 'detailed' }).success).toBe(true);
+    expect(reportScheduleFiltersSchema.safeParse({ layout: 'grid' }).success).toBe(false);
+    expect(reportScheduleFiltersSchema.safeParse({ layout: 'detailed', bogus: 1 }).success).toBe(false);
   });
 });
 

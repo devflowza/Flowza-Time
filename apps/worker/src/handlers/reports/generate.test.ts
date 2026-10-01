@@ -282,6 +282,48 @@ describe('Phase 1 · the five layouts with existing keys', () => {
     expect(html).toContain('style="color:#1d4ed8;font-weight:700">OF</td>');
   });
 
+  it('Monthly Attendance Report, Detailed layout: the Daily Report\'s rows for every day of the month, one page per employee, with totals', async () => {
+    const id = await request('monthly_attendance', 'csv', { month: '2017-11', layout: 'detailed' });
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    // five employees employed in November × thirty days, plus SALEH's second visit on the 1st (one row per IN/OUT pair)
+    expect(res).toMatchObject({ status: 'COMPLETED', rowCount: 151 });
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    expect(lines[0]).toBe('Employee,Dept,Card No,Shift,Designation,Days,Date,Att Code,IN Time,OUT Time,Wrk Hrs,Tot Hrs,Base Hrs,OT1,OT2,UT');
+    expect(lines.some((l) => l.startsWith('9001'))).toBe(false);
+    // FAISAL: the Daily Report's values on the 1st and 2nd, off, off, absent, then days without a record print only their date
+    const faisalLead = '2011  FAISAL,EL BEIT,,STAFF,Carpenter,PR 2 · AB 1 · OF 2,';
+    const faisal = lines.filter((l) => l.startsWith(faisalLead)).map((l) => l.slice(faisalLead.length));
+    expect(faisal).toHaveLength(30);
+    expect(faisal.slice(0, 6)).toEqual([
+      '01-Nov-17 Wed,PR,8:39 am,6:09 pm,570,510,540,0,0,30',
+      '02-Nov-17 Thu,PR,8:45 am,5:52 pm,547,498,540,0,0,42',
+      '03-Nov-17 Fri,OF,,,,,,,,',
+      '04-Nov-17 Sat,OF,,,,,,,,',
+      '05-Nov-17 Sun,AB,,,,,,,,',
+      '06-Nov-17 Mon,,,,,,,,,',
+    ]);
+    // two visits on one day: two rows, hours on the last one only (as the Daily Report prints 2076)
+    const salehLead = '2076  SALEH AL AGHBARI,ADMIN,,STAFF,,PR 1,';
+    expect(lines.filter((l) => l.startsWith(`${salehLead}01-Nov-17`))).toEqual([`${salehLead}01-Nov-17 Wed,PR,5:32 am,,,,,,,`, `${salehLead}01-Nov-17 Wed,PR,6:00 am,9:16 pm,916,855,540,315,0,0`]);
+    // a single IN: the clock, nothing worked, the whole base as under time
+    expect(lines).toContain('2010  ABDUL SATTHAR,ADMIN,2010,STAFF,,PR 1 · AB 2,01-Nov-17 Wed,PR,2:49 pm,,,0,540,0,0,540');
+
+    const pdfId = await request('monthly_attendance', 'pdf', { month: '2017-11', layout: 'detailed' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('<div class="title">Monthly Attendance Report (Detailed)</div>');
+    expect(html).toContain('For the Period : 01-Nov-2017 To 30-Nov-2017');
+    expect((html.match(/class="section break"/g) ?? []).length).toBe(4); // one page per employee
+    expect(html).toContain('<span class="k">Days:</span><span class="v">PR 2 · AB 1 · OF 2</span>');
+    // FAISAL's total row: 8.30 + 8.18 worked, 9.00 + 9.00 base, no overtime, 0.30 + 0.42 under time
+    expect(html).toMatch(/<tr class="total"><td class="mono" style="font-weight:700">Total<\/td>(<td[^>]*><\/td>){4}<td class="end mono" style="font-weight:700">16\.48<\/td><td class="end mono" style="font-weight:700">18\.00<\/td><td class="end mono" style="font-weight:700">0\.00<\/td><td class="end mono" style="font-weight:700">0\.00<\/td><td class="end mono" style="font-weight:700">1\.12<\/td><\/tr>/);
+    expect(html).toContain('One row per IN/OUT pair, as the Daily Report prints them');
+    // the default layout is still the codes grid
+    const summaryId = await request('monthly_attendance', 'csv', { month: '2017-11', layout: 'summary' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: summaryId }));
+    expect(csvLines(`${ORG}/${summaryId}.csv`)[0]).toMatch(/^Emp ID,Emp Name,1,2,3,/);
+  });
+
   it('Monthly Detail Report: per employee, every day of the month with code, IN/OUT and hours as the Daily Report prints them, totals and days per code', async () => {
     const id = await request('monthly_detail', 'csv', { month: '2017-11' });
     const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));

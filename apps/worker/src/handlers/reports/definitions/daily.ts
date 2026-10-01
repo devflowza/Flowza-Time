@@ -5,7 +5,7 @@ import { errors } from '@flowza/shared';
 import type { ReportContext } from '../context.js';
 import { codeInputOf, loadRecords, type DailyRecord } from '../data/records.js';
 import { groupByDepartment, loadRoster, sortByEmployeeNumber, type RosterEmployee } from '../data/roster.js';
-import { cell, countRows, EMPTY_CELL, num, type CellTone, type ReportColumn, type ReportDocument, type ReportRow, type ReportSection } from '../model.js';
+import { cell, countRows, EMPTY_CELL, num, type CellTone, type ReportCell, type ReportColumn, type ReportDocument, type ReportRow, type ReportSection } from '../model.js';
 import type { ReportDefinition } from './types.js';
 
 export const TONE_OF_GROUP: Record<string, CellTone> = { present: 'default', off: 'off', holiday: 'holiday', leave: 'leave', absent: 'absent', none: 'muted' };
@@ -23,11 +23,20 @@ function hourCells(ctx: ReportContext, h: DerivedHours | null) {
   ];
 }
 
-/** Rows for one employee on one day: one per IN/OUT pair, hours on the last row only (as the sample prints them). */
-export function dailyRowsFor(ctx: ReportContext, e: RosterEmployee, r: DailyRecord): ReportRow[] {
+/** The day's attendance code, coloured as the samples print it. */
+export function codeCell(ctx: ReportContext, r: DailyRecord): ReportCell {
   const code = ctx.code(codeInputOf(r));
   const tone = TONE_OF_GROUP[code.group] ?? 'default';
-  const lead = [cell(e.employeeNumber, { mono: true }), cell(e.displayName), cell(e.designationName ?? ''), cell(code.code, { tone, align: 'center', bold: tone !== 'default' })];
+  return cell(code.code, { tone, align: 'center', bold: tone !== 'default' });
+}
+
+/** Rows for one employee on one day: one per IN/OUT pair, hours on the last row only (as the sample prints them). */
+export function dailyRowsFor(ctx: ReportContext, e: RosterEmployee, r: DailyRecord): ReportRow[] {
+  return punchRows(ctx, r, [cell(e.employeeNumber, { mono: true }), cell(e.displayName), cell(e.designationName ?? ''), codeCell(ctx, r)]);
+}
+
+/** One day's IN/OUT rows after `lead` (the Daily Report's identity cells, the Monthly Attendance Report's date and code). */
+export function punchRows(ctx: ReportContext, r: DailyRecord, lead: ReportCell[]): ReportRow[] {
   const pairs = pairPunches(r.punches);
   if (pairs.length === 0) {
     const worked = r.firstInAt || r.lastOutAt;
