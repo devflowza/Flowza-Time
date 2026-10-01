@@ -695,7 +695,8 @@ No application code path uses Supabase `service_role`. Migrations/ops use it via
 - **Leavers** (B-75, 20260928000150): terminating, resigning or archiving an employee suspends every membership linked to
   the record (the link is kept), revokes pending invitations that would link it, ends the user's sessions
   (`app.revoke_user_sessions`, system context only) and audits each step; re-activating the employee does not re-activate
-  the login. Reporting lines cannot form a loop (`employees_no_manager_cycle` trigger + named 400 in the API).
+  the login. The same change takes the employee off every terminal they are enrolled on (`DELETE_EMPLOYEE` sync job,
+  docs/sync-engine.md "Employee ↔ device synchronisation"). Reporting lines cannot form a loop (`employees_no_manager_cycle` trigger + named 400 in the API).
 - Helper functions (schema `app`, `STABLE`, `SECURITY DEFINER`, `search_path` pinned):
   - `app.uid()`, `app.claims()`, `app.is_system()`, `app.system_org_id()`
   - `app.org_ids_with_permission(perm text) → uuid[]` (memberships ∪ system org ∪ platform grants)
