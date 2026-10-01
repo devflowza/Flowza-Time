@@ -9,7 +9,7 @@ import type { MeDto } from '@flowza/contracts';
 import { supabase } from '@/lib/supabase';
 import { api, isMfaRequiredError, isNetworkError, type Envelope } from '@/lib/api-client';
 import { useAuth } from '@/features/auth/auth-provider';
-import { Button, FormField, Input } from '@/components/ui';
+import { Button, FormField, Input, networkFailureHintKey } from '@/components/ui';
 import { LanguageSwitcher } from '@/components/layout/language-switcher';
 import { AdmBrand } from './components/adm-brand';
 
@@ -28,7 +28,7 @@ export default function AdminLoginPage() {
   const { session } = useAuth();
   const navigate = useNavigate();
   const location = useLocation();
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<{ message: string; hint?: string } | null>(null);
   const [checking, setChecking] = useState(false);
   const [show, setShow] = useState(false);
   const form = useForm<Form>({ resolver: zodResolver(schema), defaultValues: { email: '', password: '' } });
@@ -41,13 +41,13 @@ export default function AdminLoginPage() {
     setError(null);
     setChecking(true);
     const { error: err } = await supabase.auth.signInWithPassword(values);
-    if (err) { setChecking(false); setError(t('login.invalid')); return; }
+    if (err) { setChecking(false); setError({ message: t('login.invalid') }); return; }
     try {
       const me = (await api.get<Envelope<MeDto>>('/me')).data;
       if (!me.user.isPlatformAdmin) {
         await supabase.auth.signOut();
         setChecking(false);
-        setError(t('login.notAdmin'));
+        setError({ message: t('login.notAdmin') });
         return;
       }
     } catch (e) {
@@ -55,7 +55,10 @@ export default function AdminLoginPage() {
       if (!isMfaRequiredError(e)) {
         await supabase.auth.signOut();
         setChecking(false);
-        setError(isNetworkError(e) ? t('login.unreachable') : t('login.notAdmin'));
+        // A network failure carries the API host and why nothing readable came back (api-client diagnoseNetworkFailure).
+        // One fixed "could not be reached" hid that: an API that answers but does not accept this site's origin (CORS)
+        // read exactly like an outage.
+        setError(isNetworkError(e) ? { message: (e as Error).message, hint: tc(networkFailureHintKey(e)) } : { message: t('login.notAdmin') });
         return;
       }
     }
@@ -102,7 +105,12 @@ export default function AdminLoginPage() {
                   </button>
                 </div>
               </FormField>
-              {error ? <p role="alert" className="rounded-md border border-red-300/60 bg-red-50 px-3 py-2 text-sm text-red-900 dark:bg-red-950/40 dark:text-red-200">{error}</p> : null}
+              {error ? (
+                <div role="alert" className="space-y-1 rounded-md border border-red-300/60 bg-red-50 px-3 py-2 text-sm text-red-900 dark:bg-red-950/40 dark:text-red-200">
+                  <p>{error.message}</p>
+                  {error.hint ? <p className="text-xs opacity-90">{error.hint}</p> : null}
+                </div>
+              ) : null}
               <Button type="submit" className="w-full" loading={checking || form.formState.isSubmitting}>{t('login.submit')}</Button>
             </form>
             <div className="flex flex-col gap-2 text-center text-sm">
