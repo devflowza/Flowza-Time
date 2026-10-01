@@ -2,7 +2,7 @@
  * The renderer-neutral shape of a finished report. Every definition builds one of these; CSV, XLSX and PDF are three
  * views of the same object, which is what keeps the row count, the ordering and the values identical across formats.
  */
-export type CellTone = 'default' | 'present' | 'absent' | 'off' | 'leave' | 'holiday' | 'muted' | 'warning' | 'danger';
+export type CellTone = 'default' | 'present' | 'absent' | 'off' | 'leave' | 'holiday' | 'muted' | 'warning' | 'danger' | 'success';
 export type CellAlign = 'start' | 'center' | 'end';
 
 export interface ReportCell {

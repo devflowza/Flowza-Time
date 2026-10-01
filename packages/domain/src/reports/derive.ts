@@ -49,6 +49,22 @@ export function deriveHours(r: HoursInput): DerivedHours {
   };
 }
 
+export type ShiftHoursVerdict = 'MET' | 'SHORT' | 'MISSED_PUNCH';
+
+/**
+ * Whether a worked day reached its shift's hours (Monthly Timesheet's "Hours Met"): `MET` when Tot Hrs ≥ Base Hrs, `SHORT`
+ * when not (the gap is the day's UT), `MISSED_PUNCH` when a check-in or check-out is missing so the hours cannot be judged.
+ * `null` when there is nothing to judge: a day not worked (absence, leave, weekly off, holiday — its code says so) or a worked
+ * day that required no hours (work on a weekly off or holiday, or without a shift — all of it is overtime).
+ */
+export function shiftHoursVerdict(r: HoursInput): ShiftHoursVerdict | null {
+  const h = deriveHours(r);
+  if (h.worked === null || h.scheduled === null) return null;
+  if (r.status === 'MISSING_PUNCH') return 'MISSED_PUNCH';
+  if (h.scheduled === 0) return null;
+  return h.worked >= h.scheduled ? 'MET' : 'SHORT';
+}
+
 export interface TracePunchLike { punchedAt?: string; role?: string }
 export interface PunchPair { inAt: string | null; outAt: string | null }
 

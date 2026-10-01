@@ -109,6 +109,7 @@ employee's own copy) — the file is always fetched through the reader's session
 | 14 | Weekly In/Out Report | `weekly_in_out` | available (Phase 2) |
 | — | Monthly Attendance Summary (the attendance summary page as a file) | `monthly_summary` | available (HR portal Prompt 6a review) |
 | — | Monthly Detail Report (the Daily Report's detail for a whole month) | `monthly_detail` | available |
+| — | Monthly Timesheet Report (each employee's month, a row per day: check-in/out against the shift's hours) | `monthly_timesheet` | available |
 
 The **Daily Report** takes an optional `to` (HR portal Prompt 6a review, ATT-21): each day of a range of at most
 `DAILY_REPORT_MAX_DAYS` (62) days, the date heading each day's departments (a Date column in spreadsheets); the API, the
@@ -128,6 +129,18 @@ as an empty cell (spreadsheets keep the 0 for a worked day) so overtime, under t
 It prints landscape with `density: 'compact'` (7 pt, ruled rows) and `keepTogether` sections, so a block never splits across
 pages — two blocks on the first page, three on the next. Spreadsheets get the identity block as leading columns and one row per
 grid row (eleven per employee, which is what `row_count` records), so the cell cap allows about 680 employees per file (narrow by branch or department beyond that).
+
+The **Monthly Timesheet Report** (`monthly_timesheet`) answers "did each person do their shift's hours (say 8), and by how much over
+or under", for the same roster: one portrait page per employee — the identity block (Employee, Dept, Card No, Designation, and
+**Shift Hours Met**: `18 of 22`, the days the shift's hours were met out of the days that could be judged) above one row per day
+of the month: Date, Shift (the shift the day was calculated under, so a rotation shows), Att Code, Check In (first IN), Check Out
+(last OUT), Shift Hrs (Base Hrs: the shift's span less unpaid breaks, or a flexible shift's required minutes), Worked Hrs (Tot Hrs),
+**Hours Met**, Overtime (OT1 + OT2: weekly-off and holiday work included), Under Time, Late and Early, then a Total row (with
+`met/judged` under Hours Met). Hours Met is `shiftHoursVerdict` (`packages/domain/src/reports/derive.ts`): **Yes** when Tot Hrs ≥
+Base Hrs, **No** when short (the gap is the day's UT), **Missed punch** when the check-in or check-out is missing; blank on a day not
+worked (its code says why) and on worked days that required nothing (a weekly off or holiday: all of it is overtime). Spreadsheets
+get the identity block as leading columns and one row per day (`row_count` = employees × days; the total rows stay out of the
+sheet), so the cell cap allows about 670 employees per file.
 
 Types not in the sample set (`branch_attendance`, `department_attendance`, `overtime_report`, `device_sync_report`,
 `device_health_report`, `payroll_summary`) are `planned`: hidden from `/report-types`, refused by `POST /reports`, and

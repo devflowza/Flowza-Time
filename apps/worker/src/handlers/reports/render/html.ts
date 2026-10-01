@@ -3,7 +3,7 @@ import type { CellTone, ReportCell, ReportColumn, ReportDocument, ReportSection 
 
 export const escapeHtml = (s: string): string => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c] ?? c);
 
-const TONE_COLOUR: Record<CellTone, string> = { default: '#111', present: '#111', off: '#1d4ed8', leave: '#15803d', absent: '#b91c1c', holiday: '#6d28d9', muted: '#6b7280', warning: '#b45309', danger: '#b91c1c' };
+const TONE_COLOUR: Record<CellTone, string> = { default: '#111', present: '#111', off: '#1d4ed8', leave: '#15803d', absent: '#b91c1c', holiday: '#6d28d9', muted: '#6b7280', warning: '#b45309', danger: '#b91c1c', success: '#15803d' };
 
 /**
  * Print margins in millimetres. Chromium lets an @page margin override the margin passed to printToPDF, so the
@@ -51,8 +51,9 @@ const CSS = `
   .legend .items { margin-top: 2px; }
   .legend .items span { white-space: nowrap; }
   .notes { font-size: 7pt; color: #444; margin-top: 4px; }
-  .end { text-align: center; font-weight: 700; margin-top: 10px; border-top: 1px solid #b91c1c; border-bottom: 1px solid #b91c1c; padding: 3px; }
-  .end + .end-title { text-align: center; font-weight: 700; margin-top: 4px; }
+  /* div only: \`end\` is also the end-alignment class of th/td, which must not inherit the banner's rules and weight */
+  div.end { text-align: center; font-weight: 700; margin-top: 10px; border-top: 1px solid #b91c1c; border-bottom: 1px solid #b91c1c; padding: 3px; }
+  div.end + .end-title { text-align: center; font-weight: 700; margin-top: 4px; }
   th .sub { display: block; font-weight: 400; font-size: 85%; color: #555; }
   .section.keep { break-inside: avoid; page-break-inside: avoid; }
   .compact table { font-size: 7pt; }

@@ -40,7 +40,7 @@ export const ar: LocaleTemplates = {
     daily_attendance: 'الحضور اليومي', monthly_attendance: 'الحضور الشهري', employee_attendance: 'حضور الموظف', branch_attendance: 'حضور الفرع',
     department_attendance: 'حضور القسم', late_report: 'التأخير', absence_report: 'الغياب', overtime_report: 'العمل الإضافي', missing_punch_report: 'البصمات المفقودة',
     device_sync_report: 'مزامنة الأجهزة', device_health_report: 'حالة الأجهزة', audit_report: 'التدقيق', payroll_summary: 'ملخص الرواتب', employee_directory: 'دليل الموظفين',
-    leave_report: 'الإجازات', attendance_summary: 'ملخص الحضور', weekly_attendance: 'الحضور الأسبوعي', weekly_in_out: 'الدخول والخروج الأسبوعي', monthly_summary: 'ملخص الحضور الشهري', monthly_detail: 'تفاصيل الحضور الشهري',
+    leave_report: 'الإجازات', attendance_summary: 'ملخص الحضور', weekly_attendance: 'الحضور الأسبوعي', weekly_in_out: 'الدخول والخروج الأسبوعي', monthly_summary: 'ملخص الحضور الشهري', monthly_detail: 'تفاصيل الحضور الشهري', monthly_timesheet: 'سجل الدوام الشهري',
   },
   syncJobTypes: {
     PULL_ATTENDANCE: 'سحب الحضور', PULL_EMPLOYEES: 'سحب الموظفين', PUSH_EMPLOYEE: 'إرسال موظف', PUSH_EMPLOYEES: 'إرسال الموظفين', DEVICE_HEALTH_CHECK: 'فحص حالة الجهاز',

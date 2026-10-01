@@ -83,6 +83,12 @@ export function groupByDepartment<T>(ctx: ReportContext, items: readonly T[], de
   return [...groups.entries()].sort(([a], [b]) => a.localeCompare(b, ctx.locale, { sensitivity: 'base' })).map(([label, list]) => ({ label, items: list }));
 }
 
+/** Shift names by id, in the report's locale — for the shift each daily record was calculated under. */
+export async function loadShiftNames(trx: Trx, ctx: ReportContext): Promise<Map<string, string>> {
+  const rows = await trx.selectFrom('shifts').select(['id', 'name', 'nameAr']).where('organizationId', '=', ctx.organizationId).execute();
+  return new Map(rows.map((s) => [s.id, (ctx.locale === 'ar' && s.nameAr) || s.name]));
+}
+
 export interface ShiftAndPolicy { shift: string | null; policy: string | null }
 
 /**
