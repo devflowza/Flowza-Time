@@ -89,9 +89,35 @@ export async function loadNeighbourReach(trx: Trx, organizationId: string): Prom
 }
 
 /**
+ * When the recompute asked for by a new event runs. `processingDelaySeconds` is a throttle per (employee, date), not a wait
+ * after every punch: a day not recalculated within the last window is recomputed at once, so a pushed punch reaches the
+ * register within seconds; a day recalculated less than a window ago waits for the end of that window, so a burst for the
+ * same day (a double tap, a backlog uploaded in several requests) still costs one recompute per window. Nothing is lost:
+ * the queue keeps one pending job per day (its dedupe key) and that job reads every event when it runs.
+ */
+export function recomputeRunAt(now: Date, delaySeconds: number, lastComputedAt: Date | null): Date {
+  if (lastComputedAt === null || delaySeconds <= 0) return now;
+  const windowEnd = lastComputedAt.getTime() + delaySeconds * 1000;
+  if (windowEnd <= now.getTime()) return now;
+  // a computed_at ahead of this clock (another worker's skew) never pushes the recompute past one window from now
+  return new Date(Math.min(windowEnd, now.getTime() + delaySeconds * 1000));
+}
+
+/** `computed_at` of the existing daily records of the touched (employee, date) pairs, keyed `employeeId|YYYY-MM-DD`. */
+export async function loadLastComputedAt(trx: Trx, organizationId: string, days: ReadonlyArray<{ employeeId: string; date: string }>): Promise<Map<string, Date>> {
+  if (days.length === 0) return new Map();
+  const res = await sql<{ employeeId: string; date: string; computedAt: Date }>`select r.employee_id as "employeeId", r.attendance_date::text as date, r.computed_at as "computedAt"
+    from public.attendance_daily_records r
+    join unnest(${sql.val(days.map((d) => d.employeeId))}::uuid[], ${sql.val(days.map((d) => d.date))}::date[]) as t(employee_id, attendance_date)
+      on r.employee_id = t.employee_id and r.attendance_date = t.attendance_date
+    where r.organization_id = ${organizationId}::uuid`.execute(trx);
+  return new Map(res.rows.map((r) => [`${r.employeeId}|${r.date}`, r.computedAt instanceof Date ? r.computedAt : new Date(r.computedAt)]));
+}
+
+/**
  * One batch of the normaliser (§E.4, docs/attendance-engine.md "Worker integration contract"): resolves the employee for
  * each pending raw punch, attaches the branch effective on the local date of the punch, inserts the event and enqueues
- * debounced recomputes. Rows that cannot be resolved become `unmatched` (visible in reconciliation); `held` and
+ * throttled recomputes (`recomputeRunAt`). Rows that cannot be resolved become `unmatched` (visible in reconciliation); `held` and
  * `quarantined` rows are never touched here.
  */
 export async function normalizeBatch(trx: Trx, organizationId: string, now: Date, queue: JobContext['deps']['queue']): Promise<NormalizeBatchResult> {
@@ -220,8 +246,9 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
   let recomputeJobs = 0;
   if (touched.size) {
     const delay = await loadProcessingDelaySeconds(trx, organizationId);
-    const runAt = new Date(now.getTime() + delay * 1000);
+    const lastComputed = await loadLastComputedAt(trx, organizationId, [...touched.values()]);
     for (const t of touched.values()) {
+      const runAt = recomputeRunAt(now, delay, lastComputed.get(`${t.employeeId}|${t.date}`) ?? null);
       await enqueueRecompute(queue, { organizationId, employeeId: t.employeeId, date: t.date, reason: 'NEW_EVENT', runAt }, trx);
       recomputeJobs++;
     }

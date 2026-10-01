@@ -75,7 +75,9 @@ rotating schedules pass `adjacentShifts` (D−1/D+1) so neighbouring windows are
 ## Worker integration contract
 - Normaliser resolves `device_employee_id` → employee via `device_employee_states` → `employee_provider_identities` →
   `employees.device_user_id` (unmatched rows stay `unmatched`), attaches the **effective branch on that date**, and enqueues a
-  debounced `RECOMPUTE_DAILY` per (employee, date) — for cross-midnight shifts also for D−1.
+  throttled `RECOMPUTE_DAILY` per (employee, date) — for cross-midnight shifts also for D−1. The organisation's
+  `processingDelaySeconds` is the throttle window: a day not recalculated within the last window is recomputed at once (a
+  pushed punch reaches the register within seconds), a day recalculated less than a window ago at the end of that window.
 - The recompute job loads events in `[date − 1, date + 2)` (branch timezone), resolves shift and rule set, holidays
   (branch calendar), weekly-off (employee → branch → org), approved leave, passes `now`, writes the record with
   `calculation_version + 1`, a history snapshot when anything changed, and emits `attendance.created`/`attendance.updated`.
