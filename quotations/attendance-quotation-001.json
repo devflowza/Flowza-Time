@@ -1,0 +1,91 @@
+{
+  "quotationId": "QT-2026-001",
+  "date": "2026-10-01",
+  "validUntil": "2026-10-31",
+  "client": {
+    "name": "To Be Determined",
+    "email": "client@example.com",
+    "phone": "+968 XXXXXXXX"
+  },
+  "lineItems": [
+    {
+      "id": 1,
+      "description": "Attendance Management System - Device Setup & Configuration",
+      "details": "Complete setup and configuration of biometric/RFID attendance devices for 20 users. Includes device provisioning, network integration, employee enrollment, and initial system training.",
+      "quantity": 1,
+      "unit": "Setup",
+      "unitPrice": 300,
+      "currency": "OMR",
+      "total": 300,
+      "type": "one-time"
+    },
+    {
+      "id": 2,
+      "description": "Cloud-Based Attendance Platform - Year 1 Subscription",
+      "details": "Annual subscription to FlowZa Time cloud attendance platform for 20 users. Includes real-time attendance tracking, automated reporting, leave management, mobile app access, and 24/7 technical support.",
+      "quantity": 1,
+      "unit": "Year",
+      "unitPrice": 80,
+      "currency": "OMR",
+      "total": 80,
+      "type": "subscription",
+      "period": "Year 1"
+    },
+    {
+      "id": 3,
+      "description": "Cloud-Based Attendance Platform - Year 2 Subscription",
+      "details": "Annual subscription to FlowZa Time cloud attendance platform for 20 users (Year 2). Includes real-time attendance tracking, automated reporting, leave management, mobile app access, and 24/7 technical support.",
+      "quantity": 1,
+      "unit": "Year",
+      "unitPrice": 80,
+      "currency": "OMR",
+      "total": 80,
+      "type": "subscription",
+      "period": "Year 2"
+    }
+  ],
+  "summary": {
+    "subtotal": 460,
+    "tax": 0,
+    "discount": 0,
+    "total": 460,
+    "currency": "OMR"
+  },
+  "serviceInclusions": [
+    "20-user license capacity",
+    "Biometric device integration and setup",
+    "Real-time attendance tracking",
+    "Automated daily attendance reports",
+    "Leave management system",
+    "Mobile employee app",
+    "Multi-language support (English & Arabic)",
+    "API access for third-party integrations",
+    "Weekly automated backup",
+    "24/7 technical support",
+    "User training and onboarding",
+    "System administration tools"
+  ],
+  "paymentTerms": {
+    "description": "Payment Schedule",
+    "installments": [
+      {
+        "description": "Setup & Year 1 Subscription",
+        "amount": 380,
+        "dueDate": "Upon contract signing",
+        "details": "Device setup (300 OMR) + Year 1 subscription (80 OMR)"
+      },
+      {
+        "description": "Year 2 Subscription",
+        "amount": 80,
+        "dueDate": "On anniversary date",
+        "details": "Annual renewal on the same date as Year 1"
+      }
+    ]
+  },
+  "notes": {
+    "terms": "This quotation is valid for 30 days from the date above. Prices do not include VAT where applicable.",
+    "technicalRequirements": "Internet connectivity (minimum 2 Mbps), secure network for device integration",
+    "implementation": "Typical implementation and go-live within 2-3 weeks of contract signing",
+    "additionalServices": "Additional users beyond 20 can be added at 4 OMR per user per year. Custom device integrations available upon request."
+  }
+}

@@ -1,0 +1,520 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FlowZa Time - Quotation QT-2026-001</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            line-height: 1.6;
+            color: #333;
+            background: #f5f5f5;
+        }
+
+        .container {
+            max-width: 900px;
+            margin: 20px auto;
+            background: white;
+            padding: 40px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+
+        .header {
+            display: flex;
+            justify-content: space-between;
+            align-items: start;
+            border-bottom: 3px solid #0066cc;
+            padding-bottom: 30px;
+            margin-bottom: 30px;
+        }
+
+        .company-info h1 {
+            font-size: 28px;
+            color: #0066cc;
+            margin-bottom: 5px;
+        }
+
+        .company-info p {
+            font-size: 12px;
+            color: #666;
+            margin: 2px 0;
+        }
+
+        .quotation-meta {
+            text-align: right;
+            font-size: 13px;
+        }
+
+        .quotation-meta h3 {
+            color: #0066cc;
+            font-size: 14px;
+            margin-bottom: 10px;
+        }
+
+        .meta-row {
+            display: flex;
+            justify-content: space-between;
+            margin: 5px 0;
+            min-width: 250px;
+        }
+
+        .meta-label {
+            font-weight: 600;
+            color: #333;
+        }
+
+        .meta-value {
+            color: #666;
+        }
+
+        .client-section {
+            margin-bottom: 30px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 40px;
+        }
+
+        .client-info, .quotation-info {
+            font-size: 13px;
+        }
+
+        .client-info h4, .quotation-info h4 {
+            color: #0066cc;
+            font-size: 12px;
+            font-weight: 700;
+            text-transform: uppercase;
+            margin-bottom: 10px;
+            border-bottom: 1px solid #e0e0e0;
+            padding-bottom: 5px;
+        }
+
+        .client-info p, .quotation-info p {
+            margin: 5px 0;
+            color: #444;
+        }
+
+        .line-items {
+            margin-bottom: 30px;
+            overflow-x: auto;
+        }
+
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            font-size: 13px;
+        }
+
+        thead {
+            background: #f0f5ff;
+            border-top: 2px solid #0066cc;
+            border-bottom: 2px solid #0066cc;
+        }
+
+        th {
+            padding: 12px;
+            text-align: left;
+            font-weight: 600;
+            color: #0066cc;
+        }
+
+        td {
+            padding: 12px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        tr:last-child td {
+            border-bottom: none;
+        }
+
+        .description {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .item-details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 3px;
+            font-weight: normal;
+        }
+
+        .number {
+            text-align: right;
+        }
+
+        .summary-section {
+            display: flex;
+            justify-content: flex-end;
+            margin-bottom: 30px;
+        }
+
+        .summary-box {
+            width: 350px;
+        }
+
+        .summary-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            font-size: 13px;
+            border-bottom: 1px solid #e0e0e0;
+        }
+
+        .summary-row.total {
+            border-top: 2px solid #0066cc;
+            border-bottom: 2px solid #0066cc;
+            padding: 12px 0;
+            font-size: 16px;
+            font-weight: 700;
+            color: #0066cc;
+        }
+
+        .summary-label {
+            font-weight: 500;
+            color: #333;
+        }
+
+        .summary-value {
+            text-align: right;
+            color: #666;
+        }
+
+        .summary-row.total .summary-value {
+            color: #0066cc;
+        }
+
+        .inclusions {
+            margin-bottom: 30px;
+            page-break-inside: avoid;
+        }
+
+        .inclusions h3 {
+            color: #0066cc;
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+            border-bottom: 2px solid #0066cc;
+            padding-bottom: 8px;
+        }
+
+        .inclusions ul {
+            list-style: none;
+            columns: 2;
+            gap: 20px;
+        }
+
+        .inclusions li {
+            padding: 6px 0;
+            padding-left: 25px;
+            position: relative;
+            font-size: 13px;
+            color: #444;
+            break-inside: avoid;
+        }
+
+        .inclusions li:before {
+            content: "✓";
+            position: absolute;
+            left: 0;
+            color: #0066cc;
+            font-weight: bold;
+        }
+
+        .payment-section {
+            margin-bottom: 30px;
+            background: #f9f9f9;
+            padding: 20px;
+            border-left: 4px solid #0066cc;
+        }
+
+        .payment-section h3 {
+            color: #0066cc;
+            font-size: 14px;
+            font-weight: 700;
+            margin-bottom: 15px;
+            text-transform: uppercase;
+        }
+
+        .payment-item {
+            margin-bottom: 15px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e0e0e0;
+            font-size: 13px;
+        }
+
+        .payment-item:last-child {
+            border-bottom: none;
+            margin-bottom: 0;
+            padding-bottom: 0;
+        }
+
+        .payment-description {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 3px;
+        }
+
+        .payment-amount {
+            font-size: 14px;
+            font-weight: 700;
+            color: #0066cc;
+            margin-bottom: 3px;
+        }
+
+        .payment-due {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 3px;
+        }
+
+        .payment-details {
+            font-size: 12px;
+            color: #888;
+            font-style: italic;
+        }
+
+        .notes-section {
+            margin-bottom: 30px;
+            background: #fff8f0;
+            padding: 20px;
+            border-left: 4px solid #ff9800;
+            font-size: 12px;
+        }
+
+        .notes-section h3 {
+            color: #ff9800;
+            font-size: 13px;
+            font-weight: 700;
+            margin-bottom: 10px;
+            text-transform: uppercase;
+        }
+
+        .notes-section p {
+            color: #555;
+            margin-bottom: 8px;
+            line-height: 1.5;
+        }
+
+        .notes-section p:last-child {
+            margin-bottom: 0;
+        }
+
+        .footer {
+            border-top: 1px solid #e0e0e0;
+            padding-top: 20px;
+            text-align: center;
+            font-size: 11px;
+            color: #999;
+            margin-top: 30px;
+        }
+
+        @media print {
+            body {
+                background: white;
+            }
+            .container {
+                box-shadow: none;
+                margin: 0;
+                padding: 20px;
+            }
+            .page-break {
+                page-break-after: always;
+            }
+        }
+
+        @media (max-width: 768px) {
+            .container {
+                padding: 20px;
+            }
+            .header {
+                flex-direction: column;
+                gap: 20px;
+            }
+            .client-section {
+                grid-template-columns: 1fr;
+            }
+            .inclusions ul {
+                columns: 1;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="company-info">
+                <h1>FlowZa Time</h1>
+                <p>Cloud Attendance Management System</p>
+                <p>Oman | GCC Region</p>
+                <p>www.flowza.ai</p>
+            </div>
+            <div class="quotation-meta">
+                <h3>QUOTATION</h3>
+                <div class="meta-row">
+                    <span class="meta-label">Quotation ID:</span>
+                    <span class="meta-value">QT-2026-001</span>
+                </div>
+                <div class="meta-row">
+                    <span class="meta-label">Date:</span>
+                    <span class="meta-value">October 1, 2026</span>
+                </div>
+                <div class="meta-row">
+                    <span class="meta-label">Valid Until:</span>
+                    <span class="meta-value">October 31, 2026</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Client Information -->
+        <div class="client-section">
+            <div class="client-info">
+                <h4>Bill To</h4>
+                <p><strong>Client Name</strong></p>
+                <p>Contact: [Client Contact Person]</p>
+                <p>Email: [client@example.com]</p>
+                <p>Phone: [+968 XXXXXXXX]</p>
+                <p>Organization: [Organization Name]</p>
+            </div>
+            <div class="quotation-info">
+                <h4>Project Details</h4>
+                <p><strong>Project:</strong> Attendance System Implementation</p>
+                <p><strong>Duration:</strong> 24 Months</p>
+                <p><strong>User Count:</strong> 20 Users</p>
+                <p><strong>Implementation Timeline:</strong> 2-3 Weeks</p>
+            </div>
+        </div>
+
+        <!-- Line Items -->
+        <div class="line-items">
+            <table>
+                <thead>
+                    <tr>
+                        <th>Item</th>
+                        <th>Description</th>
+                        <th style="width: 80px;">Unit</th>
+                        <th style="width: 100px;" class="number">Unit Price</th>
+                        <th style="width: 100px;" class="number">Total (OMR)</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>1</td>
+                        <td>
+                            <div class="description">Device Setup & Configuration</div>
+                            <div class="item-details">Complete setup and configuration of biometric/RFID attendance devices for 20 users. Includes device provisioning, network integration, employee enrollment, and initial system training.</div>
+                        </td>
+                        <td>One-time</td>
+                        <td class="number">300.00</td>
+                        <td class="number"><strong>300.00</strong></td>
+                    </tr>
+                    <tr>
+                        <td>2</td>
+                        <td>
+                            <div class="description">Annual Subscription - Year 1</div>
+                            <div class="item-details">Cloud-based attendance platform subscription for 20 users. Includes real-time tracking, automated reporting, leave management, mobile app, and 24/7 technical support.</div>
+                        </td>
+                        <td>Annual</td>
+                        <td class="number">80.00</td>
+                        <td class="number"><strong>80.00</strong></td>
+                    </tr>
+                    <tr>
+                        <td>3</td>
+                        <td>
+                            <div class="description">Annual Subscription - Year 2</div>
+                            <div class="item-details">Cloud-based attendance platform subscription renewal for 20 users (Year 2). Includes real-time tracking, automated reporting, leave management, mobile app, and 24/7 technical support.</div>
+                        </td>
+                        <td>Annual</td>
+                        <td class="number">80.00</td>
+                        <td class="number"><strong>80.00</strong></td>
+                    </tr>
+                </tbody>
+            </table>
+        </div>
+
+        <!-- Summary -->
+        <div class="summary-section">
+            <div class="summary-box">
+                <div class="summary-row">
+                    <span class="summary-label">Subtotal:</span>
+                    <span class="summary-value">460.00 OMR</span>
+                </div>
+                <div class="summary-row">
+                    <span class="summary-label">Tax (VAT):</span>
+                    <span class="summary-value">0.00 OMR</span>
+                </div>
+                <div class="summary-row">
+                    <span class="summary-label">Discount:</span>
+                    <span class="summary-value">0.00 OMR</span>
+                </div>
+                <div class="summary-row total">
+                    <span class="summary-label">TOTAL:</span>
+                    <span class="summary-value">460.00 OMR</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Service Inclusions -->
+        <div class="inclusions">
+            <h3>What's Included</h3>
+            <ul>
+                <li>20-user license capacity</li>
+                <li>Biometric device integration and setup</li>
+                <li>Real-time attendance tracking</li>
+                <li>Automated daily attendance reports</li>
+                <li>Leave management system</li>
+                <li>Mobile employee app (iOS/Android)</li>
+                <li>Multi-language support (English & Arabic)</li>
+                <li>API access for third-party integrations</li>
+                <li>Weekly automated cloud backup</li>
+                <li>24/7 technical support and maintenance</li>
+                <li>Onboarding training for HR team</li>
+                <li>System administration tools and dashboard</li>
+            </ul>
+        </div>
+
+        <!-- Payment Terms -->
+        <div class="payment-section">
+            <h3>Payment Schedule</h3>
+
+            <div class="payment-item">
+                <div class="payment-description">Setup & Year 1 Subscription</div>
+                <div class="payment-amount">380.00 OMR</div>
+                <div class="payment-due">Due: Upon contract signing</div>
+                <div class="payment-details">Device setup (300 OMR) + Year 1 subscription (80 OMR)</div>
+            </div>
+
+            <div class="payment-item">
+                <div class="payment-description">Year 2 Subscription Renewal</div>
+                <div class="payment-amount">80.00 OMR</div>
+                <div class="payment-due">Due: On anniversary date (Year 1 + 12 months)</div>
+                <div class="payment-details">Annual subscription renewal for continued service</div>
+            </div>
+        </div>
+
+        <!-- Notes & Terms -->
+        <div class="notes-section">
+            <h3>Important Information</h3>
+            <p><strong>Quotation Validity:</strong> This quotation is valid for 30 days from the date above.</p>
+            <p><strong>Technical Requirements:</strong> Internet connectivity (minimum 2 Mbps recommended), secure network for device integration.</p>
+            <p><strong>Implementation:</strong> Typical implementation and go-live within 2-3 weeks of contract signing.</p>
+            <p><strong>Additional Users:</strong> Additional users beyond 20 can be added at 4 OMR per user per year.</p>
+            <p><strong>Tax:</strong> Prices shown do not include VAT where applicable. VAT will be added at current government rate if applicable.</p>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <p>This quotation is confidential and intended solely for the named recipient. For questions, please contact our sales team.</p>
+            <p>FlowZa Time | Cloud Attendance Management Solutions</p>
+        </div>
+    </div>
+</body>
+</html>
