@@ -53,10 +53,19 @@ const CSS = `
   .notes { font-size: 7pt; color: #444; margin-top: 4px; }
   .end { text-align: center; font-weight: 700; margin-top: 10px; border-top: 1px solid #b91c1c; border-bottom: 1px solid #b91c1c; padding: 3px; }
   .end + .end-title { text-align: center; font-weight: 700; margin-top: 4px; }
+  th .sub { display: block; font-weight: 400; font-size: 85%; color: #555; }
+  .section.keep { break-inside: avoid; page-break-inside: avoid; }
+  .compact table { font-size: 7pt; }
+  .compact th, .compact td { padding: 1px 2px; }
+  .compact tbody td { border-bottom: .5px solid #d1d5db; }
+  .compact .section { margin-top: 8px; }
+  .compact .fields { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+  .compact .fields .f { grid-template-columns: 7em minmax(0, 1fr); }
   @page { margin: ${PAGE_MARGIN_MM.top}mm ${PAGE_MARGIN_MM.right}mm ${PAGE_MARGIN_MM.bottom}mm ${PAGE_MARGIN_MM.left}mm; }
 `;
 
 const cls = (parts: Array<string | false | undefined | null>): string => { const s = parts.filter(Boolean).join(' '); return s ? ` class="${s}"` : ''; };
+const headLabel = (c: ReportColumn): string => escapeHtml(c.label) + (c.subLabel ? `<span class="sub">${escapeHtml(c.subLabel)}</span>` : '');
 
 function renderCell(c: ReportCell, col: ReportColumn | undefined): string {
   const align = c.align ?? col?.align;
@@ -69,17 +78,17 @@ function renderCell(c: ReportCell, col: ReportColumn | undefined): string {
 
 function renderHeader(columns: ReportColumn[]): string {
   const grouped = columns.some((c) => c.group);
-  if (!grouped) return `<thead><tr>${columns.map((c) => `<th${cls([c.align, c.mono && 'mono'])}>${escapeHtml(c.label)}</th>`).join('')}</tr></thead>`;
+  if (!grouped) return `<thead><tr>${columns.map((c) => `<th${cls([c.align, c.mono && 'mono'])}>${headLabel(c)}</th>`).join('')}</tr></thead>`;
   // two-level header: consecutive columns sharing a group get one spanning cell above their own labels
   const top: string[] = [];
   for (let i = 0; i < columns.length;) {
     const c = columns[i]!;
-    if (!c.group) { top.push(`<th rowspan="2"${cls([c.align, c.mono && 'mono'])}>${escapeHtml(c.label)}</th>`); i += 1; continue; }
+    if (!c.group) { top.push(`<th rowspan="2"${cls([c.align, c.mono && 'mono'])}>${headLabel(c)}</th>`); i += 1; continue; }
     let j = i; while (j < columns.length && columns[j]!.group === c.group) j += 1;
     top.push(`<th class="group" colspan="${j - i}">${escapeHtml(c.group)}</th>`);
     i = j;
   }
-  const bottom = columns.filter((c) => c.group).map((c) => `<th${cls([c.align, c.mono && 'mono'])}>${escapeHtml(c.label)}</th>`).join('');
+  const bottom = columns.filter((c) => c.group).map((c) => `<th${cls([c.align, c.mono && 'mono'])}>${headLabel(c)}</th>`).join('');
   return `<thead><tr>${top.join('')}</tr><tr>${bottom}</tr></thead>`;
 }
 
@@ -89,7 +98,7 @@ function renderSection(doc: ReportDocument, s: ReportSection, showSuper: boolean
   const heading = s.heading ? `<div class="heading">${s.heading.label ? `<span class="label">${escapeHtml(s.heading.label)}</span>` : ''}<span class="value">${escapeHtml(s.heading.value)}</span></div>` : '';
   const fields = s.fields?.length ? `<div class="fields">${s.fields.map((f) => `<div class="f"><span class="k">${escapeHtml(f.label)}</span><span class="v${f.mono ? ' mono' : ''}">${escapeHtml(f.value)}</span></div>`).join('')}</div>` : '';
   const body = s.rows.map((r) => `<tr${r.kind === 'total' ? ' class="total"' : ''}>${r.cells.map((c, i) => renderCell(c, columns[i])).join('')}</tr>`).join('');
-  return `<div class="section${s.pageBreakBefore ? ' break' : ''}">${superHeading}${heading}${fields}<table>${renderHeader(columns)}<tbody>${body}</tbody></table></div>`;
+  return `<div class="section${s.pageBreakBefore ? ' break' : ''}${s.keepTogether ? ' keep' : ''}">${superHeading}${heading}${fields}<table>${renderHeader(columns)}<tbody>${body}</tbody></table></div>`;
 }
 
 /** Full HTML document for one report. Header/footer are separate templates (Chromium repeats them per page). */
@@ -98,7 +107,7 @@ export function renderHtml(doc: ReportDocument): string {
     ? `<div class="legend"><div class="lt">${escapeHtml(doc.legendTitle)}</div><div class="items">${doc.legend.map((l) => `<span>${escapeHtml(l.code)} - ${escapeHtml(l.label)}</span>`).join(' ; ')}</div>${doc.notes.length ? `<div class="notes">${doc.notes.map(escapeHtml).join('<br>')}</div>` : ''}</div>`
     : doc.notes.length ? `<div class="legend"><div class="notes">${doc.notes.map(escapeHtml).join('<br>')}</div></div>` : '';
   const end = doc.endOfReport ? `<div class="end">${escapeHtml(doc.endOfReportLabel)}</div><div class="end-title">${escapeHtml(doc.title)}</div>` : '';
-  return `<!doctype html><html lang="${doc.locale}" dir="${doc.dir}"><head><meta charset="utf-8"><title>${escapeHtml(doc.title)}</title><style>${CSS}</style></head><body>`
+  return `<!doctype html><html lang="${doc.locale}" dir="${doc.dir}"><head><meta charset="utf-8"><title>${escapeHtml(doc.title)}</title><style>${CSS}</style></head><body${doc.density === 'compact' ? ' class="compact"' : ''}>`
     + `<div class="head"><div class="company">${escapeHtml(doc.company)}</div><div class="title">${escapeHtml(doc.title)}</div>${doc.period ? `<div class="period">${escapeHtml(doc.period)}</div>` : ''}</div>`
     + doc.sections.map((s, i) => renderSection(doc, s, i === 0 || doc.sections[i - 1]!.superHeading !== s.superHeading)).join('')
     + legend + end

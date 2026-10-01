@@ -29,6 +29,8 @@ export interface ReportColumn {
   mono?: boolean;
   /** Second-level header: columns sharing a `group` print under one spanning header cell (Weekly: Sat → MornWT | EvenWT). */
   group?: string;
+  /** A smaller second line under the label (Monthly Detail: the weekday under each day of the month). */
+  subLabel?: string;
 }
 
 export interface ReportRow { kind?: 'data' | 'total'; cells: ReportCell[] }
@@ -45,6 +47,8 @@ export interface ReportSection {
   columns?: ReportColumn[];
   rows: ReportRow[];
   pageBreakBefore?: boolean;
+  /** Keep the section on one page when it fits (Monthly Detail: one employee's month grid is never split). */
+  keepTogether?: boolean;
 }
 
 export interface LegendEntry { code: string; label: string }
@@ -55,6 +59,8 @@ export interface ReportDocument {
   company: string;
   period: string | null;
   orientation: 'portrait' | 'landscape';
+  /** `compact` prints the tables in a smaller face with ruled rows, for grids of ~33 columns (Monthly Detail). */
+  density?: 'normal' | 'compact';
   columns: ReportColumn[];
   sections: ReportSection[];
   legend: LegendEntry[] | null;
