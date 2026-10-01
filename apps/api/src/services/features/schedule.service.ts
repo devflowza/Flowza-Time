@@ -33,6 +33,7 @@ function shiftValues(input: Partial<ShiftInput>): Record<string, unknown> {
   const v: Record<string, unknown> = {};
   for (const [k, val] of Object.entries(input)) if (val !== undefined) v[k] = k === 'breaks' ? JSON.stringify(val) : val;
   if (input.type === 'FLEXIBLE') { v.startTime = input.startTime ?? null; v.endTime = input.endTime ?? null; }
+  if (input.type === 'FIXED') { v.coreStart = null; v.coreEnd = null; } // core hours belong to FLEXIBLE shifts; never left behind
   return v;
 }
 

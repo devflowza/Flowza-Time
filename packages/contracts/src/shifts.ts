@@ -11,8 +11,9 @@ export const shiftInputSchema = z.object({
   startTime: timeSchema.optional(),
   endTime: timeSchema.optional(),
   requiredMinutes: z.number().int().min(0).max(1440).optional(),
-  coreStart: timeSchema.optional(),
-  coreEnd: timeSchema.optional(),
+  /** FLEXIBLE only, optional: arriving after `coreStart` is late, leaving before `coreEnd` is early. `null` clears them on PATCH. */
+  coreStart: timeSchema.nullable().optional(),
+  coreEnd: timeSchema.nullable().optional(),
   dayBoundary: timeSchema.default('04:00'),
   breaks: z.array(shiftBreakSchema).max(6).default([]),
   punchInWindowBeforeMinutes: z.number().int().min(0).max(720).default(240),

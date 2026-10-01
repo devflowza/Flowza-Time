@@ -69,6 +69,23 @@ describe('shifts and assignments', () => {
     const on = await h.request('GET', `${base()}/shifts/resolve?employeeId=${f.e3}&date=2026-01-08`, { token: f.hrAdmin });
     expect(on.body.data.shift.id).toBe(shiftId);
   });
+
+  it('clears a flexible shift\'s core hours with null and never keeps them on a fixed shift', async () => {
+    const flex = await h.request('POST', `${base()}/shifts`, { token: f.hrAdmin, body: { code: 'EVE', name: 'Evening', type: 'FLEXIBLE', requiredMinutes: 480, coreStart: '17:00', coreEnd: '04:00' } });
+    expect(flex.status).toBe(201);
+    expect(flex.body.data).toMatchObject({ coreStart: '17:00', coreEnd: '04:00' });
+    const omitted = await h.request('PATCH', `${base()}/shifts/${flex.body.data.id}`, { token: f.hrAdmin, body: { name: 'Evening shift' } });
+    expect(omitted.body.data).toMatchObject({ name: 'Evening shift', coreStart: '17:00', coreEnd: '04:00' }); // absent = unchanged
+    const cleared = await h.request('PATCH', `${base()}/shifts/${flex.body.data.id}`, { token: f.hrAdmin, body: { type: 'FLEXIBLE', coreStart: null, coreEnd: null } });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.data).toMatchObject({ requiredMinutes: 480, coreStart: null, coreEnd: null });
+
+    const again = await h.request('PATCH', `${base()}/shifts/${flex.body.data.id}`, { token: f.hrAdmin, body: { coreStart: '10:00', coreEnd: '14:00' } });
+    expect(again.body.data).toMatchObject({ coreStart: '10:00', coreEnd: '14:00' });
+    const fixed = await h.request('PATCH', `${base()}/shifts/${flex.body.data.id}`, { token: f.hrAdmin, body: { type: 'FIXED', startTime: '08:00', endTime: '16:00' } });
+    expect(fixed.status).toBe(200);
+    expect(fixed.body.data).toMatchObject({ type: 'FIXED', coreStart: null, coreEnd: null });
+  });
 });
 
 describe('holidays, leave and rule sets', () => {
