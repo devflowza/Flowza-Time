@@ -21,10 +21,12 @@ export function createSupabasePlatformClients(opts: { url: string; serviceRoleKe
       async publish(channel, event, payload) {
         try {
           const ch = client.channel(channel, { config: { private: true } });
-          await ch.send({ type: 'broadcast', event, payload });
+          // an unjoined channel broadcasts over REST and reports a failure as its result ('error' / 'timed out'), never by throwing
+          const result = await ch.send({ type: 'broadcast', event, payload });
           await client.removeChannel(ch);
+          if (result !== 'ok') opts.log.warn({ event: 'realtime_publish_failed', channel, eventType: event, result });
         } catch (err) {
-          opts.log.warn({ event: 'realtime_publish_failed', channel, err: (err as Error).message });
+          opts.log.warn({ event: 'realtime_publish_failed', channel, eventType: event, err: (err as Error).message });
         }
       },
     },

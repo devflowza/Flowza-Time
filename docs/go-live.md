@@ -116,7 +116,7 @@ DATABASE_POOL_MAX=10
 FLOWZA_CREDENTIALS_MASTER_KEYS=<from step 0>
 FLOWZA_DEVICE_PUSH_SECRET=<from step 0>
 API_PUBLIC_URL=https://<api-host>
-WEB_ORIGINS=https://time.flowza.ai
+WEB_ORIGINS=https://time.flowza.ai,https://time.flowza.com
 TRUST_PROXY=true
 ```
 
@@ -140,7 +140,16 @@ Optional:
 `WEB_ORIGINS` must be the exact browser origin, comma-separated for more than one. A mismatch shows up as a CORS
 failure in the browser with the API logging nothing — the request never reaches a handler.
 
-The canonical origin is the custom domain, `https://time.flowza.ai`. Deliberately **not** listed: the
+The canonical origin is the custom domain, `https://time.flowza.ai`; `https://time.flowza.com` serves the same Pages
+build as an alias and is listed too (it calls the same `time-api.flowza.ai`). Check an origin with a preflight — an
+accepted one gets `access-control-allow-origin` back, a missing one gets a 204 without it:
+
+```bash
+curl -si -X OPTIONS https://time-api.flowza.ai/api/v1/me \
+  -H 'Origin: https://time.flowza.com' -H 'Access-Control-Request-Method: GET' | grep -i access-control-allow-origin
+```
+
+Deliberately **not** listed: the
 `*.pages.dev` deployment URLs. Every Cloudflare preview build gets its own hostname, so allowing them either means an
 unmaintainable list or a wildcard that lets any preview talk to production data. If you want previews to work, point
 them at a separate staging API rather than widening this one.
@@ -385,7 +394,8 @@ together rather than one at a time, because two of them appear in configuration 
 
 | Name | Serves | Notes |
 |---|---|---|
-| `time.flowza.ai` | the web app | live |
+| `time.flowza.ai` | the web app | live, canonical (e-mail links, Supabase Site URL) |
+| `time.flowza.com` | the web app (alias, same Pages project) | live; needs its own `WEB_ORIGINS` entry and Supabase redirect URLs |
 | `time-api.flowza.ai` (suggested) | `apps/api` | goes in `API_PUBLIC_URL` and `VITE_API_URL` |
 | `time-push.flowza.ai` (suggested) | device push ingress | **must accept plain HTTP on port 80** — see below |
 
@@ -412,12 +422,16 @@ relies on password recovery.
 | Field | Value |
 |---|---|
 | Site URL | `https://time.flowza.ai` |
-| Redirect URLs | `https://time.flowza.ai/auth/reset`, `https://time.flowza.ai/auth/callback`, `https://time.flowza.ai/auth/invite**` |
+| Redirect URLs | `https://time.flowza.ai/auth/reset`, `https://time.flowza.ai/auth/callback`, `https://time.flowza.ai/auth/invite**`, and the same three on `https://time.flowza.com` |
 
 `/auth/invite**` is what makes invited-owner onboarding work: the acceptance page passes
 `emailRedirectTo: invitationUrl(token)` so the confirmation email returns the invitee to the exact link they started
 from. Without it Supabase falls back to the Site URL and drops a freshly confirmed invitee on the dashboard holding no
 membership — the one screen that cannot help them.
+
+The web builds these links from `window.location.origin`, so every domain the app is served from needs its own three
+entries. A missing one is not an error: Supabase silently falls back to the Site URL, and a user who asked for a reset
+on `time.flowza.com` lands on `time.flowza.ai` instead (a different origin, so signed out there).
 
 Add `http://localhost:5173/**` to the redirect list as well if developers need password reset to work locally.
 

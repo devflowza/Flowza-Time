@@ -11,6 +11,7 @@
     "pickEmployee": "Choose an employee…", "pickEmployeeHint": "Choose an employee and a date to see the day as the rules see it.",
     "expected": "Expected", "locked": "This date is in a locked period — unlock it before editing.",
     "checkIn": "Check-in", "checkOut": "Check-out", "outBeforeIn": "Check-out must be after check-in.", "nextDay": "Check-out on the next day",
+    "future": "{{at}} has not happened yet.", "futureHint": "It is {{now}} now ({{zone}}). A punch can only be recorded once it has happened: use a time up to now, or edit the day again after the shift.", "afterRefused": "No outcome for these times: fix the highlighted time to see what the rules make of it.",
     "status": "Status", "statusHint": "Leave on Automatic to let the rules decide; pick a status to override them.", "manualInForce": "A manual status is in force: {{status}}.",
     "autoStatus": "Automatic (from the rules)", "now": "Now", "after": "After the change",
     "statusWins": "{{status}} will override the rules for this day.", "policyStatus": "The status follows the rules.",
@@ -59,6 +60,10 @@
     "queued": "Punches are being re-read and the days recalculated.", "follow": "Follow", "reason": "Sync punches from the attendance register",
     "pickBranch": "Choose a branch or an employee first — your access covers selected branches only.", "future": "Nothing to sync yet for a future period.",
     "thisRequest": "This request", "jobIdHint": "Background job id (for support)"
+  },
+  "live": {
+    "on": "Live", "onHint": "New punches appear here on their own a few seconds after the device sends them.",
+    "polling": "Auto-refresh", "pollingHint": "Live updates are not connected: this page refreshes every 15 seconds."
   },
   "summary": {
     "title": "Attendance summary", "subtitle": "One row per employee for the month: days, hours and overtime from the daily records you can see.",

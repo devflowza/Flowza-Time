@@ -7,6 +7,7 @@ import { createHarness, fakeJob, type TestHarness } from '../../test/harness.js'
 import { loadReportContext } from './context.js';
 import { REPORT_DEFINITIONS } from './definitions/index.js';
 import { exportEmployeesHandler, generateReportHandler } from './generate.js';
+import { UNKNOWN_JOB_RETRY_SECONDS } from '../../runner.js';
 
 const ORG = '0b000000-0000-4000-a000-000000000001';
 const OWNER = 'b0000000-0000-4000-a000-000000000001';
@@ -148,13 +149,34 @@ describe('GENERATE_REPORT · daily_attendance', () => {
 });
 
 describe('GENERATE_REPORT · failure paths', () => {
-  it('fails a request for a type without a generator and tells the requester why', async () => {
+  it('fails a request for a type this build knows but cannot generate, and tells the requester why', async () => {
     const id = await request('payroll_summary', 'csv', { from: DATE, to: DATE });
     const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
     expect(res.status).toBe('FAILED');
     const r = await row(id);
     expect(r.status).toBe('FAILED');
     expect(r.error).toBe('This report type is not available yet.');
+    const failed = await h.tdb.adminDb.selectFrom('domainEvents').selectAll().where('eventType', '=', 'report.failed').execute();
+    expect(failed.some((e) => (e.payload as { reportId: string }).reportId === id)).toBe(true);
+  });
+  it('puts back a type this build has never heard of (queued by a newer API) instead of failing it for good', async () => {
+    // 2026-10-01: the reports worker predated monthly_summary and failed every request for it as "not available yet"
+    const id = await request('report_from_a_newer_build', 'xlsx', { month: '2017-11' });
+    const err = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }, 1)).catch((e: unknown) => e);
+    expect(err).toMatchObject({ code: 'DEPENDENCY_UNAVAILABLE', retryable: true, retryAfterMs: UNKNOWN_JOB_RETRY_SECONDS * 1000 });
+    const r = await row(id);
+    expect(r.status).toBe('QUEUED');
+    expect(r.error).toMatch(/will start automatically/);
+    const failed = await h.tdb.adminDb.selectFrom('domainEvents').selectAll().where('eventType', '=', 'report.failed').execute();
+    expect(failed.some((e) => (e.payload as { reportId: string }).reportId === id)).toBe(false);
+  });
+  it('fails a type this build has never heard of on the last attempt, saying to request it again', async () => {
+    const id = await request('report_from_a_newer_build', 'xlsx', { month: '2017-11' });
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }, 3));
+    expect(res.status).toBe('FAILED');
+    const r = await row(id);
+    expect(r.status).toBe('FAILED');
+    expect(r.error).toBe('The report service has not been updated for this report yet. Please request it again later.');
     const failed = await h.tdb.adminDb.selectFrom('domainEvents').selectAll().where('eventType', '=', 'report.failed').execute();
     expect(failed.some((e) => (e.payload as { reportId: string }).reportId === id)).toBe(true);
   });

@@ -48,6 +48,22 @@ export function checkOutBeforeIn(inIso: string | null, outIso: string | null): b
   return !!inIso && !!outIso && Date.parse(outIso) <= Date.parse(inIso);
 }
 
+/** Clock tolerance of the API's "a punch cannot be in the future" rule (hr-workspace.service `FUTURE_TOLERANCE_MS`). */
+export const FUTURE_TOLERANCE_MS = 5 * 60_000;
+
+/** Client-side mirror of the API rule: a proposed punch may not be later than now (plus the clock tolerance). */
+export function isFuturePunch(iso: string | null, nowMs: number): boolean {
+  return !!iso && Date.parse(iso) > nowMs + FUTURE_TOLERANCE_MS;
+}
+
+/** The field (`inAt` / `outAt`) a validation error of the preview / record-edit API names in `details.issues`, if any. */
+export function issueField(details: Record<string, unknown> | undefined): 'inAt' | 'outAt' | null {
+  const issues = details?.['issues'];
+  if (!Array.isArray(issues)) return null;
+  for (const i of issues as Array<{ path?: unknown }>) if (i?.path === 'inAt' || i?.path === 'outAt') return i.path;
+  return null;
+}
+
 /** Small coloured dots per flag family in a calendar cell (the full labels live in the tooltip). */
 export const FLAG_DOT: Record<string, string> = {
   LATE: 'bg-amber-500', EARLY_DEPARTURE: 'bg-amber-600', MISSING_IN: 'bg-red-600', MISSING_OUT: 'bg-red-600', OVERTIME: 'bg-blue-600',
