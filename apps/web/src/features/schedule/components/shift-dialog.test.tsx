@@ -51,12 +51,14 @@ describe('ShiftDialog', () => {
     await screen.findByText('Enter both core times, or turn core hours off.'); // switched on = both times needed
     expect(apiMock.post).not.toHaveBeenCalled();
     fireEvent.change(screen.getByLabelText(/Core hours to/), { target: { value: '14:00' } });
+    expect(screen.queryByRole('button', { name: 'Add break' })).not.toBeInTheDocument(); // breaks are off until switched on
+    fireEvent.click(screen.getByRole('switch', { name: 'Breaks' }));
     fireEvent.click(screen.getByRole('button', { name: 'Add break' }));
     fireEvent.click(screen.getByRole('button', { name: 'Create' }));
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
     const [path, body] = apiMock.post.mock.calls[0] as [string, Record<string, unknown>];
     expect(path).toBe('/orgs/org-1/shifts');
-    expect(body).toMatchObject({ code: 'MORN', name: 'Morning', type: 'FLEXIBLE', requiredMinutes: 480, coreStart: '10:00', coreEnd: '14:00', dayBoundary: '04:00', punchInWindowBeforeMinutes: 240, punchOutWindowAfterMinutes: 360, graceInMinutes: null, breaks: [{ start: '12:00', end: '13:00', paid: false }], status: 'active' });
+    expect(body).toMatchObject({ code: 'MORN', name: 'Morning', type: 'FLEXIBLE', requiredMinutes: 480, coreStart: '10:00', coreEnd: '14:00', dayBoundary: '00:00', punchInWindowBeforeMinutes: 240, punchOutWindowAfterMinutes: 360, graceInMinutes: null, graceOutMinutes: null, color: '#0f6e56', breaks: [{ start: '12:00', end: '13:00', paid: false }], status: 'active' });
     expect(body['startTime']).toBeUndefined(); // FIXED-only fields are cleared for FLEXIBLE
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
@@ -97,5 +99,73 @@ describe('ShiftDialog', () => {
     fireEvent.change(screen.getByLabelText(/^Name\*?$/), { target: { value: 'Night shift' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
     await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/orgs/org-1/shifts/s1', expect.objectContaining({ name: 'Night shift', type: 'FIXED', startTime: '22:00', endTime: '06:00', dayBoundary: '12:00', coreStart: null, coreEnd: null, graceInMinutes: 5, breaks: [{ minutes: 30, paid: true }] })));
+  });
+
+  it('starts a new flexible shift\'s day boundary at 12:00 AM', async () => {
+    renderWithProviders(<ShiftDialog open onOpenChange={() => {}} shift={null} />);
+    fireEvent.keyDown(screen.getByRole('combobox', { name: /Type/ }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Flexible' }));
+    expect(await screen.findByLabelText(/Day boundary/)).toHaveValue('00:00');
+    expect(screen.getByTestId('boundary-guide')).toHaveTextContent("With 00:00, Monday's attendance day runs from Monday 00:00 to Monday 23:59.");
+  });
+
+  it('gives breaks, each punch window, each grace and the colour their own switch, all off but the colour on a new shift', () => {
+    renderWithProviders(<ShiftDialog open onOpenChange={() => {}} shift={null} />);
+    for (const name of ['Breaks', 'Custom punch-in window', 'Custom punch-out window', 'Custom grace in', 'Custom grace out']) expect(screen.getByRole('switch', { name })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Colour' })).toBeChecked();
+    expect(screen.queryByLabelText('Punch-in window (min before)')).not.toBeInTheDocument();
+    expect(screen.queryByLabelText('Grace in (min)')).not.toBeInTheDocument();
+    expect(screen.getByText('Off: punches are accepted from 240 min before the shift (platform default).')).toBeInTheDocument();
+    expect(screen.getByText("Off: the attendance rule set's grace applies.", { selector: '[data-testid="grace-in-block"] span' })).toBeInTheDocument();
+  });
+
+  it('keeps what was typed while a block is switched off and saves the platform default instead', async () => {
+    apiMock.post.mockResolvedValue({ data: { id: 's9' } });
+    renderWithProviders(<ShiftDialog open onOpenChange={() => {}} shift={null} />);
+    fireEvent.change(screen.getByLabelText(/^Code/), { target: { value: 'EARLY' } });
+    fireEvent.change(screen.getByLabelText(/^Name\*?$/), { target: { value: 'Early' } });
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Custom punch-in window' }));
+    expect(screen.getByLabelText('Punch-in window (min before)')).toHaveValue(240); // starts from the platform default
+    fireEvent.change(screen.getByLabelText('Punch-in window (min before)'), { target: { value: '90' } });
+    fireEvent.click(screen.getByRole('switch', { name: 'Custom punch-in window' }));
+    expect(screen.queryByLabelText('Punch-in window (min before)')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('switch', { name: 'Custom punch-in window' }));
+    expect(screen.getByLabelText('Punch-in window (min before)')).toHaveValue(90); // switching back on restores it
+    fireEvent.click(screen.getByRole('switch', { name: 'Custom punch-in window' })); // …and off again before saving
+
+    fireEvent.click(screen.getByRole('switch', { name: 'Custom grace out' }));
+    expect(screen.getByLabelText('Grace out (min)')).toHaveValue(0); // the rule-set default, to start from
+    fireEvent.click(screen.getByRole('switch', { name: 'Colour' }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
+    const [, body] = apiMock.post.mock.calls[0] as [string, Record<string, unknown>];
+    expect(body).toMatchObject({ punchInWindowBeforeMinutes: 240, punchOutWindowAfterMinutes: 360, graceInMinutes: null, graceOutMinutes: 0, breaks: [], color: null });
+  });
+
+  it('opens a saved shift with a block on exactly when it differs from the default, and switching blocks off clears them on PATCH', async () => {
+    apiMock.patch.mockResolvedValue({ data: { id: 's5' } });
+    const shift = { id: 's5', code: 'SITE', name: 'Site', nameAr: null, type: 'FIXED', startTime: '07:00', endTime: '16:00', requiredMinutes: null, coreStart: null, coreEnd: null, dayBoundary: '00:00', breaks: [{ minutes: 30, paid: false }], punchInWindowBeforeMinutes: 120, punchOutWindowAfterMinutes: 360, graceInMinutes: 15, graceOutMinutes: null, color: '#175cd3', status: 'active', crossesMidnight: false, createdAt: '', updatedAt: '' };
+    renderWithProviders(<ShiftDialog open onOpenChange={() => {}} shift={shift} />);
+    for (const name of ['Breaks', 'Custom punch-in window', 'Custom grace in', 'Colour']) expect(screen.getByRole('switch', { name })).toBeChecked();
+    for (const name of ['Custom punch-out window', 'Custom grace out']) expect(screen.getByRole('switch', { name })).not.toBeChecked();
+    expect(screen.getByLabelText('Punch-in window (min before)')).toHaveValue(120);
+    expect(screen.getByLabelText('Grace in (min)')).toHaveValue(15);
+
+    for (const name of ['Breaks', 'Custom punch-in window', 'Custom grace in', 'Colour']) fireEvent.click(screen.getByRole('switch', { name }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/orgs/org-1/shifts/s5', expect.objectContaining({ breaks: [], punchInWindowBeforeMinutes: 240, punchOutWindowAfterMinutes: 360, graceInMinutes: null, graceOutMinutes: null, color: null })));
+  });
+
+  it('refuses a switched-on grace without minutes', async () => {
+    renderWithProviders(<ShiftDialog open onOpenChange={() => {}} shift={null} />);
+    fireEvent.change(screen.getByLabelText(/^Code/), { target: { value: 'G' } });
+    fireEvent.change(screen.getByLabelText(/^Name\*?$/), { target: { value: 'Grace' } });
+    fireEvent.click(screen.getByRole('switch', { name: 'Custom grace in' }));
+    fireEvent.change(screen.getByLabelText('Grace in (min)'), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await screen.findByText('Enter the minutes, or switch this off.');
+    expect(apiMock.post).not.toHaveBeenCalled();
   });
 });

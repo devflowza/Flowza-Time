@@ -86,6 +86,17 @@ describe('shifts and assignments', () => {
     expect(fixed.status).toBe(200);
     expect(fixed.body.data).toMatchObject({ type: 'FIXED', coreStart: null, coreEnd: null });
   });
+
+  it('starts a new shift\'s day boundary at 12:00 AM and clears its colour with null (absent = unchanged)', async () => {
+    const created = await h.request('POST', `${base()}/shifts`, { token: f.hrAdmin, body: { code: 'MID', name: 'Midnight day', type: 'FLEXIBLE', requiredMinutes: 480, color: '#175cd3' } });
+    expect(created.status).toBe(201);
+    expect(created.body.data).toMatchObject({ dayBoundary: '00:00', punchInWindowBeforeMinutes: 240, punchOutWindowAfterMinutes: 360, color: '#175cd3' });
+    const omitted = await h.request('PATCH', `${base()}/shifts/${created.body.data.id}`, { token: f.hrAdmin, body: { name: 'Midnight day 2' } });
+    expect(omitted.body.data).toMatchObject({ name: 'Midnight day 2', dayBoundary: '00:00', color: '#175cd3' });
+    const cleared = await h.request('PATCH', `${base()}/shifts/${created.body.data.id}`, { token: f.hrAdmin, body: { color: null, graceInMinutes: null } });
+    expect(cleared.status).toBe(200);
+    expect(cleared.body.data).toMatchObject({ color: null, graceInMinutes: null, dayBoundary: '00:00' });
+  });
 });
 
 describe('holidays, leave and rule sets', () => {

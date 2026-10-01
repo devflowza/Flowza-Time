@@ -3,6 +3,12 @@ import { ASSIGNMENT_TARGETS, EMPLOYMENT_TYPES, HOLIDAY_TYPES, LEAVE_ACCRUALS, LE
 import { codeSchema, isoDateSchema, timeSchema, uuidSchema } from './common.js';
 import { shiftBreakSchema } from './attendance.js';
 
+/** A new shift's attendance day starts at midnight (12:00 AM): a plain calendar day. Only FLEXIBLE shifts read the boundary. */
+export const DEFAULT_SHIFT_DAY_BOUNDARY = '00:00';
+/** Platform default punch windows (minutes): what a shift uses unless its own window is switched on. */
+export const DEFAULT_PUNCH_IN_WINDOW_MINUTES = 240;
+export const DEFAULT_PUNCH_OUT_WINDOW_MINUTES = 360;
+
 export const shiftInputSchema = z.object({
   code: codeSchema,
   name: z.string().trim().min(1).max(120),
@@ -14,13 +20,14 @@ export const shiftInputSchema = z.object({
   /** FLEXIBLE only, optional: arriving after `coreStart` is late, leaving before `coreEnd` is early. `null` clears them on PATCH. */
   coreStart: timeSchema.nullable().optional(),
   coreEnd: timeSchema.nullable().optional(),
-  dayBoundary: timeSchema.default('04:00'),
+  dayBoundary: timeSchema.default(DEFAULT_SHIFT_DAY_BOUNDARY),
   breaks: z.array(shiftBreakSchema).max(6).default([]),
-  punchInWindowBeforeMinutes: z.number().int().min(0).max(720).default(240),
-  punchOutWindowAfterMinutes: z.number().int().min(0).max(720).default(360),
+  punchInWindowBeforeMinutes: z.number().int().min(0).max(720).default(DEFAULT_PUNCH_IN_WINDOW_MINUTES),
+  punchOutWindowAfterMinutes: z.number().int().min(0).max(720).default(DEFAULT_PUNCH_OUT_WINDOW_MINUTES),
   graceInMinutes: z.number().int().min(0).max(240).nullable().optional(),
   graceOutMinutes: z.number().int().min(0).max(240).nullable().optional(),
-  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).optional(),
+  /** `null` clears the colour on PATCH (the shift is shown in the neutral colour). */
+  color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
   status: z.enum(RECORD_STATUSES).default('active'),
 }).superRefine((v, ctx) => {
   if (v.type === 'FIXED' && (!v.startTime || !v.endTime)) ctx.addIssue({ code: 'custom', path: ['startTime'], message: 'Fixed shifts need start and end time' });

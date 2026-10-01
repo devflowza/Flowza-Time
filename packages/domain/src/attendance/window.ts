@@ -29,7 +29,7 @@ export interface PunchWindow {
   crossesMidnight: boolean;
 }
 
-export const DEFAULT_DAY_BOUNDARY = '04:00';
+export const DEFAULT_DAY_BOUNDARY = '00:00';
 const MIDNIGHT = '00:00';
 
 /** Ensures the zone is a valid IANA identifier; the engine never silently computes in UTC. */

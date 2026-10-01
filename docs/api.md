@@ -84,7 +84,7 @@ keys and per-operation options are documented in `apps/worker/src/handlers/sync/
 
 | Resource | Permissions | Notes |
 |---|---|---|
-| `/orgs/:orgId/shifts` (+ `/:id`) | `shift.view` / `shift.manage` | `shiftInputSchema`; delete refused (409) while assigned or referenced by a pattern; timing changes recompute from the earliest assignment. |
+| `/orgs/:orgId/shifts` (+ `/:id`) | `shift.view` / `shift.manage` | `shiftInputSchema` (`dayBoundary` defaults to `00:00`; PATCH `null` clears `color`, `graceInMinutes`/`graceOutMinutes` and the core hours, an absent field is unchanged); delete refused (409) while assigned or referenced by a pattern; timing changes recompute from the earliest assignment. |
 | `GET /orgs/:orgId/shifts/resolve?employeeId&date` | `shift.view` | `resolveShift` + `resolveRuleSet` from `@flowza/domain` over the org's assignments/patterns (employment history on the date, team memberships). |
 | `/orgs/:orgId/shift-patterns` | `shift.view` / `shift.manage` | Sequence validated (known shifts, days < cycle, unique). |
 | `/orgs/:orgId/shift-assignments` | `shift.view` / `shift.assign` | Branch resolved from the target (EMPLOYEE → employee branch, BRANCH → itself, DEPARTMENT/TEAM → their branch, ORGANIZATION → all-branch users only); overlap → `409 CONFLICT` (exclusion constraint); past-dated changes enqueue `RECALCULATE_RANGE` from `effectiveFrom` to today (`recalculationJobId` in the response). `PATCH` sets `effectiveTo`. |

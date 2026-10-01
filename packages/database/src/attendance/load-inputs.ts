@@ -83,7 +83,7 @@ export function toEngineShift(row: { id: string; code: string; name: string; typ
   return {
     id: row.id, code: String(row.code), name: row.name, type: row.type,
     startTime: hhmm(row.startTime), endTime: hhmm(row.endTime), requiredMinutes: row.requiredMinutes,
-    coreStart: hhmm(row.coreStart), coreEnd: hhmm(row.coreEnd), dayBoundary: hhmm(row.dayBoundary) ?? '04:00', breaks,
+    coreStart: hhmm(row.coreStart), coreEnd: hhmm(row.coreEnd), dayBoundary: hhmm(row.dayBoundary) ?? '00:00', breaks,
     punchInWindowBeforeMinutes: row.punchInWindowBeforeMinutes, punchOutWindowAfterMinutes: row.punchOutWindowAfterMinutes,
     graceInMinutes: row.graceInMinutes, graceOutMinutes: row.graceOutMinutes,
   };
