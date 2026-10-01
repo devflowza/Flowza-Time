@@ -83,6 +83,10 @@
       "name": "Monthly Attendance Summary",
       "description": "One row per employee for a month: present (a half day counts ½), late, half days, leave, absent, missed punch, holidays, weekly offs, days worked, worked and overtime hours, loss of pay and unexcused days, with a total row."
     },
+    "monthly_detail": {
+      "name": "Monthly Detail Report",
+      "description": "The Daily Report's detail for a whole month: per employee, every day's attendance code, IN and OUT times, worked, base and overtime hours, under time, late and early, with monthly totals and days per code."
+    },
     "weekly_attendance": {
       "name": "Weekly Report",
       "description": "The week containing the chosen date: first IN and last OUT per employee per day."

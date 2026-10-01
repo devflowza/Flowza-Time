@@ -7,7 +7,7 @@ import type { ReportCell, ReportColumn, ReportDocument, ReportSection } from '..
  */
 export interface FlatTable { header: string[]; rows: Array<{ values: Array<string | number | null>; cells: ReportCell[]; leading: string[] }> }
 
-const columnLabel = (c: ReportColumn): string => (c.group ? `${c.group} ${c.label}` : c.label);
+const columnLabel = (c: ReportColumn): string => [c.group, c.label, c.subLabel].filter(Boolean).join(' ');
 
 /** Spreadsheet-native emptiness: the printed dash stands for "nothing", so a sheet gets an empty cell, not text. */
 export const spreadsheetValue = (c: ReportCell): string | number | null => {

@@ -6,6 +6,7 @@ import { employeeAttendance } from './detail.js';
 import { employeeDirectory } from './employee-directory.js';
 import { missingPunchReport } from './missed-punch.js';
 import { monthlyAttendance } from './monthly.js';
+import { monthlyDetail } from './monthly-detail.js';
 import { monthlySummary } from './monthly-summary.js';
 import { attendanceSummary } from './summary.js';
 import { weeklyAttendance, weeklyInOut } from './weekly.js';
@@ -29,6 +30,7 @@ export const REPORT_DEFINITIONS: Partial<Record<ReportType, ReportDefinition>> =
   employee_directory: employeeDirectory,
   audit_report: auditReport,
   monthly_summary: monthlySummary,
+  monthly_detail: monthlyDetail,
 };
 
 export type { ReportDefinition } from './types.js';

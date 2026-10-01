@@ -20,6 +20,7 @@ const en = {
   'report.employee_directory.inactiveTitle': 'Inactive Employees Report',
   'report.audit_report.title': 'Audit Trail Report',
   'report.monthly_summary.title': 'Monthly Attendance Summary',
+  'report.monthly_detail.title': 'Monthly Detail Report',
 
   'period.fromTo': 'From {{from}} To {{to}}',
   'period.forPeriod': 'For the period : {{from}} to {{to}}',
@@ -99,6 +100,10 @@ const en = {
   'col.lopDays': 'LOP days',
   'col.unexcusedDays': 'Unexcused days',
   'col.source': 'Source',
+  // monthly_detail: the row captions of each employee's month grid
+  'col.day': 'Day',
+  'col.early': 'Early',
+  'col.total': 'Total',
   'source.live': 'Live',
   'source.finalized': 'Finalised',
 
@@ -107,6 +112,7 @@ const en = {
   'field.shift': 'Shift:',
   'field.dept': 'Dept:',
   'field.designation': 'Designation:',
+  'field.days': 'Days:',
 
   'status.active': 'Active',
   'status.inactive': 'Inactive',
@@ -125,6 +131,7 @@ const en = {
   'footer.policy': 'UNX = days marked unexcused; LOP = loss-of-pay days (half days = .5), after paid leave was charged first.',
   'footer.lop': 'LOP = loss-of-pay days (half days = .5), after paid leave was charged first.',
   'footer.summary': 'Present counts a half day as ½ (the other half is leave or absent). Finalised = the day counts of the finalised payroll period. Hours as {{notation}}.',
+  'footer.monthlyDetail': 'IN = first IN, OUT = last OUT of the day; Wrk Hrs = the time between them (h:mm); Late / Early = time after the shift start / before its end. Days = days per attendance code in the grid.',
   'notation.h.mm': 'hours.minutes (9.45 = 9 h 45 min)',
   'notation.hh:mm': 'hours:minutes',
 
@@ -151,6 +158,7 @@ const ar: Record<ReportLabelKey, string> = {
   'report.employee_directory.inactiveTitle': 'تقرير الموظفين غير النشطين',
   'report.audit_report.title': 'تقرير سجل التعديلات',
   'report.monthly_summary.title': 'ملخص الحضور الشهري',
+  'report.monthly_detail.title': 'التقرير الشهري التفصيلي',
 
   'period.fromTo': 'من {{from}} إلى {{to}}',
   'period.forPeriod': 'للفترة : {{from}} إلى {{to}}',
@@ -229,6 +237,9 @@ const ar: Record<ReportLabelKey, string> = {
   'col.lopDays': 'أيام الخصم',
   'col.unexcusedDays': 'أيام غير مبررة',
   'col.source': 'المصدر',
+  'col.day': 'اليوم',
+  'col.early': 'خروج مبكر',
+  'col.total': 'المجموع',
   'source.live': 'مباشر',
   'source.finalized': 'معتمد',
 
@@ -237,6 +248,7 @@ const ar: Record<ReportLabelKey, string> = {
   'field.shift': 'الوردية:',
   'field.dept': 'القسم:',
   'field.designation': 'المسمى الوظيفي:',
+  'field.days': 'الأيام:',
 
   'status.active': 'نشط',
   'status.inactive': 'غير نشط',
@@ -255,6 +267,7 @@ const ar: Record<ReportLabelKey, string> = {
   'footer.policy': 'غ/مبرر = الأيام المعلَّمة غير مبررة؛ خصم = أيام الخصم من الراتب (نصف اليوم = .5) بعد الخصم من الإجازة المدفوعة أولًا.',
   'footer.lop': 'خصم = أيام الخصم من الراتب (نصف اليوم = .5) بعد الخصم من الإجازة المدفوعة أولًا.',
   'footer.summary': 'يُحسب نصف اليوم ½ حضور (والنصف الآخر إجازة أو غياب). معتمد = أيام فترة الرواتب المعتمدة. الساعات بصيغة {{notation}}.',
+  'footer.monthlyDetail': 'الدخول = أول دخول، الخروج = آخر خروج في اليوم؛ ساعات العمل = المدة بينهما (س:د)؛ التأخير / الخروج المبكر = الوقت بعد بداية الوردية / قبل نهايتها. الأيام = عدد الأيام لكل رمز حضور في الجدول.',
   'notation.h.mm': 'ساعات.دقائق (9.45 = 9 س 45 د)',
   'notation.hh:mm': 'ساعات:دقائق',
 

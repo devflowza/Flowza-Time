@@ -260,6 +260,56 @@ describe('Phase 1 · the five layouts with existing keys', () => {
     expect(html).toContain('style="color:#1d4ed8;font-weight:700">OF</td>');
   });
 
+  it('Monthly Detail Report: per employee, every day of the month with code, IN/OUT and hours as the Daily Report prints them, totals and days per code', async () => {
+    const id = await request('monthly_detail', 'csv', { month: '2017-11' });
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    // five employees employed in November (never 9001, who left in June) × eleven rows each
+    expect(res).toMatchObject({ status: 'COMPLETED', rowCount: 55 });
+    const lines = csvLines(`${ORG}/${id}.csv`);
+    const weekdays = ['Wed', 'Thu', 'Fri', 'Sat', 'Sun', 'Mon', 'Tue'];
+    expect(lines[0]).toBe(['Employee', 'Dept', 'Card No', 'Shift', 'Designation', 'Days', 'Day', ...Array.from({ length: 30 }, (_, i) => `${i + 1} ${weekdays[i % 7]}`), 'Total'].join(','));
+    const lead = '2011  FAISAL,EL BEIT,,STAFF,Carpenter,PR 2 · AB 1 · OF 2';
+    const line = (caption: string, firstFive: Array<string | number>, total: string | number) => [lead, caption, ...firstFive, ...Array<string>(25).fill(''), total].join(',');
+    // the 1st: 8:39 am – 6:09 pm (9:30 span, 8.30 worked, UT 0.30); the 2nd: late 0.15, 8:45 am – 5:52 pm (8.18 worked, UT 0.42); off, off, absent
+    expect(lines.filter((l) => l.startsWith(lead))).toEqual([
+      line('Att Code', ['PR', 'PR', 'OF', 'OF', 'AB'], ''),
+      line('IN Time', ['8:39 am', '8:45 am', '', '', ''], ''),
+      line('OUT Time', ['6:09 pm', '5:52 pm', '', '', ''], ''),
+      line('Wrk Hrs', [570, 547, '', '', ''], 1117),
+      line('Tot Hrs', [510, 498, '', '', ''], 1008),
+      line('Base Hrs', [540, 540, '', '', ''], 1080),
+      line('OT1', [0, 0, '', '', ''], 0),
+      line('OT2', [0, 0, '', '', ''], 0),
+      line('UT', [30, 42, '', '', ''], 72),
+      line('Late', [0, 15, '', '', ''], 15),
+      line('Early', [0, 0, '', '', ''], 0),
+    ]);
+    expect(lines.some((l) => l.startsWith('9001'))).toBe(false);
+    // a single IN on the 1st prints the clock, the base and the whole base as under time — no span, nothing worked
+    const abdul = lines.filter((l) => l.startsWith('2010  ABDUL SATTHAR,ADMIN,2010,STAFF,,PR 1 · AB 2,'));
+    expect(abdul).toHaveLength(11);
+    expect(abdul[1]).toMatch(/,IN Time,2:49 pm,,/);
+    expect(abdul[3]).toMatch(/,Wrk Hrs,,,/);
+    expect(abdul[5]).toMatch(/,Base Hrs,540,,/);
+    expect(abdul[8]).toMatch(/,UT,540,,/);
+
+    const pdfId = await request('monthly_detail', 'pdf', { month: '2017-11' });
+    await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
+    const html = fileText(`${ORG}/${pdfId}.pdf`);
+    expect(html).toContain('<div class="title">Monthly Detail Report</div>');
+    expect(html).toContain('For the Period : 01-Nov-2017 To 30-Nov-2017');
+    expect(html).toContain('<body class="compact">');
+    expect(html).toContain('<th class="center">1<span class="sub">Wed</span></th>');
+    expect((html.match(/class="section keep"/g) ?? []).length).toBe(5); // one block per employee, never split across pages
+    expect(html).toContain('<span class="k">Days:</span><span class="v">PR 2 · AB 1 · OF 2</span>');
+    // hours in the tenant's notation, the span as h:mm, zeros left blank so the exceptions stand out, totals bold
+    expect(html).toMatch(/Wrk Hrs<\/td><td class="center mono">9:30<\/td><td class="center mono">9:07<\/td><td class="center"><\/td>/);
+    expect(html).toMatch(/Tot Hrs<\/td><td class="center mono">8\.30<\/td><td class="center mono">8\.18<\/td>(<td class="center"><\/td>){28}<td class="end mono" style="font-weight:700">16\.48<\/td>/);
+    expect(html).toMatch(/Late<\/td><td class="center mono"><\/td><td class="center mono">0\.15<\/td>/);
+    expect(html).toContain('style="color:#1d4ed8;font-weight:700">OF</td>');
+    expect(html).toContain('Late / Early = time after the shift start / before its end');
+  });
+
   it('Staff Absents Monthly Report: per department, numbered, day numbers and a count', async () => {
     const id = await request('absence_report', 'csv', { from: DATE, to: '2017-11-30' });
     expect((await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }))).rowCount).toBe(3);
