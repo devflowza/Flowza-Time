@@ -22,6 +22,7 @@ import {
   type EmployeeCtx, attendancePolicy, emitToUsers, inLocalWindow, isPeriodLocked, isWorking, lineManagerUserIds, loadEmployeeCtx, localInstant, lockEmployee, portalSelf, reviewerRole, userIdsOfEmployees,
 } from './common.js';
 import { evaluateForEmployee, fencesForEmployee, selfFences, toVerdictDto } from './geofences.service.js';
+import { resolveDays } from './shift-resolve.js';
 
 /**
  * Self-service check-in / check-out (HR portal Prompt 4) and the selfie check-in for employees with an attendance grant.
@@ -115,6 +116,13 @@ async function loadPunchContext(deps: Pick<ApiDeps, 'config' | 'log'>, trx: Trx,
   return { emp, settings: { ...settings, selfService: { ...settings.selfService, ipAllowList } }, grants, fences };
 }
 
+/**
+ * The employee's "selfie required" grant binds only while the organisation offers the selfie check-in: with the switch off
+ * there is no selfie to take (`submitSelfie` refuses SELFIE_DISABLED), so the grant is dormant and the plain punch is judged
+ * by the other rules — never a lock-out from both.
+ */
+const selfieRequiredNow = (ctx: PunchContext): boolean => ctx.settings.selfService.allowSelfieCheckIn && ctx.grants.selfieRequired;
+
 /** Refusals that hold whatever the direction or the location (the check-in page's blockers). */
 async function standingRefusals(trx: Trx, orgId: string, ctx: PunchContext, channel: SelfPunchChannel, ip: string | null, at: Date): Promise<SelfPunchRefusal[]> {
   const out: SelfPunchRefusal[] = [];
@@ -122,7 +130,7 @@ async function standingRefusals(trx: Trx, orgId: string, ctx: PunchContext, chan
   if (!isWorking(ctx.emp, today) || today < ctx.emp.joiningDate) out.push('NOT_ACTIVE');
   if (channel === 'web' && !ctx.settings.selfService.webCheckIn) out.push('WEB_CHECKIN_DISABLED');
   if (channel === 'mobile' && !ctx.settings.selfService.mobileCheckIn) out.push('MOBILE_CHECKIN_DISABLED');
-  if (ctx.grants.selfieRequired) out.push('SELFIE_REQUIRED');
+  if (selfieRequiredNow(ctx)) out.push('SELFIE_REQUIRED');
   if (!ipAllowed(ip, ctx.settings.selfService.ipAllowList)) out.push('IP_NOT_ALLOWED');
   if (await isPeriodLocked(trx, orgId, ctx.emp.branchId, today)) out.push('PERIOD_LOCKED');
   return out;
@@ -214,6 +222,8 @@ export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string,
     const lastDirection: SelfPunchDirection | null = last && (last.direction === 'in' || last.direction === 'out') ? last.direction : null;
     const record = await withSystemScope(trx, orgId, (t) => t.selectFrom('attendanceDailyRecords').select(['status', 'flags', 'firstInAt', 'lastOutAt', 'workedMinutes', 'expectedEndAt', 'scheduledMinutes'])
       .where('organizationId', '=', orgId).where('employeeId', '=', self.employeeId).where('attendanceDate', '=', sql<Date>`${local.date}::date`).executeTakeFirst());
+    // today's shift, resolved live (the shift tab's resolver): named even before today's record exists or catches up with a change
+    const [day] = await resolveDays(trx, orgId, ctx.emp, local.date, local.date);
     const blocked = blockers.length > 0;
     return {
       date: local.date, timezone: ctx.emp.timezone, serverTime: now.toISOString(),
@@ -228,6 +238,7 @@ export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string,
       grant: { openAttendance: ctx.grants.openAttendance, selfieRequired: ctx.grants.selfieRequired },
       selfieAvailable: ctx.settings.selfService.allowSelfieCheckIn && (ctx.grants.openAttendance || ctx.grants.selfieRequired),
       fences: selfFences(ctx.fences),
+      ...(day ? { shift: { date: day.date, shift: day.shift, source: day.source, isOff: day.isOff, holidayName: day.holidayName, onLeave: day.onLeave } } : {}),
     };
   });
 }
@@ -640,8 +651,12 @@ async function grantAccess(trx: Trx, actor: Actor, orgId: string, employeeId: st
 
 async function grantsDto(trx: Trx, orgId: string, employeeId: string): Promise<AttendanceGrantsDto> {
   const g = await loadGrants(trx, orgId, employeeId);
+  const policy = await attendancePolicy(trx, orgId);
   const name = g.grantedBy ? (await withSystemScope(trx, orgId, (t) => t.selectFrom('userProfiles').select(['fullName', 'email']).where('id', '=', g.grantedBy!).executeTakeFirst())) : undefined;
-  return { employeeId, openAttendance: g.openAttendance, selfieRequired: g.selfieRequired, grantedBy: g.grantedBy, grantedByName: name ? name.fullName || name.email : null, grantedAt: isoDateTimeOrNull(g.grantedAt) };
+  return {
+    employeeId, openAttendance: g.openAttendance, selfieRequired: g.selfieRequired, grantedBy: g.grantedBy, grantedByName: name ? name.fullName || name.email : null, grantedAt: isoDateTimeOrNull(g.grantedAt),
+    selfieCheckInEnabled: policy.selfService.allowSelfieCheckIn,
+  };
 }
 
 export async function getAttendanceGrants(deps: ApiDeps, actor: Actor, orgId: string, employeeId: string): Promise<AttendanceGrantsDto> {

@@ -17,7 +17,7 @@ import type { RuleSetDto } from '../types';
 
 type FormValues = z.input<typeof attendanceRuleSetInputSchema>;
 type NumKey = 'graceInMinutes' | 'graceOutMinutes' | 'lateThresholdMinutes' | 'earlyDepartureThresholdMinutes' | 'minFullDayMinutes' | 'halfDayThresholdMinutes' | 'overtimeStartAfterMinutes' | 'overtimeMinBlockMinutes' | 'duplicatePunchWindowSeconds';
-type BoolKey = 'overtimeEnabled' | 'countEarlyInAsOvertime' | 'autoAbsentWithoutPunches' | 'weeklyOffWorkCountsAsOvertime' | 'holidayWorkCountsAsOvertime';
+type BoolKey = 'overtimeEnabled' | 'countEarlyInAsOvertime' | 'overtimeRequiresScheduledHours' | 'autoAbsentWithoutPunches' | 'weeklyOffWorkCountsAsOvertime' | 'holidayWorkCountsAsOvertime';
 const OT_ROUNDING = [0, 5, 10, 15, 30, 60] as const;
 const PUNCH_ROUNDING = [0, 5, 10, 15, 30] as const;
 
@@ -115,6 +115,7 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet }: { open: boolean; 
                 {roundingSelect('overtimeRoundingMinutes', OT_ROUNDING, t('rules.fields.overtimeRoundingMinutes'))}
                 <FormField label={t('rules.fields.overtimeMaxMinutesPerDay')} htmlFor="rs-otmax" optional hint={t('rules.hints.overtimeMaxMinutesPerDay')} error={errors.overtimeMaxMinutesPerDay?.message}><Input id="rs-otmax" type="number" min={0} max={1440} dir="ltr" className="tnum" placeholder={t('rules.noLimit')} {...register('overtimeMaxMinutesPerDay', { setValueAs: (v: unknown) => (v === '' || v === null || v === undefined ? null : Number(v)) })} /></FormField>
               </div>
+              {b('overtimeRequiresScheduledHours', 'overtimeRequiresScheduledHours')}
               <div className="grid gap-2 sm:grid-cols-3">{b('countEarlyInAsOvertime', 'countEarlyInAsOvertime')}{b('weeklyOffWorkCountsAsOvertime', 'weeklyOffWorkCountsAsOvertime')}{b('holidayWorkCountsAsOvertime', 'holidayWorkCountsAsOvertime')}</div>
             </Section>
             <Section title={t('rules.sections.rounding')} hint={t('rules.sections.roundingHint')}>

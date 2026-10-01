@@ -72,7 +72,8 @@ beforeAll(async () => {
     { organizationId: ORG, targetType: 'ORGANIZATION', targetId: ORG, shiftId: SHIFT_M, effectiveFrom: '2026-01-01' },
     { organizationId: ORG, targetType: 'EMPLOYEE', targetId: E2, shiftId: SHIFT_N, branchId: BRANCH_A, effectiveFrom: '2026-01-01' },
   ]).execute();
-  await a.insertInto('attendanceRuleSets').values({ id: RULES, organizationId: ORG, name: 'Default', effectiveFrom: '2026-01-01', ramadanMode: JSON.stringify({}) }).execute();
+  // an overtime policy on top of "the time after the shift end": 30-min threshold, DOWN to 15 min, whole 30-min blocks
+  await a.insertInto('attendanceRuleSets').values({ id: RULES, organizationId: ORG, name: 'Default', effectiveFrom: '2026-01-01', overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 15, ramadanMode: JSON.stringify({}) }).execute();
   await a.insertInto('leaveTypes').values({ id: LEAVE_TYPE, organizationId: ORG, code: 'ANNUAL', name: 'Annual', isPaid: true }).execute();
   const emp = (id: string, n: string, deviceUserId: string) => ({ id, organizationId: ORG, employeeNumber: n, firstName: 'F', lastName: n, displayName: `F ${n}`, joiningDate: '2025-01-01', branchId: BRANCH_A, deviceUserId, customFields: JSON.stringify({}) });
   await a.insertInto('employees').values([emp(E1, 'E1', '101'), emp(E2, 'E2', '102'), emp(E3, 'E3', '103')]).execute();

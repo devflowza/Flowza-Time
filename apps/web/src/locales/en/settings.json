@@ -67,7 +67,7 @@
     "title": "Attendance processing",
     "hint": "Defaults for the attendance engine. Detailed rules live in attendance rule sets.",
     "defaultShift": "Default shift",
-    "defaultShiftHint": "Used when no shift is assigned to an employee.",
+    "defaultShiftHint": "Used when no shift is assigned to an employee. A change recalculates today's attendance; recalculate earlier days from Attendance if needed.",
     "noDefaultShift": "No default shift",
     "shiftsUnavailable": "Shifts module not available yet.",
     "processingDelay": "Processing delay (seconds)",

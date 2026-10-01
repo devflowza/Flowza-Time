@@ -8,6 +8,8 @@ const D1 = '2026-03-11';
 const FRIDAY = '2026-03-13';
 const AFTER_WINDOW = at(DATE, '23:30'); // window of the 09:00–17:00 shift closes at 23:00
 const DURING_SHIFT = at(DATE, '12:00');
+/** An organisation's overtime policy on top of "the time after the shift end": a 30-min threshold, DOWN to 15 min, 30-min blocks. */
+const OT_POLICY = { overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 15 } as const;
 
 function day(...times: string[]) {
   return times.map((t) => punch(DATE, t));
@@ -21,11 +23,11 @@ describe('calculateDailyRecord — fixed shift basics', () => {
   beforeEach(resetIds);
 
   it('marks an on-time full day PRESENT with no flags and a complete trace', () => {
-    const r = calculateDailyRecord(input({ events: day('08:55', '17:05') }));
+    const r = calculateDailyRecord(input({ events: day('08:55', '17:00') }));
     expect(r).toMatchObject({
       status: 'PRESENT',
       flags: [],
-      workedMinutes: 490,
+      workedMinutes: 485,
       scheduledMinutes: 480,
       lateMinutes: 0,
       earlyDepartureMinutes: 0,
@@ -36,7 +38,7 @@ describe('calculateDailyRecord — fixed shift basics', () => {
       expectedStartAt: '2026-03-10T05:00:00Z',
       expectedEndAt: '2026-03-10T13:00:00Z',
       firstInAt: at(DATE, '08:55'),
-      lastOutAt: at(DATE, '17:05'),
+      lastOutAt: at(DATE, '17:00'),
       shiftId: 'shift-day',
       ruleSetId: 'rules-1',
       shiftAssignmentId: 'assign-1',
@@ -113,22 +115,51 @@ describe('calculateDailyRecord — fixed shift basics', () => {
 describe('calculateDailyRecord — overtime', () => {
   beforeEach(resetIds);
 
-  it('applies threshold, rounding, minimum block and cap', () => {
-    const r = calculateDailyRecord(input({ events: day('09:00', '18:50') }));
+  it('counts the time worked after the shift end as overtime — every minute, by default', () => {
+    const r = calculateDailyRecord(input({ events: day('09:00', '17:20') }));
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 500, overtimeMinutes: 20, overtimeCategory: 'REGULAR' });
+    expect(r.flags).toEqual(['OVERTIME']);
+    expect(r.trace.steps.find((s) => s.step === 'overtime')?.values).toMatchObject({ afterEndMinutes: 20, outsideShiftMinutes: 20, requiresScheduledHours: false, rawOvertimeMinutes: 20 });
+    expect(calculateDailyRecord(input({ events: day('09:00', '18:50') })).overtimeMinutes).toBe(110);
+  });
+
+  it('applies the organisation\'s threshold, rounding, minimum block and cap', () => {
+    const r = calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: rules(OT_POLICY) }));
     // 110 min after end − 30 threshold = 80 → DOWN 15 → 75 → 30-min blocks → 60
     expect(r).toMatchObject({ overtimeMinutes: 60, overtimeCategory: 'REGULAR', workedMinutes: 590 });
     expect(r.flags).toContain('OVERTIME');
-    const capped = calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: rules({ overtimeMaxMinutesPerDay: 45 }) }));
+    const capped = calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: rules({ ...OT_POLICY, overtimeMaxMinutesPerDay: 45 }) }));
     expect(capped.overtimeMinutes).toBe(45);
     const raw = calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: rules({ overtimeStartAfterMinutes: 0, overtimeMinBlockMinutes: 0, overtimeRoundingMinutes: 0 }) }));
     expect(raw.overtimeMinutes).toBe(110);
   });
 
   it('does not award overtime below the threshold or when disabled', () => {
-    expect(calculateDailyRecord(input({ events: day('09:00', '17:25') })).overtimeMinutes).toBe(0);
+    expect(calculateDailyRecord(input({ events: day('09:00', '17:25'), rules: rules(OT_POLICY) })).overtimeMinutes).toBe(0);
+    expect(calculateDailyRecord(input({ events: day('09:00', '17:25') })).overtimeMinutes).toBe(25);
     const disabled = calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: rules({ overtimeEnabled: false }) }));
     expect(disabled.overtimeMinutes).toBe(0);
     expect(disabled.flags).not.toContain('OVERTIME');
+  });
+
+  it('a late arrival earns the time worked after the shift end; with overtimeRequiresScheduledHours only what is beyond the scheduled minutes', () => {
+    // 30 min late, 60 min after the end: 510 worked of 480 scheduled
+    const r = calculateDailyRecord(input({ events: day('09:30', '18:00') }));
+    expect(r).toMatchObject({ workedMinutes: 510, lateMinutes: 20, overtimeMinutes: 60 });
+    const strict = calculateDailyRecord(input({ events: day('09:30', '18:00'), rules: rules({ overtimeRequiresScheduledHours: true }) }));
+    expect(strict).toMatchObject({ workedMinutes: 510, overtimeMinutes: 30 });
+    expect(strict.trace.steps.find((s) => s.step === 'overtime')?.values).toMatchObject({ afterEndMinutes: 60, beyondScheduledMinutes: 30, requiresScheduledHours: true, rawOvertimeMinutes: 30 });
+  });
+
+  it('a break punched after the shift end is not overtime (PAIRED gap, DIRECTIONAL break span)', () => {
+    const paired = calculateDailyRecord(input({ events: day('09:00', '17:00', '17:30', '18:30'), rules: rules({ punchInterpretation: 'PAIRED' }) }));
+    expect(paired).toMatchObject({ workedMinutes: 540, overtimeMinutes: 60 }); // 17:30–18:30, not 17:00–18:30
+    resetIds();
+    const directional = calculateDailyRecord(input({
+      events: [punch(DATE, '09:00', 'PUNCH_IN'), punch(DATE, '17:10', 'BREAK_START'), punch(DATE, '17:40', 'BREAK_END'), punch(DATE, '18:30', 'PUNCH_OUT')],
+      rules: rules({ punchInterpretation: 'DIRECTIONAL' }),
+    }));
+    expect(directional).toMatchObject({ workedMinutes: 540, overtimeMinutes: 60 }); // 17:00–17:10 + 17:40–18:30
   });
 
   it('optionally counts early arrival as overtime', () => {
@@ -139,10 +170,11 @@ describe('calculateDailyRecord — overtime', () => {
   });
 
   it('finaliseOvertime rounds down, keeps whole blocks and caps', () => {
-    expect(finaliseOvertime(80, rules())).toBe(60);
-    expect(finaliseOvertime(29, rules())).toBe(0);
-    expect(finaliseOvertime(125, rules({ overtimeMaxMinutesPerDay: 90 }))).toBe(90);
+    expect(finaliseOvertime(80, rules(OT_POLICY))).toBe(60);
+    expect(finaliseOvertime(29, rules(OT_POLICY))).toBe(0);
+    expect(finaliseOvertime(125, rules({ ...OT_POLICY, overtimeMaxMinutesPerDay: 90 }))).toBe(90);
     expect(finaliseOvertime(47, rules({ overtimeMinBlockMinutes: 0, overtimeRoundingMinutes: 0 }))).toBe(47);
+    expect(finaliseOvertime(80, rules())).toBe(80); // the default keeps every minute
   });
 });
 
@@ -244,8 +276,9 @@ describe('calculateDailyRecord — cross-midnight', () => {
 
   it('attributes IN 21:57 (D) and OUT 06:08 (D+1) to D and works 8h11m', () => {
     const r = calculateDailyRecord(input({ shift: nightShift(), events: [punch(DATE, '21:57'), punch(D1, '06:08')] }));
-    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 491, lateMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 0, expectedStartAt: at(DATE, '22:00'), expectedEndAt: at(D1, '06:00') });
-    expect(r.flags).toEqual(['CROSS_MIDNIGHT']);
+    // the 8 minutes after 06:00 (D+1) are overtime of D
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 491, lateMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 8, expectedStartAt: at(DATE, '22:00'), expectedEndAt: at(D1, '06:00') });
+    expect(r.flags).toEqual(['OVERTIME', 'CROSS_MIDNIGHT']);
     expect(r.trace.inputs.window).toEqual({ start: at(DATE, '18:00'), end: at(D1, '12:00') });
   });
 
@@ -428,7 +461,7 @@ describe('calculateDailyRecord — flexible shifts and no shift', () => {
 
   it('flexible 8h: over hours earn overtime, leaving before the 8 hours is an early departure', () => {
     const over = calculateDailyRecord(input({ shift: flexibleShift(), events: day('10:00', '19:00') }));
-    expect(over).toMatchObject({ status: 'PRESENT', scheduledMinutes: 480, workedMinutes: 540, overtimeMinutes: 30, overtimeCategory: 'REGULAR', expectedStartAt: at(DATE, '10:00'), expectedEndAt: at(DATE, '18:00'), lateMinutes: 0, earlyDepartureMinutes: 0 });
+    expect(over).toMatchObject({ status: 'PRESENT', scheduledMinutes: 480, workedMinutes: 540, overtimeMinutes: 60, overtimeCategory: 'REGULAR', expectedStartAt: at(DATE, '10:00'), expectedEndAt: at(DATE, '18:00'), lateMinutes: 0, earlyDepartureMinutes: 0 });
     expect(over.flags).toEqual(['OVERTIME']);
     const under = calculateDailyRecord(input({ shift: flexibleShift(), events: day('10:00', '15:00') }));
     expect(under).toMatchObject({ status: 'PRESENT', workedMinutes: 300, overtimeMinutes: 0, expectedEndAt: at(DATE, '18:00'), earlyDepartureMinutes: 180 });
@@ -504,7 +537,7 @@ describe('calculateDailyRecord — Ramadan and timezones', () => {
     expect(r).toMatchObject({ status: 'PRESENT', scheduledMinutes: 360, workedMinutes: 360, earlyDepartureMinutes: 0, expectedEndAt: at(DATE, '15:00') });
     expect(r.flags).toEqual(['RAMADAN_HOURS']);
     const stayed = calculateDailyRecord(input({ rules: ramadan, events: day('09:00', '16:30') }));
-    expect(stayed.overtimeMinutes).toBe(60); // 90 after end − 30 threshold = 60
+    expect(stayed.overtimeMinutes).toBe(90); // 90 min after the (Ramadan) end
   });
 
   it('applies only within the configured dates and to eligible employees', () => {
@@ -540,18 +573,24 @@ describe('calculateDailyRecord — adversarial review', () => {
   const holiday = { id: 'hol-1', name: 'National Day', isHalfDay: false };
   const halfLeave = { id: 'lv-h', leaveTypeCode: 'ANNUAL', isPaid: true, isHalfDay: true, halfDayPart: 'FIRST_HALF' as const };
 
-  it('never awards regular overtime for merely completing the hours after a late arrival (§G.5: worked beyond scheduled)', () => {
-    const r = calculateDailyRecord(input({ events: day('11:00', '19:00') }));
+  it('overtimeRequiresScheduledHours: never awards regular overtime for merely completing the hours after a late arrival (worked beyond scheduled)', () => {
+    const strict = rules({ overtimeRequiresScheduledHours: true });
+    const r = calculateDailyRecord(input({ events: day('11:00', '19:00'), rules: strict }));
     expect(r).toMatchObject({ workedMinutes: 480, lateMinutes: 110, overtimeMinutes: 0, overtimeCategory: null });
     expect(r.flags).not.toContain('OVERTIME');
     expect(r.trace.steps.find((s) => s.step === 'overtime')?.values).toMatchObject({ afterEndMinutes: 120, beyondScheduledMinutes: 0, rawOvertimeMinutes: 0 });
+    // by default the two hours after the shift end are overtime; the late arrival stays a late arrival
+    resetIds();
+    expect(calculateDailyRecord(input({ events: day('11:00', '19:00') }))).toMatchObject({ workedMinutes: 480, lateMinutes: 110, overtimeMinutes: 120, overtimeCategory: 'REGULAR' });
   });
 
   it('caps overtime by the minutes actually worked when the whole span lies after the shift end', () => {
-    const r = calculateDailyRecord(input({ events: day('18:00', '20:00'), rules: rules({ overtimeStartAfterMinutes: 0, overtimeMinBlockMinutes: 0, overtimeRoundingMinutes: 0 }) }));
+    const r = calculateDailyRecord(input({ events: day('18:00', '20:00') }));
     expect(r.workedMinutes).toBe(120);
-    expect(r.overtimeMinutes).toBeLessThanOrEqual(120);
-    expect(r.overtimeMinutes).toBe(0); // worked (120) does not exceed the 480 scheduled minutes
+    expect(r.overtimeMinutes).toBe(120); // all of it after the 17:00 end, never more than worked
+    resetIds();
+    const strict = calculateDailyRecord(input({ events: day('18:00', '20:00'), rules: rules({ overtimeRequiresScheduledHours: true }) }));
+    expect(strict.overtimeMinutes).toBe(0); // worked (120) does not exceed the 480 scheduled minutes
   });
 
   it('does not leave a stale OVERTIME flag or a regular-overtime step on a holiday whose work earns no overtime', () => {

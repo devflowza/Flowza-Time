@@ -635,8 +635,9 @@ and recorded in the trace. Flexible shifts use a configurable day boundary (defa
 ### G.5 Rules applied (all from `attendance_rule_sets`, effective-dated)
 
 Late = `max(0, firstIn − (shiftStart + grace))`; early departure likewise at the end; worked = OUT − IN −
-unpaid breaks (fixed break minutes or measured); overtime = worked beyond scheduled minutes past the OT
-threshold, in minimum blocks; rounding (none/5/10/15 min; nearest/up/down; applied to IN, OUT and/or
+unpaid breaks (fixed break minutes or measured); overtime = the time worked after the shift end (before its start
+with early-in) past the OT threshold, in minimum blocks — or, with `overtimeRequiresScheduledHours`, only the part beyond the
+scheduled minutes; rounding (none/5/10/15 min; nearest/up/down; applied to IN, OUT and/or
 total — raw timestamps stay untouched and the trace shows both); minimum full-day/half-day thresholds;
 missing-punch behaviour (flag only / assume shift end / treat as absent); auto-absent when no punches
 and no leave/holiday/off; holiday & weekly-off precedence (holiday > weekly off > leave > punches — a

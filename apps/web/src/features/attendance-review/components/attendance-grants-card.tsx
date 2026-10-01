@@ -43,6 +43,8 @@ export function AttendanceGrantsCard({ employeeId }: { employeeId: string }) {
               <div><Label htmlFor={`grant-selfie-${employeeId}`}>{t('grants.selfieRequired')}</Label><p className="text-xs text-muted-foreground">{t('grants.selfieRequiredHint')}</p></div>
               <Switch id={`grant-selfie-${employeeId}`} checked={g.selfieRequired} disabled={put.isPending} onCheckedChange={(v) => save({ selfieRequired: v })} />
             </div>
+            {/* the requirement is dormant while the organisation's selfie check-in is off (the punch API ignores it) */}
+            {g.selfieRequired && g.selfieCheckInEnabled === false ? <p role="note" className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/50 dark:text-amber-100" data-testid="grants-selfie-off">{t('grants.selfieOff')}</p> : null}
             {g.grantedByName && g.grantedAt ? <p className="text-xs text-muted-foreground">{t('grants.changedBy', { name: g.grantedByName, date: fmtDateTime(g.grantedAt, tz) })}</p> : null}
           </>
         )}

@@ -8,6 +8,7 @@
     "title": "Check in / out",
     "subtitle": "Punch from this device. The time is always the server's clock; your location is checked against the work zones assigned to you.",
     "serverTime": "Server time",
+    "shiftToday": "Today's shift",
     "checkIn": "Check in",
     "checkOut": "Check out",
     "checkedInAt": "Checked in at {{time}}",
@@ -118,7 +119,7 @@
       "noLocation": "Your location is not included; your manager sees that too.",
       "tooLarge": "The photo is larger than 2 MB.",
       "badType": "Use a JPEG, PNG or WebP photo.",
-      "required": "Your organisation requires a selfie with every punch.",
+      "required": "Your manager asks for a selfie with every punch: use the selfie check-in.",
       "previewAlt": "Your selfie",
       "cameraAlt": "Camera preview"
     },

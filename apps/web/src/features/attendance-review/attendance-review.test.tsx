@@ -245,6 +245,19 @@ describe('AttendanceGrantsCard', () => {
     expect(await screen.findByText(/Last changed by Dev/)).toBeInTheDocument();
   });
 
+  it('says a required selfie is dormant while the organisation\'s selfie check-in is off', async () => {
+    grant('attendance.approve');
+    const dto = { employeeId: 'e1', openAttendance: false, selfieRequired: true, grantedBy: null, grantedByName: null, grantedAt: null };
+    mockGet({ [`/orgs/${ORG}/employees/e1/attendance-grants`]: { data: { ...dto, selfieCheckInEnabled: false } } });
+    const { unmount } = renderWithProviders(<AttendanceGrantsCard employeeId="e1" />);
+    expect(await screen.findByTestId('grants-selfie-off')).toHaveTextContent(/Selfie check-in is turned off for the organisation/);
+    unmount();
+    mockGet({ [`/orgs/${ORG}/employees/e1/attendance-grants`]: { data: { ...dto, selfieCheckInEnabled: true } } });
+    renderWithProviders(<AttendanceGrantsCard employeeId="e1" />);
+    await screen.findByRole('switch', { name: /Selfie required/ });
+    expect(screen.queryByTestId('grants-selfie-off')).not.toBeInTheDocument();
+  });
+
   it('renders nothing for someone who may not manage it', () => {
     grant('employee.view');
     const { container } = renderWithProviders(<AttendanceGrantsCard employeeId="e1" />);

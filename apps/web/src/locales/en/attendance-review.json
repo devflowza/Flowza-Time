@@ -157,6 +157,7 @@
     "openAttendanceHint": "May check in from anywhere with a selfie that a manager reviews before it counts.",
     "selfieRequired": "Selfie required",
     "selfieRequiredHint": "Every portal punch of this employee must be a selfie check-in.",
+    "selfieOff": "Selfie check-in is turned off for the organisation (Settings → Attendance), so no selfie is asked for: this employee punches as usual until it is turned on.",
     "saved": "Portal attendance updated",
     "changedBy": "Last changed by {{name}} on {{date}}"
   },

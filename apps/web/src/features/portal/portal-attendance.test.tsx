@@ -115,6 +115,57 @@ describe('CheckInPage', () => {
     expect(line).toHaveTextContent(/to go/);
   });
 
+  it('names today\'s shift (resolved live) and drops the record\'s "No shift" chip it would contradict', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    const general = { id: 's1', code: 'GEN', name: 'General', type: 'FIXED' as const, startTime: '09:00', endTime: '18:00', requiredMinutes: null, graceInMinutes: 10, crossesMidnight: false, color: null, breakMinutes: 60 };
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({
+      lastDirection: 'in', canCheckIn: false, canCheckOut: true,
+      punches: [{ id: 'p1', punchedAt: '2026-09-27T15:02:00Z', direction: 'in', source: 'SELF_SERVICE', channel: 'web', verdict: 'no_fence', deviceName: null, processingStatus: 'processed' }],
+      // a record computed before the shift was assigned still says NO_SHIFT until its recalculation lands
+      today: { status: 'PRESENT', flags: ['NO_SHIFT', 'SELF_SERVICE_PUNCH'], firstInAt: '2026-09-27T15:02:00Z', lastOutAt: null, workedMinutes: 0 },
+      shift: { date: '2026-09-27', shift: general, source: 'ASSIGNMENT', isOff: false, holidayName: null, onLeave: false },
+    }) } });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    renderWithProviders(<CheckInPage />);
+    const line = await screen.findByTestId('today-shift');
+    expect(line).toHaveTextContent("Today's shift");
+    expect(within(line).getByRole('link', { name: 'General 09:00–18:00' })).toHaveAttribute('href', '/my/shift');
+    expect(screen.getByText('Self-service punch')).toBeInTheDocument();
+    expect(screen.queryByText('No shift')).not.toBeInTheDocument();
+  });
+
+  it('says so when no shift applies today, and keeps the chips of an API that does not send the shift', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ shift: { date: '2026-09-27', shift: null, source: 'NONE', isOff: false, holidayName: null, onLeave: false } }) } });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    const { unmount } = renderWithProviders(<CheckInPage />);
+    expect(await screen.findByTestId('today-shift')).toHaveTextContent("Today's shiftNo shift");
+    unmount();
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ today: { status: 'PRESENT', flags: ['NO_SHIFT'], firstInAt: null, lastOutAt: null, workedMinutes: 0 } }) } });
+    renderWithProviders(<CheckInPage />);
+    expect(await screen.findByText('No shift')).toBeInTheDocument();
+    expect(screen.queryByTestId('today-shift')).not.toBeInTheDocument();
+  });
+
+  it('a required selfie is the way to punch only while the selfie check-in is offered — never a lock-out', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    const policyOn = { ...status().policy, allowSelfieCheckIn: true };
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ policy: policyOn, grant: { openAttendance: false, selfieRequired: true }, selfieAvailable: true, blockers: ['SELFIE_REQUIRED'] }) } });
+    const { unmount } = renderWithProviders(<CheckInPage />);
+    expect(await screen.findByText('Your manager asks for a selfie with every punch: use the selfie check-in.')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Check in with a selfie/ })).toBeEnabled();
+    expect(screen.queryByTestId('punch-button')).not.toBeInTheDocument();
+    unmount();
+    // the organisation turned the selfie check-in off: the grant is dormant and the plain punch is offered
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ grant: { openAttendance: false, selfieRequired: true }, selfieAvailable: false, blockers: [] }) } });
+    renderWithProviders(<CheckInPage />);
+    await screen.findByTestId('verdict-banner');
+    expect(screen.getByTestId('punch-button')).toBeEnabled();
+    expect(screen.queryByText(/asks for a selfie/)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /with a selfie/ })).not.toBeInTheDocument();
+  });
+
   it('hides the check-out time before the first check-in and on an API that does not send it', async () => {
     mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
     mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ lastDirection: 'in', today: { status: 'PENDING', flags: [], firstInAt: '2026-09-27T04:00:00Z', lastOutAt: null, workedMinutes: 0 } }) } });

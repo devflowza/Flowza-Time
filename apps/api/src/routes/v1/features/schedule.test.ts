@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createApiHarness, isoToday, queueJobs, seedOrg, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
+import { createApiHarness, isoToday, isoTodayIn, queueJobs, seedOrg, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
 let h: ApiHarness; let f: OrgFixture;
@@ -129,6 +129,8 @@ describe('holidays, leave and rule sets', () => {
     const r = await h.request('POST', `${base()}/attendance-rule-sets`, { token: f.hrAdmin, body: { name: 'Default 2026', effectiveFrom: '2026-01-01', graceInMinutes: 15 } });
     expect(r.status).toBe(201);
     expect(r.body.data.graceInMinutes).toBe(15);
+    // a new rule set counts every minute after the shift end; the stricter "beyond the scheduled hours" policy is a switch
+    expect(r.body.data).toMatchObject({ overtimeStartAfterMinutes: 0, overtimeMinBlockMinutes: 0, overtimeRoundingMinutes: 0, overtimeRequiresScheduledHours: false });
     expect(r.body.data.recalculationJobId).toBeTypeOf('string');
     expect(await recalcCount()).toBe(before + 1);
     const overlap = await h.request('POST', `${base()}/attendance-rule-sets`, { token: f.hrAdmin, body: { name: 'Clash', effectiveFrom: '2026-06-01' } });
@@ -145,5 +147,56 @@ describe('holidays, leave and rule sets', () => {
     expect(active.body.data).toHaveLength(2);
     const resolved = await h.request('GET', `${base()}/shifts/resolve?employeeId=${f.e1}&date=2026-07-01`, { token: f.hrAdmin });
     expect(resolved.body.data.ruleSet.name).toBe('Branch A rules');
+    // the overtime switch alone: nothing else of the rule set changes (no defaults re-applied on PATCH)
+    const strict = await h.request('PATCH', `${base()}/attendance-rule-sets/${r.body.data.id}`, { token: f.hrAdmin, body: { overtimeRequiresScheduledHours: true } });
+    expect(strict.status).toBe(200);
+    expect(strict.body.data).toMatchObject({ overtimeRequiresScheduledHours: true, graceInMinutes: 5, overtimeStartAfterMinutes: 0, version: 3 });
+    const row = await h.admin.selectFrom('attendanceRuleSets').select(['overtimeRequiresScheduledHours', 'graceInMinutes']).where('id', '=', r.body.data.id).executeTakeFirstOrThrow();
+    expect(row).toEqual({ overtimeRequiresScheduledHours: true, graceInMinutes: 5 });
+  });
+});
+
+describe('shift changes made outside the Schedule page recompute the days they touch (§G.7)', () => {
+  const day = (v: Date | string) => (typeof v === 'string' ? v.slice(0, 10) : `${v.getFullYear()}-${String(v.getMonth() + 1).padStart(2, '0')}-${String(v.getDate()).padStart(2, '0')}`);
+  const latestRecalc = () => h.admin.selectFrom('attendanceRecalculationRequests').selectAll().orderBy('createdAt', 'desc').executeTakeFirstOrThrow();
+  let bulkShift: string;
+
+  it('bulk "Assign shift" recomputes the chosen employees from the effective date up to today; a future start waits', async () => {
+    const s = await h.request('POST', `${base()}/shifts`, { token: f.hrAdmin, body: { code: 'BULK', name: 'Bulk shift', type: 'FIXED', startTime: '09:00', endTime: '18:00' } });
+    expect(s.status).toBe(201);
+    bulkShift = s.body.data.id;
+    const today = isoTodayIn('Asia/Muscat');
+    const from = isoTodayIn('Asia/Muscat', -3);
+    const before = await recalcCount();
+    const r = await h.request('POST', `${base()}/employees/bulk`, { token: f.hrAdmin, body: { action: 'assign_shift', employeeIds: [f.e3], shiftId: bulkShift, effectiveFrom: from } });
+    expect(r.status).toBe(200);
+    expect(r.body.data).toMatchObject({ updated: 1, employeeIds: [f.e3] });
+    expect(await recalcCount()).toBe(before + 1);
+    const req = await latestRecalc();
+    expect(req).toMatchObject({ employeeIds: [f.e3], reason: 'shift assigned to employees', status: 'QUEUED' });
+    expect([day(req.fromDate), day(req.toDate)]).toEqual([from, today]);
+    const resolved = await h.request('GET', `${base()}/shifts/resolve?employeeId=${f.e3}&date=${today}`, { token: f.hrAdmin });
+    expect(resolved.body.data.shift.code).toBe('BULK');
+    // starting tomorrow: nothing has happened yet, nothing to recompute
+    const later = await h.request('POST', `${base()}/employees/bulk`, { token: f.hrAdmin, body: { action: 'assign_shift', employeeIds: [f.e3], shiftId: bulkShift, effectiveFrom: isoTodayIn('Asia/Muscat', 1) } });
+    expect(later.status).toBe(200);
+    expect(await recalcCount()).toBe(before + 1);
+  });
+
+  it('changing the default shift recomputes today organisation-wide; saving the group unchanged does not', async () => {
+    const get = await h.request('GET', `${base()}/settings/attendance`, { token: f.owner });
+    expect(get.status).toBe(200);
+    const before = await recalcCount();
+    const put = await h.request('PUT', `${base()}/settings/attendance`, { token: f.owner, body: { ...get.body.data, defaultShiftId: bulkShift } });
+    expect(put.status).toBe(200);
+    expect(put.body.data.defaultShiftId).toBe(bulkShift);
+    expect(await recalcCount()).toBe(before + 1);
+    const req = await latestRecalc();
+    const today = isoTodayIn('Asia/Muscat');
+    expect(req).toMatchObject({ employeeIds: null, branchId: null, reason: 'default shift changed' });
+    expect([day(req.fromDate), day(req.toDate)]).toEqual([today, today]);
+    const again = await h.request('PUT', `${base()}/settings/attendance`, { token: f.owner, body: put.body.data });
+    expect(again.status).toBe(200);
+    expect(await recalcCount()).toBe(before + 1);
   });
 });

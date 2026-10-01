@@ -8,7 +8,7 @@ import { fmtDate } from '@/lib/format';
 import { cn } from '@/lib/utils';
 import { PA_NS } from '../attendance-i18n';
 import { useMyShift, useMySwaps } from '../attendance-api';
-import { shiftLabel, swappableDays } from '../shift-format';
+import { dayShiftText, swappableDays } from '../shift-format';
 import { SwapDialog } from '../components/swap-dialog';
 import { SectionTitle } from '../components/parts';
 import { SwapsTable } from '../components/swaps-table';
@@ -16,7 +16,7 @@ import { SwapsTable } from '../components/swaps-table';
 /** One day of the schedule: the shift (and where it came from), or why there is none (off, holiday, leave). */
 function DayLine({ d, emphasis = false }: { d: SelfShiftDayDto; emphasis?: boolean }) {
   const { t } = useTranslation(PA_NS);
-  const what = d.onLeave ? t('shift.onLeave') : d.holidayName ? t('shift.holiday', { name: d.holidayName }) : d.isOff ? t('shift.off') : d.shift ? shiftLabel(d.shift) : t('shift.noShift');
+  const what = dayShiftText(d, t);
   const quiet = d.onLeave || !!d.holidayName || d.isOff || !d.shift;
   return (
     <div className={cn('flex min-w-0 flex-wrap items-center justify-between gap-x-3 gap-y-1', emphasis ? 'py-1' : 'py-2')} data-testid="shift-day">
