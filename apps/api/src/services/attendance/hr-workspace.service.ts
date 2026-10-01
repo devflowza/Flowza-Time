@@ -167,7 +167,10 @@ async function planDay(trx: Trx, orgId: string, grant: MembershipGrant, input: {
     if (!value) continue;
     const at = Date.parse(value);
     if (at < windowStart.toMillis() || at >= windowEnd.toMillis()) throw errors.validation('The time must fall within the attendance day (from the day before to the day after).', { issues: [{ path: key, message: 'Outside the attendance day' }] });
-    if (at > now.getTime() + FUTURE_TOLERANCE_MS) throw errors.validation('A punch cannot be in the future.', { issues: [{ path: key, message: 'In the future' }] });
+    if (at > now.getTime() + FUTURE_TOLERANCE_MS) {
+      const label = key === 'inAt' ? 'check-in' : 'check-out';
+      throw errors.validation(`The ${label} ${DateTime.fromMillis(at, { zone: loaded.timezone }).toFormat('ccc dd LLL HH:mm')} has not happened yet: a punch can only be recorded once it has happened.`, { issues: [{ path: key, message: 'In the future' }] });
+    }
   }
   const effectiveIn = input.inAt ?? current.firstInAt;
   const effectiveOut = input.outAt ?? current.lastOutAt;
