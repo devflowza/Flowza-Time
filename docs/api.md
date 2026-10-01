@@ -127,13 +127,14 @@ after the tenant and MFA gates, before any body is read. `/me` carries `membersh
 
 | Method & path | Permission | Notes |
 |---|---|---|
-| `GET /orgs/:orgId/subscription` | `organization.view` | Plan, status, cycle, paid users, price quote (excl. VAT), VAT rate, limits and usage, module states, the plans to compare, billing contact. |
+| `GET /orgs/:orgId/subscription` | `organization.view` | Plan, status, cycle, paid users, price quote (excl. VAT), VAT rate, limits and usage, `userLimit`, module states, the plans to compare, billing contact. |
+| `GET /orgs/:orgId/user-limit` | one of `employee.create`, `employee.import`, `employee.update`, `organization.view` | `{ used, limit, remaining, reached, source }` — licensed users (active employees, org-wide) against the user limit the platform set (`source`: `override` › `seats` › `plan`; `limit` null = none). Drives "Maximum users reached" on the employee screens. |
 | `GET /orgs/:orgId/billing/invoices` | `organization.manage` | The organisation's invoices with their payments (RLS again). |
 | `GET /platform/modules` · `PATCH /platform/modules/:key` | platform admin | Catalogue with adoption (`enabledCount / totalOrganizations`, overrides, plans); the fleet-wide switch `{ isAvailable, reason }`. |
 | `POST /platform/modules/:key/apply-all` | platform admin | `{ action: enable \| disable \| reset, reason }` for every tenant, audited on each; returns the number changed. |
 | `GET/PUT /platform/orgs/:id/modules` | platform admin | Per-tenant states; PUT `{ modules: { <key>: true \| false \| null }, reason }` (null = back to the plan). |
 | `GET/POST /platform/plans` · `PATCH /platform/plans/:key` | platform admin | Plans with prices, included users, modules, limits and subscriber counts; unknown module / limit keys → 400. |
-| `PATCH /platform/orgs/:id/subscription` | platform admin | Also `billingCycle` and `seats` (paid users; they cap employee creation). |
+| `PATCH /platform/orgs/:id/subscription` | platform admin | Also `billingCycle` and `seats` — the tenant's user limit (paid users), which only a platform admin changes. The response, `GET …/subscription`, `GET /platform/orgs/:id` and every row of `GET /platform/orgs` carry `userLimit` (`used / limit`). Adding or re-activating an active employee past the limit (create, PATCH status, bulk `set_status`, import confirm) answers `402 ENTITLEMENT_EXCEEDED` with `details: { metric: 'employees', reason: 'USER_LIMIT_REACHED', limit, used, adding }`. |
 | `GET /platform/billing/summary` | platform admin | MRR / ARR, outstanding, overdue, collected (30 days), by plan, every subscription priced. |
 | `GET/POST /platform/billing/invoices` · `GET …/:id` | platform admin | Issue: `{ organizationId, planKey?, billingCycle?, seats?, periodStart?, lines?, discount?, taxRate?, dueDate?, notes?, activatesSubscription? }`. |
 | `POST /platform/billing/invoices/:id/payments` · `…/void` | platform admin | Payment (≤ balance) or refund (≤ paid); a fully paid plan invoice activates the subscription. Void only with nothing paid. |

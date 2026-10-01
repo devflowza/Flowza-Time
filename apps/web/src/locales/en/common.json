@@ -59,5 +59,18 @@
     "disabledHint": "This module is switched off for your organisation. Your owner can ask FlowZa to enable it — Settings → Subscription shows your plan.",
     "lapsedBanner": "Your subscription has ended: only attendance, employees, shifts and reports remain available. Contact FlowZa to renew.",
     "lapsedAction": "View subscription"
+  },
+  "userLimit": {
+    "title": "Users",
+    "usage": "{{used}} / {{limit}} users",
+    "usageNoLimit": "{{used}} users · no limit",
+    "remaining": "{{remaining}} left",
+    "reached": "Max users reached",
+    "reachedTitle": "Maximum users reached",
+    "reachedHint": "All {{limit}} users of your subscription are in use, so no employee can be added or re-activated. Ask your FlowZa Time provider to increase the user limit.",
+    "nearTitle": "{{remaining}} users left",
+    "nearHint": "Your subscription allows {{limit}} users and {{used}} are in use. Ask your FlowZa Time provider when you need more.",
+    "errorReached": "Maximum users reached ({{used}} of {{limit}}). Ask your FlowZa Time provider to increase the user limit.",
+    "errorNotEnough": "Only {{remaining}} of {{limit}} users are left and {{adding}} are needed. Ask your FlowZa Time provider to increase the user limit."
   }
 }

@@ -98,11 +98,23 @@ restores everything.
 No payment gateway is wired yet: payments are recorded by a platform admin (bank transfer is the norm for Omani B2B). A
 gateway (Thawani / Stripe) would call the same `recordPayment` path from its webhook.
 
-### Paid users cap employees
+### The user limit (paid users cap employees)
 
-`subscriptions.seats` — the users a tenant pays for — replaces the plan's employee limit when set: creating an employee
-beyond it answers `402 ENTITLEMENT_EXCEEDED`. Empty seats fall back to the plan limit (every tenant that existed before this
-change keeps its limit).
+`subscriptions.seats` — the users a tenant pays for — is the tenant's **user limit**, and only a platform admin changes it
+(**Tenant → Overview → User limit → Set user limit**, quick +1 / +5 / +10, or the Subscription tab; every change needs a
+reason and is audited on the tenant). It replaces the plan's employee limit when set; empty seats fall back to the plan limit
+(every tenant that existed before keeps its limit), and an `entitlements` override for `employees` wins over both.
+
+One rule, in SQL: `app.org_user_limits` (migration `20261001000300`) gives the users in use (employees not deleted and not
+terminated / resigned) and the effective limit. A user is taken by every path that makes an employee active — create, a
+status change back from terminated / resigned (one or in bulk), an import confirm (all its new rows, or none) — and each is
+refused past the limit with `402 ENTITLEMENT_EXCEEDED` (`details.reason = USER_LIMIT_REACHED`). The check holds a per-tenant
+advisory lock, so two people adding the last user at once cannot both succeed. A leaver frees their user. A limit lowered
+below the users in use removes nobody: the tenant simply cannot add or re-activate anyone until it is back under it.
+
+Where it shows: the tenants list and the tenant page (`used / limit` bar, red with **Max users reached**); the tenant's
+Employees, Add employee and Import screens (amber from 90 %, red **Maximum users reached** when full, with Add employee
+disabled) and Settings → Subscription.
 
 ## Database (migration `20260929000600_modules_plans_billing.sql`)
 

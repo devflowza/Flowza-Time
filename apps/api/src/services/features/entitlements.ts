@@ -3,9 +3,9 @@ import { errors } from '@flowza/shared';
 import { jsonObject, numberOrNull } from '../../lib/mappers.js';
 
 /**
- * Effective limit for an organisation: an active `entitlements` override wins, otherwise the subscription's seats (employees
- * only), otherwise the subscription's plan limit,
+ * Effective limit for an organisation: an active `entitlements` override wins, otherwise the subscription's plan limit,
  * otherwise null (no limit configured). Runs in the caller's context (plans/subscriptions/entitlements are member-readable).
+ * Employees are not counted here: they are the tenant's licensed users, capped by `assertUserCapacity` (./user-limit.ts).
  */
 export async function resolveLimit(trx: Trx, organizationId: string, key: string): Promise<number | null> {
   const override = await trx.selectFrom('entitlements').select(['limitValue', 'enabled'])
@@ -16,11 +16,9 @@ export async function resolveLimit(trx: Trx, organizationId: string, key: string
     if (!override.enabled) return 0;
     return numberOrNull(override.limitValue);
   }
-  const sub = await trx.selectFrom('subscriptions as s').innerJoin('plans as p', 'p.id', 's.planId').select(['p.limits', 's.seats'])
+  const sub = await trx.selectFrom('subscriptions as s').innerJoin('plans as p', 'p.id', 's.planId').select(['p.limits'])
     .where('s.organizationId', '=', organizationId).where('s.status', 'in', ['trialing', 'active', 'past_due']).orderBy('s.createdAt', 'desc').executeTakeFirst();
   if (!sub) return null;
-  // the licensed users the tenant pays for (migration 20260929000600) replace the plan's employee limit
-  if (key === 'employees' && sub.seats !== null) return sub.seats;
   return numberOrNull(jsonObject(sub.limits)[key] as string | number | null | undefined);
 }
 

@@ -1897,6 +1897,9 @@ export interface Shifts {
   coreStart: string | null;
   createdAt: Generated<Timestamp>;
   crossesMidnight: Generated<boolean | null>;
+  /**
+   * FLEXIBLE: local time at which a new attendance day starts (a punch before it counts for the previous day). Default 00:00 (12:00 AM).
+   */
   dayBoundary: Generated<string>;
   endTime: string | null;
   graceInMinutes: number | null;
@@ -1948,7 +1951,7 @@ export interface Subscriptions {
   organizationId: string;
   planId: string;
   /**
-   * Licensed users (active employees) the tenant pays for; null = the plan's employee limit. Caps employee creation.
+   * Licensed users (active employees) the tenant may have and pays for — set by a platform admin only; null = the plan's employee limit. Caps every path that adds an active employee (app.org_user_limits).
    */
   seats: number | null;
   status: Generated<SubscriptionStatus>;

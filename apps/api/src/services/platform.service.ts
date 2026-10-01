@@ -12,6 +12,7 @@ import { likeContains, pageOf, resolveSort, toCount } from '../lib/pagination.js
 import { isoDateTime, isoDateTimeOrNull } from '../lib/mappers.js';
 import { ORG_COLUMNS, toOrganizationDto, type OrgRow } from './organizations.mappers.js';
 import { enqueueInvitationEmail } from './members.service.js';
+import { readUserLimits } from './features/user-limit.js';
 import { sql } from 'kysely';
 
 type OrgListQuery = z.infer<typeof platformOrgListQuerySchema>;
@@ -63,6 +64,7 @@ export async function listOrganizations(deps: ApiDeps, actor: Actor, q: OrgListQ
     const ids = rows.map((r) => r.id);
     // counts and the platform's account fields of the page (migration 20260929000400): one call each, never per row
     const counts = ids.length ? await orgCounts(trx, ids) : new Map<string, NonNullable<PlatformOrganizationDto['counts']>>();
+    const userLimits = await readUserLimits(trx, ids);
     const accounts = ids.length
       ? new Map((await trx.selectFrom('platformTenantAccounts as a').leftJoin('userProfiles as u', 'u.id', 'a.accountManagerUserId')
         .select(['a.organizationId', 'a.accountManagerUserId', 'a.tags', 'u.email as managerEmail']).where('a.organizationId', 'in', ids).execute())
@@ -71,6 +73,7 @@ export async function listOrganizations(deps: ApiDeps, actor: Actor, q: OrgListQ
     return {
       data: rows.map((r) => ({
         ...toPlatformOrgDto(r as unknown as Parameters<typeof toPlatformOrgDto>[0], counts.get(r.id)),
+        userLimit: userLimits.get(r.id),
         account: accounts.get(r.id) ?? { accountManagerUserId: null, accountManagerEmail: null, tags: [] },
       })),
       total,
@@ -82,15 +85,17 @@ export async function getOrganization(deps: ApiDeps, actor: Actor, id: string): 
   requirePlatformAdmin(actor.principal);
   const row = await runUser(deps.db, actor, async (trx) => orgQuery(trx).select(PLATFORM_ORG_SELECT).where('o.id', '=', id).executeTakeFirst());
   if (!row) throw errors.notFound('Organisation', id);
-  const counts = await runSystem(deps.db, id, actor.requestId, async (trx) => ({
+  const { userLimit, ...counts } = await runSystem(deps.db, id, actor.requestId, async (trx) => ({
     employees: toCount((await trx.selectFrom('employees').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', id).where('deletedAt', 'is', null).executeTakeFirst())?.n),
     // terminals only: the Flowza Finance connector and the self-service punch device are platform plumbing, not device seats
     // (plan limit and usage metering alike)
     devices: toCount((await trx.selectFrom('devices').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', id).where('status', '!=', 'decommissioned').where('providerKey', 'not in', [FLOWZA_FINANCE_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY]).executeTakeFirst())?.n),
     branches: toCount((await trx.selectFrom('branches').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', id).where('status', '!=', 'archived').executeTakeFirst())?.n),
     users: toCount((await trx.selectFrom('orgMemberships').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', id).where('status', '=', 'active').executeTakeFirst())?.n),
+    // licensed users (active employees) against the user limit — migration 20261001000300
+    userLimit: (await readUserLimits(trx, [id])).get(id),
   }));
-  return toPlatformOrgDto(row as unknown as Parameters<typeof toPlatformOrgDto>[0], counts);
+  return { ...toPlatformOrgDto(row as unknown as Parameters<typeof toPlatformOrgDto>[0], counts), userLimit };
 }
 
 export async function createOrganization(deps: ApiDeps, actor: Actor, input: CreateOrganizationInput): Promise<CreateOrganizationResult> {

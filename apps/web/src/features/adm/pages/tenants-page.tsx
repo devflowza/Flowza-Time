@@ -11,6 +11,7 @@ import { useServerTable } from '@/hooks/use-server-table';
 import { fmtDateTime, fmtNumber, fmtRelative } from '@/lib/format';
 import { SearchBox } from '@/features/organization/components/search-box';
 import { usePlans, usePlatformOrgs } from '@/features/platform/api';
+import { UserLimitMeter } from '@/components/user-limit-meter';
 import { CreateOrgDialog } from '@/features/platform/components/create-org-dialog';
 import { OrgStatusBadge } from '@/features/platform/components/org-status-badge';
 
@@ -38,6 +39,9 @@ export default function AdmTenantsPage() {
     { id: 'plan', header: tp('orgs.plan'), enableSorting: false, cell: ({ row }) => row.original.subscription ? (
       <div><p className="text-sm">{row.original.subscription.planName}</p><p className="text-xs text-muted-foreground">{tp(`subscription.${row.original.subscription.status}`)}{row.original.subscription.trialEndsAt && row.original.subscription.status === 'trialing' ? ` · ${fmtRelative(row.original.subscription.trialEndsAt)}` : ''}</p></div>
     ) : <span className="text-muted-foreground">—</span> },
+    { id: 'userLimit', header: t('userLimit.column'), enableSorting: false, cell: ({ row }) => row.original.userLimit
+      ? <UserLimitMeter value={row.original.userLimit} size="sm" className="w-36" />
+      : <span className="text-muted-foreground">—</span> },
     { id: 'people', header: t('tenants.people'), enableSorting: false, cell: ({ row }) => row.original.counts ? (
       <div className="text-xs tnum"><p>{fmtNumber(row.original.counts.employees)} {tp('orgs.counts.employees').toLowerCase()}</p><p className="text-muted-foreground">{fmtNumber(row.original.counts.users)} {tp('orgs.counts.users').toLowerCase()} · {fmtNumber(row.original.counts.devices)} {tp('orgs.counts.devices').toLowerCase()}</p></div>
     ) : null },

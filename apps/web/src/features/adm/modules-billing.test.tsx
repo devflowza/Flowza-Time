@@ -13,6 +13,7 @@ import './i18n';
 import AdmPlansPage from './pages/plans-page';
 import AdmModulesPage from './pages/modules-page';
 import { TenantModulesPanel } from './components/tenant-modules-panel';
+import { UserLimitCard } from './components/user-limit-dialog';
 import SubscriptionSection from '@/features/settings/sections/subscription-section';
 import '@/features/settings/routes';
 
@@ -95,7 +96,7 @@ describe('tenant Settings → Subscription', () => {
         planKey: 'professional', planName: 'Professional', status: 'active', trialEndsAt: null, currentPeriodStart: null, currentPeriodEnd: '2027-09-30T19:59:59.999Z', cancelAt: null,
         billingCycle: 'yearly', seats: 11, includedUsers: 11, isCustom: false, vatRate: 5,
         price: { currency: 'OMR', cycle: 'yearly', seats: 11, includedUsers: 11, extraUsers: 0, base: 500, extraUnit: 40, extraAmount: 0, amount: 500, monthlyEquivalent: 41.667, perUserMonthly: 3.788 },
-        limits: { employees: 11, devices: 5 }, usage: { employees: 9, devices: 1 }, features: [],
+        limits: { employees: 11, devices: 5 }, usage: { employees: 9, devices: 1 }, features: [], userLimit: { used: 9, limit: 11, remaining: 2, reached: false, source: 'seats' },
         modules: [{ key: 'leave', name: 'Leave management', description: '', category: 'workforce', enabled: true, inPlan: true, override: null, available: true, lapsed: false, reason: null, updatedAt: null },
           { key: 'finance_integration', name: 'Flowza Finance integration', description: '', category: 'integrations', enabled: false, inPlan: false, override: null, available: true, lapsed: false, reason: null, updatedAt: null }],
         availablePlans: [{ key: 'professional', name: 'Professional', description: null, includedUsers: 11, isCustom: false, modules: ['leave'], prices: PROFESSIONAL.prices }],
@@ -105,9 +106,46 @@ describe('tenant Settings → Subscription', () => {
     });
     renderWithProviders(<SubscriptionSection />);
     expect(await screen.findByTestId('subscription-price')).toHaveTextContent(/OMR\s500\.000/);
-    expect(screen.getByTestId('usage-employees')).toHaveTextContent('9 / 11');
+    expect(screen.getByTestId('usage-employees')).toHaveTextContent('9 / 11 users');
+    expect(screen.getByTestId('usage-employees')).toHaveTextContent('2 left');
     expect(screen.getByTestId('module-finance_integration')).toHaveTextContent('Not part of your subscription');
     expect(screen.getByTestId('plan-professional')).toHaveTextContent('Current');
     expect(screen.getByText('Bank Muscat')).toBeInTheDocument();
+  });
+});
+
+describe('user limit (admin panel, migration 20261001000300)', () => {
+  const limit = (used: number, l: number) => ({ used, limit: l, remaining: Math.max(0, l - used), reached: used >= l, source: 'seats' as const });
+
+  it('shows "0 / 20 users" with a bar; raising it previews the new bar and PATCHes the seats with a reason', async () => {
+    apiMock.patch.mockResolvedValue({ data: {} });
+    renderWithProviders(<UserLimitCard orgId="org-9" orgName="Acme" value={limit(0, 20)} hasSubscription />);
+    const card = screen.getByTestId('tenant-user-limit');
+    expect(within(card).getByText('0 / 20 users')).toBeInTheDocument();
+    expect(within(card).getByRole('progressbar')).toHaveAttribute('aria-valuemax', '20');
+    fireEvent.click(within(card).getByRole('button', { name: 'Set user limit' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Increase by 5' }));
+    expect(within(dialog).getByTestId('user-limit-preview')).toHaveTextContent('0 / 25 users');
+    fireEvent.change(within(dialog).getByLabelText(/Reason/), { target: { value: 'Customer bought 5 more users' } });
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/platform/orgs/org-9/subscription', { seats: 25, reason: 'Customer bought 5 more users' }));
+  });
+
+  it('a full tenant reads "Max users reached"; a limit below the users in use is flagged before saving', async () => {
+    renderWithProviders(<UserLimitCard orgId="org-9" orgName="Acme" value={limit(20, 20)} hasSubscription />);
+    expect(screen.getByText('20 / 20 users')).toBeInTheDocument();
+    expect(screen.getByText('Max users reached')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Set user limit' }));
+    const dialog = await screen.findByRole('dialog');
+    fireEvent.change(within(dialog).getByLabelText(/^User limit/), { target: { value: '15' } });
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('This tenant already has 20 users');
+  });
+
+  it('a tenant without a subscription cannot get a limit until it has one', () => {
+    renderWithProviders(<UserLimitCard orgId="org-9" orgName="Acme" value={{ used: 3, limit: null, remaining: null, reached: false, source: null }} hasSubscription={false} />);
+    expect(screen.getByText('3 users · no limit')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Set user limit' })).toBeDisabled();
+    expect(screen.getByText('Create a subscription first (Subscription tab).')).toBeInTheDocument();
   });
 });

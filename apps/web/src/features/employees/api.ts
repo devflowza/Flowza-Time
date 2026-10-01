@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { BulkEmployeeAction, CreateEmployeeInput, DeleteEmployeeInput, EmployeeDeviceStateDto, EmployeeDto, EmploymentHistoryDto, IdentityDocumentDto, ImportJobDto, ImportJobRowDto, ImportUploadInput, JobAccepted, UpdateEmployeeInput } from '@flowza/contracts';
+import type { BulkEmployeeAction, CreateEmployeeInput, DeleteEmployeeInput, EmployeeDeviceStateDto, EmployeeDto, EmploymentHistoryDto, IdentityDocumentDto, ImportJobDto, ImportJobRowDto, ImportUploadInput, JobAccepted, UpdateEmployeeInput, UserLimitDto } from '@flowza/contracts';
 import type { z } from 'zod';
 import type { identityDocumentInputSchema } from '@flowza/contracts';
 import type { ComboboxOption } from '@/components/forms';
@@ -49,6 +49,15 @@ export function useEmployeeOptions(initialSearch = '', opts: { unlinked?: boolea
   const q = useEmployees({ search: debounced || undefined, pageSize: 20, sort: 'displayName', employmentStatus: undefined, unlinked: opts.unlinked ? true : undefined });
   const options = useMemo<ComboboxOption[]>(() => (q.data?.data ?? []).map((e) => ({ value: e.id, label: e.displayName, description: e.employeeNumber })), [q.data]);
   return { options, setSearch, isLoading: q.isLoading || q.isFetching, data: q.data?.data ?? [] };
+}
+
+/**
+ * Licensed users against the user limit the platform set (GET /orgs/:orgId/user-limit) — "Maximum users reached" on the
+ * screens that add employees. Under the employees key, so every employee mutation refreshes it.
+ */
+export function useUserLimit(enabled = true) {
+  const orgId = useOrgId();
+  return useQuery({ queryKey: [...qk.entity(orgId, ENTITY), 'user-limit'], queryFn: async () => (await api.get<Envelope<UserLimitDto>>(`/orgs/${orgId}/user-limit`)).data, enabled, retry: false, staleTime: 30_000 });
 }
 
 export function useEmployeeMutations() {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { computeInvoiceTotals, createPlanSchema, putOrgModulesSchema, quoteSubscription, roundMoney, subscriptionInvoiceLines, updatePlanSchema } from './billing.js';
+import { computeInvoiceTotals, createPlanSchema, putOrgModulesSchema, quoteSubscription, roundMoney, subscriptionInvoiceLines, toUserLimit, updatePlanSchema } from './billing.js';
 
 const PROFESSIONAL = { OMR: { monthly: 50, yearly: 500, extraUserMonthly: 4, extraUserYearly: 40 } };
 
@@ -64,5 +64,21 @@ describe('plan and module schemas', () => {
     expect(createPlanSchema.parse({ key: 'pro_plus', name: 'Pro+', limits: { employees: 50 }, modules: ['leave'] }).limits).toEqual({ employees: 50 });
     expect(putOrgModulesSchema.parse({ modules: { leave: false }, reason: 'Not needed' }).modules).toEqual({ leave: false });
     expect(putOrgModulesSchema.safeParse({ modules: { unknown_module: false }, reason: 'x y z' }).success).toBe(false);
+  });
+});
+
+describe('toUserLimit (migration 20261001000300)', () => {
+  it('reports used / limit, what is left and whether the limit is reached', () => {
+    expect(toUserLimit(0, 20, 'seats')).toEqual({ used: 0, limit: 20, remaining: 20, reached: false, source: 'seats' });
+    expect(toUserLimit(19, 20, 'seats')).toMatchObject({ remaining: 1, reached: false });
+    expect(toUserLimit(20, 20, 'seats')).toMatchObject({ remaining: 0, reached: true });
+  });
+  it('a limit lowered below the users in use is reached with nothing left (never negative)', () => {
+    expect(toUserLimit(25, 20, 'seats')).toMatchObject({ used: 25, limit: 20, remaining: 0, reached: true });
+  });
+  it('a disabled override is a limit of 0; no limit is never reached', () => {
+    expect(toUserLimit(0, 0, 'override')).toMatchObject({ remaining: 0, reached: true });
+    expect(toUserLimit(500, null, null)).toEqual({ used: 500, limit: null, remaining: null, reached: false, source: null });
+    expect(toUserLimit(5, null, 'override')).toMatchObject({ limit: null, source: null, reached: false });
   });
 });

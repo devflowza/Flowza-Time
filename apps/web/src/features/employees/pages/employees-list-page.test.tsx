@@ -48,6 +48,37 @@ describe('EmployeesListPage', () => {
     expect(screen.getByRole('button', { name: /Import from CSV/ })).toBeInTheDocument();
   });
 
+  it('once the user limit is reached it says "Maximum users reached" and the employee cannot be added', async () => {
+    mockGet({ '/orgs/org-1/employees': page([emp('e1', 'Ali', '1001')]), '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]),
+      '/orgs/org-1/user-limit': { data: { used: 20, limit: 20, remaining: 0, reached: true, source: 'seats' } } });
+    renderWithProviders(<EmployeesListPage />, { route: '/employees' });
+    const banner = await screen.findByTestId('user-limit-banner');
+    expect(banner).toHaveAttribute('role', 'alert');
+    expect(banner).toHaveTextContent('Maximum users reached');
+    expect(banner).toHaveTextContent('20 / 20 users');
+    expect(within(banner).getByRole('progressbar')).toHaveAttribute('aria-valuenow', '20');
+    expect(screen.getByRole('button', { name: /Add employee/ })).toBeDisabled();
+    // importing stays open: an import may only update existing employees (the API refuses one that adds past the limit)
+    expect(screen.getByRole('button', { name: /Import/ })).toBeEnabled();
+  });
+
+  it('warns when few users are left and keeps adding open; no banner without a limit', async () => {
+    mockGet({ '/orgs/org-1/employees': page([emp('e1', 'Ali', '1001')]), '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]),
+      '/orgs/org-1/user-limit': { data: { used: 18, limit: 20, remaining: 2, reached: false, source: 'seats' } } });
+    const first = renderWithProviders(<EmployeesListPage />, { route: '/employees' });
+    const banner = await screen.findByTestId('user-limit-banner');
+    expect(banner).toHaveTextContent('2 users left');
+    expect(banner).toHaveTextContent('18 / 20 users');
+    expect(screen.getByRole('button', { name: /Add employee/ })).toBeEnabled();
+    first.unmount();
+    mockGet({ '/orgs/org-1/employees': page([emp('e1', 'Ali', '1001')]), '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]),
+      '/orgs/org-1/user-limit': { data: { used: 300, limit: null, remaining: null, reached: false, source: null } } });
+    renderWithProviders(<EmployeesListPage />, { route: '/employees' });
+    await screen.findAllByText('Ali');
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/user-limit'));
+    expect(screen.queryByTestId('user-limit-banner')).not.toBeInTheDocument();
+  });
+
   it('debounces the search box into the URL (?search=) and passes it to the API', async () => {
     mockGet({ '/orgs/org-1/employees': page([emp('e1', 'Ali', '1001')]), '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]) });
     renderWithProviders(<EmployeesListPage />, { route: '/employees' });

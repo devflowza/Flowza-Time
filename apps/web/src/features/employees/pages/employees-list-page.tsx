@@ -13,9 +13,10 @@ import { fmtDate } from '@/lib/format';
 import { useCan } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { SearchBox } from '@/features/organization/components/search-box';
-import { useEmployees } from '../api';
+import { useEmployees, useUserLimit } from '../api';
 import { DeviceSyncSummary, EmploymentStatusBadge } from '../components/employee-badges';
 import { BulkActionDialog, type BulkKind } from '../components/bulk-dialogs';
+import { UserLimitBanner } from '../components/user-limit-banner';
 
 const ALL = '__all__';
 
@@ -33,6 +34,10 @@ export default function EmployeesListPage() {
   const [bulkIds, setBulkIds] = useState<string[]>([]);
   const filters = table.state.filters;
   const hasFilters = Object.keys(filters).length > 0;
+  // the user limit the platform set: once reached, nobody can be added (the API refuses it too)
+  const userLimit = useUserLimit(can('employee.create') || can('employee.import'));
+  const full = userLimit.data?.reached === true;
+  const fullTitle = full ? tc('userLimit.reachedTitle') : undefined;
 
   const columns = useMemo<ColumnDef<EmployeeDto, unknown>[]>(() => [
     { id: 'employeeNumber', accessorKey: 'employeeNumber', header: t('fields.employeeNumber'), cell: ({ row }) => <span className="font-mono text-xs tnum" dir="ltr">{row.original.employeeNumber}</span>, size: 110 },
@@ -78,13 +83,14 @@ export default function EmployeesListPage() {
         <>
           {can('employee.export', 'report.export') ? <Button variant="outline" size="sm" onClick={() => openBulk('export', [])}><Download /> {tc('common.export')}</Button> : null}
           {can('employee.import') ? <Button variant="outline" size="sm" onClick={() => navigate('/employees/import')}><FileUp /> {tc('common.import')}</Button> : null}
-          {can('employee.create') ? <Button size="sm" onClick={() => navigate('/employees/new')}><Plus /> {t('list.add')}</Button> : null}
+          {can('employee.create') ? <Button size="sm" disabled={full} title={fullTitle} onClick={() => navigate('/employees/new')}><Plus /> {t('list.add')}</Button> : null}
         </>
       } />
+      <UserLimitBanner value={userLimit.data} />
       {isTrulyEmpty ? (
         <EmptyState icon={Users} title={t('list.empty')} description={t('list.emptyHint')} action={
           <div className="flex flex-wrap justify-center gap-2">
-            {can('employee.create') ? <Button onClick={() => navigate('/employees/new')}><Plus /> {t('list.add')}</Button> : null}
+            {can('employee.create') ? <Button disabled={full} title={fullTitle} onClick={() => navigate('/employees/new')}><Plus /> {t('list.add')}</Button> : null}
             {can('employee.import') ? <Button variant="outline" onClick={() => navigate('/employees/import')}><FileUp /> {t('list.import')}</Button> : null}
           </div>
         } />

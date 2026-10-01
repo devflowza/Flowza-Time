@@ -98,6 +98,12 @@ export const errors = {
   invalidState: (message: string, details?: Record<string, unknown>) => new AppError('INVALID_STATE', message, { details }),
   periodLocked: (message = 'The attendance period is locked.') => new AppError('PERIOD_LOCKED', message),
   entitlement: (metric: string, limit: number) => new AppError('ENTITLEMENT_EXCEEDED', `Your plan limit for ${metric} (${limit}) has been reached.`, { details: { metric, limit } }),
+  /** The tenant's user limit (licensed employees, set by the platform): `adding` more would take `used` past `limit`. */
+  userLimit: (limit: number, used: number, adding = 1) => new AppError('ENTITLEMENT_EXCEEDED',
+    used >= limit
+      ? `Maximum users reached: ${used} of ${limit} users are in use. Ask your FlowZa Time provider to increase the user limit.`
+      : `Only ${limit - used} of ${limit} users are left, ${adding} requested. Ask your FlowZa Time provider to increase the user limit.`,
+    { details: { metric: 'employees', reason: 'USER_LIMIT_REACHED', limit, used, adding } }),
   featureDisabled: (feature: string) => new AppError('FEATURE_DISABLED', `The feature "${feature}" is not enabled for this organisation.`, { details: { feature } }),
   internal: (message = 'An unexpected error occurred.', cause?: unknown) => new AppError('INTERNAL_ERROR', message, { cause }),
   dependency: (name: string, cause?: unknown) => new AppError('DEPENDENCY_UNAVAILABLE', `${name} is currently unavailable.`, { cause, retryable: true }),
