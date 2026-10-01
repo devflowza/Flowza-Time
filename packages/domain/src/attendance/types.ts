@@ -11,7 +11,7 @@ export interface EngineShift {
   requiredMinutes: number | null; // FLEXIBLE
   coreStart: string | null;
   coreEnd: string | null;
-  dayBoundary: string;            // HH:mm, FLEXIBLE attendance-day boundary (default 04:00)
+  dayBoundary: string;            // HH:mm, FLEXIBLE attendance-day boundary (default 00:00)
   breaks: ShiftBreak[];
   punchInWindowBeforeMinutes: number;
   punchOutWindowAfterMinutes: number;

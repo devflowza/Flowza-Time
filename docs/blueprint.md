@@ -621,7 +621,7 @@ in the branch timezone; for overnight shifts `shiftEnd` is on the next calendar 
 is the date the shift *starts*. Example: shift 22:00–06:00, window 18:00 (D) → 12:00 (D+1); punches
 21:57 (D) and 06:08 (D+1) both attribute to date D. When windows of consecutive days overlap (e.g.
 flexible shifts), a punch is attributed to the window whose scheduled start is nearest — deterministic
-and recorded in the trace. Flexible shifts use a configurable day boundary (default 04:00 local).
+and recorded in the trace. Flexible shifts use a configurable day boundary (default 00:00 local, i.e. 12:00 AM).
 
 ### G.4 Interpretation of punches (configurable per rule set)
 
