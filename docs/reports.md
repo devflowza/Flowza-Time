@@ -18,10 +18,16 @@ POST /orgs/:orgId/reports ──▶ report_requests (QUEUED) + GENERATE_REPORT j
   GET …/reports/:id/download → signed URL (300 s) · retention sweep expires files after 7 days
 ```
 
-Failure policy: a non-retryable error (bad parameters, unknown type, no Chromium on this worker) sets FAILED with the
-user-safe message and emits `report.failed`; a retryable one (storage/renderer hiccup) puts the row back to QUEUED and
-lets the queue's backoff run, so a request is never left at RUNNING. `report.ready`/`report.failed` notify the
-requester only (`payload.userId`), not every holder of `report.view`.
+Failure policy: a non-retryable error (bad parameters, a type the catalogue does not offer, no Chromium on this worker)
+sets FAILED with the user-safe message and emits `report.failed`; a retryable one (storage/renderer hiccup) puts the row
+back to QUEUED and lets the queue's backoff run, so a request is never left at RUNNING. `report.ready`/`report.failed`
+notify the requester only (`payload.userId`), not every holder of `report.view`.
+
+A report type the worker's build has never heard of (not in its `REPORT_TYPES`) was queued by a newer API: the row goes
+back to QUEUED with "being updated" and is retried every 10 minutes until the job's last attempt, like a job type the
+worker has no handler for. On 2026-10-01 every Monthly Attendance Summary failed as "This report type is not available
+yet." because the 2026-09-29 deploys skipped the reports worker, whose build predated `monthly_summary`. Deploy with the
+target `all`, or `reports` straight after `both`, whenever a change adds a report type.
 
 `EXPORT_EMPLOYEES` (the employee list's bulk export) creates its own `report_requests` row of type
 `employee_directory` and then runs the same pipeline, which is what gives it a download in "My reports".

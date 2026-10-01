@@ -141,7 +141,15 @@ Optional:
 failure in the browser with the API logging nothing — the request never reaches a handler.
 
 The canonical origin is the custom domain, `https://time.flowza.ai`; `https://time.flowza.com` serves the same Pages
-build as an alias and is listed too (it calls the same `time-api.flowza.ai`). Deliberately **not** listed: the
+build as an alias and is listed too (it calls the same `time-api.flowza.ai`). Check an origin with a preflight — an
+accepted one gets `access-control-allow-origin` back, a missing one gets a 204 without it:
+
+```bash
+curl -si -X OPTIONS https://time-api.flowza.ai/api/v1/me \
+  -H 'Origin: https://time.flowza.com' -H 'Access-Control-Request-Method: GET' | grep -i access-control-allow-origin
+```
+
+Deliberately **not** listed: the
 `*.pages.dev` deployment URLs. Every Cloudflare preview build gets its own hostname, so allowing them either means an
 unmaintainable list or a wildcard that lets any preview talk to production data. If you want previews to work, point
 them at a separate staging API rather than widening this one.

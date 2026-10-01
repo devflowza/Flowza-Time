@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('@/lib/api-client', async () => (await import('@/features/employees/test-mocks')).apiClientModule);
@@ -6,6 +6,7 @@ vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
+import { ApiError } from '@/lib/api-client';
 import { apiMock, grantAll, mockGet, page, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
 import type { AttendanceEngineOutcomeDto, AttendancePreviewDto } from '@flowza/contracts';
 import { RecordEditDialog } from './record-edit-dialog';
@@ -35,9 +36,19 @@ function mockPreview(base: AttendancePreviewDto) {
   });
 }
 const editCalls = () => apiMock.post.mock.calls.filter(([p]) => p === '/orgs/org-1/attendance/record-edits');
+const proposalCalls = () => apiMock.post.mock.calls.filter(([p, b]) => p === '/orgs/org-1/attendance/preview' && ((b as Record<string, unknown>)['inAt'] || (b as Record<string, unknown>)['outAt']));
+
+// today's night shift (17:00 – 04:00 Asia/Muscat) with two punches this morning, opened at 12:00 the same day
+const nightShiftToday = () => previewOf({
+  shift: { id: 's2', code: 'NIGHT', name: 'Night shift', expectedStartAt: '2026-09-01T13:00:00Z', expectedEndAt: '2026-09-02T00:00:00Z', scheduledMinutes: 660 },
+  current: outcome({ status: 'HALF_DAY', flags: ['EARLY_DEPARTURE'], firstInAt: '2026-09-01T07:03:00Z', lastOutAt: '2026-09-01T07:45:00Z', workedMinutes: 42, lateMinutes: 0, earlyDepartureMinutes: 975, overtimeMinutes: 0 }),
+  preview: outcome({ status: 'HALF_DAY', flags: ['EARLY_DEPARTURE'], firstInAt: '2026-09-01T07:03:00Z', lastOutAt: '2026-09-01T07:45:00Z', workedMinutes: 42, lateMinutes: 0, earlyDepartureMinutes: 975, overtimeMinutes: 0 }),
+  punches: { in: { eventId: 'ev-in', punchedAt: '2026-09-01T07:03:00Z' }, out: { eventId: 'ev-out', punchedAt: '2026-09-01T07:45:00Z' } },
+});
 
 describe('RecordEditDialog', () => {
   beforeEach(() => { resetApiMock(); grantAll(); testState.orgId = 'org-1'; testState.timezone = 'Asia/Muscat'; mockGet({ '/orgs/org-1/employees': page([]) }); });
+  afterEach(() => { vi.useRealTimers(); });
 
   it('shows the expected shift, previews the policy outcome, refuses check-out before check-in and requires a reason', async () => {
     mockPreview(previewOf());
@@ -91,10 +102,69 @@ describe('RecordEditDialog', () => {
     fireEvent.click(await screen.findByRole('option', { name: 'Absent' }));
     expect(await screen.findByTestId('edit-plan')).toHaveTextContent('Set status · Absent');
     expect(screen.getByTestId('status-source-MANUAL')).toBeInTheDocument();
+    // the day after the change carries the picked status; the rules' own outcome stays on the "now" side
+    expect(within(screen.getByTestId('outcome-after')).getByText('Absent')).toBeInTheDocument();
+    expect(within(screen.getByTestId('outcome-now')).getByText('Present')).toBeInTheDocument();
     fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: 'Unauthorised absence' } });
     fireEvent.click(screen.getByRole('button', { name: 'Save record' }));
     await waitFor(() => expect(editCalls()).toHaveLength(1));
     expect(editCalls()[0]![1]).toEqual({ employeeId: EMP, date: '2026-09-01', reason: 'Unauthorised absence', status: 'ABSENT' });
+  });
+
+  it('says which time has not happened yet, previews nothing for it, and saves once the times are past', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-01T08:00:00Z')); // 12:00 in Muscat
+    mockPreview(nightShiftToday());
+    renderWithProviders(<RecordEditDialog open onOpenChange={() => {}} preset={{ employeeId: EMP, employeeName: 'Ali Hassan', date: '2026-09-01' }} />);
+    expect(await screen.findByTestId('expected-shift')).toHaveTextContent('17:00 – 04:00');
+    const checkIn = screen.getByLabelText('Check-in') as HTMLInputElement;
+    const checkOut = screen.getByLabelText('Check-out') as HTMLInputElement;
+    await waitFor(() => expect(checkIn.value).toBe('11:03'));
+
+    // the shift's own times: both still to come — each field says so, and "after" does not repeat the day as it is now
+    fireEvent.change(checkIn, { target: { value: '16:46' } });
+    fireEvent.change(checkOut, { target: { value: '03:50' } });
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Check-out on the next day' }));
+    expect(await screen.findByText('Tue 01 Sep 16:46 has not happened yet.')).toBeInTheDocument();
+    expect(screen.getByText('Wed 02 Sep 03:50 has not happened yet.')).toBeInTheDocument();
+    expect(checkIn).toHaveAttribute('aria-invalid', 'true');
+    expect(checkOut).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByTestId('future-hint')).toHaveTextContent('It is Tue 01 Sep 12:00 now (Asia/Muscat).');
+    const after = screen.getByTestId('outcome-after');
+    expect(after).toHaveTextContent('No outcome for these times');
+    expect(within(after).queryByText('Half day')).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: 'Night shift punches' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save record' }));
+    await new Promise((r) => setTimeout(r, 400)); // past the preview debounce
+    expect(proposalCalls()).toHaveLength(0);
+    expect(editCalls()).toHaveLength(0);
+
+    // times up to now: previewed and saved
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Check-out on the next day' }));
+    fireEvent.change(checkIn, { target: { value: '07:00' } });
+    fireEvent.change(checkOut, { target: { value: '11:58' } });
+    expect(screen.queryByText(/has not happened yet/)).not.toBeInTheDocument();
+    await waitFor(() => expect(within(screen.getByTestId('outcome-after')).getByText('11:58')).toBeInTheDocument());
+    expect(proposalCalls().at(-1)?.[1]).toEqual({ employeeId: EMP, date: '2026-09-01', inAt: '2026-09-01T03:00:00Z', outAt: '2026-09-01T07:58:00Z' });
+    fireEvent.click(screen.getByRole('button', { name: 'Save record' }));
+    await waitFor(() => expect(editCalls()).toHaveLength(1));
+    expect(editCalls()[0]![1]).toEqual({ employeeId: EMP, date: '2026-09-01', reason: 'Night shift punches', inAt: '2026-09-01T03:00:00Z', outAt: '2026-09-01T07:58:00Z' });
+  });
+
+  it('puts an API refusal on the field it names and shows no outcome for the refused times', async () => {
+    const base = previewOf();
+    apiMock.post.mockImplementation((path: string, body: Record<string, unknown>) => {
+      if (path !== '/orgs/org-1/attendance/preview') return Promise.reject(new Error(`unexpected POST ${path}`));
+      if (!body['outAt'] && !body['inAt']) return Promise.resolve({ data: base });
+      return Promise.reject(new ApiError(400, 'VALIDATION_ERROR', 'The time must fall within the attendance day (from the day before to the day after).', 'req-1', { issues: [{ path: 'outAt', message: 'Outside the attendance day' }] }));
+    });
+    renderWithProviders(<RecordEditDialog open onOpenChange={() => {}} preset={{ employeeId: EMP, employeeName: 'Ali Hassan', date: '2026-09-01' }} />);
+    const checkOut = await screen.findByLabelText('Check-out') as HTMLInputElement;
+    await waitFor(() => expect(checkOut.value).toBe('17:10'));
+    fireEvent.change(checkOut, { target: { value: '18:30' } });
+    expect(await screen.findByText(/must fall within the attendance day/)).toBeInTheDocument();
+    expect(checkOut).toHaveAttribute('aria-invalid', 'true');
+    expect(screen.getByTestId('outcome-after')).toHaveTextContent('No outcome for these times');
   });
 
   it('refuses to edit a day in a locked period', async () => {

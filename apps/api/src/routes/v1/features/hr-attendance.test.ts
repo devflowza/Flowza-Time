@@ -72,6 +72,12 @@ describe('POST /attendance/preview', () => {
     expect(beforeIn.status).toBe(400);
     const future = await h.request('POST', `${base()}/attendance/preview`, { token: f.hrAdmin, body: { employeeId: f.e1, date: '2099-01-01', inAt: '2099-01-01T04:00:00Z' } });
     expect(future.status).toBe(400);
+    // today's day with a check-out still to come (a night shift's next-day check-out): refused on that field, by name
+    const today = DateTime.now().setZone('Asia/Muscat').toISODate()!;
+    const later = await h.request('POST', `${base()}/attendance/preview`, { token: f.hrAdmin, body: { employeeId: f.e1, date: today, outAt: DateTime.utc().plus({ hours: 2 }).toISO() } });
+    expect(later.status).toBe(400);
+    expect(later.body).toMatchObject({ code: 'VALIDATION_ERROR', details: { issues: [{ path: 'outAt', message: 'In the future' }] } });
+    expect(later.body.message).toMatch(/^The check-out .+ has not happened yet/);
     const employee = await h.request('POST', `${base()}/attendance/preview`, { token: f.employeeUser, body: { employeeId: f.e1, date: DAY } });
     expect(employee.status).toBe(403);
     const otherBranch = await h.request('POST', `${base()}/attendance/preview`, { token: f.branchManagerB, body: { employeeId: f.e1, date: DAY } });
