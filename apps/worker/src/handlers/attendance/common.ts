@@ -48,7 +48,7 @@ export function asArray(v: unknown): unknown[] {
   return Array.isArray(v) ? v : [];
 }
 
-/** `organization_settings.attendance.processingDelaySeconds` (debounce between the last punch and the recompute). */
+/** `organization_settings.attendance.processingDelaySeconds`: the recompute throttle window per (employee, date) — see `recomputeRunAt` in normalize.ts. */
 export async function loadProcessingDelaySeconds(trx: Trx, organizationId: string): Promise<number> {
   const row = await trx.selectFrom('organizationSettings').select('attendance').where('organizationId', '=', organizationId).executeTakeFirst();
   const v = asObject(row?.attendance)['processingDelaySeconds'];
