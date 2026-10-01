@@ -42,7 +42,12 @@ type MfaListResult = { data: { totp: MfaFactor[]; all: MfaFactor[] } | null; err
 // A repeated sign-up of a confirmed address returns a stand-in user with `identities: []`; errors carry supabase's `code`.
 type AuthResult = { data: { session: { access_token: string } | null; user: { id: string; identities?: unknown[] } | null }; error: { message: string; code?: string; status?: number } | null };
 type AuthCallResult = { data: unknown; error: { message: string; code?: string; status?: number; name?: string } | null };
-export interface RealtimeChannelDouble { topic: string; handlers: Array<(msg: { event?: string; payload?: unknown }) => void>; on: ReturnType<typeof vi.fn>; subscribe: ReturnType<typeof vi.fn>; emit: (event: string) => void }
+export interface RealtimeChannelDouble {
+  topic: string; handlers: Array<(msg: { event?: string; payload?: unknown }) => void>; statusListeners: Array<(status: string) => void>;
+  on: ReturnType<typeof vi.fn>; subscribe: ReturnType<typeof vi.fn>;
+  /** Fire a broadcast signal / a subscription status (SUBSCRIBED, CHANNEL_ERROR, TIMED_OUT, CLOSED) on this channel. */
+  emit: (event: string) => void; status: (status: string) => void;
+}
 /** Every channel opened through `supabaseMock.channel` (tests clear it in their setup). */
 export const realtimeChannels: RealtimeChannelDouble[] = [];
 export const supabaseMock = {
@@ -68,9 +73,12 @@ export const supabaseMock = {
     const ch: RealtimeChannelDouble = {
       topic,
       handlers: [],
+      statusListeners: [],
       on: vi.fn((_type: string, _filter: unknown, cb: (msg: { event?: string; payload?: unknown }) => void) => { ch.handlers.push(cb); return ch; }),
-      subscribe: vi.fn((cb?: (status: string) => void) => { cb?.('SUBSCRIBED'); return ch; }),
+      // joins at once, like a reachable realtime server; `status(...)` simulates a drop or a re-join
+      subscribe: vi.fn((cb?: (status: string) => void) => { if (cb) { ch.statusListeners.push(cb); cb('SUBSCRIBED'); } return ch; }),
       emit: (event: string) => { for (const h of ch.handlers) h({ event, payload: {} }); },
+      status: (status: string) => { for (const l of ch.statusListeners) l(status); },
     };
     realtimeChannels.push(ch);
     return ch;

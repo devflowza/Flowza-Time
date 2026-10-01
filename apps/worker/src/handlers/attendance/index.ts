@@ -8,7 +8,7 @@ import { registerDayCloseHandlers } from './day-close.js';
 
 /**
  * Attendance processing (docs/attendance-engine.md "Worker integration contract"):
- *   NORMALIZE_RAW         raw punches → events (+ debounced recomputes)
+ *   NORMALIZE_RAW         raw punches → events (+ throttled recomputes)
  *   RECOMPUTE_DAILY       one (employee, date) through the pure engine → daily record (+ history, domain events)
  *   RECALCULATE_RANGE     explicit recalculation request over a scope × date range
  *   BUILD_PERIOD_SUMMARY  payroll period summaries (+ finalisation under a period lock)

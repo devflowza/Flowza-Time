@@ -20,6 +20,8 @@ test.describe('HR attendance workspace', () => {
     // the calendar: one month per employee, status colours, today's ring, the manual marker and the legend
     const card = page.locator(`[data-testid="calendar-employee"][data-employee="${salim.id}"]`);
     await expect(card).toBeVisible();
+    // realtime websockets are aborted in this suite: the register says it refreshes on a timer instead of claiming "Live"
+    await expect(page.getByTestId('attendance-live')).toHaveText('Auto-refresh');
     await expect(card.locator('[data-day="2026-09-01"]')).toHaveAttribute('data-status', 'PRESENT');
     await expect(card.locator('[data-day="2026-09-08"]')).toHaveAttribute('data-status', 'PRESENT');
     await expect(card.locator('[data-day="2026-09-20"]')).toHaveAttribute('data-today', 'true');
