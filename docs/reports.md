@@ -72,10 +72,14 @@ employee's own copy) — the file is always fetched through the reader's session
 
 - **Hours notation** — `settings.reports.hoursNotation`: `h.mm` (default; `9.45` is nine hours forty-five, never a
   decimal) or `hh:mm`. Spans (Wrk Hrs) are always `H:MM`. CSV/XLSX carry minutes as numbers; the notation is for print.
-- **Attendance codes** — statuses map to `PR AB OF HL HDP HDL`; a LEAVE day prints the tenant's `leave_types.code`
+- **Attendance codes** — statuses map to `PR AB OF HL HDP HDL MP`; a LEAVE day prints the tenant's `leave_types.code`
   (AL, SL, CL, …). `leave_types.treat_as_present` (Site Duty) counts with present days; unpaid leave (`is_paid=false`,
-  No-Pay) counts with absences. `settings.reports.codeOverrides` renames the status codes per tenant. The legend under
-  each report is generated from the effective set.
+  No-Pay) counts with absences. `MP` (engine 1.3.0, 2026-10-02 field report) is a missing-punch day (status
+  `MISSING_PUNCH`: a check-in or check-out is missing, hours unknown). It used to print `PR` and count as present with 0 h;
+  it now counts on its own — outside T/PR, T/OL, T/AB and the absence counts, in the Summary Report's trailing `MP` column and
+  the monthly summary's Missing punch — until the punch is corrected, with a footer note on the Monthly Attendance and
+  Summary reports. `settings.reports.codeOverrides` renames the status codes per tenant (a tenant may print `MP` as `PR`,
+  but the day still counts as a missing punch). The legend under each report is generated from the effective set.
 - **OT1 / OT2 / UT** — OT1 = REGULAR overtime, OT2 = overtime worked on a weekly off or holiday, UT = base − worked
   when positive (a single punch is short by the whole base). Values come from the engine under the tenant's rule set;
   the legacy vendor's own rounding is *not* emulated (decision #4 of the plan).
@@ -118,7 +122,10 @@ worker and the form apply the one rule `dailyReportRangeTooLong` (contracts). Wh
 the period's last complete day. **`monthly_summary`** reads `attendanceSummaryRows` (`@flowza/database`), the one definition the
 summary page, the profile's month strip and the print statement use; its scope (the requester's branches — days included —, a
 line manager's team, the page's search) and `finalizedFigures` (payroll.view) travel in the parameters; the total row prints in
-PDF (a spreadsheet recomputes it). `POST /attendance/summary/export` queues it (202 + report id).
+PDF (a spreadsheet recomputes it). `POST /attendance/summary/export` queues it (202 + report id). Days of employment before
+the generation date that have no calculated record (a month never recalculated, see the materialisation job in
+docs/attendance-engine.md) are in no other column: when there are any, the report adds a **Not calc.** column and a footer
+note saying to recalculate the month, instead of letting Present + Absent + Leave + Weekly off fall short of the month.
 
 The **Monthly Attendance Report** has a **Layout** parameter (`layout`, request form, schedules and "Send to…"): `summary`
 (default — the sample's codes grid) or `detailed` (`definitions/monthly-detailed.ts`, asked for on 2026-10-01: "as the daily report

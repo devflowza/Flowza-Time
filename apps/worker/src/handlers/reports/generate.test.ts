@@ -64,7 +64,7 @@ beforeAll(async () => {
   await a.insertInto('leaveRecords').values({ organizationId: ORG, employeeId: E4, branchId: BRANCH, leaveTypeId: LT_AL, startDate: '2017-10-30', endDate: '2017-11-03', status: 'APPROVED', approvedBy: OWNER, approvedAt: NOW }).execute();
   const rec = (employeeId: string, values: Record<string, unknown>) => ({ organizationId: ORG, employeeId, attendanceDate: DATE, branchId: BRANCH, departmentId: DEPT_ADMIN, timezone: MUSCAT, shiftId: SHIFT, ruleSetId: RULES, scheduledMinutes: 540, engineVersion: 'test', trace: JSON.stringify({ punches: [] }), ...values });
   await a.insertInto('attendanceDailyRecords').values([
-    // IN only → one row: 2:49 pm, dashes, base 9.00, UT 9.00
+    // IN only → one row: MP (a missing-punch day has its own code since engine 1.3.0), 2:49 pm, dashes, base 9.00, UT 9.00
     rec(E1, { status: 'MISSING_PUNCH', flags: ['MISSING_OUT'], firstInAt: at('14:49'), lastOutAt: null, workedMinutes: 0, punchCount: 1, trace: JSON.stringify({ punches: [punch('14:49', 'IN')] }) }),
     // two visits: 5:32 am (in only) then 6:00 am – 9:16 pm → worked 14.15 after a one-hour break, OT1 5.15
     rec(E2, { status: 'PRESENT', flags: ['OVERTIME'], firstInAt: at('05:32'), lastOutAt: at('21:16'), workedMinutes: 855, overtimeMinutes: 315, overtimeCategory: 'REGULAR', punchCount: 3, trace: JSON.stringify({ punches: [punch('05:32', 'IN'), punch('06:00', 'IN'), punch('21:16', 'OUT')] }) }),
@@ -94,7 +94,7 @@ describe('GENERATE_REPORT · daily_attendance', () => {
     expect(lines[0]).toBe('Department,Emp ID,Emp Name,Desg,Att Code,IN Time,OUT Time,Wrk Hrs,Tot Hrs,Base Hrs,OT1,OT2,UT');
     // departments alphabetically (ADMIN, EL BEIT, N/A), employees in natural order inside each, hours on the final visit only
     expect(lines.slice(1)).toEqual([
-      'ADMIN,2010,ABDUL SATTHAR,,PR,2:49 pm,,,0,540,0,0,540',
+      'ADMIN,2010,ABDUL SATTHAR,,MP,2:49 pm,,,0,540,0,0,540',
       'ADMIN,2076,SALEH AL AGHBARI,,PR,5:32 am,,,,,,,',
       'ADMIN,2076,SALEH AL AGHBARI,,PR,6:00 am,9:16 pm,916,855,540,315,0,0',
       'EL BEIT,2011,FAISAL,Carpenter,PR,8:39 am,6:09 pm,570,510,540,0,0,30',
@@ -305,8 +305,8 @@ describe('Phase 1 · the five layouts with existing keys', () => {
     // two visits on one day: two rows, hours on the last one only (as the Daily Report prints 2076)
     const salehLead = '2076  SALEH AL AGHBARI,ADMIN,,STAFF,,PR 1,';
     expect(lines.filter((l) => l.startsWith(`${salehLead}01-Nov-17`))).toEqual([`${salehLead}01-Nov-17 Wed,PR,5:32 am,,,,,,,`, `${salehLead}01-Nov-17 Wed,PR,6:00 am,9:16 pm,916,855,540,315,0,0`]);
-    // a single IN: the clock, nothing worked, the whole base as under time
-    expect(lines).toContain('2010  ABDUL SATTHAR,ADMIN,2010,STAFF,,PR 1 · AB 2,01-Nov-17 Wed,PR,2:49 pm,,,0,540,0,0,540');
+    // a single IN: a missing-punch day (MP, not a present day), the clock, nothing worked, the whole base as under time
+    expect(lines).toContain('2010  ABDUL SATTHAR,ADMIN,2010,STAFF,,AB 2 · MP 1,01-Nov-17 Wed,MP,2:49 pm,,,0,540,0,0,540');
 
     const pdfId = await request('monthly_attendance', 'pdf', { month: '2017-11', layout: 'detailed' });
     await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
@@ -350,8 +350,9 @@ describe('Phase 1 · the five layouts with existing keys', () => {
     ]);
     expect(lines.some((l) => l.startsWith('9001'))).toBe(false);
     // a single IN on the 1st prints the clock, the base and the whole base as under time — no span, nothing worked
-    const abdul = lines.filter((l) => l.startsWith('2010  ABDUL SATTHAR,ADMIN,2010,STAFF,,PR 1 · AB 2,'));
+    const abdul = lines.filter((l) => l.startsWith('2010  ABDUL SATTHAR,ADMIN,2010,STAFF,,AB 2 · MP 1,'));
     expect(abdul).toHaveLength(11);
+    expect(abdul[0]).toMatch(/,Att Code,MP,/);
     expect(abdul[1]).toMatch(/,IN Time,2:49 pm,,/);
     expect(abdul[3]).toMatch(/,Wrk Hrs,,,/);
     expect(abdul[5]).toMatch(/,Base Hrs,540,,/);
@@ -395,7 +396,7 @@ describe('Phase 1 · the five layouts with existing keys', () => {
     ]);
     // 14.15 worked against 9.00 → met, with 5.15 overtime; a single IN cannot be judged: missed punch, the whole base short
     expect(lines).toContain('2076  SALEH AL AGHBARI,ADMIN,,,1 of 1,01-Nov-17 Wed,STAFF,PR,5:32 am,9:16 pm,540,855,Yes,315,0,0,0');
-    expect(lines).toContain('2010  ABDUL SATTHAR,ADMIN,2010,,0 of 1,01-Nov-17 Wed,STAFF,PR,2:49 pm,,540,0,Missed punch,0,540,0,0');
+    expect(lines).toContain('2010  ABDUL SATTHAR,ADMIN,2010,,0 of 1,01-Nov-17 Wed,STAFF,MP,2:49 pm,,540,0,Missed punch,0,540,0,0');
 
     const pdfId = await request('monthly_timesheet', 'pdf', { month: '2017-11' });
     await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
@@ -463,14 +464,16 @@ describe('Phase 2 · Summary, Weekly, Weekly In/Out, Leave', () => {
     expect(res.status).toBe('COMPLETED');
     const lines = csvLines(`${ORG}/${id}.csv`);
     // AL is paid leave (middle group); SD counts as present and sits before HP; no unpaid types in this tenant
-    // UNX / LOP (HR portal Prompt 3) are appended after the sample's own columns
-    expect(lines[0]).toBe('ID,Employee Name,PR,HL,OF,SD,HP,T/PR,AL,T/OL,AB,T/AB,OT1,OT2,UT,UNX,LOP');
+    // UNX / LOP (HR portal Prompt 3) and MP (missing-punch days, engine 1.3.0) are appended after the sample's own columns
+    expect(lines[0]).toBe('ID,Employee Name,PR,HL,OF,SD,HP,T/PR,AL,T/OL,AB,T/AB,OT1,OT2,UT,UNX,LOP,MP');
     // FAISAL: PR on the 1st and 2nd, OF 3rd/4th, AB 5th; UT 0.30 + 0.42 = 72 min. Spreadsheets get numeric zeros; the print shows dashes.
-    expect(lines.find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,0,2,0,0,4,0,0,1,1,0,0,72,0,0');
+    expect(lines.find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,0,2,0,0,4,0,0,1,1,0,0,72,0,0,0');
     // SALEH: one present day with 5:15 regular overtime
-    expect(lines.find((l) => l.startsWith('2076,'))).toBe('2076,SALEH AL AGHBARI,1,0,0,0,0,1,0,0,0,0,315,0,0,0,0');
+    expect(lines.find((l) => l.startsWith('2076,'))).toBe('2076,SALEH AL AGHBARI,1,0,0,0,0,1,0,0,0,0,315,0,0,0,0,0');
     // Masoom: one day of annual leave
-    expect(lines.find((l) => l.startsWith('2192,'))).toBe('2192,Masoom,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0');
+    expect(lines.find((l) => l.startsWith('2192,'))).toBe('2192,Masoom,0,0,0,0,0,0,1,1,0,0,0,0,0,0,0,0');
+    // ABDUL: the single IN of the 1st is a missing-punch day — in MP only, not in T/PR (field report 2026-10-02: "Present with 0h")
+    expect(lines.find((l) => l.startsWith('2010,'))).toMatch(/^2010,ABDUL SATTHAR,0,0,0,0,0,0,0,0,\d+,\d+,0,0,540,0,0,1$/);
     const pdfId = await request('attendance_summary', 'pdf', { from: DATE, to: '2017-11-30' });
     await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: pdfId }));
     const html = fileText(`${ORG}/${pdfId}.pdf`);
@@ -490,7 +493,7 @@ describe('Phase 2 · Summary, Weekly, Weekly In/Out, Leave', () => {
     try {
       const id = await request('attendance_summary', 'csv', { from: DATE, to: '2017-11-30' });
       await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
-      expect(csvLines(`${ORG}/${id}.csv`).find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,0,2,0,0,4,0,0,1,1,0,0,72,2,1.5');
+      expect(csvLines(`${ORG}/${id}.csv`).find((l) => l.startsWith('2011,'))).toBe('2011,FAISAL,2,0,2,0,0,4,0,0,1,1,0,0,72,2,1.5,0');
       const monthId = await request('monthly_attendance', 'csv', { month: '2017-11' });
       await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: monthId }));
       expect(csvLines(`${ORG}/${monthId}.csv`).find((l) => l.startsWith('2011,'))).toMatch(/,1,1\.5$/);
@@ -616,6 +619,8 @@ describe('HR portal Prompt 6a review — the summary report, the daily range, mo
     expect(res).toMatchObject({ status: 'COMPLETED', rowCount: 5 });
     const lines = csvLines(`${ORG}/${id}.csv`);
     expect(lines[0]).toMatch(/^Employee No\.,Employee,Branch,Department,Present,/);
+    // days of employment before today without a calculated record are a column of their own, never silently missing (field report 2026-10-02)
+    expect(lines[0]).toMatch(/,Not calc\.,Source$/);
     expect(lines).toHaveLength(1 + 5); // a spreadsheet recomputes the total; the file carries data rows only
     expect(lines.some((l) => l.includes('Left Already'))).toBe(false); // exited before the month
     const pdf = await generate('monthly_summary', 'pdf', { month: MONTH, finalizedFigures: false });

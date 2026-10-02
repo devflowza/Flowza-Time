@@ -135,7 +135,7 @@ function toIso(v: string): string { return new Date(v).toISOString(); }
  * The first IN and the last OUT the engine attributed to the day (the punches an HR check-in / check-out edit replaces), and
  * the plan of corrections that turns the day into the proposed one, simulated through the pure engine on the real inputs.
  */
-async function planDay(trx: Trx, orgId: string, grant: MembershipGrant, input: { employeeId: string; date: string; inAt?: string | null; outAt?: string | null; status?: AttendanceStatus }): Promise<DayPlan> {
+async function planDay(trx: Trx, orgId: string, grant: MembershipGrant, input: { employeeId: string; date: string; inAt?: string | null; outAt?: string | null; removeIn?: boolean; removeOut?: boolean; status?: AttendanceStatus }): Promise<DayPlan> {
   const now = new Date();
   const emp = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'displayName', 'branchId', 'deletedAt']).where('organizationId', '=', orgId).where('id', '=', input.employeeId).executeTakeFirst();
   if (!emp || emp.deletedAt) throw errors.notFound('Employee', input.employeeId);
@@ -172,8 +172,8 @@ async function planDay(trx: Trx, orgId: string, grant: MembershipGrant, input: {
       throw errors.validation(`The ${label} ${DateTime.fromMillis(at, { zone: loaded.timezone }).toFormat('ccc dd LLL HH:mm')} has not happened yet: a punch can only be recorded once it has happened.`, { issues: [{ path: key, message: 'In the future' }] });
     }
   }
-  const effectiveIn = input.inAt ?? current.firstInAt;
-  const effectiveOut = input.outAt ?? current.lastOutAt;
+  const effectiveIn = input.removeIn ? null : input.inAt ?? current.firstInAt;
+  const effectiveOut = input.removeOut ? null : input.outAt ?? current.lastOutAt;
   if ((input.inAt || input.outAt) && effectiveIn && effectiveOut && Date.parse(effectiveOut) <= Date.parse(effectiveIn)) {
     throw errors.validation('Check-out must be after check-in.', { issues: [{ path: input.outAt ? 'outAt' : 'inAt', message: 'Check-out must be after check-in' }] });
   }
@@ -198,8 +198,17 @@ async function planDay(trx: Trx, orgId: string, grant: MembershipGrant, input: {
       events.push(synthetic(eventType));
     }
   };
-  propose(input.inAt, inPunch, 'IN');
-  propose(input.outAt, outPunch, 'OUT');
+  // a cleared time takes the punch away (REMOVE_PUNCH voids the event, as "Request correction → Remove punch" does); clearing
+  // a time the day has no punch for changes nothing
+  const remove = (existing: AttributedPunch | null): void => {
+    // nothing to take away, or the same punch already taken away (a lone punch read as both ends of the day)
+    if (!existing || plan.some((p) => p.type === 'REMOVE_PUNCH' && p.originalEventId === existing.eventId)) return;
+    plan.push({ type: 'REMOVE_PUNCH', originalEventId: existing.eventId, originalPunchedAt: existing.punchedAt, proposedPunchedAt: null, proposedEventType: null, proposedStatus: null });
+    const original = events.find((e) => e.id === existing.eventId);
+    if (original) original.voided = true;
+  };
+  if (input.removeIn) remove(inPunch); else propose(input.inAt, inPunch, 'IN');
+  if (input.removeOut) remove(outPunch); else propose(input.outAt, outPunch, 'OUT');
   const preview = plan.length ? calculateDailyRecord({ ...loaded.input, events }) : current;
   if (input.status) plan.push({ type: 'SET_STATUS', originalEventId: null, originalPunchedAt: null, proposedPunchedAt: null, proposedEventType: null, proposedStatus: input.status });
 
@@ -239,6 +248,7 @@ function correctionInputOf(employeeId: string, date: string, reason: string, ite
   switch (item.type) {
     case 'ADD_PUNCH': return { employeeId, attendanceDate: date, type: 'ADD_PUNCH', proposedPunchedAt: item.proposedPunchedAt!, proposedEventType: item.proposedEventType ?? 'PUNCH', reason };
     case 'EDIT_PUNCH': return { employeeId, attendanceDate: date, type: 'EDIT_PUNCH', originalEventId: item.originalEventId!, proposedPunchedAt: item.proposedPunchedAt!, proposedEventType: item.proposedEventType ?? 'PUNCH', reason };
+    case 'REMOVE_PUNCH': return { employeeId, attendanceDate: date, type: 'REMOVE_PUNCH', originalEventId: item.originalEventId!, reason };
     case 'SET_STATUS': return { employeeId, attendanceDate: date, type: 'SET_STATUS', proposedStatus: item.proposedStatus!, reason };
     default: {
       const exhaustive: never = item.type;
@@ -263,6 +273,9 @@ export async function editRecord(deps: ApiDeps, actor: Actor, orgId: string, inp
   if (plan.plan.length === 0) throw errors.validation('Nothing to change: the times already match the record.', { issues: [{ path: 'inAt', message: 'Unchanged' }] });
   const corrections: FiledCorrectionDto[] = [];
   let failed: AttendanceRecordEditResultDto['failed'] = null;
+  // the register shows the day as "updating" until its record was recomputed after this instant (the worker applies the
+  // corrections and recalculates within seconds; the dialog closes on this response, not after the recalculation)
+  const filedAt = new Date().toISOString();
   for (const item of plan.plan) {
     try {
       const res = await createCorrection(deps, actor, orgId, correctionInputOf(plan.employee.id, input.date, input.reason, item));
@@ -273,7 +286,7 @@ export async function editRecord(deps: ApiDeps, actor: Actor, orgId: string, inp
       break;
     }
   }
-  return { corrections, applied: failed === null && corrections.every((c) => c.approval === 'AUTO_APPROVED'), failed, unchanged: plan.unchanged };
+  return { corrections, applied: failed === null && corrections.every((c) => c.approval === 'AUTO_APPROVED'), failed, unchanged: plan.unchanged, filedAt };
 }
 
 /**
@@ -392,18 +405,19 @@ export async function calendar(deps: ApiDeps, actor: Actor, orgId: string, q: At
 // ---- monthly summary -----------------------------------------------------------------------------------------------------------
 
 /** The employee filter of a summary read: the page's filters, the caller's own row for a view_own caller. */
-function summaryScope(q: AttendanceSummaryFilters, branchScope: string[] | null, ownOnly: string | null): AttendanceSummaryScope {
+function summaryScope(q: AttendanceSummaryFilters, branchScope: string[] | null, ownOnly: string | null, visibleBranchIds: string[] | null = null): AttendanceSummaryScope {
   let employeeIds: string[] | null = q.employeeId ? [q.employeeId] : null;
   if (ownOnly) employeeIds = employeeIds ? employeeIds.filter((id) => id === ownOnly) : [ownOnly];
   // RLS already restricts the days of a branch-scoped caller to their branches: no explicit record filter under the API
-  return { employeeBranchIds: branchScope, recordBranchIds: null, departmentId: q.departmentId ?? null, employeeIds, search: q.search ?? null, includeFinalized: true };
+  // ...and the days of another branch are neither shown nor expected (`visibleBranchIds`), so a transfer is not "not calculated"
+  return { employeeBranchIds: branchScope, recordBranchIds: null, visibleBranchIds, departmentId: q.departmentId ?? null, employeeIds, search: q.search ?? null, includeFinalized: true };
 }
 
 function figuresDto(f: AttendanceSummaryDbFigures): AttendanceSummaryFigures {
   return {
     presentDays: f.presentDays, lateDays: f.lateDays, halfDays: f.halfDays, leaveDays: f.leaveDays, absentDays: f.absentDays, missingPunchDays: f.missingPunchDays, holidayDays: f.holidayDays,
     weeklyOffDays: f.weeklyOffDays, daysWorked: f.daysWorked, workedMinutes: f.workedMinutes, overtimeMinutes: f.overtimeMinutes, averageWorkedMinutes: f.averageWorkedMinutes, lopDays: f.lopDays,
-    unexcusedDays: f.unexcusedDays, pendingDays: f.pendingDays, recordCount: f.recordCount,
+    unexcusedDays: f.unexcusedDays, pendingDays: f.pendingDays, recordCount: f.recordCount, notCalculatedDays: f.notCalculatedDays,
   };
 }
 
@@ -415,12 +429,16 @@ function figuresDto(f: AttendanceSummaryDbFigures): AttendanceSummaryFigures {
  * branch-scoped HR user gets their branches, a line manager their team, a view_own caller their own row.
  */
 export async function summary(deps: ApiDeps, actor: Actor, orgId: string, q: AttendanceSummaryQuery): Promise<{ data: AttendanceSummaryRowDto[]; total: number; meta: { month: string; from: string; to: string; totals: AttendanceSummaryFigures } }> {
-  const { branchScope, ownOnly } = readScope(actor, orgId, q.branchId, { allowOwn: true });
+  const { grant, branchScope, ownOnly } = readScope(actor, orgId, q.branchId, { allowOwn: true });
   const { from, to } = monthRange(q.month);
-  const scope = summaryScope(q, branchScope, ownOnly);
+  // RLS shows a branch-scoped attendance.view holder the days of their branches only
+  const visibleBranchIds = hasPermission(grant, 'attendance.view') && !grant.allBranches ? grant.branchIds : null;
+  const scope = summaryScope(q, branchScope, ownOnly, visibleBranchIds);
   return runUser(deps.db, actor, async (trx) => {
-    const rows = await attendanceSummaryRows(trx, orgId, { from, to }, scope, { limit: q.pageSize, offset: (q.page - 1) * q.pageSize });
-    const all = await attendanceSummaryTotals(trx, orgId, { from, to }, scope);
+    // days from today on are not expected to be calculated yet: only earlier ones without a record count as not calculated
+    const asOf = DateTime.now().setZone(await orgTimezone(trx, orgId)).toISODate();
+    const rows = await attendanceSummaryRows(trx, orgId, { from, to, asOf }, scope, { limit: q.pageSize, offset: (q.page - 1) * q.pageSize });
+    const all = await attendanceSummaryTotals(trx, orgId, { from, to, asOf }, scope);
     const names = await namesOf(trx, orgId, [...new Set(rows.map((r) => r.branchId))], [...new Set(rows.map((r) => r.departmentId).filter((d): d is string => d !== null))]);
     const data = rows.map((r): AttendanceSummaryRowDto => ({
       ...figuresDto(r), employeeId: r.employeeId, employeeNumber: r.employeeNumber, employeeName: r.employeeName, branchId: r.branchId, branchName: names.branches.get(r.branchId) ?? null,

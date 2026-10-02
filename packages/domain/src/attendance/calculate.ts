@@ -3,6 +3,7 @@ import { ATTENDANCE_FLAGS, DEFAULT_ATTENDANCE_SETTINGS, type AttendanceFlag, typ
 import { addDays, dayOfWeek, minutesBetween } from '@flowza/shared';
 import { attributeEvents } from './attribute.js';
 import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
+import { carryOvernightCheckOuts, openCheckIn, overnightMaxSpanMinutes } from './overnight.js';
 import { roundMinutes, roundPunches } from './rounding.js';
 import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EnginePunchPayload, type EngineShift, type TraceStep } from './types.js';
 import { assertTimezone, computePunchWindow, localInstant, parseInstant, toUtcIso, type PunchWindow } from './window.js';
@@ -157,8 +158,10 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   if (window.crossesMidnight) rec.flag('CROSS_MIDNIGHT');
   if (shift === null) rec.flag('NO_SHIFT');
 
-  // 2. Attribution of every supplied event.
-  const attribution = attributeEvents(input.events, windows);
+  // 2. Attribution of every supplied event. On a flexible shift the check-out that closes a day's open check-in stays with
+  // that day even after its day boundary (engine 1.3.0, overnight.ts).
+  const shiftOn = new Map<string, EngineShift | null>([[addDays(date, -1), previousShift], [date, shift], [addDays(date, 1), nextShift]]);
+  const { attribution, carries } = carryOvernightCheckOuts(attributeEvents(input.events, windows), windows, (d) => shiftOn.get(d) ?? null);
   const attributed = attribution.byDate.get(date) ?? [];
   const tracePunches = new Map<string, TracePunch>();
   /** Attribution decisions worth keeping next to the interpretation note (§G.6: every punch with its attribution). */
@@ -171,9 +174,11 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
     if (d.reason === 'VOIDED') tracePunches.set(d.eventId, { ...base, role: 'IGNORED', note: 'voided event' });
     else if (d.attendanceDate === date) {
       if (d.reason === 'NEAREST_SCHEDULED_START') attributionNotes.set(d.eventId, `overlapping windows ${d.candidates.join('/')} → nearest scheduled start (${d.distanceMinutes} min)`);
+      if (d.reason === 'OVERNIGHT_CHECK_OUT') attributionNotes.set(d.eventId, `after the day boundary, closes the open check-in of ${date} (overnight)`);
       tracePunches.set(d.eventId, { ...base, role: 'IGNORED', note: attributionNotes.get(d.eventId) ?? 'in window' });
     } else {
-      const note = d.attendanceDate === null ? `outside the punch windows of ${consideredDates}` : `attributed to ${d.attendanceDate} (${d.reason === 'NEAREST_SCHEDULED_START' ? `nearest scheduled start, ${d.distanceMinutes} min` : 'only containing window'})`;
+      const why = d.reason === 'NEAREST_SCHEDULED_START' ? `nearest scheduled start, ${d.distanceMinutes} min` : d.reason === 'OVERNIGHT_CHECK_OUT' ? 'check-out closing its open check-in, overnight' : 'only containing window';
+      const note = d.attendanceDate === null ? `outside the punch windows of ${consideredDates}` : `attributed to ${d.attendanceDate} (${why})`;
       tracePunches.set(d.eventId, { ...base, role: 'OUT_OF_WINDOW', note });
       if (d.attendanceDate === null && at.toISODate() === date) outOfWindowOnDate += 1;
     }
@@ -185,6 +190,13 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
     outOfWindow: attribution.decisions.filter((d) => d.reason === 'OUT_OF_WINDOW').length,
     tieBreak: 'nearest scheduled start; earlier date on exact tie',
   });
+  for (const c of carries) {
+    if (c.to !== date && c.from !== date) continue;
+    if (c.to === date) rec.flag('CROSS_MIDNIGHT');
+    rec.step('attribution.overnight', c.to === date
+      ? `check-out after the day boundary closes the check-in of ${local(parseInstant(c.checkIn.punchedAt, zone))} (${c.spanMinutes} min): kept on ${date}`
+      : `the first check-out of ${date} closes the open check-in of ${c.to}: attributed there`, { from: c.from, to: c.to, checkIn: c.checkIn.id, events: c.events.map((e) => e.id), spanMinutes: c.spanMinutes });
+  }
   if (outOfWindowOnDate > 0) {
     rec.flag('OUT_OF_WINDOW');
     rec.step('attribution.outOfWindow', `${outOfWindowOnDate} punch(es) on calendar day ${date} fall outside every window`, { count: outOfWindowOnDate });
@@ -307,8 +319,12 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   const schedule = buildSchedule(input, window, halfDayOff, rec, anchorIn);
   const ctx: WorkContext = { rules, shift, date, zone, window, rec };
   const now = input.now ? parseInstant(input.now, zone) : null;
-  const dayOver = now === null || now >= window.windowEnd;
-  rec.step('now', now ? `now ${toUtcIso(now)} → window ${dayOver ? 'closed' : 'open'}` : 'no `now` supplied → day treated as over', { now: iso(now), dayOver });
+  // a flexible day that ends with an open check-in is not judged before its overnight check-out could still arrive
+  const openIn = window.kind === 'FLEXIBLE' && shift ? openCheckIn(attributed) : null;
+  const overnightUntil = openIn && shift ? parseInstant(openIn.punchedAt, zone).plus({ minutes: overnightMaxSpanMinutes(shift) }) : null;
+  const dayEnd = overnightUntil && overnightUntil > window.windowEnd ? overnightUntil : window.windowEnd;
+  const dayOver = now === null || now >= dayEnd;
+  rec.step('now', now ? `now ${toUtcIso(now)} → window ${dayOver ? 'closed' : 'open'}${dayEnd !== window.windowEnd ? ` (open check-in: an overnight check-out is awaited until ${toUtcIso(dayEnd)})` : ''}` : 'no `now` supplied → day treated as over', { now: iso(now), dayOver, ...(dayEnd !== window.windowEnd ? { awaitCheckOutUntil: toUtcIso(dayEnd) } : {}) });
 
   // 7. Non-working days: status is fixed; work (if any) is recorded and may count as overtime.
   if (dayType !== 'WORKING') {
@@ -546,7 +562,19 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
     if (flagged) rec.flag('LATE');
     rec.step('late', `IN ${toUtcIso(firstIn)} vs expected ${toUtcIso(schedule.expectedStart)} + ${graceIn} min grace → ${lateMinutes} min late${flagged ? ' (flagged)' : lateMinutes > 0 ? ` (≤ threshold ${rules.lateThresholdMinutes}, not flagged)` : ''}`, { graceInMinutes: graceIn, lateMinutes, thresholdMinutes: rules.lateThresholdMinutes, flagged });
   }
-  if (punctuality && lastOut && schedule.expectedEnd && !assumed.lastOut) {
+  if (punctuality && lastOut && schedule.expectedEnd && !assumed.lastOut && schedule.kind === 'FLEXIBLE') {
+    // A required-hours shift (engine 1.3.0): leaving early means leaving short — the minutes the day lacks of the required
+    // minutes, or the minutes before the expected check-out (a core end) when that is more. The grace is a tolerance: a shortfall
+    // within it is forgiven, a larger one counts in full, so the figure always matches the worked minutes on the record. On a
+    // half day the expected check-out carries no break (the break falls in the half not worked): it is the measure there.
+    const beforeEnd = Math.max(0, minutesBetween(lastOut, schedule.expectedEnd));
+    const shortOfRequired = firstIn && schedule.halfDayOff === null ? Math.max(0, schedule.scheduledMinutes - workedMinutes) : 0;
+    const shortfall = Math.max(beforeEnd, shortOfRequired);
+    earlyDepartureMinutes = shortfall > graceOut ? shortfall : 0;
+    const flagged = earlyDepartureMinutes > rules.earlyDepartureThresholdMinutes;
+    if (flagged) rec.flag('EARLY_DEPARTURE');
+    rec.step('earlyDeparture', `OUT ${toUtcIso(lastOut)}: ${shortfall} min short (${shortOfRequired} min of the ${schedule.scheduledMinutes} required, ${beforeEnd} min before the expected check-out ${toUtcIso(schedule.expectedEnd)}) → ${shortfall > graceOut ? 'beyond' : 'within'} the ${graceOut} min grace → ${earlyDepartureMinutes} min early${flagged ? ' (flagged)' : ''}`, { graceOutMinutes: graceOut, shortfallMinutes: shortfall, shortOfRequiredMinutes: shortOfRequired, beforeExpectedEndMinutes: beforeEnd, earlyDepartureMinutes, thresholdMinutes: rules.earlyDepartureThresholdMinutes, flagged });
+  } else if (punctuality && lastOut && schedule.expectedEnd && !assumed.lastOut) {
     earlyDepartureMinutes = Math.max(0, minutesBetween(lastOut, schedule.expectedEnd.minus({ minutes: graceOut })));
     const flagged = earlyDepartureMinutes > rules.earlyDepartureThresholdMinutes;
     if (flagged) rec.flag('EARLY_DEPARTURE');
@@ -649,8 +677,10 @@ function resolveMissingPunch(side: MissingSide, ctx: WorkContext, interpretation
   if (interpretation.missingIn) rec.flag('MISSING_IN');
   if (interpretation.missingOut) rec.flag('MISSING_OUT');
   const behaviour = rules.missingPunchBehavior;
-  // A half-day leave/holiday never becomes a full PRESENT day: the leave half must stay visible to payroll.
-  const presentStatus: AttendanceStatus = schedule.halfDayOff !== null ? 'HALF_DAY' : 'PRESENT';
+  // FLAG_ONLY leaves the hours unknown, so the day is neither present nor absent until the punch is corrected: its own status
+  // MISSING_PUNCH (engine 1.3.0; it used to be PRESENT with 0 worked minutes, which inflated Present and understated Worked).
+  // A half-day leave/holiday stays HALF_DAY: the leave half must stay visible to payroll.
+  const unresolvedStatus: AttendanceStatus = schedule.halfDayOff !== null ? 'HALF_DAY' : 'MISSING_PUNCH';
   const partial = (): WorkFigures => {
     const w = measureWork(ctx, interpretation, schedule);
     return { ...w, workedMinutes: 0, breakMinutes: 0, overtimeMinutes: 0, overtimeCategory: null };
@@ -658,8 +688,8 @@ function resolveMissingPunch(side: MissingSide, ctx: WorkContext, interpretation
 
   switch (behaviour) {
     case 'FLAG_ONLY': {
-      rec.step('missingPunch', `${flag} after window close → FLAG_ONLY: ${presentStatus}, worked minutes unknown (0)`, { behaviour, status: presentStatus });
-      return [presentStatus, schedule, partial()];
+      rec.step('missingPunch', `${flag} after window close → FLAG_ONLY: ${unresolvedStatus}, worked minutes unknown (0) until the punch is corrected`, { behaviour, status: unresolvedStatus });
+      return [unresolvedStatus, schedule, partial()];
     }
     case 'TREAT_AS_ABSENT': {
       rec.step('missingPunch', `${flag} → TREAT_AS_ABSENT`, { behaviour, status: 'ABSENT' });
@@ -672,8 +702,8 @@ function resolveMissingPunch(side: MissingSide, ctx: WorkContext, interpretation
     case 'ASSUME_SHIFT_END': {
       const assumed = assumedInstant(side, interpretation, schedule);
       if (assumed === null) {
-        rec.step('missingPunch', `${flag} → ASSUME_SHIFT_END has no schedule to assume from (no shift) → FLAG_ONLY`, { behaviour, status: presentStatus });
-        return [presentStatus, schedule, partial()];
+        rec.step('missingPunch', `${flag} → ASSUME_SHIFT_END has no schedule to assume from (no shift) → FLAG_ONLY: ${unresolvedStatus}`, { behaviour, status: unresolvedStatus });
+        return [unresolvedStatus, schedule, partial()];
       }
       rec.step('missingPunch', `${flag} → ASSUME_SHIFT_END: ${side} assumed at ${toUtcIso(assumed)}; status follows the assumed worked minutes`, { behaviour, assumed: toUtcIso(assumed) });
       const work = measureWork(ctx, interpretation, schedule, { assumed: side === 'OUT' ? { lastOut: assumed } : { firstIn: assumed } });

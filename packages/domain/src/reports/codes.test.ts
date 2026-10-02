@@ -8,8 +8,8 @@ describe('resolveAttendanceCode', () => {
     expect(resolveAttendanceCode({ status: 'WEEKLY_OFF', flags: [] })).toEqual({ code: 'OF', group: 'off' });
     expect(resolveAttendanceCode({ status: 'HOLIDAY', flags: [] })).toEqual({ code: 'HL', group: 'holiday' });
     expect(resolveAttendanceCode({ status: 'HALF_DAY', flags: [] })).toEqual({ code: 'HDP', group: 'present' });
-    // a day with a missing punch is still a present day; the report shows the punch that exists
-    expect(resolveAttendanceCode({ status: 'MISSING_PUNCH', flags: ['MISSING_OUT'] })).toEqual({ code: 'PR', group: 'present' });
+    // a missing-punch day (hours unknown) has its own code and group, outside present / absent — as the monthly summary counts it
+    expect(resolveAttendanceCode({ status: 'MISSING_PUNCH', flags: ['MISSING_OUT'] })).toEqual({ code: 'MP', group: 'missing' });
     expect(resolveAttendanceCode({ status: 'PENDING', flags: [] })).toEqual({ code: '', group: 'none' });
   });
   it("uses the tenant's leave-type code and lets its flags decide the totals group", () => {
@@ -37,7 +37,7 @@ describe('resolveAttendanceCode', () => {
 describe('legendItems', () => {
   it("lists presence codes, then the tenant's leave types, then the half-day codes", () => {
     const items = legendItems([{ code: 'AL', name: 'Annual Leave', isPaid: true }, { code: 'SL', name: 'Sick Leave', nameAr: 'إجازة مرضية', isPaid: true }], 'en');
-    expect(items.map((i) => i.code)).toEqual(['PR', 'AB', 'OF', 'HL', 'AL', 'SL', 'HDP', 'HDL']);
+    expect(items.map((i) => i.code)).toEqual(['PR', 'AB', 'OF', 'HL', 'AL', 'SL', 'HDP', 'HDL', 'MP']);
     expect(items[4]).toEqual({ code: 'AL', labelKey: null, label: 'Annual Leave' });
     expect(legendItems([{ code: 'SL', name: 'Sick Leave', nameAr: 'إجازة مرضية', isPaid: true }], 'ar')[4]!.label).toBe('إجازة مرضية');
   });

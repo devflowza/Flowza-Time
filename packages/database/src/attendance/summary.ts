@@ -8,7 +8,11 @@ import type { Trx } from '../context.js';
  *
  * Per employee employed during the period (joining / exit dates), from `attendance_daily_records`, with the period summary's
  * fractions (`summarisePeriod`): a PRESENT day with half-day leave is ½ present + ½ leave, a HALF_DAY is ½ present + ½ absent
- * (or + ½ leave with the half-day-leave flag), LOP counts PAY_EFFECT_FULL = 1 / PAY_EFFECT_HALF = ½. When the period is exactly a
+ * (or + ½ leave with the half-day-leave flag), LOP counts PAY_EFFECT_FULL = 1 / PAY_EFFECT_HALF = ½. Every calculated day adds up
+ * to one across present / absent / leave / missing punch / holiday / weekly off / pending — a MISSING_PUNCH day (a punch is
+ * missing, hours unknown) is in Missing punch only, never in Present — so for a whole past month they add up to the days
+ * employed; the days employed that have no record yet are `notCalculatedDays` (up to the day before `asOf`), so a gap is shown,
+ * never dropped. When the period is exactly a
  * payroll period whose summary is FINALIZED (and the caller may use it), its day counts win — they are what payroll paid.
  *
  * Runs under whatever context the transaction carries: the API caller's RLS (a branch-scoped HR user gets their branches, a
@@ -23,6 +27,12 @@ export interface AttendanceSummaryScope {
    * the worker's system context); null = any. Under the API caller's RLS this is redundant and left null.
    */
   recordBranchIds: string[] | null;
+  /**
+   * Branches whose days the reader can see — the API caller's branch scope, which RLS enforces. A day the employee spent in
+   * another branch (a transfer during the month) is then neither shown nor expected, so it never counts as not calculated.
+   * Defaults to `recordBranchIds`; null = every branch.
+   */
+  visibleBranchIds?: string[] | null;
   departmentId: string | null;
   /** Explicit employees (a filter, or a line manager's team); null = everyone in scope. */
   employeeIds: string[] | null;
@@ -32,13 +42,19 @@ export interface AttendanceSummaryScope {
   includeFinalized: boolean;
 }
 
-export interface AttendanceSummaryPeriod { from: string; to: string }
+/**
+ * `asOf` = today in the organisation's timezone: days from it on are not expected to be calculated yet, so they never count as
+ * `notCalculatedDays` (absent = the whole period is expected, e.g. a past month's report).
+ */
+export interface AttendanceSummaryPeriod { from: string; to: string; asOf?: string | null }
 
 /** One employee-month; day counts may be fractional (a half day is 0.5). */
 export interface AttendanceSummaryDbFigures {
   presentDays: number; lateDays: number; halfDays: number; leaveDays: number; absentDays: number; missingPunchDays: number; holidayDays: number;
   weeklyOffDays: number; daysWorked: number; workedMinutes: number; overtimeMinutes: number; averageWorkedMinutes: number; lopDays: number;
   unexcusedDays: number; pendingDays: number; recordCount: number;
+  /** Days of employment in the period, before `asOf`, without a calculated record (never recalculated) — shown, not dropped. */
+  notCalculatedDays: number;
 }
 export interface AttendanceSummaryDbRow extends AttendanceSummaryDbFigures {
   employeeId: string; employeeNumber: string; employeeName: string; branchId: string; departmentId: string | null; finalizedAt: Date | null;
@@ -60,10 +76,15 @@ function ctes(organizationId: string, period: AttendanceSummaryPeriod, s: Attend
   const employeeBranches = ids(s.employeeBranchIds);
   const recordBranches = ids(s.recordBranchIds);
   const employees = ids(s.employeeIds);
+  const visibleBranches = ids(s.visibleBranchIds === undefined ? s.recordBranchIds : s.visibleBranchIds);
   const paging = page ? sql`order by e.display_name, e.id limit ${page.limit} offset ${page.offset}` : sql``;
+  // the last day expected to be calculated: the day before `asOf`, never after the period
+  const lastExpected = period.asOf ? sql`least(${period.to}::date, ${period.asOf}::date - 1)` : sql`${period.to}::date`;
   return sql`
     with emp as (
-      select e.id, e.employee_number::text as employee_number, e.display_name, e.branch_id, e.department_id
+      select e.id, e.employee_number::text as employee_number, e.display_name, e.branch_id, e.department_id, e.joining_date, e.exit_date,
+        greatest(${period.from}::date, e.joining_date) as first_expected,
+        least(${lastExpected}, coalesce(e.exit_date, ${period.to}::date)) as last_expected
       from public.employees e
       where e.organization_id = ${organizationId}::uuid and e.deleted_at is null
         and e.joining_date <= ${period.to}::date and (e.exit_date is null or e.exit_date >= ${period.from}::date)
@@ -73,18 +94,30 @@ function ctes(organizationId: string, period: AttendanceSummaryPeriod, s: Attend
         and (${like}::text is null or e.display_name ilike ${like}::text or e.employee_number::text ilike ${like}::text)
       ${paging}
     ),
+    -- the days of employment each employee is expected to have a record for, in the branches the reader sees (employment
+    -- history, half-open [effective_from, effective_to)); every day when the reader sees every branch
+    expd as (
+      select emp.id as employee_id,
+        (case when ${visibleBranches}::uuid[] is null then greatest(0, emp.last_expected - emp.first_expected + 1)
+         else coalesce((select sum(greatest(0, least(coalesce(h.effective_to, emp.last_expected + 1), emp.last_expected + 1) - greatest(h.effective_from, emp.first_expected)))
+                        from public.employment_history h
+                        where h.organization_id = ${organizationId}::uuid and h.employee_id = emp.id and h.branch_id = any(${visibleBranches}::uuid[])), 0) end)::int as expected_days
+      from emp
+    ),
     rec as (
       select r.employee_id,
         count(*)::int as record_count,
-        coalesce(sum(case when r.status in ('PRESENT', 'MISSING_PUNCH') then (case when 'HALF_DAY_LEAVE' = any(r.flags) then 0.5 else 1 end)
+        (count(*) filter (where r.status not in ('NOT_JOINED', 'EXITED') and r.attendance_date between emp.first_expected and emp.last_expected
+          and (${visibleBranches}::uuid[] is null or r.branch_id = any(${visibleBranches}::uuid[]))))::int as calculated_days,
+        coalesce(sum(case when r.status = 'PRESENT' then (case when 'HALF_DAY_LEAVE' = any(r.flags) then 0.5 else 1 end)
                           when r.status = 'HALF_DAY' then 0.5 else 0 end), 0)::numeric as present_days,
         (count(*) filter (where 'LATE' = any(r.flags)))::int as late_days,
-        (count(*) filter (where r.status = 'HALF_DAY' or (r.status in ('PRESENT', 'MISSING_PUNCH') and 'HALF_DAY_LEAVE' = any(r.flags))))::int as half_days,
+        (count(*) filter (where r.status = 'HALF_DAY' or (r.status = 'PRESENT' and 'HALF_DAY_LEAVE' = any(r.flags))))::int as half_days,
         coalesce(sum(case when r.status = 'LEAVE' then 1
                           when r.status in ('PRESENT', 'MISSING_PUNCH', 'HALF_DAY', 'ABSENT') and 'HALF_DAY_LEAVE' = any(r.flags) then 0.5 else 0 end), 0)::numeric as leave_days,
         coalesce(sum(case when r.status = 'ABSENT' then (case when 'HALF_DAY_LEAVE' = any(r.flags) then 0.5 else 1 end)
                           when r.status = 'HALF_DAY' and not ('HALF_DAY_LEAVE' = any(r.flags)) then 0.5 else 0 end), 0)::numeric as absent_days,
-        (count(*) filter (where r.status = 'MISSING_PUNCH' or r.flags && array['MISSING_IN', 'MISSING_OUT']::text[]))::int as missing_punch_days,
+        (count(*) filter (where r.status = 'MISSING_PUNCH'))::int as missing_punch_days,
         (count(*) filter (where r.status = 'HOLIDAY'))::int as holiday_days,
         (count(*) filter (where r.status = 'WEEKLY_OFF'))::int as weekly_off_days,
         (count(*) filter (where r.worked_minutes > 0))::int as days_worked,
@@ -94,8 +127,8 @@ function ctes(organizationId: string, period: AttendanceSummaryPeriod, s: Attend
         (count(*) filter (where 'UNEXCUSED' = any(r.flags)))::int as unexcused_days,
         (count(*) filter (where r.status = 'PENDING'))::int as pending_days
       from public.attendance_daily_records r
+      join emp on emp.id = r.employee_id
       where r.organization_id = ${organizationId}::uuid and r.attendance_date between ${period.from}::date and ${period.to}::date
-        and r.employee_id in (select id from emp)
         and (${recordBranches}::uuid[] is null or r.branch_id = any(${recordBranches}::uuid[]))
       group by r.employee_id
     ),
@@ -120,9 +153,10 @@ const FIGURES = sql`
   coalesce(fin.weekly_off_days, rec.weekly_off_days, 0) as "weeklyOffDays", coalesce(rec.days_worked, 0) as "daysWorked",
   coalesce(fin.worked_minutes, rec.worked_minutes, 0) as "workedMinutes", coalesce(fin.overtime_minutes, rec.overtime_minutes, 0) as "overtimeMinutes",
   coalesce(fin.lop_days, rec.lop_days, 0) as "lopDays", coalesce(fin.unexcused_days, rec.unexcused_days, 0) as "unexcusedDays",
-  coalesce(rec.pending_days, 0) as "pendingDays", coalesce(rec.record_count, 0) as "recordCount"`;
+  coalesce(rec.pending_days, 0) as "pendingDays", coalesce(rec.record_count, 0) as "recordCount",
+  greatest(0, coalesce(expd.expected_days, 0) - coalesce(rec.calculated_days, 0)) as "notCalculatedDays"`;
 
-const FIGURE_KEYS = ['presentDays', 'lateDays', 'halfDays', 'leaveDays', 'absentDays', 'missingPunchDays', 'holidayDays', 'weeklyOffDays', 'daysWorked', 'workedMinutes', 'overtimeMinutes', 'lopDays', 'unexcusedDays', 'pendingDays', 'recordCount'] as const;
+const FIGURE_KEYS = ['presentDays', 'lateDays', 'halfDays', 'leaveDays', 'absentDays', 'missingPunchDays', 'holidayDays', 'weeklyOffDays', 'daysWorked', 'workedMinutes', 'overtimeMinutes', 'lopDays', 'unexcusedDays', 'pendingDays', 'recordCount', 'notCalculatedDays'] as const;
 
 function figuresOf(r: Record<string, unknown>): AttendanceSummaryDbFigures {
   const out = Object.fromEntries(FIGURE_KEYS.map((k) => [k, num(r[k])])) as Record<(typeof FIGURE_KEYS)[number], number>;
@@ -137,7 +171,7 @@ export async function attendanceSummaryRows(trx: Trx, organizationId: string, pe
   const res = await sql<Record<string, unknown>>`${ctes(organizationId, period, scope, page)}
     select emp.id as "employeeId", emp.employee_number as "employeeNumber", emp.display_name as "employeeName", emp.branch_id as "branchId", emp.department_id as "departmentId",
       ${FIGURES}, fin.finalized_at as "finalizedAt"
-    from emp left join rec on rec.employee_id = emp.id left join fin on fin.employee_id = emp.id
+    from emp left join rec on rec.employee_id = emp.id left join fin on fin.employee_id = emp.id left join expd on expd.employee_id = emp.id
     order by emp.display_name, emp.id`.execute(trx);
   return res.rows.map((r) => ({
     ...figuresOf(r), employeeId: String(r['employeeId']), employeeNumber: String(r['employeeNumber']), employeeName: String(r['employeeName']), branchId: String(r['branchId']),
@@ -151,7 +185,7 @@ export async function attendanceSummaryTotals(trx: Trx, organizationId: string, 
   const sums = sql.raw(FIGURE_KEYS.map((k) => `coalesce(sum(x."${k}"), 0) as "${k}"`).join(', '));
   const res = await sql<Record<string, unknown>>`${ctes(organizationId, period, scope, null)}
     select count(*)::int as "employees", ${sums}
-    from (select ${FIGURES} from emp left join rec on rec.employee_id = emp.id left join fin on fin.employee_id = emp.id) x`.execute(trx);
+    from (select ${FIGURES} from emp left join rec on rec.employee_id = emp.id left join fin on fin.employee_id = emp.id left join expd on expd.employee_id = emp.id) x`.execute(trx);
   const row = res.rows[0] ?? {};
   return { employees: num(row['employees']), totals: figuresOf(row) };
 }

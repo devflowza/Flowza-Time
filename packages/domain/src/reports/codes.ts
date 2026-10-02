@@ -2,10 +2,11 @@ import type { AttendanceStatus } from '@flowza/contracts';
 
 /**
  * How a day is classified for the totals the samples print. `present` feeds T/PR, `leave` feeds T/OL, `absent`
- * feeds T/AB; `off` and `holiday` are shown but counted with present days (a paid day), `none` is not a working day
- * of this employee (not joined, exited, still pending).
+ * feeds T/AB; `off` and `holiday` are shown but counted with present days (a paid day); `missing` is a missing-punch day
+ * whose hours are unknown (status MISSING_PUNCH) — in none of the three totals until the punch is corrected, counted on its
+ * own as the monthly summary does; `none` is not a working day of this employee (not joined, exited, still pending).
  */
-export type CodeGroup = 'present' | 'off' | 'holiday' | 'leave' | 'absent' | 'none';
+export type CodeGroup = 'present' | 'off' | 'holiday' | 'leave' | 'absent' | 'missing' | 'none';
 
 export interface AttendanceCode { code: string; group: CodeGroup }
 
@@ -26,12 +27,12 @@ export interface CodeInput {
  * through `settings.reports.codeOverrides` (keys are these status names plus HALF_DAY_LEAVE).
  */
 export const DEFAULT_STATUS_CODES: Readonly<Record<AttendanceStatus, string>> = {
-  PRESENT: 'PR', ABSENT: 'AB', LEAVE: 'LV', HOLIDAY: 'HL', WEEKLY_OFF: 'OF', HALF_DAY: 'HDP', MISSING_PUNCH: 'PR', NOT_JOINED: '', EXITED: '', PENDING: '',
+  PRESENT: 'PR', ABSENT: 'AB', LEAVE: 'LV', HOLIDAY: 'HL', WEEKLY_OFF: 'OF', HALF_DAY: 'HDP', MISSING_PUNCH: 'MP', NOT_JOINED: '', EXITED: '', PENDING: '',
 };
 export const DEFAULT_HALF_DAY_LEAVE_CODE = 'HDL';
 
 const GROUP_OF_STATUS: Readonly<Record<AttendanceStatus, CodeGroup>> = {
-  PRESENT: 'present', ABSENT: 'absent', LEAVE: 'leave', HOLIDAY: 'holiday', WEEKLY_OFF: 'off', HALF_DAY: 'present', MISSING_PUNCH: 'present', NOT_JOINED: 'none', EXITED: 'none', PENDING: 'none',
+  PRESENT: 'present', ABSENT: 'absent', LEAVE: 'leave', HOLIDAY: 'holiday', WEEKLY_OFF: 'off', HALF_DAY: 'present', MISSING_PUNCH: 'missing', NOT_JOINED: 'none', EXITED: 'none', PENDING: 'none',
 };
 
 export type CodeOverrides = Readonly<Partial<Record<AttendanceStatus | 'HALF_DAY_LEAVE', string>>>;
@@ -70,6 +71,7 @@ export function legendItems(leaveTypes: readonly LeaveTypeLike[], locale: 'en' |
   for (const lt of leaveTypes) items.push({ code: lt.code, labelKey: null, label: (locale === 'ar' && lt.nameAr) || lt.name });
   items.push(status('HALF_DAY', 'code.HALF_DAY'));
   items.push({ code: resolveAttendanceCode({ status: 'HALF_DAY', flags: ['HALF_DAY_LEAVE'] }, overrides).code, labelKey: 'code.HALF_DAY_LEAVE', label: null });
+  items.push(status('MISSING_PUNCH', 'code.MISSING_PUNCH'));
   // a tenant may leave a status without a code; those have nothing to explain
   return items.filter((i) => i.code !== '');
 }

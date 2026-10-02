@@ -168,5 +168,9 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * core end); without core hours the employee may check in at any time and is never late.
  * 1.2.0 — FIXED shifts: regular overtime is the time worked after the shift end (before its start with early-in), measured on
  * the worked spans; "beyond the scheduled minutes only" is the rule set's `overtimeRequiresScheduledHours`.
+ * 1.3.0 — FLEXIBLE shifts: the check-out that closes a day's open check-in stays with that day even after the day boundary
+ * (overnight.ts); early departure is the shortfall against the required minutes (or the core end) and the grace-out forgives a
+ * shortfall within it instead of shaving every one. FLAG_ONLY missing punches get their own status MISSING_PUNCH (hours unknown)
+ * instead of PRESENT with 0 worked minutes.
  */
-export const ENGINE_VERSION = 'attendance-engine/1.2.0';
+export const ENGINE_VERSION = 'attendance-engine/1.3.0';

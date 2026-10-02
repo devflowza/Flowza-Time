@@ -8,7 +8,7 @@ import { groupByDepartment, loadRoster, sortByEmployeeNumber, type RosterEmploye
 import { cell, countRows, EMPTY_CELL, num, type CellTone, type ReportCell, type ReportColumn, type ReportDocument, type ReportRow, type ReportSection } from '../model.js';
 import type { ReportDefinition } from './types.js';
 
-export const TONE_OF_GROUP: Record<string, CellTone> = { present: 'default', off: 'off', holiday: 'holiday', leave: 'leave', absent: 'absent', none: 'muted' };
+export const TONE_OF_GROUP: Record<string, CellTone> = { present: 'default', off: 'off', holiday: 'holiday', leave: 'leave', absent: 'absent', missing: 'warning', none: 'muted' };
 
 function hourCells(ctx: ReportContext, h: DerivedHours | null) {
   if (!h) return [cell(DASH, { align: 'end' }), cell(DASH, { align: 'end' }), cell(DASH, { align: 'end' }), cell(DASH, { align: 'end' }), cell(DASH, { align: 'end' }), cell(DASH, { align: 'end' })];

@@ -9,7 +9,8 @@ export interface AttributionDecision {
   attendanceDate: string | null;
   /** Dates whose windows contained the punch (ordered by date). */
   candidates: string[];
-  reason: 'SINGLE_WINDOW' | 'NEAREST_SCHEDULED_START' | 'OUT_OF_WINDOW' | 'VOIDED';
+  /** `OVERNIGHT_CHECK_OUT`: a check-out after a flexible day's boundary that closes that day's open check-in (`carryOvernightCheckOuts`). */
+  reason: 'SINGLE_WINDOW' | 'NEAREST_SCHEDULED_START' | 'OUT_OF_WINDOW' | 'VOIDED' | 'OVERNIGHT_CHECK_OUT';
   /** Distance (minutes) to the winning window's scheduled start; informational for the trace. */
   distanceMinutes: number | null;
 }

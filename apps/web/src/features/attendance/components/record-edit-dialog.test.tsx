@@ -167,6 +167,59 @@ describe('RecordEditDialog', () => {
     expect(screen.getByTestId('outcome-after')).toHaveTextContent('No outcome for these times');
   });
 
+  it('clearing a recorded time removes that punch (field report: clearing did nothing, only "Request correction" could)', async () => {
+    const base = previewOf();
+    apiMock.post.mockImplementation((path: string, body: Record<string, unknown>) => {
+      if (path === '/orgs/org-1/attendance/preview') {
+        if (!body['removeOut']) return Promise.resolve({ data: base });
+        return Promise.resolve({ data: { ...base, preview: outcome({ status: 'MISSING_PUNCH', flags: ['LATE', 'MISSING_OUT'], lastOutAt: null, workedMinutes: 0, overtimeMinutes: 0 }), plan: [{ type: 'REMOVE_PUNCH', originalEventId: 'ev-out', originalPunchedAt: '2026-09-01T13:10:40Z', proposedPunchedAt: null, proposedEventType: null, proposedStatus: null }] } });
+      }
+      if (path === '/orgs/org-1/attendance/record-edits') return Promise.resolve({ data: { corrections: [{ id: 'c1', type: 'REMOVE_PUNCH', status: 'APPROVED', approval: 'AUTO_APPROVED' }], applied: true, failed: null, unchanged: 0, filedAt: '2026-09-02T06:00:00Z' } });
+      return Promise.reject(new Error(`unexpected POST ${path}`));
+    });
+    renderWithProviders(<RecordEditDialog open onOpenChange={() => {}} preset={{ employeeId: EMP, employeeName: 'Ali Hassan', date: '2026-09-01' }} />);
+    const checkOut = await screen.findByLabelText('Check-out') as HTMLInputElement;
+    await waitFor(() => expect(checkOut.value).toBe('17:10'));
+    fireEvent.change(checkOut, { target: { value: '' } });
+    expect(await screen.findByText('The recorded check-out (17:10) will be removed.')).toBeInTheDocument();
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/attendance/preview', { employeeId: EMP, date: '2026-09-01', removeOut: true }));
+    expect(await screen.findByTestId('edit-plan')).toHaveTextContent('Remove punch');
+    expect(within(screen.getByTestId('outcome-after')).getByText('Missing punch')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: 'Badge of another employee' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save record' }));
+    await waitFor(() => expect(editCalls()).toHaveLength(1));
+    expect(editCalls()[0]![1]).toEqual({ employeeId: EMP, date: '2026-09-01', reason: 'Badge of another employee', removeOut: true });
+  });
+
+  it('opens Add record on the day the register shows, and keeps the time fields (and what was typed) while a new day loads', async () => {
+    vi.useFakeTimers({ toFake: ['Date'] });
+    vi.setSystemTime(new Date('2026-09-10T08:00:00Z'));
+    let releaseSecondDay: (() => void) | null = null;
+    apiMock.post.mockImplementation((path: string, body: Record<string, unknown>) => {
+      if (path !== '/orgs/org-1/attendance/preview') return Promise.reject(new Error(`unexpected POST ${path}`));
+      const date = body['date'] as string;
+      const day = previewOf({ date, current: outcome({ firstInAt: `${date}T04:05:00Z`, lastOutAt: `${date}T13:10:00Z` }) });
+      if (date === '2026-09-03' && !body['inAt']) return new Promise((resolve) => { releaseSecondDay = () => resolve({ data: day }); });
+      return Promise.resolve({ data: day });
+    });
+    renderWithProviders(<RecordEditDialog open onOpenChange={() => {}} preset={{ employeeId: EMP, employeeName: 'Ali Hassan' }} defaultDate="2026-09-02" />);
+    const dateInput = screen.getByLabelText(/^Date/) as HTMLInputElement;
+    expect(dateInput.value).toBe('2026-09-02');
+    expect(dateInput).not.toBeDisabled();
+    const checkIn = screen.getByLabelText('Check-in') as HTMLInputElement;
+    await waitFor(() => expect(checkIn.value).toBe('08:05'));
+    // another day: while it loads the fields stay on screen; a time typed now survives the day's punches arriving
+    fireEvent.change(dateInput, { target: { value: '2026-09-03' } });
+    expect(screen.getByLabelText('Check-in')).toBeInTheDocument();
+    expect(screen.getByTestId('expected-shift-loading')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText('Check-in'), { target: { value: '07:30' } });
+    releaseSecondDay!();
+    await screen.findByTestId('expected-shift');
+    expect((screen.getByLabelText('Check-in') as HTMLInputElement).value).toBe('07:30');
+    expect((screen.getByLabelText('Check-out') as HTMLInputElement).value).toBe('17:10');
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/attendance/preview', { employeeId: EMP, date: '2026-09-03', inAt: '2026-09-03T03:30:00Z' }));
+  });
+
   it('refuses to edit a day in a locked period', async () => {
     mockPreview(previewOf({ locked: true }));
     renderWithProviders(<RecordEditDialog open onOpenChange={() => {}} preset={{ employeeId: EMP, employeeName: 'Ali Hassan', date: '2026-09-01' }} />);

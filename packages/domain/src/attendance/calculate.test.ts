@@ -321,9 +321,9 @@ describe('calculateDailyRecord — no punches and missing punches', () => {
     expect(r.flags).not.toContain('MISSING_OUT');
   });
 
-  it('FLAG_ONLY: PRESENT with MISSING_OUT and unknown worked minutes', () => {
+  it('FLAG_ONLY: its own status MISSING_PUNCH with MISSING_OUT and unknown worked minutes (never PRESENT with 0 hours)', () => {
     const r = calculateDailyRecord(input({ events: day('09:20'), now: AFTER_WINDOW }));
-    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 0, lateMinutes: 10, lastOutAt: null, overtimeMinutes: 0 });
+    expect(r).toMatchObject({ status: 'MISSING_PUNCH', workedMinutes: 0, lateMinutes: 10, lastOutAt: null, overtimeMinutes: 0 });
     expect(r.flags).toEqual(['LATE', 'MISSING_OUT']);
   });
 
@@ -343,7 +343,7 @@ describe('calculateDailyRecord — no punches and missing punches', () => {
 
   it('handles a lone directed OUT as MISSING_IN with early departure measured', () => {
     const r = calculateDailyRecord(input({ events: [punch(DATE, '16:00', 'PUNCH_OUT')], rules: rules({ punchInterpretation: 'DIRECTIONAL' }) }));
-    expect(r.status).toBe('PRESENT');
+    expect(r.status).toBe('MISSING_PUNCH');
     expect(r.flags).toEqual(['EARLY_DEPARTURE', 'MISSING_IN']);
     expect(r.earlyDepartureMinutes).toBe(60);
     const assumed = calculateDailyRecord(input({ events: [punch(DATE, '16:00', 'PUNCH_OUT')], rules: rules({ punchInterpretation: 'DIRECTIONAL', missingPunchBehavior: 'ASSUME_SHIFT_END' }) }));
@@ -352,7 +352,7 @@ describe('calculateDailyRecord — no punches and missing punches', () => {
 
   it('falls back to FLAG_ONLY for ASSUME_SHIFT_END without a shift', () => {
     const r = calculateDailyRecord(input({ shift: null, events: day('09:00'), rules: rules({ missingPunchBehavior: 'ASSUME_SHIFT_END' }) }));
-    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 0 });
+    expect(r).toMatchObject({ status: 'MISSING_PUNCH', workedMinutes: 0 });
     expect(r.flags).toEqual(['MISSING_OUT', 'NO_SHIFT']);
   });
 });
@@ -528,6 +528,97 @@ describe('calculateDailyRecord — flexible shifts and no shift', () => {
   });
 });
 
+describe('calculateDailyRecord — flexible shifts: early departure is the shortfall, the grace a tolerance (engine 1.3.0)', () => {
+  beforeEach(resetIds);
+  // the field report: an 8-hour flexible shift with a 1-minute grace-out, checked in at 08:00
+  const shift = flexibleShift({ dayBoundary: '00:00', graceOutMinutes: 1 });
+
+  it('7h59m: one minute short is within the 1-minute grace → no early departure, nothing flagged', () => {
+    const r = calculateDailyRecord(input({ shift, events: day('08:00', '15:59') }));
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 479, scheduledMinutes: 480, earlyDepartureMinutes: 0, expectedEndAt: at(DATE, '16:00') });
+    expect(r.flags).toEqual([]);
+  });
+
+  it('7h58m: two minutes short is beyond the grace → the whole shortfall (2 min) is early departure, not 1', () => {
+    const r = calculateDailyRecord(input({ shift, events: day('08:00', '15:58') }));
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 478, earlyDepartureMinutes: 2 });
+    expect(r.flags).toEqual(['EARLY_DEPARTURE']);
+    expect(r.trace.steps.find((s) => s.step === 'earlyDeparture')?.values).toMatchObject({ shortfallMinutes: 2, graceOutMinutes: 1, earlyDepartureMinutes: 2, flagged: true });
+  });
+
+  it('measures the shortfall on the worked minutes: a longer break than scheduled is short of the required hours', () => {
+    // PAIRED: 08:00–12:00 and 13:30–16:30 = 7 h worked; leaving after the 16:00 check-out still leaves an hour short
+    const r = calculateDailyRecord(input({ shift, rules: rules({ punchInterpretation: 'PAIRED' }), events: day('08:00', '12:00', '13:30', '16:30') }));
+    expect(r).toMatchObject({ workedMinutes: 420, earlyDepartureMinutes: 60 });
+    expect(r.flags).toContain('EARLY_DEPARTURE');
+  });
+
+  it('a fixed shift keeps its clock-based early departure (grace deducted, §G.5)', () => {
+    const r = calculateDailyRecord(input({ shift: fixedShift({ graceOutMinutes: 1 }), events: day('09:00', '16:58') }));
+    expect(r.earlyDepartureMinutes).toBe(1);
+  });
+});
+
+describe('calculateDailyRecord — flexible overnight check-out (engine 1.3.0)', () => {
+  beforeEach(resetIds);
+  // the new default boundary (12:00 AM): a 22:00 → 06:00 night used to split into "Missing OUT" + a lone check-out
+  const shift = flexibleShift({ dayBoundary: '00:00' });
+  const night = () => [punch(DATE, '22:00', 'PUNCH_IN', MUSCAT, { source: 'CORRECTION' }), punch(D1, '06:00', 'PUNCH_OUT', MUSCAT, { source: 'CORRECTION' })];
+
+  it('a 22:00–06:00 pair is 8 h worked on the check-in day, without Missing OUT', () => {
+    const events = night();
+    const r = calculateDailyRecord(input({ shift, events, now: at(D1, '09:00') }));
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 480, firstInAt: at(DATE, '22:00'), lastOutAt: at(D1, '06:00'), earlyDepartureMinutes: 0, punchCount: 2 });
+    expect(r.flags).toEqual(['MANUAL_CORRECTION', 'CROSS_MIDNIGHT']);
+    expect(r.trace.punches.find((p) => p.eventId === events[1]!.id)).toMatchObject({ role: 'OUT' });
+    expect(r.trace.steps.find((s) => s.step === 'attribution.overnight')?.values).toMatchObject({ from: D1, to: DATE, spanMinutes: 480 });
+  });
+
+  it('the next day does not get the check-out (both days take the same decision)', () => {
+    const events = night();
+    const next = calculateDailyRecord(input({ shift, attendanceDate: D1, events, now: at('2026-03-12', '09:00') }));
+    expect(next).toMatchObject({ status: 'ABSENT', punchCount: 0, firstInAt: null, lastOutAt: null });
+    expect(next.flags).not.toContain('MISSING_IN');
+    expect(next.trace.punches.find((p) => p.eventId === events[1]!.id)).toMatchObject({ role: 'OUT_OF_WINDOW', note: expect.stringContaining(`attributed to ${DATE}`) });
+  });
+
+  it('consecutive nights each keep their own check-in and check-out', () => {
+    const events = [punch(DATE, '22:00', 'PUNCH_IN'), punch(D1, '06:00', 'PUNCH_OUT'), punch(D1, '22:05', 'PUNCH_IN'), punch('2026-03-12', '06:10', 'PUNCH_OUT')];
+    const first = calculateDailyRecord(input({ shift, events }));
+    const second = calculateDailyRecord(input({ shift, attendanceDate: D1, events }));
+    expect(first).toMatchObject({ workedMinutes: 480, firstInAt: at(DATE, '22:00'), lastOutAt: at(D1, '06:00') });
+    expect(second).toMatchObject({ workedMinutes: 485, firstInAt: at(D1, '22:05'), lastOutAt: at('2026-03-12', '06:10'), status: 'PRESENT' });
+  });
+
+  it('keeps the check-in day PENDING after the boundary while the check-out can still come', () => {
+    const r = calculateDailyRecord(input({ shift, events: [punch(DATE, '22:00', 'PUNCH_IN')], now: at(D1, '02:00') }));
+    expect(r.status).toBe('PENDING');
+    expect(r.flags).not.toContain('MISSING_OUT');
+    // 22:00 + 8 h required + 4 h slack = 10:00 the next morning: then it is a missing check-out
+    expect(calculateDailyRecord(input({ shift, events: [punch(DATE, '22:00', 'PUNCH_IN')], now: at(D1, '10:30') })).status).toBe('MISSING_PUNCH');
+  });
+
+  it('does not close a forgotten check-out with the next day\'s lone check-out much later', () => {
+    const events = [punch(DATE, '08:00', 'PUNCH_IN'), punch(D1, '17:00', 'PUNCH_OUT')];
+    const first = calculateDailyRecord(input({ shift, events }));
+    const second = calculateDailyRecord(input({ shift, attendanceDate: D1, events }));
+    expect(first).toMatchObject({ status: 'MISSING_PUNCH', workedMinutes: 0 });
+    expect(first.flags).toContain('MISSING_OUT');
+    expect(second.flags).toContain('MISSING_IN');
+  });
+
+  it('pairs only directed punches: undirected device punches keep the day boundary', () => {
+    const events = [punch(DATE, '22:00'), punch(D1, '06:00')];
+    expect(calculateDailyRecord(input({ shift, events })).status).toBe('MISSING_PUNCH');
+  });
+
+  it('never reaches across a fixed shift: only a flexible day keeps an overnight check-out', () => {
+    const events = [punch(DATE, '22:00', 'PUNCH_IN'), punch(D1, '06:00', 'PUNCH_OUT')];
+    const fixedDay = calculateDailyRecord(input({ shift: fixedShift({ startTime: '08:00', endTime: '16:00', punchOutWindowAfterMinutes: 360 }), events }));
+    expect(fixedDay.lastOutAt).toBeNull();
+  });
+});
+
 describe('calculateDailyRecord — Ramadan and timezones', () => {
   beforeEach(resetIds);
   const ramadan = rules({ ramadanMode: { enabled: true, from: '2026-02-18', to: '2026-03-19', scheduledMinutes: 360, appliesTo: 'all' } });
@@ -632,7 +723,7 @@ describe('calculateDailyRecord — adversarial review', () => {
   it('DIRECTIONAL orphan OUT followed by an open IN is a missing OUT, not a negative span with early departure', () => {
     const events = [punch(DATE, '08:00', 'PUNCH_OUT'), punch(DATE, '09:00', 'PUNCH_IN')];
     const r = calculateDailyRecord(input({ events, rules: rules({ punchInterpretation: 'DIRECTIONAL' }), now: AFTER_WINDOW }));
-    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 0, earlyDepartureMinutes: 0, lastOutAt: null, firstInAt: at(DATE, '09:00') });
+    expect(r).toMatchObject({ status: 'MISSING_PUNCH', workedMinutes: 0, earlyDepartureMinutes: 0, lastOutAt: null, firstInAt: at(DATE, '09:00') });
     expect(r.flags).toEqual(['MISSING_IN', 'MISSING_OUT']);
   });
 

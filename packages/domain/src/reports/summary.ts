@@ -22,7 +22,9 @@ export interface SummaryRecordLike {
  *   T/AB = AB + unpaid leave types (No-Pay)
  *
  * A half-day leave is half a leave day and half a present day; a half day without leave is HP (and half absent, which
- * the sample does not print — T/PR carries the half, T/AB does not).
+ * the sample does not print — T/PR carries the half, T/AB does not). A missing-punch day (MISSING_PUNCH: a check-in or
+ * check-out is missing, hours unknown) is in none of the three totals: it is counted on its own (`missing`), as the
+ * monthly summary counts it, until the punch is corrected.
  */
 export interface CodeSummary {
   present: number;
@@ -30,6 +32,8 @@ export interface CodeSummary {
   weeklyOff: number;
   halfDayPresent: number;
   absent: number;
+  /** Missing-punch days (hours unknown): outside T/PR, T/OL and T/AB. */
+  missing: number;
   /** Leave days by leave-type code (fractional for half days). */
   leave: Record<string, number>;
   totalPresent: number;
@@ -52,14 +56,16 @@ export function leaveGroupOf(code: string, leaveTypes: readonly LeaveTypeLike[])
 }
 
 export function summariseCodes(records: readonly SummaryRecordLike[], leaveTypes: readonly LeaveTypeLike[], fallbackLeaveCode = 'LV'): CodeSummary {
-  const s: CodeSummary = { present: 0, holiday: 0, weeklyOff: 0, halfDayPresent: 0, absent: 0, leave: {}, totalPresent: 0, totalLeave: 0, totalAbsent: 0, ot1Minutes: 0, ot2Minutes: 0, utMinutes: 0 };
+  const s: CodeSummary = { present: 0, holiday: 0, weeklyOff: 0, halfDayPresent: 0, absent: 0, missing: 0, leave: {}, totalPresent: 0, totalLeave: 0, totalAbsent: 0, ot1Minutes: 0, ot2Minutes: 0, utMinutes: 0 };
   const addLeave = (code: string | null | undefined, days: number) => { const k = (code ?? '').trim() || fallbackLeaveCode; s.leave[k] = (s.leave[k] ?? 0) + days; };
   for (const r of records) {
     const halfLeave = r.flags.includes('HALF_DAY_LEAVE');
     switch (r.status) {
       case 'PRESENT':
-      case 'MISSING_PUNCH':
         if (halfLeave) { s.present += 0.5; addLeave(r.leaveTypeCode, 0.5); } else s.present += 1;
+        break;
+      case 'MISSING_PUNCH':
+        s.missing += 1;
         break;
       case 'HALF_DAY':
         if (halfLeave) { s.present += 0.5; addLeave(r.leaveTypeCode, 0.5); } else s.halfDayPresent += 1;

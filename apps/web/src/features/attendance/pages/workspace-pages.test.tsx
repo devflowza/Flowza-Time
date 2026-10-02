@@ -14,7 +14,7 @@ import UnmatchedPunchesPage from './unmatched-page';
 import AttendancePrintPage from './print-page';
 
 const E1 = '11111111-1111-4111-8111-111111111111';
-const figures = { presentDays: 20.5, lateDays: 3, halfDays: 1, leaveDays: 2, absentDays: 1, missingPunchDays: 1, holidayDays: 1, weeklyOffDays: 8, daysWorked: 21, workedMinutes: 10_080, overtimeMinutes: 150, averageWorkedMinutes: 480, lopDays: 0.5, unexcusedDays: 4.5, pendingDays: 0, recordCount: 30 };
+const figures = { presentDays: 20.5, lateDays: 3, halfDays: 1, leaveDays: 2, absentDays: 1, missingPunchDays: 1, holidayDays: 1, weeklyOffDays: 8, daysWorked: 21, workedMinutes: 10_080, overtimeMinutes: 150, averageWorkedMinutes: 480, lopDays: 0.5, unexcusedDays: 4.5, pendingDays: 0, recordCount: 30, notCalculatedDays: 0 };
 const summaryRow: AttendanceSummaryRowDto = { ...figures, employeeId: E1, employeeNumber: '1001', employeeName: 'Ali Hassan', branchId: 'b1', branchName: 'Muscat', departmentId: 'd1', departmentName: 'Sales', source: 'LIVE', finalizedAt: null };
 const summary = { data: [summaryRow], meta: { page: 1, pageSize: 50, total: 1, totalPages: 1, month: '2026-08', from: '2026-08-01', to: '2026-08-31', totals: figures } };
 

@@ -13,7 +13,8 @@ import type { ReportDefinition } from './types.js';
 /**
  * Sample 4 — Monthly Attendance Report: one row per employee, one column per day of the month carrying the attendance
  * code (coloured as the samples print them), and an absence count. Landscape. Employees employed at any point in the
- * month appear; a day without a record is blank. A trailing LOP column (HR portal Prompt 3) carries the loss-of-pay days
+ * month appear; a day without a record is blank. A missing-punch day prints MP (its own code, outside the absence count),
+ * as the monthly summary counts it in Missing punch only. A trailing LOP column (HR portal Prompt 3) carries the loss-of-pay days
  * of the month (0.5 steps, `lopDaysOf`), after the sample's own columns so their positions do not move.
  * `layout: detailed` prints the Daily Report's rows for every day of the month instead (`monthly-detailed.ts`).
  */
@@ -56,7 +57,7 @@ export const monthlyAttendance: ReportDefinition = {
     return {
       key: 'monthly_attendance', title: ctx.t('report.monthly_attendance.title'), company: ctx.company,
       period: ctx.t('period.forThePeriod', { from: ctx.headerDate(from), to: ctx.headerDate(to) }), orientation: 'landscape', columns, sections,
-      legend: ctx.legend(), legendTitle: ctx.t('legend.title'), notes: [ctx.t('footer.lop')], endOfReport: false, endOfReportLabel: ctx.t('group.endOfReport'),
+      legend: ctx.legend(), legendTitle: ctx.t('legend.title'), notes: [ctx.t('footer.missingPunch', { code: ctx.code({ status: 'MISSING_PUNCH', flags: [] }).code }), ctx.t('footer.lop')], endOfReport: false, endOfReportLabel: ctx.t('group.endOfReport'),
       generatedAt: ctx.now, generatedLabel: ctx.generatedLabel(), pageLabel: ctx.pageLabel, timezone: ctx.timezone, locale: ctx.locale, dir: ctx.dir,
       rowCount: countRows(sections), flatten: { headingColumnLabel: null, fieldColumns: false }, fileStem: whole ? `monthly-attendance-${month}` : `monthly-attendance-${from}-${to}`,
     };

@@ -31,6 +31,7 @@ export interface PeriodSummary {
   holidayDays: number;
   weeklyOffDays: number;
   halfDays: number;
+  /** MISSING_PUNCH days: a punch is missing and the hours are unknown (a policy that resolves the day counts it in its own bucket). */
   missingPunchDays: number;
   lateDays: number;
   /** Worked minutes that are not overtime. */
@@ -65,8 +66,10 @@ function has(flags: readonly AttendanceFlag[], flag: AttendanceFlag): boolean {
 /**
  * Aggregate daily records into payroll totals. Fractions: a HALF_DAY counts 0.5 present; the other half is
  * 0.5 leave when the record carries HALF_DAY_LEAVE, otherwise 0.5 absent. ABSENT + HALF_DAY_LEAVE is 0.5
- * absent + 0.5 leave; PRESENT/MISSING_PUNCH + HALF_DAY_LEAVE is 0.5 present + 0.5 leave. Regular minutes are
- * `worked − overtime` per record (never negative).
+ * absent + 0.5 leave; PRESENT + HALF_DAY_LEAVE is 0.5 present + 0.5 leave. A MISSING_PUNCH day (a check-in or
+ * check-out is missing and the hours are unknown — engine 1.3.0) is neither present nor absent: it counts in
+ * `missingPunchDays` only, the bucket the monthly summary shows, so every day sits in exactly one bucket. Regular
+ * minutes are `worked − overtime` per record (never negative).
  */
 export function summarisePeriod(records: readonly PeriodRecordLike[], opts: PeriodSummaryOptions): PeriodSummary {
   const defaultLeavePaid = opts.defaultLeavePaid ?? true;
@@ -117,10 +120,13 @@ export function summarisePeriod(records: readonly PeriodRecordLike[], opts: Peri
 
     switch (record.status) {
       case 'PRESENT':
-      case 'MISSING_PUNCH':
         // A present record on a half-day leave (e.g. legacy rows) is still half a day of leave for payroll.
         if (halfDayLeave) { summary.halfDays += 1; summary.presentDays += 0.5; addLeave(0.5); }
         else summary.presentDays += 1;
+        break;
+      case 'MISSING_PUNCH':
+        summary.missingPunchDays += 1;
+        if (halfDayLeave) addLeave(0.5);
         break;
       case 'HALF_DAY':
         summary.halfDays += 1;
@@ -153,7 +159,6 @@ export function summarisePeriod(records: readonly PeriodRecordLike[], opts: Peri
       }
     }
 
-    if (record.status === 'MISSING_PUNCH' || has(record.flags, 'MISSING_IN') || has(record.flags, 'MISSING_OUT')) summary.missingPunchDays += 1;
     if (has(record.flags, 'LATE')) summary.lateDays += 1;
 
     const overtime = Math.max(0, record.overtimeMinutes);

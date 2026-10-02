@@ -9,7 +9,9 @@ attendance_raw_transactions ──normaliser──▶ attendance_events ──en
    (immutable, per device)   employee resolution     (immutable, void-only)   per (employee, attendance_date)
                                                       + manual/correction events
 ```
-Recompute triggers: new event, approved correction, rule-set/shift/holiday/leave change, explicit recalculation request.
+Recompute triggers: new event, approved correction, rule-set/shift/holiday/leave change, a changed joining or exit date (the
+days between the old and the new date, up to today), explicit recalculation request — and, for days nobody punched on,
+the hourly materialisation job (`ATTENDANCE_MATERIALIZE_DAYS`, below), so every past day of employment has a record.
 Records inside a locked period are skipped and listed in the recalculation summary.
 
 ## Public API (`@flowza/domain`)
@@ -17,12 +19,13 @@ Records inside a locked period are skipped and listed in the recalculation summa
 |---|---|
 | `computePunchWindow(shift, date, tz)` | FIXED: `[start − punchInWindowBefore, end + punchOutWindowAfter)`, end on D+1 when `endTime <= startTime`; FLEXIBLE: `[dayBoundary(D), dayBoundary(D+1))`; no shift: local calendar day |
 | `attributeEvents(events, windows)` | Deterministic attribution when neighbouring windows overlap: nearest scheduled start wins, ties → earlier date, no-shift windows never beat a real shift; voided/out-of-window recorded |
+| `carryOvernightCheckOuts(attribution, windows, shiftOf)` | FLEXIBLE shifts (engine 1.3.0): the next day's leading check-out that closes a day's open check-in moves back to that day (`OVERNIGHT_CHECK_OUT`), within `overnightMaxSpanMinutes(shift)` = required + unpaid breaks + 4 h (≤ 20 h) |
 | `collapseDuplicates`, `interpretPunches`, `computeBreaks` | Duplicate collapsing (keep first within `duplicatePunchWindowSeconds`), FIRST_LAST / PAIRED / DIRECTIONAL interpretation, MISSING_IN/MISSING_OUT, measured vs fixed vs scheduled breaks (paid allowance credited back) |
 | `roundMinutes`, `roundInstant`, `roundPunches` | Rounding (NONE/NEAREST/UP/DOWN) from local midnight; raw timestamps stay in the trace |
 | `calculateDailyRecord(input)` | The daily calculation (below) |
-| `resolveShift(assignments, patterns, scope, date)` | EMPLOYEE > TEAM > DEPARTMENT > BRANCH > ORGANIZATION, half-open effective ranges, rotation cycle day from `anchorDate`, `isPatternOff` |
+| `resolveShift(assignments, patterns, scope, date)` | EMPLOYEE > TEAM > DEPARTMENT > BRANCH > ORGANIZATION, half-open effective ranges `[effective_from, effective_to)` as stored (the API and the UI speak of the inclusive last day and convert at the boundary, see docs/api.md), rotation cycle day from `anchorDate`, `isPatternOff` |
 | `resolveRuleSet(ruleSets, date, branchId)` | Branch-specific first, then organisation default; latest `effectiveFrom` |
-| `summarisePeriod(records, opts)` | Payroll totals matching `attendance_period_summaries` (HALF_DAY = 0.5 present; weekly-off/holiday OT in their own columns) |
+| `summarisePeriod(records, opts)` | Payroll totals matching `attendance_period_summaries` (HALF_DAY = 0.5 present; MISSING_PUNCH in `missingPunchDays` only; weekly-off/holiday OT in their own columns) |
 | `decideRetry`, `nextAdaptiveInterval` (sync) | Provider-agnostic retry policy and adaptive polling |
 
 ## Status precedence and rules (`calculateDailyRecord`)
@@ -41,16 +44,32 @@ Records inside a locked period are skipped and listed in the recalculation summa
    flexible shifts (engine 1.1.0): **check in at any time, leave after the required time** — the expected check-out
    (`expected_end_at`) is the (rounded) first IN + required minutes + the shift's unpaid breaks (no break on a half day),
    or the core end when that is later; `expected_start_at` is the core start, else the check-in itself. Without core hours
-   the employee is never late; early departure is measured against that expected check-out. The expected check-out is on
+   the employee is never late. Early departure (engine 1.3.0) is the **shortfall**: the larger of the time left before that
+   expected check-out and required − worked (not on a half day, whose fixed break is already out of the worked minutes);
+   `graceOutMinutes` is a tolerance on it — a shortfall within the grace is forgiven, one beyond it counts in full (required
+   8 h, grace 1: 7h59m → no early departure, 7h58m → 2 min; engines ≤ 1.2.0 shaved the grace off every shortfall, so
+   7h58m showed 1 min). FIXED shifts keep `lastOut` vs `expectedEnd − grace`. The expected check-out is on
    the record from the moment of the check-in (PENDING day), so the portal's check-in page ("You can check out from …")
-   and the missing check-out reminder use it. OT = worked − required − threshold. A check-out after the shift's day
-   boundary belongs to the next attendance day — set the boundary to a time nobody works (e.g. 12:00 for night work);
+   and the missing check-out reminder use it. OT = worked − required − threshold. **Overnight** (engine 1.3.0): a
+   check-in still open at the day boundary is closed by the next day's leading check-out (`PUNCH_OUT`, not an undirected
+   `PUNCH`) within required + unpaid breaks + 4 h (at most 20 h) — 22:00 → 06:00 is 8 h worked on the check-in day,
+   `CROSS_MIDNIGHT`, no `MISSING_OUT`, and the next day does not see a stray check-out. Until that limit has passed the
+   check-in day stays `PENDING`; a check-out later than that (a forgotten one) stays on its own day as before. A check-out
+   with no open check-in behind it still belongs to the day it falls on;
    `UNDER_HOURS` when worked < `minFullDayMinutes`; `HALF_DAY` when worked < `halfDayThresholdMinutes`.
 4. No punches: `ABSENT` when `autoAbsentWithoutPunches` and the day is over (`now` past the window end); otherwise `PENDING`.
    **Callers must pass `now`** when computing the current day; without it the day is treated as finished (historical recompute).
-5. Missing punch (IN only / OUT only): `FLAG_ONLY` → `PRESENT` + `MISSING_OUT`/`MISSING_IN` with 0 worked minutes;
-   `ASSUME_SHIFT_END` → worked to the scheduled end (no OT, assumed instant not reported as a timestamp);
-   `TREAT_AS_ABSENT`; `TREAT_AS_HALF_DAY`. The dashboard "missing punches" KPI counts the flags.
+   **A working day without a resolved shift** follows the same rule as any working day — one rule for the daily register,
+   the monthly summary and the reports: punches → `PRESENT` + `NO_SHIFT` (worked = first → last punch, no lateness,
+   early departure or overtime expectations), none → `ABSENT` + `NO_SHIFT` once the day is over. It is never dropped: a
+   day of employment without any record yet is reported as *not calculated* (summary column / report column `Not calc.`)
+   until the materialisation job or a recalculation writes it.
+5. Missing punch (IN only / OUT only): `FLAG_ONLY` → `MISSING_PUNCH` + `MISSING_OUT`/`MISSING_IN` with 0 worked minutes
+   (engine 1.3.0; engines ≤ 1.2.0 wrote `PRESENT`, which inflated Present and understated Worked). Its hours are unknown,
+   so it is counted on its own — in Missing punch only (period summaries, the monthly summary, report code `MP`), never in
+   Present, Absent or Days worked — until the punch is corrected; on a half-day leave/holiday it stays `HALF_DAY`.
+   `ASSUME_SHIFT_END` → worked to the scheduled end (no OT, assumed instant not reported as a timestamp; without a shift
+   it falls back to FLAG_ONLY); `TREAT_AS_ABSENT`; `TREAT_AS_HALF_DAY`. The dashboard "missing punches" KPI counts the flags.
 6. Ramadan mode (`rules.ramadanMode`): within the date range (and eligibility) scheduled minutes shrink and `expectedEnd`
    moves earlier; flag `RAMADAN_HOURS`.
 7. Flags (canonical order): `LATE, EARLY_DEPARTURE, OVERTIME, MISSING_IN, MISSING_OUT, MANUAL_CORRECTION, OUT_OF_WINDOW,
@@ -76,13 +95,29 @@ Shift 22:00–06:00 Asia/Muscat, punches 21:57 (D) and 06:08 (D+1) → attendanc
 `CROSS_MIDNIGHT`; a punch at 05:50 (D+1) belongs to D's window, a punch at 21:50 (D+1) to D+1's window (nearest start). For
 rotating schedules pass `adjacentShifts` (D−1/D+1) so neighbouring windows are exact.
 
+Flexible shift (8 h required, day boundary 00:00), check-in 22:00 (D) and check-out 06:00 (D+1) → attendance date D, 480
+worked minutes, `CROSS_MIDNIGHT`; D+1 has no punch left (ABSENT once over, not `MISSING_IN`). At 02:00 (D+1) D is still
+`PENDING`; with no check-out by 22:00 + 12 h it becomes `MISSING_PUNCH` (`calculate.test.ts`, "flexible overnight check-out").
+
 ## Worker integration contract
 - Normaliser resolves `device_employee_id` → employee via `device_employee_states` → `employee_provider_identities` →
   `employees.device_user_id` (unmatched rows stay `unmatched`), attaches the **effective branch on that date**, and enqueues a
   throttled `RECOMPUTE_DAILY` per (employee, date) — for cross-midnight shifts also for D−1. The organisation's
   `processingDelaySeconds` is the throttle window: a day not recalculated within the last window is recomputed at once (a
   pushed punch reaches the register within seconds), a day recalculated less than a window ago at the end of that window.
+- For a FLEXIBLE shift the normaliser's D−1 reach covers the overnight carry: a punch up to `overnightMaxSpanMinutes` after
+  D−1's day boundary also recomputes D−1 (`neighbour-reach.test.ts`).
 - The recompute job loads events in `[date − 1, date + 2)` (branch timezone), resolves shift and rule set, holidays
   (branch calendar), weekly-off (employee → branch → org), approved leave, passes `now`, writes the record with
   `calculation_version + 1`, a history snapshot when anything changed, and emits `attendance.created`/`attendance.updated`.
 - `summarisePeriod` needs `leaveIsPaid` per record (join leave records); `overtimeMinutes` is REGULAR only.
+- Materialisation (`ATTENDANCE_MATERIALIZE_DAYS`, `apps/worker/src/handlers/attendance/materialize.ts`): records exist only
+  where something triggered a recompute, so a day nobody punched on used to have no record and dropped out of every
+  summary column. Every hour the scheduler (`attendance.materialize`, deduped per org) enqueues one job per active org that
+  computes the missing or still-`PENDING` days of the last 3 days (up to yesterday, org timezone) for employees in
+  employment, at most 20 000 pairs per run, 200 per transaction chunk. Older gaps are closed by a recalculation (the
+  Attendance summary page offers "Recalculate month" when it sees them).
+- Joining / exit date changes (`employees.service.ts`, `employmentDatesRecalcRange`) enqueue a recalculation of the days
+  between the old and the new date (up to today), so NOT_JOINED / EXITED records in that gap are recomputed. An employee created
+  with a past joining date gets the days since joining calculated too — from the organisation's first day (its creation date)
+  at the earliest, so a long-serving employee entered at go-live is not given years of absences.

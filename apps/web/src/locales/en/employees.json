@@ -37,7 +37,7 @@
     "syncTitle": "Sync {{count}} employees to devices?", "syncHint": "A push job is queued for every device the employees should be enrolled on.", "syncConfirm": "Queue sync",
     "assign_branch": { "title": "Assign branch ({{count}})", "hint": "Moves the selected employees to a branch. Effective-dated; devices are re-pushed." },
     "assign_department": { "title": "Assign department ({{count}})", "hint": "Sets the department of the selected employees.", "clearHint": "Leave empty to remove the department." },
-    "assign_shift": { "title": "Assign shift ({{count}})", "hint": "Closes open employee shift assignments and starts a new one.", "shift": "Shift", "select": "Select a shift", "none": "No shifts found. Create shifts first.", "effectiveTo": "Effective to" },
+    "assign_shift": { "title": "Assign shift ({{count}})", "hint": "Closes open employee shift assignments and starts a new one.", "shift": "Shift", "select": "Select a shift", "none": "No shifts found. Create shifts first.", "effectiveTo": "Effective to (last day)", "effectiveToHint": "Included: the shift still applies on this day. Leave empty for no end." },
     "set_status": { "title": "Set status ({{count}})", "hint": "Changes the employment status. Termination removes the employees from devices." },
     "export": { "title": "Export employees", "hint": "A file is generated in the background; sensitive columns are masked unless you may view them.", "format": "Format" }
   },

@@ -18,8 +18,10 @@ export type ManualAttendanceStatus = (typeof MANUAL_ATTENDANCE_STATUSES)[number]
 export const STATUS_SOURCES = ['AUTO', 'MANUAL'] as const;
 export type StatusSource = (typeof STATUS_SOURCES)[number];
 
-const outAfterIn = (v: { inAt?: string | null; outAt?: string | null }, ctx: z.RefinementCtx) => {
+const outAfterIn = (v: { inAt?: string | null; outAt?: string | null; removeIn?: boolean; removeOut?: boolean }, ctx: z.RefinementCtx) => {
   if (v.inAt && v.outAt && Date.parse(v.outAt) <= Date.parse(v.inAt)) ctx.addIssue({ code: 'custom', path: ['outAt'], message: 'Check-out must be after check-in' });
+  if (v.removeIn && v.inAt) ctx.addIssue({ code: 'custom', path: ['removeIn'], message: 'Either remove the check-in or move it, not both' });
+  if (v.removeOut && v.outAt) ctx.addIssue({ code: 'custom', path: ['removeOut'], message: 'Either remove the check-out or move it, not both' });
 };
 
 // ---- preview (no writes) ------------------------------------------------------------------------------------------------
@@ -32,6 +34,10 @@ export const attendancePreviewInputSchema = z.object({
   inAt: isoDateTimeSchema.nullish(),
   /** Proposed check-out (UTC instant); absent or null = keep the day's current check-out. */
   outAt: isoDateTimeSchema.nullish(),
+  /** Remove the day's check-in (the first IN the engine attributed): what clearing the check-in time means. */
+  removeIn: z.boolean().optional(),
+  /** Remove the day's check-out (the last OUT the engine attributed): what clearing the check-out time means. */
+  removeOut: z.boolean().optional(),
 }).superRefine(outAfterIn);
 export type AttendancePreviewInput = z.infer<typeof attendancePreviewInputSchema>;
 
@@ -53,7 +59,7 @@ export interface AttendanceEngineOutcomeDto {
 
 /** A correction the record edit would file (the preview shows the plan; the edit endpoint files exactly this plan). */
 export interface PlannedCorrectionDto {
-  type: 'ADD_PUNCH' | 'EDIT_PUNCH' | 'SET_STATUS';
+  type: 'ADD_PUNCH' | 'EDIT_PUNCH' | 'REMOVE_PUNCH' | 'SET_STATUS';
   originalEventId: string | null;
   originalPunchedAt: string | null;
   proposedPunchedAt: string | null;
@@ -88,18 +94,21 @@ export interface AttendancePreviewDto {
 
 // ---- record edit (Add / Edit record dialog) -----------------------------------------------------------------------------
 
-/** POST /orgs/:orgId/attendance/record-edits — files ADD_PUNCH / EDIT_PUNCH / SET_STATUS corrections through the engine path. */
+/** POST /orgs/:orgId/attendance/record-edits — files ADD_PUNCH / EDIT_PUNCH / REMOVE_PUNCH / SET_STATUS corrections through the engine path. */
 export const attendanceRecordEditSchema = z.object({
   employeeId: uuidSchema,
   date: isoDateSchema,
   inAt: isoDateTimeSchema.nullish(),
   outAt: isoDateTimeSchema.nullish(),
+  /** Remove the day's check-in / check-out (the time was cleared in the dialog): files a REMOVE_PUNCH correction for it. */
+  removeIn: z.boolean().optional(),
+  removeOut: z.boolean().optional(),
   /** Manual status override; absent = keep the policy-derived status. */
   status: z.enum(MANUAL_ATTENDANCE_STATUSES).optional(),
   reason: z.string().trim().min(3).max(1000),
 }).superRefine((v, ctx) => {
   outAfterIn(v, ctx);
-  if (!v.inAt && !v.outAt && !v.status) ctx.addIssue({ code: 'custom', path: ['status'], message: 'Set a check-in, a check-out or a status' });
+  if (!v.inAt && !v.outAt && !v.removeIn && !v.removeOut && !v.status) ctx.addIssue({ code: 'custom', path: ['status'], message: 'Set a check-in, a check-out or a status' });
 });
 export type AttendanceRecordEditInput = z.infer<typeof attendanceRecordEditSchema>;
 
@@ -112,6 +121,8 @@ export interface AttendanceRecordEditResultDto {
   failed: { type: PlannedCorrectionDto['type']; code: string; message: string } | null;
   /** Plan items skipped because they changed nothing (the time already matches). */
   unchanged: number;
+  /** Server time the corrections were filed: the day's record is up to date once it was computed after this (absent on an older API). */
+  filedAt?: string;
 }
 
 // ---- bulk status ------------------------------------------------------------------------------------------------------------
@@ -215,13 +226,18 @@ export type AttendanceSummaryExportInput = z.infer<typeof attendanceSummaryExpor
 /** Rows one export may hold; above it the export asks for a branch / department filter. */
 export const ATTENDANCE_SUMMARY_EXPORT_MAX_ROWS = 10_000;
 
-/** The figures of one employee-month (same fractions as the period summary: a half day counts 0.5 present). */
+/**
+ * The figures of one employee-month (same fractions as the period summary: a half day counts 0.5 present). Every calculated day
+ * of employment adds up to one across present / absent / leave / missing punch / holiday / weekly off / pending (a half day is
+ * ½ present + ½ absent or leave); a day never calculated is in `notCalculatedDays` instead. Late and half days count across them.
+ */
 export interface AttendanceSummaryFigures {
   presentDays: number;
   lateDays: number;
   halfDays: number;
   leaveDays: number;
   absentDays: number;
+  /** Days whose check-in or check-out is missing so the hours are unknown (status MISSING_PUNCH): not in present nor days worked. */
   missingPunchDays: number;
   holidayDays: number;
   weeklyOffDays: number;
@@ -235,6 +251,8 @@ export interface AttendanceSummaryFigures {
   unexcusedDays: number;
   pendingDays: number;
   recordCount: number;
+  /** Days of employment in the month, up to yesterday, that have no calculated record yet (a recalculation fills them). */
+  notCalculatedDays: number;
 }
 export interface AttendanceSummaryRowDto extends AttendanceSummaryFigures {
   employeeId: string;

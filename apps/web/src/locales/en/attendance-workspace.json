@@ -18,7 +18,8 @@
     "pendingCorrections": "{{count}} correction(s) waiting", "previewing": "Calculating…",
     "reason": "Reason", "reasonRequired": "Give a reason (at least 3 characters).", "reasonPlaceholder": "e.g. Forgot to punch out — confirmed by the supervisor",
     "nothing": "Change the check-in, the check-out or the status first.", "save": "Save record", "willFile": "Will file:",
-    "plan": { "ADD_PUNCH": "Add punch", "EDIT_PUNCH": "Move punch", "SET_STATUS": "Set status" },
+    "plan": { "ADD_PUNCH": "Add punch", "EDIT_PUNCH": "Move punch", "REMOVE_PUNCH": "Remove punch", "SET_STATUS": "Set status" },
+    "removeIn": "The recorded check-in ({{time}}) will be removed.", "removeOut": "The recorded check-out ({{time}}) will be removed.", "saving": "Saving…", "updating": "Updating…", "updatingHint": "Saved — the day is being recalculated.",
     "applied": "Record updated", "pending": "Sent for approval", "partial": "Saved {{count}} correction(s) — one step failed", "savedHint": "{{count}} correction(s) filed; the day is recalculated within seconds."
   },
   "bulk": {
@@ -71,8 +72,9 @@
     "exportQueued": "The summary of {{count}} employee(s) is being prepared. Download it from Reports when it is ready.", "openReports": "Open Reports",
     "empty": "No employees for this month", "emptyHint": "Employees active during the month appear here once their days are calculated.",
     "card": "P {{present}} · Late {{late}} · A {{absent}} · L {{leave}} · {{worked}}",
-    "footnote": "A half day counts as ½ present. Months whose payroll period is finalised show the finalised figures.",
-    "columns": { "present": "Present", "late": "Late", "half": "Half days", "leave": "Leave", "absent": "Absent", "missing": "Missing punch", "holiday": "Holidays", "weeklyOff": "Weekly off", "daysWorked": "Days worked", "worked": "Worked", "average": "Avg / day", "overtime": "Overtime", "lop": "Loss of pay", "unexcused": "Unexcused", "source": "Source" }
+    "footnote": "A half day counts as ½ present. Missing punch: days whose check-in or check-out is missing, so their hours are unknown — counted in Missing punch only (not in Present or Days worked) until the punch is corrected; every other day is in exactly one of Present, Absent, Leave, Holidays and Weekly off. Months whose payroll period is finalised show the finalised figures.",
+    "notCalculated": { "banner": "{{count}} employee-day(s) of this month have no calculated attendance yet, so they appear in no other column. Recalculate the month to include them.", "action": "Recalculate month", "reason": "Monthly summary: calculate the missing days of {{month}}", "queued": "Recalculation queued: the missing days appear when it finishes.", "pickBranch": "Pick a branch (or an employee) first: you can recalculate only the branches you manage." },
+    "columns": { "present": "Present", "late": "Late", "half": "Half days", "leave": "Leave", "absent": "Absent", "missing": "Missing punch", "holiday": "Holidays", "weeklyOff": "Weekly off", "daysWorked": "Days worked", "worked": "Worked", "average": "Avg / day", "overtime": "Overtime", "lop": "Loss of pay", "unexcused": "Unexcused", "source": "Source", "missingHint": "A check-in or check-out is missing, so the hours are unknown: not counted in Present or Days worked until the punch is corrected.", "notCalculated": "Not calculated", "notCalculatedHint": "Days of employment, up to yesterday, without a calculated record. Recalculate the month to include them." }
   },
   "unmatched": {
     "title": "Unmatched punches", "subtitle": "Device punches that could not be linked to an employee. Assign the device user id to an employee, or set the punches aside.",

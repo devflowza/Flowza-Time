@@ -9,6 +9,7 @@ vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks'
 import { apiMock, grant, grantAll, mockGet, page, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
 import type { AttendanceTimelineDto } from '@flowza/contracts';
 import { DailyView } from './daily-view';
+import { usePendingEdits } from '../pending-edits';
 import { TimelineDrawer } from './timeline-drawer';
 
 const E1 = '11111111-1111-4111-8111-111111111111';
@@ -69,6 +70,30 @@ describe('DailyView — Auto / Manual chips and bulk Set status', () => {
     const table = (await screen.findAllByRole('table'))[0]!;
     await within(table).findAllByText('Ali Hassan');
     expect(within(table).queryByRole('checkbox', { name: 'Select row' })).not.toBeInTheDocument();
+  });
+});
+
+describe('DailyView — a day just saved in Add / Edit record (field report 2026-10-02: it showed the old outcome until recalculated)', () => {
+  beforeEach(() => { resetApiMock(); grantAll(); testState.orgId = 'org-1'; testState.timezone = 'Asia/Muscat'; usePendingEdits.setState({ edits: {} }); });
+
+  it('says the day is updating until a record computed after the edit arrives, polling meanwhile, then settles it', async () => {
+    let computedAt = '2026-09-10T18:00:00Z';
+    mockGet({
+      '/orgs/org-1/attendance/daily': () => ({ ...daily, data: [{ ...rec('r1', E1, 'Ali Hassan', 'ABSENT'), computedAt }, rec('r2', E2, 'Sara Nasser', 'ABSENT')] }),
+      '/orgs/org-1/attendance/manual-statuses': { data: [] },
+      '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]), '/orgs/org-1/shifts': page([]), '/orgs/org-1/employees': page([]),
+    });
+    usePendingEdits.getState().mark(E1, '2026-09-10', '2026-09-11T08:00:00Z');
+    renderWithProviders(<DailyView />, { route: '/attendance?tab=daily&date=2026-09-10' });
+    const table = (await screen.findAllByRole('table'))[0]!;
+    const rows = await within(table).findAllByRole('row');
+    const ali = rows.find((r) => r.textContent?.includes('Ali Hassan'))!;
+    expect(await within(ali).findByTestId('row-updating')).toHaveTextContent(/Updating/);
+    expect(within(rows.find((r) => r.textContent?.includes('Sara Nasser'))!).queryByTestId('row-updating')).not.toBeInTheDocument();
+    // the worker recalculated the day: the next poll brings the record computed after the edit
+    computedAt = '2026-09-11T08:00:03Z';
+    await waitFor(() => expect(screen.queryAllByTestId('row-updating')).toHaveLength(0), { timeout: 6000 });
+    expect(usePendingEdits.getState().edits).toEqual({});
   });
 });
 

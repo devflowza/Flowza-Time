@@ -96,7 +96,7 @@ export function BulkActionDialog({ kind, employeeIds, onClose, onDone }: { kind:
               <FormField label={t('effective.effectiveFrom')} htmlFor="bulk-from" required={kind === 'assign_shift'}>
                 <Input id="bulk-from" type="date" dir="ltr" value={effectiveFrom} onChange={(e) => setEffectiveFrom(e.target.value)} />
               </FormField>
-              {kind === 'assign_shift' ? <FormField label={t('bulk.assign_shift.effectiveTo')} htmlFor="bulk-to" optional><Input id="bulk-to" type="date" dir="ltr" value={effectiveTo} min={effectiveFrom} onChange={(e) => setEffectiveTo(e.target.value)} /></FormField> : null}
+              {kind === 'assign_shift' ? <FormField label={t('bulk.assign_shift.effectiveTo')} htmlFor="bulk-to" optional hint={t('bulk.assign_shift.effectiveToHint')}><Input id="bulk-to" type="date" dir="ltr" value={effectiveTo} min={effectiveFrom} onChange={(e) => setEffectiveTo(e.target.value)} /></FormField> : null}
             </div>
           ) : null}
         </div>

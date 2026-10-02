@@ -86,7 +86,7 @@ export const FINANCE_STATUS_MAPPING: ReadonlyArray<{ finance: string; statuses: 
   { finance: 'on_leave', statuses: ['LEAVE'], flags: [], note: 'halfLeave' },
   { finance: 'holiday', statuses: ['HOLIDAY'], flags: [], note: '' },
   { finance: 'weekend', statuses: ['WEEKLY_OFF'], flags: [], note: '' },
-  { finance: 'incomplete', statuses: ['PRESENT', 'HALF_DAY', 'ABSENT'], flags: ['MISSING_IN', 'MISSING_OUT'], note: 'missedPunch' },
+  { finance: 'incomplete', statuses: ['MISSING_PUNCH', 'PRESENT', 'HALF_DAY', 'ABSENT'], flags: ['MISSING_IN', 'MISSING_OUT'], note: 'missedPunch' },
   { finance: 'holiday_work', statuses: ['HOLIDAY'], flags: ['WORKED_ON_HOLIDAY', 'NON_WORKING_DAY_WORK'], note: '' },
   { finance: 'weekly_off_work', statuses: ['WEEKLY_OFF'], flags: ['WORKED_ON_WEEKLY_OFF', 'NON_WORKING_DAY_WORK'], note: '' },
 ];

@@ -1,4 +1,5 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { sql } from 'kysely';
 import { createApiHarness, isoToday, isoTodayIn, queueJobs, seedOrg, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
@@ -68,6 +69,42 @@ describe('shifts and assignments', () => {
     expect(off.body.data).toMatchObject({ source: 'PATTERN', isPatternOff: true, patternDay: 2 });
     const on = await h.request('GET', `${base()}/shifts/resolve?employeeId=${f.e3}&date=2026-01-08`, { token: f.hrAdmin });
     expect(on.body.data.shift.id).toBe(shiftId);
+  });
+
+  it('"Effective to" is the last day, included (field report: 1 Sep → 2 Sep left the 2nd with "No shift", → 1 Oct left 1 Oct)', async () => {
+    const shiftOn = async (date: string) => (await h.request('GET', `${base()}/shifts/resolve?employeeId=${f.e2}&date=${date}`, { token: f.hrAdmin })).body.data;
+    const assign = (effectiveFrom: string, effectiveTo: string | null) => h.request('POST', `${base()}/shift-assignments`, { token: f.hrAdmin, body: { targetType: 'EMPLOYEE', targetId: f.e2, shiftId, effectiveFrom, effectiveTo } });
+    const first = await assign('2026-09-01', '2026-09-02');
+    expect(first.status).toBe(201);
+    expect(first.body.data).toMatchObject({ effectiveFrom: '2026-09-01', effectiveTo: '2026-09-02' });
+    // the recalculation covers the assignment's days, its last day included
+    const req = await h.admin.selectFrom('attendanceRecalculationRequests').select([sql<string>`from_date::text`.as('from'), sql<string>`to_date::text`.as('to')]).orderBy('createdAt', 'desc').executeTakeFirstOrThrow();
+    expect(req).toEqual({ from: '2026-09-01', to: '2026-09-02' });
+    // the next assignment starts the day after the last day: adjacent, not overlapping
+    const second = await assign('2026-09-03', '2026-10-01');
+    expect(second.status).toBe(201);
+    for (const date of ['2026-09-01', '2026-09-02', '2026-09-03', '2026-10-01']) expect((await shiftOn(date)).shift?.id).toBe(shiftId);
+    expect((await shiftOn('2026-08-31')).source).toBe('NONE');
+    expect((await shiftOn('2026-10-02')).source).toBe('NONE');
+    expect((await shiftOn('2026-09-02')).assignment).toMatchObject({ effectiveFrom: '2026-09-01', effectiveTo: '2026-09-02' });
+    // stored as the half-open bound the engine, the exclusion constraint and every query read: the day after the last day
+    const stored = await h.admin.selectFrom('shiftAssignments').select(sql<string>`effective_to::text`.as('to')).where('id', '=', first.body.data.id).executeTakeFirstOrThrow();
+    expect(stored.to).toBe('2026-09-03');
+    // a single day; a last day before the first is refused
+    expect((await assign('2026-08-20', '2026-08-20')).status).toBe(201);
+    expect((await shiftOn('2026-08-20')).shift?.id).toBe(shiftId);
+    expect((await shiftOn('2026-08-21')).source).toBe('NONE');
+    const bad = await assign('2026-08-10', '2026-08-09');
+    expect(bad.status).toBe(400);
+    // ending an assignment on a day keeps that day; the list and "active on" show the same last day
+    const end = await h.request('PATCH', `${base()}/shift-assignments/${second.body.data.id}`, { token: f.hrAdmin, body: { effectiveTo: '2026-09-15' } });
+    expect(end.status).toBe(200);
+    expect(end.body.data.effectiveTo).toBe('2026-09-15');
+    expect((await shiftOn('2026-09-15')).shift?.id).toBe(shiftId);
+    expect((await shiftOn('2026-09-16')).source).toBe('NONE');
+    const active = await h.request('GET', `${base()}/shift-assignments?activeOn=2026-09-15`, { token: f.hrAdmin });
+    expect(active.body.data.find((a: { id: string }) => a.id === second.body.data.id)).toMatchObject({ effectiveTo: '2026-09-15' });
+    expect((await h.request('PATCH', `${base()}/shift-assignments/${second.body.data.id}`, { token: f.hrAdmin, body: { effectiveTo: '2026-09-02' } })).status).toBe(400);
   });
 
   it('clears a flexible shift\'s core hours with null and never keeps them on a fixed shift', async () => {

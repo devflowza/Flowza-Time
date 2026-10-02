@@ -53,8 +53,13 @@ export const shiftAssignmentInputSchema = z.object({
   shiftId: uuidSchema.optional(),
   shiftPatternId: uuidSchema.optional(),
   effectiveFrom: isoDateSchema,
+  /**
+   * The assignment's LAST day — inclusive: "1 Sep → 2 Sep" covers both days (2026-10-02 field report). The API stores the day after
+   * it, the half-open bound of the table's `[effective_from, effective_to)` range. Null / absent = open-ended.
+   */
   effectiveTo: isoDateSchema.nullable().optional(),
-}).refine((v) => (v.shiftId ? 1 : 0) + (v.shiftPatternId ? 1 : 0) === 1, { message: 'Provide exactly one of shiftId or shiftPatternId' });
+}).refine((v) => (v.shiftId ? 1 : 0) + (v.shiftPatternId ? 1 : 0) === 1, { message: 'Provide exactly one of shiftId or shiftPatternId' })
+  .refine((v) => !v.effectiveTo || v.effectiveTo >= v.effectiveFrom, { message: 'The last day cannot be before the first day', path: ['effectiveTo'] });
 export type ShiftAssignmentInput = z.infer<typeof shiftAssignmentInputSchema>;
 
 export const holidayInputSchema = z.object({

@@ -21,7 +21,7 @@ import { RecordDialog, type CorrectionPreset } from './record-dialog';
 import { useWorkspaceDialogs } from './workspace-dialogs';
 
 const PAGE_SIZES = [12, 24, 48];
-const LEGEND_STATUSES = ['PRESENT', 'ABSENT', 'LEAVE', 'HALF_DAY', 'HOLIDAY', 'WEEKLY_OFF', 'PENDING'] as const;
+const LEGEND_STATUSES = ['PRESENT', 'ABSENT', 'LEAVE', 'HALF_DAY', 'MISSING_PUNCH', 'HOLIDAY', 'WEEKLY_OFF', 'PENDING'] as const;
 /** One legend entry per dot colour (MISSING_IN / MISSING_OUT share red, the two non-working-day flags share violet …). */
 const LEGEND_DOTS: Array<{ flag: string; ns: 'attendance' | 'attendanceWorkspace'; key: string }> = [
   { flag: 'LATE', ns: 'attendance', key: 'flags.LATE' },
