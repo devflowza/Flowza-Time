@@ -37,6 +37,7 @@ export function AssignmentDialog({ open, onOpenChange, preset }: { open: boolean
   const form = useForm<FormValues, unknown, ShiftAssignmentInput>({ resolver: zodResolver(shiftAssignmentInputSchema), defaultValues: { targetType: 'EMPLOYEE', targetId: '', effectiveFrom: todayIso(tz), effectiveTo: null, ...preset } });
   const { register, control, setValue, formState: { errors, isSubmitting } } = form;
   const targetType = useWatch({ control, name: 'targetType' }) ?? 'EMPLOYEE';
+  const effectiveFrom = useWatch({ control, name: 'effectiveFrom' });
   const targetOptions = useMemo(() => {
     switch (targetType) {
       case 'BRANCH': return { options: branches.options, loading: branches.isLoading, search: undefined };
@@ -93,7 +94,7 @@ export function AssignmentDialog({ open, onOpenChange, preset }: { open: boolean
           </div>
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label={t('assignments.effectiveFrom')} htmlFor="as-from" required error={errors.effectiveFrom?.message} hint={t('assignments.effectiveFromHint')}><Input id="as-from" type="date" dir="ltr" {...register('effectiveFrom')} aria-invalid={!!errors.effectiveFrom} /></FormField>
-            <FormField label={t('assignments.effectiveTo')} htmlFor="as-to" optional error={errors.effectiveTo?.message}><Input id="as-to" type="date" dir="ltr" {...register('effectiveTo', { setValueAs: (v: unknown) => (v === '' ? null : v) })} /></FormField>
+            <FormField label={t('assignments.effectiveTo')} htmlFor="as-to" optional error={errors.effectiveTo ? t('assignments.effectiveToBeforeFrom') : undefined} hint={t('assignments.effectiveToHint')}><Input id="as-to" type="date" dir="ltr" min={effectiveFrom || undefined} {...register('effectiveTo', { setValueAs: (v: unknown) => (v === '' ? null : v) })} aria-invalid={!!errors.effectiveTo} /></FormField>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{tc('common.cancel')}</Button>

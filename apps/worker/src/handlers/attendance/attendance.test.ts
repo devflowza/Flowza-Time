@@ -107,10 +107,10 @@ beforeAll(async () => {
 afterAll(async () => { await h?.close(); });
 
 describe('registration and pure helpers', () => {
-  it('registers the six attendance job types', () => {
+  it('registers the seven attendance job types', () => {
     const reg = new HandlerRegistry();
     registerAttendanceHandlers(reg);
-    expect(reg.types().sort()).toEqual(['APPLY_CORRECTION', 'ATTENDANCE_DAY_CLOSE', 'BUILD_PERIOD_SUMMARY', 'NORMALIZE_RAW', 'RECALCULATE_RANGE', 'RECOMPUTE_DAILY']);
+    expect(reg.types().sort()).toEqual(['APPLY_CORRECTION', 'ATTENDANCE_DAY_CLOSE', 'ATTENDANCE_MATERIALIZE_DAYS', 'BUILD_PERIOD_SUMMARY', 'NORMALIZE_RAW', 'RECALCULATE_RANGE', 'RECOMPUTE_DAILY']);
   });
   it('maps device directions to event types and tolerates snake_case ramadan settings', () => {
     expect(['in', 'out', 'break_out', 'break_in', 'overtime_in', 'unknown'].map((d) => eventTypeForDirection(d as never))).toEqual(['PUNCH_IN', 'PUNCH_OUT', 'BREAK_START', 'BREAK_END', 'PUNCH', 'PUNCH']);
@@ -283,9 +283,10 @@ describe('corrections', () => {
 
   it('recompute after the correction bumps the version, writes a CORRECTION history snapshot and flags MANUAL_CORRECTION', async () => {
     const before = await record(E1, '2026-03-17');
-    expect(await recompute(E1, '2026-03-17', { reason: 'CORRECTION', triggeredBy: OWNER })).toMatchObject({ outcome: 'updated', version: 2, status: 'PRESENT' });
+    // one punch, the check-out still missing (FLAG_ONLY): its own status since engine 1.3.0, never PRESENT with 0 hours
+    expect(await recompute(E1, '2026-03-17', { reason: 'CORRECTION', triggeredBy: OWNER })).toMatchObject({ outcome: 'updated', version: 2, status: 'MISSING_PUNCH' });
     const r = await record(E1, '2026-03-17');
-    expect(r).toMatchObject({ status: 'PRESENT', calculationVersion: 2, hasCorrection: true, punchCount: 1, workedMinutes: 0 });
+    expect(r).toMatchObject({ status: 'MISSING_PUNCH', calculationVersion: 2, hasCorrection: true, punchCount: 1, workedMinutes: 0 });
     expect(r.flags).toEqual(['MISSING_OUT', 'MANUAL_CORRECTION']);
     const hist = await h.tdb.adminDb.selectFrom('attendanceDailyRecordHistory').selectAll().where('recordId', '=', r.id).execute();
     expect(hist).toHaveLength(1);
@@ -294,7 +295,7 @@ describe('corrections', () => {
     expect((hist[0]!.snapshot as { id: string }).id).toBe(before.id);
     const ev = await h.tdb.adminDb.selectFrom('domainEvents').select(['eventType', 'payload']).where('aggregateId', '=', r.id).orderBy('id').execute();
     expect(ev.map((e) => e.eventType)).toEqual(['attendance.created', 'attendance.updated']);
-    expect(ev[1]!.payload).toMatchObject({ status: 'PRESENT', previousStatus: 'ABSENT', version: 2, reason: 'CORRECTION' });
+    expect(ev[1]!.payload).toMatchObject({ status: 'MISSING_PUNCH', previousStatus: 'ABSENT', version: 2, reason: 'CORRECTION' });
   });
 
   it('SET_STATUS overrides the computed status on recompute with a MANUAL_OVERRIDE history reason and stays sticky', async () => {
@@ -358,7 +359,8 @@ describe('employment history', () => {
   it('puts records under the new branch (and its timezone) from the effective date', async () => {
     const r15 = await record(E3, '2026-03-15');
     const r16 = await record(E3, '2026-03-16');
-    expect(r15).toMatchObject({ branchId: BRANCH_A, timezone: MUSCAT, status: 'PRESENT' });
+    // the 17:00 check-out of the 15th was removed by the REMOVE_PUNCH correction above: a missing punch
+    expect(r15).toMatchObject({ branchId: BRANCH_A, timezone: MUSCAT, status: 'MISSING_PUNCH' });
     expect(r16).toMatchObject({ branchId: BRANCH_B, timezone: RIYADH, status: 'PRESENT', lateMinutes: 0 });
     expect(iso(r16.expectedStartAt)).toBe('2026-03-16T05:00:00.000Z'); // 08:00 Riyadh
     expect(iso(r15.expectedStartAt)).toBe('2026-03-15T04:00:00.000Z'); // 08:00 Muscat
@@ -447,8 +449,9 @@ describe('BUILD_PERIOD_SUMMARY', () => {
     const res = await buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', { organizationId: ORG, periodStart: '2026-03-01', periodEnd: '2026-03-31', employeeIds: [E1] }));
     expect(res).toMatchObject({ employees: 1, built: 1, changed: 1, finalized: 0, pendingDays: 1 });
     const s = await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').selectAll().where('employeeId', '=', E1).executeTakeFirstOrThrow();
-    // 03-05 ABSENT (bypass), 03-09 LEAVE, 03-10 PRESENT late 10, 03-11 HOLIDAY, 03-13 + 03-14 WEEKLY_OFF, 03-16 ABSENT, 03-17 PRESENT (missing out), 03-18 PRESENT OT 90, 03-19 PENDING
-    expect(s).toMatchObject({ branchId: BRANCH_A, status: 'draft', version: 1, workingDays: 7, presentDays: '3.00', absentDays: '2.00', leaveDays: '1.00', paidLeaveDays: '1.00', holidayDays: 1, weeklyOffDays: 2, halfDays: 0, missingPunchDays: 1, lateDays: 1, lateMinutes: 10, overtimeMinutes: 90, overtimeWeeklyOffMinutes: 0, overtimeHolidayMinutes: 0, regularMinutes: 465 + 512, earlyDepartureMinutes: 0 });
+    // 03-05 ABSENT (bypass), 03-09 LEAVE, 03-10 PRESENT late 10, 03-11 HOLIDAY, 03-13 + 03-14 WEEKLY_OFF, 03-16 ABSENT, 03-17 MISSING_PUNCH (missing out:
+    // a missing-punch day only, not present — engine 1.3.0), 03-18 PRESENT OT 90, 03-19 PENDING
+    expect(s).toMatchObject({ branchId: BRANCH_A, status: 'draft', version: 1, workingDays: 7, presentDays: '2.00', absentDays: '2.00', leaveDays: '1.00', paidLeaveDays: '1.00', holidayDays: 1, weeklyOffDays: 2, halfDays: 0, missingPunchDays: 1, lateDays: 1, lateMinutes: 10, overtimeMinutes: 90, overtimeWeeklyOffMinutes: 0, overtimeHolidayMinutes: 0, regularMinutes: 465 + 512, earlyDepartureMinutes: 0 });
     const versions = s.recordVersions as Record<string, number>;
     expect(Object.keys(versions)).toHaveLength(10);
     expect(versions[(await record(E1, '2026-03-17')).id]).toBe(2);
@@ -461,12 +464,12 @@ describe('BUILD_PERIOD_SUMMARY', () => {
   });
 
   it('scopes a branch build by employee, aggregating all of a transferred employee\'s records in the period', async () => {
-    // E3 moved A → B on 03-16: 03-14 WEEKLY_OFF (A), 03-15 PRESENT with a voided OUT (A), 03-16 PRESENT (B). A branch-B build must not overwrite the
+    // E3 moved A → B on 03-16: 03-14 WEEKLY_OFF (A), 03-15 MISSING_PUNCH after its OUT was voided (A), 03-16 PRESENT (B). A branch-B build must not overwrite the
     // employee's single (employee, period) summary with a partial one built from the branch-B records only.
     const res = await buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', { organizationId: ORG, periodStart: '2026-03-01', periodEnd: '2026-03-31', branchId: BRANCH_B }));
     expect(res).toMatchObject({ employees: 1, built: 1 });
     const s = await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').selectAll().where('employeeId', '=', E3).where('periodStart', '=', sql<Date>`'2026-03-01'::date`).executeTakeFirstOrThrow();
-    expect(s).toMatchObject({ branchId: BRANCH_B, workingDays: 2, presentDays: '2.00', weeklyOffDays: 1, missingPunchDays: 1 });
+    expect(s).toMatchObject({ branchId: BRANCH_B, workingDays: 2, presentDays: '1.00', weeklyOffDays: 1, missingPunchDays: 1 });
     expect(Object.keys(s.recordVersions as Record<string, number>)).toHaveLength(3);
     // E1/E2 have no branch-B records → untouched
     expect(await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').select('employeeId').where('employeeId', '=', E2).execute()).toHaveLength(0);
@@ -484,7 +487,7 @@ describe('BUILD_PERIOD_SUMMARY', () => {
     const payload = { ...march, periodEnd: '2026-03-18' };
     expect(await buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', payload))).toMatchObject({ built: 1, finalized: 1, changed: 1, pendingDays: 0 });
     const s = await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').selectAll().where('employeeId', '=', E1).where('periodEnd', '=', sql<Date>`'2026-03-18'::date`).executeTakeFirstOrThrow();
-    expect(s).toMatchObject({ status: 'finalized', finalizedBy: OWNER, version: 1, presentDays: '3.00' });
+    expect(s).toMatchObject({ status: 'finalized', finalizedBy: OWNER, version: 1, presentDays: '2.00', missingPunchDays: 1 });
     expect(s.finalizedAt).not.toBeNull();
     // a finalized summary is not silently rebuilt
     expect(await buildPeriodSummaryHandler(ctx('BUILD_PERIOD_SUMMARY', { organizationId: ORG, periodStart: '2026-03-01', periodEnd: '2026-03-18', employeeIds: [E1] }))).toMatchObject({ skippedFinalized: 1, built: 0 });

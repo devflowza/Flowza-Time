@@ -5,6 +5,7 @@ import { registerRecalculateHandlers } from './recalculate.js';
 import { registerPeriodSummaryHandlers } from './period-summary.js';
 import { registerCorrectionHandlers } from './corrections.js';
 import { registerDayCloseHandlers } from './day-close.js';
+import { registerMaterializeHandlers } from './materialize.js';
 
 /**
  * Attendance processing (docs/attendance-engine.md "Worker integration contract"):
@@ -14,6 +15,7 @@ import { registerDayCloseHandlers } from './day-close.js';
  *   BUILD_PERIOD_SUMMARY  payroll period summaries (+ finalisation under a period lock)
  *   APPLY_CORRECTION      approved correction → void/add events → recompute
  *   ATTENDANCE_DAY_CLOSE  day-close sweep: unexplained days past the grace period → UNEXCUSED marks (+ optional pay effect)
+ *   ATTENDANCE_MATERIALIZE_DAYS  every employee-day of the last days (up to yesterday) gets a record; stale PENDING days are judged
  */
 export function registerAttendanceHandlers(registry: HandlerRegistry): void {
   registerNormalizeHandlers(registry);
@@ -22,6 +24,7 @@ export function registerAttendanceHandlers(registry: HandlerRegistry): void {
   registerPeriodSummaryHandlers(registry);
   registerCorrectionHandlers(registry);
   registerDayCloseHandlers(registry);
+  registerMaterializeHandlers(registry);
 }
 
 export { attendanceTasks } from './tasks.js';
@@ -31,5 +34,6 @@ export { recomputeDaily, recomputeDailyHandler, isPeriodLocked, type RecomputeOp
 export { recalculateRange, enqueueRecalculationForScope, recalculationScopeSchema, type RecalculationScope, type RecalculationSummary } from './recalculate.js';
 export { buildPeriodSummaries, buildPeriodSummaryHandler, periodSummaryPayloadSchema, type PeriodSummaryPayload, type PeriodSummaryResult } from './period-summary.js';
 export { applyApprovedCorrection, applyCorrectionHandler, applyCorrectionPayloadSchema, type ApplyCorrectionOptions, type ApplyCorrectionResult } from './corrections.js';
+export { materializeHandler, materializePayloadSchema, materializeDedupeKey, pairsToMaterialize, MATERIALIZE_JOB_TYPE, MATERIALIZE_LOOKBACK_DAYS, MATERIALIZE_MAX_PAIRS, type MaterializePayload, type MaterializeSummary } from './materialize.js';
 export { runDayClose, dayCloseHandler, dayClosePayloadSchema, dayCloseDedupeKey, dayCloseRecipients, assessDay, DAY_CLOSE_JOB_TYPE, DAY_CLOSE_MAX_DAYS, DAY_CLOSE_LOOKBACK_DAYS, type DayClosePayload, type DayCloseSummary } from './day-close.js';
 export { enqueueRecompute, enqueueNormalizeRaw, recomputeDedupeKey, normalizeDedupeKey, recomputePayloadSchema, IMMEDIATE_RECOMPUTE_REASONS, loadAttendanceSettings, type RecomputeReason, type EnqueueRecomputeInput } from './common.js';

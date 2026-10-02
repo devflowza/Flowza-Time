@@ -4,8 +4,9 @@ import { addDays, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { likeContains } from '../../lib/pagination.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
-import { isoDate, isoDateOrNull, isoDateTime, isoDateTimeOrNull } from '../../lib/mappers.js';
+import { isoDate, isoDateTime, isoDateTimeOrNull } from '../../lib/mappers.js';
 import { cancelForEntity, submit } from '../approvals/engine.js';
+import { assignmentEndFromStored } from '../features/assignment-dates.js';
 import { systemStep } from '../features/context.js';
 import { dv } from '../features/sql-helpers.js';
 import { emitToUsers, isPeriodLocked, isWorking, loadEmployeeCtx, localInstant, lockEmployee, portalSelf, userIdsOfEmployees, type EmployeeCtx } from './common.js';
@@ -71,7 +72,8 @@ export async function getMyShift(deps: ApiDeps, actor: Actor, orgId: string): Pr
         .where((eb) => eb.or([eb('requesterEmployeeId', '=', emp.id), eb('targetEmployeeId', '=', emp.id)])).execute()).flatMap((r) => [r.requesterAssignmentId, r.targetAssignmentId]).filter((x): x is string => !!x));
       const history: SelfShiftAssignmentDto[] = assignments
         .filter((a) => (a.targetType === 'EMPLOYEE' ? a.targetId === emp.id : a.targetType === 'BRANCH' ? a.targetId === emp.branchId : a.targetType === 'ORGANIZATION' ? a.targetId === orgId : a.targetType === 'DEPARTMENT' ? a.targetId === emp.departmentId : emp.teamIds.includes(a.targetId)))
-        .map((a) => ({ id: a.id, targetType: a.targetType, shiftName: a.shiftName, patternName: a.patternName, effectiveFrom: isoDate(a.effectiveFrom), effectiveTo: isoDateOrNull(a.effectiveTo), isSwap: swapAssignmentIds.has(a.id) }));
+        // the assignment's last day (inclusive), as the Schedule page shows it; the table stores the day after (assignment-dates.ts)
+        .map((a) => ({ id: a.id, targetType: a.targetType, shiftName: a.shiftName, patternName: a.patternName, effectiveFrom: isoDate(a.effectiveFrom), effectiveTo: assignmentEndFromStored(a.effectiveTo), isSwap: swapAssignmentIds.has(a.id) }));
       const dtos = days.map((d) => toDay(d, swaps, names, emp.id));
       return { date: today, timezone: emp.timezone, today: dtos[0]!, upcoming: dtos.slice(1), history };
     });

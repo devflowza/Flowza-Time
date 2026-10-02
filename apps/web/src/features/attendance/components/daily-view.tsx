@@ -1,11 +1,11 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
 import { CalendarCheck, CalendarPlus, ChevronLeft, ChevronRight, ListChecks, ListTree, X } from 'lucide-react';
 import { ATTENDANCE_FLAGS, ATTENDANCE_STATUSES } from '@flowza/contracts';
 import { DataTable } from '@/components/data-table';
-import { Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StatCard } from '@/components/ui';
+import { Badge, Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StatCard } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { fmtDate, fmtMinutes, fmtNumber, fmtTime, todayIso } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -17,6 +17,7 @@ import { useShiftOptions } from '@/features/schedule/api';
 import { HolidayDialog } from '@/features/schedule/components/holiday-dialogs';
 import { useDailyAttendance } from '../api';
 import { useManualStatuses } from '../workspace-api';
+import { awaitsRecalculation, PENDING_EDIT_POLL_MS, pendingEditKey, usePendingEdits } from '../pending-edits';
 import type { DailyRecord } from '../types';
 import { AttendanceStatusBadge, FlagChips } from './badges';
 import { RecordDialog, type CorrectionPreset } from './record-dialog';
@@ -38,7 +39,19 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
   const f = table.state.filters;
   const date = f['date'] && DateTime.fromISO(f['date']).isValid ? f['date'] : todayIso(tz);
   const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize, sort: table.state.sort, order: table.state.order, date, branchId: f['branchId'], departmentId: f['departmentId'], shiftId: f['shiftId'], status: f['status'], flag: f['flag'], search: f['search'] }), [table.state, date, f]);
-  const q = useDailyAttendance(query);
+  // a day just saved in Add / Edit record is recalculated by the worker within seconds: until its record was computed after
+  // the edit, the row says "Updating…" and the list refreshes every PENDING_EDIT_POLL_MS (field report 2026-10-02)
+  const pendingEdits = usePendingEdits((s) => s.edits);
+  const settlePending = usePendingEdits((s) => s.settle);
+  const pendingForDay = useMemo(() => Object.entries(pendingEdits).filter(([k]) => k.endsWith(`|${date}`)), [pendingEdits, date]);
+  const q = useDailyAttendance(query, true, pendingForDay.length ? PENDING_EDIT_POLL_MS : false);
+  const awaiting = useMemo(() => new Set((q.data?.data ?? []).filter((r) => awaitsRecalculation(pendingEdits[pendingEditKey(r.employeeId, r.attendanceDate)], r.computedAt)).map((r) => r.id)), [q.data, pendingEdits]);
+  useEffect(() => {
+    // settle the days whose record is now up to date; a day with no row yet keeps waiting (the store gives up after a minute)
+    const rows = new Map((q.data?.data ?? []).map((r) => [pendingEditKey(r.employeeId, r.attendanceDate), r]));
+    const done = pendingForDay.filter(([k, e]) => { const r = rows.get(k); return r !== undefined && !awaitsRecalculation(e, r.computedAt); }).map(([k]) => k);
+    if (done.length) settlePending(done);
+  }, [q.data, pendingForDay, settlePending]);
   const branches = useBranchOptions();
   const departments = useDepartmentOptions(f['branchId']);
   const shifts = useShiftOptions();
@@ -81,10 +94,10 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
     { id: 'lateMinutes', header: t('columns.late'), cell: ({ row }) => <span className={cn('tnum', row.original.lateMinutes > 0 && 'text-amber-700 dark:text-amber-300')}>{row.original.lateMinutes ? fmtMinutes(row.original.lateMinutes) : '—'}</span> },
     { id: 'early', header: t('columns.early'), enableSorting: false, cell: ({ row }) => <span className={cn('tnum', row.original.earlyDepartureMinutes > 0 && 'text-amber-700 dark:text-amber-300')}>{row.original.earlyDepartureMinutes ? fmtMinutes(row.original.earlyDepartureMinutes) : '—'}</span> },
     { id: 'overtime', header: t('columns.overtime'), enableSorting: false, cell: ({ row }) => <span className={cn('tnum', row.original.overtimeMinutes > 0 && 'text-blue-700 dark:text-blue-300')}>{row.original.overtimeMinutes ? fmtMinutes(row.original.overtimeMinutes) : '—'}</span> },
-    { id: 'status', header: tc('common.status'), cell: ({ row }) => <span className="inline-flex flex-wrap items-center gap-1"><AttendanceStatusBadge status={row.original.status} />{manual.isSuccess ? <StatusSourceChip source={manualKeys.has(`${row.original.employeeId}|${row.original.attendanceDate}`) ? 'MANUAL' : 'AUTO'} /> : null}</span> },
+    { id: 'status', header: tc('common.status'), cell: ({ row }) => <span className="inline-flex flex-wrap items-center gap-1"><AttendanceStatusBadge status={row.original.status} />{awaiting.has(row.original.id) ? <Badge variant="outline" className="animate-pulse" title={tw('edit.updatingHint')} data-testid="row-updating">{tw('edit.updating')}</Badge> : null}{manual.isSuccess ? <StatusSourceChip source={manualKeys.has(`${row.original.employeeId}|${row.original.attendanceDate}`) ? 'MANUAL' : 'AUTO'} /> : null}</span> },
     { id: 'flags', header: t('columns.flags'), enableSorting: false, cell: ({ row }) => <FlagChips flags={row.original.flags} size="xs" /> },
     { id: 'actions', header: '', enableSorting: false, enableHiding: false, cell: ({ row }) => <Button variant="ghost" size="icon" className="size-7" aria-label={tw('timeline.open')} title={tw('timeline.open')} onClick={(e) => { e.stopPropagation(); openTimeline({ employeeId: row.original.employeeId, date: row.original.attendanceDate, employeeName: row.original.employeeName }); }}><ListTree /></Button> },
-  ], [t, tc, tw, tz, manual.isSuccess, manualKeys, openTimeline]);
+  ], [t, tc, tw, tz, manual.isSuccess, manualKeys, openTimeline, awaiting]);
 
   return (
     <div className="space-y-4">

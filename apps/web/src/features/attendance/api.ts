@@ -13,9 +13,10 @@ export type MonthlyPage = PageEnvelope<MonthlyRow> & { meta: { month?: string; d
 const RECORDS = 'attendance-records';
 const ACTIVITY = 'attendance-activity';
 
-export function useDailyAttendance(query: ListQuery, enabled = true) {
+/** `refetchInterval`: a faster refresh while a day just edited is being recalculated (pending-edits.ts). */
+export function useDailyAttendance(query: ListQuery, enabled = true, refetchInterval: number | false = false) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, 'attendance-daily', query), queryFn: () => api.get<DailyPage>(`/orgs/${orgId}/attendance/daily`, query), placeholderData: keepPreviousData, enabled });
+  return useQuery({ queryKey: qk.list(orgId, 'attendance-daily', query), queryFn: () => api.get<DailyPage>(`/orgs/${orgId}/attendance/daily`, query), placeholderData: keepPreviousData, enabled, refetchInterval });
 }
 export function useMonthlyAttendance(query: ListQuery, enabled = true) {
   const orgId = useOrgId();

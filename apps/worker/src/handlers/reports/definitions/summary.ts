@@ -14,7 +14,8 @@ import type { ReportDefinition } from './types.js';
  * T/OL | AB [unpaid leave types] T/AB), then OT1, OT2 as h:mm and UT in the tenant's notation. The leave columns are
  * the tenant's own leave types, so a tenant with CL and EL gets CL and EL columns. Two policy-parity columns follow
  * (HR portal Prompt 3), appended at the end so the sample's column positions stay where payroll imports expect them:
- * UNX = days marked unexcused, LOP = loss-of-pay days (0.5 steps, `lopDaysOf` — the rule the period summaries use).
+ * UNX = days marked unexcused, LOP = loss-of-pay days (0.5 steps, `lopDaysOf` — the rule the period summaries use). MP
+ * (missing-punch days, hours unknown — outside T/PR, T/OL and T/AB as on the monthly summary) is appended after them.
  */
 export const attendanceSummary: ReportDefinition = {
   key: 'attendance_summary',
@@ -45,7 +46,7 @@ export const attendanceSummary: ReportDefinition = {
         ...paidTypes.map((l) => count(leaveDays(l.code))), total(s.totalLeave),
         count(s.absent), ...unpaidTypes.map((l) => count(leaveDays(l.code))), total(s.totalAbsent),
         num(s.ot1Minutes, hoursColonMinutes(s.ot1Minutes), { mono: true }), num(s.ot2Minutes, hoursColonMinutes(s.ot2Minutes), { mono: true }), num(s.utMinutes, ctx.hours(s.utMinutes, { zeroAsValue: true }), { mono: true }),
-        count(unexcused), num(lop, formatDays(lop, { zeroAsDash: true }), { align: 'center', bold: lop > 0 }),
+        count(unexcused), num(lop, formatDays(lop, { zeroAsDash: true }), { align: 'center', bold: lop > 0 }), count(s.missing),
       ] };
     });
     const sections: ReportSection[] = [{ rows }];
@@ -57,12 +58,12 @@ export const attendanceSummary: ReportDefinition = {
       ...paidTypes.map((l) => c(`lt-${l.code}`, l.code)), c('tol', ctx.t('col.totalLeave'), 5),
       c('ab', codeOf('ABSENT')), ...unpaidTypes.map((l) => c(`lt-${l.code}`, l.code)), c('tab', ctx.t('col.totalAbsent'), 5),
       { key: 'ot1', label: ctx.t('col.ot1'), align: 'end', width: 6, mono: true }, { key: 'ot2', label: ctx.t('col.ot2'), align: 'end', width: 6, mono: true }, { key: 'ut', label: ctx.t('col.ut'), align: 'end', width: 6, mono: true },
-      c('unx', ctx.t('col.unexcused')), c('lop', ctx.t('col.lop')),
+      c('unx', ctx.t('col.unexcused')), c('lop', ctx.t('col.lop')), c('mp', codeOf('MISSING_PUNCH') || ctx.t('col.missingPunch')),
     ];
     return {
       key: 'attendance_summary', title: ctx.t('report.attendance_summary.title'), company: ctx.company,
       period: ctx.t('period.forPeriod', { from: ctx.headerDate(from), to: ctx.headerDate(to) }), orientation: 'landscape', columns, sections,
-      legend: ctx.legend(), legendTitle: ctx.t('legend.title'), notes: [...ctx.notes(), ctx.t('footer.policy')], endOfReport: false, endOfReportLabel: ctx.t('group.endOfReport'),
+      legend: ctx.legend(), legendTitle: ctx.t('legend.title'), notes: [...ctx.notes(), ctx.t('footer.policy'), ctx.t('footer.missingPunch', { code: ctx.code({ status: 'MISSING_PUNCH', flags: [] }).code })], endOfReport: false, endOfReportLabel: ctx.t('group.endOfReport'),
       generatedAt: ctx.now, generatedLabel: ctx.generatedLabel(), pageLabel: ctx.pageLabel, timezone: ctx.timezone, locale: ctx.locale, dir: ctx.dir,
       rowCount: countRows(sections), flatten: { headingColumnLabel: null, fieldColumns: false }, fileStem: `summary-report-${from}-${to}`,
     };

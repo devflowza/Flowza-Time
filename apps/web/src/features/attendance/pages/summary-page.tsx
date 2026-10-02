@@ -2,7 +2,7 @@ import { useMemo } from 'react';
 import type { ColumnDef } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
-import { ArrowLeft, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, Printer, X } from 'lucide-react';
+import { AlertTriangle, ArrowLeft, Calculator, CalendarRange, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, Printer, X } from 'lucide-react';
 import type { AttendanceSummaryRowDto, ReportFormat } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
@@ -10,15 +10,17 @@ import { Badge, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, Dro
 import { Combobox } from '@/components/forms';
 import { useServerTable } from '@/hooks/use-server-table';
 import { fmtDate, fmtDateTime, todayIso } from '@/lib/format';
-import { toastError } from '@/lib/toast';
-import { useCan, useOrgTimezone } from '@/features/me/use-me';
+import { toast, toastError } from '@/lib/toast';
+import { useActiveMembership, useCan, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { SearchBox } from '@/features/organization/components/search-box';
 import { useEmployeeOptions } from '@/features/employees/api';
 import { toastJobQueued } from '@/features/employees/job-toast';
 import '../workspace-i18n';
 import { useAttendanceSummary, useWorkspaceMutations } from '../workspace-api';
+import { useAttendanceMutations } from '../api';
 import { fmtDays, fmtHm, shiftMonth } from '../status';
+import { toastMutationError } from '../period-locked';
 
 const num = (n: number) => <span className="tnum">{fmtDays(n)}</span>;
 
@@ -56,6 +58,27 @@ export default function AttendanceSummaryPage() {
   const canExport = can('report.export');
   const hasFilters = ['employeeId', 'branchId', 'departmentId', 'search'].some((k) => !!f[k]);
   const totals = q.data?.meta.totals;
+  // employee-days of the month (up to yesterday) that were never calculated: in no other column, so the row would not add up
+  const notCalculated = totals?.notCalculatedDays ?? 0;
+  const showNotCalculated = notCalculated > 0 || (q.data?.data ?? []).some((r) => r.notCalculatedDays > 0);
+  const membership = useActiveMembership();
+  const canRecalculate = can('attendance.recalculate');
+  const { recalculate } = useAttendanceMutations();
+  const recalculateMonth = () => {
+    const today = todayIso(tz);
+    const from = `${month}-01`;
+    const monthEnd = q.data?.meta.to ?? from;
+    const to = monthEnd < today ? monthEnd : today;
+    if (to < from) return;
+    const branchId = f['branchId'] || undefined;
+    const employeeId = f['employeeId'] || undefined;
+    // a branch-scoped member must name a branch or an employee (the API refuses an organisation-wide recompute for them)
+    if (membership && !membership.allBranches && !branchId && !employeeId) { toast.warning(t('summary.notCalculated.pickBranch')); return; }
+    recalculate.mutate(
+      { fromDate: from, toDate: to, branchId, departmentId: f['departmentId'] || undefined, employeeIds: employeeId ? [employeeId] : undefined, reason: t('summary.notCalculated.reason', { month }) },
+      { onSuccess: (res) => toastJobQueued(res.jobId, navigate, t('summary.notCalculated.queued'), { to: `/attendance?tab=recalc&request=${res.requestId}` }), onError: (e) => toastMutationError(e, navigate) },
+    );
+  };
   const setMonth = (m: string) => table.update({ filters: { month: m === currentMonth ? '' : m } });
   const employeeOptions = useMemo(() => {
     const id = f['employeeId'];
@@ -77,7 +100,7 @@ export default function AttendanceSummaryPage() {
     { id: 'half', header: t('summary.columns.half'), enableSorting: false, cell: ({ row }) => num(row.original.halfDays) },
     { id: 'leave', header: t('summary.columns.leave'), enableSorting: false, cell: ({ row }) => num(row.original.leaveDays) },
     { id: 'absent', header: t('summary.columns.absent'), enableSorting: false, cell: ({ row }) => <span className={row.original.absentDays ? 'tnum text-red-700 dark:text-red-300' : 'tnum'}>{fmtDays(row.original.absentDays)}</span> },
-    { id: 'missing', header: t('summary.columns.missing'), enableSorting: false, cell: ({ row }) => num(row.original.missingPunchDays) },
+    { id: 'missing', header: () => <span title={t('summary.columns.missingHint')} className="cursor-help underline decoration-dotted underline-offset-2">{t('summary.columns.missing')}</span>, enableSorting: false, cell: ({ row }) => num(row.original.missingPunchDays) },
     { id: 'holiday', header: t('summary.columns.holiday'), enableSorting: false, cell: ({ row }) => num(row.original.holidayDays) },
     { id: 'weeklyOff', header: t('summary.columns.weeklyOff'), enableSorting: false, cell: ({ row }) => num(row.original.weeklyOffDays) },
     { id: 'daysWorked', header: t('summary.columns.daysWorked'), enableSorting: false, cell: ({ row }) => num(row.original.daysWorked) },
@@ -86,10 +109,11 @@ export default function AttendanceSummaryPage() {
     { id: 'overtime', header: t('summary.columns.overtime'), enableSorting: false, cell: ({ row }) => <span className={row.original.overtimeMinutes ? 'tnum text-blue-700 dark:text-blue-300' : 'tnum'}>{fmtHm(row.original.overtimeMinutes)}</span> },
     { id: 'lop', header: t('summary.columns.lop'), enableSorting: false, cell: ({ row }) => num(row.original.lopDays) },
     { id: 'unexcused', header: t('summary.columns.unexcused'), enableSorting: false, cell: ({ row }) => <span className={row.original.unexcusedDays ? 'tnum text-red-700 dark:text-red-300' : 'tnum'}>{fmtDays(row.original.unexcusedDays)}</span> },
+    ...(showNotCalculated ? [{ id: 'notCalculated', header: () => <span title={t('summary.columns.notCalculatedHint')} className="cursor-help underline decoration-dotted underline-offset-2">{t('summary.columns.notCalculated')}</span>, enableSorting: false, cell: ({ row }) => <span className={row.original.notCalculatedDays ? 'tnum font-medium text-amber-700 dark:text-amber-300' : 'tnum'}>{fmtDays(row.original.notCalculatedDays)}</span> } satisfies ColumnDef<AttendanceSummaryRowDto, unknown>] : []),
     { id: 'source', header: t('summary.columns.source'), enableSorting: false, cell: ({ row }) => row.original.source === 'FINALIZED' ? <Badge variant="success" title={row.original.finalizedAt ? fmtDateTime(row.original.finalizedAt, tz) : undefined}>{t('summary.finalized')}</Badge> : <Badge variant="outline">{t('summary.live')}</Badge> },
     // printing / saving the statement is an export (review minor 11): the link is for report.export holders
     ...(canExport ? [{ id: 'actions', header: '', enableSorting: false, enableHiding: false, cell: ({ row }) => <Button asChild variant="ghost" size="icon" className="size-7"><Link to={`/attendance/print?employeeId=${row.original.employeeId}&month=${month}`} onClick={(e) => e.stopPropagation()} aria-label={t('print.open')} title={t('print.open')}><Printer /></Link></Button> } satisfies ColumnDef<AttendanceSummaryRowDto, unknown>] : []),
-  ], [t, ta, tz, month, canExport]);
+  ], [t, ta, tz, month, canExport, showNotCalculated]);
 
   return (
     <div className="page-container space-y-4">
@@ -114,6 +138,13 @@ export default function AttendanceSummaryPage() {
         <Button variant="outline" size="sm" onClick={() => setMonth(currentMonth)} disabled={month === currentMonth}><CalendarRange /> {ta('monthly.thisMonth')}</Button>
         <p className="text-sm text-muted-foreground">{q.data?.meta.from && q.data.meta.to ? `${fmtDate(q.data.meta.from)} → ${fmtDate(q.data.meta.to)}` : fmtDate(`${month}-01`, 'MMMM yyyy')}</p>
       </div>
+      {notCalculated > 0 ? (
+        <div role="status" className="flex flex-wrap items-center gap-2 rounded-md border border-amber-300/60 bg-amber-50 p-3 text-sm text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-200" data-testid="summary-not-calculated">
+          <AlertTriangle className="size-4 shrink-0" aria-hidden />
+          <p className="min-w-0 flex-1">{t('summary.notCalculated.banner', { count: notCalculated })}</p>
+          {canRecalculate ? <Button size="sm" variant="outline" onClick={recalculateMonth} loading={recalculate.isPending}><Calculator /> {t('summary.notCalculated.action')}</Button> : null}
+        </div>
+      ) : null}
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-4 xl:grid-cols-8" data-testid="summary-totals">
         <StatCard label={t('summary.columns.present')} value={fmtDays(totals?.presentDays ?? 0)} tone="success" loading={q.isLoading} />
         <StatCard label={t('summary.columns.late')} value={fmtDays(totals?.lateDays ?? 0)} tone="warning" loading={q.isLoading} />

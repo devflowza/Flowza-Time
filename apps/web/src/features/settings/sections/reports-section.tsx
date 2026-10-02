@@ -16,8 +16,8 @@ type Values = z.input<typeof schema>;
 type Output = z.output<typeof serverSchema>;
 
 /** Statuses a tenant may rename; leave days always print the leave type's own code. Placeholders show the defaults. */
-const CODE_KEYS = ['PRESENT', 'ABSENT', 'WEEKLY_OFF', 'HOLIDAY', 'HALF_DAY', 'HALF_DAY_LEAVE', 'LEAVE'] as const;
-const DEFAULT_CODES: Record<(typeof CODE_KEYS)[number], string> = { PRESENT: 'PR', ABSENT: 'AB', WEEKLY_OFF: 'OF', HOLIDAY: 'HL', HALF_DAY: 'HDP', HALF_DAY_LEAVE: 'HDL', LEAVE: 'LV' };
+const CODE_KEYS = ['PRESENT', 'ABSENT', 'WEEKLY_OFF', 'HOLIDAY', 'HALF_DAY', 'HALF_DAY_LEAVE', 'MISSING_PUNCH', 'LEAVE'] as const;
+const DEFAULT_CODES: Record<(typeof CODE_KEYS)[number], string> = { PRESENT: 'PR', ABSENT: 'AB', WEEKLY_OFF: 'OF', HOLIDAY: 'HL', HALF_DAY: 'HDP', HALF_DAY_LEAVE: 'HDL', MISSING_PUNCH: 'MP', LEAVE: 'LV' };
 const NOTATIONS = ['h.mm', 'hh:mm'] as const;
 const FORMATS = ['pdf', 'xlsx', 'csv'] as const;
 

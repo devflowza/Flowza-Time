@@ -416,6 +416,7 @@
       "HOLIDAY": "Holiday",
       "HALF_DAY": "Half day present",
       "HALF_DAY_LEAVE": "Half day leave",
+      "MISSING_PUNCH": "Missing punch (hours unknown)",
       "LEAVE": "Leave (type unknown)"
     }
   },

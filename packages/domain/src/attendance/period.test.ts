@@ -17,7 +17,9 @@ describe('summarisePeriod', () => {
     record('2026-03-08', 'HOLIDAY', { workedMinutes: 120, overtimeMinutes: 120, overtimeCategory: 'HOLIDAY', flags: ['WORKED_ON_HOLIDAY', 'OVERTIME'] }),
     record('2026-03-09', 'LEAVE', { leaveIsPaid: true }),
     record('2026-03-10', 'LEAVE', { leaveIsPaid: false }),
-    record('2026-03-11', 'PRESENT', { flags: ['MISSING_OUT'] }),
+    // a missing check-out the policy resolved (ASSUME_SHIFT_END: the hours were assumed) is a present day
+    record('2026-03-11', 'PRESENT', { flags: ['MISSING_OUT'], workedMinutes: 480 }),
+    // an unresolved one (FLAG_ONLY, hours unknown) is its own bucket: missing punch only, never present
     record('2026-03-12', 'MISSING_PUNCH', { flags: ['MISSING_IN'] }),
     record('2026-03-13', 'ABSENT', { flags: ['HALF_DAY_LEAVE'], leaveIsPaid: false }),
     record('2026-03-14', 'PENDING'),
@@ -32,16 +34,16 @@ describe('summarisePeriod', () => {
       periodEnd: '2026-03-31',
       recordCount: 15,
       workingDays: 11,
-      presentDays: 1 + 1 + 0.5 + 0.5 + 1 + 1,
+      presentDays: 1 + 1 + 0.5 + 0.5 + 1,
       absentDays: 0.5 + 1 + 0.5,
       leaveDays: 0.5 + 1 + 1 + 0.5,
       paidLeaveDays: 0.5 + 1,
       holidayDays: 1,
       weeklyOffDays: 2,
       halfDays: 2,
-      missingPunchDays: 2,
+      missingPunchDays: 1,
       lateDays: 1,
-      regularMinutes: 480 + 480 + 200 + 240 + 0 + 0,
+      regularMinutes: 480 + 480 + 200 + 240 + 0 + 0 + 480,
       overtimeMinutes: 60,
       overtimeWeeklyOffMinutes: 300,
       overtimeHolidayMinutes: 120,
@@ -86,8 +88,15 @@ describe('summarisePeriod', () => {
 });
 
 describe('summarisePeriod half-day leave on PRESENT records (review)', () => {
-  it('splits a PRESENT / MISSING_PUNCH record carrying HALF_DAY_LEAVE into half present + half leave', () => {
+  it('splits a PRESENT record carrying HALF_DAY_LEAVE into half present + half leave', () => {
     const s = summarisePeriod([record('2026-03-02', 'PRESENT', { flags: ['MISSING_OUT', 'HALF_DAY_LEAVE'], leaveIsPaid: true })], { periodStart: '2026-03-01', periodEnd: '2026-03-31' });
-    expect(s).toMatchObject({ presentDays: 0.5, leaveDays: 0.5, paidLeaveDays: 0.5, halfDays: 1, missingPunchDays: 1, absentDays: 0 });
+    expect(s).toMatchObject({ presentDays: 0.5, leaveDays: 0.5, paidLeaveDays: 0.5, halfDays: 1, missingPunchDays: 0, absentDays: 0 });
+  });
+
+  it('puts every day in exactly one bucket: a MISSING_PUNCH day is missing punch only (engine 1.3.0)', () => {
+    const days: PeriodRecordLike[] = [record('2026-03-01', 'PRESENT', { workedMinutes: 480 }), record('2026-03-02', 'MISSING_PUNCH', { flags: ['MISSING_OUT'] }), record('2026-03-03', 'ABSENT'), record('2026-03-04', 'WEEKLY_OFF'), record('2026-03-05', 'LEAVE')];
+    const s = summarisePeriod(days, { periodStart: '2026-03-01', periodEnd: '2026-03-31' });
+    expect(s).toMatchObject({ presentDays: 1, missingPunchDays: 1, absentDays: 1, weeklyOffDays: 1, leaveDays: 1, workingDays: 4 });
+    expect(s.presentDays + s.missingPunchDays + s.absentDays + s.weeklyOffDays + s.leaveDays + s.holidayDays + s.pendingDays).toBe(days.length);
   });
 });

@@ -1,8 +1,9 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
-import type { AttendanceEventType, PunchDirection, VerificationMethod } from '@flowza/contracts';
-import { SELF_SERVICE_PROVIDER_KEY, uuidSchema } from '@flowza/contracts';
+import type { AttendanceEventType, PunchDirection, ShiftBreak, VerificationMethod } from '@flowza/contracts';
+import { SELF_SERVICE_PROVIDER_KEY, shiftBreakSchema, uuidSchema } from '@flowza/contracts';
+import { overnightMaxSpanMinutes } from '@flowza/domain';
 import { addDays, event, isValidTimezone, localDateOf, timeToMinutes } from '@flowza/shared';
 import { withContext, type EventSource, type RawSource, type Trx } from '@flowza/database';
 import type { HandlerRegistry, JobContext } from '../types.js';
@@ -54,12 +55,16 @@ export function historyOn<T extends { effectiveFrom: string; effectiveTo: string
 /**
  * How far the organisation's punch windows reach into the neighbouring calendar days (§G.3), in local minutes of day:
  * a punch at or before `previousUntil` may belong to the previous attendance date (cross-midnight shift ends, punch-out
- * margins past midnight, flexible day boundaries); a punch at or after `nextFrom` may belong to the next one (shifts whose
- * punch-in margin starts before midnight). `null` = no shift reaches that way. Derived from the shifts themselves rather than
- * a fixed "before noon" rule so that unusual windows (e.g. a 12 h punch-out margin) still trigger the neighbour's recompute.
+ * margins past midnight, flexible day boundaries, a flexible night's check-out that closes the previous day's open check-in —
+ * engine 1.3.0, up to the shift's overnight span after the boundary); a punch at or after `nextFrom` may belong to the next one
+ * (shifts whose punch-in margin starts before midnight). `null` = no shift reaches that way. Derived from the shifts themselves
+ * rather than a fixed "before noon" rule so that unusual windows (e.g. a 12 h punch-out margin) still trigger the neighbour's
+ * recompute.
  */
 export interface NeighbourReach { previousUntil: number | null; nextFrom: number | null }
-export function neighbourReach(shifts: ReadonlyArray<{ type: 'FIXED' | 'FLEXIBLE'; startTime: string | null; endTime: string | null; dayBoundary: string; punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number }>): NeighbourReach {
+export interface ReachShift { type: 'FIXED' | 'FLEXIBLE'; startTime: string | null; endTime: string | null; dayBoundary: string; punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number; requiredMinutes?: number | null; breaks?: unknown }
+const breaksOf = (raw: unknown): ShiftBreak[] => (Array.isArray(raw) ? raw.flatMap((b) => { const parsed = shiftBreakSchema.safeParse(b); return parsed.success ? [parsed.data] : []; }) : []);
+export function neighbourReach(shifts: ReadonlyArray<ReachShift>): NeighbourReach {
   const DAY = 24 * 60;
   let previousUntil: number | null = null;
   let nextFrom: number | null = null;
@@ -67,8 +72,10 @@ export function neighbourReach(shifts: ReadonlyArray<{ type: 'FIXED' | 'FLEXIBLE
   const reachNext = (m: number): void => { nextFrom = nextFrom === null ? m : Math.min(nextFrom, m); };
   for (const s of shifts) {
     if (s.type === 'FLEXIBLE') {
+      // [boundary(D), boundary(D+1)): punches before the boundary belong to D−1, and so may a check-out within the overnight span
+      // after it (it closes D−1's open check-in when one is waiting)
       const boundary = timeToMinutes(s.dayBoundary);
-      if (boundary > 0) reachPrevious(boundary); // [boundary(D), boundary(D+1)): punches before the boundary belong to D−1
+      reachPrevious(Math.min(DAY - 1, boundary + overnightMaxSpanMinutes({ requiredMinutes: s.requiredMinutes ?? null, breaks: breaksOf(s.breaks) })));
       continue;
     }
     if (s.startTime === null || s.endTime === null) continue;
@@ -83,7 +90,7 @@ export function neighbourReach(shifts: ReadonlyArray<{ type: 'FIXED' | 'FLEXIBLE
 }
 
 export async function loadNeighbourReach(trx: Trx, organizationId: string): Promise<NeighbourReach> {
-  const shifts = await trx.selectFrom('shifts').select(['type', 'startTime', 'endTime', 'dayBoundary', 'punchInWindowBeforeMinutes', 'punchOutWindowAfterMinutes'])
+  const shifts = await trx.selectFrom('shifts').select(['type', 'startTime', 'endTime', 'dayBoundary', 'punchInWindowBeforeMinutes', 'punchOutWindowAfterMinutes', 'requiredMinutes', 'breaks'])
     .where('organizationId', '=', organizationId).execute();
   return neighbourReach(shifts);
 }

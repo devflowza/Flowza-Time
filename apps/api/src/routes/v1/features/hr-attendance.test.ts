@@ -117,6 +117,29 @@ describe('POST /attendance/record-edits', () => {
   });
 });
 
+describe('POST /attendance/record-edits · a cleared time (field report 2026-10-02: clearing did not remove the punch)', () => {
+  it('previews and files a REMOVE_PUNCH for the cleared check-out, and says when it was filed', async () => {
+    const D = '2026-08-04';
+    const [, out] = await h.admin.insertInto('attendanceEvents').values([
+      { organizationId: f.orgId, employeeId: f.e3, branchId: f.branchA, punchedAt: new Date(`${D}T04:00:00Z`), eventType: 'PUNCH', source: 'DEVICE', deviceId: device },
+      { organizationId: f.orgId, employeeId: f.e3, branchId: f.branchA, punchedAt: new Date(`${D}T13:00:00Z`), eventType: 'PUNCH', source: 'DEVICE', deviceId: device },
+    ]).returning('id').execute();
+    const preview = await h.request('POST', `${base()}/attendance/preview`, { token: f.hrAdmin, body: { employeeId: f.e3, date: D, removeOut: true } });
+    expect(preview.status).toBe(200);
+    expect(preview.body.data.plan).toEqual([expect.objectContaining({ type: 'REMOVE_PUNCH', originalEventId: out!.id, proposedPunchedAt: null })]);
+    // one punch left: the hours are unknown, its own status (engine 1.3.0)
+    expect(preview.body.data.preview).toMatchObject({ status: 'MISSING_PUNCH', lastOutAt: null, workedMinutes: 0 });
+    const both = await h.request('POST', `${base()}/attendance/preview`, { token: f.hrAdmin, body: { employeeId: f.e3, date: D, removeOut: true, outAt: `${D}T14:00:00Z` } });
+    expect(both.status).toBe(400);
+    const res = await h.request('POST', `${base()}/attendance/record-edits`, { token: f.hrAdmin, body: { employeeId: f.e3, date: D, removeOut: true, reason: 'Badge of another employee' } });
+    expect(res.status).toBe(201);
+    expect(res.body.data.corrections.map((c: { type: string; approval: string }) => [c.type, c.approval])).toEqual([['REMOVE_PUNCH', 'AUTO_APPROVED']]);
+    expect(Number.isFinite(Date.parse(res.body.data.filedAt))).toBe(true);
+    const row = await h.admin.selectFrom('attendanceCorrections').selectAll().where('organizationId', '=', f.orgId).where('employeeId', '=', f.e3).where('type', '=', 'REMOVE_PUNCH').executeTakeFirstOrThrow();
+    expect(row).toMatchObject({ originalEventId: out!.id, status: 'APPROVED', reason: 'Badge of another employee' });
+  });
+});
+
 describe('POST /attendance/bulk-status', () => {
   it('caps the request at 200 items and needs the HR edit permissions', async () => {
     const tooMany = await h.request('POST', `${base()}/attendance/bulk-status`, { token: f.owner, body: { status: 'ABSENT', reason: 'bulk', items: Array.from({ length: 201 }, (_, i) => ({ employeeId: f.e2, date: `2026-06-${String((i % 28) + 1).padStart(2, '0')}` })) } });

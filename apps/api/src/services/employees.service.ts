@@ -13,6 +13,7 @@ import { hashPin } from '../lib/hashing.js';
 import { loadSettings } from '../lib/settings.js';
 import { assertUserCapacity } from './features/user-limit.js';
 import { enqueueRecalculation } from './features/recalc.js';
+import { assignmentEndToStored } from './features/assignment-dates.js';
 import { likeContains, pageOf, prefixTsQuery, resolveSort, toCount } from '../lib/pagination.js';
 import { isoDate } from '../lib/mappers.js';
 import { DOCUMENT_COLUMNS, EMPLOYEE_COLUMNS, EMPTY_SYNC_SUMMARY, HISTORY_COLUMNS, toDeviceStateDto, toDocumentDto, toEmployeeDto, toHistoryDto, type DeviceSyncSummary, type DeviceStateRow, type EmployeeRow, type HistoryRow } from './employees.mappers.js';
@@ -189,6 +190,12 @@ async function orgToday(trx: Trx, orgId: string): Promise<string> {
   return DateTime.now().setZone(org?.timezone ?? 'UTC').toISODate() ?? DateTime.utc().toISODate()!;
 }
 
+/** The organisation's first day on FlowZa (the local date it was created on): no attendance is calculated before it. */
+async function orgFirstDay(trx: Trx, orgId: string): Promise<string | null> {
+  const org = await trx.selectFrom('organizations').select(['timezone', 'createdAt']).where('id', '=', orgId).executeTakeFirst();
+  return org ? DateTime.fromJSDate(new Date(org.createdAt)).setZone(org.timezone).toISODate() : null;
+}
+
 async function assertReferences(trx: Trx, orgId: string, refs: { branchId?: string; departmentId?: string | null; designationId?: string | null; managerEmployeeId?: string | null; secondaryManagerEmployeeId?: string | null; selfId?: string }): Promise<void> {
   if (refs.branchId) {
     const b = await trx.selectFrom('branches').select(['id', 'status']).where('organizationId', '=', orgId).where('id', '=', refs.branchId).executeTakeFirst();
@@ -309,6 +316,32 @@ export async function applyHistoryTransition(trx: Trx, orgId: string, employeeId
   await trx.insertInto('employmentHistory').values({ organizationId: orgId, employeeId, effectiveFrom, effectiveTo: null, ...values, createdBy: actorUserId }).execute();
 }
 
+/**
+ * The days a change of joining / exit date moves between NOT_JOINED / EXITED and calculated attendance (2026-10-02 field report:
+ * a joining date moved from 2 Oct back to 1 Sep left every September day "Not joined" and out of the monthly summary): from the
+ * earlier to the later of the old and the new date (an open exit date counts as today), never past today — the days after it
+ * are calculated when they come. Null when neither date changed or the whole range lies in the future.
+ */
+export function employmentDatesRecalcRange(before: { joiningDate: string; exitDate: string | null }, after: { joiningDate: string; exitDate: string | null }, today: string): { fromDate: string; toDate: string } | null {
+  const bounds: string[] = [];
+  if (before.joiningDate !== after.joiningDate) bounds.push(before.joiningDate, after.joiningDate);
+  if (before.exitDate !== after.exitDate) bounds.push(before.exitDate ?? today, after.exitDate ?? today);
+  if (bounds.length === 0) return null;
+  const fromDate = bounds.reduce((a, b) => (a < b ? a : b));
+  const last = bounds.reduce((a, b) => (a > b ? a : b));
+  const toDate = last < today ? last : today;
+  return fromDate <= toDate ? { fromDate, toDate } : null;
+}
+
+/**
+ * The first employment record starts on the joining date ("Joined"): a joining date moved earlier takes it along, so the days in
+ * between belong to the branch the employee joined (the working calendar reads the record in force on each date).
+ */
+async function startHistoryOnJoining(trx: Trx, orgId: string, employeeId: string, joiningDate: string): Promise<void> {
+  const first = await trx.selectFrom('employmentHistory').select(['id', 'effectiveFrom']).where('organizationId', '=', orgId).where('employeeId', '=', employeeId).orderBy('effectiveFrom', 'asc').executeTakeFirst();
+  if (first && isoDate(first.effectiveFrom) > joiningDate) await trx.updateTable('employmentHistory').set({ effectiveFrom: joiningDate }).where('id', '=', first.id).execute();
+}
+
 function snapshotOf(e: { branchId: string; departmentId: string | null; designationId: string | null; managerEmployeeId: string | null; employmentType: EmployeeDto['employmentType']; employmentStatus: EmployeeDto['employmentStatus'] }): EmploymentSnapshot {
   return { branchId: e.branchId, departmentId: e.departmentId, designationId: e.designationId, managerEmployeeId: e.managerEmployeeId, employmentType: e.employmentType, employmentStatus: e.employmentStatus };
 }
@@ -348,6 +381,12 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     await audit(trx, actor, orgId, 'employee.created', 'employee', { entityId: row.id, branchId: input.branchId, newValue: { ...auditable, deviceUserId, pinSet: Boolean(input.pin) } });
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.created', aggregateType: 'employee', aggregateId: row.id, payload: { employeeNumber: dto.employeeNumber, branchId: dto.branchId, deviceUserId }, actorUserId: actor.userId, requestId: actor.requestId });
     await maybeEnqueuePush(deps, trx, actor, orgId, [row.id]);
+    // an employee entered after they joined: the days since the joining date are calculated now, not left out of the register —
+    // from the organisation's first day at the latest, so a long-serving employee entered at go-live gets no years of absences
+    const today = await orgToday(trx, orgId);
+    const firstDay = await orgFirstDay(trx, orgId);
+    const recalcFrom = firstDay && firstDay > input.joiningDate ? firstDay : input.joiningDate;
+    if (recalcFrom < today) await enqueueRecalculation(deps, trx, actor, orgId, { fromDate: recalcFrom, toDate: today, employeeIds: [row.id], reason: `Employee ${dto.employeeNumber} joined on ${input.joiningDate}` });
     return maskSensitive(dto, grant);
   });
 }
@@ -393,6 +432,15 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     }
     patch['updatedBy'] = actor.userId;
     await trx.updateTable('employees').set(patch as never).where('organizationId', '=', orgId).where('id', '=', id).execute();
+    // a changed joining / exit date: the days in between are recalculated in this transaction (AGENTS.md rule 5)
+    const beforeDates = { joiningDate: isoDate(before.joiningDate), exitDate: before.exitDate === null ? null : isoDate(before.exitDate) };
+    const afterDates = { joiningDate, exitDate: input.exitDate === undefined ? beforeDates.exitDate : input.exitDate };
+    if (afterDates.joiningDate < beforeDates.joiningDate) await startHistoryOnJoining(trx, orgId, id, afterDates.joiningDate);
+    const recalcRange = employmentDatesRecalcRange(beforeDates, afterDates, await orgToday(trx, orgId));
+    if (recalcRange) {
+      const changed = [beforeDates.joiningDate !== afterDates.joiningDate ? `joining date ${beforeDates.joiningDate} → ${afterDates.joiningDate}` : null, beforeDates.exitDate !== afterDates.exitDate ? `exit date ${beforeDates.exitDate ?? 'none'} → ${afterDates.exitDate ?? 'none'}` : null].filter(Boolean).join(', ');
+      await enqueueRecalculation(deps, trx, actor, orgId, { ...recalcRange, employeeIds: [id], reason: `Employee ${before.employeeNumber}: ${changed}` });
+    }
     // B-75: becoming terminated/resigned ends every login linked to the record (a refusal rolls the whole change back).
     // The reverse is deliberately NOT automatic: re-activating the employee leaves the login suspended until an
     // administrator re-activates the member.
@@ -464,10 +512,13 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
       return runUser(deps.db, actor, async (trx) => {
         const shift = await trx.selectFrom('shifts').select('id').where('organizationId', '=', orgId).where('id', '=', input.shiftId).executeTakeFirst();
         if (!shift) throw errors.validation('Shift not found in this organisation.', { issues: [{ path: 'shiftId', message: 'Unknown shift' }] });
+        // effectiveTo is the assignment's LAST day (inclusive), as on the Schedule page; stored as the day after (assignment-dates.ts)
+        if (input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw errors.validation('effectiveTo (the last day) cannot be before effectiveFrom.', { issues: [{ path: 'effectiveTo', message: 'Before the first day' }] });
         const employees = await visibleEmployees(trx, orgId, grant, input.employeeIds);
         for (const e of employees) {
+          // the open assignment ends the day before the new one starts (stored bound = the new start, half-open)
           await trx.updateTable('shiftAssignments').set({ effectiveTo: input.effectiveFrom }).where('organizationId', '=', orgId).where('targetType', '=', 'EMPLOYEE').where('targetId', '=', e.id).where('effectiveTo', 'is', null).where('effectiveFrom', '<', sql<Date>`${input.effectiveFrom}::date`).execute();
-          await trx.insertInto('shiftAssignments').values({ organizationId: orgId, targetType: 'EMPLOYEE', targetId: e.id, branchId: e.branchId, shiftId: input.shiftId, shiftPatternId: null, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo ?? null, createdBy: actor.userId }).execute();
+          await trx.insertInto('shiftAssignments').values({ organizationId: orgId, targetType: 'EMPLOYEE', targetId: e.id, branchId: e.branchId, shiftId: input.shiftId, shiftPatternId: null, effectiveFrom: input.effectiveFrom, effectiveTo: assignmentEndToStored(input.effectiveTo), createdBy: actor.userId }).execute();
         }
         await audit(trx, actor, orgId, 'employee.bulk_shift_assigned', 'employee', { newValue: { employeeIds: employees.map((e) => e.id), shiftId: input.shiftId, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo ?? null } });
         // §G.7, as an assignment made on the Schedule page: the days the change covers that already started (today included)

@@ -97,7 +97,7 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet }: { open: boolean; 
               <Controller control={control} name="branchId" render={({ field }) => <Combobox id="rs-branch" value={field.value ?? null} onChange={(v) => field.onChange(v)} options={branches.options} loading={branches.isLoading} clearable={!ruleSet} disabled={!!ruleSet} placeholder={t('rules.orgWide')} />} />
             </FormField>
             <FormField label={t('rules.effectiveFrom')} htmlFor="rs-from" required error={errors.effectiveFrom?.message}><Input id="rs-from" type="date" dir="ltr" {...register('effectiveFrom')} aria-invalid={!!errors.effectiveFrom} /></FormField>
-            <FormField label={t('rules.effectiveTo')} htmlFor="rs-to" optional error={errors.effectiveTo?.message}><Input id="rs-to" type="date" dir="ltr" {...register('effectiveTo', { setValueAs: (v: unknown) => (v === '' ? null : v) })} /></FormField>
+            <FormField label={t('rules.effectiveTo')} htmlFor="rs-to" optional error={errors.effectiveTo?.message} hint={t('rules.effectiveToHint')}><Input id="rs-to" type="date" dir="ltr" {...register('effectiveTo', { setValueAs: (v: unknown) => (v === '' ? null : v) })} /></FormField>
           </div>
 
           <div className="grid gap-4 lg:grid-cols-2">

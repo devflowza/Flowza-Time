@@ -41,6 +41,10 @@ describe('summariseCodes', () => {
     expect(s.leave).toEqual({ AL: 0.5, SL: 0.5 });
     expect(s.totalLeave).toBe(1);
   });
+  it('counts a missing-punch day (hours unknown) on its own, in none of T/PR, T/OL or T/AB', () => {
+    const s = summariseCodes([present(540), day('MISSING_PUNCH', { flags: ['MISSING_OUT'], firstInAt: '2017-11-02T04:00:00Z' }), day('ABSENT')], LT);
+    expect(s).toMatchObject({ present: 1, missing: 1, absent: 1, totalPresent: 1, totalAbsent: 1, totalLeave: 0 });
+  });
   it('treats a leave whose type is gone as ordinary paid leave, and ignores days that are not the employee\'s', () => {
     const s = summariseCodes([day('LEAVE', { leaveTypeCode: 'ZZ' }), day('LEAVE'), day('PENDING'), day('NOT_JOINED')], LT);
     expect(s.leave).toEqual({ ZZ: 1, LV: 1 });

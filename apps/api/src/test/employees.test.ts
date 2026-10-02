@@ -135,6 +135,28 @@ describe('employees', () => {
     expect(events.filter((e) => e.eventType === 'employee.updated').length).toBeGreaterThanOrEqual(3);
   });
 
+  it('a joining date moved back recalculates the days in between (field report: TEST020 stayed "Not joined" for September)', async () => {
+    const requests = () => api.tdb.adminDb.selectFrom('attendanceRecalculationRequests').select([sql<string>`from_date::text`.as('fromDate'), sql<string>`to_date::text`.as('toDate'), 'employeeIds', 'reason', 'queueJobId', 'status']).where('organizationId', '=', F.orgA).where(sql<boolean>`${createdId}::uuid = any(employee_ids)`).orderBy('createdAt', 'asc').execute();
+    const before = (await requests()).length; // a back-dated create queues its days since joining (from the organisation's first day)
+    const res = await api.request('PATCH', `/orgs/${F.orgA}/employees/${createdId}`, { user: F.ownerA, body: { joiningDate: '2026-01-15' } });
+    expect(res.status).toBe(200);
+    expect(res.json.data.joiningDate).toBe('2026-01-15');
+    const after = await requests();
+    expect(after).toHaveLength(before + 1);
+    const req = after[after.length - 1]!;
+    // old and new date included, one request for this employee, queued in the same transaction as the change
+    expect({ from: req.fromDate, to: req.toDate }).toEqual({ from: '2026-01-15', to: '2026-02-01' });
+    expect(req).toMatchObject({ employeeIds: [createdId], status: 'QUEUED', reason: expect.stringContaining('joining date 2026-02-01 → 2026-01-15') });
+    const job = await api.tdb.adminDb.selectFrom('jobs.queue').select(['jobType', 'queueName']).where('id', '=', req.queueJobId!).executeTakeFirstOrThrow();
+    expect(job).toEqual({ jobType: 'RECALCULATE_RANGE', queueName: 'processing' });
+    // the first employment record now starts on the new joining date: the days in the gap belong to the branch joined
+    const history = await api.request('GET', `/orgs/${F.orgA}/employees/${createdId}/history`, { user: F.ownerA });
+    expect(history.json.data[history.json.data.length - 1]).toMatchObject({ effectiveFrom: '2026-01-15', branchId: F.branchHQ });
+    // an unrelated change queues nothing
+    await api.request('PATCH', `/orgs/${F.orgA}/employees/${createdId}`, { user: F.ownerA, body: { displayNameAr: 'نور ح' } });
+    expect(await requests()).toHaveLength(before + 1);
+  });
+
   it('PATCH with null clears optional fields (what the profile form sends for an emptied field); required ones refuse it', async () => {
     const url = `/orgs/${F.orgA}/employees/${createdId}`;
     const set = await api.request('PATCH', url, { user: F.ownerA, body: { displayName: 'Noor H.', nationalityCode: 'om', cardNumber: '00123', weeklyOffDays: [5, 6] } });
@@ -357,5 +379,30 @@ describe('search & dashboard', () => {
     expect(res.json.data).toMatchObject({ date, presentToday: 1, absent: 0, late: 0 });
     const hq = (await api.request('GET', `/orgs/${F.orgA}/dashboard/branches?date=${date}`, { user: F.ownerA })).json.data.find((b: any) => b.branchId === F.branchHQ);
     expect(hq).toMatchObject({ present: 1 });
+  });
+});
+
+describe('employees entered after they joined (field report 2026-10-02, bug 1)', () => {
+  it('queues the days since joining, but never before the organisation\'s first day', async () => {
+    const requests = (id: string) => api.tdb.adminDb.selectFrom('attendanceRecalculationRequests').select([sql<string>`from_date::text`.as('fromDate'), sql<string>`to_date::text`.as('toDate'), 'employeeIds']).where('organizationId', '=', F.orgA).where(sql<boolean>`${id}::uuid = any(employee_ids)`).execute();
+    const today = (await sql<{ d: string }>`select (now() at time zone timezone)::date::text as d from public.organizations where id = ${F.orgA}::uuid`.execute(api.tdb.adminDb)).rows[0]!.d;
+    const { createdAt } = await api.tdb.adminDb.selectFrom('organizations').select('createdAt').where('id', '=', F.orgA).executeTakeFirstOrThrow();
+    await api.tdb.adminDb.updateTable('organizations').set({ createdAt: new Date('2026-03-01T06:00:00Z') }).where('id', '=', F.orgA).execute();
+    try {
+      const create = (employeeNumber: string, joiningDate: string) => api.request('POST', `/orgs/${F.orgA}/employees`, { user: F.ownerA, body: { employeeNumber, firstName: 'Late', lastName: employeeNumber, joiningDate, branchId: F.branchHQ } });
+      const late = await create('E-020', '2026-04-15');
+      expect(late.status).toBe(201);
+      expect(await requests(late.json.data.id)).toEqual([{ fromDate: '2026-04-15', toDate: today, employeeIds: [late.json.data.id] }]);
+      // joined in 2015, entered now: the days before the organisation was on FlowZa are not filled with absences
+      const veteran = await create('E-021', '2015-06-01');
+      expect(veteran.status).toBe(201);
+      expect(await requests(veteran.json.data.id)).toEqual([{ fromDate: '2026-03-01', toDate: today, employeeIds: [veteran.json.data.id] }]);
+      // joining today or later: nothing to calculate yet
+      const upcoming = await create('E-022', '2099-01-01');
+      expect(upcoming.status).toBe(201);
+      expect(await requests(upcoming.json.data.id)).toEqual([]);
+    } finally {
+      await api.tdb.adminDb.updateTable('organizations').set({ createdAt }).where('id', '=', F.orgA).execute();
+    }
   });
 });

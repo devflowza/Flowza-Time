@@ -69,7 +69,8 @@ export default function AttendancePage() {
       </Tabs>
       <CorrectionDialog key={`${correction.open}-${correction.preset?.employeeId ?? ''}-${correction.preset?.attendanceDate ?? ''}`} open={correction.open} onOpenChange={(o) => setCorrection((c) => ({ ...c, open: o }))} preset={correction.preset} onCreated={() => navigate('/corrections')} />
       <RecalculateDialog key={String(recalcOpen)} open={recalcOpen} onOpenChange={setRecalcOpen} />
-      {addOpen ? <RecordEditDialog key={addKey} open onOpenChange={setAddOpen} /> : null}
+      {/* Add record starts on the day the register shows (field report 2026-10-02: it opened on today and a record landed on the wrong day) */}
+      {addOpen ? <RecordEditDialog key={addKey} open onOpenChange={setAddOpen} defaultDate={tab === 'daily' ? params.get('date') ?? undefined : undefined} /> : null}
     </div>
   );
 }

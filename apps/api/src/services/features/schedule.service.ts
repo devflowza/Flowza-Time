@@ -10,6 +10,7 @@ import { type Actor, audit, diffObjects, runUser, withSystemScope } from '../../
 import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
 import { isoDate, isoDateOrNull, isoDateTime, jsonArray, jsonObject } from '../../lib/mappers.js';
 import { enqueueRecalculation, orgToday } from './recalc.js';
+import { assignmentEndFromStored, assignmentEndToStored } from './assignment-dates.js';
 import { dv, today } from './sql-helpers.js';
 
 type HolidayCalendarInput = z.infer<typeof holidayCalendarInputSchema>;
@@ -175,7 +176,9 @@ async function targetNames(trx: Trx, orgId: string, rows: { targetType: string; 
   return out;
 }
 type AssignmentRow = { id: string; targetType: string; targetId: string; branchId: string | null; shiftId: string | null; shiftName: string | null; shiftPatternId: string | null; patternName: string | null; effectiveFrom: Date | string; effectiveTo: Date | string | null; createdBy: string | null; createdAt: Date };
-const toAssignmentDto = (a: AssignmentRow, names: Map<string, string>): ShiftAssignmentDto => ({ id: a.id, targetType: a.targetType, targetId: a.targetId, targetName: a.targetType === 'ORGANIZATION' ? 'Organisation' : names.get(a.targetId) ?? null, branchId: a.branchId, shiftId: a.shiftId, shiftName: a.shiftName, shiftPatternId: a.shiftPatternId, patternName: a.patternName, effectiveFrom: isoDate(a.effectiveFrom), effectiveTo: isoDateOrNull(a.effectiveTo), createdBy: a.createdBy, createdAt: isoDateTime(a.createdAt) });
+/** `effectiveTo` is the assignment's LAST day (inclusive) on the API; the table stores the day after it (assignment-dates.ts). */
+const toAssignmentDto = (a: AssignmentRow, names: Map<string, string>): ShiftAssignmentDto => ({ id: a.id, targetType: a.targetType, targetId: a.targetId, targetName: a.targetType === 'ORGANIZATION' ? 'Organisation' : names.get(a.targetId) ?? null, branchId: a.branchId, shiftId: a.shiftId, shiftName: a.shiftName, shiftPatternId: a.shiftPatternId, patternName: a.patternName, effectiveFrom: isoDate(a.effectiveFrom), effectiveTo: assignmentEndFromStored(a.effectiveTo), createdBy: a.createdBy, createdAt: isoDateTime(a.createdAt) });
+const lastDayError = () => errors.validation('effectiveTo (the last day) cannot be before effectiveFrom.', { issues: [{ path: 'effectiveTo', message: 'Before the first day' }] });
 
 /** Branch used for RLS/scope: EMPLOYEE → employee branch, BRANCH → itself, DEPARTMENT/TEAM → their branch (may be null), ORGANIZATION → null. */
 async function resolveTargetBranch(trx: Trx, orgId: string, targetType: string, targetId: string): Promise<{ branchId: string | null; employeeIds: string[] | null }> {
@@ -201,7 +204,9 @@ export async function listAssignments(deps: ApiDeps, actor: Actor, orgId: string
     if (q.activeOn) base = base.where('a.effectiveFrom', '<=', dv(q.activeOn)).where((eb) => eb.or([eb('a.effectiveTo', 'is', null), eb('a.effectiveTo', '>', dv(q.activeOn!))]));
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const page = pageOf(q);
-    const rows = (await base.select(ASSIGNMENT_COLUMNS).orderBy('a.effectiveFrom', 'desc').orderBy('a.id').limit(page.pageSize).offset(page.offset).execute()) as AssignmentRow[];
+    // latest start first; among assignments starting the same day the newest first, so one just created is on the first page
+    // (field report 2026-10-02: after "Assign" the new row hid among twenty others starting on 1 Sep, ordered by random id)
+    const rows = (await base.select(ASSIGNMENT_COLUMNS).orderBy('a.effectiveFrom', 'desc').orderBy('a.createdAt', 'desc').orderBy('a.id').limit(page.pageSize).offset(page.offset).execute()) as AssignmentRow[];
     const names = await targetNames(trx, orgId, rows);
     return { data: rows.map((r) => toAssignmentDto(r, names)), total };
   });
@@ -213,7 +218,8 @@ export async function createAssignment(deps: ApiDeps, actor: Actor, orgId: strin
     if (target.branchId) requireBranchAccess(grant, target.branchId); else if (!grant.allBranches) throw errors.forbidden('Branch-scoped users can only assign shifts to employees or branches in their scope.');
     if (input.shiftId) await loadShift(trx, orgId, input.shiftId);
     if (input.shiftPatternId && !(await trx.selectFrom('shiftPatterns').select('id').where('organizationId', '=', orgId).where('id', '=', input.shiftPatternId).executeTakeFirst())) throw errors.validation('Shift pattern not found.', { issues: [{ path: 'shiftPatternId', message: 'Unknown pattern' }] });
-    const row = await trx.insertInto('shiftAssignments').values({ organizationId: orgId, targetType: input.targetType, targetId: input.targetId, branchId: target.branchId, shiftId: input.shiftId ?? null, shiftPatternId: input.shiftPatternId ?? null, effectiveFrom: input.effectiveFrom, effectiveTo: input.effectiveTo ?? null, createdBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
+    if (input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw lastDayError();
+    const row = await trx.insertInto('shiftAssignments').values({ organizationId: orgId, targetType: input.targetType, targetId: input.targetId, branchId: target.branchId, shiftId: input.shiftId ?? null, shiftPatternId: input.shiftPatternId ?? null, effectiveFrom: input.effectiveFrom, effectiveTo: assignmentEndToStored(input.effectiveTo), createdBy: actor.userId }).returning('id').executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'shift.assigned', 'shift_assignment', { entityId: row.id, branchId: target.branchId, newValue: input });
     const recalc = await recalcIfPast(deps, trx, actor, orgId, input.effectiveFrom, input.effectiveTo ?? null, { branchId: target.branchId, employeeIds: target.employeeIds, reason: `shift assignment ${input.targetType} created` });
     const saved = (await assignmentQuery(trx, orgId).select(ASSIGNMENT_COLUMNS).where('a.id', '=', row.id).executeTakeFirstOrThrow()) as AssignmentRow;
@@ -226,10 +232,10 @@ export async function updateAssignment(deps: ApiDeps, actor: Actor, orgId: strin
     const before = (await assignmentQuery(trx, orgId).select(ASSIGNMENT_COLUMNS).where('a.id', '=', id).executeTakeFirst()) as AssignmentRow | undefined;
     if (!before) throw errors.notFound('Shift assignment', id);
     requireBranchAccess(grant, before.branchId);
-    if (input.effectiveTo !== null && input.effectiveTo <= isoDate(before.effectiveFrom)) throw errors.validation('effectiveTo must be after effectiveFrom.', { issues: [{ path: 'effectiveTo', message: 'Invalid range' }] });
-    await trx.updateTable('shiftAssignments').set({ effectiveTo: input.effectiveTo }).where('id', '=', id).execute();
-    await audit(trx, actor, orgId, 'shift.assignment_updated', 'shift_assignment', { entityId: id, branchId: before.branchId, oldValue: { effectiveTo: isoDateOrNull(before.effectiveTo) }, newValue: input });
-    const oldTo = isoDateOrNull(before.effectiveTo); const newTo = input.effectiveTo;
+    if (input.effectiveTo !== null && input.effectiveTo < isoDate(before.effectiveFrom)) throw lastDayError();
+    await trx.updateTable('shiftAssignments').set({ effectiveTo: assignmentEndToStored(input.effectiveTo) }).where('id', '=', id).execute();
+    const oldTo = assignmentEndFromStored(before.effectiveTo); const newTo = input.effectiveTo;
+    await audit(trx, actor, orgId, 'shift.assignment_updated', 'shift_assignment', { entityId: id, branchId: before.branchId, oldValue: { effectiveTo: oldTo }, newValue: input });
     const from = oldTo && newTo ? minDate(oldTo, newTo) : (oldTo ?? newTo ?? isoDate(before.effectiveFrom));
     const target = await resolveTargetBranch(trx, orgId, before.targetType, before.targetId).catch(() => ({ branchId: before.branchId, employeeIds: null }));
     const recalc = await recalcIfPast(deps, trx, actor, orgId, from, null, { branchId: before.branchId, employeeIds: target.employeeIds, reason: 'shift assignment end date changed' });
@@ -246,7 +252,7 @@ export async function deleteAssignment(deps: ApiDeps, actor: Actor, orgId: strin
     await trx.deleteFrom('shiftAssignments').where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'shift.unassigned', 'shift_assignment', { entityId: id, branchId: before.branchId, oldValue: toAssignmentDto(before, new Map()) });
     const target = await resolveTargetBranch(trx, orgId, before.targetType, before.targetId).catch(() => ({ branchId: before.branchId, employeeIds: null }));
-    const recalc = await recalcIfPast(deps, trx, actor, orgId, isoDate(before.effectiveFrom), isoDateOrNull(before.effectiveTo), { branchId: before.branchId, employeeIds: target.employeeIds, reason: 'shift assignment removed' });
+    const recalc = await recalcIfPast(deps, trx, actor, orgId, isoDate(before.effectiveFrom), assignmentEndFromStored(before.effectiveTo), { branchId: before.branchId, employeeIds: target.employeeIds, reason: 'shift assignment removed' });
     return { recalculationJobId: recalc?.jobId ?? null };
   });
 }
@@ -268,7 +274,8 @@ export async function resolveEmployeeShift(deps: ApiDeps, actor: Actor, orgId: s
     const shift = resolved.shiftId ? await trx.selectFrom('shifts').selectAll().where('id', '=', resolved.shiftId).executeTakeFirst() : null;
     const ruleSets = (await trx.selectFrom('attendanceRuleSets').select(['id', 'branchId', 'effectiveFrom', 'effectiveTo', 'name']).where('organizationId', '=', orgId).execute()).map((r) => ({ id: r.id, branchId: r.branchId, effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: isoDateOrNull(r.effectiveTo), name: r.name, rules: {} as never }));
     const ruleSet = resolveRuleSet(ruleSets, date, scope.branchId);
-    return { employeeId, date, source: resolved.source, isPatternOff: resolved.isPatternOff, patternDay: resolved.patternDay, assignment: resolved.assignment, shift: shift ? toShiftDto(shift) : null, ruleSet: ruleSet ? { id: ruleSet.id, name: ruleSet.name, branchId: ruleSet.branchId } : null, scope };
+    const assignment = resolved.assignment ? { ...resolved.assignment, effectiveTo: assignmentEndFromStored(resolved.assignment.effectiveTo) } : null;
+    return { employeeId, date, source: resolved.source, isPatternOff: resolved.isPatternOff, patternDay: resolved.patternDay, assignment, shift: shift ? toShiftDto(shift) : null, ruleSet: ruleSet ? { id: ruleSet.id, name: ruleSet.name, branchId: ruleSet.branchId } : null, scope };
   });
 }
 
