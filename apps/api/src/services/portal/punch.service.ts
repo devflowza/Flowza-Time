@@ -4,24 +4,25 @@ import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import {
   GEOFENCE_VERDICTS, SELFIE_MAX_BYTES, SELF_SERVICE_PROVIDER_KEY,
-  type AttendanceFlag, type AttendanceGrantsDto, type AttendanceGrantsInput, type AttendanceSettings, type AttendanceStatus, type GeofenceVerdict,
+  type AttendanceFlag, type AttendanceGrantsDto, type AttendanceGrantsInput, type AttendancePolicySections, type AttendanceSettings, type AttendanceStatus, type GeofenceVerdict,
   type SelfieCheckinDto, type SelfieReviewInput, type SelfiePhotoDto, type SelfPunchChannel, type SelfPunchDirection, type SelfPunchDto, type SelfPunchPreviewDto,
   type SelfPunchRefusal, type SelfPunchResultDto, type SelfPunchStatusDto, type SelfieCheckinStatus,
 } from '@flowza/contracts';
-import { ensureSelfServiceDevice, type Trx } from '@flowza/database';
+import { additionalShiftOn, ensureSelfServiceDevice, loadAdditionalShiftAssignments, loadEmployeeWorkingCalendars, resolvePolicyFor, type Trx } from '@flowza/database';
 import { withinGeofenceOf, type GeofenceEvaluation, type GeofenceFence, type MembershipGrant } from '@flowza/domain';
 import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { requireBranchAccess, requireMembership } from '../../lib/authorize.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
-import { isoDateTime, isoDateTimeOrNull, jsonObject } from '../../lib/mappers.js';
+import { isoDate, isoDateTime, isoDateTimeOrNull, jsonObject } from '../../lib/mappers.js';
 import { pageOf, toCount } from '../../lib/pagination.js';
+import { moduleEnabledFor } from '../../middleware/module-gate.js';
 import { systemStep } from '../features/context.js';
 import { enqueueNormalize, ingestRawTransactions } from '../features/ingest.js';
 import {
   type EmployeeCtx, attendancePolicy, emitToUsers, inLocalWindow, isPeriodLocked, isWorking, lineManagerUserIds, loadEmployeeCtx, localInstant, lockEmployee, portalSelf, reviewerRole, userIdsOfEmployees,
 } from './common.js';
-import { evaluateForEmployee, fencesForEmployee, selfFences, toVerdictDto } from './geofences.service.js';
+import { evaluateForEmployee, fencesForBranch, fencesForEmployee, selfFences, toVerdictDto } from './geofences.service.js';
 import { resolveDays } from './shift-resolve.js';
 
 /**
@@ -43,6 +44,16 @@ import { resolveDays } from './shift-resolve.js';
  * switch (web / mobile), the IP allow-list, locked periods, the check-in / check-out windows (accept, flag or reject), the
  * duplicate guard, the in/out sequence, the selfie-only grant and the geofence (evaluated server-side; the client's
  * preview is advice). A refused punch is NOT stored — it is audited (and a geofence refusal notifies the line manager).
+ *
+ * Enterprise (docs/enterprise/plan.md §4.7, §7):
+ *   - the employee's attendance POLICY of the day (`policy.methods`, resolved for today's placement and primary shift) can
+ *     restrict the channels further — web / mobile / selfie off → 403 CHECKIN_METHOD_NOT_ALLOWED; the organisation switches
+ *     still apply first (a policy only restricts them) — and its `requireGeofence` other than `inherit` replaces the
+ *     organisation's. Stored policies apply whatever the module state (switching a module off never loosens attendance);
+ *   - while a temporary deployment to another branch covers today (and advanced_scheduling is on), a location the employee's
+ *     own fences would not accept is judged again against the HOST branch's fences; accepted there, the punch keeps that
+ *     verdict and its payload records `deploymentId` / `deployedBranchId`. The punch is still the employee's: home branch,
+ *     home timezone, home calendar.
  */
 
 const SELFIE_BUCKET = 'employee-photos';
@@ -108,12 +119,66 @@ export function effectiveIpAllowList(deps: Pick<ApiDeps, 'config' | 'log'>, orgI
   return [];
 }
 
-interface PunchContext { emp: EmployeeCtx; settings: AttendanceSettings; grants: Grants; fences: GeofenceFence[] }
-async function loadPunchContext(deps: Pick<ApiDeps, 'config' | 'log'>, trx: Trx, orgId: string, employeeId: string): Promise<PunchContext> {
+type CheckInMethods = AttendancePolicySections['methods'];
+
+/**
+ * The check-in methods of the employee's attendance policy today (Enterprise policy section `methods`): the policy resolved
+ * for today's placement (employment history) and primary shift (the per-date working calendar, the organisation's default
+ * shift, else today's additional shift) — the resolution the engine applies to the day. Without a policy: the contract
+ * defaults (everything the organisation allows). System scope: the employee was authorised first.
+ */
+async function policyMethodsFor(trx: Trx, orgId: string, emp: EmployeeCtx, today: string, defaultShiftId: string | null): Promise<CheckInMethods> {
+  return withSystemScope(trx, orgId, async (t) => {
+    const { calendars } = await loadEmployeeWorkingCalendars(t, orgId, [emp.id], { from: today, to: today });
+    const day = calendars.get(emp.id)?.day(today);
+    const placement = day?.placement ?? { branchId: emp.branchId, departmentId: emp.departmentId };
+    let shiftId = day ? day.shift.shiftId ?? (day.shift.isPatternOff ? null : defaultShiftId) : defaultShiftId;
+    if (!shiftId) shiftId = additionalShiftOn(await loadAdditionalShiftAssignments(t, orgId, [emp.id], today, today), today)?.shiftId ?? null;
+    const policy = await resolvePolicyFor(t, orgId, emp.id, today, { branchId: placement.branchId, departmentId: placement.departmentId, shiftId });
+    return policy.rules.policy.methods;
+  });
+}
+
+/** A temporary deployment to another branch covering `today` (not cancelled), with the host branch's fences. System scope. */
+interface ActiveDeployment { id: string; branchId: string; branchName: string | null; toDate: string; timezone: string; fences: GeofenceFence[] }
+async function activeDeploymentFor(trx: Trx, orgId: string, employeeId: string, today: string): Promise<ActiveDeployment | null> {
+  const row = await withSystemScope(trx, orgId, (t) => t.selectFrom('employeeBranchDeployments as d').leftJoin('branches as b', 'b.id', 'd.branchId')
+    .select(['d.id', 'd.branchId', 'b.name as branchName', 'b.timezone', 'd.toDate'])
+    .where('d.organizationId', '=', orgId).where('d.employeeId', '=', employeeId).where('d.cancelledAt', 'is', null)
+    .where('d.fromDate', '<=', sql<Date>`${today}::date`).where('d.toDate', '>=', sql<Date>`${today}::date`)
+    .orderBy('d.fromDate', 'desc').executeTakeFirst());
+  if (!row) return null;
+  const fences = await fencesForBranch(trx, orgId, row.branchId);
+  return { id: row.id, branchId: row.branchId, branchName: row.branchName, toDate: isoDate(row.toDate), timezone: row.timezone ?? 'UTC', fences };
+}
+
+interface PunchContext { emp: EmployeeCtx; settings: AttendanceSettings; grants: Grants; fences: GeofenceFence[]; methods: CheckInMethods; deployment: ActiveDeployment | null }
+async function loadPunchContext(deps: Pick<ApiDeps, 'config' | 'log'>, trx: Trx, orgId: string, employeeId: string, actor: Pick<Actor, 'disabledModules'>): Promise<PunchContext> {
   const emp = await loadEmployeeCtx(trx, orgId, employeeId);
   const [settings, grants, fences] = await Promise.all([attendancePolicy(trx, orgId), loadGrants(trx, orgId, employeeId), fencesForEmployee(trx, orgId, emp)]);
   const ipAllowList = [...effectiveIpAllowList(deps, orgId, settings.selfService.ipAllowList)];
-  return { emp, settings: { ...settings, selfService: { ...settings.selfService, ipAllowList } }, grants, fences };
+  // sequential: each switches the transaction's role for its reads and restores it
+  const today = localInstant(new Date(), emp.timezone).date;
+  const methods = await policyMethodsFor(trx, orgId, emp, today, settings.defaultShiftId ?? null);
+  // the host-branch check-in is the module's feature (it widens where a punch is accepted): off with the module, while the
+  // access REMOVAL after a deployment runs whatever the module state (worker sweep)
+  const deployment = moduleEnabledFor(actor.disabledModules, orgId, 'advanced_scheduling') ? await activeDeploymentFor(trx, orgId, emp.id, today) : null;
+  const requireGeofence = methods.requireGeofence === 'inherit' ? settings.selfService.requireGeofence : methods.requireGeofence;
+  return { emp, settings: { ...settings, selfService: { ...settings.selfService, ipAllowList, requireGeofence } }, grants, fences, methods, deployment };
+}
+
+/**
+ * Where the punch is judged: the employee's own fences; while deployed, a location they would not accept (denied, flagged or
+ * merely logged as outside — never a mock location) is judged again against the host branch's fences (in the host branch's
+ * local time), and an `allowed` there wins. Returns the deployment that decided, if any.
+ */
+function judgeLocation(ctx: PunchContext, input: { lat?: number | undefined; lng?: number | undefined; accuracy?: number | undefined; isMock?: boolean | undefined; direction: 'in' | 'out' }, at: Date): { evaluation: GeofenceEvaluation; viaDeployment: { id: string; branchId: string } | null } {
+  const policy = ctx.settings.selfService.requireGeofence;
+  const own = evaluateForEmployee(ctx.emp, ctx.fences, input, policy, at);
+  const d = ctx.deployment;
+  if (!d || d.fences.length === 0 || own.verdict === 'allowed' || own.verdict === 'no_fence' || own.verdict === 'denied_mock') return { evaluation: own, viaDeployment: null };
+  const host = evaluateForEmployee({ timezone: d.timezone }, d.fences, input, policy, at);
+  return host.verdict === 'allowed' ? { evaluation: host, viaDeployment: { id: d.id, branchId: d.branchId } } : { evaluation: own, viaDeployment: null };
 }
 
 /**
@@ -121,7 +186,9 @@ async function loadPunchContext(deps: Pick<ApiDeps, 'config' | 'log'>, trx: Trx,
  * there is no selfie to take (`submitSelfie` refuses SELFIE_DISABLED), so the grant is dormant and the plain punch is judged
  * by the other rules — never a lock-out from both.
  */
-const selfieRequiredNow = (ctx: PunchContext): boolean => ctx.settings.selfService.allowSelfieCheckIn && ctx.grants.selfieRequired;
+const selfieRequiredNow = (ctx: PunchContext): boolean => ctx.settings.selfService.allowSelfieCheckIn && ctx.methods.selfie && ctx.grants.selfieRequired;
+/** The selfie check-in is open to the caller: the organisation switch, the attendance policy and a grant. */
+const selfieAvailableNow = (ctx: PunchContext): boolean => ctx.settings.selfService.allowSelfieCheckIn && ctx.methods.selfie && (ctx.grants.openAttendance || ctx.grants.selfieRequired);
 
 /** Refusals that hold whatever the direction or the location (the check-in page's blockers). */
 async function standingRefusals(trx: Trx, orgId: string, ctx: PunchContext, channel: SelfPunchChannel, ip: string | null, at: Date): Promise<SelfPunchRefusal[]> {
@@ -130,6 +197,8 @@ async function standingRefusals(trx: Trx, orgId: string, ctx: PunchContext, chan
   if (!isWorking(ctx.emp, today) || today < ctx.emp.joiningDate) out.push('NOT_ACTIVE');
   if (channel === 'web' && !ctx.settings.selfService.webCheckIn) out.push('WEB_CHECKIN_DISABLED');
   if (channel === 'mobile' && !ctx.settings.selfService.mobileCheckIn) out.push('MOBILE_CHECKIN_DISABLED');
+  // the attendance policy restricts what the organisation allows (never the other way round)
+  if ((channel === 'web' && ctx.settings.selfService.webCheckIn && !ctx.methods.web) || (channel === 'mobile' && ctx.settings.selfService.mobileCheckIn && !ctx.methods.mobile)) out.push('CHECKIN_METHOD_NOT_ALLOWED');
   if (selfieRequiredNow(ctx)) out.push('SELFIE_REQUIRED');
   if (!ipAllowed(ip, ctx.settings.selfService.ipAllowList)) out.push('IP_NOT_ALLOWED');
   if (await isPeriodLocked(trx, orgId, ctx.emp.branchId, today)) out.push('PERIOD_LOCKED');
@@ -148,6 +217,8 @@ interface Assessment {
   flagged: boolean;
   lastDirection: SelfPunchDirection | null;
   lastPunch: RawPunchRow | null;
+  /** The temporary deployment whose host branch fences accepted the location (Enterprise). */
+  viaDeployment: { id: string; branchId: string } | null;
 }
 
 async function assess(trx: Trx, orgId: string, ctx: PunchContext, input: { channel: SelfPunchChannel; direction: SelfPunchDirection; lat?: number | undefined; lng?: number | undefined; accuracy?: number | undefined; isMock?: boolean | undefined }, ip: string | null, at: Date, opts: { sequence: boolean }): Promise<Assessment> {
@@ -166,7 +237,7 @@ async function assess(trx: Trx, orgId: string, ctx: PunchContext, input: { chann
   const outOfWindow = !inLocalWindow(window, local.minuteOfDay);
   const action = ctx.settings.selfService.outOfWindowAction;
   if (outOfWindow && action === 'reject') refusals.push('OUT_OF_WINDOW');
-  const evaluation = evaluateForEmployee(ctx.emp, ctx.fences, input, ctx.settings.selfService.requireGeofence, at);
+  const { evaluation, viaDeployment } = judgeLocation(ctx, input, at);
   let verdict: GeofenceVerdict = evaluation.verdict;
   if (verdict === 'denied_mock') refusals.push('MOCK_LOCATION');
   else if (verdict === 'denied_outside') {
@@ -174,7 +245,7 @@ async function assess(trx: Trx, orgId: string, ctx: PunchContext, input: { chann
     if (ctx.grants.openAttendance) verdict = 'flagged'; else refusals.push('OUTSIDE_GEOFENCE');
   }
   const flagOutOfWindow = outOfWindow && action === 'flag';
-  return { evaluation, verdict, outOfWindow, flagOutOfWindow, refusals, flagged: verdict === 'flagged' || flagOutOfWindow, lastDirection, lastPunch: last };
+  return { evaluation, verdict, outOfWindow, flagOutOfWindow, refusals, flagged: verdict === 'flagged' || flagOutOfWindow, lastDirection, lastPunch: last, viaDeployment };
 }
 
 const REFUSAL_TEXT: Record<SelfPunchRefusal, string> = {
@@ -190,6 +261,7 @@ const REFUSAL_TEXT: Record<SelfPunchRefusal, string> = {
   NOT_CHECKED_IN: 'You have already checked out.',
   PERIOD_LOCKED: 'The attendance period is locked.',
   NOT_ACTIVE: 'Your employment is not active.',
+  CHECKIN_METHOD_NOT_ALLOWED: 'Your attendance policy does not allow this check-in method.',
 };
 /**
  * The HTTP error of a refused punch: stable code + `details.reason` (and every other refusal that applied). A duplicate
@@ -211,7 +283,7 @@ export function refusalError(refusals: readonly SelfPunchRefusal[], extra: Recor
 export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string, q: { channel: SelfPunchChannel }): Promise<SelfPunchStatusDto> {
   const self = portalSelf(actor, orgId, 'attendance.checkin');
   return runUser(deps.db, actor, async (trx) => {
-    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId, actor);
     const now = new Date();
     const local = localInstant(now, ctx.emp.timezone);
     const blockers = await standingRefusals(trx, orgId, ctx, q.channel, actor.ip, now);
@@ -236,9 +308,11 @@ export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string,
         outOfWindowAction: ctx.settings.selfService.outOfWindowAction, duplicatePunchSeconds: ctx.settings.selfService.duplicatePunchSeconds, ipRestricted: ctx.settings.selfService.ipAllowList.length > 0,
       },
       grant: { openAttendance: ctx.grants.openAttendance, selfieRequired: ctx.grants.selfieRequired },
-      selfieAvailable: ctx.settings.selfService.allowSelfieCheckIn && (ctx.grants.openAttendance || ctx.grants.selfieRequired),
-      fences: selfFences(ctx.fences),
+      selfieAvailable: selfieAvailableNow(ctx),
+      // while deployed, the host branch's fences are shown too (the punch is judged against them as well)
+      fences: selfFences([...ctx.fences, ...(ctx.deployment?.fences ?? [])]),
       ...(day ? { shift: { date: day.date, shift: day.shift, source: day.source, isOff: day.isOff, holidayName: day.holidayName, onLeave: day.onLeave } } : {}),
+      deployment: ctx.deployment ? { branchId: ctx.deployment.branchId, branchName: ctx.deployment.branchName, toDate: ctx.deployment.toDate } : null,
     };
   });
 }
@@ -252,7 +326,7 @@ function startOfLocalDay(at: Date, tz: string): Date {
 export async function previewPunch(deps: ApiDeps, actor: Actor, orgId: string, input: { direction: SelfPunchDirection; channel: SelfPunchChannel; lat?: number | undefined; lng?: number | undefined; accuracy?: number | undefined; isMock?: boolean | undefined }): Promise<SelfPunchPreviewDto> {
   const self = portalSelf(actor, orgId, 'attendance.checkin');
   return runUser(deps.db, actor, async (trx) => {
-    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId, actor);
     const a = await assess(trx, orgId, ctx, input, actor.ip, new Date(), { sequence: true });
     return { verdict: { ...toVerdictDto(a.evaluation), verdict: a.verdict }, outOfWindow: a.outOfWindow, refusals: a.refusals, wouldBeFlagged: a.flagged };
   });
@@ -277,7 +351,7 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
       const verdict = isVerdict(p['verdict']) ? p['verdict'] : 'no_fence';
       return { kind: 'ok', result: { replayed: true, punch: dto, verdict: { verdict, reason: typeof p['verdictReason'] === 'string' ? p['verdictReason'] : 'replayed', geofenceId: typeof p['geofenceId'] === 'string' ? p['geofenceId'] : null, geofenceName: typeof p['geofenceName'] === 'string' ? p['geofenceName'] : null, distanceM: typeof p['distanceM'] === 'number' ? p['distanceM'] : null, scope: null, enforcement: null }, outOfWindow: p['outOfWindow'] === true, flagged: verdict === 'flagged' || p['outOfWindow'] === true } };
     }
-    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId, actor);
     const a = await assess(trx, orgId, ctx, input, actor.ip, now, { sequence: true });
     const verdictDto = { ...toVerdictDto(a.evaluation), verdict: a.verdict };
     const location = { lat: input.lat ?? null, lng: input.lng ?? null, accuracy: input.accuracy ?? null, isMock: input.isMock === true };
@@ -295,6 +369,8 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
       withinGeofence: withinGeofenceOf(a.evaluation),
       distanceM: verdictDto.distanceM, ip: actor.ip, userAgent: actor.userAgent, isMock: location.isMock, outOfWindow: a.flagOutOfWindow, clientQueuedAt: input.clientQueuedAt ?? null,
       ...(a.outOfWindow && !a.flagOutOfWindow ? { outOfWindowAccepted: true } : {}), ...(a.verdict !== a.evaluation.verdict ? { openAttendance: true } : {}),
+      // accepted at the host branch of a temporary deployment (the punch stays the employee's home branch's)
+      ...(a.viaDeployment ? { deploymentId: a.viaDeployment.id, deployedBranchId: a.viaDeployment.branchId } : {}),
     };
     const written = await systemStep(trx, orgId, async (t) => {
       const device = await ensureSelfServiceDevice(t, orgId);
@@ -306,7 +382,7 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
       await enqueueNormalize(deps, t, orgId, device.id, actor.requestId);
       return { rawId, device };
     });
-    await audit(trx, actor, orgId, 'attendance.self_punch', 'attendance_raw_transaction', { entityId: written.rawId, branchId: ctx.emp.branchId, newValue: { direction: input.direction, channel: input.channel, verdict: verdictDto, outOfWindow: a.outOfWindow, flagged: a.flagged, ...location, deviceCreated: written.device.created } });
+    await audit(trx, actor, orgId, 'attendance.self_punch', 'attendance_raw_transaction', { entityId: written.rawId, branchId: ctx.emp.branchId, newValue: { direction: input.direction, channel: input.channel, verdict: verdictDto, outOfWindow: a.outOfWindow, flagged: a.flagged, ...location, deviceCreated: written.device.created, ...(a.viaDeployment ? { deploymentId: a.viaDeployment.id, deployedBranchId: a.viaDeployment.branchId } : {}) } });
     if (a.flagged) {
       await emitToUsers(trx, actor, orgId, 'attendance.punch_flagged', { type: 'employee', id: ctx.emp.id }, await lineManagerUserIds(trx, orgId, ctx.emp),
         { employeeId: ctx.emp.id, employeeName: ctx.emp.displayName, outcome: 'flagged', verdict: a.verdict, reason: a.flagOutOfWindow && a.verdict !== 'flagged' ? 'out_of_window' : a.evaluation.reason, geofenceName: a.evaluation.geofenceName, distanceM: a.evaluation.distanceM, direction: input.direction, at: now.toISOString(), rawTransactionId: written.rawId });
@@ -471,8 +547,9 @@ export async function submitSelfie(deps: ApiDeps, actor: Actor, orgId: string, i
   if (!deps.storage.upload) throw errors.dependency('Photo storage');
   return runUser(deps.db, actor, async (trx) => {
     await lockEmployee(trx, 'self-punch', self.employeeId);
-    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId, actor);
     if (!ctx.settings.selfService.allowSelfieCheckIn) throw new AppError('FORBIDDEN', 'Selfie check-in is turned off for this organisation.', { details: { reason: 'SELFIE_DISABLED' } });
+    if (!ctx.methods.selfie) throw new AppError('FORBIDDEN', REFUSAL_TEXT.CHECKIN_METHOD_NOT_ALLOWED, { details: { reason: 'CHECKIN_METHOD_NOT_ALLOWED', refusals: ['CHECKIN_METHOD_NOT_ALLOWED'], method: 'selfie' } });
     if (!ctx.grants.openAttendance && !ctx.grants.selfieRequired) throw new AppError('FORBIDDEN', 'Selfie check-in needs an attendance grant from your manager.', { details: { reason: 'SELFIE_NOT_GRANTED' } });
     const now = new Date();
     const today = localInstant(now, ctx.emp.timezone).date;
@@ -485,7 +562,7 @@ export async function submitSelfie(deps: ApiDeps, actor: Actor, orgId: string, i
         .where('direction', '=', input.direction).where('createdAt', '>', new Date(now.getTime() - dupSeconds * 1000)).executeTakeFirst());
       if (recent) throw refusalError(['DUPLICATE_PUNCH'], { direction: input.direction });
     }
-    const evaluation = evaluateForEmployee(ctx.emp, ctx.fences, { ...input }, ctx.settings.selfService.requireGeofence, now);
+    const { evaluation, viaDeployment } = judgeLocation(ctx, { ...input }, now);
     const id = randomUUID();
     const photoPath = `checkins/${orgId}/${ctx.emp.id}/${id}.${input.image.ext}`;
     await systemStep(trx, orgId, (t) => t.insertInto('selfieCheckins').values({
@@ -495,7 +572,7 @@ export async function submitSelfie(deps: ApiDeps, actor: Actor, orgId: string, i
     // the row commits only if the photo is stored (a failed upload rolls the check-in back)
     const stored = await deps.storage.upload!(SELFIE_BUCKET, photoPath, input.image.bytes, input.image.contentType);
     if (!stored) throw errors.dependency('Photo storage');
-    await audit(trx, actor, orgId, 'attendance.selfie_submitted', 'selfie_checkin', { entityId: id, branchId: ctx.emp.branchId, newValue: { direction: input.direction, verdict: evaluation.verdict, lat: input.lat ?? null, lng: input.lng ?? null, accuracy: input.accuracy ?? null, photoSha256: input.image.sha256 } });
+    await audit(trx, actor, orgId, 'attendance.selfie_submitted', 'selfie_checkin', { entityId: id, branchId: ctx.emp.branchId, newValue: { direction: input.direction, verdict: evaluation.verdict, lat: input.lat ?? null, lng: input.lng ?? null, accuracy: input.accuracy ?? null, photoSha256: input.image.sha256, ...(viaDeployment ? { deploymentId: viaDeployment.id, deployedBranchId: viaDeployment.branchId } : {}) } });
     await emitToUsers(trx, actor, orgId, 'attendance.selfie_submitted', { type: 'selfie_checkin', id }, await lineManagerUserIds(trx, orgId, ctx.emp),
       { selfieId: id, employeeId: ctx.emp.id, employeeName: ctx.emp.displayName, direction: input.direction, at: now.toISOString(), verdict: evaluation.verdict });
     const row = (await withSystemScope(trx, orgId, (t) => t.selectFrom('selfieCheckins').select(SELFIE_COLUMNS).where('id', '=', id).executeTakeFirstOrThrow())) as SelfieRow;

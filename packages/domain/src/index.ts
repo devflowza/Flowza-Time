@@ -10,3 +10,4 @@ export * from './geofence/index.js';
 export * from './policy/compliance.js';
 export * from './policy/points.js';
 export * from './policy/overtime.js';
+export * from './scheduling/round-the-clock.js';

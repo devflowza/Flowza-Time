@@ -16,6 +16,8 @@ export type ErrorCode =
   | 'FEATURE_DISABLED'
   | 'PERIOD_LOCKED'
   | 'INVALID_STATE'
+  /** A well-formed request that breaks a business rule of the target (e.g. two shifts that cannot form one day): 422. */
+  | 'UNPROCESSABLE'
   | 'DEVICE_OFFLINE'
   | 'DEVICE_UNSUPPORTED_OPERATION'
   | 'PROVIDER_ERROR'
@@ -39,6 +41,7 @@ const HTTP_STATUS: Record<ErrorCode, number> = {
   FEATURE_DISABLED: 403,
   PERIOD_LOCKED: 409,
   INVALID_STATE: 409,
+  UNPROCESSABLE: 422,
   DEVICE_OFFLINE: 503,
   DEVICE_UNSUPPORTED_OPERATION: 422,
   PROVIDER_ERROR: 502,
@@ -96,6 +99,7 @@ export const errors = {
   notFound: (entity: string, id?: string) => new AppError('NOT_FOUND', `${entity} not found.`, id ? { details: { id } } : {}),
   conflict: (message: string, details?: Record<string, unknown>) => new AppError('CONFLICT', message, { details }),
   invalidState: (message: string, details?: Record<string, unknown>) => new AppError('INVALID_STATE', message, { details }),
+  unprocessable: (message: string, details?: Record<string, unknown>) => new AppError('UNPROCESSABLE', message, { details }),
   periodLocked: (message = 'The attendance period is locked.') => new AppError('PERIOD_LOCKED', message),
   entitlement: (metric: string, limit: number) => new AppError('ENTITLEMENT_EXCEEDED', `Your plan limit for ${metric} (${limit}) has been reached.`, { details: { metric, limit } }),
   /** The tenant's user limit (licensed employees, set by the platform): `adding` more would take `used` past `limit`. */

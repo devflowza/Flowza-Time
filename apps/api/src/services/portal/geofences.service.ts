@@ -68,6 +68,28 @@ export async function fencesForEmployee(trx: Trx, orgId: string, emp: Pick<Emplo
   });
 }
 
+/**
+ * The fences of a BRANCH as a place (Enterprise, temporary deployment — docs/enterprise/plan.md §4.7): the fences assigned to
+ * the branch (scope `branch`) and the fences that belong to it (`geofences.branch_id`), whatever else they are assigned to.
+ * All are judged as one branch-scope set (the domain rule: the worst verdict of the set wins), with the direction flags of
+ * their branch assignment (both directions for a fence that only belongs to the branch). System scope.
+ */
+export async function fencesForBranch(trx: Trx, orgId: string, branchId: string): Promise<GeofenceFence[]> {
+  return withSystemScope(trx, orgId, async (t) => {
+    const assigned = await t.selectFrom('geofenceAssignments as a').innerJoin('geofences as g', (j) => j.onRef('g.id', '=', 'a.geofenceId').onRef('g.organizationId', '=', 'a.organizationId'))
+      .select(['g.id', 'g.organizationId', 'g.branchId', 'g.name', 'g.latitude', 'g.longitude', 'g.radiusM', 'g.polygon', 'g.enforcement', 'g.accuracyThresholdM', 'g.graceM', 'g.activeFrom', 'g.activeTo', 'g.timeWindows', 'g.isActive', 'g.createdAt', 'g.updatedAt',
+        'a.priority', 'a.requireOnCheckIn', 'a.requireOnCheckOut'])
+      .where('a.organizationId', '=', orgId).where('a.scope', '=', 'branch').where('a.targetId', '=', branchId)
+      .orderBy('a.priority', 'asc').orderBy('g.name', 'asc').execute();
+    const seen = new Set(assigned.map((r) => r.id));
+    const owned = (await t.selectFrom('geofences').select(FENCE_COLUMNS).where('organizationId', '=', orgId).where('branchId', '=', branchId).orderBy('name', 'asc').execute()) as FenceRow[];
+    return [
+      ...assigned.map((r) => toFenceSpec(r as unknown as FenceRow, { scope: 'branch', priority: r.priority, requireOnCheckIn: r.requireOnCheckIn, requireOnCheckOut: r.requireOnCheckOut })),
+      ...owned.filter((f) => !seen.has(f.id)).map((f) => toFenceSpec(f, { scope: 'branch', priority: 100, requireOnCheckIn: true, requireOnCheckOut: true })),
+    ];
+  });
+}
+
 /** The punch-time evaluation for an employee at an instant (their branch's local time decides windows and active dates). */
 export function evaluateForEmployee(emp: Pick<EmployeeCtx, 'timezone'>, fences: readonly GeofenceFence[], input: { lat?: number | undefined; lng?: number | undefined; accuracy?: number | undefined; isMock?: boolean | undefined; direction: 'in' | 'out' }, policy: 'off' | 'flag' | 'block', at: Date): GeofenceEvaluation {
   const when = localInstant(at, emp.timezone);

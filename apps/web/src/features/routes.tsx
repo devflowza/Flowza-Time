@@ -19,6 +19,7 @@ import { teamRoutes } from './team/routes';
 import { attendanceReviewRoutes } from './attendance-review/routes';
 import { attendanceAdminRoutes } from './attendance-admin/routes';
 import { policiesRoutes } from './policies/routes';
+import { schedulingRoutes } from './scheduling/routes';
 
 /** Every feature exports its RouteObject[] from features/<name>/routes.tsx (lazy pages). */
 export const featureRoutes: RouteObject[] = [
@@ -28,4 +29,6 @@ export const featureRoutes: RouteObject[] = [
   ...attendanceReviewRoutes,
   ...attendanceAdminRoutes,
   ...policiesRoutes,
+  // Enterprise round-the-clock scheduling (module advanced_scheduling): /deployments
+  ...schedulingRoutes,
 ];
