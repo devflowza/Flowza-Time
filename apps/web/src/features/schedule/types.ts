@@ -12,7 +12,11 @@ export interface ShiftResolution {
   assignment: { id: string; targetType: string; targetId: string; shiftId: string | null; shiftPatternId: string | null; effectiveFrom: string; effectiveTo: string | null } | null;
   shift: ShiftDto | null; ruleSet: { id: string; name: string; branchId: string | null } | null; scope: { employeeId: string; teamIds: string[]; departmentId: string | null; branchId: string; organizationId: string };
 }
-export type RuleSetDto = AttendanceRuleSetInput & { id: string; version: number; createdAt: string; updatedAt: string };
+/**
+ * An attendance rule set = the attendance policy: its scope (branch; Enterprise: country, department, employee group, shift),
+ * the rules and the `policy` sections. `specificity` orders policies (shift 32 > group 16 > department 8 > branch 4 > country 2).
+ */
+export type RuleSetDto = AttendanceRuleSetInput & { id: string; version: number; specificity?: number; createdAt: string; updatedAt: string };
 /** `branchCount` = branches that picked this calendar (absent from an older API); the default also applies to branches without one. */
 export interface HolidayCalendarDto { id: string; name: string; countryCode: string | null; isDefault: boolean; holidayCount?: number; branchCount?: number; createdAt: string; updatedAt: string }
 export interface HolidayDto { id: string; calendarId: string; name: string; nameAr: string | null; date: string; endDate: string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; createdAt: string }

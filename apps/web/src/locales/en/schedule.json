@@ -82,5 +82,175 @@
     "empty": "No holidays in {{year}}", "emptyHint": "Add public, religious, company or regional holidays for this calendar.", "endDate": "End date", "endDateHint": "For multi-day holidays.", "type": "Type",
     "types": { "PUBLIC": "Public", "RELIGIOUS": "Religious", "COMPANY": "Company", "REGIONAL": "Regional" }, "halfDay": "Half day", "tentative": "Tentative", "tentativeHint": "(date to be confirmed, e.g. moon sighting)",
     "allBranches": "All branches", "branchScopeHint": "Turn off to limit this holiday to selected branches.", "addBranch": "Add branch…", "mark": "Mark a holiday", "markDate": "Mark as holiday", "calendar": "Calendar", "newDefaultCalendar": "No calendar yet — a default calendar will be created and applied to every branch without its own.", "defaultCalendarNote": "Added to the default calendar: it applies to every branch without a calendar of its own.", "appliesToNobody": "This calendar applies to nobody: it is not the default and no branch uses it, so its holidays change no attendance. Make it the default, or pick it for a branch under Organisation → Branches.", "makeDefault": "Make default", "madeDefault": "Now the default calendar", "usedBy": "{{count}} branch(es)", "recalcQueued": "Attendance on these days is being recalculated.", "noCalendarsMarkHint": "Mark a holiday to start — a default calendar is created for you. Add more calendars only if branches follow different holidays."
+  },
+  "policyEditor": {
+    "add": "Add attendance policy",
+    "edit": "Edit attendance policy",
+    "enterprise": "Enterprise",
+    "sectionsLabel": "Policy sections",
+    "hasErrors": "(has errors)",
+    "hasWarnings": "(has compliance warnings)",
+    "off": "Off",
+    "autoCheckout": "Auto checkout at shift end",
+    "invalidRepeatedLate": "Between 2 and 31 late arrivals within 7 to 90 days.",
+    "invalidEscalation": "Thresholds must increase from one step to the next, and each action can appear once.",
+    "addStep": "Add step",
+    "removeStep": "Remove step",
+    "noEscalation": "No escalation: points are reported only.",
+    "packApplied": "Filled in from the {{country}} pack ({{version}}). Review every figure.",
+    "tabs": {
+      "general": "General",
+      "late": "Late & early",
+      "attendance": "Attendance",
+      "overtime": "Overtime",
+      "discipline": "Discipline",
+      "regularisation": "Regularisation",
+      "ramadan": "Ramadan"
+    },
+    "sections": {
+      "grace": "Grace & thresholds",
+      "lateEscalation": "Very late and repeated late",
+      "lateEscalationHint": "Flags arrivals well after the start and counts repeated lateness for the points.",
+      "day": "Full and half day",
+      "dayHint": "Worked minutes needed for a full or a half day.",
+      "methods": "Check-in methods",
+      "methodsHint": "Which self-service check-ins employees on this policy may use (the organisation switches must allow them too).",
+      "overtimeLimits": "Weekly overtime, legal limits and rates",
+      "overtimeLimitsHint": "Used by the overtime summary and the payroll export; the engine's daily overtime is unchanged.",
+      "points": "Attendance points",
+      "pointsHint": "Points per occurrence, counted over a rolling window; reaching a threshold calls for the escalation step.",
+      "regularisation": "Regularisation limits",
+      "regularisationHint": "Limits on the employees' own regularisation requests."
+    },
+    "fields": {
+      "description": "Description",
+      "veryLateAfterMinutes": "Very late after (min from start)",
+      "repeatedLate": "Repeated late",
+      "repeatedLateOccurrences": "Late arrivals",
+      "repeatedLateDays": "Within (days)",
+      "methodWeb": "Web check-in",
+      "methodMobile": "Mobile check-in",
+      "methodSelfie": "Selfie check-in",
+      "requireGeofence": "Geofence requirement",
+      "weeklyThresholdMinutes": "Weekly overtime after (min)",
+      "maxDailyWorkMinutes": "Statutory daily maximum (min)",
+      "rates": "Overtime rates (× hourly wage)",
+      "pointsEnabled": "Count attendance points",
+      "expiryDays": "Points expire after (days)",
+      "escalation": "Escalation ladder",
+      "stepPoints": "At points",
+      "stepAction": "Action",
+      "maxPerMonth": "Max requests per month",
+      "backdateDays": "How many days back"
+    },
+    "hints": {
+      "veryLateAfterMinutes": "Measured from the scheduled start, not after the grace. Empty = off.",
+      "repeatedLate": "N late arrivals within D days count one repeated-late occurrence.",
+      "requireGeofence": "Inherit = Settings → Attendance.",
+      "missingPunchBehavior": "“Auto checkout at shift end” closes a day without a check-out at the end of the shift.",
+      "weeklyThresholdMinutes": "Worked minutes in a Monday–Sunday week beyond this, net of the daily overtime. Empty = off.",
+      "maxDailyWorkMinutes": "Days above it are reported in the overtime summary.",
+      "pointsEnabled": "Off: the points report shows this policy's employees with no points.",
+      "expiryDays": "A point counts for this many days, then drops off.",
+      "backdateDays": "A request may concern a day at most this many days ago."
+    },
+    "points": {
+      "late": "Late",
+      "veryLate": "Very late",
+      "earlyDeparture": "Early departure",
+      "absent": "Absent",
+      "missingPunch": "Missing punch",
+      "unexcused": "Unexcused",
+      "repeatedLate": "Repeated late"
+    },
+    "rates": {
+      "regular": "Regular",
+      "weekly": "Weekly",
+      "weeklyOff": "Weekly off",
+      "holiday": "Holiday"
+    },
+    "geofence": {
+      "inherit": "Inherit",
+      "off": "Not required",
+      "flag": "Flag outside",
+      "block": "Block outside"
+    },
+    "actions": {
+      "NOTIFY_MANAGER": "Notify manager",
+      "VERBAL_WARNING": "Verbal warning",
+      "WRITTEN_WARNING": "Written warning",
+      "FINAL_WARNING": "Final warning",
+      "HR_REVIEW": "HR review"
+    },
+    "scope": {
+      "title": "Who the policy is for",
+      "hint": "Every dimension you set must match; the most specific matching policy wins (shift > group > department > branch > country).",
+      "country": "Country",
+      "anyCountry": "Any country",
+      "department": "Department",
+      "anyDepartment": "Any department",
+      "group": "Employee group",
+      "anyGroup": "Any group",
+      "shift": "Shift",
+      "anyShift": "Any shift",
+      "immutable": "The scope of a policy cannot change; create a new policy instead."
+    },
+    "pack": {
+      "title": "Start from a country rule pack",
+      "hint": "Fills in the statutory day, overtime caps, weekly threshold, rates and Ramadan hours. Review every figure; sector and contract rules vary.",
+      "pick": "Country pack",
+      "placeholder": "Choose a country",
+      "applied": "From the {{country}} pack {{version}} — {{law}}, verified on {{verifiedOn}}.",
+      "from": "Created from the {{country}} pack {{version}}."
+    },
+    "compliance": {
+      "title": "Compliance with {{country}} law",
+      "noPack": "No rule pack for this country: nothing to check.",
+      "checking": "Checking…",
+      "none": "No warnings.",
+      "disclaimer": "Warnings, not rules: the figures are the general private-sector law. Confirm with counsel.",
+      "severity": {
+        "warning": "Warning",
+        "info": "Note"
+      },
+      "codes": {
+        "FULL_DAY_ABOVE_STATUTORY_DAY": "Full day of {{value}} min is longer than the statutory day of {{law}} min.",
+        "OVERTIME_CAP_MISSING": "No daily overtime cap: the law allows {{law}} min of overtime a day.",
+        "OVERTIME_CAP_ABOVE_LAW": "Daily overtime cap of {{value}} min is above the legal {{law}} min.",
+        "MAX_DAILY_WORK_MISSING": "No statutory daily maximum: the law caps a day's work at {{law}} min.",
+        "MAX_DAILY_WORK_ABOVE_LAW": "Daily maximum of {{value}} min is above the legal {{law}} min.",
+        "WEEKLY_THRESHOLD_MISSING": "No weekly overtime threshold: the statutory week is {{law}} min.",
+        "WEEKLY_THRESHOLD_ABOVE_LAW": "Weekly threshold of {{value}} min is above the statutory week of {{law}} min.",
+        "OVERTIME_RATE_BELOW_LAW": "Overtime rate ×{{value}} is below the legal minimum ×{{law}}.",
+        "RAMADAN_HOURS_ABOVE_LAW": "Ramadan day of {{value}} min is above the legal {{law}} min.",
+        "RAMADAN_NOT_CONFIGURED": "Ramadan hours are not set: the law reduces the day to {{law}} min.",
+        "SHIFT_LONGER_THAN_STATUTORY_DAY": "The shift's {{value}} scheduled minutes exceed the statutory day of {{law}} min."
+      }
+    }
+  },
+  "policyList": {
+    "hint": "Policies are effective-dated. Every dimension a policy names must match the employee on the date; the most specific matching policy wins, and without any the default rules apply.",
+    "scope": "Scope",
+    "specificity": "Specificity",
+    "specificityHint": "Shift 32, group 16, department 8, branch 4, country 2: the highest matching policy wins.",
+    "branch": "Branch",
+    "points": "Points"
+  },
+  "whichPolicy": {
+    "title": "Which policy applies?",
+    "hint": "Pick an employee and a date: where they sit, the policy the engine applies and why the others do not.",
+    "winner": "Applies:",
+    "specificity": "specificity {{n}}",
+    "defaults": "No policy matches: the default rules apply.",
+    "applies": "Applies",
+    "lessSpecific": "Matches, but a more specific policy wins",
+    "mismatch": {
+      "DATES": "Not in force on this date",
+      "COUNTRY": "Another country",
+      "BRANCH": "Another branch",
+      "DEPARTMENT": "Another department",
+      "EMPLOYEE_GROUP": "Another employee group",
+      "SHIFT": "Another shift"
+    }
   }
 }

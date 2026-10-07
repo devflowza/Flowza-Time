@@ -17,6 +17,8 @@ import attendanceAdminEn from '@/locales/en/attendance-admin.json';
 import attendanceAdminAr from '@/locales/ar/attendance-admin.json';
 import { usePendingCounts, useTeamAccess } from '@/features/team/api';
 import '@/features/team/i18n';
+import '@/features/policies/i18n';
+import { Scale } from 'lucide-react';
 
 registerNamespace('portal', portalEn, portalAr);
 // HR portal Prompt 4: check-in / requests / shift entries and the reasons / geofences review pages
@@ -120,6 +122,8 @@ export function Sidebar() {
     { label: t('nav.sections.time'), items: [
       { to: '/shifts', label: t('nav.shifts'), icon: CalendarDays, permissions: ['shift.view'] },
       { to: '/holidays', label: t('nav.holidays'), icon: CalendarOff, permissions: ['holiday.view'] },
+      // Enterprise: global attendance policies (employee groups, points & discipline, overtime summary, country packs)
+      { to: '/attendance/policies', label: t('policies:nav.policies'), icon: Scale, permissions: ['attendance.view'], modules: ['attendance_policies'] },
       { to: '/reports', label: t('nav.reports'), icon: BarChart3, permissions: ['report.view'] },
       { to: '/payroll', label: t('nav.payroll'), icon: Wallet, permissions: ['payroll.view'], modules: ['payroll'] },
     ] },

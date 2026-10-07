@@ -2,7 +2,7 @@ import { sql } from 'kysely';
 import type { z } from 'zod';
 import { isDefaultPolicySections, policySectionsEqual, policySectionsOf, type AttendancePolicySections, type AttendanceRuleSetInput, type HolidayInput, type ShiftAssignmentInput, type ShiftInput, type ShiftPatternInput, type holidayCalendarInputSchema } from '@flowza/contracts';
 import { resolvePolicyFor, type Trx } from '@flowza/database';
-import { resolveShift, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
+import { policySpecificity, resolveShift, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
@@ -437,7 +437,10 @@ export { assertLeaveRangeUnlocked, assertNoLeaveOverlap, createLeaveRecord, crea
  */
 export interface RuleSetDto extends Record<string, unknown> {
   id: string; name: string; description: string; branchId: string | null; countryCode: string | null; departmentId: string | null; employeeGroupId: string | null; shiftId: string | null;
-  effectiveFrom: string; effectiveTo: string | null; policy: AttendancePolicySections; version: number; createdAt: string; updatedAt: string;
+  effectiveFrom: string; effectiveTo: string | null; policy: AttendancePolicySections;
+  /** Higher = more specific (shift 32, employee group 16, department 8, branch 4, country 2; packages/domain policySpecificity). */
+  specificity: number;
+  version: number; createdAt: string; updatedAt: string;
 }
 const RULE_KEYS = ['graceInMinutes', 'graceOutMinutes', 'lateThresholdMinutes', 'earlyDepartureThresholdMinutes', 'minFullDayMinutes', 'halfDayThresholdMinutes', 'overtimeEnabled', 'overtimeStartAfterMinutes', 'overtimeMinBlockMinutes', 'overtimeRoundingMinutes', 'overtimeMaxMinutesPerDay', 'countEarlyInAsOvertime', 'overtimeRequiresScheduledHours', 'punchRoundingMinutes', 'punchRoundingMode', 'workedRoundingMinutes', 'workedRoundingMode', 'punchInterpretation', 'duplicatePunchWindowSeconds', 'missingPunchBehavior', 'autoAbsentWithoutPunches', 'weeklyOffWorkCountsAsOvertime', 'holidayWorkCountsAsOvertime', 'ramadanMode'] as const;
 /** The scope dimensions beyond the branch: Enterprise (attendance_policies). Every scope dimension is immutable once created. */
@@ -447,8 +450,9 @@ type RuleSetRow = Record<string, unknown> & { id: string; name: string; descript
 function toRuleSetDto(r: RuleSetRow): RuleSetDto {
   const out: RuleSetDto = {
     id: r.id, name: r.name, description: r.description ?? '', branchId: r.branchId, countryCode: r.countryCode?.trim() || null, departmentId: r.departmentId ?? null, employeeGroupId: r.employeeGroupId ?? null, shiftId: r.shiftId ?? null,
-    effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: isoDateOrNull(r.effectiveTo), policy: policySectionsOf(r.policy), version: r.version, createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt),
+    effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: isoDateOrNull(r.effectiveTo), policy: policySectionsOf(r.policy), specificity: 0, version: r.version, createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt),
   };
+  out.specificity = policySpecificity({ ...out, id: out.id });
   for (const k of RULE_KEYS) out[k] = k === 'ramadanMode' ? jsonObject(r[k]) : r[k];
   return out;
 }

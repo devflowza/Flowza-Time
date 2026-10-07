@@ -1,5 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from 'kysely';
+import { withContext } from '@flowza/database';
+import { employeePolicyOn } from '../services/policies/enforcement.js';
 import { auditRows, createApiHarness, queueJobs, ROLE, seedMembership, seedOrg, seedUser, uuid, type ApiHarness, type OrgFixture } from './features-harness.js';
 
 /*
@@ -249,6 +251,14 @@ describe('scoped policies, resolution and compliance', () => {
     const names = scoped.body.data.candidates.map((c: { name: string }) => c.name);
     expect(names).not.toContain('Branch A'); // another branch's policy is not theirs to read
     expect(names).toEqual(expect.arrayContaining(['Branch B', 'Organisation default', 'Operations']));
+  });
+
+  it('the self-service endpoints can read the policy of the employee from the employee\'s own context', async () => {
+    // the employee cannot read the rule sets themselves (no attendance.view): the helper resolves in the system scope
+    const own = await withContext(h.deps.db, { kind: 'user', userId: f.employeeUser, requestId: 'policy-self' }, (trx) => employeePolicyOn(trx, f.orgId, f.e1, '2026-03-10'));
+    expect(own?.row?.id).toBe(deptPolicy);
+    const visible = await withContext(h.deps.db, { kind: 'user', userId: f.employeeUser, requestId: 'policy-self' }, (trx) => trx.selectFrom('attendanceRuleSets').select('id').execute());
+    expect(visible).toEqual([]);
   });
 
   it('country packs and the compliance check of a draft', async () => {
