@@ -7,6 +7,7 @@
 import { z } from 'zod';
 import { SHIFT_CHANGE_KINDS, SHIFT_CHANGE_STATUSES, type ApprovalRequestStatus, type ShiftChangeKind, type ShiftChangeStatus } from '../enums.js';
 import { isoDateSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import type { SelfShiftDayDto } from '../dto/portal-attendance.js';
 
 /** How far ahead a change may be asked for, and the longest range one request may cover (days, inclusive). */
 export const SHIFT_CHANGE_AHEAD_DAYS = 180;
@@ -36,6 +37,18 @@ export const cancelShiftChangeSchema = z.object({ reason: z.string().trim().min(
 
 /** The shifts an employee may ask for (active shifts of the organisation), with the one they work on the first day. */
 export const shiftChangeOptionsQuerySchema = z.object({ date: isoDateSchema });
+
+/** One active shift of the organisation an employee may ask for (GET /me/shift-changes/options). */
+export interface ShiftChangeOptionDto {
+  id: string; code: string; name: string; nameAr: string | null; type: 'FIXED' | 'FLEXIBLE';
+  startTime: string | null; endTime: string | null; crossesMidnight: boolean; color: string | null;
+}
+export interface ShiftChangeOptionsDto {
+  date: string;
+  /** What the employee works on `date` (the engine's resolution; null fields when nothing resolves). */
+  current: Omit<SelfShiftDayDto, 'swap'>;
+  shifts: ShiftChangeOptionDto[];
+}
 
 export interface ShiftChangeRequestDto {
   id: string; kind: ShiftChangeKind; status: ShiftChangeStatus;
