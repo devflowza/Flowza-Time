@@ -16,6 +16,13 @@ export const additionalShiftAssignmentInputSchema = z.object({
 }).refine((v) => !v.effectiveTo || v.effectiveTo >= v.effectiveFrom, { message: 'The last day cannot be before the first day', path: ['effectiveTo'] });
 export type AdditionalShiftAssignmentInput = z.infer<typeof additionalShiftAssignmentInputSchema>;
 export const additionalShiftAssignmentUpdateSchema = z.object({ effectiveTo: isoDateSchema.nullable() });
+/** An open-ended additional assignment is checked against the employee's shifts over its first this many days. */
+export const ADDITIONAL_SHIFT_CHECK_DAYS = 92;
+/** Why an additional shift cannot be combined with the day's shift (packages/domain composeDoubleShift), or is refused outright. */
+export const ADDITIONAL_SHIFT_REFUSALS = ['SAME_SHIFT', 'NOT_FIXED', 'OVERLAP', 'TOO_LONG', 'INACTIVE'] as const;
+export type AdditionalShiftRefusal = (typeof ADDITIONAL_SHIFT_REFUSALS)[number];
+/** `details` of the 422 refusing an additional shift assignment: the first conflicting dates (at most 10). */
+export interface AdditionalShiftConflictDetails { reason: AdditionalShiftRefusal; conflicts: Array<{ date: string; reason: AdditionalShiftRefusal; shiftId: string | null }> }
 export const additionalShiftAssignmentListQuerySchema = paginationQuerySchema.extend({
   employeeId: uuidSchema.optional(),
   shiftId: uuidSchema.optional(),
@@ -106,7 +113,11 @@ export interface RoundTheClockPlanDto {
   /** Average weekly hours per crew member over the full cycle. */
   averageWeeklyHours: number;
 }
-export interface RoundTheClockResultDto { plan: RoundTheClockPlanDto; shiftIds: string[]; patternIds: string[]; assignmentIds: string[]; coverageIds: string[] }
+export interface RoundTheClockResultDto {
+  plan: RoundTheClockPlanDto; shiftIds: string[]; patternIds: string[]; assignmentIds: string[]; coverageIds: string[];
+  /** The recalculation of the crews' past days (a queue job id, NOT a sync job: the attendance pages track it). */
+  recalculationJobId?: string | null;
+}
 
 // ----- coverage --------------------------------------------------------------------------------------------------------------
 
@@ -117,12 +128,18 @@ export const shiftCoverageInputSchema = z.object({
   minHeadcount: z.number().int().min(1).max(10000),
 });
 export type ShiftCoverageInput = z.infer<typeof shiftCoverageInputSchema>;
-export const shiftCoverageUpdateSchema = z.object({ weekdays: weeklyOffDaysSchema.min(1).optional(), minHeadcount: z.number().int().min(1).max(10000).optional() });
+export const shiftCoverageUpdateSchema = z.object({
+  weekdays: weeklyOffDaysSchema.min(1).refine((a) => new Set(a).size === a.length, { message: 'Each weekday once' }).optional(),
+  minHeadcount: z.number().int().min(1).max(10000).optional(),
+});
 export const shiftCoverageListQuerySchema = z.object({ branchId: uuidSchema.optional(), shiftId: uuidSchema.optional() });
 export interface ShiftCoverageDto { id: string; branchId: string; shiftId: string; shiftName: string | null; weekdays: number[]; minHeadcount: number; createdAt: string; updatedAt: string }
 /** Scheduled head count vs the targets per day and shift (rotation patterns, assignments, double shifts; leave and offs excluded). */
+/** The coverage report spans at most this many days. */
+export const SHIFT_COVERAGE_REPORT_MAX_DAYS = 62;
 export const shiftCoverageReportQuerySchema = z.object({ branchId: uuidSchema, from: isoDateSchema, to: isoDateSchema })
-  .refine((v) => v.to >= v.from, { message: 'The last day cannot be before the first day', path: ['to'] });
+  .refine((v) => v.to >= v.from, { message: 'The last day cannot be before the first day', path: ['to'] })
+  .refine((v) => (Date.parse(`${v.to}T00:00:00Z`) - Date.parse(`${v.from}T00:00:00Z`)) / 86_400_000 < SHIFT_COVERAGE_REPORT_MAX_DAYS, { message: `At most ${SHIFT_COVERAGE_REPORT_MAX_DAYS} days`, path: ['to'] });
 export interface ShiftCoverageReportDto {
   branchId: string; from: string; to: string;
   shifts: Array<{ id: string; code: string; name: string; startTime: string | null; endTime: string | null }>;

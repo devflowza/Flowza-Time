@@ -8,3 +8,4 @@ export * from './leave/rules.js';
 export * from './approvals/index.js';
 export * from './geofence/index.js';
 export * from './policy/compliance.js';
+export * from './scheduling/round-the-clock.js';

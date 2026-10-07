@@ -15,6 +15,7 @@ import { registerLeaveRoutes } from './leave.js';
 import { registerTeamRoutes } from './team.js';
 import { registerAttendanceAdminRoutes } from './attendance-admin.js';
 import { registerRosterRoutes } from './roster.js';
+import { registerSchedulingRoutes } from './scheduling.js';
 
 /**
  * Feature modules: devices (+ groups, pending), sync, attendance (+ corrections, recalculation, period locks, day marks),
@@ -37,4 +38,6 @@ export function registerFeatureRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   registerTeamRoutes(v1, deps);
   registerAttendanceAdminRoutes(v1, deps);
   registerRosterRoutes(v1, deps);
+  // Enterprise round-the-clock scheduling (module advanced_scheduling): templates, coverage, double shifts, branch deployments
+  registerSchedulingRoutes(v1, deps);
 }

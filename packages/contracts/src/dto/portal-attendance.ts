@@ -73,7 +73,9 @@ export const selfPunchStatusQuerySchema = z.object({ channel: z.enum(SELF_PUNCH_
 export interface SelfPunchDto { id: string; punchedAt: string; direction: string; source: string; channel: SelfPunchChannel | null; verdict: GeofenceVerdict | null; deviceName: string | null; processingStatus: string }
 
 /** Why a self-service punch was refused (details.reason of the 403 / 409). */
-export const SELF_PUNCH_REFUSALS = ['WEB_CHECKIN_DISABLED', 'MOBILE_CHECKIN_DISABLED', 'IP_NOT_ALLOWED', 'OUT_OF_WINDOW', 'OUTSIDE_GEOFENCE', 'MOCK_LOCATION', 'SELFIE_REQUIRED', 'DUPLICATE_PUNCH', 'ALREADY_CHECKED_IN', 'NOT_CHECKED_IN', 'PERIOD_LOCKED', 'NOT_ACTIVE'] as const;
+export const SELF_PUNCH_REFUSALS = ['WEB_CHECKIN_DISABLED', 'MOBILE_CHECKIN_DISABLED', 'IP_NOT_ALLOWED', 'OUT_OF_WINDOW', 'OUTSIDE_GEOFENCE', 'MOCK_LOCATION', 'SELFIE_REQUIRED', 'DUPLICATE_PUNCH', 'ALREADY_CHECKED_IN', 'NOT_CHECKED_IN', 'PERIOD_LOCKED', 'NOT_ACTIVE',
+  /** The employee's attendance policy (`policy.methods`, Enterprise) does not allow this channel (web / mobile / selfie). */
+  'CHECKIN_METHOD_NOT_ALLOWED'] as const;
 export type SelfPunchRefusal = (typeof SELF_PUNCH_REFUSALS)[number];
 
 export interface SelfPunchStatusDto {
@@ -109,6 +111,11 @@ export interface SelfPunchStatusDto {
    * today's record exists. Absent from an older API.
    */
   shift?: SelfShiftTodayDto;
+  /**
+   * A temporary deployment to another branch covering today (Enterprise, advanced_scheduling): the check-in also accepts that
+   * branch's geofences. Null when none; absent from an older API.
+   */
+  deployment?: { branchId: string; branchName: string | null; toDate: string } | null;
 }
 
 /** The shift of one day as the check-in page shows it (the shift tab's day without the swap). */
