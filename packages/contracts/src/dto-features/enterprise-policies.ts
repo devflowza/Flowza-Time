@@ -6,8 +6,40 @@
 import { z } from 'zod';
 import { RECORD_STATUSES } from '../enums.js';
 import { codeSchema, isoDateSchema, paginationQuerySchema, uuidSchema } from '../common.js';
-import type { AttendancePointKind, DisciplineAction } from '../attendance.js';
+import { attendancePolicySectionsSchema, DEFAULT_POLICY_SECTIONS, type AttendancePointKind, type AttendancePolicySections, type DisciplineAction } from '../attendance.js';
 import { updateSchemaOf } from './devices.js';
+
+// ----- the stored policy sections -------------------------------------------------------------------------------------------
+
+/**
+ * The policy sections of a stored row (`attendance_rule_sets.policy`), defaults filled in. Never throws: a section that no
+ * longer validates (a row written before a rule tightened) falls back to its defaults section by section, so one bad value
+ * cannot hide the rest of the policy — or fail the list it is shown in.
+ */
+export function policySectionsOf(raw: unknown): AttendancePolicySections {
+  let value: unknown = raw;
+  if (typeof value === 'string') { try { value = JSON.parse(value); } catch { value = {}; } }
+  const parsed = attendancePolicySectionsSchema.safeParse(value ?? {});
+  if (parsed.success) return parsed.data;
+  const stored = value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : {};
+  const kept: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(attendancePolicySectionsSchema.shape)) {
+    const one = (schema as z.ZodType).safeParse(stored[key]);
+    if (one.success && one.data !== undefined) kept[key] = one.data;
+  }
+  const salvaged = attendancePolicySectionsSchema.safeParse(kept);
+  return salvaged.success ? salvaged.data : DEFAULT_POLICY_SECTIONS;
+}
+
+/** Same sections once defaults are filled in (key order is the schema's, so the serialisations compare). */
+export function policySectionsEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(policySectionsOf(a)) === JSON.stringify(policySectionsOf(b));
+}
+
+/** True when the sections are the contract defaults — what an organisation without attendance_policies may store. */
+export function isDefaultPolicySections(sections: unknown): boolean {
+  return policySectionsEqual(sections, DEFAULT_POLICY_SECTIONS);
+}
 
 // ----- employee groups ------------------------------------------------------------------------------------------------------
 
@@ -53,6 +85,10 @@ export interface EmployeeGroupMemberDto {
   /** Inclusive last day, null = open-ended. */
   effectiveTo: string | null;
 }
+/** A membership ended because the employee joined another group (or the same group again) from a later date. */
+export interface EndedEmployeeGroupMembershipDto { id: string; employeeGroupId: string; employeeId: string; effectiveFrom: string; effectiveTo: string }
+/** POST /employee-groups/:id/members — the memberships created, those ended to make room, the recalculation queued (if any). */
+export interface EmployeeGroupMembersResultDto { added: EmployeeGroupMemberDto[]; ended: EndedEmployeeGroupMembershipDto[]; recalculationJobId: string | null }
 
 // ----- policy resolution ----------------------------------------------------------------------------------------------------
 
@@ -105,10 +141,14 @@ export const attendancePointsQuerySchema = paginationQuerySchema.extend({
   /** Only employees with at least this many points. */
   minPoints: z.coerce.number().min(0).max(1000).optional(),
 });
+/** GET /attendance-policies/points/:employeeId — one employee's standing and its events. */
+export const attendancePointsDetailQuerySchema = z.object({ asOf: isoDateSchema.optional() });
 export interface AttendancePointEventDto { date: string; kind: AttendancePointKind; points: number; expiresOn: string; policyId: string | null }
 export interface AttendancePointsRowDto {
   employeeId: string; employeeNumber: string; displayName: string; branchId: string;
   policyId: string | null; policyName: string | null;
+  /** False when the employee's policy has points switched off (then `points` is 0 and nothing is counted). */
+  pointsEnabled: boolean;
   points: number;
   occurrences: Record<AttendancePointKind, number>;
   /** The highest escalation step reached (null = none) and the next one. */
@@ -116,6 +156,8 @@ export interface AttendancePointsRowDto {
   nextEscalation: { action: DisciplineAction; threshold: number } | null;
 }
 export interface AttendancePointsDetailDto extends AttendancePointsRowDto { asOf: string; windowFrom: string; events: AttendancePointEventDto[] }
+/** `meta` of the points list: the date the standing is computed on. */
+export interface AttendancePointsListMeta { asOf: string }
 
 // ----- overtime summary ----------------------------------------------------------------------------------------------------
 
