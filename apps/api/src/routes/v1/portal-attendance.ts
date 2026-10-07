@@ -3,7 +3,7 @@ import {
   attendanceGrantsInputSchema, attendanceNotesQuerySchema, geofenceAssignmentsInputSchema, geofenceEvaluateSchema, geofenceInputSchema, geofenceListQuerySchema, geofenceUpdateSchema, noteReviewSchema,
   portalCancelSchema, selfieListQuerySchema, selfieReviewSchema, SELFIE_MAX_BYTES, selfNoteInputSchema, selfNotesQuerySchema, selfNoteUpdateSchema, selfPunchPreviewSchema, selfPunchSchema,
   selfPunchStatusQuerySchema, selfRegularisationInputSchema, selfRegularisationsQuerySchema, selfSelfieFormSchema, selfSelfieSchema, selfShiftSwapInputSchema, selfShiftSwapsQuerySchema,
-  selfStatsQuerySchema, swapCandidatesQuerySchema,
+  selfStatsQuerySchema, swapCandidatesQuerySchema, cancelShiftChangeSchema, selfShiftChangeInputSchema, selfShiftChangesQuerySchema, shiftChangeListQuerySchema, shiftChangeOptionsQuerySchema,
 } from '@flowza/contracts';
 import { AppError, errors } from '@flowza/shared';
 import type { AppEnv } from '../../middleware/request-context.js';
@@ -17,12 +17,13 @@ import * as notes from '../../services/portal/notes.service.js';
 import * as punch from '../../services/portal/punch.service.js';
 import * as regularisations from '../../services/portal/regularisations.service.js';
 import * as shift from '../../services/portal/shift.service.js';
+import * as shiftChanges from '../../services/portal/shift-change.service.js';
 import * as stats from '../../services/portal/stats.service.js';
 
 /**
  * Employee-portal attendance (HR portal Prompt 4). `/orgs/:orgId/me/…` acts on the caller's own employee record (never an id
  * from the client): check-in / check-out with geofence verdicts, the selfie check-in, reasons for days, regularisations,
- * the shift tab + swaps, own statistics. The manager / HR side: the notes review list and decisions, selfie review, the
+ * the shift tab + swaps + shift change requests (Enterprise), own statistics. The manager / HR side: the notes review list and decisions, selfie review, the
  * per-employee attendance grants and the geofences (+ assignments, dry-run evaluation).
  */
 export function registerPortalAttendanceRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
@@ -74,6 +75,14 @@ export function registerPortalAttendanceRoutes(v1: Hono<AppEnv>, deps: ApiDeps):
   v1.get('/orgs/:orgId/me/shift-swaps', async (c) => ok(c, await shift.listMySwaps(deps, actorOf(c, deps), param(c, 'orgId'), query(c, selfShiftSwapsQuerySchema))));
   v1.post('/orgs/:orgId/me/shift-swaps', async (c) => created(c, await shift.requestSwap(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, selfShiftSwapInputSchema))));
   v1.post('/orgs/:orgId/me/shift-swaps/:id/cancel', async (c) => ok(c, await shift.cancelMySwap(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), (await optionalBody(c, portalCancelSchema)).reason)));
+
+  // ----- shift change requests (Enterprise, module shift_requests — the module gate closes these routes when it is off)
+  v1.get('/orgs/:orgId/me/shift-changes/options', async (c) => ok(c, await shiftChanges.getShiftChangeOptions(deps, actorOf(c, deps), param(c, 'orgId'), query(c, shiftChangeOptionsQuerySchema))));
+  v1.get('/orgs/:orgId/me/shift-changes', async (c) => ok(c, await shiftChanges.listMyShiftChanges(deps, actorOf(c, deps), param(c, 'orgId'), query(c, selfShiftChangesQuerySchema))));
+  v1.post('/orgs/:orgId/me/shift-changes', async (c) => created(c, await shiftChanges.requestShiftChange(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, selfShiftChangeInputSchema))));
+  v1.post('/orgs/:orgId/me/shift-changes/:id/cancel', async (c) => ok(c, await shiftChanges.cancelMyShiftChange(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), (await optionalBody(c, cancelShiftChangeSchema)).reason)));
+  // HR (attendance.view, branch scope) / line manager (attendance.view_team): the list; decisions go through /approvals
+  v1.get('/orgs/:orgId/shift-change-requests', async (c) => { const q = query(c, shiftChangeListQuerySchema); const r = await shiftChanges.listShiftChangeRequests(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
 
   // ----- own statistics
   v1.get('/orgs/:orgId/me/stats', async (c) => ok(c, await stats.getMyStats(deps, actorOf(c, deps), param(c, 'orgId'), query(c, selfStatsQuerySchema))));
