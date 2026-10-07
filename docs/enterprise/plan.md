@@ -115,12 +115,30 @@ What the benchmark settles:
 
    The attendance calendar, payroll and data scope stay with the home branch. A permanent move is a transfer
    (`employment_history`), as before.
+
+   **Its window is the HOST branch's time** (`packages/domain/src/scheduling/deployment-window.ts`; review fixes of
+   2026-10-07):
+   - **Host fences** are the fences ASSIGNED to the host branch with scope `branch` — what the host's own staff get — with
+     each assignment's check-in / check-out flags. A fence the host merely owns (`geofences.branch_id`) for someone else
+     (an employee's home, a team's client site) is neither judged nor shown.
+   - **Check-in coverage:** from `fromDate` through `toDate`, plus `toDate + 1` until 12:00 host time, so a night shift
+     that starts on the last day (22:00 → 06:00) can check out at the host the next morning.
+   - **Terminals are enrolled on the first day, never before:** at creation when the deployment starts today, else by the
+     daily sweep when the host's date reaches `fromDate`. Terminals the employee is already on (another path) are neither
+     pushed nor recorded; `enrolled_device_ids` lists the ones the deployment added.
+   - **Terminals are removed from those `enrolled_device_ids` only**, once the host's date is at least `toDate + 2` (the
+     morning after stays covered), or at once on cancellation. They are kept when the host is now the employee's branch,
+     and handed over to another deployment of the employee to the same host that asks for terminals and covers the host's
+     today (its own end or cancellation removes them). A cancellation always runs the clean-up, and the sweep picks up
+     every cancelled deployment that is not cleaned up, whether or not it had an enrolment job.
+   - The sweep is enqueued when a local day begins in the organisation's timezone or in any of its branches'.
 8. **Module gating has three layers, as for every module** (docs/pricing.md):
    - **API gate:** route prefixes in `module-gate.ts`, plus `requireModuleFor` for body-level features on core routes
      (a scoped policy, an ADDITIONAL change).
    - **Web:** `RequireModule`, sidebar, tabs.
-   - **Worker:** nothing is gated. The deployment clean-up (removing an employee from the host branch's terminals) is an
-     access removal, so it runs whatever the module state; host-branch check-in, which widens access, follows the module.
+   - **Worker:** the deployment clean-up (removing an employee from the host branch's terminals) is an access removal, so
+     it runs whatever the module state. What widens access follows the module: the host-branch check-in (API) and the
+     sweep's first-day enrolment on the host terminals.
 
    Switching a module off never deletes data. The engine keeps applying stored scoped policies and double shifts, so a
    downgrade never silently changes calculated attendance or payroll.
@@ -163,7 +181,8 @@ What the benchmark settles:
 - Written by the system step only. Read like swaps: `attendance.view` by branch, own rows, or the line manager's team.
 
 `employee_branch_deployments`:
-- Columns: home and host branch, inclusive range, reason, enrol and cleanup jobs, cancellation.
+- Columns: home and host branch, inclusive range, reason, enrol and cleanup jobs, cancellation, and the host terminals the
+  deployment enrolled the employee on (`enrolled_device_ids`, migration `20261007000200`: the clean-up touches these only).
 - No overlapping active deployments for an employee.
 - Written by the system step only. Readable in the host or home branch scope and by the employee.
 
