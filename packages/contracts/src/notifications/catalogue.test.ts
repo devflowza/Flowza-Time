@@ -221,6 +221,8 @@ describe('approval notification facts', () => {
     expect(approvalContextFacts({ kind: 'ATTENDANCE_CORRECTION', correction: { id: REQ, attendanceDate: '2026-09-12', type: 'ADD_PUNCH', originalPunchedAt: null, proposedPunchedAt: null, proposedEventType: null, proposedStatus: null, reason: 'x', status: 'PENDING', requestedBy: null, rejectionReason: null } }))
       .toEqual({ date: '2026-09-12', endDate: null, leaveTypeName: null });
     expect(approvalContextFacts({ kind: 'SHIFT_SWAP', summary: null, swap: { id: REQ, swapDate: '2026-09-20', requesterName: null, targetName: null, requesterShiftName: null, targetShiftName: null, reason: 'x', status: 'pending' } }).date).toBe('2026-09-20');
+    expect(approvalContextFacts({ kind: 'SHIFT_CHANGE', summary: null, change: { id: REQ, kind: 'CHANGE', fromDate: '2026-10-12', toDate: '2026-10-14', employeeName: null, requestedShiftName: null, currentShiftName: null, reason: 'x', status: 'pending' } }))
+      .toEqual({ date: '2026-10-12', endDate: '2026-10-14', leaveTypeName: null });
     expect(approvalContextFacts({ kind: 'COMP_OFF', compOff: { id: REQ, workedOn: '2026-09-05', workedOnType: 'weekly_off', workedMinutes: 480, recordedMinutes: null, daysEarned: 1, location: 'HQ', summary: 'x', status: 'pending_approval' } }).date).toBe('2026-09-05');
     expect(approvalContextFacts({ kind: 'GENERIC', entityType: 'OVERTIME_CLAIM', summary: 'x' })).toEqual({ date: null, endDate: null, leaveTypeName: null });
     expect(approvalContextFacts(null)).toEqual({ date: null, endDate: null, leaveTypeName: null });

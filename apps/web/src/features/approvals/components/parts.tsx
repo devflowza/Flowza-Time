@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { ArrowLeftRight, CalendarOff, Clock, FileQuestion, MessageSquareText } from 'lucide-react';
+import { ArrowLeftRight, CalendarOff, Clock, FileQuestion, MessageSquareText, Repeat } from 'lucide-react';
 import type { ApprovalContextDto, ApprovalEntity, ApprovalRequestDto, ApprovalRequestStatus, ApprovalStepDto } from '@flowza/contracts';
 import { Badge } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -11,6 +11,7 @@ import { AR_NS } from '@/features/attendance-review/i18n';
 import { AttendanceStatusBadge, FlagChips } from '@/features/attendance/components/badges';
 import { fmtTime } from '@/lib/format';
 import { CompOffApprovalContext } from '@/features/leave/components/comp-off-context';
+import { ShiftChangeApprovalContext } from '@/features/shift-requests/components/approval-context';
 
 const STATUS_TONE: Record<string, 'warning' | 'success' | 'danger' | 'neutral'> = { PENDING: 'warning', APPROVED: 'success', REJECTED: 'danger', CANCELLED: 'neutral', INVALIDATED: 'neutral', SKIPPED: 'neutral' };
 
@@ -21,7 +22,7 @@ export function RequestStatusBadge({ status }: { status: ApprovalRequestStatus |
 
 export function EntityIcon({ entityType, className }: { entityType: ApprovalEntity; className?: string }) {
   const Icon = entityType === 'LEAVE' || entityType === 'COMP_OFF' ? CalendarOff : entityType === 'ATTENDANCE_CORRECTION' || entityType === 'MISSING_PUNCH' || entityType === 'REGULARISATION' ? Clock
-    : entityType === 'ATTENDANCE_NOTE' ? MessageSquareText : entityType === 'SHIFT_SWAP' ? ArrowLeftRight : FileQuestion;
+    : entityType === 'ATTENDANCE_NOTE' ? MessageSquareText : entityType === 'SHIFT_SWAP' ? ArrowLeftRight : entityType === 'SHIFT_CHANGE' ? Repeat : FileQuestion;
   const tone = entityType === 'LEAVE' || entityType === 'COMP_OFF' ? 'bg-chart-leave/12 text-chart-leave' : 'bg-chart-late/12 text-chart-late';
   return <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-lg', tone, className)} aria-hidden><Icon className="size-4" /></span>;
 }
@@ -71,6 +72,8 @@ export function ApprovalContext({ context, timezone, compact = false }: { contex
   if (context.kind === 'ATTENDANCE_NOTE' || context.kind === 'REGULARISATION' || context.kind === 'SHIFT_SWAP') return <PortalRequestContext context={context} timezone={timezone} compact={compact} />;
   // leave v2: a comp-off credit request (the day worked, hours claimed vs recorded, days earned)
   if (context.kind === 'COMP_OFF') return <CompOffApprovalContext c={context.compOff} compact={compact} />;
+  // Enterprise (shift_requests): a shift change or an additional (double) shift over a range
+  if (context.kind === 'SHIFT_CHANGE') return <ShiftChangeApprovalContext context={context} compact={compact} />;
   return <p className="text-sm text-muted-foreground">{context.summary ?? t('context.noDetails')}</p>;
 }
 
