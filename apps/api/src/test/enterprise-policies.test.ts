@@ -1,7 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { sql } from 'kysely';
 import { withContext } from '@flowza/database';
-import { employeePolicyOn } from '../services/policies/enforcement.js';
+import { withSystemScope } from '../lib/service.js';
+import { policiesOn } from '../services/policies/placement.js';
 import { auditRows, createApiHarness, queueJobs, ROLE, seedMembership, seedOrg, seedUser, uuid, type ApiHarness, type OrgFixture } from './features-harness.js';
 
 /*
@@ -254,8 +255,8 @@ describe('scoped policies, resolution and compliance', () => {
   });
 
   it('the self-service endpoints can read the policy of the employee from the employee\'s own context', async () => {
-    // the employee cannot read the rule sets themselves (no attendance.view): the helper resolves in the system scope
-    const own = await withContext(h.deps.db, { kind: 'user', userId: f.employeeUser, requestId: 'policy-self' }, (trx) => employeePolicyOn(trx, f.orgId, f.e1, '2026-03-10'));
+    // the employee cannot read the rule sets themselves (no attendance.view): the self-service endpoints resolve in the system scope
+    const own = await withContext(h.deps.db, { kind: 'user', userId: f.employeeUser, requestId: 'policy-self' }, (trx) => withSystemScope(trx, f.orgId, async (t) => (await policiesOn(t, f.orgId, [f.e1], '2026-03-10')).get(f.e1)));
     expect(own?.row?.id).toBe(deptPolicy);
     const visible = await withContext(h.deps.db, { kind: 'user', userId: f.employeeUser, requestId: 'policy-self' }, (trx) => trx.selectFrom('attendanceRuleSets').select('id').execute());
     expect(visible).toEqual([]);

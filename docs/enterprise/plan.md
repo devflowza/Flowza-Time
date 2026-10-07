@@ -119,7 +119,8 @@ What the benchmark settles:
    - **API gate:** route prefixes in `module-gate.ts`, plus `requireModuleFor` for body-level features on core routes
      (a scoped policy, an ADDITIONAL change).
    - **Web:** `RequireModule`, sidebar, tabs.
-   - **Worker:** the deployment cleanup scan is gated.
+   - **Worker:** nothing is gated. The deployment clean-up (removing an employee from the host branch's terminals) is an
+     access removal, so it runs whatever the module state; host-branch check-in, which widens access, follows the module.
 
    Switching a module off never deletes data. The engine keeps applying stored scoped policies and double shifts, so a
    downgrade never silently changes calculated attendance or payroll.

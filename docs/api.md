@@ -194,3 +194,12 @@ signature (`svix-id` / `svix-timestamp` / `svix-signature`, or the `webhook-*` n
 ## Follow-ups for the integrator
 - ZKTeco terminals post to `/iclock/*` at the root of the configured server URL: a reverse-proxy rewrite
   `/iclock/* → /device-push/iclock/~<token>/iclock/*` (per device) or a firmware that accepts a path in the server URL is required.
+
+## Enterprise: shift requests, round-the-clock scheduling, global attendance policies (migration 20261007000100)
+
+Three Enterprise-only modules (`shift_requests`, `advanced_scheduling`, `attendance_policies`; `docs/pricing.md`). Their routes
+answer `403 FEATURE_DISABLED` (`details.reason = MODULE_DISABLED`) when the module is off; on the core
+`attendance-rule-sets` route a scope beyond the branch or a non-default `policy` needs `attendance_policies`, and an ADDITIONAL
+(double-shift) change request needs `advanced_scheduling` too. The route table is in `docs/enterprise/plan.md` §7; each slice's
+endpoints, permissions, validations and decisions are in `docs/enterprise/reports/` (`e1-shift-requests.md`,
+`e2-policies.md`, `e3-scheduling.md`).
