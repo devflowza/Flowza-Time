@@ -1,14 +1,15 @@
 import { sql } from 'kysely';
 import type { z } from 'zod';
-import type { AttendanceRuleSetInput, HolidayInput, ShiftAssignmentInput, ShiftInput, ShiftPatternInput, holidayCalendarInputSchema } from '@flowza/contracts';
-import type { Trx } from '@flowza/database';
-import { resolveShift, resolveRuleSet, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
+import { isDefaultPolicySections, policySectionsEqual, policySectionsOf, type AttendancePolicySections, type AttendanceRuleSetInput, type HolidayInput, type ShiftAssignmentInput, type ShiftInput, type ShiftPatternInput, type holidayCalendarInputSchema } from '@flowza/contracts';
+import { resolvePolicyFor, type Trx } from '@flowza/database';
+import { policySpecificity, resolveShift, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
 import { type Actor, audit, diffObjects, runUser, withSystemScope } from '../../lib/service.js';
 import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
 import { isoDate, isoDateOrNull, isoDateTime, jsonArray, jsonObject } from '../../lib/mappers.js';
+import { requireModuleFor } from '../../middleware/module-gate.js';
 import { enqueueRecalculation, orgToday } from './recalc.js';
 import { assignmentEndFromStored, assignmentEndToStored } from './assignment-dates.js';
 import { dv, today } from './sql-helpers.js';
@@ -17,7 +18,7 @@ type HolidayCalendarInput = z.infer<typeof holidayCalendarInputSchema>;
 
 const minDate = (a: string, b: string) => (a < b ? a : b);
 /** Recompute the affected range only when the change touches dates up to today (future dates recompute when they arrive). */
-async function recalcIfPast(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, from: string, to: string | null, extra: { branchId?: string | null; employeeIds?: string[] | null; reason: string }): Promise<{ requestId: string; jobId: string } | null> {
+export async function recalcIfPast(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, from: string, to: string | null, extra: { branchId?: string | null; employeeIds?: string[] | null; reason: string }): Promise<{ requestId: string; jobId: string } | null> {
   const today = await orgToday(trx, orgId);
   if (from > today) return null;
   return enqueueRecalculation(deps, trx, actor, orgId, { fromDate: from, toDate: minDate(to ?? today, today), branchId: extra.branchId ?? null, employeeIds: extra.employeeIds ?? null, reason: extra.reason });
@@ -272,10 +273,11 @@ export async function resolveEmployeeShift(deps: ApiDeps, actor: Actor, orgId: s
     const scope = { employeeId, teamIds: teams, departmentId: hist?.departmentId ?? emp.departmentId, branchId: hist?.branchId ?? emp.branchId, organizationId: orgId };
     const resolved = resolveShift(assignments, patterns, scope, date);
     const shift = resolved.shiftId ? await trx.selectFrom('shifts').selectAll().where('id', '=', resolved.shiftId).executeTakeFirst() : null;
-    const ruleSets = (await trx.selectFrom('attendanceRuleSets').select(['id', 'branchId', 'effectiveFrom', 'effectiveTo', 'name']).where('organizationId', '=', orgId).execute()).map((r) => ({ id: r.id, branchId: r.branchId, effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: isoDateOrNull(r.effectiveTo), name: r.name, rules: {} as never }));
-    const ruleSet = resolveRuleSet(ruleSets, date, scope.branchId);
+    // the policy the engine applies: the most specific one matching country / branch / department / employee group / shift
+    const policy = await resolvePolicyFor(trx, orgId, employeeId, date, { branchId: scope.branchId, departmentId: scope.departmentId, shiftId: resolved.shiftId });
+    const ruleSet = policy.row;
     const assignment = resolved.assignment ? { ...resolved.assignment, effectiveTo: assignmentEndFromStored(resolved.assignment.effectiveTo) } : null;
-    return { employeeId, date, source: resolved.source, isPatternOff: resolved.isPatternOff, patternDay: resolved.patternDay, assignment, shift: shift ? toShiftDto(shift) : null, ruleSet: ruleSet ? { id: ruleSet.id, name: ruleSet.name, branchId: ruleSet.branchId } : null, scope };
+    return { employeeId, date, source: resolved.source, isPatternOff: resolved.isPatternOff, patternDay: resolved.patternDay, assignment, shift: shift ? toShiftDto(shift) : null, ruleSet: ruleSet ? { id: ruleSet.id, name: ruleSet.name, branchId: ruleSet.branchId } : null, scope, policyScope: policy.scope };
   });
 }
 
@@ -428,38 +430,72 @@ export { assertLeaveRangeUnlocked, assertNoLeaveOverlap, createLeaveRecord, crea
 
 // ----- rule sets -------------------------------------------------------------------------------------------------------------
 
-export interface RuleSetDto extends Record<string, unknown> { id: string; name: string; branchId: string | null; effectiveFrom: string; effectiveTo: string | null; version: number; createdAt: string; updatedAt: string }
+/**
+ * An attendance rule set IS the attendance policy (docs/enterprise/plan.md §4): the classic organisation / branch rule set, or
+ * (Enterprise, attendance_policies) a policy scoped by country, department, employee group or shift with the `policy`
+ * sections. `policy` always comes back complete (defaults filled in, never failing on an older row).
+ */
+export interface RuleSetDto extends Record<string, unknown> {
+  id: string; name: string; description: string; branchId: string | null; countryCode: string | null; departmentId: string | null; employeeGroupId: string | null; shiftId: string | null;
+  effectiveFrom: string; effectiveTo: string | null; policy: AttendancePolicySections;
+  /** Higher = more specific (shift 32, employee group 16, department 8, branch 4, country 2; packages/domain policySpecificity). */
+  specificity: number;
+  version: number; createdAt: string; updatedAt: string;
+}
 const RULE_KEYS = ['graceInMinutes', 'graceOutMinutes', 'lateThresholdMinutes', 'earlyDepartureThresholdMinutes', 'minFullDayMinutes', 'halfDayThresholdMinutes', 'overtimeEnabled', 'overtimeStartAfterMinutes', 'overtimeMinBlockMinutes', 'overtimeRoundingMinutes', 'overtimeMaxMinutesPerDay', 'countEarlyInAsOvertime', 'overtimeRequiresScheduledHours', 'punchRoundingMinutes', 'punchRoundingMode', 'workedRoundingMinutes', 'workedRoundingMode', 'punchInterpretation', 'duplicatePunchWindowSeconds', 'missingPunchBehavior', 'autoAbsentWithoutPunches', 'weeklyOffWorkCountsAsOvertime', 'holidayWorkCountsAsOvertime', 'ramadanMode'] as const;
-function toRuleSetDto(r: Record<string, unknown> & { id: string; name: string; branchId: string | null; effectiveFrom: Date | string; effectiveTo: Date | string | null; version: number; createdAt: Date; updatedAt: Date }): RuleSetDto {
-  const out: RuleSetDto = { id: r.id, name: r.name, branchId: r.branchId, effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: isoDateOrNull(r.effectiveTo), version: r.version, createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt) };
+/** The scope dimensions beyond the branch: Enterprise (attendance_policies). Every scope dimension is immutable once created. */
+const ENTERPRISE_SCOPE_KEYS = ['countryCode', 'departmentId', 'employeeGroupId', 'shiftId'] as const;
+const SCOPE_KEYS = ['branchId', ...ENTERPRISE_SCOPE_KEYS] as const;
+type RuleSetRow = Record<string, unknown> & { id: string; name: string; description?: string | null; branchId: string | null; countryCode?: string | null; departmentId?: string | null; employeeGroupId?: string | null; shiftId?: string | null; policy?: unknown; effectiveFrom: Date | string; effectiveTo: Date | string | null; version: number; createdAt: Date; updatedAt: Date };
+function toRuleSetDto(r: RuleSetRow): RuleSetDto {
+  const out: RuleSetDto = {
+    id: r.id, name: r.name, description: r.description ?? '', branchId: r.branchId, countryCode: r.countryCode?.trim() || null, departmentId: r.departmentId ?? null, employeeGroupId: r.employeeGroupId ?? null, shiftId: r.shiftId ?? null,
+    effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: isoDateOrNull(r.effectiveTo), policy: policySectionsOf(r.policy), specificity: 0, version: r.version, createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt),
+  };
+  out.specificity = policySpecificity({ ...out, id: out.id });
   for (const k of RULE_KEYS) out[k] = k === 'ramadanMode' ? jsonObject(r[k]) : r[k];
   return out;
 }
-export async function listRuleSets(deps: ApiDeps, actor: Actor, orgId: string, q: { branchId?: string; activeOn?: string; includeExpired: boolean }): Promise<RuleSetDto[]> {
+export async function listRuleSets(deps: ApiDeps, actor: Actor, orgId: string, q: { branchId?: string; countryCode?: string; departmentId?: string; employeeGroupId?: string; shiftId?: string; activeOn?: string; includeExpired: boolean }): Promise<RuleSetDto[]> {
   const grant = requirePermission(actor.principal, orgId, 'attendance.view');
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
     let base = trx.selectFrom('attendanceRuleSets').selectAll().where('organizationId', '=', orgId);
     if (scope) base = base.where((eb) => eb.or([eb('branchId', 'is', null), eb('branchId', 'in', scope)]));
+    if (q.countryCode) base = base.where('countryCode', '=', q.countryCode);
+    if (q.departmentId) base = base.where('departmentId', '=', q.departmentId);
+    if (q.employeeGroupId) base = base.where('employeeGroupId', '=', q.employeeGroupId);
+    if (q.shiftId) base = base.where('shiftId', '=', q.shiftId);
     if (q.activeOn) base = base.where('effectiveFrom', '<=', dv(q.activeOn)).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', dv(q.activeOn!))]));
     else if (!q.includeExpired) base = base.where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', today())]));
-    return (await base.orderBy('branchId').orderBy('effectiveFrom', 'desc').execute()).map((r) => toRuleSetDto(r as never));
+    return (await base.orderBy('branchId').orderBy('effectiveFrom', 'desc').orderBy('id').execute()).map((r) => toRuleSetDto(r as never));
   });
 }
 function ruleSetValues(input: Partial<AttendanceRuleSetInput>): Record<string, unknown> {
   const v: Record<string, unknown> = {};
-  for (const [k, val] of Object.entries(input)) if (val !== undefined) v[k] = k === 'ramadanMode' ? JSON.stringify(val) : val;
+  for (const [k, val] of Object.entries(input)) if (val !== undefined) v[k] = k === 'ramadanMode' || k === 'policy' ? JSON.stringify(val) : val;
   return v;
+}
+/** The department, employee group and shift a policy names must be the organisation's own. */
+async function validatePolicyScope(trx: Trx, orgId: string, input: Partial<AttendanceRuleSetInput>): Promise<void> {
+  const unknown = (path: string, what: string) => errors.validation(`${what} not found.`, { issues: [{ path, message: `Unknown ${what.toLowerCase()}` }] });
+  if (input.departmentId && !(await trx.selectFrom('departments').select('id').where('organizationId', '=', orgId).where('id', '=', input.departmentId).executeTakeFirst())) throw unknown('departmentId', 'Department');
+  if (input.employeeGroupId && !(await trx.selectFrom('employeeGroups').select('id').where('organizationId', '=', orgId).where('id', '=', input.employeeGroupId).executeTakeFirst())) throw unknown('employeeGroupId', 'Employee group');
+  if (input.shiftId && !(await trx.selectFrom('shifts').select('id').where('organizationId', '=', orgId).where('id', '=', input.shiftId).executeTakeFirst())) throw unknown('shiftId', 'Shift');
 }
 export async function createRuleSet(deps: ApiDeps, actor: Actor, orgId: string, input: AttendanceRuleSetInput): Promise<RuleSetDto & { recalculationJobId: string | null }> {
   const grant = requirePermission(actor.principal, orgId, 'attendance.manage_rules');
   requireBranchAccess(grant, input.branchId);
   if (!grant.allBranches && !input.branchId) throw errors.forbidden('Branch-scoped users cannot change the organisation-wide rule set.');
   if (input.effectiveTo && input.effectiveTo <= input.effectiveFrom) throw errors.validation('effectiveTo must be after effectiveFrom.', { issues: [{ path: 'effectiveTo', message: 'Invalid range' }] });
+  // a scope beyond the branch, or policy sections other than the defaults, are the Enterprise attendance policies
+  if (ENTERPRISE_SCOPE_KEYS.some((k) => !!input[k]) || (input.policy !== undefined && !isDefaultPolicySections(input.policy))) requireModuleFor(actor.disabledModules, orgId, 'attendance_policies');
   return runUser(deps.db, actor, async (trx) => {
     if (input.branchId && !(await trx.selectFrom('branches').select('id').where('organizationId', '=', orgId).where('id', '=', input.branchId).executeTakeFirst())) throw errors.validation('Branch not found.', { issues: [{ path: 'branchId', message: 'Unknown branch' }] });
+    await validatePolicyScope(trx, orgId, input);
     const row = await trx.insertInto('attendanceRuleSets').values({ organizationId: orgId, ...ruleSetValues(input), createdBy: actor.userId } as never).returningAll().executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'attendance.rule_set_created', 'attendance_rule_set', { entityId: row.id, branchId: input.branchId ?? null, newValue: input });
+    // a branch policy recomputes that branch; any other scope may concern employees of every branch
     const recalc = await recalcIfPast(deps, trx, actor, orgId, input.effectiveFrom, input.effectiveTo ?? null, { branchId: input.branchId ?? null, reason: `rule set ${input.name} created` });
     return { ...toRuleSetDto(row as never), recalculationJobId: recalc?.jobId ?? null };
   });
@@ -471,11 +507,18 @@ export async function updateRuleSet(deps: ApiDeps, actor: Actor, orgId: string, 
     if (!before) throw errors.notFound('Rule set', id);
     requireBranchAccess(grant, before.branchId);
     if (!grant.allBranches && !before.branchId) throw errors.forbidden('Branch-scoped users cannot change the organisation-wide rule set.');
-    if (input.branchId !== undefined && input.branchId !== before.branchId) throw errors.validation('The branch of a rule set cannot change; create a new rule set instead.', { issues: [{ path: 'branchId', message: 'Immutable' }] });
-    const values = ruleSetValues(input); delete values.branchId;
+    const b = toRuleSetDto(before as never);
+    // the scope says who the policy is for: changing it would silently move employees between policies — create a new one
+    for (const key of SCOPE_KEYS) {
+      if (input[key] !== undefined && (input[key] ?? null) !== b[key]) throw errors.validation(`The scope of a policy (${key}) cannot change; create a new policy instead.`, { issues: [{ path: key, message: 'Immutable' }] });
+    }
+    // the policy sections replace the stored ones as a whole; new non-default sections are the Enterprise module's
+    if (input.policy !== undefined && !isDefaultPolicySections(input.policy) && !policySectionsEqual(input.policy, b.policy)) requireModuleFor(actor.disabledModules, orgId, 'attendance_policies');
+    const values = ruleSetValues(input);
+    for (const key of SCOPE_KEYS) delete values[key];
     if (Object.keys(values).length) await trx.updateTable('attendanceRuleSets').set({ ...values, version: sql`version + 1` } as never).where('id', '=', id).execute();
     const after = await trx.selectFrom('attendanceRuleSets').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
-    const b = toRuleSetDto(before as never); const a = toRuleSetDto(after as never);
+    const a = toRuleSetDto(after as never);
     await audit(trx, actor, orgId, 'attendance.rule_set_updated', 'attendance_rule_set', { entityId: id, branchId: before.branchId, ...diffObjects(b, a) });
     const recalc = await recalcIfPast(deps, trx, actor, orgId, minDate(b.effectiveFrom, a.effectiveFrom), null, { branchId: before.branchId, reason: `rule set ${after.name} changed` });
     return { ...a, recalculationJobId: recalc?.jobId ?? null };

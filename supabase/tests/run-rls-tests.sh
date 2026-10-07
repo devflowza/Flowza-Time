@@ -20,6 +20,8 @@ psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_notifi
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_email_log.sql"
 # approval engine v2 (after the other suites: it commits fixtures of its own on top of the isolation ones)
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_approvals.sql"
+# Enterprise (20261007000100): shift requests, round-the-clock scheduling, global attendance policies — self-contained, every block rolls back
+psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_enterprise.sql"
 # security gate (HR portal Prompt 10): the data API login (PostgREST / pg_graphql) reads and writes nothing
 psql -U authenticator -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_data_api.sql"
 # security gate: catalogue-driven invariants and the generated cross-tenant probes (last: they read every suite's fixtures)

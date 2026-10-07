@@ -18,7 +18,7 @@ import SubscriptionSection from '@/features/settings/sections/subscription-secti
 import '@/features/settings/routes';
 
 const SETTINGS = { data: { general: { platformName: 'FlowZa Time', supportEmail: 'support@flowza.ai' }, billing: { currency: 'OMR', vatRate: 5, invoicePrefix: 'FZT', paymentTermsDays: 14, sellerName: 'F & Z Capital', sellerVatNumber: '', sellerAddress: 'Muscat', bankDetails: '' }, updatedAt: null } };
-const ALL_MODULES = ['devices', 'finance_integration', 'geofences', 'leave', 'manager_workspace', 'payroll', 'report_schedules', 'self_service'];
+const ALL_MODULES = ['advanced_scheduling', 'attendance_policies', 'devices', 'finance_integration', 'geofences', 'leave', 'manager_workspace', 'payroll', 'report_schedules', 'self_service', 'shift_requests'];
 const plan = (key: string, over: Record<string, unknown> = {}) => ({
   id: `00000000-0000-0000-0000-00000000000${key.length}`, key, name: key[0]!.toUpperCase() + key.slice(1), description: null, prices: {}, limits: { employees: 50 }, features: [],
   modules: ALL_MODULES, includedUsers: null, trialDays: 0, isCustom: false, isActive: true, sortOrder: 1, subscribers: 0, liveSubscribers: 0, ...over,

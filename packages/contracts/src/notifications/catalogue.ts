@@ -551,6 +551,7 @@ export function approvalContextFacts(context: ApprovalContextDto | null | undefi
     case 'ATTENDANCE_NOTE': return { ...none, date: R.date(context.note.attendanceDate) };
     case 'REGULARISATION': return { ...none, date: R.date(context.regularisation.attendanceDate) };
     case 'SHIFT_SWAP': return { ...none, date: R.date(context.swap.swapDate) };
+    case 'SHIFT_CHANGE': return { ...none, date: R.date(context.change.fromDate), endDate: R.date(context.change.toDate) };
     case 'COMP_OFF': return { ...none, date: R.date(context.compOff.workedOn) };
     default: return none;
   }

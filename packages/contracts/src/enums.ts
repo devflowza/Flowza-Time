@@ -79,7 +79,9 @@ export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
  * SELF_SERVICE_PUNCH come from the punch payload; NON_WORKING_DAY_WORK marks work recorded on a weekly off / holiday.
  */
 export const ATTENDANCE_FLAGS = ['LATE', 'EARLY_DEPARTURE', 'OVERTIME', 'MISSING_IN', 'MISSING_OUT', 'MANUAL_CORRECTION', 'OUT_OF_WINDOW', 'WORKED_ON_HOLIDAY', 'WORKED_ON_WEEKLY_OFF', 'HALF_DAY_LEAVE', 'DUPLICATE_PUNCHES_COLLAPSED', 'RAMADAN_HOURS', 'CROSS_MIDNIGHT', 'NO_SHIFT', 'UNDER_HOURS',
-  'UNEXCUSED', 'EXCUSED', 'LOP', 'PAY_EFFECT_HALF', 'PAY_EFFECT_FULL', 'OUTSIDE_GEOFENCE', 'SELF_SERVICE_PUNCH', 'NON_WORKING_DAY_WORK'] as const;
+  'UNEXCUSED', 'EXCUSED', 'LOP', 'PAY_EFFECT_HALF', 'PAY_EFFECT_FULL', 'OUTSIDE_GEOFENCE', 'SELF_SERVICE_PUNCH', 'NON_WORKING_DAY_WORK',
+  // engine 1.4.0 (Enterprise): arrival beyond the policy's very-late threshold; a day worked on two shifts (double shift)
+  'VERY_LATE', 'DOUBLE_SHIFT'] as const;
 export type AttendanceFlag = (typeof ATTENDANCE_FLAGS)[number];
 
 /** Kinds of `attendance_day_marks` rows: a reviewed verdict on one employee-day (HR portal Prompt 3). */
@@ -233,6 +235,11 @@ export type RegularisationStatus = (typeof REGULARISATION_STATUSES)[number];
 export const SELFIE_CHECKIN_STATUSES = ['pending', 'approved', 'rejected'] as const;
 export type SelfieCheckinStatus = (typeof SELFIE_CHECKIN_STATUSES)[number];
 export const SHIFT_SWAP_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'] as const;
+/** Shift change requests (Enterprise, shift_requests): work another shift (CHANGE) or a second shift (ADDITIONAL) over a range. */
+export const SHIFT_CHANGE_KINDS = ['CHANGE', 'ADDITIONAL'] as const;
+export type ShiftChangeKind = (typeof SHIFT_CHANGE_KINDS)[number];
+export const SHIFT_CHANGE_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'] as const;
+export type ShiftChangeStatus = (typeof SHIFT_CHANGE_STATUSES)[number];
 export type ShiftSwapStatus = (typeof SHIFT_SWAP_STATUSES)[number];
 /** Per-fence enforcement when a punch is outside it (capped by `attendance.selfService.requireGeofence`). */
 export const GEOFENCE_ENFORCEMENTS = ['hard_block', 'soft_warn', 'advisory_log'] as const;

@@ -1,0 +1,79 @@
+{
+  "request": "Request a shift change",
+  "mine": "My shift change requests",
+  "empty": "No shift change requests",
+  "emptyHint": "Need another shift, or a second one, for a few days? Request a shift change.",
+  "kinds": {
+    "CHANGE": "Change of shift",
+    "ADDITIONAL": "Additional shift"
+  },
+  "kindHints": {
+    "CHANGE": "Work another shift instead of yours on these days.",
+    "ADDITIONAL": "Work a second shift on top of yours on these days (a double shift)."
+  },
+  "status": {
+    "pending": "Pending",
+    "approved": "Approved",
+    "rejected": "Rejected",
+    "cancelled": "Withdrawn"
+  },
+  "dialog": {
+    "title": "Request a shift change",
+    "hint": "Choose the days and the shift you want to work. Your manager decides; once approved, your schedule changes for those days only.",
+    "kind": "Request",
+    "from": "First day",
+    "to": "Last day",
+    "shift": "Shift",
+    "pickShift": "Choose a shift",
+    "noShifts": "No shift is available",
+    "current": "Your shift on {{date}}: {{shift}}",
+    "currentNone": "You have no shift on {{date}}",
+    "reason": "Reason",
+    "submit": "Send request",
+    "submitted": "Shift change requested. Your manager has been notified.",
+    "errors": {
+      "from": "Choose the first day.",
+      "to": "Choose the last day.",
+      "past": "The first day cannot be in the past.",
+      "order": "The last day cannot be before the first day.",
+      "tooFar": "A request can start at most {{days}} days ahead.",
+      "tooLong": "One request covers at most {{days}} days.",
+      "shift": "Choose a shift.",
+      "reason": "Write at least 3 characters."
+    }
+  },
+  "columns": {
+    "dates": "Days",
+    "kind": "Request",
+    "shifts": "Shifts",
+    "status": "Status",
+    "decision": "Reason / decision",
+    "employee": "Employee"
+  },
+  "range": "{{from}} → {{to}}",
+  "plus": "+ {{shift}}",
+  "shiftChange": "{{from}} → {{to}}",
+  "badge": {
+    "pending": "Shift change requested",
+    "additional": "+ {{shift}}"
+  },
+  "withdraw": "Withdraw",
+  "withdrawTitle": "Withdraw this shift change request?",
+  "withdrawHint": "Your manager will no longer see it as pending.",
+  "withdrawn": "Shift change request withdrawn",
+  "hr": {
+    "tab": "Shift requests",
+    "description": "Shift change and additional shift requests from employees. Decisions are taken in the approvals inbox.",
+    "openInbox": "Open approvals",
+    "openRequest": "Open in approvals",
+    "allStatuses": "All statuses",
+    "allKinds": "All requests",
+    "employee": "Employee",
+    "from": "From",
+    "to": "To",
+    "emptyHint": "Requests employees send from My shift appear here."
+  },
+  "approval": {
+    "adds": "Adds {{shift}}"
+  }
+}

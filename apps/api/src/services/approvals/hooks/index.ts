@@ -7,6 +7,7 @@ import { leaveHook } from './leave.js';
 import { attendanceNoteHook } from './attendance-notes.js';
 import { regularisationHook } from './regularisations.js';
 import { shiftSwapHook } from './shift-swaps.js';
+import { shiftChangeHook } from './shift-changes.js';
 import { compOffHook } from './comp-off.js';
 
 /** What the engine hands an entity hook when a request reaches a terminal state. Runs inside the engine's system step. */
@@ -104,6 +105,7 @@ export const entityHooks: Partial<Record<ApprovalEntity, EntityHook>> = {
   ATTENDANCE_NOTE: attendanceNoteHook,
   REGULARISATION: regularisationHook,
   SHIFT_SWAP: shiftSwapHook,
+  SHIFT_CHANGE: shiftChangeHook,
   COMP_OFF: compOffHook,
 };
 

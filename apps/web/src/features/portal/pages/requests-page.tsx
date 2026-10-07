@@ -8,7 +8,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, EmptyState, ErrorState, Skeleton, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { fmtDate, fmtDateTime, fmtTime, todayIso } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
-import { useOrgTimezone } from '@/features/me/use-me';
+import { useModuleEnabled, useOrgTimezone } from '@/features/me/use-me';
 import { PA_NS } from '../attendance-i18n';
 import { useMyNotes, useMyRegularisations, useMySelfiePhoto, useMySelfies, useMySwaps, useRegularisationMutations } from '../attendance-api';
 import { fmtDays } from '../model';
@@ -167,7 +167,10 @@ export default function MyRequestsPage() {
   const tz = useOrgTimezone();
   const today = todayIso(tz);
   const [params, setParams] = useSearchParams();
-  const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'reasons';
+  // shift swaps are an Enterprise feature (module shift_requests): without it the tab is not offered (no 403 from the page)
+  const swapsOn = useModuleEnabled('shift_requests');
+  const tabs = TABS.filter((tb) => tb !== 'swaps' || swapsOn);
+  const tab: Tab = (tabs as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'reasons';
   const [editing, setEditing] = useState<AttendanceNoteDto | null>(null);
   const [newNote, setNewNote] = useState(false);
   const [newRegularisation, setNewRegularisation] = useState(false);
@@ -180,7 +183,7 @@ export default function MyRequestsPage() {
           <Button onClick={() => setNewRegularisation(true)}><Plus /> {t('regularisation.new')}</Button>
         </div>} />
       <Tabs value={tab} onValueChange={(v) => { const next = new URLSearchParams(params); next.set('tab', v); setParams(next, { replace: true }); }}>
-        <TabsList aria-label={t('requests.title')} className="max-w-full overflow-x-auto">{TABS.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`requests.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
+        <TabsList aria-label={t('requests.title')} className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`requests.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
         <TabsContent value="reasons">{tab === 'reasons' ? <ReasonsTab onEdit={setEditing} /> : null}</TabsContent>
         <TabsContent value="regularisations">{tab === 'regularisations' ? <RegularisationsTab timezone={tz} /> : null}</TabsContent>
         <TabsContent value="swaps">{tab === 'swaps' ? <SwapsTab /> : null}</TabsContent>

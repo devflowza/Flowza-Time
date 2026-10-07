@@ -75,8 +75,9 @@ export function useRuleSets(query: ListQuery = {}) {
 export function useRuleSetMutations() {
   const orgId = useOrgId();
   const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: qk.entity(orgId, 'attendance-rule-sets') });
-  const create = useMutation({ mutationFn: async (input: AttendanceRuleSetInput) => (await api.post<Envelope<WithRecalc<RuleSetDto>>>(`/orgs/${orgId}/attendance-rule-sets`, input)).data, onSuccess: invalidate });
+  const invalidate = () => { void qc.invalidateQueries({ queryKey: qk.entity(orgId, 'attendance-rule-sets') }); void qc.invalidateQueries({ queryKey: qk.entity(orgId, 'policy-resolve') }); void qc.invalidateQueries({ queryKey: qk.entity(orgId, 'employee-groups') }); };
+  // the body is partial: without attendance_policies the editor leaves out the policy sections and the Enterprise scope
+  const create = useMutation({ mutationFn: async (input: Partial<AttendanceRuleSetInput>) => (await api.post<Envelope<WithRecalc<RuleSetDto>>>(`/orgs/${orgId}/attendance-rule-sets`, input)).data, onSuccess: invalidate });
   const update = useMutation({ mutationFn: async ({ id, input }: { id: string; input: Partial<AttendanceRuleSetInput> }) => (await api.patch<Envelope<WithRecalc<RuleSetDto>>>(`/orgs/${orgId}/attendance-rule-sets/${id}`, input)).data, onSuccess: invalidate });
   const remove = useMutation({ mutationFn: async (id: string) => (await api.delete<Envelope<{ recalculationJobId: string | null }>>(`/orgs/${orgId}/attendance-rule-sets/${id}`)).data, onSuccess: invalidate });
   return { create, update, remove };

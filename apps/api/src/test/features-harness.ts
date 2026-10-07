@@ -125,7 +125,15 @@ export async function seedEmployee(admin: Database, orgId: string, branchId: str
   return id;
 }
 
-export async function seedOrg(admin: Database, tag: string, opts: { plan?: string | null } = {}): Promise<OrgFixture> {
+/** Switch modules on for an organisation the way a platform admin does (an organization_modules override). */
+export async function enableModules(admin: Database, orgId: string, keys: readonly string[]): Promise<void> {
+  if (keys.length === 0) return;
+  await admin.insertInto('organizationModules').values(keys.map((moduleKey) => ({ organizationId: orgId, moduleKey, enabled: true, reason: 'test fixture' })))
+    .onConflict((oc) => oc.columns(['organizationId', 'moduleKey']).doUpdateSet({ enabled: true })).execute();
+}
+
+/** `modules`: Enterprise modules to switch on through an override (the default trial plan does not include them). */
+export async function seedOrg(admin: Database, tag: string, opts: { plan?: string | null; modules?: readonly string[] } = {}): Promise<OrgFixture> {
   const orgId = uuid('a');
   await admin.insertInto('organizations').values({ id: orgId, companyCode: `ORG-${tag}`, legalName: `Org ${tag}`, displayName: `Org ${tag}`, timezone: 'Asia/Muscat' }).execute();
   await admin.insertInto('organizationSettings').values({ organizationId: orgId }).onConflict((oc) => oc.doNothing()).execute();
@@ -146,6 +154,7 @@ export async function seedOrg(admin: Database, tag: string, opts: { plan?: strin
   await seedMembership(admin, orgId, users.managerUser, ROLE.hr_user, { employeeId: e3 });
   await seedMembership(admin, orgId, users.payrollUser, ROLE.payroll);
   await seedMembership(admin, orgId, users.employeeUser, ROLE.employee, { employeeId: e1 });
+  await enableModules(admin, orgId, opts.modules ?? []);
   return { orgId, branchA, branchB, departmentA, ...users, e1, e2, e3, deviceUserIds: { e1: '1001', e2: '1002', e3: '1003' } };
 }
 

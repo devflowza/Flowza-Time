@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, Mail, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, ArrowRightLeft, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, Mail, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
 import type { ModuleKey, Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -17,6 +17,9 @@ import attendanceAdminEn from '@/locales/en/attendance-admin.json';
 import attendanceAdminAr from '@/locales/ar/attendance-admin.json';
 import { usePendingCounts, useTeamAccess } from '@/features/team/api';
 import '@/features/team/i18n';
+import '@/features/policies/i18n';
+import { Scale } from 'lucide-react';
+import '@/features/scheduling/i18n';
 
 registerNamespace('portal', portalEn, portalAr);
 // HR portal Prompt 4: check-in / requests / shift entries and the reasons / geofences review pages
@@ -109,6 +112,8 @@ export function Sidebar() {
       { to: '/attendance/geofences', label: t('attendance-review:nav.geofences'), icon: MapPinned, permissions: ['attendance.manage_geofences'], modules: ['geofences'] },
       // HR portal Prompt 6b: the regularisation register (approvers and reviewers; RLS scopes the rows to their branches)
       { to: '/attendance/regularisations', label: t('attendance-admin:nav.regularisations'), icon: ClipboardCheck, permissions: ['attendance.approve', 'attendance.review_notes'], any: true },
+      // Enterprise: temporary deployment of employees to another branch (round-the-clock scheduling)
+      { to: '/deployments', label: t('scheduling:nav.deployments'), icon: ArrowRightLeft, permissions: ['employee.view'], modules: ['advanced_scheduling'] },
     ] },
     { label: t('nav.sections.devices'), items: [
       { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'], modules: ['devices'] },
@@ -120,6 +125,8 @@ export function Sidebar() {
     { label: t('nav.sections.time'), items: [
       { to: '/shifts', label: t('nav.shifts'), icon: CalendarDays, permissions: ['shift.view'] },
       { to: '/holidays', label: t('nav.holidays'), icon: CalendarOff, permissions: ['holiday.view'] },
+      // Enterprise: global attendance policies (employee groups, points & discipline, overtime summary, country packs)
+      { to: '/attendance/policies', label: t('policies:nav.policies'), icon: Scale, permissions: ['attendance.view'], modules: ['attendance_policies'] },
       { to: '/reports', label: t('nav.reports'), icon: BarChart3, permissions: ['report.view'] },
       { to: '/payroll', label: t('nav.payroll'), icon: Wallet, permissions: ['payroll.view'], modules: ['payroll'] },
     ] },

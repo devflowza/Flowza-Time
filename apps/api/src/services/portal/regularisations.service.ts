@@ -1,5 +1,6 @@
-import type { ApprovalRequestStatus, RegularisationDto, RegularisationStatus, SelfRegularisationInput } from '@flowza/contracts';
-import { effectiveBranchOn, type Trx } from '@flowza/database';
+import { DateTime } from 'luxon';
+import type { ApprovalRequestStatus, AttendancePolicySections, RegularisationDto, RegularisationStatus, SelfRegularisationInput } from '@flowza/contracts';
+import { additionalShiftOn, effectiveBranchOn, loadAdditionalShiftAssignments, resolvePolicyFor, type Trx } from '@flowza/database';
 import { addDays, AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
@@ -7,8 +8,9 @@ import { isoDate, isoDateTime, isoDateTimeOrNull } from '../../lib/mappers.js';
 import { cancelForEntity, submit } from '../approvals/engine.js';
 import { systemStep } from '../features/context.js';
 import { dv } from '../features/sql-helpers.js';
-import { attendancePolicy, isPeriodLocked, isWorking, loadEmployeeCtx, localDate, localInstant, lockEmployee, portalSelf } from './common.js';
+import { attendancePolicy, isPeriodLocked, isWorking, loadEmployeeCtx, localDate, localInstant, lockEmployee, portalSelf, type EmployeeCtx } from './common.js';
 import { seatSecondaryManager } from './line-manager.js';
+import { resolveDays } from './shift-resolve.js';
 import { loadRegularisation, REGULARISATION_COLUMNS, type RegularisationRow } from './regularisation-effects.js';
 
 /**
@@ -18,6 +20,7 @@ import { loadRegularisation, REGULARISATION_COLUMNS, type RegularisationRow } fr
  * approval THROUGH attendance corrections (regularisation-effects.ts). One open request per day; the employee may withdraw
  * a pending one. The organisation turns the feature off with Settings → Attendance → self-service → "Regularisation
  * requests" (`selfService.regularisation`, on by default — review P2-9), independently of direct self-service corrections.
+ * The attendance policy of the day may limit them (Enterprise policy sections: requests per month, how far back).
  */
 
 const REG_KEYS = ['attendance.note', 'attendance.request_correction'] as const;
@@ -43,6 +46,23 @@ async function toDtos(trx: Trx, orgId: string, rows: RegularisationRow[]): Promi
   });
 }
 
+/**
+ * The regularisation limits of the attendance POLICY that applies to the employee on the regularised day (Enterprise,
+ * docs/enterprise/plan.md §4: `policy.regularisation` — a monthly limit and how far back a day may be regularised). The policy
+ * is resolved exactly as the engine resolves it: the branch and department effective on the day (employment history) and the
+ * day's primary shift (else its additional shift). Stored policies apply whatever the module state (plan §4.8). System scope.
+ */
+async function regularisationLimits(trx: Trx, orgId: string, emp: EmployeeCtx, date: string, branchId: string): Promise<AttendancePolicySections['regularisation']> {
+  const [day] = await resolveDays(trx, orgId, emp, date, date);
+  return withSystemScope(trx, orgId, async (t) => {
+    const hist = await t.selectFrom('employmentHistory').select('departmentId').where('organizationId', '=', orgId).where('employeeId', '=', emp.id)
+      .where('effectiveFrom', '<=', dv(date)).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', dv(date))])).orderBy('effectiveFrom', 'desc').executeTakeFirst();
+    const shiftId = day?.shiftId ?? additionalShiftOn(await loadAdditionalShiftAssignments(t, orgId, [emp.id], date, date), date)?.shiftId ?? null;
+    const policy = await resolvePolicyFor(t, orgId, emp.id, date, { branchId, departmentId: hist ? hist.departmentId : emp.departmentId, shiftId });
+    return policy.rules.policy.regularisation;
+  });
+}
+
 export async function listMyRegularisations(deps: ApiDeps, actor: Actor, orgId: string, q: { from?: string | undefined; to?: string | undefined; status?: RegularisationStatus | undefined }): Promise<RegularisationDto[]> {
   const self = portalSelf(actor, orgId, ...REG_KEYS, 'attendance.view_own');
   return runUser(deps.db, actor, async (trx) => {
@@ -56,6 +76,8 @@ export async function listMyRegularisations(deps: ApiDeps, actor: Actor, orgId: 
 
 export async function submitRegularisation(deps: ApiDeps, actor: Actor, orgId: string, input: SelfRegularisationInput): Promise<RegularisationDto> {
   const self = portalSelf(actor, orgId, ...REG_KEYS);
+  // the contract checks the YYYY-MM-DD shape only: a day that does not exist never reaches the date arithmetic or SQL
+  if (!DateTime.fromISO(input.date, { zone: 'utc' }).isValid) throw errors.validation('This date does not exist.', { issues: [{ path: 'date', message: 'Invalid date' }] });
   return runUser(deps.db, actor, async (trx) => {
     await lockEmployee(trx, 'regularisation', self.employeeId);
     if (!(await attendancePolicy(trx, orgId)).selfService.regularisation) throw new AppError('FORBIDDEN', 'Regularisation requests are turned off for this organisation.', { details: { reason: 'REGULARISATION_DISABLED' } });
@@ -77,6 +99,21 @@ export async function submitRegularisation(deps: ApiDeps, actor: Actor, orgId: s
     if (await isPeriodLocked(trx, orgId, branchId, input.date)) throw errors.periodLocked('The attendance period of this date is locked.');
     const open = await withSystemScope(trx, orgId, (t) => t.selectFrom('attendanceRegularisationRequests').select('id').where('organizationId', '=', orgId).where('employeeId', '=', emp.id).where('attendanceDate', '=', dv(input.date)).where('status', '=', 'pending').executeTakeFirst());
     if (open) throw errors.conflict('A regularisation for this day is already waiting for a decision.', { regularisationId: open.id });
+    // the attendance policy's limits (Enterprise policy sections; null = no limit)
+    const limits = await regularisationLimits(trx, orgId, emp, input.date, branchId);
+    if (limits.backdateDays !== null && input.date < addDays(today, -limits.backdateDays)) {
+      throw errors.validation(`Your attendance policy allows regularising a day at most ${limits.backdateDays} day(s) back.`, { reason: 'REGULARISATION_TOO_OLD', backdateDays: limits.backdateDays, issues: [{ path: 'date', message: 'Too far back' }] });
+    }
+    if (limits.maxPerMonth !== null) {
+      const monthStart = `${input.date.slice(0, 7)}-01`;
+      const nextMonth = DateTime.fromISO(monthStart, { zone: 'utc' }).plus({ months: 1 }).toISODate()!;
+      const used = await withSystemScope(trx, orgId, (t) => t.selectFrom('attendanceRegularisationRequests').select((eb) => eb.fn.countAll<string>().as('n')).where('organizationId', '=', orgId).where('employeeId', '=', emp.id)
+        .where('status', '!=', 'cancelled').where('attendanceDate', '>=', dv(monthStart)).where('attendanceDate', '<', dv(nextMonth)).executeTakeFirst());
+      const count = Number(used?.n ?? 0);
+      if (count >= limits.maxPerMonth) {
+        throw errors.validation(`Your attendance policy allows ${limits.maxPerMonth} regularisation request(s) per month, and ${input.date.slice(0, 7)} already has ${count}.`, { reason: 'REGULARISATION_LIMIT', maxPerMonth: limits.maxPerMonth, used: count, issues: [{ path: 'date', message: 'Monthly limit reached' }] });
+      }
+    }
     const row = await systemStep(trx, orgId, (t) => t.insertInto('attendanceRegularisationRequests').values({
       organizationId: orgId, employeeId: emp.id, branchId, attendanceDate: input.date, type: input.type, proposedInAt: input.proposedInAt ? new Date(input.proposedInAt) : null, proposedOutAt: input.proposedOutAt ? new Date(input.proposedOutAt) : null,
       reason: input.reason, status: 'pending', createdBy: actor.userId,

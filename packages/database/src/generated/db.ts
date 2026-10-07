@@ -147,6 +147,10 @@ export type RoundingMode = "DOWN" | "NEAREST" | "NONE" | "UP";
 
 export type SelfieCheckinStatus = "approved" | "pending" | "rejected";
 
+export type ShiftChangeKind = "ADDITIONAL" | "CHANGE";
+
+export type ShiftChangeStatus = "approved" | "cancelled" | "pending" | "rejected";
+
 export type ShiftSwapStatus = "approved" | "cancelled" | "pending" | "rejected";
 
 export type ShiftType = "FIXED" | "FLEXIBLE";
@@ -168,6 +172,19 @@ export type VerificationMethod = "card" | "face" | "fingerprint" | "iris" | "man
 export type VerificationStatus = "REPORTED" | "UNVERIFIED" | "VERIFIED";
 
 export type WebhookEventStatus = "duplicate" | "failed" | "processed" | "queued" | "received" | "rejected";
+
+export interface AdditionalShiftAssignments {
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  effectiveFrom: Timestamp;
+  effectiveTo: Timestamp | null;
+  employeeId: string;
+  id: Generated<string>;
+  organizationId: string;
+  shiftChangeRequestId: string | null;
+  shiftId: string;
+}
 
 export interface ApiKeys {
   branchIds: string[] | null;
@@ -584,12 +601,25 @@ export interface AttendanceRuleSets {
   autoAbsentWithoutPunches: Generated<boolean>;
   branchId: string | null;
   countEarlyInAsOvertime: Generated<boolean>;
+  /**
+   * Policy scope: employees whose branch (on the date) is in this country. Null = any.
+   */
+  countryCode: string | null;
   createdAt: Generated<Timestamp>;
   createdBy: string | null;
+  /**
+   * Policy scope: employees of this department (on the date). Null = any.
+   */
+  departmentId: string | null;
+  description: Generated<string>;
   duplicatePunchWindowSeconds: Generated<number>;
   earlyDepartureThresholdMinutes: Generated<number>;
   effectiveFrom: Timestamp;
   effectiveTo: Timestamp | null;
+  /**
+   * Policy scope: members of this employee group (on the date). Null = any.
+   */
+  employeeGroupId: string | null;
   extra: Generated<Json>;
   graceInMinutes: Generated<number>;
   graceOutMinutes: Generated<number>;
@@ -610,10 +640,18 @@ export interface AttendanceRuleSets {
   overtimeRequiresScheduledHours: Generated<boolean>;
   overtimeRoundingMinutes: Generated<number>;
   overtimeStartAfterMinutes: Generated<number>;
+  /**
+   * Policy sections (very late, check-in methods, overtime rates and weekly threshold, attendance points, escalation, regularisation limits, country pack provenance) — @flowza/contracts attendancePolicySectionsSchema.
+   */
+  policy: Generated<Json>;
   punchInterpretation: Generated<PunchInterpretation>;
   punchRoundingMinutes: Generated<number>;
   punchRoundingMode: Generated<RoundingMode>;
   ramadanMode: Generated<Json>;
+  /**
+   * Policy scope: days worked on this shift. Null = any.
+   */
+  shiftId: string | null;
   updatedAt: Generated<Timestamp>;
   version: Generated<number>;
   weeklyOffWorkCountsAsOvertime: Generated<boolean>;
@@ -1014,6 +1052,55 @@ export interface EmployeeAttendanceGrants {
   openAttendance: Generated<boolean>;
   organizationId: string;
   selfieRequired: Generated<boolean>;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface EmployeeBranchDeployments {
+  branchId: string;
+  cancelledAt: Timestamp | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+  cleanedUpAt: Timestamp | null;
+  cleanupJobId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  employeeId: string;
+  enrolJobId: string | null;
+  /**
+   * Terminals of the host branch this deployment enrolled the employee on (those where they were not enrolled already); the clean-up removes the employee from these only.
+   */
+  enrolledDeviceIds: Generated<string[]>;
+  enrolOnDevices: Generated<boolean>;
+  fromDate: Timestamp;
+  homeBranchId: string | null;
+  id: Generated<string>;
+  organizationId: string;
+  reason: string;
+  toDate: Timestamp;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface EmployeeGroupMemberships {
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  effectiveFrom: Timestamp;
+  effectiveTo: Timestamp | null;
+  employeeGroupId: string;
+  employeeId: string;
+  id: Generated<string>;
+  organizationId: string;
+}
+
+export interface EmployeeGroups {
+  code: string;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  description: Generated<string>;
+  id: Generated<string>;
+  name: string;
+  nameAr: string | null;
+  organizationId: string;
+  status: Generated<RecordStatus>;
   updatedAt: Generated<Timestamp>;
 }
 
@@ -1876,6 +1963,40 @@ export interface ShiftAssignments {
   targetType: AssignmentTarget;
 }
 
+export interface ShiftChangeRequests {
+  appliedAssignmentIds: Generated<string[]>;
+  approvalRequestId: string | null;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  currentShiftId: string | null;
+  decidedAt: Timestamp | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  employeeId: string;
+  fromDate: Timestamp;
+  id: Generated<string>;
+  kind: Generated<ShiftChangeKind>;
+  organizationId: string;
+  reason: string;
+  requestedShiftId: string;
+  status: Generated<ShiftChangeStatus>;
+  toDate: Timestamp;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface ShiftCoverageRequirements {
+  branchId: string;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  id: Generated<string>;
+  minHeadcount: number;
+  organizationId: string;
+  shiftId: string;
+  updatedAt: Generated<Timestamp>;
+  weekdays: Generated<number[]>;
+}
+
 export interface ShiftPatterns {
   anchorDate: Timestamp;
   code: string;
@@ -2106,6 +2227,7 @@ export interface UserProfiles {
 }
 
 export interface DB {
+  additionalShiftAssignments: AdditionalShiftAssignments;
   apiKeys: ApiKeys;
   approvalDelegations: ApprovalDelegations;
   approvalDigestRuns: ApprovalDigestRuns;
@@ -2150,6 +2272,9 @@ export interface DB {
   emailEvents: EmailEvents;
   emailMessages: EmailMessages;
   employeeAttendanceGrants: EmployeeAttendanceGrants;
+  employeeBranchDeployments: EmployeeBranchDeployments;
+  employeeGroupMemberships: EmployeeGroupMemberships;
+  employeeGroups: EmployeeGroups;
   employeeIdentityDocuments: EmployeeIdentityDocuments;
   employeeProviderIdentities: EmployeeProviderIdentities;
   employees: Employees;
@@ -2202,6 +2327,8 @@ export interface DB {
   roles: Roles;
   selfieCheckins: SelfieCheckins;
   shiftAssignments: ShiftAssignments;
+  shiftChangeRequests: ShiftChangeRequests;
+  shiftCoverageRequirements: ShiftCoverageRequirements;
   shiftPatterns: ShiftPatterns;
   shifts: Shifts;
   shiftSwapRequests: ShiftSwapRequests;

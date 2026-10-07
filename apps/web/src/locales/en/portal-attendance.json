@@ -95,7 +95,8 @@
       "ALREADY_CHECKED_IN": "You are already checked in. Check out first.",
       "NOT_CHECKED_IN": "You are not checked in. Check in first.",
       "PERIOD_LOCKED": "This attendance period is locked for payroll.",
-      "NOT_ACTIVE": "Your employee record is not active."
+      "NOT_ACTIVE": "Your employee record is not active.",
+      "CHECKIN_METHOD_NOT_ALLOWED": "Your attendance policy does not allow this way of checking in."
     },
     "recorded": {
       "in": "Checked in at {{time}}",

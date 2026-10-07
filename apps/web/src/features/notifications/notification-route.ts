@@ -58,7 +58,8 @@ export function selfRouteFor(entityType: string | null): string {
     case 'ATTENDANCE_NOTE': return '/my/requests?tab=reasons';
     case 'REGULARISATION':
     case 'MISSING_PUNCH': return '/my/requests?tab=regularisations';
-    case 'SHIFT_SWAP': return '/my/shift';
+    case 'SHIFT_SWAP':
+    case 'SHIFT_CHANGE': return '/my/shift';
     case 'ATTENDANCE_CORRECTION': return '/my/attendance?tab=corrections';
     default: return '/my';
   }

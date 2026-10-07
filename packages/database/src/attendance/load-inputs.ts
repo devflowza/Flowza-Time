@@ -1,10 +1,11 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, resolveAttendanceSettings, shiftBreakSchema, type AttendanceRules, type AttendanceSettings, type ShiftBreak } from '@flowza/contracts';
+import { resolveAttendanceSettings, shiftBreakSchema, type AttendanceSettings, type ShiftBreak } from '@flowza/contracts';
 import { addDays, errors, isValidTimezone, localDateTime } from '@flowza/shared';
-import { resolveRuleSet, type DailyCalculationInput, type EngineDayMark, type EngineEvent, type EngineHoliday, type EngineLeave, type EnginePunchPayload, type EngineRuleSet, type EngineShift } from '@flowza/domain';
+import { composeDoubleShift, type DailyCalculationInput, type EngineDayMark, type EngineEvent, type EngineHoliday, type EngineLeave, type EnginePunchPayload, type EngineShift, type PolicyScope } from '@flowza/domain';
 import type { Trx } from '../context.js';
 import { activeMarksOn } from './day-marks.js';
+import { additionalShiftOn, loadAdditionalShiftAssignments, resolvePolicyFor } from './policy.js';
 import { loadEmployeeWorkingCalendars } from './working-calendar.js';
 
 /*
@@ -69,6 +70,10 @@ export interface LoadedDailyInputs {
   leave: { id: string; isPaid: boolean } | null;
   /** The organisation's effective attendance settings (defaults filled in). */
   settings: AttendanceSettings;
+  /** Where the employee sat on the date for the policy resolution (Enterprise: country, branch, department, group, shift). */
+  policyScope: PolicyScope;
+  /** The additional (double) shift combined into the day's shift, when one applied. */
+  additionalShiftId: string | null;
 }
 
 /** `time` columns arrive as `HH:mm:ss`; the engine speaks `HH:mm`. */
@@ -91,41 +96,6 @@ export function toEngineShift(row: { id: string; code: string; name: string; typ
 
 // The rotation-pattern mapper moved to the per-date working calendar (leave v2 review P1-1); re-exported for existing importers.
 export { toEnginePattern } from './working-calendar.js';
-
-/** `ramadan_mode` jsonb tolerates the snake_case keys documented in the migration. */
-export function normaliseRamadanMode(raw: unknown): Record<string, unknown> {
-  const o = asObject(raw);
-  const appliesTo = o['appliesTo'] ?? o['applies_to'];
-  const out: Record<string, unknown> = { enabled: o['enabled'] === true, appliesTo: appliesTo === undefined || appliesTo === 'all' ? 'all' : 'flagged_employees' };
-  const scheduled = o['scheduledMinutes'] ?? o['scheduled_minutes'];
-  if (typeof scheduled === 'number') out['scheduledMinutes'] = scheduled;
-  if (typeof o['from'] === 'string') out['from'] = o['from'].slice(0, 10);
-  if (typeof o['to'] === 'string') out['to'] = o['to'].slice(0, 10);
-  return out;
-}
-
-type RuleSetRow = Awaited<ReturnType<typeof loadRuleSetRows>>[number];
-async function loadRuleSetRows(trx: Trx, organizationId: string, branchId: string) {
-  return trx.selectFrom('attendanceRuleSets').selectAll().where('organizationId', '=', organizationId)
-    .where((eb) => eb.or([eb('branchId', 'is', null), eb('branchId', '=', branchId)])).execute();
-}
-
-/** Map a rule set row onto `AttendanceRules`, validating through the shared contract schema (the DB constraints mirror it). */
-export function toAttendanceRules(row: RuleSetRow): AttendanceRules {
-  const parsed = attendanceRuleSetInputSchema.safeParse({
-    name: row.name, effectiveFrom: isoDate(row.effectiveFrom), effectiveTo: row.effectiveTo === null ? null : isoDate(row.effectiveTo), branchId: row.branchId,
-    graceInMinutes: row.graceInMinutes, graceOutMinutes: row.graceOutMinutes, lateThresholdMinutes: row.lateThresholdMinutes, earlyDepartureThresholdMinutes: row.earlyDepartureThresholdMinutes,
-    minFullDayMinutes: row.minFullDayMinutes, halfDayThresholdMinutes: row.halfDayThresholdMinutes, overtimeEnabled: row.overtimeEnabled, overtimeStartAfterMinutes: row.overtimeStartAfterMinutes,
-    overtimeMinBlockMinutes: row.overtimeMinBlockMinutes, overtimeRoundingMinutes: row.overtimeRoundingMinutes, overtimeMaxMinutesPerDay: row.overtimeMaxMinutesPerDay, countEarlyInAsOvertime: row.countEarlyInAsOvertime,
-    overtimeRequiresScheduledHours: row.overtimeRequiresScheduledHours,
-    punchRoundingMinutes: row.punchRoundingMinutes, punchRoundingMode: row.punchRoundingMode, workedRoundingMinutes: row.workedRoundingMinutes, workedRoundingMode: row.workedRoundingMode,
-    punchInterpretation: row.punchInterpretation, duplicatePunchWindowSeconds: row.duplicatePunchWindowSeconds, missingPunchBehavior: row.missingPunchBehavior, autoAbsentWithoutPunches: row.autoAbsentWithoutPunches,
-    weeklyOffWorkCountsAsOvertime: row.weeklyOffWorkCountsAsOvertime, holidayWorkCountsAsOvertime: row.holidayWorkCountsAsOvertime, ramadanMode: normaliseRamadanMode(row.ramadanMode),
-  });
-  if (!parsed.success) throw errors.validation('Attendance rule set is invalid.', { ruleSetId: row.id, issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`) });
-  const { name: _n, branchId: _b, effectiveFrom: _f, effectiveTo: _t, ...rules } = parsed.data;
-  return rules;
-}
 
 /**
  * Build the pure engine's input for one (employee, date): effective branch/department/timezone from employment history,
@@ -165,7 +135,10 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   // to "no shift on purpose" and must not fall back either.
   const defaultShiftId = settings.defaultShiftId ?? null;
   const effectiveShiftId = (r: { shiftId: string | null; isPatternOff: boolean }): string | null => r.shiftId ?? (r.isPatternOff ? null : defaultShiftId);
-  const shiftIds = [...new Set([effectiveShiftId(resolved), effectiveShiftId(resolvedPrev), effectiveShiftId(resolvedNext)].filter((s): s is string => s !== null))];
+  // Double shifts (Enterprise): an additional shift assignment on a date is combined with that date's shift (composeDoubleShift).
+  const additional = await loadAdditionalShiftAssignments(trx, organizationId, [employeeId], addDays(date, -1), addDays(date, 1));
+  const additionalOn = (d: string): string | null => additionalShiftOn(additional, d)?.shiftId ?? null;
+  const shiftIds = [...new Set([effectiveShiftId(resolved), effectiveShiftId(resolvedPrev), effectiveShiftId(resolvedNext), additionalOn(addDays(date, -1)), additionalOn(date), additionalOn(addDays(date, 1))].filter((s): s is string => s !== null))];
   const shiftRows = shiftIds.length
     ? await trx.selectFrom('shifts').select(['id', 'code', 'name', 'type', 'startTime', 'endTime', 'requiredMinutes', 'coreStart', 'coreEnd', 'dayBoundary', 'breaks', 'punchInWindowBeforeMinutes', 'punchOutWindowAfterMinutes', 'graceInMinutes', 'graceOutMinutes'])
       .where('organizationId', '=', organizationId).where('id', 'in', shiftIds).execute()
@@ -173,13 +146,26 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   const shifts = new Map(shiftRows.map((s) => [s.id, toEngineShift(s)]));
   // an unknown (deleted) default shift silently resolves to "no shift" (the engine flags NO_SHIFT) rather than failing the day
   const shiftOf = (id: string | null): EngineShift | null => (id === null ? null : shifts.get(id) ?? null);
-  const shift = shiftOf(effectiveShiftId(resolved));
+  // the day's shift with its additional shift folded in; a combination that cannot be one day (overlap, flexible, ≥ 24 h — the
+  // API refuses those when the assignment is made) keeps the primary shift alone; an additional shift on a day without any
+  // shift is the day's shift
+  const dayShift = (d: string, primaryId: string | null): EngineShift | null => {
+    const primary = shiftOf(primaryId);
+    const extra = shiftOf(additionalOn(d));
+    if (!extra) return primary;
+    if (!primary) return extra;
+    const composed = composeDoubleShift(primary, extra);
+    return composed.ok ? composed.shift : primary;
+  };
+  const primaryShiftId = effectiveShiftId(resolved);
+  const shift = dayShift(date, primaryShiftId);
+  const additionalShiftId = shift?.segments ? additionalOn(date) : null;
 
-  // Rule set: branch-specific first, then organisation default (falls back to contract defaults when none is configured).
-  const ruleSetRows = await loadRuleSetRows(trx, organizationId, today.branchId);
-  const ruleSets: Array<EngineRuleSet & { row: RuleSetRow }> = ruleSetRows.map((r) => ({ id: r.id, branchId: r.branchId, effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: r.effectiveTo === null ? null : isoDate(r.effectiveTo), rules: DEFAULT_ATTENDANCE_RULES, row: r }));
-  const ruleSet = resolveRuleSet(ruleSets, date, today.branchId);
-  const rules = ruleSet ? toAttendanceRules(ruleSet.row) : DEFAULT_ATTENDANCE_RULES;
+  // Policy (rule set): the most specific policy whose scope matches — country of the branch → branch → department → employee
+  // group → the day's (primary) shift; without policies the organisation / branch rule sets resolve exactly as before, and
+  // without any the contract defaults apply (policy.ts, packages/domain resolvePolicy).
+  const policy = await resolvePolicyFor(trx, organizationId, employeeId, date, { branchId: today.branchId, departmentId: today.departmentId, shiftId: primaryShiftId ?? additionalOn(date) });
+  const rules = policy.rules;
 
   // Weekly off: employee → branch → organisation; a rotation pattern off-day counts as a weekly off for this date. Holiday:
   // the branch calendar (or the organisation default calendar). Both from the per-date working calendar above.
@@ -221,7 +207,7 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
     timezone,
     shift,
     rules,
-    ruleSetId: ruleSet?.id ?? null,
+    ruleSetId: policy.row?.id ?? null,
     shiftAssignmentId: resolved.assignment?.id ?? null,
     weeklyOffDays,
     holiday,
@@ -232,7 +218,7 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
     dayMarks,
     settings: { nonWorkingDay: settings.nonWorkingDay },
     now: now.toISOString(),
-    adjacentShifts: { previous: shiftOf(effectiveShiftId(resolvedPrev)), next: shiftOf(effectiveShiftId(resolvedNext)) },
+    adjacentShifts: { previous: dayShift(addDays(date, -1), effectiveShiftId(resolvedPrev)), next: dayShift(addDays(date, 1), effectiveShiftId(resolvedNext)) },
   };
-  return { input, branchId: today.branchId, departmentId: today.departmentId, timezone, eventSources, leave: leave ? { id: leave.id, isPaid: leave.isPaid } : null, settings };
+  return { input, branchId: today.branchId, departmentId: today.departmentId, timezone, eventSources, leave: leave ? { id: leave.id, isPaid: leave.isPaid } : null, settings, policyScope: policy.scope, additionalShiftId };
 }

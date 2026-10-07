@@ -32,6 +32,7 @@ describe('resolveNotificationRoute', () => {
     expect(resolveNotificationRoute(approval('approval.info_requested', { entityType: 'ATTENDANCE_NOTE' }), EMPLOYEE)).toBe('/my/requests?tab=reasons');
     expect(resolveNotificationRoute(approval('approval.decided', { entityType: 'REGULARISATION' }), EMPLOYEE)).toBe('/my/requests?tab=regularisations');
     expect(resolveNotificationRoute(approval('approval.decided', { entityType: 'SHIFT_SWAP' }), EMPLOYEE)).toBe('/my/shift');
+    expect(resolveNotificationRoute(approval('approval.decided', { entityType: 'SHIFT_CHANGE' }), EMPLOYEE)).toBe('/my/shift');
     expect(resolveNotificationRoute(approval('approval.decided', { entityType: 'ATTENDANCE_CORRECTION' }), EMPLOYEE)).toBe('/my/attendance?tab=corrections');
     expect(selfRouteFor(null)).toBe('/my');
   });

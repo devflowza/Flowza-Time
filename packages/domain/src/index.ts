@@ -7,3 +7,8 @@ export * from './leave/balances.js';
 export * from './leave/rules.js';
 export * from './approvals/index.js';
 export * from './geofence/index.js';
+export * from './policy/compliance.js';
+export * from './policy/points.js';
+export * from './policy/overtime.js';
+export * from './scheduling/round-the-clock.js';
+export * from './scheduling/deployment-window.js';

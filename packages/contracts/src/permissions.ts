@@ -6,7 +6,7 @@ export const PERMISSIONS = [
   'branch.view', 'branch.manage', 'department.view', 'department.manage',
   'employee.view', 'employee.view_team', 'employee.view_sensitive', 'employee.create', 'employee.update', 'employee.delete', 'employee.import', 'employee.export',
   'device.view', 'device.create', 'device.update', 'device.manage', 'device.sync',
-  'shift.view', 'shift.manage', 'shift.assign', 'shift.request_swap', 'holiday.view', 'holiday.manage',
+  'shift.view', 'shift.manage', 'shift.assign', 'shift.request_swap', 'shift.request_change', 'holiday.view', 'holiday.manage',
   'leave.view', 'leave.manage', 'leave.request', 'leave.approve', 'leave.view_team',
   'attendance.view', 'attendance.view_own', 'attendance.view_team', 'attendance.view_raw', 'attendance.correct', 'attendance.approve',
   'attendance.manage_rules', 'attendance.recalculate', 'attendance.lock_period', 'attendance.request_correction',

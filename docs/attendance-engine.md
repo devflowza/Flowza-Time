@@ -24,7 +24,9 @@ Records inside a locked period are skipped and listed in the recalculation summa
 | `roundMinutes`, `roundInstant`, `roundPunches` | Rounding (NONE/NEAREST/UP/DOWN) from local midnight; raw timestamps stay in the trace |
 | `calculateDailyRecord(input)` | The daily calculation (below) |
 | `resolveShift(assignments, patterns, scope, date)` | EMPLOYEE > TEAM > DEPARTMENT > BRANCH > ORGANIZATION, half-open effective ranges `[effective_from, effective_to)` as stored (the API and the UI speak of the inclusive last day and convert at the boundary, see docs/api.md), rotation cycle day from `anchorDate`, `isPatternOff` |
-| `resolveRuleSet(ruleSets, date, branchId)` | Branch-specific first, then organisation default; latest `effectiveFrom` |
+| `resolveRuleSet(ruleSets, date, branchId)` | Branch-specific first, then organisation default; latest `effectiveFrom` (policies scoped by another dimension are ignored) |
+| `resolvePolicy(policies, date, scope)` / `explainPolicyResolution` | Enterprise attendance policies (docs/enterprise/plan.md §4): every dimension a policy names (country of the branch, branch, department, employee group, the day's primary shift) must match; the most specific wins — shift 32 > group 16 > department 8 > branch 4 > country 2 > organisation 0 — then the latest `effectiveFrom`, then id. The loader (`packages/database/src/attendance/policy.ts` `resolvePolicyFor`) feeds the engine with it |
+| `composeDoubleShift(primary, additional)` | Engine 1.4.0: two FIXED shifts on one date become one day from the first start to the last end, the gap an unpaid break, grace / windows from the outer shifts, `segments` kept (flag `DOUBLE_SHIFT`); refused: flexible, overlap, ≥ 24 h, same shift |
 | `summarisePeriod(records, opts)` | Payroll totals matching `attendance_period_summaries` (HALF_DAY = 0.5 present; MISSING_PUNCH in `missingPunchDays` only; weekly-off/holiday OT in their own columns) |
 | `decideRetry`, `nextAdaptiveInterval` (sync) | Provider-agnostic retry policy and adaptive polling |
 
@@ -72,9 +74,12 @@ Records inside a locked period are skipped and listed in the recalculation summa
    it falls back to FLAG_ONLY); `TREAT_AS_ABSENT`; `TREAT_AS_HALF_DAY`. The dashboard "missing punches" KPI counts the flags.
 6. Ramadan mode (`rules.ramadanMode`): within the date range (and eligibility) scheduled minutes shrink and `expectedEnd`
    moves earlier; flag `RAMADAN_HOURS`.
+6b. Engine 1.4.0 (Enterprise): `VERY_LATE` when a late arrival is more than the policy's `late.veryLateAfterMinutes` after the
+   SCHEDULED start (not after the grace: "after 09:00" on an 08:00 shift is 60); `DOUBLE_SHIFT` on a composite day of two
+   shifts (an `additional_shift_assignments` row folded in by the loader). Nothing changes for a day without either.
 7. Flags (canonical order): `LATE, EARLY_DEPARTURE, OVERTIME, MISSING_IN, MISSING_OUT, MANUAL_CORRECTION, OUT_OF_WINDOW,
    WORKED_ON_HOLIDAY, WORKED_ON_WEEKLY_OFF, HALF_DAY_LEAVE, DUPLICATE_PUNCHES_COLLAPSED, RAMADAN_HOURS, CROSS_MIDNIGHT,
-   NO_SHIFT, UNDER_HOURS`.
+   NO_SHIFT, UNDER_HOURS, …, VERY_LATE, DOUBLE_SHIFT`.
 
 ## Known design choices (from the adversarial review)
 - Punch rounding is applied to the punch instants **before** late/early evaluation (09:08 with NEAREST-15 → 09:15 → 5 min late
@@ -107,7 +112,8 @@ worked minutes, `CROSS_MIDNIGHT`; D+1 has no punch left (ABSENT once over, not `
   pushed punch reaches the register within seconds), a day recalculated less than a window ago at the end of that window.
 - For a FLEXIBLE shift the normaliser's D−1 reach covers the overnight carry: a punch up to `overnightMaxSpanMinutes` after
   D−1's day boundary also recomputes D−1 (`neighbour-reach.test.ts`).
-- The recompute job loads events in `[date − 1, date + 2)` (branch timezone), resolves shift and rule set, holidays
+- The recompute job loads events in `[date − 1, date + 2)` (branch timezone), resolves shift (+ the additional shift of a double
+  shift) and the policy (`resolvePolicyFor`: country / branch / department / employee group on the date / primary shift), holidays
   (branch calendar), weekly-off (employee → branch → org), approved leave, passes `now`, writes the record with
   `calculation_version + 1`, a history snapshot when anything changed, and emits `attendance.created`/`attendance.updated`.
 - `summarisePeriod` needs `leaveIsPaid` per record (join leave records); `overtimeMinutes` is REGULAR only.

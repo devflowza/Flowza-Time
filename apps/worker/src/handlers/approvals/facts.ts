@@ -11,9 +11,9 @@ const text = (v: string | null | undefined): string | null => (typeof v === 'str
  * What a notice says about the document behind a request (HR portal Prompt 8, B-102): the day it is about, or a leave's dates
  * and type in both languages (review 8-P2-2 — the recipient's language picks the name) — read straight from each entity's
  * table in the organisation's system context. The relay derives every approval notice's facts from here (review 8-P0-1: never
- * from the event's payload); the reminders and escalations use them too. Entity types without a document table (overtime,
- * missing punch, shift change, manual attendance, overtime claims) carry no facts and render with the entity label and the
- * person only.
+ * from the event's payload); the reminders and escalations use them too. A shift change request (Enterprise) carries its
+ * range. Entity types without a document table (overtime, missing punch, manual attendance, overtime claims) carry no facts
+ * and render with the entity label and the person only.
  */
 export async function approvalEntityFacts(trx: Trx, orgId: string, entityType: ApprovalEntity, entityId: string): Promise<ApprovalNotificationFacts> {
   switch (entityType) {
@@ -37,6 +37,10 @@ export async function approvalEntityFacts(trx: Trx, orgId: string, entityType: A
     case 'SHIFT_SWAP': {
       const r = await trx.selectFrom('shiftSwapRequests').select('swapDate').where('organizationId', '=', orgId).where('id', '=', entityId).executeTakeFirst();
       return { ...NONE, date: day(r?.swapDate) };
+    }
+    case 'SHIFT_CHANGE': {
+      const r = await trx.selectFrom('shiftChangeRequests').select(['fromDate', 'toDate']).where('organizationId', '=', orgId).where('id', '=', entityId).executeTakeFirst();
+      return { ...NONE, date: day(r?.fromDate), endDate: day(r?.toDate) };
     }
     case 'COMP_OFF': {
       const r = await trx.selectFrom('compOffCredits').select('workedOn').where('organizationId', '=', orgId).where('id', '=', entityId).executeTakeFirst();

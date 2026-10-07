@@ -30,11 +30,19 @@ export const MODULE_ROUTE_RULES: ReadonlyArray<{ pattern: RegExp; modules: reado
   { pattern: /^payroll(\/|$)/, modules: ['payroll'] },
   { pattern: /^(report-schedules|report-deliveries|report-recipients|reports\/share)(\/|$)/, modules: ['report_schedules'] },
   { pattern: /^integrations\/finance(\/|$)/, modules: ['finance_integration'] },
+  // Enterprise (migration 20261007000100, docs/enterprise/plan.md). Shift swaps moved here from the plain portal; the
+  // organisations that used them keep them through an override. The attendance rule sets stay core: their scope dimensions
+  // beyond the branch and the policy sections are refused by the service when attendance_policies is off.
+  { pattern: /^me\/(shift-swaps|shift-changes)(\/|$)/, modules: ['shift_requests'] },
+  { pattern: /^shift-change-requests(\/|$)/, modules: ['shift_requests'] },
+  { pattern: /^(additional-shift-assignments|branch-deployments|shift-coverage|round-the-clock)(\/|$)/, modules: ['advanced_scheduling'] },
+  { pattern: /^(employee-groups|attendance-policies)(\/|$)/, modules: ['attendance_policies'] },
 ];
 
 const MODULE_NAMES: Record<ModuleKey, string> = {
   devices: 'Devices & sync', self_service: 'Employee self-service portal', geofences: 'Web check-in & geofencing', leave: 'Leave management',
   manager_workspace: 'Manager workspace', payroll: 'Payroll', report_schedules: 'Scheduled reports', finance_integration: 'Flowza Finance integration',
+  shift_requests: 'Shift change & swap requests', advanced_scheduling: 'Round-the-clock scheduling', attendance_policies: 'Global attendance policies',
 };
 
 /** The modules a path (relative to `/orgs/:orgId/`) needs. */
@@ -48,6 +56,19 @@ export function moduleDisabledError(key: ModuleKey): AppError {
   return new AppError('FEATURE_DISABLED', `The ${MODULE_NAMES[key]} module is not enabled for this organisation. Your administrator can enable it with FlowZa.`, {
     details: { reason: MODULE_DISABLED, module: key },
   });
+}
+
+/**
+ * Whether a module is on for the organisation of a request — for a service whose ROUTE is core but part of whose BODY belongs
+ * to a module (a policy scoped beyond the branch, an ADDITIONAL shift change). Outside an HTTP request (no snapshot) the gate
+ * has nothing to say: true.
+ */
+export function moduleEnabledFor(disabledModules: ReadonlyMap<string, ReadonlySet<string>> | undefined, orgId: string, key: ModuleKey): boolean {
+  return !(disabledModules?.get(orgId)?.has(key) ?? false);
+}
+/** Throw the module gate's 403 when the module is off for the organisation (see moduleEnabledFor). */
+export function requireModuleFor(disabledModules: ReadonlyMap<string, ReadonlySet<string>> | undefined, orgId: string, key: ModuleKey): void {
+  if (!moduleEnabledFor(disabledModules, orgId, key)) throw moduleDisabledError(key);
 }
 
 /**

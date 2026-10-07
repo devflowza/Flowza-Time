@@ -6,6 +6,7 @@
  * 11 users), invoices, payments, refunds and the subscription activation of a paid invoice.
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { ENTERPRISE_MODULE_KEYS } from '@flowza/contracts';
 import { createTestApi, F, type TestApi } from './harness.js';
 
 let api: TestApi;
@@ -19,12 +20,16 @@ const modulesOf = async (user: string, orgId: string) => {
 };
 
 describe('module switches', () => {
-  it('every tenant that exists today keeps every module (trial and business include them all)', async () => {
+  it('every tenant that exists today keeps every module it had (trial and business include all but the Enterprise ones)', async () => {
+    const enterpriseOnly = (m: Record<string, boolean>) => Object.entries(m).filter(([k]) => (ENTERPRISE_MODULE_KEYS as readonly string[]).includes(k));
     const a = await modulesOf(F.ownerA, F.orgA);
-    expect(Object.values(a.modules).every(Boolean)).toBe(true);
-    expect(Object.keys(a.modules).sort()).toEqual(['devices', 'finance_integration', 'geofences', 'leave', 'manager_workspace', 'payroll', 'report_schedules', 'self_service']);
+    expect(Object.entries(a.modules).filter(([k]) => !(ENTERPRISE_MODULE_KEYS as readonly string[]).includes(k)).every(([, on]) => on)).toBe(true);
+    expect(Object.keys(a.modules).sort()).toEqual(['advanced_scheduling', 'attendance_policies', 'devices', 'finance_integration', 'geofences', 'leave', 'manager_workspace', 'payroll', 'report_schedules', 'self_service', 'shift_requests']);
+    // the Enterprise modules (migration 20261007000100) are off on business and trial
+    expect(enterpriseOnly(a.modules).every(([, on]) => !on)).toBe(true);
     const b = await modulesOf(F.ownerB, F.orgB);
-    expect(Object.values(b.modules).every(Boolean)).toBe(true);
+    expect(Object.entries(b.modules).filter(([k]) => !(ENTERPRISE_MODULE_KEYS as readonly string[]).includes(k)).every(([, on]) => on)).toBe(true);
+    expect(enterpriseOnly(b.modules).every(([, on]) => !on)).toBe(true);
     expect(b.subscriptionLapsed).toBe(false);
     expect((await api.request('GET', `/orgs/${F.orgA}/leave-types`, { user: F.ownerA })).status).toBe(200);
   });

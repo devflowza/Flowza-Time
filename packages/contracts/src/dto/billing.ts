@@ -12,7 +12,11 @@ import { booleanQuerySchema, currencyCodeSchema, emailSchema, isoDateSchema, iso
 // ------------------------------------------------------------------------------------------------------------------------------
 
 /** Switchable modules. The core (employees, attendance, shifts, reports, approvals, users, settings, audit) is always on. */
-export const MODULE_KEYS = ['devices', 'self_service', 'geofences', 'leave', 'manager_workspace', 'payroll', 'report_schedules', 'finance_integration'] as const;
+export const MODULE_KEYS = ['devices', 'self_service', 'geofences', 'leave', 'manager_workspace', 'payroll', 'report_schedules', 'finance_integration',
+  // Enterprise only (migration 20261007000100, docs/enterprise/plan.md)
+  'shift_requests', 'advanced_scheduling', 'attendance_policies'] as const;
+/** Modules only the Enterprise plan includes (a platform admin can still switch one on for a tenant). */
+export const ENTERPRISE_MODULE_KEYS = ['shift_requests', 'advanced_scheduling', 'attendance_policies'] as const satisfies readonly (typeof MODULE_KEYS)[number][];
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 export const MODULE_CATEGORIES = ['workforce', 'time', 'devices', 'insights', 'integrations'] as const;
 export type ModuleCategory = (typeof MODULE_CATEGORIES)[number];
