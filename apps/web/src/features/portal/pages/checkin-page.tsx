@@ -20,6 +20,7 @@ import { VerdictChip } from '../components/attendance-badges';
 import { LocationProblem, VerdictBanner } from '../components/verdict-banner';
 import { SelfieDialog } from '../components/selfie-dialog';
 import { SectionTitle } from '../components/parts';
+import { DeploymentBanner } from '@/features/scheduling/components/deployment-banner';
 
 /** The server's clock, ticking locally from the offset measured when the status was read (display only; the API stamps punches). */
 function useServerClock(serverTime: string | undefined, receivedAt: number, timezone: string) {
@@ -172,6 +173,8 @@ export default function CheckInPage() {
   return (
     <div className="page-container space-y-5">
       <PageHeader title={t('checkin.title')} description={t('checkin.subtitle')} />
+      {/* Enterprise: a temporary deployment to another branch covers today — that branch's zone is accepted too */}
+      {s?.deployment ? <DeploymentBanner deployment={s.deployment} /> : null}
 
       <div className="grid gap-5 lg:grid-cols-5">
         <Card className="p-5 lg:col-span-3">

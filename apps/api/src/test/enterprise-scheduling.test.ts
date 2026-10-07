@@ -338,6 +338,12 @@ describe('web check-in at the host branch during a deployment', () => {
     expect(home.status).toBe(201);
     const last = await h.admin.selectFrom('attendanceRawTransactions').select('rawPayload').where('organizationId', '=', f.orgId).where('employeeId', '=', f.e1).orderBy('punchedAt', 'desc').executeTakeFirstOrThrow();
     expect(last.rawPayload).not.toHaveProperty('deploymentId');
+    // the module switched off: the host branch's zone no longer counts (the deployment itself stays)
+    const setModule = (enabled: boolean) => h.admin.updateTable('organizationModules').set({ enabled }).where('organizationId', '=', f.orgId).where('moduleKey', '=', 'advanced_scheduling').execute();
+    await setModule(false);
+    expect((await punch({ direction: await nextDirection(), ...FAR, accuracy: 10 })).status).toBe(403);
+    expect((await h.request('GET', `${base()}/me/punch/status?channel=web`, { token: f.employeeUser })).body.data.deployment).toBeNull();
+    await setModule(true);
     // ended / cancelled → refused again
     expect((await h.request('POST', `${base()}/branch-deployments/${dep.body.data.id}/cancel`, { token: f.hrAdmin, body: { reason: 'Back home' } })).status).toBe(200);
     expect((await punch({ direction: await nextDirection(), ...FAR, accuracy: 10 })).status).toBe(403);

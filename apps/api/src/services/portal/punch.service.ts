@@ -16,6 +16,7 @@ import { requireBranchAccess, requireMembership } from '../../lib/authorize.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonObject } from '../../lib/mappers.js';
 import { pageOf, toCount } from '../../lib/pagination.js';
+import { moduleEnabledFor } from '../../middleware/module-gate.js';
 import { systemStep } from '../features/context.js';
 import { enqueueNormalize, ingestRawTransactions } from '../features/ingest.js';
 import {
@@ -49,9 +50,10 @@ import { resolveDays } from './shift-resolve.js';
  *     restrict the channels further — web / mobile / selfie off → 403 CHECKIN_METHOD_NOT_ALLOWED; the organisation switches
  *     still apply first (a policy only restricts them) — and its `requireGeofence` other than `inherit` replaces the
  *     organisation's. Stored policies apply whatever the module state (switching a module off never loosens attendance);
- *   - while a temporary deployment to another branch covers today, a location the employee's own fences would not accept is
- *     judged again against the HOST branch's fences; accepted there, the punch keeps that verdict and its payload records
- *     `deploymentId` / `deployedBranchId`. The punch is still the employee's: home branch, home timezone, home calendar.
+ *   - while a temporary deployment to another branch covers today (and advanced_scheduling is on), a location the employee's
+ *     own fences would not accept is judged again against the HOST branch's fences; accepted there, the punch keeps that
+ *     verdict and its payload records `deploymentId` / `deployedBranchId`. The punch is still the employee's: home branch,
+ *     home timezone, home calendar.
  */
 
 const SELFIE_BUCKET = 'employee-photos';
@@ -151,14 +153,16 @@ async function activeDeploymentFor(trx: Trx, orgId: string, employeeId: string, 
 }
 
 interface PunchContext { emp: EmployeeCtx; settings: AttendanceSettings; grants: Grants; fences: GeofenceFence[]; methods: CheckInMethods; deployment: ActiveDeployment | null }
-async function loadPunchContext(deps: Pick<ApiDeps, 'config' | 'log'>, trx: Trx, orgId: string, employeeId: string): Promise<PunchContext> {
+async function loadPunchContext(deps: Pick<ApiDeps, 'config' | 'log'>, trx: Trx, orgId: string, employeeId: string, actor: Pick<Actor, 'disabledModules'>): Promise<PunchContext> {
   const emp = await loadEmployeeCtx(trx, orgId, employeeId);
   const [settings, grants, fences] = await Promise.all([attendancePolicy(trx, orgId), loadGrants(trx, orgId, employeeId), fencesForEmployee(trx, orgId, emp)]);
   const ipAllowList = [...effectiveIpAllowList(deps, orgId, settings.selfService.ipAllowList)];
   // sequential: each switches the transaction's role for its reads and restores it
   const today = localInstant(new Date(), emp.timezone).date;
   const methods = await policyMethodsFor(trx, orgId, emp, today, settings.defaultShiftId ?? null);
-  const deployment = await activeDeploymentFor(trx, orgId, emp.id, today);
+  // the host-branch check-in is the module's feature (it widens where a punch is accepted): off with the module, while the
+  // access REMOVAL after a deployment runs whatever the module state (worker sweep)
+  const deployment = moduleEnabledFor(actor.disabledModules, orgId, 'advanced_scheduling') ? await activeDeploymentFor(trx, orgId, emp.id, today) : null;
   const requireGeofence = methods.requireGeofence === 'inherit' ? settings.selfService.requireGeofence : methods.requireGeofence;
   return { emp, settings: { ...settings, selfService: { ...settings.selfService, ipAllowList, requireGeofence } }, grants, fences, methods, deployment };
 }
@@ -279,7 +283,7 @@ export function refusalError(refusals: readonly SelfPunchRefusal[], extra: Recor
 export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string, q: { channel: SelfPunchChannel }): Promise<SelfPunchStatusDto> {
   const self = portalSelf(actor, orgId, 'attendance.checkin');
   return runUser(deps.db, actor, async (trx) => {
-    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId, actor);
     const now = new Date();
     const local = localInstant(now, ctx.emp.timezone);
     const blockers = await standingRefusals(trx, orgId, ctx, q.channel, actor.ip, now);
@@ -322,7 +326,7 @@ function startOfLocalDay(at: Date, tz: string): Date {
 export async function previewPunch(deps: ApiDeps, actor: Actor, orgId: string, input: { direction: SelfPunchDirection; channel: SelfPunchChannel; lat?: number | undefined; lng?: number | undefined; accuracy?: number | undefined; isMock?: boolean | undefined }): Promise<SelfPunchPreviewDto> {
   const self = portalSelf(actor, orgId, 'attendance.checkin');
   return runUser(deps.db, actor, async (trx) => {
-    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId, actor);
     const a = await assess(trx, orgId, ctx, input, actor.ip, new Date(), { sequence: true });
     return { verdict: { ...toVerdictDto(a.evaluation), verdict: a.verdict }, outOfWindow: a.outOfWindow, refusals: a.refusals, wouldBeFlagged: a.flagged };
   });
@@ -347,7 +351,7 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
       const verdict = isVerdict(p['verdict']) ? p['verdict'] : 'no_fence';
       return { kind: 'ok', result: { replayed: true, punch: dto, verdict: { verdict, reason: typeof p['verdictReason'] === 'string' ? p['verdictReason'] : 'replayed', geofenceId: typeof p['geofenceId'] === 'string' ? p['geofenceId'] : null, geofenceName: typeof p['geofenceName'] === 'string' ? p['geofenceName'] : null, distanceM: typeof p['distanceM'] === 'number' ? p['distanceM'] : null, scope: null, enforcement: null }, outOfWindow: p['outOfWindow'] === true, flagged: verdict === 'flagged' || p['outOfWindow'] === true } };
     }
-    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId, actor);
     const a = await assess(trx, orgId, ctx, input, actor.ip, now, { sequence: true });
     const verdictDto = { ...toVerdictDto(a.evaluation), verdict: a.verdict };
     const location = { lat: input.lat ?? null, lng: input.lng ?? null, accuracy: input.accuracy ?? null, isMock: input.isMock === true };
@@ -543,7 +547,7 @@ export async function submitSelfie(deps: ApiDeps, actor: Actor, orgId: string, i
   if (!deps.storage.upload) throw errors.dependency('Photo storage');
   return runUser(deps.db, actor, async (trx) => {
     await lockEmployee(trx, 'self-punch', self.employeeId);
-    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId);
+    const ctx = await loadPunchContext(deps, trx, orgId, self.employeeId, actor);
     if (!ctx.settings.selfService.allowSelfieCheckIn) throw new AppError('FORBIDDEN', 'Selfie check-in is turned off for this organisation.', { details: { reason: 'SELFIE_DISABLED' } });
     if (!ctx.methods.selfie) throw new AppError('FORBIDDEN', REFUSAL_TEXT.CHECKIN_METHOD_NOT_ALLOWED, { details: { reason: 'CHECKIN_METHOD_NOT_ALLOWED', refusals: ['CHECKIN_METHOD_NOT_ALLOWED'], method: 'selfie' } });
     if (!ctx.grants.openAttendance && !ctx.grants.selfieRequired) throw new AppError('FORBIDDEN', 'Selfie check-in needs an attendance grant from your manager.', { details: { reason: 'SELFIE_NOT_GRANTED' } });
