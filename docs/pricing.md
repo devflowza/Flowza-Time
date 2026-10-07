@@ -11,11 +11,11 @@ derived from it: yearly = ten months of monthly (two months free), and the per-u
 
 | Plan | Yearly | Monthly | Users included | Extra user / year (month) | Modules | Limits (max) |
 |---|---|---|---|---|---|---|
-| **Trial** | free, 14 days | — | — | — | every module | 50 employees, 3 terminals, 2 branches |
+| **Trial** | free, 14 days | — | — | — | every module except the Enterprise ones | 50 employees, 3 terminals, 2 branches |
 | **Starter** | 250 | 25 | 11 | 20 (2) | Devices & sync, Employee self-service | 50 employees, 2 terminals, 2 branches |
 | **Professional** (reference) | **500** | 50 | **11** | 40 (4) | Starter + Leave, Web check-in & geofencing, Manager workspace, Payroll, Scheduled reports | 100 employees, 5 terminals, 5 branches |
 | **Business** | 1,100 | 110 | 25 | 35 (3.5) | Professional + Flowza Finance integration | 1,000 employees, 50 terminals, 25 branches |
-| **Enterprise** | custom | custom | — | — | every module | 100,000 employees, 5,000 terminals |
+| **Enterprise** | custom | custom | — | — | every module, including the Enterprise-only modules (shift requests, round-the-clock scheduling, global attendance policies) | 100,000 employees, 5,000 terminals |
 
 What a customer pays (yearly, excl. VAT):
 
@@ -50,6 +50,16 @@ in integer baisa, and is used by the API (invoices, revenue figures) and the web
 | `payroll` | Payroll | `/payroll`; `payroll/*` |
 | `report_schedules` | Scheduled reports | schedules and sharing on `/reports`; `report-schedules`, `report-deliveries`, `report-recipients`, `reports/share` |
 | `finance_integration` | Flowza Finance integration | Settings → Integrations; `integrations/finance*` |
+| `shift_requests` (**Enterprise**) | Shift change & swap requests | `/my/shift` (change requests, swaps), Shifts → Shift requests; `me/shift-changes*`, `me/shift-swaps*`, `shift-change-requests` |
+| `advanced_scheduling` (**Enterprise**) | Round-the-clock scheduling | Shifts → Round-the-clock / Coverage / Double shifts, `/deployments`; `round-the-clock*`, `shift-coverage*`, `additional-shift-assignments*`, `branch-deployments*` |
+| `attendance_policies` (**Enterprise**) | Global attendance policies | `/attendance/policies`, the policy scope and sections of Shifts → Rules; `employee-groups*`, `attendance-policies*` (and, on the core `attendance-rule-sets` route, any scope beyond the branch or a non-default `policy`) |
+
+The three Enterprise modules (migration `20261007000100`, design and benchmark in `docs/enterprise/plan.md`) are in the Enterprise
+plan only; a platform admin can switch one on for any tenant (Tenant → Modules). **Shift swaps** used to come with the
+self-service portal on every plan: every organisation that had used them keeps them through an override recorded with its
+reason, so nobody lost a feature they used. Switching an Enterprise module off keeps every stored policy, group, double shift
+and deployment, and the attendance engine keeps applying the stored policies and double shifts (a downgrade never silently
+changes calculated attendance); terminal clean-up after a deployment runs whatever the module state.
 
 The core — employees and organisation, attendance and corrections, shifts and holidays, reports, approvals, users, settings,
 audit — is never switchable.
@@ -123,7 +133,8 @@ disabled) and Settings → Subscription.
 `app._org_module_states` / `app.org_module_states` / `app.org_module_enabled` / `app.next_billing_invoice_number`, and
 `app.principal_snapshot` extended with `disabledModules`. Every table has RLS (forced where it applies), refuses the data API, and
 the tenant-scoped ones refuse client writes (system context only, after `requirePlatformAdmin`). The seed changes no existing
-tenant: Trial, Business and Enterprise include every module; only Starter (no tenant on it) is a subset.
+tenant: Trial, Business and Enterprise include every module of that migration; only Starter (no tenant on it) is a subset.
+The Enterprise-only modules of migration `20261007000100` are in the Enterprise plan alone.
 
 **Deploy order:** apply the migration before deploying the API (the API reads `disabledModules` and falls back to "nothing off"
 when the key is absent, but the new endpoints need the tables).
