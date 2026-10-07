@@ -28,37 +28,56 @@ import type { HandlerRegistry, JobContext } from '../types.js';
 
 /** Local hour (organisation timezone) in which the daily sweep is enqueued. */
 export const DEPLOYMENT_CLEANUP_LOCAL_HOUR = 0;
+/** Deployments read per batch, and the batches one run works through at most (a larger backlog continues the next day). */
+export const DEPLOYMENT_CLEANUP_BATCH = 500;
+export const DEPLOYMENT_CLEANUP_MAX_ROUNDS = 20;
 
 export const deploymentCleanupPayloadSchema = z.object({ organizationId: z.guid(), asOf: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional() });
 
 export interface DeploymentCleanupSummary { organizationId: string; today: string; due: number; cleanedUp: number; pending: number; removals: number; syncJobIds: string[]; failed: number }
 
+type DueDeployment = Awaited<ReturnType<typeof deploymentsDueForCleanup>>[number];
+
+/** Clean one deployment in its own transaction and audit it as SYSTEM; a failure is counted and logged, never thrown. */
+async function cleanOne(deps: Pick<WorkerDeps, 'db' | 'queue' | 'log'>, organizationId: string, jobId: string | null, today: string, d: DueDeployment, summary: DeploymentCleanupSummary): Promise<void> {
+  const ctx = { kind: 'system' as const, organizationId, ...(jobId ? { jobId } : {}) };
+  try {
+    const res = await withContext(deps.db, ctx, async (trx) => {
+      const r = await cleanupBranchDeployment(trx, deps.queue, { organizationId, deploymentId: d.id, today, trigger: 'SCHEDULED', requestedBy: null, correlationId: `deployment-cleanup:${d.id}`, cause: d.cancelled ? 'cancelled' : 'ended' });
+      await writeAudit(trx, {
+        organizationId, actorUserId: null, actorType: 'SYSTEM', action: 'employee.deployment_cleaned_up', entityType: 'employee', entityId: d.employeeId, branchId: d.branchId, jobId,
+        newValue: { deploymentId: d.id, toDate: d.toDate, cause: d.cancelled ? 'cancelled' : 'ended', syncJobId: r.syncJobId, removals: r.removals, skipped: r.skipped, kept: r.kept, cancelledEnrolItems: r.cancelledEnrolItems, inFlightEnrolItems: r.inFlightEnrolItems, cleanedUp: r.cleanedUp },
+        reason: 'Temporary deployment ended: access to the branch\'s terminals removed',
+      });
+      return r;
+    });
+    if (res.cleanedUp) summary.cleanedUp += 1; else summary.pending += 1;
+    summary.removals += res.removals.length;
+    if (res.syncJobId) summary.syncJobIds.push(res.syncJobId);
+  } catch (err) {
+    summary.failed += 1;
+    deps.log.error(event('deployment_cleanup_failed', { organizationId, deploymentId: d.id, jobId, err: (err as Error).message }));
+  }
+}
+
 export async function runBranchDeploymentCleanup(deps: Pick<WorkerDeps, 'db' | 'queue' | 'now' | 'log'>, organizationId: string, jobId: string | null = null): Promise<DeploymentCleanupSummary> {
   const ctx = { kind: 'system' as const, organizationId, ...(jobId ? { jobId } : {}) };
-  const { today, due } = await withContext(deps.db, ctx, async (trx) => {
+  const today = await withContext(deps.db, ctx, async (trx) => {
     const org = await trx.selectFrom('organizations').select('timezone').where('id', '=', organizationId).executeTakeFirst();
     const zone = org?.timezone && isValidTimezone(org.timezone) ? org.timezone : 'UTC';
-    const localToday = DateTime.fromJSDate(deps.now()).setZone(zone).toISODate() ?? deps.now().toISOString().slice(0, 10);
-    return { today: localToday, due: await deploymentsDueForCleanup(trx, organizationId, localToday) };
+    return DateTime.fromJSDate(deps.now()).setZone(zone).toISODate() ?? deps.now().toISOString().slice(0, 10);
   });
-  const summary: DeploymentCleanupSummary = { organizationId, today, due: due.length, cleanedUp: 0, pending: 0, removals: 0, syncJobIds: [], failed: 0 };
-  for (const d of due) {
-    try {
-      const res = await withContext(deps.db, ctx, async (trx) => {
-        const r = await cleanupBranchDeployment(trx, deps.queue, { organizationId, deploymentId: d.id, today, trigger: 'SCHEDULED', requestedBy: null, correlationId: `deployment-cleanup:${d.id}`, cause: d.cancelled ? 'cancelled' : 'ended' });
-        await writeAudit(trx, {
-          organizationId, actorUserId: null, actorType: 'SYSTEM', action: 'employee.deployment_cleaned_up', entityType: 'employee', entityId: d.employeeId, branchId: d.branchId, jobId,
-          newValue: { deploymentId: d.id, toDate: d.toDate, cause: d.cancelled ? 'cancelled' : 'ended', syncJobId: r.syncJobId, removals: r.removals, skipped: r.skipped, kept: r.kept, cancelledEnrolItems: r.cancelledEnrolItems, inFlightEnrolItems: r.inFlightEnrolItems, cleanedUp: r.cleanedUp },
-          reason: 'Temporary deployment ended: access to the branch\'s terminals removed',
-        });
-        return r;
-      });
-      if (res.cleanedUp) summary.cleanedUp += 1; else summary.pending += 1;
-      summary.removals += res.removals.length;
-      if (res.syncJobId) summary.syncJobIds.push(res.syncJobId);
-    } catch (err) {
-      summary.failed += 1;
-      deps.log.error(event('deployment_cleanup_failed', { organizationId, deploymentId: d.id, jobId, err: (err as Error).message }));
+  const summary: DeploymentCleanupSummary = { organizationId, today, due: 0, cleanedUp: 0, pending: 0, removals: 0, syncJobIds: [], failed: 0 };
+  // a backlog larger than one batch is worked through in the same run, each deployment at most once (one still waiting for a
+  // running enrolment item stays due and is picked again by the next run, not by this one)
+  const seen = new Set<string>();
+  for (let round = 0; round < DEPLOYMENT_CLEANUP_MAX_ROUNDS; round += 1) {
+    const batch = (await withContext(deps.db, ctx, (trx) => deploymentsDueForCleanup(trx, organizationId, today, DEPLOYMENT_CLEANUP_BATCH))).filter((d) => !seen.has(d.id));
+    if (batch.length === 0) break;
+    for (const d of batch) {
+      seen.add(d.id);
+      summary.due += 1;
+      await cleanOne(deps, organizationId, jobId, today, d, summary);
     }
   }
   deps.log.info(event('deployment_cleanup_done', { ...summary, syncJobIds: summary.syncJobIds.length, jobId }));
