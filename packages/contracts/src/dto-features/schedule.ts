@@ -60,4 +60,16 @@ export const updateLeaveRecordSchema = z.object({
   onBehalfOfUserId: uuidSchema.optional(),
 });
 export type UpdateLeaveRecordInput = z.infer<typeof updateLeaveRecordSchema>;
-export const ruleSetListQuerySchema = z.object({ branchId: uuidSchema.optional(), activeOn: isoDateSchema.optional(), includeExpired: booleanQuerySchema.default(true) });
+/**
+ * Attendance rule sets (policies). The scope filters beyond `branchId` (Enterprise, attendance_policies) match the policy's own
+ * dimension exactly (a policy scoped to the group, not "policies that would apply to its members").
+ */
+export const ruleSetListQuerySchema = z.object({
+  branchId: uuidSchema.optional(),
+  countryCode: z.string().regex(/^[A-Z]{2}$/).optional(),
+  departmentId: uuidSchema.optional(),
+  employeeGroupId: uuidSchema.optional(),
+  shiftId: uuidSchema.optional(),
+  activeOn: isoDateSchema.optional(),
+  includeExpired: booleanQuerySchema.default(true),
+});

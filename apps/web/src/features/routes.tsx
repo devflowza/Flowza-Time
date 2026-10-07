@@ -18,6 +18,7 @@ import { portalRoutes } from './portal/routes';
 import { teamRoutes } from './team/routes';
 import { attendanceReviewRoutes } from './attendance-review/routes';
 import { attendanceAdminRoutes } from './attendance-admin/routes';
+import { policiesRoutes } from './policies/routes';
 
 /** Every feature exports its RouteObject[] from features/<name>/routes.tsx (lazy pages). */
 export const featureRoutes: RouteObject[] = [
@@ -26,4 +27,5 @@ export const featureRoutes: RouteObject[] = [
   ...reportsRoutes, ...payrollRoutes, ...leaveRoutes, ...portalRoutes, ...teamRoutes,
   ...attendanceReviewRoutes,
   ...attendanceAdminRoutes,
+  ...policiesRoutes,
 ];
