@@ -1,8 +1,8 @@
 import { sql } from 'kysely';
 import type { z } from 'zod';
 import type { AttendanceRuleSetInput, HolidayInput, ShiftAssignmentInput, ShiftInput, ShiftPatternInput, holidayCalendarInputSchema } from '@flowza/contracts';
-import type { Trx } from '@flowza/database';
-import { resolveShift, resolveRuleSet, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
+import { resolvePolicyFor, type Trx } from '@flowza/database';
+import { resolveShift, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
@@ -272,10 +272,11 @@ export async function resolveEmployeeShift(deps: ApiDeps, actor: Actor, orgId: s
     const scope = { employeeId, teamIds: teams, departmentId: hist?.departmentId ?? emp.departmentId, branchId: hist?.branchId ?? emp.branchId, organizationId: orgId };
     const resolved = resolveShift(assignments, patterns, scope, date);
     const shift = resolved.shiftId ? await trx.selectFrom('shifts').selectAll().where('id', '=', resolved.shiftId).executeTakeFirst() : null;
-    const ruleSets = (await trx.selectFrom('attendanceRuleSets').select(['id', 'branchId', 'effectiveFrom', 'effectiveTo', 'name']).where('organizationId', '=', orgId).execute()).map((r) => ({ id: r.id, branchId: r.branchId, effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: isoDateOrNull(r.effectiveTo), name: r.name, rules: {} as never }));
-    const ruleSet = resolveRuleSet(ruleSets, date, scope.branchId);
+    // the policy the engine applies: the most specific one matching country / branch / department / employee group / shift
+    const policy = await resolvePolicyFor(trx, orgId, employeeId, date, { branchId: scope.branchId, departmentId: scope.departmentId, shiftId: resolved.shiftId });
+    const ruleSet = policy.row;
     const assignment = resolved.assignment ? { ...resolved.assignment, effectiveTo: assignmentEndFromStored(resolved.assignment.effectiveTo) } : null;
-    return { employeeId, date, source: resolved.source, isPatternOff: resolved.isPatternOff, patternDay: resolved.patternDay, assignment, shift: shift ? toShiftDto(shift) : null, ruleSet: ruleSet ? { id: ruleSet.id, name: ruleSet.name, branchId: ruleSet.branchId } : null, scope };
+    return { employeeId, date, source: resolved.source, isPatternOff: resolved.isPatternOff, patternDay: resolved.patternDay, assignment, shift: shift ? toShiftDto(shift) : null, ruleSet: ruleSet ? { id: ruleSet.id, name: ruleSet.name, branchId: ruleSet.branchId } : null, scope, policyScope: policy.scope };
   });
 }
 
@@ -448,7 +449,7 @@ export async function listRuleSets(deps: ApiDeps, actor: Actor, orgId: string, q
 }
 function ruleSetValues(input: Partial<AttendanceRuleSetInput>): Record<string, unknown> {
   const v: Record<string, unknown> = {};
-  for (const [k, val] of Object.entries(input)) if (val !== undefined) v[k] = k === 'ramadanMode' ? JSON.stringify(val) : val;
+  for (const [k, val] of Object.entries(input)) if (val !== undefined) v[k] = k === 'ramadanMode' || k === 'policy' ? JSON.stringify(val) : val;
   return v;
 }
 export async function createRuleSet(deps: ApiDeps, actor: Actor, orgId: string, input: AttendanceRuleSetInput): Promise<RuleSetDto & { recalculationJobId: string | null }> {

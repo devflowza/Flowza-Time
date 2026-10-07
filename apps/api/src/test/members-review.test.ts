@@ -25,7 +25,7 @@ const membershipOf = async (userId: string) => h.admin.selectFrom('orgMembership
 // the reviewer's caller: a custom `user_admin_b` role (user.* + employee.view/update, nothing else) scoped to branch B
 const UA_PERMISSIONS = ['user.view', 'user.manage', 'employee.view', 'employee.update', 'dashboard.view'];
 // a branch-scoped user admin who also holds every permission of the `employee` role (so may hand it out)
-const EMPLOYEE_ROLE_PERMISSIONS = ['attendance.checkin', 'attendance.note', 'attendance.request_correction', 'attendance.view_own', 'holiday.view', 'leave.request', 'shift.request_swap'];
+const EMPLOYEE_ROLE_PERMISSIONS = ['attendance.checkin', 'attendance.note', 'attendance.request_correction', 'attendance.view_own', 'holiday.view', 'leave.request', 'shift.request_change', 'shift.request_swap'];
 let roleUA: string; let roleBUA: string;
 const uaB = uuid('c'); const buaB = uuid('c'); const orgAdmin = uuid('c'); const adminB = uuid('c'); const staffB = uuid('c'); const roleAdmin = uuid('c');
 let msUaB: string; let msAdminB: string; let msStaffB: string;

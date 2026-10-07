@@ -23,7 +23,7 @@ const review = (id: string, body: Record<string, unknown>, token = f.managerUser
 
 beforeAll(async () => {
   h = await createApiHarness(`flowza_api_portal_requests_${process.pid}`);
-  f = await seedOrg(h.admin, 'requests');
+  f = await seedOrg(h.admin, 'requests', { modules: ['shift_requests'] });
   e4 = await seedEmployee(h.admin, f.orgId, f.branchA, 4);
   emp4User = uuid('c');
   await seedUser(h.admin, emp4User, 'emp4@test.local', 'Employee Four');

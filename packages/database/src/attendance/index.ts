@@ -4,6 +4,8 @@ export * from './day-marks.js';
 export * from './pay-effect.js';
 // The engine's daily input loader, shared by the worker's recompute and the API's record preview (HR portal Prompt 6a).
 export * from './load-inputs.js';
+// Attendance policy resolution (Enterprise: scoped policies, employee groups) and the additional (double) shift loader.
+export * from './policy.js';
 // THE per-date working calendar, shared by the loader above, leave day counting, balances and the comp-off preview (leave v2 review P1-1 / P1-2).
 export { historyRowOn, loadEmployeeWorkingCalendars, type CalendarBranch, type DayPlacement, type EmployeeWorkingCalendar, type WorkingCalendarContext, type WorkingDay } from './working-calendar.js';
 export * from './self-service-device.js';

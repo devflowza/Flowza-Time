@@ -1,6 +1,7 @@
 import { DateTime } from 'luxon';
 import type { AttendanceRules } from '@flowza/contracts';
 import type { EngineShiftAssignment, EngineShiftPattern, ShiftResolution } from './types.js';
+import { branchOnlyScope, resolvePolicy, type ScopedPolicy } from './resolve-policy.js';
 
 /** Where the employee sits in the organisation on the date being resolved. */
 export interface EmployeeScope {
@@ -90,8 +91,8 @@ export function resolveShift(
   return { assignment, shiftId: entry.shiftId, isPatternOff: false, source: 'PATTERN', patternDay: day };
 }
 
-/** Effective-dated rule set row as loaded from `attendance_rule_sets`. */
-export interface EngineRuleSet {
+/** Effective-dated rule set row as loaded from `attendance_rule_sets` (the attendance policy; scope dimensions optional). */
+export interface EngineRuleSet extends ScopedPolicy {
   id: string;
   branchId: string | null;
   effectiveFrom: string;
@@ -101,12 +102,9 @@ export interface EngineRuleSet {
 
 /**
  * Rule set effective on `date` for a branch: a branch-specific set wins over the organisation default
- * (`branchId === null`). Among several matches the latest `effectiveFrom` wins, then id.
+ * (`branchId === null`). Among several matches the latest `effectiveFrom` wins, then id. Policies that name a country,
+ * department, employee group or shift are not considered — the full resolution is `resolvePolicy` (resolve-policy.ts).
  */
 export function resolveRuleSet<T extends EngineRuleSet>(ruleSets: readonly T[], date: string, branchId: string | null): T | null {
-  const active = ruleSets.filter((r) => isEffectiveOn(r, date));
-  const pick = (rows: T[]): T | null =>
-    rows.sort((a, b) => (a.effectiveFrom !== b.effectiveFrom ? b.effectiveFrom.localeCompare(a.effectiveFrom) : a.id.localeCompare(b.id)))[0] ?? null;
-  const branchSpecific = branchId === null ? [] : active.filter((r) => r.branchId === branchId);
-  return pick(branchSpecific) ?? pick(active.filter((r) => r.branchId === null));
+  return resolvePolicy(ruleSets, date, branchOnlyScope(branchId));
 }

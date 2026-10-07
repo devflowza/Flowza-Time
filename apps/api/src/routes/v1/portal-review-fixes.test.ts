@@ -184,7 +184,7 @@ describe('shift swaps: the colleague is a party to the request (4-P0-2), employm
     .map((a) => `${iso(a.effectiveFrom as Date | string)}→${iso(a.effectiveTo as Date | string | null)}:${a.shiftId === MORN ? 'MORN' : 'EVE'}`);
 
   beforeAll(async () => {
-    s = await seedOrg(h.admin, 'swaps');
+    s = await seedOrg(h.admin, 'swaps', { modules: ['shift_requests'] });
     MORN = (await h.admin.insertInto('shifts').values({ organizationId: s.orgId, code: 'MORN', name: 'Morning', type: 'FIXED', startTime: '08:00', endTime: '16:00' }).returning('id').executeTakeFirstOrThrow()).id;
     EVE = (await h.admin.insertInto('shifts').values({ organizationId: s.orgId, code: 'EVE', name: 'Evening', type: 'FIXED', startTime: '14:00', endTime: '22:00' }).returning('id').executeTakeFirstOrThrow()).id;
     e4 = await linked(s, 14, s.branchA); // no manager: routed to the HR admins
@@ -287,7 +287,7 @@ describe('shift swaps: the colleague is a party to the request (4-P0-2), employm
 
 describe('4-P2-13 the portal shift tab and the swap rules use the branch effective on each date', () => {
   it('4-P2-13 after a future-dated transfer, the days before it keep the old branch (probe S5)', async () => {
-    const t = await seedOrg(h.admin, 'transfer');
+    const t = await seedOrg(h.admin, 'transfer', { modules: ['shift_requests'] });
     const MORN = (await h.admin.insertInto('shifts').values({ organizationId: t.orgId, code: 'MORN', name: 'Morning', type: 'FIXED', startTime: '08:00', endTime: '16:00' }).returning('id').executeTakeFirstOrThrow()).id;
     const EVE = (await h.admin.insertInto('shifts').values({ organizationId: t.orgId, code: 'EVE', name: 'Evening', type: 'FIXED', startTime: '14:00', endTime: '22:00' }).returning('id').executeTakeFirstOrThrow()).id;
     await h.admin.insertInto('shiftAssignments').values([

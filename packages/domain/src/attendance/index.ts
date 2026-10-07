@@ -10,3 +10,5 @@ export * from './period.js';
 export * from './activity.js';
 export * from './self-stats.js';
 export * from './team-today.js';
+export * from './resolve-policy.js';
+export * from './double-shift.js';

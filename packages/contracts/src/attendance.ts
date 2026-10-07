@@ -11,10 +11,92 @@ export const ramadanModeSchema = z.object({
 });
 export type RamadanMode = z.infer<typeof ramadanModeSchema>;
 
-/** Configurable attendance rules (§107). Mirrors attendance_rule_sets. */
+/** Disciplinary escalation steps of an attendance policy (Enterprise, attendance_policies). */
+export const DISCIPLINE_ACTIONS = ['NOTIFY_MANAGER', 'VERBAL_WARNING', 'WRITTEN_WARNING', 'FINAL_WARNING', 'HR_REVIEW'] as const;
+export type DisciplineAction = (typeof DISCIPLINE_ACTIONS)[number];
+/** What an attendance point is given for (one occurrence per day and kind; VERY_LATE replaces LATE on the same day). */
+export const ATTENDANCE_POINT_KINDS = ['LATE', 'VERY_LATE', 'EARLY_DEPARTURE', 'ABSENT', 'MISSING_PUNCH', 'UNEXCUSED', 'REPEATED_LATE'] as const;
+export type AttendancePointKind = (typeof ATTENDANCE_POINT_KINDS)[number];
+
+const pointsValue = z.number().min(0).max(100).multipleOf(0.5);
+const otRate = z.number().min(1).max(5).multipleOf(0.05);
+/**
+ * The sections of an attendance POLICY beyond the classic rule-set thresholds (Enterprise, `attendance_rule_sets.policy`,
+ * docs/enterprise/plan.md §4). Every key is read by something — nothing here is decorative:
+ *   late.veryLateAfterMinutes     → engine flag VERY_LATE (engine 1.4.0)
+ *   late.repeatedLate             → attendance points (REPEATED_LATE occurrences)
+ *   methods                       → the web / mobile / selfie check-in endpoints (per-policy restriction of the org switches)
+ *   overtime.weeklyThresholdMinutes, overtime.rates, overtime.maxDailyWorkMinutes → the overtime summary (weighted hours,
+ *                                   weekly overtime, days over the statutory daily maximum)
+ *   points                        → the attendance points & discipline report
+ *   regularisation                → the self-service regularisation endpoint (monthly limit, how far back)
+ *   countryPack                   → provenance of a policy created from a country rule pack (compliance check)
+ * A PATCH replaces the policy object as a whole (the editor always sends every section).
+ */
+export const attendancePolicySectionsSchema = z.object({
+  countryPack: z.object({ code: z.string().regex(/^[A-Z]{2}$/), version: z.string().trim().min(1).max(20) }).nullable().default(null),
+  late: z.object({
+    /** Arriving more than this many minutes after the SCHEDULED start (not after the grace) flags VERY_LATE. Null = off. */
+    veryLateAfterMinutes: z.number().int().min(1).max(720).nullable().default(null),
+    /** Every `occurrences` late arrivals within `periodDays` count one REPEATED_LATE occurrence (points). Null = off. */
+    repeatedLate: z.object({ occurrences: z.number().int().min(2).max(31), periodDays: z.number().int().min(7).max(90) }).nullable().default(null),
+  }).prefault({}),
+  methods: z.object({
+    /** Web / mobile / selfie check-in allowed for employees on this policy (the organisation switches must also allow it). */
+    web: z.boolean().default(true),
+    mobile: z.boolean().default(true),
+    selfie: z.boolean().default(true),
+    /** Geofence requirement for web / mobile check-in; `inherit` = Settings → Attendance. */
+    requireGeofence: z.enum(['inherit', 'off', 'flag', 'block']).default('inherit'),
+  }).prefault({}),
+  overtime: z.object({
+    /** Worked minutes in an ISO week (Mon–Sun) beyond this count as weekly overtime, net of the daily overtime already counted. */
+    weeklyThresholdMinutes: z.number().int().min(60).max(10080).nullable().default(null),
+    /** Statutory maximum of work (regular + overtime) per day; days above it are reported. */
+    maxDailyWorkMinutes: z.number().int().min(60).max(1440).nullable().default(null),
+    /** Pay multipliers for the weighted overtime hours of the payroll export. */
+    rates: z.object({ regular: otRate.default(1.25), weekly: otRate.default(1.25), weeklyOff: otRate.default(1.5), holiday: otRate.default(2) }).prefault({}),
+  }).prefault({}),
+  points: z.object({
+    enabled: z.boolean().default(false),
+    late: pointsValue.default(1),
+    veryLate: pointsValue.default(2),
+    earlyDeparture: pointsValue.default(1),
+    absent: pointsValue.default(3),
+    missingPunch: pointsValue.default(1),
+    unexcused: pointsValue.default(2),
+    repeatedLate: pointsValue.default(2),
+    /** A point counts for this many days (rolling window), then drops off. */
+    expiryDays: z.number().int().min(7).max(730).default(90),
+    /** Escalation ladder: reaching `points` within the window calls for `action` (ascending thresholds, each action once). */
+    escalation: z.array(z.object({ points: z.number().min(0.5).max(1000).multipleOf(0.5), action: z.enum(DISCIPLINE_ACTIONS) })).max(DISCIPLINE_ACTIONS.length).default([])
+      .refine((a) => a.every((s, i) => i === 0 || s.points > a[i - 1]!.points), { message: 'Thresholds must increase' })
+      .refine((a) => new Set(a.map((s) => s.action)).size === a.length, { message: 'Each action once' }),
+  }).prefault({}),
+  regularisation: z.object({
+    /** At most this many regularisation requests per employee per calendar month. Null = no limit. */
+    maxPerMonth: z.number().int().min(1).max(31).nullable().default(null),
+    /** A regularisation may concern a day at most this many days back. Null = no limit. */
+    backdateDays: z.number().int().min(1).max(365).nullable().default(null),
+  }).prefault({}),
+});
+export type AttendancePolicySections = z.infer<typeof attendancePolicySectionsSchema>;
+export const DEFAULT_POLICY_SECTIONS: AttendancePolicySections = attendancePolicySectionsSchema.parse({});
+
+/**
+ * Configurable attendance rules (§107). Mirrors attendance_rule_sets — the attendance POLICY. Scope (Enterprise,
+ * attendance_policies): every dimension that is set must match the employee on the date; the most specific matching
+ * policy wins (shift > employee group > department > branch > country > organisation — packages/domain resolvePolicy).
+ * Without the module only `branchId` may be set (the classic organisation / branch rule sets).
+ */
 export const attendanceRuleSetInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
+  description: z.string().trim().max(500).default(''),
   branchId: uuidSchema.nullable().optional(),
+  countryCode: z.string().regex(/^[A-Z]{2}$/).nullable().optional(),
+  departmentId: uuidSchema.nullable().optional(),
+  employeeGroupId: uuidSchema.nullable().optional(),
+  shiftId: uuidSchema.nullable().optional(),
   effectiveFrom: isoDateSchema,
   effectiveTo: isoDateSchema.nullable().optional(),
   graceInMinutes: z.number().int().min(0).max(240).default(10),
@@ -44,9 +126,14 @@ export const attendanceRuleSetInputSchema = z.object({
   weeklyOffWorkCountsAsOvertime: z.boolean().default(true),
   holidayWorkCountsAsOvertime: z.boolean().default(true),
   ramadanMode: ramadanModeSchema.default({ enabled: false, appliesTo: 'all' }),
+  /** `.default` (not `.prefault`) so a PATCH without `policy` keeps the stored one (updateSchemaOf strips top-level defaults). */
+  policy: attendancePolicySectionsSchema.default(() => attendancePolicySectionsSchema.parse({})),
 });
 export type AttendanceRuleSetInput = z.infer<typeof attendanceRuleSetInputSchema>;
-export type AttendanceRules = Omit<AttendanceRuleSetInput, 'name' | 'branchId' | 'effectiveFrom' | 'effectiveTo'>;
+/** The scope and naming fields of a policy — everything that is not a rule the engine applies. */
+export const POLICY_SCOPE_KEYS = ['branchId', 'countryCode', 'departmentId', 'employeeGroupId', 'shiftId'] as const;
+export type PolicyScopeKey = (typeof POLICY_SCOPE_KEYS)[number];
+export type AttendanceRules = Omit<AttendanceRuleSetInput, 'name' | 'description' | PolicyScopeKey | 'effectiveFrom' | 'effectiveTo'>;
 export const DEFAULT_ATTENDANCE_RULES: AttendanceRules = attendanceRuleSetInputSchema.parse({ name: 'default', effectiveFrom: '2000-01-01' });
 
 export const attendanceDailyRecordDtoSchema = z.object({

@@ -25,7 +25,7 @@ async function punch(employeeId: string, branchId: string, at: string, eventType
 }
 
 beforeAll(async () => {
-  h = await createApiHarness(`flowza_api_team_ws_${process.pid}`); f = await seedOrg(h.admin, 'teamws');
+  h = await createApiHarness(`flowza_api_team_ws_${process.pid}`); f = await seedOrg(h.admin, 'teamws', { modules: ['shift_requests'] });
   e4 = await seedEmployee(h.admin, f.orgId, f.branchA, 4);
   e9 = await seedEmployee(h.admin, f.orgId, f.branchB, 9);
   e5 = await seedEmployee(h.admin, f.orgId, f.branchA, 5, { managerEmployeeId: e4 });

@@ -157,6 +157,10 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   });
   if (window.crossesMidnight) rec.flag('CROSS_MIDNIGHT');
   if (shift === null) rec.flag('NO_SHIFT');
+  if (shift?.segments && shift.segments.length > 1) {
+    rec.flag('DOUBLE_SHIFT');
+    rec.step('schedule.doubleShift', `double shift: ${shift.segments.map((s) => `${s.code} ${s.startTime}–${s.endTime}`).join(' + ')} → one day ${shift.startTime}–${shift.endTime}, the time between them unpaid`, { segments: shift.segments });
+  }
 
   // 2. Attribution of every supplied event. On a flexible shift the check-out that closes a day's open check-in stays with
   // that day even after its day boundary (engine 1.3.0, overnight.ts).
@@ -263,6 +267,7 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
       holiday: input.holiday ? `${input.holiday.name}${input.holiday.isHalfDay ? ' (half day)' : ''}` : null,
       leave: input.leave ? `${input.leave.leaveTypeCode}${input.leave.isHalfDay ? ` (${input.leave.halfDayPart ?? 'SECOND_HALF'})` : ''}` : null,
       weeklyOff: input.weeklyOffDays.includes(dayOfWeek(date)),
+      ...(shift?.segments && shift.segments.length > 1 ? { segments: shift.segments } : {}),
     },
     punches: [...tracePunches.values()],
     steps: rec.steps,
@@ -561,6 +566,13 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
     const flagged = lateMinutes > rules.lateThresholdMinutes;
     if (flagged) rec.flag('LATE');
     rec.step('late', `IN ${toUtcIso(firstIn)} vs expected ${toUtcIso(schedule.expectedStart)} + ${graceIn} min grace → ${lateMinutes} min late${flagged ? ' (flagged)' : lateMinutes > 0 ? ` (≤ threshold ${rules.lateThresholdMinutes}, not flagged)` : ''}`, { graceInMinutes: graceIn, lateMinutes, thresholdMinutes: rules.lateThresholdMinutes, flagged });
+    // engine 1.4.0: very late is measured from the scheduled start (the policy says "after 09:00", not "after the grace")
+    const veryLateAfter = rules.policy.late.veryLateAfterMinutes;
+    const afterStart = minutesBetween(schedule.expectedStart, firstIn);
+    if (veryLateAfter !== null && lateMinutes > 0 && afterStart > veryLateAfter) {
+      rec.flag('VERY_LATE');
+      rec.step('late.veryLate', `arrived ${afterStart} min after the scheduled start > ${veryLateAfter} min → VERY_LATE`, { minutesAfterStart: afterStart, veryLateAfterMinutes: veryLateAfter });
+    }
   }
   if (punctuality && lastOut && schedule.expectedEnd && !assumed.lastOut && schedule.kind === 'FLEXIBLE') {
     // A required-hours shift (engine 1.3.0): leaving early means leaving short — the minutes the day lacks of the required

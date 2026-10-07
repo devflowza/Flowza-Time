@@ -17,6 +17,11 @@ export interface EngineShift {
   punchOutWindowAfterMinutes: number;
   graceInMinutes: number | null;  // overrides rule set when set
   graceOutMinutes: number | null;
+  /**
+   * A double shift (engine 1.4.0, composeDoubleShift): the shifts this composite day is made of, in time order. Absent for an
+   * ordinary shift. The engine flags DOUBLE_SHIFT; the schedule itself is the composite's start / end / breaks.
+   */
+  segments?: Array<{ shiftId: string; code: string; startTime: string; endTime: string }>;
 }
 
 /**
@@ -111,7 +116,11 @@ export interface DailyCalculationInput {
 export interface TraceStep { step: string; detail: string; values?: Record<string, unknown> }
 export interface CalculationTrace {
   engineVersion: string;
-  inputs: { shiftId: string | null; shiftType: ShiftType | null; ruleSetId: string | null; timezone: string; window: { start: string; end: string } | null; holiday: string | null; leave: string | null; weeklyOff: boolean };
+  inputs: {
+    shiftId: string | null; shiftType: ShiftType | null; ruleSetId: string | null; timezone: string; window: { start: string; end: string } | null; holiday: string | null; leave: string | null; weeklyOff: boolean;
+    /** Double shift (engine 1.4.0): the shifts the day combines. */
+    segments?: Array<{ shiftId: string; code: string; startTime: string; endTime: string }>;
+  };
   punches: Array<{ eventId: string; punchedAt: string; local: string; role: 'IN' | 'OUT' | 'BREAK_START' | 'BREAK_END' | 'IGNORED' | 'DUPLICATE' | 'OUT_OF_WINDOW'; note?: string }>;
   steps: TraceStep[];
 }
@@ -172,5 +181,7 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * (overnight.ts); early departure is the shortfall against the required minutes (or the core end) and the grace-out forgives a
  * shortfall within it instead of shaving every one. FLAG_ONLY missing punches get their own status MISSING_PUNCH (hours unknown)
  * instead of PRESENT with 0 worked minutes.
+ * 1.4.0 — Enterprise: VERY_LATE when the arrival is more than the policy's `late.veryLateAfterMinutes` after the scheduled start;
+ * DOUBLE_SHIFT for a composite day of two shifts (composeDoubleShift). Nothing changes for a day without either.
  */
-export const ENGINE_VERSION = 'attendance-engine/1.3.0';
+export const ENGINE_VERSION = 'attendance-engine/1.4.0';

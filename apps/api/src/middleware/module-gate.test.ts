@@ -11,12 +11,18 @@ describe('modulesForPath (routes relative to /orgs/:orgId/)', () => {
     ['leave-types', ['leave']], ['leave-records/r1/comments', ['leave']], ['leave-balances/export', ['leave']], ['leave-calendar', ['leave']],
     ['team/summary', ['manager_workspace']], ['team/leave', ['leave', 'manager_workspace']], ['payroll/periods', ['payroll']],
     ['report-schedules/s1/run-now', ['report_schedules']], ['reports/share', ['report_schedules']], ['integrations/finance/status', ['finance_integration']],
+    // Enterprise (migration 20261007000100)
+    ['me/shift-swaps', ['self_service', 'shift_requests']], ['me/shift-swaps/candidates', ['self_service', 'shift_requests']], ['me/shift-changes/c1/cancel', ['self_service', 'shift_requests']],
+    ['shift-change-requests', ['shift_requests']], ['additional-shift-assignments/a1', ['advanced_scheduling']], ['branch-deployments', ['advanced_scheduling']],
+    ['shift-coverage/report', ['advanced_scheduling']], ['round-the-clock/preview', ['advanced_scheduling']],
+    ['employee-groups/g1/members', ['attendance_policies']], ['attendance-policies/points', ['attendance_policies']], ['attendance-policies/resolve', ['attendance_policies']],
   ])('%s → %j', (path, modules) => {
     expect(modulesForPath(path).sort()).toEqual([...modules].sort());
   });
 
   it.each(['employees', 'employees/e1', 'attendance/daily', 'attendance/regularisations', 'attendance/notes', 'shifts', 'holidays', 'reports', 'reports/r1/download',
-    'approvals/inbox', 'team/pending-counts', 'teams', 'teams/t1', 'settings/leave', 'dashboard/summary', 'audit', 'members', 'roles'])('%s is the core: no module', (path) => {
+    'approvals/inbox', 'team/pending-counts', 'teams', 'teams/t1', 'settings/leave', 'dashboard/summary', 'audit', 'members', 'roles',
+    'attendance-rule-sets', 'attendance-rule-sets/r1', 'shift-assignments', 'shift-patterns', 'shift-roster'])('%s is the core: no module', (path) => {
     expect(modulesForPath(path)).toEqual([]);
   });
 });
