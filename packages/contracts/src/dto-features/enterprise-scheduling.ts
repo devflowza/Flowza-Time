@@ -47,7 +47,10 @@ export const branchDeploymentInputSchema = z.object({
   /** Inclusive last day (at most 367 days after the first). */
   toDate: isoDateSchema,
   reason: z.string().trim().min(3).max(1000),
-  /** Enrol the employee on the branch's active terminals (async device job). */
+  /**
+   * Enrol the employee on the branch's active terminals (async device job) ON THE FIRST DAY (host branch time): at once when
+   * the deployment starts today, else by the daily sweep. Removed again after the last day.
+   */
   enrolOnDevices: z.boolean().default(true),
 }).refine((v) => v.toDate >= v.fromDate, { message: 'The last day cannot be before the first day', path: ['toDate'] });
 export type BranchDeploymentInput = z.infer<typeof branchDeploymentInputSchema>;
@@ -66,8 +69,13 @@ export interface BranchDeploymentDto {
   homeBranchId: string | null; homeBranchName: string | null; branchId: string; branchName: string | null;
   fromDate: string; toDate: string; reason: string; status: BranchDeploymentStatus;
   enrolOnDevices: boolean;
-  /** The device enrolment job (a sync_jobs id: /sync/:id renders it). */
+  /**
+   * The device enrolment job (a sync_jobs id: /sync/:id renders it). Null until the deployment's first day (the daily sweep
+   * enrols it then), and when there was nothing to push (no terminal, or the employee was on them already).
+   */
   enrolJobId: string | null;
+  /** Host terminals this deployment put the employee on (the clean-up takes them off these only). */
+  enrolledDevices: number;
   cleanupJobId: string | null; cleanedUpAt: string | null;
   cancelledAt: string | null; cancelReason: string | null; createdAt: string;
 }

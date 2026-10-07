@@ -9,8 +9,8 @@ import {
   type SelfPunchRefusal, type SelfPunchResultDto, type SelfPunchStatusDto, type SelfieCheckinStatus,
 } from '@flowza/contracts';
 import { additionalShiftOn, ensureSelfServiceDevice, loadAdditionalShiftAssignments, loadEmployeeWorkingCalendars, resolvePolicyFor, type Trx } from '@flowza/database';
-import { withinGeofenceOf, type GeofenceEvaluation, type GeofenceFence, type MembershipGrant } from '@flowza/domain';
-import { AppError, errors } from '@flowza/shared';
+import { deploymentCoverageAt, hostLocalTime, withinGeofenceOf, type GeofenceEvaluation, type GeofenceFence, type MembershipGrant } from '@flowza/domain';
+import { AppError, addDays, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { requireBranchAccess, requireMembership } from '../../lib/authorize.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
@@ -50,10 +50,12 @@ import { resolveDays } from './shift-resolve.js';
  *     restrict the channels further — web / mobile / selfie off → 403 CHECKIN_METHOD_NOT_ALLOWED; the organisation switches
  *     still apply first (a policy only restricts them) — and its `requireGeofence` other than `inherit` replaces the
  *     organisation's. Stored policies apply whatever the module state (switching a module off never loosens attendance);
- *   - while a temporary deployment to another branch covers today (and advanced_scheduling is on), a location the employee's
- *     own fences would not accept is judged again against the HOST branch's fences; accepted there, the punch keeps that
- *     verdict and its payload records `deploymentId` / `deployedBranchId`. The punch is still the employee's: home branch,
- *     home timezone, home calendar.
+ *   - while a temporary deployment to another branch covers the moment (and advanced_scheduling is on), a location the
+ *     employee's own fences would not accept is judged again against the HOST branch's branch-scope fences; accepted there,
+ *     the punch keeps that verdict and its payload records `deploymentId` / `deployedBranchId`. Coverage is the HOST
+ *     branch's local time: the first day through the last, and the morning after the last day until noon (a night shift
+ *     that starts on the last day checks out then — packages/domain deployment-window). The punch is still the employee's:
+ *     home branch, home timezone, home calendar.
  */
 
 const SELFIE_BUCKET = 'employee-photos';
@@ -139,46 +141,63 @@ async function policyMethodsFor(trx: Trx, orgId: string, emp: EmployeeCtx, today
   });
 }
 
-/** A temporary deployment to another branch covering `today` (not cancelled), with the host branch's fences. System scope. */
-interface ActiveDeployment { id: string; branchId: string; branchName: string | null; toDate: string; timezone: string; fences: GeofenceFence[] }
-async function activeDeploymentFor(trx: Trx, orgId: string, employeeId: string, today: string): Promise<ActiveDeployment | null> {
-  const row = await withSystemScope(trx, orgId, (t) => t.selectFrom('employeeBranchDeployments as d').leftJoin('branches as b', 'b.id', 'd.branchId')
-    .select(['d.id', 'd.branchId', 'b.name as branchName', 'b.timezone', 'd.toDate'])
+/**
+ * The temporary deployments whose host branch judges a punch at `at` (Enterprise): not cancelled and, in the HOST branch's
+ * local time, from the first day through the last or the morning after the last day until noon (packages/domain
+ * deployment-window) — with the host branch's branch-scope fences. The one covering the day comes first (two can apply on
+ * the morning a deployment follows another). System scope.
+ */
+interface ActiveDeployment { id: string; branchId: string; branchName: string | null; fromDate: string; toDate: string; timezone: string; coverage: 'active' | 'checkout_grace'; fences: GeofenceFence[] }
+async function activeDeploymentsFor(trx: Trx, orgId: string, employeeId: string, at: Date): Promise<ActiveDeployment[]> {
+  const utcToday = at.toISOString().slice(0, 10);
+  // a superset in UTC dates (a host date is at most a day away from it); the host-local window decides below
+  const rows = await withSystemScope(trx, orgId, (t) => t.selectFrom('employeeBranchDeployments as d').leftJoin('branches as b', (j) => j.onRef('b.id', '=', 'd.branchId').onRef('b.organizationId', '=', 'd.organizationId'))
+    .select(['d.id', 'd.branchId', 'b.name as branchName', 'b.timezone', 'd.fromDate', 'd.toDate'])
     .where('d.organizationId', '=', orgId).where('d.employeeId', '=', employeeId).where('d.cancelledAt', 'is', null)
-    .where('d.fromDate', '<=', sql<Date>`${today}::date`).where('d.toDate', '>=', sql<Date>`${today}::date`)
-    .orderBy('d.fromDate', 'desc').executeTakeFirst());
-  if (!row) return null;
-  const fences = await fencesForBranch(trx, orgId, row.branchId);
-  return { id: row.id, branchId: row.branchId, branchName: row.branchName, toDate: isoDate(row.toDate), timezone: row.timezone ?? 'UTC', fences };
+    .where('d.fromDate', '<=', sql<Date>`${addDays(utcToday, 1)}::date`).where('d.toDate', '>=', sql<Date>`${addDays(utcToday, -2)}::date`)
+    .orderBy('d.fromDate', 'desc').execute());
+  const out: ActiveDeployment[] = [];
+  for (const r of rows) {
+    const range = { fromDate: isoDate(r.fromDate), toDate: isoDate(r.toDate) };
+    const coverage = deploymentCoverageAt(range, hostLocalTime(at, r.timezone));
+    if (coverage !== 'active' && coverage !== 'checkout_grace') continue;
+    out.push({ id: r.id, branchId: r.branchId, branchName: r.branchName, ...range, timezone: r.timezone ?? 'UTC', coverage, fences: await fencesForBranch(trx, orgId, r.branchId) });
+  }
+  return out.sort((a, b) => Number(a.coverage !== 'active') - Number(b.coverage !== 'active'));
 }
 
-interface PunchContext { emp: EmployeeCtx; settings: AttendanceSettings; grants: Grants; fences: GeofenceFence[]; methods: CheckInMethods; deployment: ActiveDeployment | null }
+interface PunchContext { emp: EmployeeCtx; settings: AttendanceSettings; grants: Grants; fences: GeofenceFence[]; methods: CheckInMethods; deployments: ActiveDeployment[] }
 async function loadPunchContext(deps: Pick<ApiDeps, 'config' | 'log'>, trx: Trx, orgId: string, employeeId: string, actor: Pick<Actor, 'disabledModules'>): Promise<PunchContext> {
   const emp = await loadEmployeeCtx(trx, orgId, employeeId);
   const [settings, grants, fences] = await Promise.all([attendancePolicy(trx, orgId), loadGrants(trx, orgId, employeeId), fencesForEmployee(trx, orgId, emp)]);
   const ipAllowList = [...effectiveIpAllowList(deps, orgId, settings.selfService.ipAllowList)];
   // sequential: each switches the transaction's role for its reads and restores it
-  const today = localInstant(new Date(), emp.timezone).date;
+  const at = new Date();
+  const today = localInstant(at, emp.timezone).date;
   const methods = await policyMethodsFor(trx, orgId, emp, today, settings.defaultShiftId ?? null);
   // the host-branch check-in is the module's feature (it widens where a punch is accepted): off with the module, while the
-  // access REMOVAL after a deployment runs whatever the module state (worker sweep)
-  const deployment = moduleEnabledFor(actor.disabledModules, orgId, 'advanced_scheduling') ? await activeDeploymentFor(trx, orgId, emp.id, today) : null;
+  // access REMOVAL after a deployment runs whatever the module state (worker sweep). Judged in the host branch's time.
+  const deployments = moduleEnabledFor(actor.disabledModules, orgId, 'advanced_scheduling') ? await activeDeploymentsFor(trx, orgId, emp.id, at) : [];
   const requireGeofence = methods.requireGeofence === 'inherit' ? settings.selfService.requireGeofence : methods.requireGeofence;
-  return { emp, settings: { ...settings, selfService: { ...settings.selfService, ipAllowList, requireGeofence } }, grants, fences, methods, deployment };
+  return { emp, settings: { ...settings, selfService: { ...settings.selfService, ipAllowList, requireGeofence } }, grants, fences, methods, deployments };
 }
 
 /**
  * Where the punch is judged: the employee's own fences; while deployed, a location they would not accept (denied, flagged or
- * merely logged as outside — never a mock location) is judged again against the host branch's fences (in the host branch's
- * local time), and an `allowed` there wins. Returns the deployment that decided, if any.
+ * merely logged as outside — never a mock location) is judged again against each covering deployment's host branch fences
+ * (in the host branch's local time, with their assignments' check-in / check-out flags), and an `allowed` there wins.
+ * Returns the deployment that decided, if any.
  */
 function judgeLocation(ctx: PunchContext, input: { lat?: number | undefined; lng?: number | undefined; accuracy?: number | undefined; isMock?: boolean | undefined; direction: 'in' | 'out' }, at: Date): { evaluation: GeofenceEvaluation; viaDeployment: { id: string; branchId: string } | null } {
   const policy = ctx.settings.selfService.requireGeofence;
   const own = evaluateForEmployee(ctx.emp, ctx.fences, input, policy, at);
-  const d = ctx.deployment;
-  if (!d || d.fences.length === 0 || own.verdict === 'allowed' || own.verdict === 'no_fence' || own.verdict === 'denied_mock') return { evaluation: own, viaDeployment: null };
-  const host = evaluateForEmployee({ timezone: d.timezone }, d.fences, input, policy, at);
-  return host.verdict === 'allowed' ? { evaluation: host, viaDeployment: { id: d.id, branchId: d.branchId } } : { evaluation: own, viaDeployment: null };
+  if (own.verdict === 'allowed' || own.verdict === 'no_fence' || own.verdict === 'denied_mock') return { evaluation: own, viaDeployment: null };
+  for (const d of ctx.deployments) {
+    if (d.fences.length === 0) continue;
+    const host = evaluateForEmployee({ timezone: d.timezone }, d.fences, input, policy, at);
+    if (host.verdict === 'allowed') return { evaluation: host, viaDeployment: { id: d.id, branchId: d.branchId } };
+  }
+  return { evaluation: own, viaDeployment: null };
 }
 
 /**
@@ -297,6 +316,8 @@ export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string,
     // today's shift, resolved live (the shift tab's resolver): named even before today's record exists or catches up with a change
     const [day] = await resolveDays(trx, orgId, ctx.emp, local.date, local.date);
     const blocked = blockers.length > 0;
+    // the banner names the deployment covering the host's today (not the morning-after check-out of one that has ended)
+    const covering = ctx.deployments.find((x) => x.coverage === 'active');
     return {
       date: local.date, timezone: ctx.emp.timezone, serverTime: now.toISOString(),
       punches: recent.filter((r) => r.punchedAt.getTime() >= todayStart).map(toPunchDto),
@@ -309,10 +330,11 @@ export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string,
       },
       grant: { openAttendance: ctx.grants.openAttendance, selfieRequired: ctx.grants.selfieRequired },
       selfieAvailable: selfieAvailableNow(ctx),
-      // while deployed, the host branch's fences are shown too (the punch is judged against them as well)
-      fences: selfFences([...ctx.fences, ...(ctx.deployment?.fences ?? [])]),
+      // while deployed, the host branch's branch-scope fences are shown too (the punch is judged against them as well) —
+      // never a fence the host merely owns for someone else
+      fences: selfFences([...ctx.fences, ...ctx.deployments.flatMap((d) => d.fences)]),
       ...(day ? { shift: { date: day.date, shift: day.shift, source: day.source, isOff: day.isOff, holidayName: day.holidayName, onLeave: day.onLeave } } : {}),
-      deployment: ctx.deployment ? { branchId: ctx.deployment.branchId, branchName: ctx.deployment.branchName, toDate: ctx.deployment.toDate } : null,
+      deployment: covering ? { branchId: covering.branchId, branchName: covering.branchName, toDate: covering.toDate } : null,
     };
   });
 }

@@ -23,8 +23,9 @@ const ALL = '__all__';
 
 /**
  * /deployments (Enterprise, advanced_scheduling): employees temporarily working at another branch. A deployment lets the
- * portal check-in accept the host branch's geofences, enrols the employee on its terminals (a sync job, opened at /sync/:id)
- * and takes them off again after the end date. The attendance calendar and payroll stay with the home branch.
+ * portal check-in accept the host branch's geofences, enrols the employee on its terminals on the first day (a sync job,
+ * opened at /sync/:id — none yet for a deployment that has not started) and takes them off again after the last day. The
+ * attendance calendar and payroll stay with the home branch.
  */
 export default function DeploymentsPage() {
   const { t } = useTranslation(SCHED_NS);
@@ -53,7 +54,8 @@ export default function DeploymentsPage() {
         // sync_jobs ids: the sync job page renders them (AGENTS.md "job ids are not interchangeable")
         if (d.cleanupJobId) return <Link className="text-xs underline-offset-2 hover:underline" to={`/sync/${d.cleanupJobId}`}>{t('deployments.cleanupJob')}</Link>;
         if (d.enrolJobId) return <Link className="text-xs underline-offset-2 hover:underline" to={`/sync/${d.enrolJobId}`}>{t('deployments.enrolJob')}</Link>;
-        return <span className="text-xs text-muted-foreground">{d.enrolOnDevices ? t('deployments.noTerminals') : t('deployments.notEnrolled')}</span>;
+        const text = !d.enrolOnDevices ? t('deployments.notEnrolled') : d.status === 'scheduled' ? t('deployments.enrolScheduled') : t('deployments.noTerminals');
+        return <span className="text-xs text-muted-foreground">{text}</span>;
       },
     },
     { id: 'actions', header: '', cell: ({ row }) => canUpdate && (row.original.status === 'active' || row.original.status === 'scheduled') ? <RowActions actions={[{ key: 'cancel', label: t('deployments.cancel'), icon: <Ban />, destructive: true, onSelect: () => { setCancelReason(''); setCancelling(row.original); } }]} /> : null },

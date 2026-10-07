@@ -19,7 +19,8 @@ import { registerSchedulingHandlers } from './scheduling/index.js';
  *   approvals (APPROVAL_REMINDERS: escalation, 24-hour reminders, the daily digest)
  *   leave (LEAVE_YEAR_CLOSE: carry-forward into next year's allocations; LEAVE_COMP_OFF_EXPIRY: the daily comp-off expiry)
  *   members (SEND_INVITATION_EMAIL: e-mails an invitation with a token minted at send time, hash only)
- *   scheduling (BRANCH_DEPLOYMENT_CLEANUP: takes an employee off a host branch's terminals once a temporary deployment is over)
+ *   scheduling (BRANCH_DEPLOYMENT_CLEANUP: the daily deployment sweep — takes an employee off a host branch's terminals once a
+ *               temporary deployment is over or cancelled, and enrols them there on its first day)
  */
 export function buildHandlerRegistry(): HandlerRegistry {
   const registry = new HandlerRegistry();

@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { branchDeploymentInputSchema } from '@flowza/contracts';
 import { Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label } from '@/components/ui';
 import { Combobox } from '@/components/forms';
-import { todayIso } from '@/lib/format';
+import { fmtDate, todayIso } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
@@ -15,7 +15,9 @@ import { SCHED_NS } from '../i18n';
 
 /**
  * Send an employee to another branch for a while: employee, host branch, inclusive range, reason, and whether to enrol them on
- * the host branch's terminals. The enrolment is a SYNC job: the toast's "View" opens /sync/<enrolJobId>.
+ * the host branch's terminals. The enrolment happens on the FIRST DAY (host branch time): a deployment that starts today is
+ * enrolled at once — a SYNC job, the toast's "View" opens /sync/<enrolJobId> — a later one by the daily sweep on that day,
+ * which the toast says (no link: there is no job yet).
  */
 export function DeploymentDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
   const { t } = useTranslation(SCHED_NS);
@@ -39,6 +41,7 @@ export function DeploymentDialog({ open, onOpenChange }: { open: boolean; onOpen
     create.mutate(parsed.data, {
       onSuccess: (d) => {
         if (d.enrolJobId) toastJobQueued(d.enrolJobId, navigate, t('deployments.enrolQueued', { branch: d.branchName ?? '' }));
+        else if (d.enrolOnDevices && d.status === 'scheduled') toast.success(t('deployments.enrolOnFirstDay', { branch: d.branchName ?? '', date: fmtDate(d.fromDate) }));
         else toast.success(t('deployments.created'));
         onOpenChange(false);
       },

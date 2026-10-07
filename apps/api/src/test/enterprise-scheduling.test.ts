@@ -1,12 +1,14 @@
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
+import { DateTime } from 'luxon';
 import { loadDailyInputs, withContext } from '@flowza/database';
 import { addDays } from '@flowza/shared';
 import { auditRows, createApiHarness, isoTodayIn, seedDevice, seedEmployee, seedOrg, uuid, type ApiHarness, type OrgFixture } from './features-harness.js';
 
 /*
  * Round-the-clock scheduling (Enterprise, module advanced_scheduling — docs/enterprise/plan.md §4.7–4.8, §8–§9): 24/7 templates,
- * coverage targets and report, additional (double) shift assignments, temporary branch deployments (terminals, check-in at the
- * host branch, clean-up on cancel), and the per-policy check-in methods of the portal punch.
+ * coverage targets and report, additional (double) shift assignments, temporary branch deployments (terminals enrolled on the
+ * first day only, clean-up at every cancel, check-in at the host branch's branch-scope fences in its time — the morning after
+ * the last day included), and the per-policy check-in methods of the portal punch.
  */
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
 
@@ -247,7 +249,7 @@ describe('temporary branch deployments', () => {
     deviceB = await seedDevice(h.admin, f.orgId, f.branchB);
     const r = await h.request('POST', `${base()}/branch-deployments`, { token: f.hrAdmin, body: { employeeId: f.e2, branchId: f.branchA, fromDate: TODAY, toDate: addDays(TODAY, 5), reason: 'Covering the night crew' } });
     expect(r.status).toBe(201);
-    expect(r.body.data).toMatchObject({ employeeId: f.e2, employeeName: 'Employee 2', homeBranchId: f.branchB, homeBranchName: 'Branch B', branchId: f.branchA, branchName: 'Branch A', status: 'active', enrolOnDevices: true, cancelledAt: null });
+    expect(r.body.data).toMatchObject({ employeeId: f.e2, employeeName: 'Employee 2', homeBranchId: f.branchB, homeBranchName: 'Branch B', branchId: f.branchA, branchName: 'Branch A', status: 'active', enrolOnDevices: true, enrolledDevices: 1, cancelledAt: null });
     deploymentId = r.body.data.id;
     const jobId = r.body.data.enrolJobId as string;
     expect(jobId).toEqual(expect.any(String));
@@ -258,7 +260,10 @@ describe('temporary branch deployments', () => {
     expect(items.some((i) => i.deviceId === hostNoPush || i.deviceId === deviceB)).toBe(false);
     // the sync job is readable at /sync/:id
     expect((await h.request('GET', `${base()}/sync/jobs/${jobId}`, { token: f.hrAdmin })).status).toBe(200);
-    expect((await auditRows(h.admin, 'employee.deployment_created')).length).toBe(1);
+    const created = await auditRows(h.admin, 'employee.deployment_created');
+    expect(created.length).toBe(1);
+    expect(created[0]!.newValue).toMatchObject({ enrolment: 'now', enrolJobId: jobId, devices: 1, alreadyEnrolled: [] });
+    expect((await h.admin.selectFrom('employeeBranchDeployments').select('enrolledDeviceIds').where('id', '=', deploymentId).executeTakeFirstOrThrow()).enrolledDeviceIds).toEqual([hostPush]);
   });
 
   it('refuses an overlap (409), the own branch (400), a past range (400) and a caller without access to the host branch (403)', async () => {
@@ -281,20 +286,57 @@ describe('temporary branch deployments', () => {
     expect((await h.request('GET', `${base()}/branch-deployments?branchId=${f.branchA}&activeOn=${TODAY}`, { token: f.hrAdmin })).body.meta.total).toBe(1);
   });
 
-  it('cancels: a deployment that enrolled is cleaned up at once (the queued enrolment is stopped); a second cancel is refused', async () => {
+  it('a deployment that starts later enrols nothing at creation (the daily sweep does on its first day); cancelling it still runs the clean-up', async () => {
+    const before = await h.admin.selectFrom('syncJobs').select('id').where('organizationId', '=', f.orgId).execute();
     const r = await h.request('POST', `${base()}/branch-deployments`, { token: f.hrAdmin, body: { employeeId: f.e3, branchId: f.branchB, fromDate: addDays(TODAY, 10), toDate: addDays(TODAY, 12), reason: 'Stocktaking' } });
     expect(r.status).toBe(201);
-    expect(r.body.data.status).toBe('scheduled');
-    const enrolJobId = r.body.data.enrolJobId as string;
-    expect((await h.admin.selectFrom('syncJobItems').select('deviceId').where('syncJobId', '=', enrolJobId).execute()).map((i) => i.deviceId)).toEqual([deviceB]);
+    expect(r.body.data).toMatchObject({ status: 'scheduled', enrolOnDevices: true, enrolJobId: null, enrolledDevices: 0 });
+    // no device job at all: the employee is not on the host terminals before the first day
+    expect(await h.admin.selectFrom('syncJobs').select('id').where('organizationId', '=', f.orgId).execute()).toHaveLength(before.length);
+    const created = await auditRows(h.admin, 'employee.deployment_created');
+    expect(created[0]!.newValue).toMatchObject({ deploymentId: r.body.data.id, enrolment: 'first_day', enrolJobId: null, devices: 0 });
     const c = await h.request('POST', `${base()}/branch-deployments/${r.body.data.id}/cancel`, { token: f.hrAdmin, body: { reason: 'Plans changed' } });
     expect(c.status).toBe(200);
     expect(c.body.data).toMatchObject({ status: 'cancelled', cancelReason: 'Plans changed' });
     expect(c.body.data.cleanedUpAt).not.toBeNull();
-    expect((await h.admin.selectFrom('syncJobItems').select('status').where('syncJobId', '=', enrolJobId).execute()).map((i) => i.status)).toEqual(['CANCELLED']);
     expect((await h.request('POST', `${base()}/branch-deployments/${r.body.data.id}/cancel`, { token: f.hrAdmin, body: { reason: 'Again please' } })).status).toBe(409);
     const audit = await auditRows(h.admin, 'employee.deployment_cancelled');
-    expect(audit[0]!.newValue).toMatchObject({ status: 'cancelled', cleanup: { cancelledEnrolItems: 1 } });
+    expect(audit[0]!.newValue).toMatchObject({ status: 'cancelled', cleanup: { enrolledDevices: 0, removals: [], cancelledEnrolItems: 0, cleanedUp: true } });
+  });
+
+  it('cancels a started deployment at once: the queued enrolment is stopped', async () => {
+    const r = await h.request('POST', `${base()}/branch-deployments`, { token: f.hrAdmin, body: { employeeId: f.e3, branchId: f.branchB, fromDate: TODAY, toDate: addDays(TODAY, 1), reason: 'Stocktaking today' } });
+    expect(r.status).toBe(201);
+    const enrolJobId = r.body.data.enrolJobId as string;
+    expect((await h.admin.selectFrom('syncJobItems').select('deviceId').where('syncJobId', '=', enrolJobId).execute()).map((i) => i.deviceId)).toEqual([deviceB]);
+    const c = await h.request('POST', `${base()}/branch-deployments/${r.body.data.id}/cancel`, { token: f.hrAdmin, body: { reason: 'Plans changed' } });
+    expect(c.status).toBe(200);
+    expect(c.body.data.cleanedUpAt).not.toBeNull();
+    expect((await h.admin.selectFrom('syncJobItems').select('status').where('syncJobId', '=', enrolJobId).execute()).map((i) => i.status)).toEqual(['CANCELLED']);
+    const audit = await auditRows(h.admin, 'employee.deployment_cancelled');
+    expect(audit[0]!.newValue).toMatchObject({ status: 'cancelled', cleanup: { enrolledDevices: 1, cancelledEnrolItems: 1, removals: [] } });
+  });
+
+  it('every cancel cleans up: terminals handed over to a deployment without an enrolment job of its own are removed; others are kept', async () => {
+    const r = await h.request('POST', `${base()}/branch-deployments`, { token: f.hrAdmin, body: { employeeId: f.e3, branchId: f.branchB, fromDate: addDays(TODAY, 20), toDate: addDays(TODAY, 21), reason: 'Later at branch B' } });
+    expect(r.status).toBe(201);
+    expect(r.body.data.enrolJobId).toBeNull();
+    // an earlier deployment to branch B handed deviceB over to this one (the sweep's hand-over); the employee is on deviceB, and
+    // on a second branch-B terminal by another path. The deployment has no enrolment job of its own.
+    const otherPath = await seedDevice(h.admin, f.orgId, f.branchB);
+    await h.admin.updateTable('employeeBranchDeployments').set({ enrolledDeviceIds: [deviceB] }).where('id', '=', r.body.data.id).execute();
+    await h.admin.insertInto('deviceEmployeeStates').values([
+      { organizationId: f.orgId, deviceId: deviceB, employeeId: f.e3, deviceUserId: '1003', syncStatus: 'IN_SYNC', desired: true },
+      { organizationId: f.orgId, deviceId: otherPath, employeeId: f.e3, deviceUserId: '1003', syncStatus: 'IN_SYNC', desired: true },
+    ]).execute();
+    const c = await h.request('POST', `${base()}/branch-deployments/${r.body.data.id}/cancel`, { token: f.hrAdmin, body: { reason: 'Not needed' } });
+    expect(c.status).toBe(200);
+    const cleanupJobId = c.body.data.cleanupJobId as string;
+    expect(cleanupJobId).toEqual(expect.any(String));
+    expect(await h.admin.selectFrom('syncJobItems').select(['deviceId', 'employeeId', 'operation']).where('syncJobId', '=', cleanupJobId).execute()).toEqual([{ deviceId: deviceB, employeeId: f.e3, operation: 'DELETE_EMPLOYEE' }]);
+    const desired = async (deviceId: string) => (await h.admin.selectFrom('deviceEmployeeStates').select('desired').where('deviceId', '=', deviceId).where('employeeId', '=', f.e3).executeTakeFirstOrThrow()).desired;
+    expect(await desired(deviceB)).toBe(false);
+    expect(await desired(otherPath)).toBe(true);
   });
 });
 
@@ -304,6 +346,9 @@ describe('web check-in at the host branch during a deployment', () => {
     const fence = (name: string, branchId: string, at: { lat: number; lng: number }) => h.request('POST', `${base()}/geofences`, { token: f.owner, body: { name, branchId, latitude: at.lat, longitude: at.lng, radiusM: 150, enforcement: 'hard_block', accuracyThresholdM: 100, assignments: [{ scope: 'branch', targetId: branchId }] } });
     expect((await fence('Branch A gate', f.branchA, OFFICE)).status).toBe(201);
     expect((await fence('Branch B yard', f.branchB, FAR)).status).toBe(201);
+    // branch B also OWNS a fence that is someone else's: e4's home (an employee assignment) — not the branch as a place
+    const e4Home = await h.request('POST', `${base()}/geofences`, { token: f.owner, body: { name: 'E4 home', branchId: f.branchB, latitude: NOWHERE.lat, longitude: NOWHERE.lng, radiusM: 100, enforcement: 'hard_block', accuracyThresholdM: 100, assignments: [{ scope: 'employee', targetId: e4 }] } });
+    expect(e4Home.status).toBe(201);
 
     // not deployed: branch B's yard is outside the employee's (branch A) fence
     const before = await punch({ direction: await nextDirection(), ...FAR, accuracy: 10 });
@@ -320,10 +365,12 @@ describe('web check-in at the host branch during a deployment', () => {
     expect(dep.status).toBe(201);
     const status = await h.request('GET', `${base()}/me/punch/status?channel=web`, { token: f.employeeUser });
     expect(status.body.data.deployment).toEqual({ branchId: f.branchB, branchName: 'Branch B', toDate: addDays(TODAY, 2) });
+    // the host's branch-scope fences only: e4's home is neither shown …
     expect(status.body.data.fences.map((x: { name: string }) => x.name).sort()).toEqual(['Branch A gate', 'Branch B yard']);
 
     const dir = await nextDirection();
     const ok = await punch({ direction: dir, ...FAR, accuracy: 10 });
+    // … nor judged (with the worst verdict winning it would deny everyone standing in the yard)
     expect(ok.status).toBe(201);
     expect(ok.body.data.verdict).toMatchObject({ verdict: 'allowed', geofenceName: 'Branch B yard' });
     const raw = await h.admin.selectFrom('attendanceRawTransactions').selectAll().where('organizationId', '=', f.orgId).where('employeeId', '=', f.e1).orderBy('punchedAt', 'desc').executeTakeFirstOrThrow();
@@ -348,6 +395,32 @@ describe('web check-in at the host branch during a deployment', () => {
     expect((await h.request('POST', `${base()}/branch-deployments/${dep.body.data.id}/cancel`, { token: f.hrAdmin, body: { reason: 'Back home' } })).status).toBe(200);
     expect((await punch({ direction: await nextDirection(), ...FAR, accuracy: 10 })).status).toBe(403);
     expect((await h.request('GET', `${base()}/me/punch/status?channel=web`, { token: f.employeeUser })).body.data.deployment).toBeNull();
+  });
+
+  it('a night shift on the last day checks out at the host the next morning (until noon, host time), not in the afternoon', async () => {
+    const dep = await h.request('POST', `${base()}/branch-deployments`, { token: f.hrAdmin, body: { employeeId: f.e1, branchId: f.branchB, fromDate: TODAY, toDate: TODAY, reason: 'One night shift', enrolOnDevices: false } });
+    expect(dep.status).toBe(201);
+    const muscat = (date: string, time: string) => DateTime.fromISO(`${date}T${time}`, { zone: 'Asia/Muscat' }).toJSDate();
+    vi.useFakeTimers({ toFake: ['Date'] });
+    try {
+      // 06:05 the morning after the last day (host time): the check-out of the 22:00 → 06:00 shift is accepted at the host
+      vi.setSystemTime(muscat(addDays(TODAY, 1), '06:05'));
+      const status = await h.request('GET', `${base()}/me/punch/status?channel=web`, { token: f.employeeUser });
+      expect(status.body.data.deployment).toBeNull(); // the banner is over …
+      expect(status.body.data.fences.map((x: { name: string }) => x.name)).toContain('Branch B yard'); // … the host fence still judges
+      const morning = await punch({ direction: await nextDirection(), ...FAR, accuracy: 10 });
+      expect(morning.status).toBe(201);
+      const raw = await h.admin.selectFrom('attendanceRawTransactions').select('rawPayload').where('organizationId', '=', f.orgId).where('employeeId', '=', f.e1).orderBy('punchedAt', 'desc').executeTakeFirstOrThrow();
+      expect(raw.rawPayload).toMatchObject({ verdict: 'allowed', deploymentId: dep.body.data.id, deployedBranchId: f.branchB });
+      // 15:00 the same day: the deployment is over at the host
+      vi.setSystemTime(muscat(addDays(TODAY, 1), '15:00'));
+      const afternoon = await punch({ direction: await nextDirection(), ...FAR, accuracy: 10 });
+      expect(afternoon.status).toBe(403);
+      expect(afternoon.body.details.reason).toBe('OUTSIDE_GEOFENCE');
+      expect((await h.request('GET', `${base()}/me/punch/status?channel=web`, { token: f.employeeUser })).body.data.fences.map((x: { name: string }) => x.name)).toEqual(['Branch A gate']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

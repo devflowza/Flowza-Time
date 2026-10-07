@@ -1,28 +1,30 @@
 import type { z } from 'zod';
-import { FLOWZA_FINANCE_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY, type BranchDeploymentDto, type BranchDeploymentInput, type BranchDeploymentStatus, type branchDeploymentListQuerySchema } from '@flowza/contracts';
-import { cleanupBranchDeployment, effectiveBranchIdOn, type DeploymentCleanupResult, type Trx } from '@flowza/database';
-import type { MembershipGrant } from '@flowza/domain';
+import type { BranchDeploymentDto, BranchDeploymentInput, BranchDeploymentStatus, branchDeploymentListQuerySchema } from '@flowza/contracts';
+import { branchToday, cleanupBranchDeployment, effectiveBranchIdOn, enrolBranchDeployment, type DeploymentEnrolResult, type Trx } from '@flowza/database';
+import { deploymentStarted, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { requireBranchAccess, requirePermission } from '../../lib/authorize.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
-import { isoDate, isoDateOrNull, isoDateTime, isoDateTimeOrNull, jsonObject } from '../../lib/mappers.js';
+import { isoDate, isoDateOrNull, isoDateTime, isoDateTimeOrNull } from '../../lib/mappers.js';
 import { pageOf, toCount } from '../../lib/pagination.js';
 import { systemStep } from '../features/context.js';
 import { orgToday } from '../features/recalc.js';
-import { createSyncJob } from '../features/sync-jobs.js';
 import { dv } from '../features/sql-helpers.js';
 import { daysBetween } from './common.js';
 
 /*
  * Temporary deployment of an employee to another branch (Enterprise, `employee_branch_deployments`, docs/enterprise/plan.md
  * §4.7). A deployment is NOT a transfer: the attendance calendar, timezone, payroll and data scope stay with the home branch.
- * It does three things:
- *   - web / mobile check-in accepts the host branch's geofences while it covers the day (portal/punch.service.ts);
- *   - on request, the employee is enrolled on the host branch's terminals (ONE sync job of PUSH_EMPLOYEE items, a sync_jobs
- *     id the UI opens at /sync/:id);
- *   - after the end date the daily worker sweep takes them off those terminals again (packages/database
- *     cleanupBranchDeployment); a cancelled deployment that had enrolled them is cleaned up at once.
+ * It does three things, every date judged in the HOST branch's timezone (packages/domain deployment-window):
+ *   - web / mobile check-in accepts the host branch's geofences from the first day through the last, and the morning after
+ *     until noon — a night shift's check-out (portal/punch.service.ts);
+ *   - on request, the employee is enrolled on the host branch's terminals ON THE FIRST DAY, never before: at creation when the
+ *     deployment starts today (or has started), else by the daily worker sweep (packages/database enrolBranchDeployment —
+ *     ONE sync job of PUSH_EMPLOYEE items, a sync_jobs id the UI opens at /sync/:id; terminals the employee is already on by
+ *     another path are left alone and not recorded in `enrolled_device_ids`);
+ *   - once the host date is toDate + 2 the daily sweep takes them off the terminals the deployment enrolled again
+ *     (cleanupBranchDeployment); a cancellation ALWAYS runs that clean-up at once (it re-checks what to keep).
  *
  * Who: `employee.view` reads (RLS: readers of the host OR the home branch, and the employee); creating and cancelling need
  * `employee.update` with access to BOTH the employee's home branch (on the first day) and the host branch. The table is
@@ -33,11 +35,9 @@ import { daysBetween } from './common.js';
 type ListQuery = z.infer<typeof branchDeploymentListQuerySchema>;
 type DeploymentRow = {
   id: string; employeeId: string; homeBranchId: string | null; branchId: string; fromDate: Date | string; toDate: Date | string; reason: string; enrolOnDevices: boolean;
-  enrolJobId: string | null; cleanupJobId: string | null; cleanedUpAt: Date | null; cancelledAt: Date | null; cancelReason: string | null; createdAt: Date;
+  enrolJobId: string | null; enrolledDeviceIds: string[] | null; cleanupJobId: string | null; cleanedUpAt: Date | null; cancelledAt: Date | null; cancelReason: string | null; createdAt: Date;
 };
-const COLUMNS = ['id', 'employeeId', 'homeBranchId', 'branchId', 'fromDate', 'toDate', 'reason', 'enrolOnDevices', 'enrolJobId', 'cleanupJobId', 'cleanedUpAt', 'cancelledAt', 'cancelReason', 'createdAt'] as const;
-/** Terminal-less device rows: the portal's virtual device and the Flowza Finance connector are never enrolment targets. */
-const NOT_TERMINALS = [SELF_SERVICE_PROVIDER_KEY, FLOWZA_FINANCE_PROVIDER_KEY];
+const COLUMNS = ['id', 'employeeId', 'homeBranchId', 'branchId', 'fromDate', 'toDate', 'reason', 'enrolOnDevices', 'enrolJobId', 'enrolledDeviceIds', 'cleanupJobId', 'cleanedUpAt', 'cancelledAt', 'cancelReason', 'createdAt'] as const;
 
 export function deploymentStatus(row: { fromDate: string; toDate: string; cancelled: boolean }, today: string): BranchDeploymentStatus {
   if (row.cancelled) return 'cancelled';
@@ -69,7 +69,7 @@ async function toDtos(trx: Trx, orgId: string, rows: readonly DeploymentRow[], t
       id: r.id, employeeId: r.employeeId, employeeName: emp?.displayName ?? null, employeeNumber: emp?.employeeNumber ?? null,
       homeBranchId: r.homeBranchId, homeBranchName: r.homeBranchId ? names.branches.get(r.homeBranchId) ?? null : null, branchId: r.branchId, branchName: names.branches.get(r.branchId) ?? null,
       fromDate, toDate, reason: r.reason, status: deploymentStatus({ fromDate, toDate, cancelled: r.cancelledAt !== null }, today), enrolOnDevices: r.enrolOnDevices,
-      enrolJobId: r.enrolJobId, cleanupJobId: r.cleanupJobId, cleanedUpAt: isoDateTimeOrNull(r.cleanedUpAt), cancelledAt: isoDateTimeOrNull(r.cancelledAt), cancelReason: r.cancelReason, createdAt: isoDateTime(r.createdAt),
+      enrolJobId: r.enrolJobId, enrolledDevices: new Set(r.enrolledDeviceIds ?? []).size, cleanupJobId: r.cleanupJobId, cleanedUpAt: isoDateTimeOrNull(r.cleanedUpAt), cancelledAt: isoDateTimeOrNull(r.cancelledAt), cancelReason: r.cancelReason, createdAt: isoDateTime(r.createdAt),
     };
   });
 }
@@ -156,26 +156,21 @@ export async function createDeployment(deps: ApiDeps, actor: Actor, orgId: strin
       enrolOnDevices: input.enrolOnDevices, createdBy: actor.userId,
     }).returning('id').executeTakeFirstOrThrow()).id);
 
-    let enrol: { jobId: string; devices: number } | null = null;
-    if (input.enrolOnDevices) {
-      // the host branch's active terminals that can receive employees (the caller was authorised for that branch above;
-      // device rows are read in system scope as the caller need not hold device.view)
-      const devices = await withSystemScope(trx, orgId, (t) => t.selectFrom('devices').select(['id', 'capabilities']).where('organizationId', '=', orgId).where('branchId', '=', host.id)
-        .where('status', '=', 'active').where('providerKey', 'not in', NOT_TERMINALS).orderBy('name').execute());
-      const targets = devices.filter((d) => jsonObject(d.capabilities)['employeePush'] === true);
-      if (targets.length > 0) {
-        const job = await createSyncJob(deps, trx, {
-          organizationId: orgId, jobType: 'PUSH_EMPLOYEES', trigger: 'MANUAL', scope: { deploymentId: id, employeeIds: [emp.id], branchId: host.id, cause: 'deployment' }, branchId: host.id,
-          requestedBy: actor.userId, correlationId: actor.requestId, priority: 6,
-          items: targets.map((d) => ({ deviceId: d.id, employeeId: emp.id, branchId: host.id, operation: 'PUSH_EMPLOYEE' as const })),
-        });
-        await systemStep(trx, orgId, (t) => t.updateTable('employeeBranchDeployments').set({ enrolJobId: job.id }).where('organizationId', '=', orgId).where('id', '=', id).execute());
-        enrol = { jobId: job.id, devices: targets.length };
-      }
+    // the terminals: only once the deployment has started at the host (its timezone) — a deployment for next month enrols
+    // nothing today; the daily sweep enrols it on its first day. The caller was authorised for the host branch above; device
+    // rows are read in system scope (the caller need not hold device.view).
+    let enrol: DeploymentEnrolResult | null = null;
+    const hostToday = await systemStep(trx, orgId, (t) => branchToday(t, orgId, host.id, new Date()));
+    const startsNow = deploymentStarted({ fromDate: input.fromDate, toDate: input.toDate }, hostToday);
+    if (input.enrolOnDevices && startsNow) {
+      enrol = await systemStep(trx, orgId, (t) => enrolBranchDeployment(t, deps.queue, { organizationId: orgId, deploymentId: id, hostToday, trigger: 'MANUAL', requestedBy: actor.userId, correlationId: actor.requestId }));
     }
     await audit(trx, actor, orgId, 'employee.deployment_created', 'employee', {
       entityId: emp.id, branchId: host.id,
-      newValue: { deploymentId: id, homeBranchId: emp.homeBranchId, branchId: host.id, fromDate: input.fromDate, toDate: input.toDate, reason: input.reason, enrolOnDevices: input.enrolOnDevices, enrolJobId: enrol?.jobId ?? null, devices: enrol?.devices ?? 0 },
+      newValue: {
+        deploymentId: id, homeBranchId: emp.homeBranchId, branchId: host.id, fromDate: input.fromDate, toDate: input.toDate, reason: input.reason, enrolOnDevices: input.enrolOnDevices,
+        enrolment: !input.enrolOnDevices ? 'off' : startsNow ? 'now' : 'first_day', enrolJobId: enrol?.syncJobId ?? null, devices: enrol?.enrolled.length ?? 0, alreadyEnrolled: enrol?.alreadyEnrolled ?? [],
+      },
     });
     const row = (await loadDeploymentSystem(trx, orgId, id))!;
     return (await toDtos(trx, orgId, [row], today))[0]!;
@@ -195,14 +190,19 @@ export async function cancelDeployment(deps: ApiDeps, actor: Actor, orgId: strin
     if (status === 'cancelled') throw errors.invalidState('The deployment is already cancelled.');
     if (status === 'ended') throw errors.invalidState('The deployment has ended; the daily clean-up takes the employee off the branch\'s terminals.');
     await systemStep(trx, orgId, (t) => t.updateTable('employeeBranchDeployments').set({ cancelledAt: new Date(), cancelledBy: actor.userId, cancelReason: input.reason }).where('organizationId', '=', orgId).where('id', '=', id).execute());
-    // access removal at once for a deployment that had enrolled the employee (started or not: the enrolment ran at creation)
-    let cleanup: DeploymentCleanupResult | null = null;
-    if (row.enrolJobId) {
-      cleanup = await systemStep(trx, orgId, (t) => cleanupBranchDeployment(t, deps.queue, { organizationId: orgId, deploymentId: id, today, trigger: 'MANUAL', requestedBy: actor.userId, correlationId: actor.requestId, cause: 'cancelled' }));
-    }
+    // access removal at once, ALWAYS (whether or not this deployment had an enrolment job of its own: terminals may have been
+    // handed over to it by an earlier deployment to the same host); the clean-up decides what to keep. An enrolment item that
+    // is running right now leaves it "not cleaned up" for the daily sweep.
+    const cleanup = await systemStep(trx, orgId, async (t) => cleanupBranchDeployment(t, deps.queue, {
+      organizationId: orgId, deploymentId: id, hostToday: await branchToday(t, orgId, row.branchId, new Date()), trigger: 'MANUAL', requestedBy: actor.userId, correlationId: actor.requestId, cause: 'cancelled',
+    }));
     await audit(trx, actor, orgId, 'employee.deployment_cancelled', 'employee', {
       entityId: row.employeeId, branchId: row.branchId, reason: input.reason,
-      oldValue: { status }, newValue: { deploymentId: id, status: 'cancelled', cleanup: cleanup ? { syncJobId: cleanup.syncJobId, removals: cleanup.removals, skipped: cleanup.skipped, cancelledEnrolItems: cleanup.cancelledEnrolItems, inFlightEnrolItems: cleanup.inFlightEnrolItems, kept: cleanup.kept } : null },
+      oldValue: { status },
+      newValue: {
+        deploymentId: id, status: 'cancelled',
+        cleanup: { syncJobId: cleanup.syncJobId, enrolledDevices: cleanup.enrolledDevices, removals: cleanup.removals, skipped: cleanup.skipped, cancelledEnrolItems: cleanup.cancelledEnrolItems, inFlightEnrolItems: cleanup.inFlightEnrolItems, kept: cleanup.kept, handedOverTo: cleanup.handedOverTo, cleanedUp: cleanup.cleanedUp },
+      },
     });
     const after = (await loadDeploymentSystem(trx, orgId, id))!;
     return (await toDtos(trx, orgId, [after], today))[0]!;

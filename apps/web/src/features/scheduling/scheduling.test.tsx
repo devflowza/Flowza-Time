@@ -109,7 +109,7 @@ describe('round-the-clock scheduling (web)', () => {
       '/orgs/org-1/branches': page([branch(BRANCH_A, 'Muscat'), branch(BRANCH_B, 'Sohar')]),
       '/orgs/org-1/employees': page([{ id: EMP, displayName: 'Ahmed Hassan', employeeNumber: 'E-1' }]),
     });
-    apiMock.post.mockResolvedValue({ data: { id: 'dep-1', employeeId: EMP, employeeName: 'Ahmed Hassan', employeeNumber: 'E-1', homeBranchId: BRANCH_A, homeBranchName: 'Muscat', branchId: BRANCH_B, branchName: 'Sohar', fromDate: '2026-10-07', toDate: '2026-10-09', reason: 'Cover', status: 'active', enrolOnDevices: true, enrolJobId: 'sync-job-1', cleanupJobId: null, cleanedUpAt: null, cancelledAt: null, cancelReason: null, createdAt: '2026-10-07T08:00:00Z' } });
+    apiMock.post.mockResolvedValue({ data: { id: 'dep-1', employeeId: EMP, employeeName: 'Ahmed Hassan', employeeNumber: 'E-1', homeBranchId: BRANCH_A, homeBranchName: 'Muscat', branchId: BRANCH_B, branchName: 'Sohar', fromDate: '2026-10-07', toDate: '2026-10-09', reason: 'Cover', status: 'active', enrolOnDevices: true, enrolJobId: 'sync-job-1', enrolledDevices: 1, cleanupJobId: null, cleanedUpAt: null, cancelledAt: null, cancelReason: null, createdAt: '2026-10-07T08:00:00Z' } });
     const success = vi.spyOn(toast, 'success');
     renderWithProviders(<DeploymentsPage />, { route: '/deployments' });
     fireEvent.click(await screen.findByRole('button', { name: 'Deploy employee' }));
@@ -126,6 +126,34 @@ describe('round-the-clock scheduling (web)', () => {
     const call = success.mock.calls.find((c) => (c[1] as { action?: unknown } | undefined)?.action)!;
     act(() => { clickToastAction(call[1]); });
     expect(screen.getByTestId('location')).toHaveTextContent('/sync/sync-job-1');
+  });
+
+  it('a deployment that starts later: the toast says the terminals come on the first day (no job, no /sync link) and the list says so', async () => {
+    const later = { id: 'dep-2', employeeId: EMP, employeeName: 'Ahmed Hassan', employeeNumber: 'E-1', homeBranchId: BRANCH_A, homeBranchName: 'Muscat', branchId: BRANCH_B, branchName: 'Sohar', fromDate: '2099-12-01', toDate: '2099-12-07', reason: 'Cover', status: 'scheduled', enrolOnDevices: true, enrolJobId: null, enrolledDevices: 0, cleanupJobId: null, cleanedUpAt: null, cancelledAt: null, cancelReason: null, createdAt: '2026-10-07T08:00:00Z' };
+    mockGet({
+      '/orgs/org-1/branch-deployments': page([later]),
+      '/orgs/org-1/branches': page([branch(BRANCH_A, 'Muscat'), branch(BRANCH_B, 'Sohar')]),
+      '/orgs/org-1/employees': page([{ id: EMP, displayName: 'Ahmed Hassan', employeeNumber: 'E-1' }]),
+    });
+    apiMock.post.mockResolvedValue({ data: later });
+    const success = vi.spyOn(toast, 'success');
+    renderWithProviders(<DeploymentsPage />, { route: '/deployments' });
+    expect((await screen.findAllByText('Added on the first day')).length).toBeGreaterThan(0);
+    expect(screen.queryByRole('link', { name: 'Enrolment job' })).not.toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Deploy employee' }));
+    const dialog = await screen.findByRole('dialog');
+    expect(within(dialog).getByText(/on the first day \(at once if that is today\)/)).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Employee/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Ahmed Hassan/ }));
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Deploy to branch/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Sohar/ }));
+    fireEvent.change(within(dialog).getByLabelText(/^First day/), { target: { value: '2099-12-01' } });
+    fireEvent.change(within(dialog).getByLabelText(/^Last day/), { target: { value: '2099-12-07' } });
+    fireEvent.change(within(dialog).getByLabelText(/^Reason/), { target: { value: 'Covering in December' } });
+    fireEvent.click(within(dialog).getByTestId('deployment-save'));
+    await waitFor(() => expect(success).toHaveBeenCalledWith('Deployment saved. The employee will be added to the terminals of Sohar on 01 Dec 2099.'));
+    // no "View" action: there is no job to open yet
+    expect(success.mock.calls.some((c) => (c[1] as { action?: unknown } | undefined)?.action)).toBe(false);
   });
 
   it('the coverage grid shows scheduled / required and highlights a gap', () => {

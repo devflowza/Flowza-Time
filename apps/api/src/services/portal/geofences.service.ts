@@ -69,10 +69,12 @@ export async function fencesForEmployee(trx: Trx, orgId: string, emp: Pick<Emplo
 }
 
 /**
- * The fences of a BRANCH as a place (Enterprise, temporary deployment — docs/enterprise/plan.md §4.7): the fences assigned to
- * the branch (scope `branch`) and the fences that belong to it (`geofences.branch_id`), whatever else they are assigned to.
- * All are judged as one branch-scope set (the domain rule: the worst verdict of the set wins), with the direction flags of
- * their branch assignment (both directions for a fence that only belongs to the branch). System scope.
+ * The fences of a BRANCH as a place for a temporary deployment (Enterprise — docs/enterprise/plan.md §4.7): exactly what the
+ * branch's own staff get through the BRANCH scope, i.e. the fences ASSIGNED to the branch (scope `branch`), each with its
+ * assignment's `require_on_check_in` / `require_on_check_out`. A fence merely OWNED by the branch (`geofences.branch_id`) but
+ * assigned to someone else — another employee's home / WFH fence, a team's client site, a department's yard — is not the
+ * branch's place: it is never judged for a deployed employee nor shown to them. Judged as one branch-scope set (the domain
+ * rule: the worst verdict of the applicable fences wins, as for the host's own staff). System scope.
  */
 export async function fencesForBranch(trx: Trx, orgId: string, branchId: string): Promise<GeofenceFence[]> {
   return withSystemScope(trx, orgId, async (t) => {
@@ -81,12 +83,7 @@ export async function fencesForBranch(trx: Trx, orgId: string, branchId: string)
         'a.priority', 'a.requireOnCheckIn', 'a.requireOnCheckOut'])
       .where('a.organizationId', '=', orgId).where('a.scope', '=', 'branch').where('a.targetId', '=', branchId)
       .orderBy('a.priority', 'asc').orderBy('g.name', 'asc').execute();
-    const seen = new Set(assigned.map((r) => r.id));
-    const owned = (await t.selectFrom('geofences').select(FENCE_COLUMNS).where('organizationId', '=', orgId).where('branchId', '=', branchId).orderBy('name', 'asc').execute()) as FenceRow[];
-    return [
-      ...assigned.map((r) => toFenceSpec(r as unknown as FenceRow, { scope: 'branch', priority: r.priority, requireOnCheckIn: r.requireOnCheckIn, requireOnCheckOut: r.requireOnCheckOut })),
-      ...owned.filter((f) => !seen.has(f.id)).map((f) => toFenceSpec(f, { scope: 'branch', priority: 100, requireOnCheckIn: true, requireOnCheckOut: true })),
-    ];
+    return assigned.map((r) => toFenceSpec(r as unknown as FenceRow, { scope: 'branch', priority: r.priority, requireOnCheckIn: r.requireOnCheckIn, requireOnCheckOut: r.requireOnCheckOut }));
   });
 }
 
