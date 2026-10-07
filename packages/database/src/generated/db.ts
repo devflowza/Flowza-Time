@@ -1066,6 +1066,10 @@ export interface EmployeeBranchDeployments {
   createdBy: string | null;
   employeeId: string;
   enrolJobId: string | null;
+  /**
+   * Terminals of the host branch this deployment enrolled the employee on (those where they were not enrolled already); the clean-up removes the employee from these only.
+   */
+  enrolledDeviceIds: Generated<string[]>;
   enrolOnDevices: Generated<boolean>;
   fromDate: Timestamp;
   homeBranchId: string | null;

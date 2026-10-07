@@ -566,10 +566,11 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
     const flagged = lateMinutes > rules.lateThresholdMinutes;
     if (flagged) rec.flag('LATE');
     rec.step('late', `IN ${toUtcIso(firstIn)} vs expected ${toUtcIso(schedule.expectedStart)} + ${graceIn} min grace → ${lateMinutes} min late${flagged ? ' (flagged)' : lateMinutes > 0 ? ` (≤ threshold ${rules.lateThresholdMinutes}, not flagged)` : ''}`, { graceInMinutes: graceIn, lateMinutes, thresholdMinutes: rules.lateThresholdMinutes, flagged });
-    // engine 1.4.0: very late is measured from the scheduled start (the policy says "after 09:00", not "after the grace")
+    // engine 1.4.0: very late is measured from the scheduled start (the policy says "after 09:00", not "after the grace"), and
+    // only ever on top of LATE: an arrival inside the late tolerance (grace + threshold) is never very late
     const veryLateAfter = rules.policy.late.veryLateAfterMinutes;
     const afterStart = minutesBetween(schedule.expectedStart, firstIn);
-    if (veryLateAfter !== null && lateMinutes > 0 && afterStart > veryLateAfter) {
+    if (veryLateAfter !== null && flagged && afterStart > veryLateAfter) {
       rec.flag('VERY_LATE');
       rec.step('late.veryLate', `arrived ${afterStart} min after the scheduled start > ${veryLateAfter} min → VERY_LATE`, { minutesAfterStart: afterStart, veryLateAfterMinutes: veryLateAfter });
     }

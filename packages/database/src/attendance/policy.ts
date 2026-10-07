@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, type AttendanceRules } from '@flowza/contracts';
+import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, policySectionsOf, type AttendanceRules } from '@flowza/contracts';
 import { errors } from '@flowza/shared';
 import { explainPolicyResolution, resolvePolicy, type EngineRuleSet, type PolicyScope } from '@flowza/domain';
 import type { Trx } from '../context.js';
@@ -56,7 +56,9 @@ export function toAttendanceRules(row: RuleSetRow): AttendanceRules {
     punchRoundingMinutes: row.punchRoundingMinutes, punchRoundingMode: row.punchRoundingMode, workedRoundingMinutes: row.workedRoundingMinutes, workedRoundingMode: row.workedRoundingMode,
     punchInterpretation: row.punchInterpretation, duplicatePunchWindowSeconds: row.duplicatePunchWindowSeconds, missingPunchBehavior: row.missingPunchBehavior, autoAbsentWithoutPunches: row.autoAbsentWithoutPunches,
     weeklyOffWorkCountsAsOvertime: row.weeklyOffWorkCountsAsOvertime, holidayWorkCountsAsOvertime: row.holidayWorkCountsAsOvertime, ramadanMode: normaliseRamadanMode(row.ramadanMode),
-    policy: asObject(row.policy),
+    // a stored section that no longer validates (a rule tightened after it was saved) falls back section by section to the
+    // defaults instead of failing every recompute, check-in and regularisation of the employees on the policy
+    policy: policySectionsOf(row.policy),
   });
   if (!parsed.success) throw errors.validation('Attendance rule set is invalid.', { ruleSetId: row.id, issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`) });
   const { name: _n, description: _d, branchId: _b, countryCode: _c, departmentId: _dep, employeeGroupId: _g, shiftId: _s, effectiveFrom: _f, effectiveTo: _t, ...rules } = parsed.data;

@@ -162,6 +162,25 @@ select pg_temp.assert_eq((select count(*) from public.employee_branch_deployment
 select pg_temp.assert_eq((select count(*) from public.employee_branch_deployments where id = '0a000000-0000-0000-0000-000000000ea3'), 0, 'a deployment between HQ and A-3 stays out of reach');
 rollback;
 
+-- ---------- as a branch-scoped attendance admin (A-2 only, attendance.manage_rules) — review fix 20261007000200 ----------
+begin;
+select pg_temp.fixtures();
+insert into auth.users (id, email) values ('a0000000-0000-0000-0000-0000000000aa', 'aa-a@test.local');
+insert into public.user_profiles (id, email, full_name) values ('a0000000-0000-0000-0000-0000000000aa', 'aa-a@test.local', 'Attendance Admin A-2');
+insert into public.org_memberships (id, organization_id, user_id, role_id, status, all_branches) values
+  ('0a000000-0000-0000-0000-0000000000aa', '0a000000-0000-0000-0000-000000000000', 'a0000000-0000-0000-0000-0000000000aa', '10000000-0000-0000-0000-000000000006', 'active', false);
+insert into public.membership_branches (membership_id, branch_id) values ('0a000000-0000-0000-0000-0000000000aa', '0a000000-0000-0000-0000-00000000000c');
+set local role authenticated;
+select set_config('request.jwt.claims', '{"sub":"a0000000-0000-0000-0000-0000000000aa","role":"authenticated"}', true);
+select pg_temp.assert_raises($q$ insert into public.employee_groups (organization_id, code, name) values ('0a000000-0000-0000-0000-000000000000', 'BRANCH', 'Branch-made group') $q$, 'a group is organisation-wide: creating one needs every branch');
+select pg_temp.assert_rows($q$ update public.employee_groups set name = 'Renamed' where id = '0a000000-0000-0000-0000-000000000e62' $q$, 0, 'renaming a group needs every branch');
+select pg_temp.assert_rows($q$ insert into public.employee_group_memberships (organization_id, employee_group_id, employee_id, effective_from) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-000000000e62', '0a000000-0000-0000-0000-0000000000e2', '2026-01-01') $q$, 1, 'a branch-scoped admin puts an employee of their branch in a group');
+select pg_temp.assert_raises($q$ insert into public.employee_group_memberships (organization_id, employee_group_id, employee_id, effective_from) values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-000000000e62', '0a000000-0000-0000-0000-0000000000e4', '2026-01-01') $q$, '… never an employee of another branch');
+select pg_temp.assert_rows($q$ update public.employee_group_memberships set effective_to = '2026-12-01' where employee_id = '0a000000-0000-0000-0000-0000000000e3' $q$, 1, 'ends the membership of an employee of their branch');
+select pg_temp.assert_rows($q$ update public.employee_group_memberships set effective_to = '2026-12-01' where employee_id = '0a000000-0000-0000-0000-0000000000e1' and effective_to is null $q$, 0, '… not one of another branch''s employee');
+select pg_temp.assert_rows($q$ delete from public.employee_group_memberships where employee_id = '0a000000-0000-0000-0000-0000000000e1' $q$, 0, '… nor deletes one');
+rollback;
+
 -- ---------- as Employee A (emp-a, linked to e3) ----------
 begin;
 select pg_temp.fixtures();

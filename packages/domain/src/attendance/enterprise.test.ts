@@ -111,6 +111,17 @@ describe('VERY_LATE (engine 1.4.0)', () => {
     expect(day('09:01').flags).toEqual(expect.arrayContaining(['LATE', 'VERY_LATE']));
   });
 
+  it('never flags VERY_LATE inside the late tolerance (grace + late threshold)', () => {
+    const r = calculateDailyRecord(input({
+      shift: fixedShift({ startTime: '09:00', endTime: '17:00' }),
+      rules: rules({ graceInMinutes: 10, lateThresholdMinutes: 15, policy: { ...policy, late: { veryLateAfterMinutes: 20, repeatedLate: null } } }),
+      events: [punch(DATE, '09:22'), punch(DATE, '17:00')],
+    }));
+    expect(r.lateMinutes).toBe(12);
+    expect(r.flags).not.toContain('LATE');
+    expect(r.flags).not.toContain('VERY_LATE');
+  });
+
   it('is off without a threshold, and on a plain rule set', () => {
     expect(day('10:00', { late: { veryLateAfterMinutes: null, repeatedLate: null } }).flags).not.toContain('VERY_LATE');
     expect(calculateDailyRecord(input({ events: [punch(DATE, '11:00'), punch(DATE, '17:00')] })).flags).not.toContain('VERY_LATE');
