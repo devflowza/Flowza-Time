@@ -58,7 +58,7 @@ function ReasonsTab({ scope, status, onScope, onStatus, oversight }: { scope: No
       {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : q.isLoading ? <TableSkeleton cols={7} rows={5} /> : rows.length === 0 ? (
         <EmptyState icon={MessageSquareText} title={t('notes.empty')} description={t('notes.emptyHint')} />
       ) : (
-        <div className="rounded-lg border bg-card shadow-card">
+        <div className="rounded-xl border bg-card shadow-card">
           <div className="overflow-x-auto">
             <Table>
               {/* the actions column stays at the visible end while the rest scrolls sideways (a narrow screen, a long table) */}

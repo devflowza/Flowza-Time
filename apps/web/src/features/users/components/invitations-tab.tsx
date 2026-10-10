@@ -36,7 +36,7 @@ export function InvitationsTab() {
       {q.isLoading ? <Skeleton className="h-48 w-full" /> : q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !q.data || q.data.length === 0 ? (
         <EmptyState icon={Mail} title={t('invitations.empty')} description={t('invitations.emptyHint')} action={canManage ? <Button size="sm" onClick={() => setInviting(true)}><UserPlus /> {t('invite.title')}</Button> : undefined} />
       ) : (
-        <div className="rounded-lg border bg-card shadow-card">
+        <div className="rounded-xl border bg-card shadow-card">
           <Table>
             <TableHeader><TableRow><TableHead>{t('fields.email')}</TableHead><TableHead>{t('fields.role')}</TableHead><TableHead>{t('fields.branchScope')}</TableHead><TableHead>{t('invitations.invitedBy')}</TableHead><TableHead>{t('invitations.expires')}</TableHead><TableHead /></TableRow></TableHeader>
             <TableBody>

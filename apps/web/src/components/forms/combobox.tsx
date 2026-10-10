@@ -4,6 +4,7 @@ import { Check, ChevronsUpDown, Loader2, X } from 'lucide-react';
 import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
+import { fieldClass } from '@/components/ui/input';
 
 export interface ComboboxOption { value: string; label: string; description?: string; disabled?: boolean }
 /** A row pinned under the list — "Add branch", "Edit Muscat HQ" — rather than one of the values to pick from. */
@@ -35,7 +36,7 @@ export function Combobox({ value, onChange, options, placeholder, onSearch, load
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
       <PopoverPrimitive.Trigger asChild>
-        <button id={id} type="button" role="combobox" aria-expanded={open} aria-invalid={rest['aria-invalid']} disabled={disabled} className={cn('flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 aria-invalid:border-destructive', !selected && 'text-muted-foreground', className)}>
+        <button id={id} type="button" role="combobox" aria-expanded={open} aria-invalid={rest['aria-invalid']} disabled={disabled} className={cn('flex h-9 items-center justify-between gap-2 px-3 data-[state=open]:border-ring data-[state=open]:ring-[3px] data-[state=open]:ring-ring/20 data-[state=open]:ring-offset-0', fieldClass, !selected && 'text-muted-foreground', className)}>
           <span className="truncate">{selected?.label ?? placeholder ?? t('common.none')}</span>
           <span className="flex items-center gap-1">
             {clearable && selected ? <X className="size-3.5 opacity-60 hover:opacity-100" onClick={(e) => { e.stopPropagation(); onChange(null); }} aria-label="Clear" /> : null}
@@ -44,7 +45,7 @@ export function Combobox({ value, onChange, options, placeholder, onSearch, load
         </button>
       </PopoverPrimitive.Trigger>
       <PopoverPrimitive.Portal>
-        <PopoverPrimitive.Content align="start" sideOffset={4} className="z-50 w-[var(--radix-popover-trigger-width)] min-w-[220px] rounded-md border bg-card p-0 text-card-foreground shadow-md">
+        <PopoverPrimitive.Content align="start" sideOffset={4} className="z-50 w-[var(--radix-popover-trigger-width)] min-w-[220px] origin-(--radix-popover-content-transform-origin) rounded-lg border bg-popover p-0 text-popover-foreground shadow-md data-[state=closed]:animate-pop-out data-[state=open]:animate-pop-in">
           <Command shouldFilter={!onSearch} className="flex flex-col">
             <div className="flex items-center gap-2 border-b px-3">
               <Command.Input placeholder={t('common.searchPlaceholder')} onValueChange={(q) => onSearch?.(q)} className="h-9 w-full bg-transparent text-sm outline-none placeholder:text-muted-foreground" />
@@ -53,7 +54,7 @@ export function Combobox({ value, onChange, options, placeholder, onSearch, load
             <Command.List className="max-h-64 overflow-y-auto p-1">
               <Command.Empty className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyText ?? t('common.noResults')}</Command.Empty>
               {options.map((o) => (
-                <Command.Item key={o.value} value={o.label + ' ' + o.value} disabled={o.disabled} onSelect={() => { onChange(o.value); setOpen(false); }} className="flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-accent data-[disabled=true]:opacity-50">
+                <Command.Item key={o.value} value={o.label + ' ' + o.value} disabled={o.disabled} onSelect={() => { onChange(o.value); setOpen(false); }} className="flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-muted data-[disabled=true]:opacity-50">
                   <Check className={cn('size-4', o.value === value ? 'opacity-100' : 'opacity-0')} />
                   <span className="flex-1 truncate">{o.label}</span>
                   {o.description ? <span className="truncate text-xs text-muted-foreground">{o.description}</span> : null}
@@ -64,7 +65,7 @@ export function Combobox({ value, onChange, options, placeholder, onSearch, load
               /* Outside Command.List so the search text never filters them away: an empty picker must still offer a way out. */
               <div className="border-t p-1">
                 {actions.map((a) => (
-                  <button key={a.key} type="button" onClick={() => { setOpen(false); a.onSelect(); }} className="flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-start text-sm font-medium text-primary outline-none hover:bg-accent focus-visible:bg-accent">
+                  <button key={a.key} type="button" onClick={() => { setOpen(false); a.onSelect(); }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-start text-sm font-medium text-primary outline-none hover:bg-muted focus-visible:bg-muted">
                     <span className="flex size-4 shrink-0 items-center justify-center">{a.icon}</span>
                     <span className="truncate">{a.label}</span>
                   </button>

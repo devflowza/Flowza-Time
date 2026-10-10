@@ -22,7 +22,7 @@ export default tseslint.config(
   {
     files: ['apps/web/**/*.{ts,tsx}'],
     plugins: { 'react-hooks': reactHooks, 'react-refresh': reactRefresh },
-    rules: { ...reactHooks.configs.recommended.rules, 'react-refresh/only-export-components': ['warn', { allowConstantExport: true }] },
+    rules: { ...reactHooks.configs.recommended.rules, 'react-refresh/only-export-components': ['warn', { allowConstantExport: true, extraHOCs: ['lazyPage'] }] },
   },
   {
     // UI primitives export variants/hooks alongside components by design (shadcn convention); providers export hooks.

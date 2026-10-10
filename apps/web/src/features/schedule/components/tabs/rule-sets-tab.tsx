@@ -64,7 +64,7 @@ export function RuleSetsTab() {
         {canManage ? <Button size="sm" className="ms-auto" onClick={() => setDialog({ open: true, ruleSet: null })}><Plus /> {enterprise ? t('policyEditor.add') : t('rules.add')}</Button> : null}
       </div>
       <p className="text-xs text-muted-foreground">{enterprise ? t('policyList.hint') : t('rules.hint')}</p>
-      <div className="rounded-lg border bg-card shadow-card">
+      <div className="rounded-xl border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
           : q.isLoading && !q.data ? <TableSkeleton cols={6} rows={4} />
           : q.data && q.data.length === 0 ? <div className="p-4"><EmptyState icon={ScrollText} title={t('rules.empty')} description={t('rules.emptyHint')} action={canManage ? <Button onClick={() => setDialog({ open: true, ruleSet: null })}><Plus /> {t('rules.add')}</Button> : undefined} /></div>

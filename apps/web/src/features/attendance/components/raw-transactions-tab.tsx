@@ -71,7 +71,7 @@ export function RawTransactionsTab() {
         {hasFilters ? <Button variant="ghost" size="sm" onClick={() => { setCursors([]); setDeviceEmployeeId(''); table.update({ filters: { deviceId: '', branchId: '', processingStatus: '', deviceEmployeeId: '', from: '', to: '' } }); }}><X /> {tc('common.clearFilters')}</Button> : null}
       </div>
       <p className="text-xs text-muted-foreground">{t('raw.hint')}</p>
-      <div className="rounded-lg border bg-card shadow-card">
+      <div className="rounded-xl border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
           : q.isLoading && !rows ? <TableSkeleton cols={7} />
           : rows && rows.length === 0 ? <div className="p-4"><EmptyState title={t('raw.empty')} description={hasFilters ? tc('common.noResultsHint') : t('raw.emptyHint')} /></div>

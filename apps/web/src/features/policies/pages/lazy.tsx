@@ -1,6 +1,6 @@
-import { lazy } from 'react';
 import { Skeleton } from '@/components/ui';
+import { lazyPage } from '@/lib/lazy-page';
 
-export const PoliciesPage = lazy(() => import('./policies-page'));
+export const PoliciesPage = lazyPage(() => import('./policies-page'));
 
 export function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }

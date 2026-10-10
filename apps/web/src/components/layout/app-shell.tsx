@@ -1,9 +1,9 @@
-import { useState } from 'react';
-import { Link, Navigate, Outlet } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Link, Navigate, Outlet, useLocation, useNavigationType } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Sidebar } from './sidebar';
 import { Topbar } from './topbar';
-import { Dialog, DialogContent } from '@/components/ui';
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui';
 import { useActiveMembership, useMe } from '@/features/me/use-me';
 import { TriangleAlert } from 'lucide-react';
 import { isMfaRequiredError } from '@/lib/api-client';
@@ -15,6 +15,7 @@ import { CreateOrganizationScreen } from '@/features/auth/create-organization-sc
 import { readPendingInvitation } from '@/features/auth/pending-invitation';
 import { Button } from '@/components/ui';
 import { useApplyDashboardTheme } from '@/features/dashboard/theme';
+import { APP_SCROLL_ID, scrollPageToTop } from '@/lib/scroll';
 
 export function AppShell() {
   const { t } = useTranslation();
@@ -25,6 +26,10 @@ export function AppShell() {
   const lapsed = useActiveMembership()?.subscriptionLapsed === true;
   // Before any early return: the tenant's style must be on <html> for every state the shell can render.
   useApplyDashboardTheme();
+  // A new page opens at its top; Back and Forward leave the position alone.
+  const { pathname } = useLocation();
+  const navigationType = useNavigationType();
+  useEffect(() => { if (navigationType !== 'POP') scrollPageToTop(); }, [pathname, navigationType]);
 
   // A platform admin is gated at aal2 on every route, so /me itself fails before the shell can render any way out.
   if (me.isError && isMfaRequiredError(me.error)) return <MfaRequiredGate onVerified={() => void me.refetch()} />;
@@ -43,9 +48,14 @@ export function AppShell() {
   // nothing is in flight. Falling through here renders the Outlet without a membership and useOrgId() throws.
   if (!me.data) {
     return (
-      <div className="flex min-h-screen">
-        <div className="hidden w-60 bg-sidebar md:block" />
-        <div className="flex-1 p-8 space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-32 w-full" /><Skeleton className="h-64 w-full" /></div>
+      <div className="flex min-h-dvh bg-background md:h-dvh md:bg-sidebar">
+        <div className="hidden w-60 md:block" />
+        <div className="flex-1 md:py-2 md:pe-2">
+          <div className="h-full bg-background md:rounded-2xl md:border md:border-black/[0.06] dark:md:border-white/[0.07]">
+            <div className="h-14 border-b border-border/70" />
+            <div className="space-y-4 p-8"><Skeleton className="h-8 w-64" /><Skeleton className="h-32 w-full" /><Skeleton className="h-64 w-full" /></div>
+          </div>
+        </div>
       </div>
     );
   }
@@ -62,22 +72,30 @@ export function AppShell() {
   // guard above so an ordinary member-less user still gets the onboarding screen rather than the portal's refusal.
   if (me.data.memberships.length === 0) return <Navigate to="/adm" replace />;
   return (
-    <div className="flex min-h-screen">
+    // The frame: from `md` up the shell is exactly one screen tall, painted in the tenant's sidebar colour, and the page sits
+    // in a rounded panel inset from its edges that scrolls on its own (#app-scroll). On a phone the document scrolls as usual.
+    <div className="flex min-h-dvh bg-background md:h-dvh md:overflow-hidden md:bg-sidebar">
+      <a href="#main" className="sr-only z-50 rounded-md bg-card px-3 py-2 text-sm font-medium shadow-md focus:not-sr-only focus:fixed focus:start-3 focus:top-3">{t('app.skipToContent')}</a>
       <Sidebar />
       <Dialog open={mobileNav} onOpenChange={setMobileNav}>
-        <DialogContent size="sm" className="start-0 top-0 h-full max-h-none w-72 translate-x-0 translate-y-0 rounded-none bg-sidebar p-0 text-sidebar-foreground rtl:translate-x-0 md:hidden">
-          <div className="[&>aside]:flex [&>aside]:w-72" onClick={() => setMobileNav(false)}><Sidebar /></div>
+        <DialogContent variant="sheet" aria-describedby={undefined} className="bg-sidebar p-0 text-sidebar-foreground md:hidden">
+          <DialogTitle className="sr-only">{t('nav.navigation')}</DialogTitle>
+          <div className="h-full [&>aside]:flex [&>aside]:h-full [&>aside]:w-72" onClick={() => setMobileNav(false)}><Sidebar /></div>
         </DialogContent>
       </Dialog>
-      <div className="flex min-w-0 flex-1 flex-col">
-        <Topbar onOpenMobileNav={() => setMobileNav(true)} />
-        {lapsed ? (
-          <div role="status" className="flex flex-wrap items-center gap-2 border-b border-amber-300/60 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
-            <TriangleAlert className="size-4 shrink-0" aria-hidden /> {t('modules.lapsedBanner')}
-            <Link to="/settings/subscription" className="font-medium underline underline-offset-4">{t('modules.lapsedAction')}</Link>
-          </div>
-        ) : null}
-        <main className="flex-1"><Outlet /></main>
+      <div className="flex min-w-0 flex-1 flex-col md:py-2 md:pe-2">
+        {/* the panel's background carries the tenant's colour as a faint light at its top (globals.css .app-ambient): it
+            belongs to the scroll container itself, so it is painted once and the content scrolls over it */}
+        <div id={APP_SCROLL_ID} className="app-ambient flex min-w-0 flex-1 flex-col bg-background md:overflow-y-auto md:overscroll-contain md:rounded-2xl md:border md:border-black/[0.06] md:shadow-[0_1px_3px_rgb(0_0_0/0.12),0_12px_40px_-12px_rgb(0_0_0/0.35)] dark:md:border-white/[0.07]">
+          <Topbar onOpenMobileNav={() => setMobileNav(true)} />
+          {lapsed ? (
+            <div role="status" className="flex flex-wrap items-center gap-2 border-b border-amber-300/60 bg-amber-50 px-4 py-2 text-sm text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+              <TriangleAlert className="size-4 shrink-0" aria-hidden /> {t('modules.lapsedBanner')}
+              <Link to="/settings/subscription" className="font-medium underline underline-offset-4">{t('modules.lapsedAction')}</Link>
+            </div>
+          ) : null}
+          <main id="main" tabIndex={-1} className="flex-1 focus:outline-none"><Outlet /></main>
+        </div>
       </div>
     </div>
   );

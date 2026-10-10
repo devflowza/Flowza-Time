@@ -1,9 +1,11 @@
 @import 'tailwindcss';
 
-/* FlowZa design tokens — light/dark, RTL-safe (use logical utilities: ms-/me-/ps-/pe-/start-/end-). */
+/* FlowZa design tokens — light/dark, RTL-safe (use logical utilities: ms-/me-/ps-/pe-/start-/end-). docs/design.md §1. */
 @theme {
-  --font-sans: 'Inter', 'IBM Plex Sans Arabic', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Arabic', sans-serif;
-  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+  /* Geist for Latin, IBM Plex Sans Arabic for Arabic (both self-hosted, imported in main.tsx; the Arabic faces only download
+     when Arabic text is on screen). Geist has no Arabic glyphs, so Arabic falls through to Plex in either UI language. */
+  --font-sans: 'Geist Variable', 'IBM Plex Sans Arabic', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Noto Sans Arabic', sans-serif;
+  --font-mono: 'Geist Mono Variable', ui-monospace, SFMono-Regular, Menlo, monospace;
 
   /* The brand scale is a set of variables, not literals, so a tenant style ([data-theme] below) can swap the whole
      scale and every `brand-*` utility, `primary`, `ring` and the selection colour follow it. */
@@ -22,10 +24,14 @@
   --color-foreground: var(--fg);
   --color-card: var(--card);
   --color-card-foreground: var(--fg);
+  /* Floating surfaces (menus, selects, popovers): white in light mode, a step above the card in dark mode. */
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--fg);
   --color-muted: var(--muted);
+  --color-muted-strong: var(--muted-strong);
   --color-muted-foreground: var(--muted-fg);
   --color-border: var(--border);
-  --color-input: var(--border);
+  --color-input: var(--input);
   --color-ring: var(--color-brand-500);
   --color-primary: var(--color-brand-700);
   --color-primary-foreground: #ffffff;
@@ -67,31 +73,92 @@
   --radius-sm: 0.375rem;
   --radius-md: 0.5rem;
   --radius-lg: 0.75rem;
-  --radius-xl: 1rem;
+  --radius-xl: 0.875rem;
+  --radius-2xl: 1.125rem;
 
-  --shadow-card: 0 1px 2px rgb(16 24 40 / 0.06), 0 1px 3px rgb(16 24 40 / 0.1);
+  /* Elevation. One light source (above), shadows tinted with the ink colour rather than pure black, and a different
+     recipe per mode (`:root` / `.dark` below): in the dark, depth comes from a lighter surface and a top highlight,
+     not from a shadow nobody can see. `shadow-card` is resting content; `shadow-md`/`shadow-lg` are floating layers. */
+  --shadow-xs: var(--elev-xs);
+  --shadow-sm: var(--elev-sm);
+  --shadow-card: var(--elev-card);
+  --shadow-md: var(--elev-float);
+  --shadow-lg: var(--elev-overlay);
+  --shadow-xl: var(--elev-overlay);
 
   /* Secondary text (hints, table headings, e-mail lines) is set in `text-xs`; 13px instead of Tailwind's 12px keeps it
      legible on dense screens without touching the 14px body size. */
   --text-xs: 0.8125rem;
   --text-xs--line-height: 1.125rem;
+
+  /* Motion. Critically damped curves (no overshoot) in the spirit of a spring: fast out of the gate, a long soft
+     settle. Only `transform` and `opacity` are animated, so every transition stays on the compositor. */
+  --ease-out: cubic-bezier(0.22, 1, 0.36, 1);
+  --ease-in: cubic-bezier(0.55, 0, 1, 0.45);
+  --ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ease-spring: cubic-bezier(0.16, 1, 0.3, 1);
+
+  --animate-page-in: page-in 320ms var(--ease-out) backwards;
+  --animate-fade-in: fade-in 200ms var(--ease-out);
+  --animate-fade-out: fade-out 150ms var(--ease-in) forwards;
+  --animate-dialog-in: dialog-in 300ms var(--ease-spring);
+  --animate-dialog-out: dialog-out 160ms var(--ease-in) forwards;
+  --animate-pop-in: pop-in 180ms var(--ease-spring);
+  --animate-pop-out: pop-out 120ms var(--ease-in) forwards;
+  --animate-sheet-in: sheet-in 340ms var(--ease-spring);
+  --animate-sheet-out: sheet-out 200ms var(--ease-in) forwards;
+
+  @keyframes page-in {
+    from { opacity: 0; transform: translateY(6px); }
+  }
+  @keyframes fade-in {
+    from { opacity: 0; }
+  }
+  @keyframes fade-out {
+    to { opacity: 0; }
+  }
+  @keyframes dialog-in {
+    from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  }
+  @keyframes dialog-out {
+    to { opacity: 0; transform: translateY(4px) scale(0.98); }
+  }
+  @keyframes pop-in {
+    from { opacity: 0; transform: scale(0.96); }
+  }
+  @keyframes pop-out {
+    to { opacity: 0; transform: scale(0.97); }
+  }
+  /* The navigation sheet enters from, and leaves towards, the start edge: left in English, right in Arabic. */
+  @keyframes sheet-in {
+    from { transform: translateX(calc(var(--sheet-from, -1) * 100%)); }
+  }
+  @keyframes sheet-out {
+    to { transform: translateX(calc(var(--sheet-from, -1) * 100%)); }
+  }
 }
 
 /* ---------------------------------------------------------------------------------------------------------------------
-   Tenant dashboard styles (Settings → Dashboard). Each style is a block of variables keyed by `data-theme`, set on
-   <html> by the app shell from the organisation's settings. The same blocks also style any element that carries the
-   attribute itself — that is how the settings gallery renders live thumbnails from one source of truth.
-   Order matters: `.dark` sits before the styles so a style's sidebar wins in both modes, and each style has an
-   explicit `.dark` variant for the values that must change with the mode (accent tint; a light sidebar).
-   Every rule keeps text contrast ≥ 4.5:1 (docs/design.md §6).
+   Neutrals. One cool grey family for both modes (never mixed with warm greys), off-white and off-black grounds.
+   Text contrast: foreground ≥ 13:1 and muted-foreground ≥ 6:1 on every surface, in both modes (docs/design.md §6).
    ------------------------------------------------------------------------------------------------------------------ */
 :root {
-  --bg: #f7f8fa;
-  --fg: #101828;
+  --bg: #f6f7f9;
+  --fg: #0f1419;
   --card: #ffffff;
-  --muted: #f2f4f7;
-  --muted-fg: #475467; /* Gray-600: 7:1 on white, so hints and headings read as text, not decoration */
-  --border: #e4e7ec;
+  --popover: #ffffff;
+  --muted: #f1f3f5;
+  --muted-strong: #e7e9ed;
+  --muted-fg: #525a67; /* ~7:1 on white, 6.3:1 on muted: hints and headings read as text, not decoration */
+  --border: #e6e8ec;
+  --input: #dcdfe5;
+  --elev-xs: 0 1px 2px rgb(15 20 25 / 0.05);
+  --elev-sm: 0 1px 2px rgb(15 20 25 / 0.06), 0 1px 3px rgb(15 20 25 / 0.05);
+  --elev-card: 0 1px 2px rgb(15 20 25 / 0.04), 0 2px 6px -2px rgb(15 20 25 / 0.05);
+  --elev-float: 0 0 0 1px rgb(15 20 25 / 0.03), 0 4px 8px -2px rgb(15 20 25 / 0.06), 0 12px 28px -6px rgb(15 20 25 / 0.14);
+  --elev-overlay: 0 0 0 1px rgb(15 20 25 / 0.04), 0 8px 16px -4px rgb(15 20 25 / 0.08), 0 28px 56px -12px rgb(15 20 25 / 0.28);
+  --scrollbar: rgb(15 20 25 / 0.18);
+  --ambient: 0.07;
   color-scheme: light;
 }
 /* FlowZa Green — the signature look (reference mockup 1) and the default for every organisation. */
@@ -108,10 +175,10 @@
   --brand-700: #0f6e56;
   --brand-800: #0e4e3f;
   --brand-900: #0c4035;
-  --sidebar: #0e2b25;
+  --sidebar: #0d2620;
   --sidebar-fg: #d7e5e0;
   --sidebar-strong: #ffffff;
-  --sidebar-hover: rgb(255 255 255 / 0.07);
+  --sidebar-hover: rgb(255 255 255 / 0.06);
   --sidebar-active: rgb(255 255 255 / 0.09);
   --sidebar-active-fg: #ffffff;
   --sidebar-active-icon: #78cfaf;
@@ -131,21 +198,31 @@
   --bar-fill: var(--chart-present);
 }
 .dark {
-  --bg: #0b1220;
-  --fg: #e6eaf0;
-  --card: #111a2b;
-  --muted: #1a2438;
-  --muted-fg: #a6b0bf;
-  --border: #243046;
+  --bg: #0b0d12;
+  --fg: #e8eaee;
+  --card: #121620;
+  --popover: #171c26;
+  --muted: #1a1f2a;
+  --muted-strong: #232937;
+  --muted-fg: #a1a9b7;
+  --border: #252b37;
+  --input: #2d3442;
   --accent: #10251f;
-  --sidebar: #08111d;
+  --sidebar: #06080b;
   --sidebar-fg: #c7d1dc;
+  --elev-xs: 0 1px 2px rgb(0 0 0 / 0.3);
+  --elev-sm: 0 1px 2px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.03);
+  --elev-card: 0 1px 2px rgb(0 0 0 / 0.35), inset 0 1px 0 rgb(255 255 255 / 0.035);
+  --elev-float: 0 0 0 1px rgb(255 255 255 / 0.05), 0 8px 24px -6px rgb(0 0 0 / 0.6), inset 0 1px 0 rgb(255 255 255 / 0.04);
+  --elev-overlay: 0 0 0 1px rgb(255 255 255 / 0.06), 0 24px 64px -12px rgb(0 0 0 / 0.75), inset 0 1px 0 rgb(255 255 255 / 0.05);
+  --scrollbar: rgb(255 255 255 / 0.16);
+  --ambient: 0.12;
   color-scheme: dark;
 }
 .dark[data-theme='emerald'],
 .dark [data-theme='emerald'] {
   --accent: #10251f;
-  --sidebar: #08111d;
+  --sidebar: #06080b;
   --sidebar-fg: #c7d1dc;
 }
 
@@ -227,11 +304,11 @@
 .dark[data-theme='classic'],
 .dark [data-theme='classic'] {
   --accent: #172554;
-  --sidebar: #111a2b;
-  --sidebar-fg: #a6b0bf;
-  --sidebar-strong: #e6eaf0;
-  --sidebar-hover: #1a2438;
-  --sidebar-border: #243046;
+  --sidebar: #06080b;
+  --sidebar-fg: #a1a9b7;
+  --sidebar-strong: #e8eaee;
+  --sidebar-hover: #1a1f2a;
+  --sidebar-border: #252b37;
 }
 
 /* Desert Gold — warm sand and bronze, a deep brown sidebar. */
@@ -396,20 +473,69 @@
 
 @layer base {
   * { @apply border-border; }
-  html { -webkit-text-size-adjust: 100%; }
-  body { @apply bg-background text-foreground antialiased; font-feature-settings: 'cv11', 'ss01'; }
+  html {
+    -webkit-text-size-adjust: 100%;
+    /* `scrollbar-color` is inherited, so every scroll area gets the same quiet thumb */
+    scrollbar-color: var(--scrollbar) transparent;
+    -webkit-tap-highlight-color: transparent;
+  }
+  body {
+    @apply bg-background text-foreground antialiased;
+    font-optical-sizing: auto;
+    /* Geist's slashed zero would read as Ø in codes; keep the plain one and let `.tnum` line figures up */
+    font-feature-settings: 'calt', 'kern';
+  }
   [dir='rtl'] body { letter-spacing: 0; }
+  /* Headings track tighter as they grow and never leave one word on the last line. */
+  h1, h2, h3 { text-wrap: balance; }
+  h1 { letter-spacing: -0.022em; }
+  h2, h3 { letter-spacing: -0.012em; }
+  [dir='rtl'] :is(h1, h2, h3) { letter-spacing: 0; }
+  /* One focus ring for anything that does not draw its own (a ring composes with the shadow scale in Tailwind v4).
+     Text fields replace it with a border and a soft halo (components/ui/input.tsx `fieldClass`). */
   :focus-visible { @apply outline-none ring-2 ring-ring ring-offset-2 ring-offset-background; }
   ::selection { background: var(--color-brand-200); color: var(--color-brand-900); }
   /* tabular numbers for attendance figures */
   .tnum { font-variant-numeric: tabular-nums; }
-  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; } }
+  @media (prefers-reduced-motion: reduce) { *, *::before, *::after { animation-duration: 0.01ms !important; animation-delay: 0ms !important; transition-duration: 0.01ms !important; } }
 }
 
 @layer utilities {
   .scrollbar-thin { scrollbar-width: thin; }
-  .page-container { @apply mx-auto w-full max-w-[1600px] px-4 py-5 sm:px-6 lg:px-8; }
+  /* Every page opens with a short rise-and-fade (transform + opacity only). It runs when the page's container mounts,
+     so a navigation animates and a refetch, a filter or a tab change inside the page does not. */
+  .page-container { @apply mx-auto w-full max-w-[1600px] px-4 py-6 sm:px-6 lg:px-8; animation: var(--animate-page-in); }
   /* Progress bars in the dashboard: a solid colour or a gradient, decided by the tenant style. */
   .bar-fill { background: var(--bar-fill); }
   .hero-gradient { background-image: linear-gradient(135deg, var(--hero-from), var(--hero-to)); }
+  /* Translucent chrome (the top bar): content scrolls underneath a frosted layer. Solid when the reader asks for less
+     transparency, and where backdrop-filter is not supported. */
+  .glass { background-color: color-mix(in oklab, var(--bg) 82%, transparent); backdrop-filter: blur(14px) saturate(1.6); }
+  @supports not (backdrop-filter: blur(1px)) { .glass { background-color: var(--bg); } }
+  @media (prefers-reduced-transparency: reduce) { .glass { background-color: var(--bg); backdrop-filter: none; } }
+  /* A soft wash of the tenant's colour behind the top of every page: the background of the content panel, which is the
+     scroll container, so it is painted once and stays put while the page scrolls over it. A light source, not a
+     decoration, so it stays faint (stronger in the dark, where it reads as glow). Only the image: the colour is the
+     panel's own `bg-background`. */
+  .app-ambient {
+    background-image:
+      radial-gradient(60rem 26rem at 85% -8rem, color-mix(in oklab, var(--color-brand-500) calc(var(--ambient) * 100%), transparent), transparent 70%),
+      radial-gradient(40rem 20rem at 10% -10rem, color-mix(in oklab, var(--color-brand-300) calc(var(--ambient) * 60%), transparent), transparent 70%);
+    background-repeat: no-repeat;
+  }
+  /* The auth hero: the tenant colour as light falling on a dark surface, over a faint grid that fades out. */
+  .auth-hero {
+    background:
+      radial-gradient(48rem 32rem at 0% 0%, color-mix(in oklab, var(--color-brand-500) 38%, transparent), transparent 62%),
+      radial-gradient(40rem 30rem at 100% 100%, color-mix(in oklab, var(--color-brand-400) 22%, transparent), transparent 60%),
+      var(--sidebar);
+  }
+  .auth-grid {
+    background-image:
+      linear-gradient(to right, rgb(255 255 255 / 0.05) 1px, transparent 1px),
+      linear-gradient(to bottom, rgb(255 255 255 / 0.05) 1px, transparent 1px);
+    background-size: 44px 44px;
+    mask-image: radial-gradient(ellipse at 30% 30%, black 20%, transparent 72%);
+  }
+  [dir='rtl'] { --sheet-from: 1; }
 }

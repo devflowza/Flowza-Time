@@ -103,7 +103,7 @@ export function PeriodLocksTab() {
         {canLock ? <Button size="sm" className="ms-auto" onClick={() => setLockOpen(true)}><Lock /> {t('periods.lockTitle')}</Button> : null}
       </div>
       <p className="text-xs text-muted-foreground">{t('periods.hint')}</p>
-      <div className="rounded-lg border bg-card shadow-card">
+      <div className="rounded-xl border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
           : q.isLoading && !q.data ? <TableSkeleton cols={5} rows={4} />
           : q.data && q.data.length === 0 ? <div className="p-4"><EmptyState icon={Lock} title={t('periods.empty')} description={t('periods.emptyHint')} action={canLock ? <Button onClick={() => setLockOpen(true)}><Lock /> {t('periods.lockTitle')}</Button> : undefined} /></div>

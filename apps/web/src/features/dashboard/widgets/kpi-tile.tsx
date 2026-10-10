@@ -51,10 +51,10 @@ export function KpiTile({ label, value, icon: Icon, tone, loading, percent, hint
   const body = (
     <>
       <div className="flex items-start gap-3">
-        <span className={cn('flex shrink-0 items-center justify-center rounded-lg', t.icon, size === 'lg' ? 'size-11' : 'size-10')}><Icon className={size === 'lg' ? 'size-[22px]' : 'size-5'} aria-hidden /></span>
+        <span className={cn('flex shrink-0 items-center justify-center rounded-xl', t.icon, size === 'lg' ? 'size-11' : 'size-10')}><Icon className={size === 'lg' ? 'size-[22px]' : 'size-5'} aria-hidden /></span>
         <div className="min-w-0 flex-1">
           <p className="truncate text-xs font-medium text-muted-foreground">{label}</p>
-          {loading ? <Skeleton className={cn('mt-1', size === 'lg' ? 'h-8 w-20' : 'h-7 w-16')} /> : <p className={cn('tnum font-semibold leading-tight', size === 'lg' ? 'text-3xl' : 'text-2xl')}>{value}</p>}
+          {loading ? <Skeleton className={cn('mt-1', size === 'lg' ? 'h-8 w-20' : 'h-7 w-16')} /> : <p className={cn('tnum font-semibold leading-tight tracking-tight', size === 'lg' ? 'text-3xl' : 'text-2xl')}>{value}</p>}
         </div>
       </div>
       {delta || hint ? (
@@ -88,6 +88,6 @@ export function KpiTile({ label, value, icon: Icon, tone, loading, percent, hint
   // `@container` lets the footer adapt to the tile's own width; flex-col + mt-auto keep bars level across a band.
   const frame = '@container flex min-w-0 flex-col p-4';
   // A link tile is the Card surface on an <a>: same classes, one interactive element, nothing nested inside it.
-  if (to) return <Link to={to} className={cn(frame, 'rounded-lg border bg-card text-card-foreground shadow-card transition-colors hover:border-brand-300 focus-visible:ring-2 focus-visible:ring-ring')}>{body}</Link>;
+  if (to) return <Link to={to} className={cn(frame, 'rounded-xl border bg-card text-card-foreground shadow-card transition-[border-color,box-shadow,translate] duration-200 ease-out hover:-translate-y-px hover:border-brand-300 hover:shadow-md focus-visible:ring-2 focus-visible:ring-ring')}>{body}</Link>;
   return <Card className={frame}>{body}</Card>;
 }
