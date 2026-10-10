@@ -13,7 +13,7 @@ import { enqueueJob } from '../lib/jobs.js';
 import { hashPin } from '../lib/hashing.js';
 import { loadSettings } from '../lib/settings.js';
 import { assertUserCapacity } from './features/user-limit.js';
-import { enqueueRecalculation } from './features/recalc.js';
+import { enqueueRecalculation, recalcTodayForLocationChange } from './features/recalc.js';
 import { assignmentEndToStored } from './features/assignment-dates.js';
 import { likeContains, pageOf, prefixTsQuery, resolveSort, toCount } from '../lib/pagination.js';
 import { isoDate } from '../lib/mappers.js';
@@ -453,6 +453,11 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     if (recalcRange) {
       const changed = [beforeDates.joiningDate !== afterDates.joiningDate ? `joining date ${beforeDates.joiningDate} → ${afterDates.joiningDate}` : null, beforeDates.exitDate !== afterDates.exitDate ? `exit date ${beforeDates.exitDate ?? 'none'} → ${afterDates.exitDate ?? 'none'}` : null].filter(Boolean).join(', ');
       await enqueueRecalculation(deps, trx, actor, orgId, { ...recalcRange, employeeIds: [id], reason: `Employee ${before.employeeNumber}: ${changed}` });
+    }
+    // another place in the same branch can mean another location-scoped policy from today (a transfer recalculates through the
+    // history transition)
+    if (input.workLocationId !== undefined && input.workLocationId !== before.workLocationId && targetBranchId === before.branchId) {
+      await recalcTodayForLocationChange(deps, trx, actor, orgId, { employeeIds: [id] }, `Employee ${before.employeeNumber}: work location changed`);
     }
     // B-75: becoming terminated/resigned ends every login linked to the record (a refusal rolls the whole change back).
     // The reverse is deliberately NOT automatic: re-activating the employee leaves the login suspended until an

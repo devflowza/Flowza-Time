@@ -15,6 +15,7 @@ import { requireBranchAccess, requirePermission } from '../lib/authorize.js';
 import { numberOrNull } from '../lib/mappers.js';
 import { toCount } from '../lib/pagination.js';
 import { type Actor, audit, diffObjects, runUser, withSystemScope } from '../lib/service.js';
+import { recalcTodayForLocationChange } from './features/recalc.js';
 import { LEVEL_COLUMNS, toLocationDto, toLocationLevelDto, type LevelRow } from './locations.mappers.js';
 
 /*
@@ -547,6 +548,20 @@ const auditView = (n: NodeRow) => ({
   levelId: n.levelId, parentId: n.parentId, branchId: n.branchId, code: n.code, name: n.name, nameAr: n.nameAr, latitude: n.latitude, longitude: n.longitude, status: n.status,
 });
 
+/** Who a move of `node` concerns for policy resolution: the branches below a group node, the people working in a place or below it. */
+async function peopleBelow(trx: Trx, orgId: string, node: Pick<NodeRow, 'id' | 'role' | 'branchId'>): Promise<{ employeeIds?: string[]; branchIds?: string[] }> {
+  if (node.role === 'branch') return { branchIds: node.branchId ? [node.branchId] : [] };
+  return withSystemScope(trx, orgId, async (t) => {
+    if (node.role === 'group') {
+      const rows = await t.selectFrom('locations').select('branchId').where('organizationId', '=', orgId).where('role', '=', 'branch').where(sql<boolean>`path @> array[${node.id}]::uuid[]`).execute();
+      return { branchIds: rows.flatMap((r) => (r.branchId ? [r.branchId] : [])) };
+    }
+    const rows = await t.selectFrom('employees as e').innerJoin('locations as l', (j) => j.onRef('l.id', '=', 'e.workLocationId').onRef('l.organizationId', '=', 'e.organizationId'))
+      .select('e.id').where('e.organizationId', '=', orgId).where('e.deletedAt', 'is', null).where(sql<boolean>`l.path @> array[${node.id}]::uuid[]`).execute();
+    return { employeeIds: rows.map((r) => r.id) };
+  });
+}
+
 /** Moves a branch's node under a group location (null = the top level): members with every branch only. */
 async function moveBranchNode(trx: Trx, actor: Actor, grant: MembershipGrant, orgId: string, node: NodeRow, parentId: string | null): Promise<void> {
   requireEveryBranch(grant, 'can place branches in the location tree');
@@ -560,14 +575,15 @@ async function moveBranchNode(trx: Trx, actor: Actor, grant: MembershipGrant, or
  * Places a branch in the location tree (`parentLocationId` of POST / PATCH /branches): under a group location, or at the top
  * (null). Unchanged → nothing to do (and nothing to authorise); a change needs every branch. Runs in the caller's transaction.
  */
-export async function placeBranch(trx: Trx, actor: Actor, grant: MembershipGrant, orgId: string, branchId: string, parentId: string | null): Promise<void> {
+export async function placeBranch(trx: Trx, actor: Actor, grant: MembershipGrant, orgId: string, branchId: string, parentId: string | null): Promise<boolean> {
   try {
     await lockTree(trx, orgId);
     const ref = await trx.selectFrom('locations').select('id').where('organizationId', '=', orgId).where('role', '=', 'branch').where('branchId', '=', branchId).executeTakeFirst();
     const node = ref ? await findNode(trx, orgId, ref.id) : undefined;
     if (!node) throw errors.notFound('Branch', branchId);
-    if (node.parentId === parentId) return;
+    if (node.parentId === parentId) return false;
     await moveBranchNode(trx, actor, grant, orgId, node, parentId);
+    return true;
   } catch (err) {
     throw mapLocationError(err) ?? err;
   }
@@ -592,7 +608,10 @@ export async function updateLocation(deps: ApiDeps, actor: Actor, orgId: string,
           reason: 'BRANCH_NODE', issues: other.map((k) => ({ path: k, message: 'Not editable on a branch location' })),
         });
       }
-      if (moving) await moveBranchNode(trx, actor, grant, orgId, node, input.parentId ?? null);
+      if (moving) {
+        await moveBranchNode(trx, actor, grant, orgId, node, input.parentId ?? null);
+        await recalcTodayForLocationChange(deps, trx, actor, orgId, { branchIds: node.branchId ? [node.branchId] : [] }, 'Branch moved in the location tree');
+      }
       return (await presentNode(trx, orgId, id)).dto;
     }
     if (node.role === 'group') requireEveryBranch(grant, 'can manage group locations');
@@ -653,6 +672,8 @@ export async function updateLocation(deps: ApiDeps, actor: Actor, orgId: string,
     const diff = diffObjects(auditView(node), auditView(after));
     if (Object.keys(diff.newValue).length) await audit(trx, actor, orgId, 'location.updated', 'location', { entityId: id, branchId: after.branchId, ...diff });
     if (moving) {
+      // the people below now sit under other locations: their policy may change from today
+      await recalcTodayForLocationChange(deps, trx, actor, orgId, await peopleBelow(trx, orgId, after), `Location ${after.code ?? after.id} moved`);
       await audit(trx, actor, orgId, 'location.moved', 'location', {
         entityId: id, branchId: after.branchId,
         oldValue: { parentId: node.parentId, branchId: node.branchId },

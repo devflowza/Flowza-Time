@@ -11,6 +11,7 @@ import { likeContains, pageOf, resolveSort, toCount } from '../lib/pagination.js
 import { isoDateTime } from '../lib/mappers.js';
 import { BRANCH_COLUMNS, DEPARTMENT_COLUMNS, DESIGNATION_COLUMNS, TEAM_COLUMNS, toBranchDto, toDepartmentDto, toDesignationDto, toTeamDto, type DepartmentRow, type TeamRow } from './structure.mappers.js';
 import { placeBranch } from './locations.service.js';
+import { recalcTodayForLocationChange } from './features/recalc.js';
 
 type BranchInput = z.infer<typeof branchInputSchema>;
 type DepartmentInput = z.infer<typeof departmentInputSchema>;
@@ -105,7 +106,10 @@ export async function updateBranch(deps: ApiDeps, actor: Actor, orgId: string, i
     const before = await loadBranch(trx, orgId, id);
     const values = branchValues(fields);
     if (Object.keys(values).length) await trx.updateTable('branches').set(values as never).where('organizationId', '=', orgId).where('id', '=', id).execute();
-    if (parentLocationId !== undefined) await placeBranch(trx, actor, grant, orgId, id, parentLocationId);
+    // placed under another region: its people may fall under other location-scoped policies from today
+    if (parentLocationId !== undefined && await placeBranch(trx, actor, grant, orgId, id, parentLocationId)) {
+      await recalcTodayForLocationChange(deps, trx, actor, orgId, { branchIds: [id] }, 'Branch moved in the location tree');
+    }
     const after = await loadBranch(trx, orgId, id);
     await audit(trx, actor, orgId, 'branch.updated', 'branch', { entityId: id, branchId: id, ...diffObjects(before as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>) });
     return after;
