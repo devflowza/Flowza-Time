@@ -87,7 +87,7 @@ function DevicesPanel() {
     { id: 'lastAttendanceSyncAt', header: t('columns.lastAttendanceSync'), enableSorting: false, cell: ({ row }) => <span className="text-xs tnum" title={row.original.lastAttendanceSyncAt ?? ''}>{fmtRelative(row.original.lastAttendanceSyncAt)}</span> },
     { id: 'lastEmployeeSyncAt', header: t('columns.lastEmployeeSync'), enableSorting: false, cell: ({ row }) => <span className="text-xs tnum" title={row.original.lastEmployeeSyncAt ?? ''}>{fmtRelative(row.original.lastEmployeeSyncAt)}</span> },
     { id: 'employees', header: t('columns.employees'), enableSorting: false, cell: ({ row }) => <span className="tnum">{fmtNumber(row.original.employeeCount ?? 0)}</span>, size: 90 },
-    { id: 'provider', header: t('columns.provider'), cell: ({ row }) => { const p = providerNames.get(row.original.providerKey); return <div className="flex flex-wrap items-center gap-1"><span className="text-xs">{row.original.providerName ?? p?.name ?? row.original.providerKey}</span>{p ? <ProviderStatusBadge status={p.status} /> : null}</div>; } },
+    { id: 'provider', header: t('columns.provider'), cell: ({ row }) => { const p = providerNames.get(row.original.providerKey); return <div className="flex flex-wrap items-center gap-1"><span className="text-xs">{row.original.providerName ?? p?.name ?? row.original.providerKey}</span>{p && p.status !== 'available' ? <ProviderStatusBadge status={p.status} /> : null}</div>; } },
     { id: 'tags', header: t('fields.tags'), enableSorting: false, cell: ({ row }) => <TagChips tags={row.original.tags} /> },
   ], [t, tc, providerNames]);
 

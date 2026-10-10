@@ -9,9 +9,10 @@ import { ProviderError } from './types.js';
 
 const EXPECTED_KEYS = ['mock', 'flowza_finance', 'zkteco_push', 'hikvision_push', 'zkteco_biotime', 'hikvision_isapi', 'suprema_biostar2', 'anviz_crosschex_cloud', 'essl_push', 'fingertec_push', 'matrix_cosec', 'hikvision_hpp', 'nitgen'];
 // Reference rows live in the original reference-data migration plus every later migration that seeds or re-seeds a provider (the
-// Flowza Finance connector arrived with its own migration and was re-seeded by its review fixes); each file carries at most one
-// `insert into public.device_providers` block, and a later file's row replaces an earlier one (same order as the replay).
-const SQL_PATHS = ['20260905001600_reference_data.sql', '20260928000400_finance_connector.sql', '20260928000450_finance_connector_fixes.sql', '20260929000100_hikvision_push_provider.sql', '20260929000200_device_provider_adapters.sql'].map((f) => resolve(import.meta.dirname, '../../../supabase/migrations', f));
+// Flowza Finance connector arrived with its own migration and was re-seeded by its review fixes; Hikvision push left beta through a
+// re-seed); each file carries at most one `insert into public.device_providers` block, and a later file's row replaces an earlier
+// one (same order as the replay).
+const SQL_PATHS = ['20260905001600_reference_data.sql', '20260928000400_finance_connector.sql', '20260928000450_finance_connector_fixes.sql', '20260929000100_hikvision_push_provider.sql', '20260929000200_device_provider_adapters.sql', '20261010000100_hikvision_push_available.sql'].map((f) => resolve(import.meta.dirname, '../../../supabase/migrations', f));
 
 type SqlValue = string | number | null;
 /** Minimal tokenizer for the `insert into … values (…),(…)` block of the reference-data migration. */
