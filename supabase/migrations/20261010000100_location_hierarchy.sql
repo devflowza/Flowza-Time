@@ -17,6 +17,8 @@
 --     changes branch (no writer of branch_id can break the key) and refuses a reference to a group / branch node.
 --  4. RLS: read with branch.view (group nodes, or nodes of an allowed branch); write with branch.manage — group / branch
 --     nodes and the levels for members with every branch only, place nodes for the members whose scope holds the branch.
+--     Locations are archived, never deleted (no client delete). Rule sets that name no branch (organisation-wide, group
+--     location) are written by members with every branch only (restrictive policies, as the service decides).
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 set client_min_messages = warning;
@@ -143,9 +145,11 @@ begin
     end if;
     new.path := array[new.id];
   else
+    -- FOR SHARE: a concurrent move of the parent waits for this row (or this row waits for the move and reads its new path)
     select p.role, p.branch_id, p.path, pl.position into v_parent
     from public.locations p join public.location_levels pl on pl.id = p.level_id
-    where p.id = new.parent_id and p.organization_id = new.organization_id;
+    where p.id = new.parent_id and p.organization_id = new.organization_id
+    for share of p;
     if not found then
       raise exception 'parent location % does not belong to this organisation', new.parent_id using errcode = '23503';
     end if;
@@ -299,7 +303,9 @@ create policy location_levels_delete on public.location_levels for delete to aut
 call app.enforce_tenant_table('public.location_levels');
 
 alter table public.locations enable row level security;
-grant select, insert, update, delete on public.locations to authenticated, flowza_system;
+-- a location is archived, never deleted (its subtree, its references and the history keep pointing at it): no client delete
+grant select, insert, update on public.locations to authenticated, flowza_system;
+revoke delete on public.locations from authenticated, flowza_system;
 drop policy if exists locations_select on public.locations;
 drop policy if exists locations_insert on public.locations;
 drop policy if exists locations_update on public.locations;
@@ -314,9 +320,6 @@ create policy locations_update on public.locations for update to authenticated, 
   organization_id = any ((select app.org_ids_with_permission('branch.manage'))::uuid[])
   and (organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or (role = 'place' and branch_id = any ((select app.allowed_branch_ids())::uuid[])))
 ) with check (
-  organization_id = any ((select app.org_ids_with_permission('branch.manage'))::uuid[])
-  and (organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or (role = 'place' and branch_id = any ((select app.allowed_branch_ids())::uuid[]))));
-create policy locations_delete on public.locations for delete to authenticated, flowza_system using (
   organization_id = any ((select app.org_ids_with_permission('branch.manage'))::uuid[])
   and (organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or (role = 'place' and branch_id = any ((select app.allowed_branch_ids())::uuid[]))));
 call app.enforce_tenant_table('public.locations');
@@ -379,7 +382,7 @@ create trigger geofences_place_reference before insert or update of branch_id, l
 -- coverage targets per place (Enterprise, advanced_scheduling): null = the whole branch
 alter table public.shift_coverage_requirements add column if not exists location_id uuid;
 alter table public.shift_coverage_requirements drop constraint if exists shift_coverage_requirements_location_fkey;
-alter table public.shift_coverage_requirements add constraint shift_coverage_requirements_location_fkey foreign key (location_id, branch_id, organization_id) references public.locations(id, branch_id, organization_id) on delete cascade;
+alter table public.shift_coverage_requirements add constraint shift_coverage_requirements_location_fkey foreign key (location_id, branch_id, organization_id) references public.locations(id, branch_id, organization_id);
 alter table public.shift_coverage_requirements drop constraint if exists shift_coverage_requirements_unique;
 alter table public.shift_coverage_requirements add constraint shift_coverage_requirements_unique unique nulls not distinct (organization_id, branch_id, shift_id, location_id);
 create index if not exists shift_coverage_requirements_location_idx on public.shift_coverage_requirements (organization_id, location_id, branch_id) where location_id is not null;
@@ -420,6 +423,19 @@ revoke execute on function app.attendance_rule_sets_location() from public, anon
 drop trigger if exists attendance_rule_sets_location on public.attendance_rule_sets;
 create trigger attendance_rule_sets_location before insert or update of location_id, branch_id on public.attendance_rule_sets for each row execute function app.attendance_rule_sets_location();
 
+-- authorization twice (AGENTS.md rule 2): a rule set that names no branch — the organisation-wide one or a group location's —
+-- spans branches, so only members with every branch (or the system context) write it; the service refuses the same
+drop policy if exists attendance_rule_sets_unscoped_insert on public.attendance_rule_sets;
+drop policy if exists attendance_rule_sets_unscoped_update on public.attendance_rule_sets;
+drop policy if exists attendance_rule_sets_unscoped_delete on public.attendance_rule_sets;
+create policy attendance_rule_sets_unscoped_insert on public.attendance_rule_sets as restrictive for insert to authenticated, flowza_system
+  with check (branch_id is not null or organization_id = any ((select app.unrestricted_org_ids())::uuid[]));
+create policy attendance_rule_sets_unscoped_update on public.attendance_rule_sets as restrictive for update to authenticated, flowza_system
+  using (branch_id is not null or organization_id = any ((select app.unrestricted_org_ids())::uuid[]))
+  with check (branch_id is not null or organization_id = any ((select app.unrestricted_org_ids())::uuid[]));
+create policy attendance_rule_sets_unscoped_delete on public.attendance_rule_sets as restrictive for delete to authenticated, flowza_system
+  using (branch_id is not null or organization_id = any ((select app.unrestricted_org_ids())::uuid[]));
+
 -- two policies of the same scope (now including the location) cannot overlap in time
 alter table public.attendance_rule_sets drop constraint if exists attendance_rule_sets_no_overlap;
 alter table public.attendance_rule_sets add constraint attendance_rule_sets_no_overlap exclude using gist (
@@ -452,6 +468,12 @@ begin
       raise exception '% has no forced RLS', v_table;
     end if;
   end loop;
+  if has_table_privilege('authenticated', 'public.locations', 'delete') then
+    raise exception 'location hierarchy: a client may not delete a location';
+  end if;
+  if (select count(*) from pg_policies where schemaname = 'public' and tablename = 'attendance_rule_sets' and permissive = 'RESTRICTIVE' and policyname like 'attendance_rule_sets_unscoped_%') <> 3 then
+    raise exception 'location hierarchy: the unscoped rule-set policies are missing';
+  end if;
   if (select count(*) from pg_constraint where conname in ('devices_location_fkey', 'employees_work_location_fkey', 'geofences_location_fkey',
       'shift_coverage_requirements_location_fkey', 'attendance_rule_sets_location_fkey', 'attendance_rule_sets_location_branch_fkey') and convalidated) <> 6 then
     raise exception 'location hierarchy: a place reference key is missing or not validated';

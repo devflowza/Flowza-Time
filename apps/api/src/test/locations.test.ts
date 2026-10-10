@@ -488,6 +488,15 @@ describe('the location tree', () => {
     expect((await call('POST', '/locations', cap.owner, { levelId: group, name: 'Last one' }, cap.orgId)).status).toBe(201);
     const full = await call('POST', '/locations', cap.owner, { levelId: group, name: 'One too many' }, cap.orgId);
     expect([full.status, full.body.details]).toEqual([409, { reason: 'LOCATIONS_MAX', max: 10_000 }]);
+    // archiving makes room again (the cap counts active locations), and a restore needs that room
+    await sql`update public.locations set status = 'archived' where organization_id = ${cap.orgId}::uuid and code in ('G1', 'G2')`.execute(h.admin);
+    const again = await call('POST', '/locations', cap.owner, { levelId: group, name: 'Room again' }, cap.orgId);
+    expect(again.status).toBe(201);
+    const archivedId = (await h.admin.selectFrom('locations').select('id').where('organizationId', '=', cap.orgId).where('code', '=', 'G1').executeTakeFirstOrThrow()).id;
+    expect((await call('PATCH', `/locations/${archivedId}`, cap.owner, { status: 'active' }, cap.orgId)).status).toBe(200);
+    const g2 = (await h.admin.selectFrom('locations').select('id').where('organizationId', '=', cap.orgId).where('code', '=', 'G2').executeTakeFirstOrThrow()).id;
+    const noRoom = await call('PATCH', `/locations/${g2}`, cap.owner, { status: 'active' }, cap.orgId);
+    expect([noRoom.status, noRoom.body.details?.reason]).toEqual([409, 'LOCATIONS_MAX']);
   });
 });
 

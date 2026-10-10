@@ -31,19 +31,21 @@ Organisation
 - Branches keep their table and every one of the ~40 tables that reference them is unchanged, as is the RLS branch scope
   (`app.allowed_branch_ids()`): the hierarchy is additive.
 
-### Rules (enforced by the database, mirrored by the API with clear errors)
+### Rules
+The database enforces the structural rules (shape, levels, keys — marked **DB**); the API checks them first, with clear errors,
+and also enforces the limits and the archive rules (**API**).
 | Rule | |
 |---|---|
 | A child's level is deeper (higher `position`) than its parent's | levels may be skipped: Branch 5 can hold floors with no site |
 | group nodes sit under group nodes (or at the top) | branch nodes under a group node (or at the top) |
 | place nodes sit under their branch node or a place node of the same branch | never at the top |
-| No cycles; at most 8 levels; at most 10 000 locations per organisation | |
+| No cycles; at most 8 levels (**DB**); at most 10 000 active locations per organisation, 50 000 in all with the archived ones (**API**) | archiving makes room again |
 | Codes are unique among siblings (case-insensitive) | the API derives one from the name when it is omitted |
 | A level's role never changes; levels are renamed freely, inserted anywhere (role = above / below the branch level), deleted only when no location uses them; the branch level cannot be deleted | |
 | A template replaces the level list only while the organisation has no group / place locations | |
 | A place moves to another branch only when nothing (device, employee, geofence, coverage target, policy) refers to it or below it | composite foreign keys `(location_id, branch_id)` make this structural |
 | Changing a device's / employee's / geofence's branch clears its location when the location belongs to the old branch | BEFORE UPDATE triggers — no writer of `branch_id` can break the composite key |
-| A location is archived, never deleted; archiving refuses while it has active children or is used by an active device, employee or geofence | branch nodes follow their branch |
+| A location is archived, never deleted — no client may delete one (**DB**); archiving refuses while it has active children or is used by an active device, employee, geofence, coverage target or current policy (**API**) | branch nodes follow their branch |
 
 ### Templates (`LOCATION_TEMPLATES`, @flowza/contracts)
 | Key | Levels (role) | Standard |
@@ -128,7 +130,10 @@ recalculation of a past day uses the current work location).
   branch-scoped administrator manages the sites / floors / zones of their branches but never group nodes, branch
   placement or the levels (levels: `branch.manage` + every branch).
 - Trigger functions are `SECURITY DEFINER` with an empty `search_path`; they validate the shape from the level and the
-  parent and never trust `role`, `branch_id` or `path` sent by a client.
+  parent (read `FOR SHARE`, so a concurrent move cannot leave a stale path) and never trust `role`, `branch_id` or `path` sent
+  by a client.
+- Rule sets that name no branch — the organisation-wide one and group-location policies — are written by members with every
+  branch only (restrictive policies; the service refuses the same).
 - Tenant key immutable, RLS forced, no data API (`app.enforce_tenant_table`), covering indexes for every foreign key.
 
 ## 7. Not in this release (follow-ups)

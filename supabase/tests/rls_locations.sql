@@ -161,6 +161,8 @@ select pg_temp.assert_rows($q$ update public.locations set parent_id = null wher
 select pg_temp.assert_rows($q$ update public.location_levels set name = 'Head office', name_ar = 'المكتب الرئيسي' where id = '0a000000-0000-0000-0000-000000001001' $q$, 1, 'owner A renames a level');
 select pg_temp.assert_rows($q$ update public.locations set name = 'Hijack' where organization_id = '0b000000-0000-0000-0000-000000000000' $q$, 0, 'owner A cannot touch org B nodes');
 select pg_temp.assert_sqlstate($q$ insert into public.location_levels (organization_id, position, role, name) values ('0b000000-0000-0000-0000-000000000000', 2, 'place', 'Cross') $q$, '42501', 'owner A cannot add a level to org B');
+select pg_temp.assert_sqlstate($q$ delete from public.locations where id = '0a000000-0000-0000-0000-000000002022' $q$, '42501', 'a location is archived, never deleted — even by the owner');
+select pg_temp.assert_rows($q$ insert into public.attendance_rule_sets (organization_id, name, location_id, effective_from, ramadan_mode) values ('0a000000-0000-0000-0000-000000000000', 'HQ policy', '0a000000-0000-0000-0000-000000002001', '2026-01-01', '{}') $q$, 1, 'owner A writes a policy for a group location');
 rollback;
 
 -- ---------- as a branch-scoped administrator (bm-a promoted to org admin, A-2 only) ----------
@@ -181,6 +183,10 @@ select pg_temp.assert_rows($q$ update public.locations set name = 'Renamed HQ' w
 select pg_temp.assert_rows($q$ update public.location_levels set name = 'Renamed' $q$, 0, 'a scoped admin cannot rename levels');
 select pg_temp.assert_rows($q$ delete from public.location_levels $q$, 0, 'a scoped admin cannot delete levels');
 select pg_temp.assert_sqlstate($q$ insert into public.location_levels (organization_id, position, role, name) values ('0a000000-0000-0000-0000-000000000000', 5, 'place', 'Desk') $q$, '42501', 'a scoped admin cannot add levels');
+-- rule sets that name no branch span branches: a scoped admin writes neither a group location's nor the organisation-wide one
+select pg_temp.assert_sqlstate($q$ insert into public.attendance_rule_sets (organization_id, name, location_id, effective_from, ramadan_mode) values ('0a000000-0000-0000-0000-000000000000', 'Region grab', '0a000000-0000-0000-0000-000000002001', '2026-01-01', '{}') $q$, '42501', 'a scoped admin cannot write a group-location policy');
+select pg_temp.assert_sqlstate($q$ insert into public.attendance_rule_sets (organization_id, name, effective_from, ramadan_mode) values ('0a000000-0000-0000-0000-000000000000', 'Org grab', '2027-01-01', '{}') $q$, '42501', 'a scoped admin cannot write the organisation-wide rule set');
+select pg_temp.assert_rows($q$ insert into public.attendance_rule_sets (organization_id, name, branch_id, location_id, effective_from, ramadan_mode) values ('0a000000-0000-0000-0000-000000000000', 'Site 2 policy', '0a000000-0000-0000-0000-00000000000c', '0a000000-0000-0000-0000-000000002021', '2026-01-01', '{}') $q$, 1, 'a scoped admin writes a place policy of their branch');
 rollback;
 
 -- ---------- as the auditor (branch.view, no branch.manage) ----------
@@ -212,7 +218,7 @@ set local role authenticated;
 select set_config('request.jwt.claims', '{"sub":"b0000000-0000-0000-0000-000000000001","role":"authenticated"}', true);
 select pg_temp.assert_eq((select count(*) from public.locations), (select b_nodes from loc_expect), 'owner B sees org B nodes only');
 select pg_temp.assert_eq((select count(*) from public.location_levels where organization_id = '0a000000-0000-0000-0000-000000000000'), 0, 'owner B reads none of org A levels');
-select pg_temp.assert_rows($q$ delete from public.locations where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, 0, 'owner B cannot delete org A nodes');
+select pg_temp.assert_sqlstate($q$ delete from public.locations where organization_id = '0a000000-0000-0000-0000-000000000000' $q$, '42501', 'owner B cannot delete org A nodes (nobody deletes a location)');
 rollback;
 
 \echo 'rls_locations: ok'

@@ -1,6 +1,6 @@
 import { sql, type Updateable } from 'kysely';
 import {
-  LOCATION_LEVELS_MAX, LOCATIONS_MAX, locationTemplate,
+  LOCATION_LEVELS_MAX, LOCATIONS_MAX, LOCATIONS_TOTAL_MAX, locationTemplate,
   type ApplyLocationTemplateInput, type LocationDetailDto, type LocationDto, type LocationInput, type LocationLevelDto, type LocationLevelInput,
   type LocationLevelRole, type LocationListQuery, type UpdateLocationInput, type UpdateLocationLevelInput,
 } from '@flowza/contracts';
@@ -348,10 +348,21 @@ async function siblingCodes(trx: Trx, orgId: string, parentId: string | null, ex
 const sameCode = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 
 /** The cap counts every group and place node of the organisation, also in branches the caller cannot see. */
-async function requireRoomForLocation(trx: Trx, orgId: string): Promise<void> {
-  const n = await withSystemScope(trx, orgId, async (t) =>
-    toCount((await t.selectFrom('locations').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('role', '<>', 'branch').executeTakeFirst())?.n));
-  if (n >= LOCATIONS_MAX) throw errors.conflict(`An organisation has at most ${LOCATIONS_MAX.toLocaleString('en-US')} locations.`, { reason: 'LOCATIONS_MAX', max: LOCATIONS_MAX });
+/**
+ * Room for one more active group / place location, counted organisation-wide: at most LOCATIONS_MAX active ones (archiving
+ * makes room, so one member filling the tree never locks everybody out for good) and LOCATIONS_TOTAL_MAX in all — locations
+ * are archived, never deleted. `restoring`: an archived node coming back only needs room among the active ones.
+ */
+async function requireRoomForLocation(trx: Trx, orgId: string, opts: { restoring?: boolean } = {}): Promise<void> {
+  const counts = await withSystemScope(trx, orgId, async (t) => t.selectFrom('locations')
+    .select((eb) => [eb.fn.countAll().as('total'), eb.fn.countAll().filterWhere('status', '<>', 'archived').as('active')])
+    .where('organizationId', '=', orgId).where('role', '<>', 'branch').executeTakeFirst());
+  if (toCount(counts?.active) >= LOCATIONS_MAX) {
+    throw errors.conflict(`An organisation has at most ${LOCATIONS_MAX.toLocaleString('en-US')} active locations: archive the ones no longer used.`, { reason: 'LOCATIONS_MAX', max: LOCATIONS_MAX });
+  }
+  if (!opts.restoring && toCount(counts?.total) >= LOCATIONS_TOTAL_MAX) {
+    throw errors.conflict(`An organisation keeps at most ${LOCATIONS_TOTAL_MAX.toLocaleString('en-US')} locations, archived ones included.`, { reason: 'LOCATIONS_MAX', max: LOCATIONS_TOTAL_MAX, includesArchived: true });
+  }
 }
 
 type PlaceUsage = { devices: number; employees: number; geofences: number; coverageTargets: number; policies: number };
@@ -638,6 +649,7 @@ export async function updateLocation(deps: ApiDeps, actor: Actor, orgId: string,
       throw invalid('status', PLACEMENT_MESSAGES.PARENT_ARCHIVED, { problem: 'PARENT_ARCHIVED' });
     }
     if (input.status === 'archived' && node.status !== 'archived') await assertArchivable(trx, orgId, node);
+    if (input.status === 'active' && node.status === 'archived') await requireRoomForLocation(trx, orgId, { restoring: true });
 
     // the code it ends up with is unique among its (new) siblings
     const code = input.code ?? node.code;

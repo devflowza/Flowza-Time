@@ -20,8 +20,10 @@ export type LocationLevelIcon = (typeof LOCATION_LEVEL_ICONS)[number];
 
 /** At most this many levels (the database allows positions 1–8). */
 export const LOCATION_LEVELS_MAX = 8;
-/** At most this many locations (group + place nodes) per organisation. */
+/** At most this many ACTIVE locations (group + place nodes) per organisation — archiving one makes room again. */
 export const LOCATIONS_MAX = 10_000;
+/** …and at most this many in all, archived ones included (locations are archived, never deleted). */
+export const LOCATIONS_TOTAL_MAX = 50_000;
 
 // ----- levels ------------------------------------------------------------------------------------------------------------------
 
