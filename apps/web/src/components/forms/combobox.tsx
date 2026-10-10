@@ -5,7 +5,13 @@ import * as PopoverPrimitive from '@radix-ui/react-popover';
 import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 
-export interface ComboboxOption { value: string; label: string; description?: string; disabled?: boolean }
+export interface ComboboxOption {
+  value: string; label: string; description?: string; disabled?: boolean;
+  /** Indentation level of a tree row (the location picker); 0 / absent = flush. */
+  depth?: number;
+  /** Extra words the search matches (e.g. a location's path), besides the label. */
+  keywords?: string[];
+}
 /** A row pinned under the list — "Add branch", "Edit Muscat HQ" — rather than one of the values to pick from. */
 export interface ComboboxAction { key: string; label: string; icon?: React.ReactNode; onSelect: () => void }
 
@@ -53,7 +59,7 @@ export function Combobox({ value, onChange, options, placeholder, onSearch, load
             <Command.List className="max-h-64 overflow-y-auto p-1">
               <Command.Empty className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyText ?? t('common.noResults')}</Command.Empty>
               {options.map((o) => (
-                <Command.Item key={o.value} value={o.label + ' ' + o.value} disabled={o.disabled} onSelect={() => { onChange(o.value); setOpen(false); }} className="flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-accent data-[disabled=true]:opacity-50">
+                <Command.Item key={o.value} value={o.label + ' ' + o.value} keywords={o.keywords} disabled={o.disabled} onSelect={() => { onChange(o.value); setOpen(false); }} style={o.depth ? { paddingInlineStart: `${0.5 + o.depth * 0.75}rem` } : undefined} className="flex cursor-default select-none items-center gap-2 rounded-sm px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-accent data-[disabled=true]:opacity-50">
                   <Check className={cn('size-4', o.value === value ? 'opacity-100' : 'opacity-0')} />
                   <span className="flex-1 truncate">{o.label}</span>
                   {o.description ? <span className="truncate text-xs text-muted-foreground">{o.description}</span> : null}

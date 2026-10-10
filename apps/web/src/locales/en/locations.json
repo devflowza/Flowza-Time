@@ -1,0 +1,10 @@
+{
+  "picker": {
+    "placeholder": "Any location",
+    "placeholderPlace": "No specific place",
+    "none": "No locations yet. Build the tree in Organisation → Locations.",
+    "noPlaces": "No places in this branch yet. Add sites, floors or zones in Organisation → Locations.",
+    "noGroups": "No group locations yet. Add Headquarters or regions in Organisation → Locations.",
+    "chooseBranchFirst": "Choose the branch first."
+  }
+}
