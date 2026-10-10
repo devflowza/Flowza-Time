@@ -11,6 +11,8 @@ export const reportParametersSchema = z.object({
   to: isoDateSchema.optional(),
   month: z.string().regex(/^\d{4}-\d{2}$/).optional(),
   branchId: uuidSchema.optional(),
+  /** A group / branch location → its branches; a place → the employees working in it or below (docs/locations.md). */
+  locationId: uuidSchema.optional(),
   departmentId: uuidSchema.optional(),
   employeeIds: z.array(uuidSchema).max(5000).optional(),
   shiftId: uuidSchema.optional(),

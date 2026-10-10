@@ -37,10 +37,17 @@ export function normaliseRamadanMode(raw: unknown): Record<string, unknown> {
 
 export type RuleSetRow = Awaited<ReturnType<typeof loadPolicyRows>>[number];
 
-/** Every policy row of the organisation, or only those effective on `date`. */
+/**
+ * Every policy row of the organisation, or only those effective on `date` — with the depth of its location and of its branch's
+ * node in the location tree (docs/locations.md §3: between two location policies the deeper one wins).
+ */
 export async function loadPolicyRows(trx: Trx, organizationId: string, date?: string) {
-  let q = trx.selectFrom('attendanceRuleSets').selectAll().where('organizationId', '=', organizationId);
-  if (date) q = q.where('effectiveFrom', '<=', asDate(date)).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', asDate(date))]));
+  let q = trx.selectFrom('attendanceRuleSets as rs')
+    .leftJoin('locations as pl', (j) => j.onRef('pl.id', '=', 'rs.locationId').onRef('pl.organizationId', '=', 'rs.organizationId'))
+    .leftJoin('locations as bn', (j) => j.onRef('bn.branchId', '=', 'rs.branchId').onRef('bn.organizationId', '=', 'rs.organizationId').on('bn.role', '=', 'branch'))
+    .selectAll('rs').select(['pl.depth as locationDepth', 'bn.depth as branchDepth'])
+    .where('rs.organizationId', '=', organizationId);
+  if (date) q = q.where('rs.effectiveFrom', '<=', asDate(date)).where((eb) => eb.or([eb('rs.effectiveTo', 'is', null), eb('rs.effectiveTo', '>', asDate(date))]));
   return q.execute();
 }
 
@@ -48,7 +55,7 @@ export async function loadPolicyRows(trx: Trx, organizationId: string, date?: st
 export function toAttendanceRules(row: RuleSetRow): AttendanceRules {
   const parsed = attendanceRuleSetInputSchema.safeParse({
     name: row.name, description: row.description, effectiveFrom: isoDate(row.effectiveFrom), effectiveTo: row.effectiveTo === null ? null : isoDate(row.effectiveTo),
-    branchId: row.branchId, countryCode: row.countryCode, departmentId: row.departmentId, employeeGroupId: row.employeeGroupId, shiftId: row.shiftId,
+    branchId: row.branchId, countryCode: row.countryCode, departmentId: row.departmentId, employeeGroupId: row.employeeGroupId, shiftId: row.shiftId, locationId: row.locationId,
     graceInMinutes: row.graceInMinutes, graceOutMinutes: row.graceOutMinutes, lateThresholdMinutes: row.lateThresholdMinutes, earlyDepartureThresholdMinutes: row.earlyDepartureThresholdMinutes,
     minFullDayMinutes: row.minFullDayMinutes, halfDayThresholdMinutes: row.halfDayThresholdMinutes, overtimeEnabled: row.overtimeEnabled, overtimeStartAfterMinutes: row.overtimeStartAfterMinutes,
     overtimeMinBlockMinutes: row.overtimeMinBlockMinutes, overtimeRoundingMinutes: row.overtimeRoundingMinutes, overtimeMaxMinutesPerDay: row.overtimeMaxMinutesPerDay, countEarlyInAsOvertime: row.countEarlyInAsOvertime,
@@ -61,7 +68,7 @@ export function toAttendanceRules(row: RuleSetRow): AttendanceRules {
     policy: policySectionsOf(row.policy),
   });
   if (!parsed.success) throw errors.validation('Attendance rule set is invalid.', { ruleSetId: row.id, issues: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`) });
-  const { name: _n, description: _d, branchId: _b, countryCode: _c, departmentId: _dep, employeeGroupId: _g, shiftId: _s, effectiveFrom: _f, effectiveTo: _t, ...rules } = parsed.data;
+  const { name: _n, description: _d, branchId: _b, countryCode: _c, departmentId: _dep, employeeGroupId: _g, shiftId: _s, locationId: _l, effectiveFrom: _f, effectiveTo: _t, ...rules } = parsed.data;
   return rules;
 }
 
@@ -70,6 +77,7 @@ export type PolicyCandidate = EngineRuleSet & { row: RuleSetRow };
 export function toPolicyCandidate(row: RuleSetRow): PolicyCandidate {
   return {
     id: row.id, branchId: row.branchId, countryCode: row.countryCode, departmentId: row.departmentId, employeeGroupId: row.employeeGroupId, shiftId: row.shiftId,
+    locationId: row.locationId, locationDepth: row.locationDepth, branchDepth: row.branchDepth,
     effectiveFrom: isoDate(row.effectiveFrom), effectiveTo: row.effectiveTo === null ? null : isoDate(row.effectiveTo), rules: DEFAULT_ATTENDANCE_RULES, row,
   };
 }
@@ -83,13 +91,35 @@ export async function employeeGroupIdOn(trx: Trx, organizationId: string, employ
   return row?.employeeGroupId ?? null;
 }
 
-/** Where the employee sits on the date: the placement the caller resolved (branch / department / primary shift) + country and group. */
+/**
+ * Where the employee sits on the date: the placement the caller resolved (branch / department / primary shift) + country,
+ * group and location chain — the path of the employee's work location when it belongs to the placement's branch (a
+ * deployment or a past date in another branch falls back to that branch), else the path of the branch's node.
+ */
 export async function loadPolicyScope(trx: Trx, organizationId: string, employeeId: string, date: string, placement: { branchId: string; departmentId: string | null; shiftId: string | null }): Promise<PolicyScope> {
   const [branch, employeeGroupId] = await Promise.all([
-    trx.selectFrom('branches').select('countryCode').where('organizationId', '=', organizationId).where('id', '=', placement.branchId).executeTakeFirst(),
+    trx.selectFrom('branches as b')
+      .select((eb) => [
+        'b.countryCode',
+        eb.selectFrom('locations as bn').select('bn.path').whereRef('bn.branchId', '=', 'b.id').where('bn.role', '=', 'branch').limit(1).as('branchPath'),
+        eb.selectFrom('employees as e').innerJoin('locations as wl', (j) => j.onRef('wl.id', '=', 'e.workLocationId').onRef('wl.organizationId', '=', 'e.organizationId'))
+          .select('wl.path').where('e.id', '=', employeeId).whereRef('e.organizationId', '=', 'b.organizationId').whereRef('wl.branchId', '=', 'b.id').limit(1).as('workPath'),
+      ])
+      .where('b.organizationId', '=', organizationId).where('b.id', '=', placement.branchId).executeTakeFirst(),
     employeeGroupIdOn(trx, organizationId, employeeId, date),
   ]);
-  return { countryCode: branch?.countryCode?.trim() || null, branchId: placement.branchId, departmentId: placement.departmentId, employeeGroupId, shiftId: placement.shiftId };
+  const chain = uuidArray(branch?.workPath) ?? uuidArray(branch?.branchPath);
+  return {
+    countryCode: branch?.countryCode?.trim() || null, branchId: placement.branchId, departmentId: placement.departmentId, employeeGroupId, shiftId: placement.shiftId,
+    ...(chain ? { locationIds: chain } : {}),
+  };
+}
+
+/** A uuid[] column as node-postgres returns it (an array, or the text form `{a,b}` when no array parser is registered). */
+export function uuidArray(v: unknown): string[] | null {
+  if (Array.isArray(v)) return v.map(String);
+  if (typeof v === 'string' && v.startsWith('{') && v.endsWith('}')) return v.length > 2 ? v.slice(1, -1).split(',').map((x) => x.trim()) : [];
+  return null;
 }
 
 export interface ResolvedPolicy {

@@ -82,6 +82,8 @@ export const createDeviceSchema = z.object({
   code: codeSchema,
   name: z.string().trim().min(1).max(120),
   branchId: uuidSchema,
+  /** Where the terminal is installed: a place (site, floor, zone…) of its branch (docs/locations.md); null clears it. */
+  locationId: uuidSchema.nullable().optional(),
   providerKey: z.string().min(1).max(64),
   modelId: uuidSchema.optional(),
   manufacturer: z.string().trim().min(1).max(80),
@@ -113,6 +115,10 @@ export const deviceDtoSchema = z.object({
   organizationId: uuidSchema,
   branchId: uuidSchema,
   branchName: z.string().optional(),
+  /** The place the terminal is installed in (null = the branch, no finer place). */
+  locationId: uuidSchema.nullable().optional(),
+  /** That place's path below the branch, e.g. "Site A › Floor 2 › Zone C". */
+  locationName: z.string().nullable().optional(),
   code: z.string(),
   name: z.string(),
   providerKey: z.string(),

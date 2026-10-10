@@ -11,6 +11,7 @@ export * from './reports.js';
 export * from './integrations.js';
 export * from './country-packs.js';
 export * from './dto/structure.js';
+export * from './dto/locations.js';
 export * from './dto/members.js';
 export * from './dto/notifications.js';
 export * from './notifications/catalogue.js';

@@ -16,3 +16,4 @@ export * from './leave/index.js';
 export * from './employees/effective-branch.js';
 // Temporary branch deployments (Enterprise): the access removal shared by the worker's sweep and the API's cancel.
 export * from './scheduling/deployments.js';
+export * from './locations/index.js';

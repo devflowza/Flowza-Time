@@ -98,17 +98,22 @@ export const policyListQuerySchema = z.object({
   departmentId: uuidSchema.optional(),
   employeeGroupId: uuidSchema.optional(),
   shiftId: uuidSchema.optional(),
+  locationId: uuidSchema.optional(),
   activeOn: isoDateSchema.optional(),
 });
 export const policyResolveQuerySchema = z.object({ employeeId: uuidSchema, date: isoDateSchema });
-/** Where an employee sits on a date — the facts every policy dimension is matched against. */
-export interface PolicyScopeDto { countryCode: string | null; branchId: string | null; departmentId: string | null; employeeGroupId: string | null; shiftId: string | null }
+/**
+ * Where an employee sits on a date — the facts every policy dimension is matched against — or, for a policy, the dimensions
+ * it names. `locationId`: the employee's deepest location (work location, else the branch's node) / the policy's location;
+ * `locationIds`: the employee's location chain, root first (absent for a policy).
+ */
+export interface PolicyScopeDto { countryCode: string | null; branchId: string | null; departmentId: string | null; employeeGroupId: string | null; shiftId: string | null; locationId: string | null; locationIds?: string[] }
 export interface PolicyCandidateDto {
   id: string; name: string; scope: PolicyScopeDto; effectiveFrom: string; effectiveTo: string | null;
-  /** Higher = more specific (shift 32, group 16, department 8, branch 4, country 2). */
+  /** Higher = more specific (shift 32, group 16, department 8, location / branch 4, country 2; between locations the deeper one wins). */
   specificity: number;
   /** Whether it applies on the date; when not, which dimension (or the dates) ruled it out. */
-  matches: boolean; mismatch: 'DATES' | 'COUNTRY' | 'BRANCH' | 'DEPARTMENT' | 'EMPLOYEE_GROUP' | 'SHIFT' | null;
+  matches: boolean; mismatch: 'DATES' | 'COUNTRY' | 'BRANCH' | 'LOCATION' | 'DEPARTMENT' | 'EMPLOYEE_GROUP' | 'SHIFT' | null;
 }
 export interface PolicyResolutionDto {
   employeeId: string; date: string; scope: PolicyScopeDto;

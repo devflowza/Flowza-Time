@@ -132,6 +132,8 @@ export interface RoundTheClockResultDto {
 export const shiftCoverageInputSchema = z.object({
   branchId: uuidSchema,
   shiftId: uuidSchema,
+  /** A place of the branch (site, floor, zone…): only the people working there count (docs/locations.md); null = the whole branch. */
+  locationId: uuidSchema.nullable().optional(),
   weekdays: weeklyOffDaysSchema.min(1).refine((a) => new Set(a).size === a.length, { message: 'Each weekday once' }).default([0, 1, 2, 3, 4, 5, 6]),
   minHeadcount: z.number().int().min(1).max(10000),
 });
@@ -140,8 +142,12 @@ export const shiftCoverageUpdateSchema = z.object({
   weekdays: weeklyOffDaysSchema.min(1).refine((a) => new Set(a).size === a.length, { message: 'Each weekday once' }).optional(),
   minHeadcount: z.number().int().min(1).max(10000).optional(),
 });
-export const shiftCoverageListQuerySchema = z.object({ branchId: uuidSchema.optional(), shiftId: uuidSchema.optional() });
-export interface ShiftCoverageDto { id: string; branchId: string; shiftId: string; shiftName: string | null; weekdays: number[]; minHeadcount: number; createdAt: string; updatedAt: string }
+export const shiftCoverageListQuerySchema = z.object({ branchId: uuidSchema.optional(), shiftId: uuidSchema.optional(), locationId: uuidSchema.optional() });
+export interface ShiftCoverageDto {
+  id: string; branchId: string; shiftId: string; shiftName: string | null; weekdays: number[]; minHeadcount: number; createdAt: string; updatedAt: string;
+  /** The place the target applies to and its path below the branch (null = the whole branch). */
+  locationId?: string | null; locationName?: string | null;
+}
 /** Scheduled head count vs the targets per day and shift (rotation patterns, assignments, double shifts; leave and offs excluded). */
 /** The coverage report spans at most this many days. */
 export const SHIFT_COVERAGE_REPORT_MAX_DAYS = 62;
@@ -151,5 +157,6 @@ export const shiftCoverageReportQuerySchema = z.object({ branchId: uuidSchema, f
 export interface ShiftCoverageReportDto {
   branchId: string; from: string; to: string;
   shifts: Array<{ id: string; code: string; name: string; startTime: string | null; endTime: string | null }>;
-  days: Array<{ date: string; cells: Array<{ shiftId: string; required: number; scheduled: number; gap: number }> }>;
+  /** One cell per (shift, location) target; `locationId` null = the whole branch. Without a target the cell has required 0. */
+  days: Array<{ date: string; cells: Array<{ shiftId: string; locationId?: string | null; required: number; scheduled: number; gap: number }> }>;
 }

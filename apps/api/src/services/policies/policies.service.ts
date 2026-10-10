@@ -20,7 +20,7 @@ import { placementsOn, policiesOn, shiftScheduledMinutes, type EmployeePolicy } 
  */
 
 const NIL = '00000000-0000-0000-0000-000000000000';
-const scopeOf = (row: RuleSetRow): PolicyScopeDto => ({ countryCode: row.countryCode?.trim() || null, branchId: row.branchId, departmentId: row.departmentId, employeeGroupId: row.employeeGroupId, shiftId: row.shiftId });
+const scopeOf = (row: RuleSetRow): PolicyScopeDto => ({ countryCode: row.countryCode?.trim() || null, branchId: row.branchId, departmentId: row.departmentId, employeeGroupId: row.employeeGroupId, shiftId: row.shiftId, locationId: row.locationId });
 
 /** The employee, read under the caller's RLS (404 when hidden or deleted) and inside their branch scope (403). */
 async function authoriseEmployee(trx: Trx, grant: MembershipGrant, orgId: string, employeeId: string): Promise<{ id: string; branchId: string; employeeNumber: string; displayName: string }> {
@@ -53,7 +53,9 @@ export async function resolveEmployeePolicy(deps: ApiDeps, actor: Actor, orgId: 
       specificity: c.specificity, matches: c.mismatch === null, mismatch: c.mismatch,
     }));
     const winner = explained.winner ? candidates.find((c) => c.id === explained.winner!.id) ?? null : null;
-    return { employeeId, date, scope: { ...explained.scope }, policy: winner ? { id: winner.id, name: winner.name, specificity: winner.specificity } : null, candidates };
+    const { locationIds, ...scope } = explained.scope;
+    const chain = [...(locationIds ?? [])];
+    return { employeeId, date, scope: { ...scope, locationId: chain.at(-1) ?? null, locationIds: chain }, policy: winner ? { id: winner.id, name: winner.name, specificity: winner.specificity } : null, candidates };
   });
 }
 
