@@ -89,8 +89,9 @@ ordering between existing policies is unchanged.
 ## 4. Muster list
 
 `GET /orgs/:orgId/locations/:id/muster?date=` — for every employee whose **latest** non-voided attendance event on the date
-(the branch's local date) was punched on a terminal placed in the location's subtree: the employee, the event, the
-terminal and its location. `PUNCH_IN` / `BREAK_END` = on site, `BREAK_START` = on break, `PUNCH_OUT` = left, `PUNCH` =
+(the branch's local date) was punched on a terminal placed in the location's subtree (for a group or branch node: any terminal
+of its branches, at its place or at the branch): the employee, the event, the terminal and its location. Employees deployed
+to the branch that day count. `PUNCH_IN` / `BREAK_END` = on site, `BREAK_START` = on break, `PUNCH_OUT` = left, `PUNCH` =
 seen (direction unknown). Plus the same counts per direct child location (drill-down). Portal (web/mobile) punches carry
 no terminal and are not attributed to a place.
 
@@ -110,8 +111,15 @@ no terminal and are not attributed to a place.
 | `DELETE locations/:id` | same | archive |
 | `GET locations/:id/muster` | `attendance.view` + module `advanced_scheduling` | §4 |
 
-Errors: `VALIDATION_ERROR` (shape / parent / level rules), `CONFLICT` (in use, nodes exist for a template, cross-branch
-move of a referenced place, the branch level), `NOT_FOUND`.
+Errors: `400 VALIDATION_ERROR` (shape / parent / level rules; `details.problem` names the placement rule), `409 CONFLICT`
+with `details.reason` (`LEVELS_MAX`, `BRANCH_LEVEL`, `LEVEL_IN_USE`, `LOCATIONS_EXIST`, `LOCATIONS_MAX`, `CODE_TAKEN`,
+`BRANCH_NODE`, `PLACE_IN_USE`, `LOCATION_IN_USE` with the counts), `404 NOT_FOUND` for a location the caller cannot see.
+The full route list, with the place references and filters, is in `docs/api.md` § Location hierarchy.
+
+**Recalculation.** A work location changed inside the branch, a branch placed under another region, or a group / place moved
+can change which policy applies: when the organisation has a location-scoped policy, today is recomputed for the people
+concerned. Past days keep the values they were computed with (the work location is not effective-dated, so a later
+recalculation of a past day uses the current work location).
 
 ## 6. Security
 
@@ -128,4 +136,10 @@ move of a referenced place, the branch level), `NOT_FOUND`.
 - Re-labelling the fixed word "Branch" across every screen with the organisation's branch-level name.
 - Dynamic region-scoped access (a member granted a group node automatically gets branches added under it later).
 - Effective-dated work-location history; work location in the employee import; portal punches attributed to a place via
-  geofence.
+  geofence (the muster list counts terminal punches only).
+- A place referenced by a policy of any date (expired ones included) cannot move to another branch until that policy is
+  removed.
+- The report-schedule dialog has no location field yet (the API takes `filters.locationId`); a claimed pending device gets its
+  place in Settings afterwards; the dashboard's activity and recent-attendance cards stay organisation-wide.
+- Location labels in lists follow the caller's row security: a role without `branch.view` (the line manager) sees no work
+  location name, as it sees no branch name.
