@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   ApplyLocationTemplateInput, LocationDto, LocationInput, LocationLevelDto, LocationLevelInput, UpdateLocationInput, UpdateLocationLevelInput,
 } from '@flowza/contracts';
@@ -33,11 +33,16 @@ export function useLocations(opts: { includeArchived?: boolean; enabled?: boolea
     queryFn: async () => (await api.get<Envelope<LocationDto[]>>(`/orgs/${orgId}/locations`, includeArchived ? { includeArchived: true } : undefined)).data,
     enabled: (opts.enabled ?? true) && can('branch.view'),
     staleTime: 30_000,
+    // switching includeArchived keeps the current tree on screen until the other list arrives
+    placeholderData: keepPreviousData,
   });
 }
 
-/** Everything a level or a location change can affect: the levels, the tree, and the branch list (its placement column). */
-function useInvalidateLocations() {
+/**
+ * Everything a level or a location change can affect: the levels, the tree, and the branch list (its placement column).
+ * Exported for writers outside this module whose change moves the tree too (a branch created, placed or archived).
+ */
+export function useInvalidateLocations() {
   const orgId = useOrgId();
   const qc = useQueryClient();
   return () => Promise.all([

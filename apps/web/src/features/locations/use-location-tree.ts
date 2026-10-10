@@ -6,6 +6,12 @@ import { indexLocations, pathLabel, type LocationTreeIndex } from './tree';
 
 export interface LocationTree extends LocationTreeIndex {
   isLoading: boolean;
+  /** A refetch is in flight (e.g. after a write, or while switching to the list with archived locations). */
+  isFetching: boolean;
+  /** The levels' or the locations' load error, if either failed. */
+  error: unknown;
+  /** Reload both lists (an error state's retry). */
+  refetch: () => void;
   /** A node's name in the UI language (its Arabic name in Arabic when it has one). */
   nameOf: (node: LocationDto) => string;
   /** A level's name in the UI language. */
@@ -26,5 +32,15 @@ export function useLocationTree(opts: { includeArchived?: boolean; enabled?: boo
     return level ? local(level.name, level.nameAr) : '';
   }, [index, local]);
   const labelOf = useCallback((id: string | null | undefined, o?: { fromBranch?: boolean }) => (id ? pathLabel(index, id, nameOf, o) : ''), [index, nameOf]);
-  return { ...index, isLoading: levels.isLoading || locations.isLoading, nameOf, levelName, labelOf };
+  const { refetch: refetchLevels } = levels;
+  const { refetch: refetchLocations } = locations;
+  const refetch = useCallback(() => { void refetchLevels(); void refetchLocations(); }, [refetchLevels, refetchLocations]);
+  const isLoading = levels.isLoading || locations.isLoading;
+  const isFetching = levels.isFetching || locations.isFetching;
+  const error: unknown = levels.error ?? locations.error ?? null;
+  // one object per change of the data or the language, so callers can memoise on it
+  return useMemo(
+    () => ({ ...index, isLoading, isFetching, error, refetch, nameOf, levelName, labelOf }),
+    [index, isLoading, isFetching, error, refetch, nameOf, levelName, labelOf],
+  );
 }
