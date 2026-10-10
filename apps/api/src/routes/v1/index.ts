@@ -13,12 +13,13 @@ import { registerRoleRoutes } from './roles.js';
 import { registerSearchRoutes } from './search.js';
 import { registerSelfServiceRoutes } from './self-service.js';
 import { registerStructureRoutes } from './structure.js';
+import { registerLocationRoutes } from './locations.js';
 import { registerFeatureRoutes } from './features/index.js';
 import { registerPortalAttendanceRoutes } from './portal-attendance.js';
 
 /**
  * Registers all /api/v1 route modules. Each module exports `register<Name>Routes(v1, deps)` and lives in its own file
- * (me, organizations, members, roles, structure, employees, imports, devices, device-groups, sync, attendance,
+ * (me, organizations, members, roles, structure, locations, employees, imports, devices, device-groups, sync, attendance,
  * corrections, approvals, shifts, holidays, leave, rule-sets, reports, payroll, dashboard, search, audit, subscription, platform).
  * Order matters where literal segments shadow parameters: imports (`/employees/imports/...`) must be registered before
  * employees (`/employees/:id`).
@@ -30,6 +31,7 @@ export function registerV1Routes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   registerMemberRoutes(v1, deps);
   registerRoleRoutes(v1, deps);
   registerStructureRoutes(v1, deps);
+  registerLocationRoutes(v1, deps);
   registerImportRoutes(v1, deps); // before employees: /employees/imports must not match /employees/:id
   registerEmployeeRoutes(v1, deps);
   registerSearchRoutes(v1, deps);

@@ -1,17 +1,22 @@
 import type { BranchDto, DepartmentDto, DesignationDto, TeamDto } from '@flowza/contracts';
 import { isoDateTime, jsonObject, numberOrNull } from '../lib/mappers.js';
 
-export const BRANCH_COLUMNS = ['id', 'organizationId', 'code', 'name', 'nameAr', 'countryCode', 'city', 'address', 'timezone', 'latitude', 'longitude', 'geofenceRadiusM', 'contact', 'weeklyOffDays', 'holidayCalendarId', 'status', 'createdAt', 'updatedAt'] as const;
+/** Columns of `branches as b` left-joined with the branch's node in the location tree (`locations as ln`, role 'branch'). */
+export const BRANCH_COLUMNS = ['b.id', 'b.organizationId', 'b.code', 'b.name', 'b.nameAr', 'b.countryCode', 'b.city', 'b.address', 'b.timezone', 'b.latitude', 'b.longitude', 'b.geofenceRadiusM', 'b.contact', 'b.weeklyOffDays', 'b.holidayCalendarId', 'b.status', 'b.createdAt', 'b.updatedAt',
+  'ln.id as locationId', 'ln.parentId as parentLocationId'] as const;
 export interface BranchRow {
   id: string; organizationId: string; code: string; name: string; nameAr: string | null; countryCode: string; city: string | null; address: unknown; timezone: string;
   latitude: string | null; longitude: string | null; geofenceRadiusM: number | null; contact: unknown; weeklyOffDays: number[] | null; holidayCalendarId: string | null;
   status: BranchDto['status']; createdAt: Date; updatedAt: Date;
+  /** The branch's node in the location tree and the group location it sits under (null = the top level). */
+  locationId: string | null; parentLocationId: string | null;
 }
 export function toBranchDto(r: BranchRow, employeeCount?: number): BranchDto {
   return {
     id: r.id, organizationId: r.organizationId, code: r.code, name: r.name, nameAr: r.nameAr, countryCode: r.countryCode, city: r.city, address: jsonObject(r.address), timezone: r.timezone,
     latitude: numberOrNull(r.latitude), longitude: numberOrNull(r.longitude), geofenceRadiusM: r.geofenceRadiusM, contact: jsonObject(r.contact), weeklyOffDays: r.weeklyOffDays,
-    holidayCalendarId: r.holidayCalendarId, status: r.status, employeeCount, createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt),
+    holidayCalendarId: r.holidayCalendarId, status: r.status, employeeCount, locationId: r.locationId, parentLocationId: r.parentLocationId,
+    createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt),
   };
 }
 

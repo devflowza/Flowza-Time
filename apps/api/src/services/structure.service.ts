@@ -10,6 +10,7 @@ import { type Actor, runUser, audit, diffObjects } from '../lib/service.js';
 import { likeContains, pageOf, resolveSort, toCount } from '../lib/pagination.js';
 import { isoDateTime } from '../lib/mappers.js';
 import { BRANCH_COLUMNS, DEPARTMENT_COLUMNS, DESIGNATION_COLUMNS, TEAM_COLUMNS, toBranchDto, toDepartmentDto, toDesignationDto, toTeamDto, type DepartmentRow, type TeamRow } from './structure.mappers.js';
+import { placeBranch } from './locations.service.js';
 
 type BranchInput = z.infer<typeof branchInputSchema>;
 type DepartmentInput = z.infer<typeof departmentInputSchema>;
@@ -30,27 +31,34 @@ async function employeeCounts(trx: Trx, orgId: string, column: 'branchId' | 'dep
 }
 
 // Branches ---------------------------------------------------------------------------------------
-const BRANCH_SORT = { code: 'code', name: 'name', city: 'city', status: 'status', createdAt: 'created_at' } as const;
+const BRANCH_SORT = { code: 'b.code', name: 'b.name', city: 'b.city', status: 'b.status', createdAt: 'b.created_at' } as const;
+
+/** Branches with their node in the location tree (docs/locations.md): one join, one node per branch. */
+function branchQuery(trx: Trx, orgId: string) {
+  return trx.selectFrom('branches as b')
+    .leftJoin('locations as ln', (j) => j.onRef('ln.branchId', '=', 'b.id').onRef('ln.organizationId', '=', 'b.organizationId').on('ln.role', '=', 'branch'))
+    .where('b.organizationId', '=', orgId);
+}
 
 export async function listBranches(deps: ApiDeps, actor: Actor, orgId: string, q: StructureListQuery): Promise<{ data: BranchDto[]; total: number }> {
   const grant = requirePermission(actor.principal, orgId, 'branch.view');
   const scope = branchFilter(grant, q.branchId);
-  const sort = resolveSort(BRANCH_SORT, q.sort, q.order, 'name');
+  const sort = resolveSort(BRANCH_SORT, q.sort, q.order, 'b.name');
   return runUser(deps.db, actor, async (trx) => {
     const page = pageOf(q);
-    let base = trx.selectFrom('branches').where('organizationId', '=', orgId);
-    if (scope) base = base.where('id', 'in', scope);
-    if (q.status) base = base.where('status', '=', q.status);
-    if (q.search) { const like = likeContains(q.search); base = base.where((eb) => eb.or([eb('name', 'ilike', like), eb(sql`code::text`, 'ilike', like), eb('city', 'ilike', like)])); }
+    let base = branchQuery(trx, orgId);
+    if (scope) base = base.where('b.id', 'in', scope);
+    if (q.status) base = base.where('b.status', '=', q.status);
+    if (q.search) { const like = likeContains(q.search); base = base.where((eb) => eb.or([eb('b.name', 'ilike', like), eb(sql`b.code::text`, 'ilike', like), eb('b.city', 'ilike', like)])); }
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
-    const rows = await base.select(BRANCH_COLUMNS).orderBy(sql.raw(sort.column), sort.direction).orderBy('id').limit(page.pageSize).offset(page.offset).execute();
+    const rows = await base.select(BRANCH_COLUMNS).orderBy(sql.raw(sort.column), sort.direction).orderBy('b.id').limit(page.pageSize).offset(page.offset).execute();
     const counts = await employeeCounts(trx, orgId, 'branchId', rows.map((r) => r.id));
     return { data: rows.map((r) => toBranchDto(r, counts.get(r.id) ?? 0)), total };
   });
 }
 
 async function loadBranch(trx: Trx, orgId: string, id: string): Promise<BranchDto> {
-  const row = await trx.selectFrom('branches').select(BRANCH_COLUMNS).where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
+  const row = await branchQuery(trx, orgId).select(BRANCH_COLUMNS).where('b.id', '=', id).executeTakeFirst();
   if (!row) throw errors.notFound('Branch', id);
   const counts = await employeeCounts(trx, orgId, 'branchId', [id]);
   return toBranchDto(row, counts.get(id) ?? 0);
@@ -71,24 +79,33 @@ function branchValues(input: Partial<BranchInput> | UpdateBranchInput): Record<s
   return v;
 }
 
+/**
+ * The trigger `branches_location_node` gives the new branch its node in the location tree (at the top); `parentLocationId`
+ * places it under a group location right away (members with every branch).
+ */
 export async function createBranch(deps: ApiDeps, actor: Actor, orgId: string, input: BranchInput): Promise<BranchDto> {
-  requirePermission(actor.principal, orgId, 'branch.manage');
+  const grant = requirePermission(actor.principal, orgId, 'branch.manage');
   if (!isValidTimezone(input.timezone)) throw errors.validation('Invalid IANA timezone.', { issues: [{ path: 'timezone', message: 'Unknown timezone' }] });
+  const { parentLocationId, ...fields } = input;
   return runUser(deps.db, actor, async (trx) => {
-    const row = await trx.insertInto('branches').values({ organizationId: orgId, ...branchValues(input) } as never).returning(BRANCH_COLUMNS).executeTakeFirstOrThrow();
+    const row = await trx.insertInto('branches').values({ organizationId: orgId, ...branchValues(fields) } as never).returning('id').executeTakeFirstOrThrow();
+    if (parentLocationId) await placeBranch(trx, actor, grant, orgId, row.id, parentLocationId);
     await audit(trx, actor, orgId, 'branch.created', 'branch', { entityId: row.id, branchId: row.id, newValue: input });
-    return toBranchDto(row, 0);
+    return loadBranch(trx, orgId, row.id);
   });
 }
 
+/** `parentLocationId` moves the branch's node in the location tree (null = the top level): members with every branch. */
 export async function updateBranch(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: UpdateBranchInput): Promise<BranchDto> {
   const grant = requirePermission(actor.principal, orgId, 'branch.manage');
   requireBranchAccess(grant, id);
   if (input.timezone !== undefined && !isValidTimezone(input.timezone)) throw errors.validation('Invalid IANA timezone.', { issues: [{ path: 'timezone', message: 'Unknown timezone' }] });
+  const { parentLocationId, ...fields } = input;
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadBranch(trx, orgId, id);
-    const values = branchValues(input);
+    const values = branchValues(fields);
     if (Object.keys(values).length) await trx.updateTable('branches').set(values as never).where('organizationId', '=', orgId).where('id', '=', id).execute();
+    if (parentLocationId !== undefined) await placeBranch(trx, actor, grant, orgId, id, parentLocationId);
     const after = await loadBranch(trx, orgId, id);
     await audit(trx, actor, orgId, 'branch.updated', 'branch', { entityId: id, branchId: id, ...diffObjects(before as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>) });
     return after;
