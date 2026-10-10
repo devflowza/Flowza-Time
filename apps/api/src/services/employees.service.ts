@@ -2,11 +2,12 @@ import { type z } from 'zod';
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { TEAM_PERMISSIONS, type BulkEmployeeAction, type CreateEmployeeInput, type DeleteEmployeeInput, type EmployeeDeviceStateDto, type EmployeeDto, type EmployeeListQuery, type EmploymentHistoryDto, type IdentityDocumentDto, type UpdateEmployeeInput, type identityDocumentInputSchema } from '@flowza/contracts';
-import { emitDomainEvent, type Trx } from '@flowza/database';
+import { emitDomainEvent, locationLabels, type Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { branchFilter, hasPermission, requireAnyPermission, requireBranchAccess, requirePermission } from '../lib/authorize.js';
+import { assertPlaceOfBranch, locationScope } from '../lib/location-scope.js';
 import { type Actor, runUser, audit, diffObjects, withSystemScope } from '../lib/service.js';
 import { enqueueJob } from '../lib/jobs.js';
 import { hashPin } from '../lib/hashing.js';
@@ -105,9 +106,14 @@ export async function listEmployees(deps: ApiDeps, actor: Actor, orgId: string, 
   const sort = resolveSort(EMPLOYEE_SORT, q.sort, q.order, 'e.employee_number');
   return runUser(deps.db, actor, async (trx) => {
     const page = pageOf(q);
+    // `locationId` (docs/locations.md §2): a group / branch location → the employees of its branches, a place → the employees
+    // working in it or below; ANDed with the branch scope above (NOT_FOUND for a location the caller cannot see)
+    const loc = q.locationId ? await locationScope(trx, orgId, q.locationId, scope) : null;
     let base = employeeQuery(trx, orgId);
     if (!q.includeDeleted) base = base.where('e.deletedAt', 'is', null);
     if (scope) base = beyond.length ? base.where((eb) => eb.or([eb('e.branchId', 'in', scope), eb('e.id', 'in', beyond)])) : base.where('e.branchId', 'in', scope);
+    if (loc?.branchIds) base = base.where('e.branchId', 'in', loc.branchIds);
+    if (loc?.placeIds) base = base.where('e.workLocationId', 'in', loc.placeIds);
     if (q.departmentId) base = base.where('e.departmentId', '=', q.departmentId);
     if (q.designationId) base = base.where('e.designationId', '=', q.designationId);
     if (q.employmentStatus) base = base.where('e.employmentStatus', '=', q.employmentStatus);
@@ -134,7 +140,8 @@ export async function listEmployees(deps: ApiDeps, actor: Actor, orgId: string, 
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const rows = await base.select(EMPLOYEE_COLUMNS).orderBy(sql.raw(sort.column), sort.direction).orderBy('e.id').limit(page.pageSize).offset(page.offset).execute();
     const summaries = await syncSummaries(trx, orgId, rows.map((r) => r.id));
-    return { data: rows.map((r) => maskSensitive(toEmployeeDto(r as EmployeeRow, summaries.get(r.id) ?? { ...EMPTY_SYNC_SUMMARY }), grant)), total };
+    const labels = await locationLabels(trx, orgId, rows.map((r) => r.workLocationId));
+    return { data: rows.map((r) => maskSensitive(toEmployeeDto(r as EmployeeRow, summaries.get(r.id) ?? { ...EMPTY_SYNC_SUMMARY }, labels), grant)), total };
   });
 }
 
@@ -147,7 +154,7 @@ async function loadEmployeeRow(trx: Trx, orgId: string, id: string): Promise<Emp
 async function loadEmployeeDto(trx: Trx, orgId: string, id: string): Promise<EmployeeDto> {
   const row = await loadEmployeeRow(trx, orgId, id);
   const summaries = await syncSummaries(trx, orgId, [id]);
-  return toEmployeeDto(row, summaries.get(id) ?? { ...EMPTY_SYNC_SUMMARY });
+  return toEmployeeDto(row, summaries.get(id) ?? { ...EMPTY_SYNC_SUMMARY }, await locationLabels(trx, orgId, [row.workLocationId]));
 }
 
 async function historyRows(trx: Trx, orgId: string, employeeId: string, limit?: number): Promise<EmploymentHistoryDto[]> {
@@ -362,6 +369,8 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
   requireBranchAccess(grant, input.branchId);
   return runUser(deps.db, actor, async (trx) => {
     await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: input.managerEmployeeId, secondaryManagerEmployeeId: input.secondaryManagerEmployeeId });
+    // where the employee works inside the branch: a place of that branch the caller can see (the composite key says it again)
+    if (input.workLocationId) await assertPlaceOfBranch(trx, orgId, input.workLocationId, input.branchId, 'workLocationId');
     // the user limit the platform set (licensed users = active employees, counted org-wide whatever the creator's branch scope)
     if (!hasLeft(input.employmentStatus)) await assertUserCapacity(trx, orgId, 1);
     const displayName = input.displayName ?? [input.firstName, input.lastName].filter(Boolean).join(' ');
@@ -369,7 +378,7 @@ export async function createEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     const insert = (deviceUserId: string) => trx.insertInto('employees').values({
       organizationId: orgId, employeeNumber: input.employeeNumber, firstName: input.firstName, middleName: input.middleName ?? null, lastName: input.lastName, displayName, displayNameAr: input.displayNameAr ?? null,
       gender: input.gender, dateOfBirth: input.dateOfBirth ?? null, nationalityCode: input.nationalityCode ?? null, email: input.email ?? null, phone: input.phone ?? null,
-      joiningDate: input.joiningDate, employmentStatus: input.employmentStatus, employmentType: input.employmentType, branchId: input.branchId, departmentId: input.departmentId ?? null,
+      joiningDate: input.joiningDate, employmentStatus: input.employmentStatus, employmentType: input.employmentType, branchId: input.branchId, workLocationId: input.workLocationId ?? null, departmentId: input.departmentId ?? null,
       designationId: input.designationId ?? null, managerEmployeeId: input.managerEmployeeId ?? null, secondaryManagerEmployeeId: input.secondaryManagerEmployeeId ?? null, deviceUserId, cardNumber: input.cardNumber ?? null, pinHash,
       weeklyOffDays: input.weeklyOffDays ?? null, customFields: JSON.stringify(input.customFields ?? {}), createdBy: actor.userId, updatedBy: actor.userId,
     }).returning(['id', 'deviceUserId']).executeTakeFirstOrThrow();
@@ -402,6 +411,10 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     const effectiveManager = input.managerEmployeeId === undefined ? before.managerEmployeeId : input.managerEmployeeId;
     const effectiveSecondary = input.secondaryManagerEmployeeId === undefined ? before.secondaryManagerEmployeeId : input.secondaryManagerEmployeeId;
     await assertReferences(trx, orgId, { branchId: input.branchId, departmentId: input.departmentId, designationId: input.designationId, managerEmployeeId: effectiveManager, secondaryManagerEmployeeId: effectiveSecondary, selfId: id });
+    // the work location is a place of the employee's branch AFTER the change (re-sending the stored one unchanged is a no-op); a
+    // transfer without a new place drops the old one (app.place_reference_guard) — the response and the audit diff show it
+    const targetBranchId = input.branchId ?? before.branchId;
+    if (input.workLocationId && !(input.workLocationId === before.workLocationId && targetBranchId === before.branchId)) await assertPlaceOfBranch(trx, orgId, input.workLocationId, targetBranchId, 'workLocationId');
     await assertNoReportingCycle(trx, orgId, id, {
       managerEmployeeId: effectiveManager !== before.managerEmployeeId ? effectiveManager : null,
       secondaryManagerEmployeeId: effectiveSecondary !== before.secondaryManagerEmployeeId ? effectiveSecondary : null,
@@ -449,7 +462,8 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
       await offboardLinkedLogins(deps, trx, actor, grant, orgId, [id], { source: 'update', employmentStatus: nextSnapshot.employmentStatus });
     }
     const after = await loadEmployeeDto(trx, orgId, id);
-    const beforeDto = toEmployeeDto(before);
+    // labelled like `after`, so an unchanged work location never shows up in the diff
+    const beforeDto = toEmployeeDto(before, undefined, await locationLabels(trx, orgId, [before.workLocationId]));
     const diff = diffObjects(beforeDto as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>);
     if (pin !== undefined) (diff.newValue as Record<string, unknown>)['pinSet'] = true;
     await audit(trx, actor, orgId, 'employee.updated', 'employee', { entityId: id, branchId: after.branchId, ...diff, reason: changeReason ?? null });
@@ -548,6 +562,8 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
         }
         const changed: string[] = [];
         const leavers: string[] = [];
+        // a transfer drops a work location of the old branch (app.place_reference_guard): recorded in the bulk audit row
+        const workLocationsCleared: Array<{ employeeId: string; workLocationId: string }> = [];
         for (const e of employees) {
           const next = snapshotOf(e);
           if (input.action === 'assign_branch') next.branchId = input.branchId;
@@ -556,6 +572,7 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
           if (!snapshotChanged(snapshotOf(e), next)) continue;
           await applyHistoryTransition(trx, orgId, e.id, next, effectiveFrom, `Bulk ${input.action}`, actor.userId, isoDate(e.joiningDate));
           await trx.updateTable('employees').set({ branchId: next.branchId, departmentId: next.departmentId, employmentStatus: next.employmentStatus, updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', e.id).execute();
+          if (e.workLocationId && next.branchId !== e.branchId) workLocationsCleared.push({ employeeId: e.id, workLocationId: e.workLocationId });
           await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.updated', aggregateType: 'employee', aggregateId: e.id, payload: { bulk: input.action, transition: true, branchId: next.branchId }, actorUserId: actor.userId, requestId: actor.requestId });
           changed.push(e.id);
           if (hasLeft(next.employmentStatus) && !hasLeft(e.employmentStatus)) leavers.push(e.id);
@@ -565,7 +582,7 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
           await offboardLinkedLogins(deps, trx, actor, grant, orgId, leavers, { source: 'bulk_set_status', employmentStatus: input.employmentStatus });
         }
         const { employeeIds: _ids, ...rest } = input;
-        await audit(trx, actor, orgId, 'employee.bulk_updated', 'employee', { newValue: { ...rest, effectiveFrom, employeeIds: changed } });
+        await audit(trx, actor, orgId, 'employee.bulk_updated', 'employee', { newValue: { ...rest, effectiveFrom, employeeIds: changed, ...(workLocationsCleared.length ? { workLocationsCleared } : {}) } });
         // leavers come off every terminal; anybody else whose branch or status changed is pushed (a leaver never is)
         if (input.action === 'set_status' && leavers.length) await removeLeaversFromDevices(deps, trx, actor, orgId, leavers, { source: 'bulk_set_status', employmentStatus: input.employmentStatus });
         const toPush = input.action === 'set_status' && hasLeft(input.employmentStatus) ? [] : changed;
@@ -578,7 +595,7 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
 
 async function visibleEmployees(trx: Trx, orgId: string, grant: MembershipGrant, ids: string[]) {
   const unique = [...new Set(ids)];
-  const rows = await trx.selectFrom('employees').select(['id', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'employmentType', 'employmentStatus', 'joiningDate']).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('id', 'in', unique).execute();
+  const rows = await trx.selectFrom('employees').select(['id', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'employmentType', 'employmentStatus', 'joiningDate', 'workLocationId']).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('id', 'in', unique).execute();
   if (rows.length !== unique.length) throw errors.validation('One or more employees were not found or are outside your branch scope.', { missing: unique.filter((id) => !rows.some((r) => r.id === id)) });
   for (const r of rows) requireBranchAccess(grant, r.branchId);
   return rows;
