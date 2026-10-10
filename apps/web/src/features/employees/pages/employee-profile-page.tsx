@@ -7,6 +7,7 @@ import { Avatar, Badge, Button, ErrorState, Skeleton, Tabs, TabsContent, TabsLis
 import { fmtDate } from '@/lib/format';
 import { toastError } from '@/lib/toast';
 import { useCan, useEmployeeId, useModuleEnabled } from '@/features/me/use-me';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useEmployee, useEmployeeMutations } from '../api';
 import { EmploymentStatusBadge } from '../components/employee-badges';
 import { OverviewTab } from '../components/profile/overview-tab';
@@ -38,6 +39,10 @@ export default function EmployeeProfilePage() {
   const { bulk } = useEmployeeMutations();
   const e = q.data;
   const isOwn = !!e && e.id === ownEmployeeId;
+  // where the employee works: "Muscat › Site A › Floor 2" (the place in the UI language when the tree knows it)
+  const locations = useLocationTree();
+  const workPlace = e ? locations.labelOf(e.workLocationId, { fromBranch: true }) || e.workLocationName || '' : '';
+  const where = e ? [e.branchName, workPlace].filter(Boolean).join(' › ') : '';
   // the Devices & sync and self-service portal modules (migration 20260929000600)
   const devicesOn = useModuleEnabled('devices');
   const selfServiceOn = useModuleEnabled('self_service');
@@ -69,7 +74,7 @@ export default function EmployeeProfilePage() {
             <PageHeader
               breadcrumbs={<Link to={directory ? '/employees' : '/team'} className="inline-flex items-center gap-1 hover:underline"><ArrowLeft className="size-3 rtl:rotate-180" /> {directory ? t('title') : tc('nav.sections.team')}</Link>}
               title={e.displayName}
-              description={[e.employeeNumber, e.designationName, e.departmentName, e.branchName].filter(Boolean).join(' · ')}
+              description={[e.employeeNumber, e.designationName, e.departmentName, where].filter(Boolean).join(' · ')}
               actions={
                 <div className="flex flex-wrap items-center gap-2">
                   <EmploymentStatusBadge status={e.employmentStatus} />

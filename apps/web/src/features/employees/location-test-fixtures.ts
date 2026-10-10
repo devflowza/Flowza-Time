@@ -59,6 +59,8 @@ export const NODES: LocationDto[] = [
   node(LOC.floor2, LOC.siteA, L_FLOOR, 'Floor 2', { branchId: BRANCH_1 }),
   node(LOC.siteX, LOC.branch2, L_SITE, 'Site X', { branchId: BRANCH_2 }),
 ];
+/** Regions and branches, no places (an organisation on GROUP_LEVELS). */
+export const GROUP_NODES: LocationDto[] = NODES.filter((n) => n.role !== 'place');
 /** The same branches without regions or places (what a SIMPLE organisation's tree holds). */
 export const SIMPLE_NODES: LocationDto[] = NODES.filter((n) => n.role === 'branch').map((n) => ({ ...n, parentId: null, levelId: SIMPLE_LEVELS[0]!.id }));
 

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
@@ -13,6 +13,8 @@ import { fmtDate } from '@/lib/format';
 import { useCan } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { SearchBox } from '@/features/organization/components/search-box';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useEmployees, useUserLimit } from '../api';
 import { DeviceSyncSummary, EmploymentStatusBadge } from '../components/employee-badges';
 import { BulkActionDialog, type BulkKind } from '../components/bulk-dialogs';
@@ -38,6 +40,13 @@ export default function EmployeesListPage() {
   const userLimit = useUserLimit(can('employee.create') || can('employee.import'));
   const full = userLimit.data?.reached === true;
   const fullTitle = full ? tc('userLimit.reachedTitle') : undefined;
+  // locations (docs/locations.md): the work location for organisations with places, the filter as soon as there is a hierarchy
+  const locations = useLocationTree();
+  const showPlaces = locations.hasPlaceLevels;
+  const showLocationFilter = locations.hasGroupLevels || locations.hasPlaceLevels;
+  const { labelOf } = locations;
+  // the place below the branch, in the UI language when the tree knows it (else as the API wrote it)
+  const workPlaceOf = useCallback((e: EmployeeDto) => labelOf(e.workLocationId, { fromBranch: true }) || e.workLocationName || '', [labelOf]);
 
   const columns = useMemo<ColumnDef<EmployeeDto, unknown>[]>(() => [
     { id: 'employeeNumber', accessorKey: 'employeeNumber', header: t('fields.employeeNumber'), cell: ({ row }) => <span className="font-mono text-xs tnum" dir="ltr">{row.original.employeeNumber}</span>, size: 110 },
@@ -48,12 +57,13 @@ export default function EmployeesListPage() {
       </div>
     ) },
     { id: 'branch', header: tc('common.branch'), cell: ({ row }) => row.original.branchName ?? '—' },
+    ...(showPlaces ? [{ id: 'workLocation', header: t('fields.workLocation'), enableSorting: false, cell: ({ row }) => workPlaceOf(row.original) || '—' } satisfies ColumnDef<EmployeeDto, unknown>] : []),
     { id: 'department', header: tc('common.department'), cell: ({ row }) => row.original.departmentName ?? '—' },
     { id: 'designation', header: t('fields.designation'), cell: ({ row }) => row.original.designationName ?? '—' },
     { id: 'employmentStatus', accessorKey: 'employmentStatus', header: tc('common.status'), cell: ({ row }) => <EmploymentStatusBadge status={row.original.employmentStatus} /> },
     { id: 'joiningDate', accessorKey: 'joiningDate', header: t('fields.joiningDate'), cell: ({ row }) => <span className="tnum">{fmtDate(row.original.joiningDate)}</span> },
     { id: 'devices', header: t('sync.devices'), enableSorting: false, cell: ({ row }) => <DeviceSyncSummary summary={row.original.deviceSyncSummary} /> },
-  ], [t, tc]);
+  ], [t, tc, showPlaces, workPlaceOf]);
 
   const openBulk = (kind: BulkKind, ids: string[]) => { setBulkIds(ids); setBulk(kind); };
   const canBulkEdit = can('employee.update');
@@ -62,6 +72,13 @@ export default function EmployeesListPage() {
     <>
       <SearchBox value={filters['search']} onChange={(v) => table.setFilter('search', v)} placeholder={t('list.searchPlaceholder')} />
       <Combobox value={filters['branchId'] ?? null} onChange={(v) => table.update({ filters: { branchId: v ?? '', departmentId: '' } })} options={branches.options} loading={branches.isLoading} clearable placeholder={tc('common.branch')} className="h-8 w-44" />
+      {/* a region / branch → the employees of its branches; a place → the employees working in it or below */}
+      {showLocationFilter || filters['locationId'] ? (
+        <>
+          <label htmlFor="employees-location-filter" className="sr-only">{t('list.locationFilter')}</label>
+          <LocationPicker id="employees-location-filter" value={filters['locationId'] ?? null} onChange={(v) => table.setFilter('locationId', v ?? undefined)} placeholder={t('list.location')} className="h-8 w-44" />
+        </>
+      ) : null}
       <Combobox value={filters['departmentId'] ?? null} onChange={(v) => table.setFilter('departmentId', v ?? undefined)} options={departments.options} loading={departments.isLoading} clearable placeholder={tc('common.department')} className="h-8 w-44" />
       <Select value={filters['employmentStatus'] ?? ALL} onValueChange={(v) => table.setFilter('employmentStatus', v === ALL ? undefined : v)}>
         <SelectTrigger className="h-8 w-40" aria-label={t('fields.employmentStatus')}><SelectValue /></SelectTrigger>
@@ -123,7 +140,7 @@ export default function EmployeesListPage() {
           renderCard={(e) => (
             <div className="flex items-center gap-3">
               <Avatar name={e.displayName} src={e.photoUrl} />
-              <div className="min-w-0 flex-1"><p className="truncate font-medium">{e.displayName}</p><p className="truncate text-xs text-muted-foreground">{e.employeeNumber} · {e.branchName ?? '—'}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate font-medium">{e.displayName}</p><p className="truncate text-xs text-muted-foreground">{e.employeeNumber} · {e.branchName ?? '—'}{workPlaceOf(e) ? ` › ${workPlaceOf(e)}` : ''}</p></div>
               <EmploymentStatusBadge status={e.employmentStatus} />
             </div>
           )}
