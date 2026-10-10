@@ -172,3 +172,27 @@ describe('generated reports narrowed by location', () => {
     expect(detail.text).not.toContain('WORKER');
   });
 });
+
+describe('the policy column resolves location policies', () => {
+  it('prints the deepest location policy on each employee\'s chain', async () => {
+    const a = h.tdb.adminDb;
+    await a.insertInto('attendanceRuleSets').values([
+      { organizationId: ORG, name: 'Company standard', effectiveFrom: '2026-01-01', ramadanMode: '{}' },
+      { organizationId: ORG, name: 'Region policy', locationId: REGION, effectiveFrom: '2026-01-01', ramadanMode: '{}' },
+      { organizationId: ORG, name: 'Head Office policy', branchId: HQ, effectiveFrom: '2026-01-01', ramadanMode: '{}' },
+      { organizationId: ORG, name: 'Site 1 policy', branchId: HQ, locationId: SITE1, effectiveFrom: '2026-01-01', ramadanMode: '{}' },
+    ]).execute();
+    try {
+      const dir = await generate('employee_directory', {});
+      expect(dir.res.status).toBe('COMPLETED');
+      const line = (name: string) => dir.text.split('\n').find((l) => l.includes(name)) ?? '';
+      expect(line('SITE ONE WORKER')).toContain('Site 1 policy');
+      expect(line('FLOOR ONE WORKER')).toContain('Site 1 policy'); // Floor 1 is below Site 1
+      expect(line('HEAD OFFICE WORKER')).toContain('Head Office policy');
+      expect(line('SITE TWO WORKER')).toContain('Head Office policy');
+      expect(line('SITE THREE WORKER')).toContain('Region policy'); // B2 sits under the region and has no policy of its own
+    } finally {
+      await a.deleteFrom('attendanceRuleSets').where('organizationId', '=', ORG).execute();
+    }
+  });
+});
