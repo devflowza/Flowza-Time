@@ -64,7 +64,8 @@ afterAll(async () => { await h?.close(); });
 describe('Enterprise engine input', () => {
   it('the most specific scoped policy applies: group on the date, else the country, else the company default', async () => {
     expect((await load(E1, '2026-03-12'))!.input.ruleSetId).toBe(P_GROUP);
-    expect((await load(E1, '2026-03-12'))!.policyScope).toEqual({ countryCode: 'OM', branchId: BRANCH, departmentId: null, employeeGroupId: GROUP, shiftId: MORNING });
+    // no work location: the location chain is the branch's node
+    expect((await load(E1, '2026-03-12'))!.policyScope).toEqual({ countryCode: 'OM', branchId: BRANCH, departmentId: null, employeeGroupId: GROUP, shiftId: MORNING, locationIds: [expect.any(String)] });
     // the membership ended on 2026-03-15 (stored exclusive end 03-16)
     expect((await load(E1, '2026-03-16'))!.input.ruleSetId).toBe(P_OM);
     expect((await load(E2, '2026-03-12'))!.input.ruleSetId).toBe(P_OM);
