@@ -1,0 +1,132 @@
+1
+00:00:00,900 --> 00:00:08,351
+Welcome to FlowZa Time Enterprise: cloud attendance for multi-branch organisations across Oman and the GCC.
+
+2
+00:00:08,701 --> 00:00:11,791
+Let's walk through it, from the first device to the live dashboard.
+
+3
+00:00:13,091 --> 00:00:21,903
+Start with your devices. In Devices, choose Register device, and pick the provider: ZKTeco, Hikvision, Suprema, Anviz or Matrix.
+
+4
+00:00:22,253 --> 00:00:26,890
+Give the terminal a code, a name and a branch. Its timezone follows the branch.
+
+5
+00:00:27,240 --> 00:00:33,729
+Test the connection. Push terminals get their own URL and token, and punches start syncing automatically.
+
+6
+00:00:35,129 --> 00:00:41,626
+Next, your sites. Each branch has a code, a city, a timezone, weekly off days and a holiday calendar.
+
+7
+00:00:41,976 --> 00:00:47,015
+The branch timezone decides the attendance date, so Muscat and Riyadh both stay correct.
+
+8
+00:00:47,365 --> 00:00:50,507
+Add a geofence to control where mobile check-in is allowed.
+
+9
+00:00:51,907 --> 00:01:00,594
+Now add your people: employee number, branch, department, designation and line manager. Or import hundreds at once from a CSV file.
+
+10
+00:01:00,944 --> 00:01:08,860
+In Shifts and schedules, define fixed or flexible shifts, with breaks, grace periods and punch windows, including overnight shifts.
+
+11
+00:01:09,210 --> 00:01:15,271
+Then assign shifts to a branch, a department, a team, or one employee. The most specific assignment wins.
+
+12
+00:01:16,671 --> 00:01:22,073
+To change a shift, assign the new one with an effective from date, and an end date if it's temporary.
+
+13
+00:01:22,423 --> 00:01:28,336
+Change many employees at once with a bulk action, or let employees request a change from their own portal.
+
+14
+00:01:28,686 --> 00:01:31,111
+Past days are recalculated automatically.
+
+15
+00:01:33,011 --> 00:01:37,664
+Now, Salim works in Muscat, but is asked to cover the Sohar branch for two weeks.
+
+16
+00:01:38,014 --> 00:01:45,735
+In Branch deployments, choose Deploy employee. Pick Sohar, the first and last day, and keep Add to the branch's terminals switched on.
+
+17
+00:01:46,085 --> 00:01:53,827
+Salim is enrolled on the Sohar terminals on day one, punches there as usual, and is removed automatically after the last day.
+
+18
+00:01:54,177 --> 00:02:01,077
+Salim's shift, holidays and payroll stay with Muscat, so the attendance record is complete, with no manual fixes.
+
+19
+00:02:02,877 --> 00:02:10,398
+Leave is built in. Set up annual, sick, emergency or maternity leave, with yearly days, monthly accrual and carry forward.
+
+20
+00:02:10,748 --> 00:02:14,707
+Employees apply from their portal, and see their balance before they submit.
+
+21
+00:02:15,057 --> 00:02:20,053
+Approved leave appears on the team calendar, and those days count as leave, not absence.
+
+22
+00:02:21,453 --> 00:02:27,948
+Every request goes to the right person. Each employee has a line manager, and an optional secondary manager.
+
+23
+00:02:28,298 --> 00:02:34,209
+Leave, corrections, regularisations, shift changes and swaps all land in one Approvals inbox.
+
+24
+00:02:34,559 --> 00:02:40,689
+Approve, reject, ask for information, or reassign. One by one, in bulk, or straight from an email.
+
+25
+00:02:41,039 --> 00:02:45,516
+Workflows add up to five levels, with escalation when nobody acts in time.
+
+26
+00:02:47,116 --> 00:02:52,044
+Need a shift swap? In My shift, choose Request a swap, then pick the day and a colleague.
+
+27
+00:02:52,394 --> 00:02:57,353
+The line manager approves it in the inbox, and both schedules change for that day only.
+
+28
+00:02:59,753 --> 00:03:09,937
+Finally, configure and monitor. Settings cover regional options, attendance rules, sync, notifications and security, while roles decide who sees which branch.
+
+29
+00:03:10,287 --> 00:03:16,406
+Under Settings, Dashboard, pick one of seven styles, and a layout: Overview, Operations, or Executive.
+
+30
+00:03:16,756 --> 00:03:22,483
+The dashboard shows today at a glance: present, absent, on leave and late, compared with last week.
+
+31
+00:03:22,833 --> 00:03:31,046
+Then the attendance trend, every branch, device status and the approvals waiting for you, with reports in PDF, Excel or CSV.
+
+32
+00:03:32,946 --> 00:03:35,942
+FlowZa Time. People on time, business on track.
+
+33
+00:03:36,292 --> 00:03:38,467
+See it for yourself at flowza.com.
+
