@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { useForm, Controller, type UseFormReturn } from 'react-hook-form';
+import { useForm, useWatch, Controller, type UseFormReturn } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
@@ -15,6 +15,8 @@ import { useOrgTimezone } from '@/features/me/use-me';
 import { BranchPicker } from '@/features/organization/components/branch-picker';
 import { TimezoneSelect } from '@/features/organization/components/timezone-select';
 import { blankToUndefined } from '@/features/organization/form-utils';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { toastJobQueued } from '@/features/sync/job-toast';
 import { useDeviceMutations, useDeviceModels, useProviders, type DeviceCreatedDto, type ProviderDto } from '../api';
 import { CapabilityChips, IntegrationBadge, ProviderStatusBadge, VerificationBadge } from '../components/device-badges';
@@ -32,7 +34,9 @@ import { TagsInput } from '../components/tags-input';
 const STEPS = ['device', 'details', 'connection', 'review'] as const;
 type Step = (typeof STEPS)[number];
 
-const detailsSchema = createDeviceSchema.pick({ code: true, name: true, branchId: true, timezone: true, tags: true, serialNumber: true, modelName: true, manufacturer: true, notes: true });
+const detailsSchema = createDeviceSchema.pick({ code: true, name: true, branchId: true, locationId: true, timezone: true, tags: true, serialNumber: true, modelName: true, manufacturer: true, notes: true });
+/** The device's location is a place (site, floor, zone…) of its branch (docs/locations.md). */
+const PLACE_ROLES = ['place'] as const;
 type DetailsValues = z.input<typeof detailsSchema>;
 type Details = z.output<typeof detailsSchema>;
 type DetailsForm = UseFormReturn<DetailsValues, unknown, Details>;
@@ -263,10 +267,11 @@ function DeviceStep({ provider, model, onProvider, onModel }: { provider: Provid
 
 // ---- step 2: details --------------------------------------------------------------------------------------------------------
 
-function DetailsStep({ form, isPush, onSubmit, onBack }: { form: DetailsForm; isPush: boolean; onSubmit: (d: Details) => void; onBack: () => void }) {
+function DetailsStep({ form, isPush, showPlaces, onSubmit, onBack }: { form: DetailsForm; isPush: boolean; showPlaces: boolean; onSubmit: (d: Details) => void; onBack: () => void }) {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation();
   const { register, control, formState: { errors }, setValue, getValues } = form;
+  const branchId = useWatch({ control, name: 'branchId' });
 
   /**
    * Zod's own messages are written for whoever wrote the schema — a blank Branch reported "Invalid GUID", a blank Code
@@ -294,9 +299,21 @@ function DetailsStep({ form, isPush, onSubmit, onBack }: { form: DetailsForm; is
         <FormField label={tc('common.branch')} htmlFor="dev-branch" required error={err('branchId')}>
           <Controller control={control} name="branchId" render={({ field }) => (
             <BranchPicker id="dev-branch" value={field.value} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId}
-              onChange={(v, b) => { field.onChange(v ?? ''); if (b && !getValues('timezone')) setValue('timezone', b.timezone); }} />
+              onChange={(v, b) => {
+                // a place belongs to one branch: another branch makes the chosen one meaningless
+                if ((v ?? '') !== field.value) setValue('locationId', undefined);
+                field.onChange(v ?? '');
+                if (b && !getValues('timezone')) setValue('timezone', b.timezone);
+              }} />
           )} />
         </FormField>
+        {showPlaces ? (
+          <FormField label={t('fields.location')} htmlFor="dev-location" optional error={err('locationId')} hint={t('fields.locationHint')}>
+            <Controller control={control} name="locationId" render={({ field }) => (
+              <LocationPicker id="dev-location" value={field.value ?? null} roles={PLACE_ROLES} branchId={branchId || null} onChange={(v) => field.onChange(v ?? undefined)} aria-invalid={!!errors.locationId} />
+            )} />
+          </FormField>
+        ) : null}
         <FormField label={tc('common.timezone')} htmlFor="dev-tz" error={err('timezone')} hint={t('fields.timezoneHint')} optional>
           <Controller control={control} name="timezone" render={({ field }) => <TimezoneSelect id="dev-tz" value={field.value ?? undefined} onChange={field.onChange} />} />
         </FormField>
@@ -328,6 +345,8 @@ export default function DeviceNewPage() {
   const { t: tc } = useTranslation();
   const navigate = useNavigate();
   const orgTz = useOrgTimezone();
+  // the location field only exists for organisations whose branches hold places (sites, floors, zones…)
+  const locations = useLocationTree();
   const { create, testConnection } = useDeviceMutations();
   const [step, setStep] = useState<Step>('device');
   const [furthest, setFurthest] = useState(0);
@@ -358,7 +377,7 @@ export default function DeviceNewPage() {
   // typed. The resolver widens with the provider: a push terminal is identified by its serial number, so that field is
   // required for one of the two integration shapes only.
   const schema = useMemo(() => (isPush ? detailsSchema.extend({ serialNumber: createDeviceSchema.shape.serialNumber.unwrap().min(1) }) : detailsSchema), [isPush]);
-  const detailsForm = useForm<DetailsValues, unknown, Details>({ resolver: zodResolver(schema), defaultValues: { code: '', name: '', branchId: '', timezone: orgTz, tags: [], manufacturer: '', modelName: undefined, serialNumber: undefined, notes: undefined } });
+  const detailsForm = useForm<DetailsValues, unknown, Details>({ resolver: zodResolver(schema), defaultValues: { code: '', name: '', branchId: '', locationId: undefined, timezone: orgTz, tags: [], manufacturer: '', modelName: undefined, serialNumber: undefined, notes: undefined } });
 
   const go = useCallback((s: Step) => {
     setStep(s);
@@ -407,7 +426,7 @@ export default function DeviceNewPage() {
     setTestResult(null);
     // Changing the provider changes what the hardware is, so the identifiers typed for the previous one no longer
     // describe it — which is what the old remount-on-provider-key did implicitly.
-    detailsForm.reset({ code: '', name: '', branchId: '', timezone: orgTz, tags: [], manufacturer: p.vendor, modelName: undefined, serialNumber: undefined, notes: undefined });
+    detailsForm.reset({ code: '', name: '', branchId: '', locationId: undefined, timezone: orgTz, tags: [], manufacturer: p.vendor, modelName: undefined, serialNumber: undefined, notes: undefined });
     setDetails(null);
   };
 
@@ -486,7 +505,7 @@ export default function DeviceNewPage() {
             ) : null}
 
             {step === 'details' && provider ? (
-              <DetailsStep form={detailsForm} isPush={isPush} onBack={() => leaveDetails('device')} onSubmit={(d) => { setDetails(d); go('connection'); }} />
+              <DetailsStep form={detailsForm} isPush={isPush} showPlaces={locations.hasPlaceLevels} onBack={() => leaveDetails('device')} onSubmit={(d) => { setDetails(d); go('connection'); }} />
             ) : null}
 
             {step === 'connection' && provider ? (
@@ -532,6 +551,7 @@ export default function DeviceNewPage() {
                 <ReviewGroup title={t('wizard.step.details')} onEdit={() => go('details')}>
                   <Row label={tc('common.code')}><span className="font-mono">{details.code}</span></Row>
                   <Row label={tc('common.name')}>{details.name}</Row>
+                  {locations.hasPlaceLevels || details.locationId ? <Row label={t('fields.location')}>{locations.labelOf(details.locationId, { fromBranch: true }) || '—'}</Row> : null}
                   <Row label={tc('common.timezone')}><span dir="ltr">{details.timezone ?? '—'}</span></Row>
                   <Row label={t('fields.serialNumber')}><span className="font-mono" dir="ltr">{details.serialNumber ?? '—'}</span></Row>
                   <Row label={t('fields.tags')}>{details.tags?.length ? details.tags.map((x) => <Badge key={x} variant="secondary" className="me-1 font-normal">{x}</Badge>) : '—'}</Row>
