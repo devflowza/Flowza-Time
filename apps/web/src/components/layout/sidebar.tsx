@@ -1,6 +1,6 @@
 import { NavLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, ArrowRightLeft, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, Mail, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, ArrowRightLeft, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, Mail, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserCheck, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
 import type { ModuleKey, Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/ui-store';
@@ -114,6 +114,8 @@ export function Sidebar() {
       { to: '/attendance/regularisations', label: t('attendance-admin:nav.regularisations'), icon: ClipboardCheck, permissions: ['attendance.approve', 'attendance.review_notes'], any: true },
       // Enterprise: temporary deployment of employees to another branch (round-the-clock scheduling)
       { to: '/deployments', label: t('scheduling:nav.deployments'), icon: ArrowRightLeft, permissions: ['employee.view'], modules: ['advanced_scheduling'] },
+      // Enterprise: who is on site now, per location of the tree (the muster list — docs/locations.md §4)
+      { to: '/attendance/muster', label: t('scheduling:nav.muster'), icon: UserCheck, permissions: ['attendance.view'], modules: ['advanced_scheduling'] },
     ] },
     { label: t('nav.sections.devices'), items: [
       { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'], modules: ['devices'] },

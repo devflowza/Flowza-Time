@@ -1,5 +1,5 @@
 {
-  "nav": { "deployments": "Branch deployments" },
+  "nav": { "deployments": "Branch deployments", "muster": "On site now" },
   "tabs": { "roundTheClock": "Round-the-clock", "coverage": "Coverage", "doubleShifts": "Double shifts" },
   "templates": {
     "TWO_SHIFT_4ON4OFF": { "name": "2 × 12 h — 4 on, 4 off", "hint": "Day and night shifts of 12 hours. Each crew works 4 days, has 4 off, works 4 nights and has 4 off (16-day cycle)." },
@@ -47,11 +47,14 @@
   },
   "coverage": {
     "targets": "Coverage targets",
-    "targetsHint": "The minimum number of people a branch needs on a shift, on the weekdays you choose.",
+    "targetsHint": "The minimum number of people a branch — or a place in it, such as a site, floor or zone — needs on a shift, on the weekdays you choose.",
     "add": "Add target",
     "edit": "Edit target",
     "dialogHint": "Choose the branch and shift, the weekdays and the minimum head count.",
     "shift": "Shift",
+    "location": "Location",
+    "locationHint": "A site, floor or zone of the branch: only the people who work there count. Leave empty for the whole branch.",
+    "wholeBranch": "Whole branch",
     "weekdays": "Weekdays",
     "weekdaysRequired": "Choose at least one weekday.",
     "minHeadcount": "Minimum head count",
@@ -65,7 +68,7 @@
     "empty": "No coverage targets yet",
     "emptyHint": "Add a target to see where a branch is short of people.",
     "report": "Coverage report",
-    "reportHint": "People scheduled against the targets, by day and shift: shift assignments, rotations and double shifts. Days off, holidays and approved leave are left out.",
+    "reportHint": "People scheduled against the targets, by day and shift — and by place for a target on a site, floor or zone: shift assignments, rotations and double shifts. Days off, holidays and approved leave are left out.",
     "tooLong": "Choose at most {{days}} days.",
     "pickBranch": "Choose a branch.",
     "nothingScheduled": "Nothing to show",
@@ -156,5 +159,43 @@
     "deployed": "You are deployed to {{branch}} until {{date}}.",
     "anotherBranch": "another branch",
     "hint": "You can check in at that branch as well as at your own."
+  },
+  "muster": {
+    "title": "On site now",
+    "subtitle": "The muster list: who was last seen in a location on the day, from the punches on the terminals placed there. Use it for a roll call.",
+    "location": "Location",
+    "date": "Date",
+    "pickLocation": "Choose a location",
+    "path": "Location path",
+    "updated": "Updated {{time}} · refreshes every minute",
+    "print": "Print roll call",
+    "totals": "Totals",
+    "states": { "on_site": "On site", "on_break": "On break", "left": "Left", "seen": "Seen" },
+    "stateHints": {
+      "on_site": "Last punch: check-in or end of a break",
+      "on_break": "Last punch: start of a break",
+      "left": "Last punch: check-out",
+      "seen": "Punched, direction unknown"
+    },
+    "children": "Inside {{name}}",
+    "childrenHint": "The same totals for each location directly below. Choose one to see who is there.",
+    "columns": { "employee": "Employee", "number": "Number", "state": "State", "time": "Last punch", "terminal": "Terminal", "place": "Place" },
+    "search": "Search name or number",
+    "allStates": "All states",
+    "noEntries": "Nobody has punched here on this day",
+    "noEntriesHint": "Punches on the terminals placed in this location and below appear here within a minute.",
+    "noDevices": "No terminal is placed in this location yet",
+    "noDevicesHint": "Set a device's location in Devices: only punches on terminals placed here or below can be attributed to it.",
+    "openDevices": "Open Devices",
+    "noLocations": "No locations to show",
+    "noLocationsHint": "Build the location tree in Organisation → Locations.",
+    "portalNote": "Web and mobile check-ins carry no terminal: they are not attributed to a place and do not appear here.",
+    "rollCall": {
+      "title": "Roll call",
+      "generated": "Generated {{at}}",
+      "accounted": "Accounted for",
+      "checkedBy": "Checked by (name and time)",
+      "signature": "Signature"
+    }
   }
 }

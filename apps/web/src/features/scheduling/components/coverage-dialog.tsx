@@ -7,30 +7,41 @@ import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useShiftOptions } from '@/features/schedule/api';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useCoverageMutations } from '../api';
 import { SCHED_NS } from '../i18n';
 import { WEEKDAYS } from '../model';
 
-/** Add a coverage target (branch, shift, weekdays, minimum head count) or edit one's weekdays / minimum. */
+/**
+ * Add a coverage target (branch, shift, optionally a place of the branch, weekdays, minimum head count) or edit one's weekdays /
+ * minimum. A target on a place (site, floor, zone…) counts only the people working there (docs/locations.md); without one it
+ * covers the whole branch. The place is offered when the organisation has place levels.
+ */
 export function CoverageDialog({ open, onOpenChange, target }: { open: boolean; onOpenChange: (o: boolean) => void; target: ShiftCoverageDto | null }) {
   const { t } = useTranslation(SCHED_NS);
   const { t: tc } = useTranslation();
   const branches = useBranchOptions();
   const shifts = useShiftOptions();
+  const tree = useLocationTree();
   const { create, update } = useCoverageMutations();
   const [branchId, setBranchId] = useState<string | null>(target?.branchId ?? null);
   const [shiftId, setShiftId] = useState<string | null>(target?.shiftId ?? null);
+  const [locationId, setLocationId] = useState<string | null>(target?.locationId ?? null);
   const [weekdays, setWeekdays] = useState<number[]>(target?.weekdays ?? [...WEEKDAYS]);
   const [minHeadcount, setMinHeadcount] = useState(target?.minHeadcount ?? 1);
+  const showLocation = tree.hasPlaceLevels || !!target?.locationId;
   const valid = !!branchId && !!shiftId && weekdays.length > 0 && Number.isInteger(minHeadcount) && minHeadcount >= 1;
   const toggle = (d: number) => setWeekdays((w) => (w.includes(d) ? w.filter((x) => x !== d) : [...w, d].sort((a, b) => a - b)));
+  // a place belongs to one branch: another branch clears it
+  const pickBranch = (v: string | null) => { if (v !== branchId) setLocationId(null); setBranchId(v); };
 
   const onSave = () => {
     if (!valid || !branchId || !shiftId) return;
     const done = { onSuccess: () => { toast.success(target ? t('coverage.saved') : t('coverage.created')); onOpenChange(false); }, onError: toastError };
-    // a PATCH sends only what it changes (no defaults re-applied server-side)
+    // a PATCH sends only what it changes (no defaults re-applied server-side); the branch, shift and place name the target
     if (target) update.mutate({ id: target.id, input: { weekdays, minHeadcount } }, done);
-    else create.mutate({ branchId, shiftId, weekdays, minHeadcount }, done);
+    else create.mutate({ branchId, shiftId, locationId, weekdays, minHeadcount }, done);
   };
 
   return (
@@ -40,12 +51,17 @@ export function CoverageDialog({ open, onOpenChange, target }: { open: boolean; 
         <div className="space-y-4">
           <div className="grid gap-4 sm:grid-cols-2">
             <FormField label={tc('common.branch')} htmlFor="cov-branch" required>
-              <Combobox id="cov-branch" value={branchId} onChange={setBranchId} options={branches.options} loading={branches.isLoading} disabled={!!target} placeholder={tc('common.branch')} />
+              <Combobox id="cov-branch" value={branchId} onChange={pickBranch} options={branches.options} loading={branches.isLoading} disabled={!!target} placeholder={tc('common.branch')} />
             </FormField>
             <FormField label={t('coverage.shift')} htmlFor="cov-shift" required>
               <Combobox id="cov-shift" value={shiftId} onChange={setShiftId} options={shifts.options} loading={shifts.isLoading} disabled={!!target} placeholder={t('coverage.shift')} />
             </FormField>
           </div>
+          {showLocation ? (
+            <FormField label={t('coverage.location')} htmlFor="cov-location" optional hint={t('coverage.locationHint')}>
+              <LocationPicker id="cov-location" roles={['place']} branchId={branchId} value={locationId} onChange={(v) => setLocationId(v)} disabled={!!target} clearable={!target} includeArchived={!!target} placeholder={t('coverage.wholeBranch')} />
+            </FormField>
+          ) : null}
           <fieldset className="space-y-1.5">
             <legend className="text-sm font-medium">{t('coverage.weekdays')}</legend>
             <div className="flex flex-wrap gap-1.5">

@@ -6,10 +6,15 @@ vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import { apiMock, grantAll, mockGet, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
+import { apiMock, grantAll, mockGet, page, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/schedule.json';
 import ar from '@/locales/ar/schedule.json';
+import { DEFAULT_ATTENDANCE_RULES, DEFAULT_POLICY_SECTIONS } from '@flowza/contracts';
+import { qk } from '@/lib/query-keys';
+import { indexLocations } from '@/features/locations/tree';
+import { BR1, BR2, BRANCHES, BRANCH_ONLY_LEVELS, BRANCH_ONLY_NODES, LEVELS, NODES, N_B1, N_F2, N_HQ, N_SA, locationRoutes } from '@/features/scheduling/test-locations';
+import { locationOfScope, scopeOfLocation } from '../policy-location';
 import { RuleSetDialog } from './rule-set-dialog';
 
 registerNamespace('schedule', en, ar);
@@ -73,7 +78,7 @@ describe('RuleSetDialog — the attendance policy editor (Enterprise attendance_
     const [path, body] = apiMock.post.mock.calls[0] as [string, Record<string, unknown>];
     expect(path).toBe('/orgs/org-1/attendance-rule-sets');
     expect(body).toMatchObject({ name: 'Classic', graceInMinutes: 10 });
-    for (const key of ['policy', 'countryCode', 'departmentId', 'employeeGroupId', 'shiftId']) expect(body).not.toHaveProperty(key);
+    for (const key of ['policy', 'countryCode', 'departmentId', 'employeeGroupId', 'shiftId', 'locationId']) expect(body).not.toHaveProperty(key);
   });
 
   it('a country rule pack fills the form, records policy.countryPack, and the compliance warnings show for that country', async () => {
@@ -117,5 +122,103 @@ describe('RuleSetDialog — the attendance policy editor (Enterprise attendance_
     const [path, body] = apiMock.patch.mock.calls[0] as [string, Record<string, unknown>];
     expect(path).toBe('/orgs/org-1/attendance-rule-sets/rs1');
     expect(body).toMatchObject({ graceInMinutes: 12, employeeGroupId: 'f0000000-0000-4000-8000-0000000000a1', description: 'Sales staff', policy: { methods: { mobile: false, requireGeofence: 'block' }, points: { expiryDays: 60, escalation: [{ points: 5, action: 'VERBAL_WARNING' }] }, regularisation: { maxPerMonth: 2 } } });
+  });
+});
+
+describe('RuleSetDialog — the policy location (Enterprise, docs/locations.md §3)', () => {
+  const storedPolicy = (scope: Record<string, unknown>) => ({
+    ...DEFAULT_ATTENDANCE_RULES, id: 'rs9', name: 'Site policy', description: '', branchId: null, countryCode: null, departmentId: null, employeeGroupId: null, shiftId: null, locationId: null,
+    effectiveFrom: '2026-01-01', effectiveTo: null, version: 1, specificity: 4, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', policy: structuredClone(DEFAULT_POLICY_SECTIONS), ...scope,
+  }) as never;
+  const locationField = () => screen.getByRole('combobox', { name: /^Location/ });
+  const pickOption = async (combobox: HTMLElement, option: RegExp) => {
+    fireEvent.click(combobox);
+    fireEvent.click(await screen.findByRole('option', { name: option }));
+  };
+  /** Name the draft, save it, and return the body of the create. */
+  const create = async () => {
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Scoped policy' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create|Save/ }));
+    await waitFor(() => expect(apiMock.post.mock.calls.some(([p]) => p === '/orgs/org-1/attendance-rule-sets')).toBe(true));
+    return (apiMock.post.mock.calls.find(([p]) => p === '/orgs/org-1/attendance-rule-sets') as [string, Record<string, unknown>])[1];
+  };
+
+  beforeEach(() => {
+    resetApiMock(); grantAll();
+    mockGet({ ...locationRoutes(), '/orgs/org-1/branches': page(BRANCHES) });
+    apiMock.post.mockResolvedValue({ data: { id: 'rs1', recalculationJobId: null } });
+    apiMock.patch.mockResolvedValue({ data: { id: 'rs9', recalculationJobId: null } });
+  });
+  afterEach(() => { testState.disabledModules = new Set(); testState.allBranches = true; });
+
+  it.each([
+    ['a group location (Headquarters): the location alone', /^Muscat HQ/, { locationId: N_HQ, branchId: null }],
+    ['a branch: the branch, no location', /^Branch 1/, { branchId: BR1, locationId: null }],
+    ['a place (a floor): the place and its branch', /^Floor 2/, { locationId: N_F2, branchId: BR1 }],
+  ])('a new policy for %s', async (_label, option, scope) => {
+    renderWithProviders(<RuleSetDialog open onOpenChange={vi.fn()} ruleSet={null} />);
+    // group and place levels: one Location field (any node of the tree) replaces the branch select
+    await waitFor(() => expect(locationField()).toBeInTheDocument());
+    expect(screen.queryByRole('combobox', { name: /^Branch/ })).toBeNull();
+    await pickOption(locationField(), option);
+    expect(await create()).toMatchObject(scope);
+  });
+
+  it('editing a place policy shows the place, read-only, and the PATCH keeps the scope', async () => {
+    renderWithProviders(<RuleSetDialog open onOpenChange={vi.fn()} ruleSet={storedPolicy({ locationId: N_SA, branchId: BR1 })} />);
+    await waitFor(() => expect(locationField()).toHaveTextContent('Site A'));
+    expect(locationField()).toBeDisabled();
+    fireEvent.change(screen.getByLabelText('Grace in (min)'), { target: { value: '7' } });
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledTimes(1));
+    const [path, body] = apiMock.patch.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe('/orgs/org-1/attendance-rule-sets/rs9');
+    expect(body).toMatchObject({ graceInMinutes: 7, locationId: N_SA, branchId: BR1 });
+  });
+
+  it('a member scoped to some branches is offered their branches and places, not the group locations', async () => {
+    testState.allBranches = false;
+    renderWithProviders(<RuleSetDialog open onOpenChange={vi.fn()} ruleSet={null} />);
+    await waitFor(() => expect(locationField()).toBeInTheDocument());
+    fireEvent.click(locationField());
+    expect(await screen.findByRole('option', { name: /^Branch 1/ })).toBeInTheDocument();
+    expect(screen.getByRole('option', { name: /^Site A/ })).toBeInTheDocument();
+    expect(screen.queryByRole('option', { name: /^Muscat HQ/ })).toBeNull();
+  });
+
+  it('editing a branch policy shows the branch\'s node of the tree', async () => {
+    renderWithProviders(<RuleSetDialog open onOpenChange={vi.fn()} ruleSet={storedPolicy({ branchId: BR2 })} />);
+    await waitFor(() => expect(locationField()).toHaveTextContent('Branch 2'));
+    expect(locationField()).toBeDisabled();
+  });
+
+  it('an organisation with branches only keeps the branch select', async () => {
+    mockGet({ ...locationRoutes(BRANCH_ONLY_LEVELS, BRANCH_ONLY_NODES), '/orgs/org-1/branches': page(BRANCHES) });
+    const { client } = renderWithProviders(<RuleSetDialog open onOpenChange={vi.fn()} ruleSet={null} />);
+    await waitFor(() => expect(client.getQueryData(qk.list('org-1', 'location-levels'))).toBeDefined());
+    expect(screen.getByRole('combobox', { name: /^Branch/ })).toBeInTheDocument();
+    expect(screen.queryByRole('combobox', { name: /^Location/ })).toBeNull();
+  });
+
+  it('without the module: the branch select, no location tree is read and the request names no location', async () => {
+    testState.disabledModules = new Set(['attendance_policies']);
+    renderWithProviders(<RuleSetDialog open onOpenChange={vi.fn()} ruleSet={null} />);
+    expect(screen.queryByRole('combobox', { name: /^Location/ })).toBeNull();
+    await pickOption(screen.getByRole('combobox', { name: /^Branch/ }), /^Branch 2/);
+    const body = await create();
+    expect(body).toMatchObject({ branchId: BR2 });
+    expect(body).not.toHaveProperty('locationId');
+    expect(apiMock.get.mock.calls.some(([p]) => String(p).startsWith('/orgs/org-1/location'))).toBe(false);
+  });
+
+  it('maps a node to the stored scope and a stored scope back to its node', () => {
+    const index = indexLocations(NODES, LEVELS);
+    expect(scopeOfLocation(index.byId.get(N_HQ))).toEqual({ branchId: null, locationId: N_HQ });
+    expect(scopeOfLocation(index.byId.get(N_B1))).toEqual({ branchId: BR1, locationId: null });
+    expect(scopeOfLocation(index.byId.get(N_F2))).toEqual({ branchId: BR1, locationId: N_F2 });
+    expect(scopeOfLocation(undefined)).toEqual({ branchId: null, locationId: null });
+    expect(locationOfScope(index, { branchId: BR1, locationId: N_SA })).toBe(N_SA);
+    expect(locationOfScope(index, { branchId: BR1, locationId: null })).toBe(N_B1);
+    expect(locationOfScope(index, { branchId: null, locationId: null })).toBeNull();
   });
 });
