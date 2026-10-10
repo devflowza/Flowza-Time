@@ -6,6 +6,8 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
 import { useBranchOptions } from '@/features/organization/lookups';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { AR_NS } from '../i18n';
 import { useGeofenceMutations, useGeofences } from '../api';
 import { GeofenceDialog } from '../components/geofence-dialog';
@@ -13,6 +15,8 @@ import { GeofenceAssignmentsDialog } from '../components/geofence-assignments';
 import { GeofenceTester } from '../components/geofence-tester';
 
 const ENFORCEMENT_TONE = { hard_block: 'danger', soft_warn: 'warning', advisory_log: 'info' } as const;
+/** `location` (the place a fence outlines) only for organisations with place levels. */
+const COLUMNS = ['name', 'branch', 'location', 'shape', 'enforcement', 'assignments', 'active'] as const;
 
 /**
  * /attendance/geofences — the work zones portal punches are checked against (attendance.manage_geofences): the list, create /
@@ -23,7 +27,13 @@ const ENFORCEMENT_TONE = { hard_block: 'danger', soft_warn: 'warning', advisory_
  */
 export default function GeofencesPage() {
   const { t } = useTranslation(AR_NS);
-  const q = useGeofences(true);
+  const { t: tc } = useTranslation();
+  // locations (docs/locations.md): the place each fence outlines, and a filter once the organisation has a hierarchy
+  const locations = useLocationTree();
+  const [locationId, setLocationId] = useState<string | null>(null);
+  const showPlaces = locations.hasPlaceLevels;
+  const showLocationFilter = locations.hasGroupLevels || locations.hasPlaceLevels;
+  const q = useGeofences(true, locationId ?? undefined);
   const branches = useBranchOptions();
   const { remove } = useGeofenceMutations();
   const [editing, setEditing] = useState<GeofenceDto | 'new' | null>(null);
@@ -31,18 +41,29 @@ export default function GeofencesPage() {
   const [deleting, setDeleting] = useState<GeofenceDto | null>(null);
   const rows = q.data ?? [];
   const branchList = branches.data.map((b) => ({ id: b.id, name: b.name }));
+  const columns = COLUMNS.filter((c) => c !== 'location' || showPlaces);
+  // the place below the branch, in the UI language when the tree knows it (else as the API wrote it)
+  const placeOf = (f: GeofenceDto) => locations.labelOf(f.locationId, { fromBranch: true }) || f.locationName || '';
 
   return (
     <div className="page-container space-y-5">
       <PageHeader title={t('geofences.title')} description={t('geofences.subtitle')} actions={<Button onClick={() => setEditing('new')}><Plus /> {t('geofences.new')}</Button>} />
       <p className="flex items-start gap-2 rounded-md border bg-muted/30 px-3 py-2 text-sm text-muted-foreground" data-testid="geofence-precedence"><Info className="mt-0.5 size-4 shrink-0" aria-hidden />{t('geofences.precedence')}</p>
-      {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : q.isLoading ? <TableSkeleton cols={7} rows={4} /> : rows.length === 0 ? (
-        <EmptyState icon={MapPinned} title={t('geofences.empty')} description={t('geofences.emptyHint')} action={<Button onClick={() => setEditing('new')}><Plus /> {t('geofences.new')}</Button>} />
+      {showLocationFilter ? (
+        <div className="flex flex-wrap items-center gap-2">
+          {/* a region / branch → the fences of its branches; a place → the fences outlining it or a place below it */}
+          <label htmlFor="geofences-location-filter" className="sr-only">{t('geofences.filterLocation')}</label>
+          <LocationPicker id="geofences-location-filter" value={locationId} onChange={(v) => setLocationId(v)} placeholder={t('geofences.allLocations')} className="h-8 w-56" />
+        </div>
+      ) : null}
+      {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : q.isLoading ? <TableSkeleton cols={columns.length + 1} rows={4} /> : rows.length === 0 ? (
+        locationId ? <EmptyState icon={MapPinned} title={tc('common.noResults')} description={tc('common.noResultsHint')} />
+          : <EmptyState icon={MapPinned} title={t('geofences.empty')} description={t('geofences.emptyHint')} action={<Button onClick={() => setEditing('new')}><Plus /> {t('geofences.new')}</Button>} />
       ) : (
         <div className="rounded-lg border bg-card shadow-card">
           <div className="overflow-x-auto">
             <Table>
-              <TableHeader><TableRow>{(['name', 'branch', 'shape', 'enforcement', 'assignments', 'active'] as const).map((c) => <TableHead key={c}>{t(`geofences.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>
+              <TableHeader><TableRow>{columns.map((c) => <TableHead key={c}>{t(`geofences.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>
               <TableBody>
                 {rows.map((f) => {
                   const editable = f.editable !== false;
@@ -54,6 +75,7 @@ export default function GeofencesPage() {
                       {lockedWhy ? <span className="mt-0.5 flex items-center gap-1 text-xs font-normal text-muted-foreground" data-testid="geofence-read-only"><Lock className="size-3" aria-hidden />{lockedWhy}</span> : null}
                     </TableCell>
                     <TableCell className="text-sm">{f.branchName ?? t('geofences.fields.orgWide')}</TableCell>
+                    {showPlaces ? <TableCell className="text-sm" data-testid="geofence-location">{placeOf(f) || '—'}</TableCell> : null}
                     <TableCell className="text-xs tnum">{f.polygon ? t('geofences.shape.polygon', { count: f.polygon.length }) : t('geofences.shape.circle', { meters: f.radiusM })}<span className="block text-muted-foreground" dir="ltr">{f.latitude.toFixed(5)}, {f.longitude.toFixed(5)}</span></TableCell>
                     <TableCell><Badge variant={ENFORCEMENT_TONE[f.enforcement]}>{t(`geofences.enforcement.${f.enforcement}`)}</Badge></TableCell>
                     <TableCell className="text-xs">
