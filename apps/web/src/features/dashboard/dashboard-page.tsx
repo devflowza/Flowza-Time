@@ -10,8 +10,10 @@ import { cn } from '@/lib/utils';
 import en from '@/locales/en/dashboard.json';
 import ar from '@/locales/ar/dashboard.json';
 import { useActiveMembership, useCan, useMe, useModuleEnabled, useOrgTimezone } from '@/features/me/use-me';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useDashboardBranches, useDashboardSummary, useDashboardTrends } from './api';
-import { daypart, firstName, shiftDate, toTrendPoints, trendWindow } from './model';
+import { branchRowsInLocation, daypart, firstName, shiftDate, toTrendPoints, trendWindow } from './model';
 import { useDashboardSettings } from './theme';
 import { ExecutiveLayout, OperationsLayout, OverviewLayout, type DashboardData } from './layouts';
 
@@ -35,10 +37,16 @@ export default function DashboardPage() {
   const [date, setDate] = useState(today);
   const [range, setRange] = useState<DashboardTrendRange>(settings.trendDays);
   const isToday = date === today;
+  // the location filter (docs/locations.md): offered once the organisation has regions above or places inside its branches;
+  // the counts and the trend come for that location, the branch table keeps the branches under it
+  const locations = useLocationTree();
+  const showLocationFilter = locations.hasGroupLevels || locations.hasPlaceLevels;
+  const [locationId, setLocationId] = useState<string | null>(null);
+  const location = locationId ? locations.byId.get(locationId) : undefined;
 
-  const summary = useDashboardSummary(date);
+  const summary = useDashboardSummary(date, locationId);
   const win = trendWindow(date, Math.max(range, MIN_TREND_DAYS));
-  const trends = useDashboardTrends(win.from, win.to);
+  const trends = useDashboardTrends(win.from, win.to, locationId);
   const branches = useDashboardBranches(date);
   const points = useMemo(() => toTrendPoints(trends.data ?? []), [trends.data]);
 
@@ -47,7 +55,7 @@ export default function DashboardPage() {
     summary: summary.data, summaryLoading: summary.isLoading,
     points, trendsLoading: trends.isLoading, trendsError: trends.isError ? trends.error : null, retryTrends: () => void trends.refetch(),
     range, setRange,
-    branches: branches.data, branchesLoading: branches.isLoading, branchesError: branches.isError ? branches.error : null, retryBranches: () => void branches.refetch(),
+    branches: branches.data && branchRowsInLocation(branches.data, locations, locationId), branchesLoading: branches.isLoading, branchesError: branches.isError ? branches.error : null, retryBranches: () => void branches.refetch(),
     settings, can, rtl: i18n.dir() === 'rtl',
     viewer: {
       hasReports: membership?.isManager ?? false,
@@ -58,7 +66,8 @@ export default function DashboardPage() {
 
   const part = daypart(DateTime.now().setZone(tz).hour);
   const name = firstName(user?.fullName);
-  const org = membership?.organization.displayName ?? '';
+  // "Here's what's happening at Muscat HQ today" while a location is chosen
+  const org = location ? locations.nameOf(location) : membership?.organization.displayName ?? '';
   const heading = settings.showGreeting ? (name ? t(`greeting.${part}`, { name }) : t(`greeting.${part}Anon`)) : t('title');
   const subtitle = isToday ? t('greeting.subtitle', { org }) : t('greeting.subtitlePast', { org, date: fmtDate(date) });
   const Layout = settings.layout === 'operations' ? OperationsLayout : settings.layout === 'executive' ? ExecutiveLayout : OverviewLayout;
@@ -73,6 +82,12 @@ export default function DashboardPage() {
           <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
         </div>
         <div className="flex flex-wrap items-center gap-2">
+          {showLocationFilter ? (
+            <>
+              <label htmlFor="dashboard-location" className="sr-only">{t('location.filter')}</label>
+              <LocationPicker id="dashboard-location" value={locationId} onChange={(v) => setLocationId(v)} placeholder={t('location.all')} className="h-9 w-52" />
+            </>
+          ) : null}
           <span className="hidden items-center gap-1.5 text-xs text-muted-foreground sm:inline-flex" aria-live="polite">
             <span className={cn('size-2 rounded-full', summary.isError ? 'bg-red-500' : 'bg-emerald-500')} aria-hidden />
             {summary.isFetching ? t('date.loading') : summary.dataUpdatedAt ? t('date.updated', { when: fmtRelative(new Date(summary.dataUpdatedAt).toISOString()) }) : t('date.live')}

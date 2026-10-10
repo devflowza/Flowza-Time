@@ -1,5 +1,6 @@
 import { DateTime } from 'luxon';
 import type { DashboardSummary, DashboardTrendPoint } from '@flowza/contracts';
+import { ancestorsOf, type LocationTreeIndex } from '@/features/locations/tree';
 
 /**
  * Pure helpers behind the dashboard widgets. Everything here is deterministic and free of React so the arithmetic
@@ -60,6 +61,20 @@ export const firstName = (fullName: string | null | undefined): string => (fullN
 
 /** Same quote for everyone on a given day, a different one the next day. */
 export const quoteIndex = (isoDate: string, count: number): number => (count > 0 ? DateTime.fromISO(isoDate).ordinal % count : 0);
+
+/**
+ * The per-branch rows that stay under the dashboard's location filter (docs/locations.md): a region or a branch keeps the
+ * branches under it, a place keeps its branch. No filter — or a location the tree does not know — keeps every row.
+ */
+export function branchRowsInLocation<R extends { branchId: string }>(rows: readonly R[], tree: LocationTreeIndex, locationId: string | null): R[] {
+  const node = locationId ? tree.byId.get(locationId) : undefined;
+  if (!node) return [...rows];
+  if (node.role === 'place') return rows.filter((r) => r.branchId === node.branchId);
+  return rows.filter((r) => {
+    const branchNode = tree.branchNodeOf.get(r.branchId);
+    return !!branchNode && (branchNode.id === node.id || ancestorsOf(tree, branchNode.id).some((a) => a.id === node.id));
+  });
+}
 
 // ----- team widgets (HR portal Prompt 5) -----------------------------------------------------------------------------------------
 
