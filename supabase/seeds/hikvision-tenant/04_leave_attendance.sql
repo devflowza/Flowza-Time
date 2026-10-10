@@ -354,6 +354,14 @@ begin
   job_id := app.enqueue_job('processing', 'RECALCULATE_RANGE', org, jsonb_build_object('organizationId', org, 'requestId', req), 3, now() + interval '10 minutes', 'recalculate:' || req::text, 3, 3600, 'seed-hikvision');
   update public.attendance_recalculation_requests set queue_job_id = job_id where id = req;
 
+  -- The range job works one day at a time (~20 employee-days a minute on the hosted worker); the same days as parallel
+  -- RECOMPUTE_DAILY jobs (the recompute-queue contract: payload, priority 5, dedupe key recompute:<employee>:<date>) finish
+  -- the punch-less days (leave, weekly offs, absences, rotation off days) in minutes. Both are idempotent.
+  perform app.enqueue_job('processing', 'RECOMPUTE_DAILY', org, jsonb_build_object('organizationId', org, 'employeeId', x.id, 'date', g::date, 'reason', 'RECALCULATION'),
+                          5, now() + interval '2 minutes', 'recompute:' || x.id || ':' || g::date, 5, 120, 'seed-hikvision')
+  from public.employees x, generate_series(d_from, d_to, interval '1 day') g
+  where x.organization_id = org and x.deleted_at is null and x.employment_status = 'active' and g::date >= x.joining_date;
+
   perform app.enqueue_job('processing', 'BUILD_PERIOD_SUMMARY', org,
     jsonb_build_object('organizationId', org, 'periodStart', p.ps, 'periodEnd', p.pe, 'finalize', false, 'requestedBy', owner_id),
     4, now() + interval '30 minutes', 'period:' || org::text || ':all:' || p.ps || ':' || p.pe || ':build', 6, 600, 'seed-hikvision')
