@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
@@ -14,6 +14,8 @@ import { toastError } from '@/lib/toast';
 import { useCan } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { SearchBox } from '@/features/organization/components/search-box';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useSyncMutations } from '@/features/sync/api';
 import { toastJobAccepted } from '@/features/sync/job-toast';
 import { useDeviceSummary, useDevices, useGroupMutations, useGroupOptions, useProviders, type DeviceRow } from '../api';
@@ -68,9 +70,16 @@ function DevicesPanel() {
   const [groupId, setGroupId] = useState<string | null>(null);
   const filters = table.state.filters;
   // fleet counts come from the server (branch-scoped like the list) — a page of the list must never be aggregated client-side
-  const summary = useDeviceSummary({ branchId: filters['branchId'] });
+  const summary = useDeviceSummary({ branchId: filters['branchId'], locationId: filters['locationId'] });
   const hasFilters = Object.keys(filters).length > 0;
   const providerNames = useMemo(() => new Map((providers.data ?? []).map((p) => [p.key, p])), [providers.data]);
+  // locations (docs/locations.md): the column for organisations with places, the filter as soon as there is a hierarchy
+  const locations = useLocationTree();
+  const showPlaces = locations.hasPlaceLevels;
+  const showLocationFilter = locations.hasGroupLevels || locations.hasPlaceLevels;
+  const { labelOf } = locations;
+  // the place below the branch, in the UI language when the tree knows it (else as the API wrote it)
+  const placeOf = useCallback((d: DeviceRow) => labelOf(d.locationId, { fromBranch: true }) || d.locationName || '', [labelOf]);
 
   const counts = useMemo(() => {
     const by = summary.data?.byConnectionStatus ?? {};
@@ -82,6 +91,7 @@ function DevicesPanel() {
     { id: 'name', accessorKey: 'name', header: tc('common.name'), cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.name}</p><p className="truncate font-mono text-xs text-muted-foreground" dir="ltr">{row.original.code}</p></div> },
     { id: 'model', header: t('columns.model'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate">{row.original.manufacturer}</p><p className="truncate text-xs text-muted-foreground">{row.original.modelName ?? '—'}</p></div> },
     { id: 'branch', header: tc('common.branch'), cell: ({ row }) => row.original.branchName ?? '—' },
+    ...(showPlaces ? [{ id: 'location', header: t('columns.location'), enableSorting: false, cell: ({ row }) => placeOf(row.original) || '—' } satisfies ColumnDef<DeviceRow, unknown>] : []),
     { id: 'connectionStatus', accessorKey: 'connectionStatus', header: t('columns.connection'), cell: ({ row }) => <ConnectionBadge status={row.original.connectionStatus} lastHeartbeatAt={row.original.lastHeartbeatAt} /> },
     { id: 'status', accessorKey: 'status', header: tc('common.status'), cell: ({ row }) => <DeviceStatusBadge status={row.original.status} /> },
     { id: 'lastAttendanceSyncAt', header: t('columns.lastAttendanceSync'), enableSorting: false, cell: ({ row }) => <span className="text-xs tnum" title={row.original.lastAttendanceSyncAt ?? ''}>{fmtRelative(row.original.lastAttendanceSyncAt)}</span> },
@@ -89,7 +99,7 @@ function DevicesPanel() {
     { id: 'employees', header: t('columns.employees'), enableSorting: false, cell: ({ row }) => <span className="tnum">{fmtNumber(row.original.employeeCount ?? 0)}</span>, size: 90 },
     { id: 'provider', header: t('columns.provider'), cell: ({ row }) => { const p = providerNames.get(row.original.providerKey); return <div className="flex flex-wrap items-center gap-1"><span className="text-xs">{row.original.providerName ?? p?.name ?? row.original.providerKey}</span>{p ? <ProviderStatusBadge status={p.status} /> : null}</div>; } },
     { id: 'tags', header: t('fields.tags'), enableSorting: false, cell: ({ row }) => <TagChips tags={row.original.tags} /> },
-  ], [t, tc, providerNames]);
+  ], [t, tc, providerNames, showPlaces, placeOf]);
 
   const runBulk = () => {
     if (!bulk) return;
@@ -106,6 +116,13 @@ function DevicesPanel() {
     <>
       <SearchBox value={filters['search']} onChange={(v) => table.setFilter('search', v)} placeholder={t('list.searchPlaceholder')} />
       <Combobox value={filters['branchId'] ?? null} onChange={(v) => table.setFilter('branchId', v ?? undefined)} options={branches.options} loading={branches.isLoading} clearable placeholder={tc('common.branch')} className="h-8 w-44" />
+      {/* a region / branch → the terminals of its branches; a place → the terminals installed in it or below */}
+      {showLocationFilter || filters['locationId'] ? (
+        <>
+          <label htmlFor="devices-location-filter" className="sr-only">{t('list.locationFilter')}</label>
+          <LocationPicker id="devices-location-filter" value={filters['locationId'] ?? null} onChange={(v) => table.setFilter('locationId', v ?? undefined)} placeholder={t('columns.location')} className="h-8 w-44" />
+        </>
+      ) : null}
       <Select value={filters['status'] ?? ALL} onValueChange={(v) => table.setFilter('status', v === ALL ? undefined : v)}>
         <SelectTrigger className="h-8 w-36" aria-label={tc('common.status')}><SelectValue /></SelectTrigger>
         <SelectContent><SelectItem value={ALL}>{t('list.allStatuses')}</SelectItem>{DEVICE_STATUSES.map((s) => <SelectItem key={s} value={s}>{t(`deviceStatus.${s}`)}</SelectItem>)}</SelectContent>
@@ -158,7 +175,7 @@ function DevicesPanel() {
           )}
           renderCard={(d) => (
             <div className="flex items-center gap-3">
-              <div className="min-w-0 flex-1"><p className="truncate font-medium">{d.name}</p><p className="truncate text-xs text-muted-foreground">{d.code} · {d.branchName ?? '—'}</p></div>
+              <div className="min-w-0 flex-1"><p className="truncate font-medium">{d.name}</p><p className="truncate text-xs text-muted-foreground">{d.code} · {d.branchName ?? '—'}{placeOf(d) ? ` › ${placeOf(d)}` : ''}</p></div>
               <ConnectionBadge status={d.connectionStatus} lastHeartbeatAt={d.lastHeartbeatAt} showRelative={false} />
             </div>
           )}

@@ -5,28 +5,31 @@ import { useOrgId } from '@/features/me/use-me';
 
 export const dashboardKeys = {
   all: (orgId: string) => ['dashboard', orgId] as const,
-  summary: (orgId: string, date: string) => ['dashboard', orgId, 'summary', date] as const,
-  trends: (orgId: string, from: string, to: string) => ['dashboard', orgId, 'trends', from, to] as const,
+  summary: (orgId: string, date: string, locationId: string | null = null) => ['dashboard', orgId, 'summary', date, locationId] as const,
+  trends: (orgId: string, from: string, to: string, locationId: string | null = null) => ['dashboard', orgId, 'trends', from, to, locationId] as const,
   branches: (orgId: string, date: string) => ['dashboard', orgId, 'branches', date] as const,
 };
 
+/** `locationId` (docs/locations.md): a region / branch → its branches; a place → the employees working in it or below. Absent = everything in scope. */
+const withLocation = <Q extends Record<string, string>>(query: Q, locationId: string | null | undefined): Q & { locationId?: string } => (locationId ? { ...query, locationId } : query);
+
 /** Today's counts (or any past day's). Polled every minute — the dashboard is the screen people leave open. */
-export function useDashboardSummary(date: string) {
+export function useDashboardSummary(date: string, locationId: string | null = null) {
   const orgId = useOrgId();
   return useQuery({
-    queryKey: dashboardKeys.summary(orgId, date),
-    queryFn: async () => (await api.get<Envelope<DashboardSummary>>(`/orgs/${orgId}/dashboard/summary`, { date })).data,
+    queryKey: dashboardKeys.summary(orgId, date, locationId),
+    queryFn: async () => (await api.get<Envelope<DashboardSummary>>(`/orgs/${orgId}/dashboard/summary`, withLocation({ date }, locationId))).data,
     refetchInterval: 60_000,
     placeholderData: keepPreviousData,
   });
 }
 
 /** One point per day of the window, inclusive. The API caps the window at 92 days. */
-export function useDashboardTrends(from: string, to: string) {
+export function useDashboardTrends(from: string, to: string, locationId: string | null = null) {
   const orgId = useOrgId();
   return useQuery({
-    queryKey: dashboardKeys.trends(orgId, from, to),
-    queryFn: async () => (await api.get<Envelope<DashboardTrendPoint[]>>(`/orgs/${orgId}/dashboard/trends`, { from, to })).data,
+    queryKey: dashboardKeys.trends(orgId, from, to, locationId),
+    queryFn: async () => (await api.get<Envelope<DashboardTrendPoint[]>>(`/orgs/${orgId}/dashboard/trends`, withLocation({ from, to }, locationId))).data,
     staleTime: 60_000,
     refetchInterval: 5 * 60_000,
     placeholderData: keepPreviousData,

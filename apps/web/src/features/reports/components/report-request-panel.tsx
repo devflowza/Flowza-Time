@@ -21,6 +21,8 @@ import { toastJobQueued } from '@/features/employees/job-toast';
 import { useShiftOptions } from '@/features/schedule/api';
 import { useLeaveTypes } from '@/features/leave/api';
 import { EmployeeMultiSelect } from '@/features/attendance/components/employee-multi-select';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useReportMutations, useReportTypes, type ReportTypeDef } from '../api';
 import type { ShareSpec } from './share-report-dialog';
 import '../schedules-i18n';
@@ -48,6 +50,10 @@ function ReportForm({ def, onQueued, onShare }: { def: ReportTypeDef; onQueued: 
   const leaveTypes = useLeaveTypes();
   const params = useMemo(() => new Set([...def.requiredParameters, ...def.optionalParameters]), [def]);
   const required = useMemo(() => new Set(def.requiredParameters), [def]);
+  // the location filter (docs/locations.md) narrows every report that can be narrowed to a branch, once the organisation has
+  // regions above or places inside its branches: a region / branch → its branches, a place → the people working there
+  const locations = useLocationTree();
+  const showLocation = required.has('locationId') || ((params.has('locationId') || params.has('branchId')) && (locations.hasGroupLevels || locations.hasPlaceLevels));
   // Same contract schema the API validates, plus the catalogue's required parameters for this report type.
   const schema = useMemo(() => createReportRequestSchema.superRefine((v, ctx) => {
     for (const p of def.requiredParameters) if (isEmpty((v.parameters as Record<string, unknown> | undefined)?.[p])) ctx.addIssue({ code: 'custom', path: ['parameters', p], message: t('request.required') });
@@ -98,6 +104,9 @@ function ReportForm({ def, onQueued, onShare }: { def: ReportTypeDef; onQueued: 
         </FormField> : null}
         {params.has('branchId') ? <FormField label={tc('common.branch')} htmlFor="rp-branch" required={required.has('branchId')} optional={!required.has('branchId')} error={pErr?.['branchId']?.message}>
           <Controller control={control} name="parameters.branchId" render={({ field }) => <Combobox id="rp-branch" value={field.value ?? null} onChange={(v) => { field.onChange(v ?? undefined); form.setValue('parameters.departmentId', undefined); }} options={branches.options} loading={branches.isLoading} clearable placeholder={t('request.allBranches')} aria-invalid={!!pErr?.['branchId']} />} />
+        </FormField> : null}
+        {showLocation ? <FormField label={t('request.location')} htmlFor="rp-location" required={required.has('locationId')} optional={!required.has('locationId')} hint={t('request.locationHint')} error={pErr?.['locationId']?.message}>
+          <Controller control={control} name="parameters.locationId" render={({ field }) => <LocationPicker id="rp-location" value={field.value ?? null} onChange={(v) => field.onChange(v ?? undefined)} placeholder={t('request.allLocations')} aria-invalid={!!pErr?.['locationId']} />} />
         </FormField> : null}
         {params.has('departmentId') ? <FormField label={tc('common.department')} htmlFor="rp-dept" optional error={pErr?.['departmentId']?.message}>
           <Controller control={control} name="parameters.departmentId" render={({ field }) => <Combobox id="rp-dept" value={field.value ?? null} onChange={(v) => field.onChange(v ?? undefined)} options={departments.options} loading={departments.isLoading} clearable placeholder={t('request.allDepartments')} />} />

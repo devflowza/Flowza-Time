@@ -8,18 +8,33 @@ import { useDepartmentOptions, useDesignationOptions } from '@/features/organiza
 import { BranchPicker } from '@/features/organization/components/branch-picker';
 import { blankToUndefined } from '@/features/organization/form-utils';
 import { WeeklyOffToggles } from '@/features/organization/components/weekly-off-toggles';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useEmployeeOptions } from '../api';
 
 /** Form values are the *input* side of the contract schema (defaults not yet applied). Shared by create and edit. */
 export type EmployeeFormValues = z.input<typeof createEmployeeSchema> & { exitDate?: string | null };
+
+/** A work location is a place (site, floor, zone…) of the employee's branch (docs/locations.md). */
+const PLACE_ROLES = ['place'] as const;
 
 export function EmployeeFormFields({ form, mode, excludeEmployeeId }: { form: UseFormReturn<EmployeeFormValues, unknown, unknown>; mode: 'create' | 'edit'; excludeEmployeeId?: string }) {
   const { t } = useTranslation('employees');
   const { t: tc } = useTranslation();
   const { register, control, formState: { errors } } = form;
   const branchId = useWatch({ control, name: 'branchId' });
+  const workLocationId = useWatch({ control, name: 'workLocationId' });
   const managerId = useWatch({ control, name: 'managerEmployeeId' });
   const secondaryManagerId = useWatch({ control, name: 'secondaryManagerEmployeeId' });
+  // the work location only exists for organisations whose branches hold places (sites, floors, zones…)
+  const locations = useLocationTree();
+  const savedWorkLocation = form.formState.defaultValues?.workLocationId ?? null;
+  // an archived place stays readable on the record that still points at it (it is not in the active tree)
+  const archivedWorkLocation = !!savedWorkLocation && locations.byId.size > 0 && !locations.byId.has(savedWorkLocation);
+  const workLocationPath = locations.labelOf(workLocationId, { fromBranch: true });
+  // Cleared = null when editing: a Controller set to `undefined` falls back to (and shows) the saved default; the PATCH
+  // diff turns it into null anyway. A new record just leaves the field out.
+  const noWorkLocation = mode === 'edit' ? null : undefined;
   const departments = useDepartmentOptions(branchId || undefined);
   const designations = useDesignationOptions();
   const managers = useEmployeeOptions();
@@ -102,8 +117,22 @@ export function EmployeeFormFields({ form, mode, excludeEmployeeId }: { form: Us
             )} />
           </FormField>
           <FormField label={tc('common.branch')} htmlFor="emp-branch" required error={errors.branchId?.message}>
-            <Controller control={control} name="branchId" render={({ field }) => <BranchPicker id="emp-branch" value={field.value} onChange={(v) => field.onChange(v ?? '')} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId} />} />
+            <Controller control={control} name="branchId" render={({ field }) => (
+              <BranchPicker id="emp-branch" value={field.value} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId}
+                onChange={(v) => {
+                  // a place belongs to one branch: another branch clears the work location (the edit PATCH sends null)
+                  if ((v ?? '') !== field.value && form.getValues('workLocationId')) form.setValue('workLocationId', noWorkLocation, { shouldDirty: true });
+                  field.onChange(v ?? '');
+                }} />
+            )} />
           </FormField>
+          {locations.hasPlaceLevels || savedWorkLocation ? (
+            <FormField label={t('fields.workLocation')} htmlFor="emp-work-location" optional error={errors.workLocationId?.message} hint={workLocationPath || t('fields.workLocationHint')}>
+              <Controller control={control} name="workLocationId" render={({ field }) => (
+                <LocationPicker id="emp-work-location" value={field.value ?? null} roles={PLACE_ROLES} branchId={branchId || null} includeArchived={archivedWorkLocation} disabled={field.disabled} onChange={(v) => field.onChange(v ?? noWorkLocation)} aria-invalid={!!errors.workLocationId} />
+              )} />
+            </FormField>
+          ) : null}
           <FormField label={tc('common.department')} htmlFor="emp-dept" optional error={errors.departmentId?.message}>
             <Controller control={control} name="departmentId" render={({ field }) => <Combobox id="emp-dept" value={field.value} onChange={(v) => field.onChange(v ?? undefined)} options={departments.options} loading={departments.isLoading} clearable placeholder={tc('common.none')} />} />
           </FormField>

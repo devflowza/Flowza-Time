@@ -7,6 +7,7 @@ import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, ConfirmDialog, Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle, ErrorState, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { toastJobAccepted } from '@/features/sync/job-toast';
 import { useDevice, useDeviceMutations, type DeviceAction } from '../api';
 import { ConnectionBadge, DeviceStatusBadge, IntegrationBadge } from '../components/device-badges';
@@ -40,6 +41,10 @@ export default function DeviceDetailPage() {
   const d = q.data;
   const isPush = d?.integrationType === 'DEVICE_PUSH';
   const tabs = TABS.filter((tb) => tb !== 'commands' || isPush);
+  // where the terminal is installed: "Muscat › Site A › Floor 2" (the place in the UI language when the tree knows it)
+  const locations = useLocationTree();
+  const place = d ? locations.labelOf(d.locationId, { fromBranch: true }) || d.locationName || '' : '';
+  const where = d ? [d.branchName, place].filter(Boolean).join(' › ') : '';
 
   const run = (action: DeviceAction, kind: DeviceActionKind) => {
     setBusy(kind);
@@ -79,7 +84,7 @@ export default function DeviceDetailPage() {
             <PageHeader
               breadcrumbs={<Link to="/devices" className="inline-flex items-center gap-1 hover:underline"><ArrowLeft className="size-3 rtl:rotate-180" /> {t('title')}</Link>}
               title={d.name}
-              description={[d.code, d.branchName, d.providerName ?? d.providerKey, d.modelName].filter(Boolean).join(' · ')}
+              description={[d.code, where, d.providerName ?? d.providerKey, d.modelName].filter(Boolean).join(' · ')}
               actions={<DeviceActions device={d} busy={busy} onAction={onAction} />}
             />
             <div className="mb-4 flex flex-wrap items-center gap-2">
