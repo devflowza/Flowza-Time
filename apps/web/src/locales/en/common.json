@@ -1,11 +1,11 @@
 {
-  "app": { "name": "FlowZa Time", "tagline": "Attendance & workforce time, made explainable." },
+  "app": { "name": "FlowZa Time", "tagline": "Attendance & workforce time, made explainable.", "skipToContent": "Skip to content", "heroBody": "Multi-branch attendance, device synchronisation and payroll-ready summaries — built for the GCC.", "heroPoints": { "devices": "Every biometric terminal, synced as punches happen", "rules": "Shift rules and overtime, explained line by line", "payroll": "Payroll-ready summaries in English and Arabic" } },
   "nav": {
     "dashboard": "Dashboard", "employees": "Employees", "attendance": "Attendance", "devices": "Devices", "sync": "Sync jobs",
     "reconciliation": "Reconciliation", "shifts": "Shifts", "holidays": "Holidays", "leave": "Leave", "corrections": "Corrections",
     "approvals": "Approvals", "reports": "Reports", "payroll": "Payroll", "structure": "Organisation", "branches": "Branches",
     "departments": "Departments", "users": "Users & roles", "settings": "Settings", "audit": "Audit log", "emailLog": "E-mail log", "notifications": "Notifications",
-    "platform": "Platform admin", "help": "Help", "signOut": "Sign out", "collapse": "Collapse sidebar", "expand": "Expand sidebar", "team": "Team overview",
+    "platform": "Platform admin", "help": "Help", "signOut": "Sign out", "collapse": "Collapse sidebar", "expand": "Expand sidebar", "navigation": "Navigation", "openNavigation": "Open navigation", "team": "Team overview",
     "attendanceSummary": "Attendance summary", "unmatchedPunches": "Unmatched punches", "pinMapping": "PIN mapping", "punchLog": "Punch log",
     "sections": { "workforce": "Workforce", "devices": "Devices & sync", "time": "Time", "admin": "Administration", "team": "My team" }
   },

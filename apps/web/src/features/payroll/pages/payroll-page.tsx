@@ -83,7 +83,7 @@ export default function PayrollPage() {
         <Combobox value={branchId ?? null} onChange={(v) => setParam('branchId', v ?? undefined)} options={branches.options} loading={branches.isLoading} clearable placeholder={t('periods.allBranches')} className="h-8 w-44" />
       </div>
 
-      <section className="rounded-lg border bg-card shadow-card">
+      <section className="rounded-xl border bg-card shadow-card">
         {periods.isError ? <div className="p-4"><ErrorState error={periods.error} onRetry={() => void periods.refetch()} /></div>
           : periods.isLoading && !periods.data ? <TableSkeleton cols={5} rows={6} />
           : !periods.data || periods.data.length === 0 ? <div className="p-4"><EmptyState icon={Wallet} title={t('periods.empty')} /></div>

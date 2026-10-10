@@ -37,7 +37,7 @@ export function DocumentsTab({ employeeId }: { employeeId: string }) {
       {q.isLoading ? <Skeleton className="h-40 w-full" /> : q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : !q.data || q.data.length === 0 ? (
         <EmptyState icon={FileText} title={t('documents.empty')} description={t('documents.emptyHint')} action={canEdit ? <Button size="sm" onClick={() => setAdding(true)}><Plus /> {t('documents.add')}</Button> : undefined} />
       ) : (
-        <div className="rounded-lg border bg-card shadow-card">
+        <div className="rounded-xl border bg-card shadow-card">
           <Table>
             <TableHeader><TableRow><TableHead>{t('documents.type')}</TableHead><TableHead>{t('documents.number')}</TableHead><TableHead>{t('documents.country')}</TableHead><TableHead>{t('documents.issued')}</TableHead><TableHead>{t('documents.expires')}</TableHead><TableHead>{t('documents.notes')}</TableHead><TableHead /></TableRow></TableHeader>
             <TableBody>

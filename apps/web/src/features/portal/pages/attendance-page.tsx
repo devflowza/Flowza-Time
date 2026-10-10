@@ -36,7 +36,7 @@ function DailyLog({ days, onSelect }: { days: SelfDayDto[]; onSelect: (d: SelfDa
   if (rows.length === 0) return <EmptyState icon={CalendarX2} title={t('attendance.emptyMonth')} description={t('attendance.emptyMonthHint')} />;
   return (
     <>
-      <div className="hidden rounded-lg border bg-card shadow-card md:block">
+      <div className="hidden rounded-xl border bg-card shadow-card md:block">
         <Table>
           <TableHeader><TableRow>{(['date', 'status', 'shift', 'in', 'out', 'worked', 'late', 'overtime', 'flags'] as const).map((c) => <TableHead key={c}>{t(`attendance.columns.${c}`)}</TableHead>)}</TableRow></TableHeader>
           <TableBody>
@@ -92,7 +92,7 @@ function Last30Days({ today, onSelect, onReason, rules }: { today: string; onSel
   if (current.isLoading || previous.isLoading) return <TableSkeleton cols={8} rows={6} />;
   if (days.length === 0) return <EmptyState icon={CalendarX2} title={t('attendance.emptyMonth')} description={t('attendance.emptyMonthHint')} />;
   return (
-    <div className="rounded-lg border bg-card shadow-card" data-testid="last-30-days">
+    <div className="rounded-xl border bg-card shadow-card" data-testid="last-30-days">
       <div className="overflow-x-auto">
         <Table>
           <TableHeader><TableRow>{(['date', 'status', 'in', 'out', 'worked', 'flags'] as const).map((c) => <TableHead key={c}>{t(`attendance.columns.${c}`)}</TableHead>)}<TableHead>{tpa('attendance.reasonColumn')}</TableHead></TableRow></TableHeader>
@@ -142,7 +142,7 @@ function CorrectionsTab({ timezone }: { timezone: string }) {
   const rows = q.data?.data ?? [];
   if (rows.length === 0) return <EmptyState icon={ClipboardList} title={t('attendance.corrections.empty')} description={t('attendance.corrections.emptyHint')} />;
   return (
-    <div className="rounded-lg border bg-card shadow-card">
+    <div className="rounded-xl border bg-card shadow-card">
       <div className="overflow-x-auto">
         <Table>
           <TableHeader><TableRow>{(['date', 'type', 'change', 'reason', 'status', 'submitted'] as const).map((c) => <TableHead key={c}>{t(`attendance.corrections.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>

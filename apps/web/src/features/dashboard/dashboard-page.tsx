@@ -67,7 +67,7 @@ export default function DashboardPage() {
     <div className="page-container">
       <div className="mb-5 flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
         <div className="min-w-0">
-          <h1 className="truncate text-2xl font-semibold tracking-tight sm:text-[28px]">
+          <h1 className="truncate text-2xl font-semibold sm:text-[28px]">
             {heading}{settings.showGreeting ? <span className="ms-2" aria-hidden>👋</span> : null}
           </h1>
           <p className="mt-1 text-sm text-muted-foreground">{subtitle}</p>
@@ -77,7 +77,7 @@ export default function DashboardPage() {
             <span className={cn('size-2 rounded-full', summary.isError ? 'bg-red-500' : 'bg-emerald-500')} aria-hidden />
             {summary.isFetching ? t('date.loading') : summary.dataUpdatedAt ? t('date.updated', { when: fmtRelative(new Date(summary.dataUpdatedAt).toISOString()) }) : t('date.live')}
           </span>
-          <div className="inline-flex items-center rounded-md border bg-card shadow-card">
+          <div className="inline-flex items-center rounded-lg border bg-card shadow-xs">
             <Button variant="ghost" size="icon" aria-label={t('date.previous')} onClick={() => setDate(shiftDate(date, -1))}><ChevronLeft className="rtl:rotate-180" /></Button>
             <span className="tnum inline-flex items-center gap-2 px-1 text-sm font-medium"><CalendarDays className="size-4 text-muted-foreground" aria-hidden />{fmtDate(date, 'EEE, dd MMM yyyy')}</span>
             <Button variant="ghost" size="icon" aria-label={t('date.next')} disabled={isToday} onClick={() => setDate(shiftDate(date, 1))}><ChevronRight className="rtl:rotate-180" /></Button>

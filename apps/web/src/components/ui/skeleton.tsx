@@ -1,6 +1,6 @@
 import { cn } from '@/lib/utils';
 export function Skeleton({ className, ...props }: React.HTMLAttributes<HTMLDivElement>) {
-  return <div className={cn('animate-pulse rounded-md bg-muted', className)} aria-hidden {...props} />;
+  return <div className={cn('animate-pulse rounded-md bg-muted-strong/70', className)} aria-hidden {...props} />;
 }
 export function TableSkeleton({ rows = 8, cols = 5 }: { rows?: number; cols?: number }) {
   return (

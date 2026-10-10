@@ -15,7 +15,7 @@ export function SwapsTable({ rows }: { rows: ShiftSwapDto[] }) {
   const { cancel } = useSwapMutations();
   const [withdrawing, setWithdrawing] = useState<ShiftSwapDto | null>(null);
   return (
-    <div className="rounded-lg border bg-card shadow-card">
+    <div className="rounded-xl border bg-card shadow-card">
       <div className="overflow-x-auto">
         <Table>
           <TableHeader><TableRow>{(['date', 'with', 'shifts', 'status', 'decision'] as const).map((c) => <TableHead key={c}>{t(`swap.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>

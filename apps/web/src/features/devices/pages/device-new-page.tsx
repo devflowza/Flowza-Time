@@ -23,6 +23,7 @@ import { normalizeProviderConfig, validateProviderConfig, type ConfigValues } fr
 import { PushCredentialsDialog } from '../components/push-credentials-dialog';
 import { TestConnectionResult } from '../components/test-connection-result';
 import { TagsInput } from '../components/tags-input';
+import { scrollPageToTop } from '@/lib/scroll';
 
 /**
  * Four steps, not six. Provider and model are one decision about the same object ("what am I connecting?"), and the
@@ -364,7 +365,7 @@ export default function DeviceNewPage() {
     setStep(s);
     setFurthest((f) => Math.max(f, STEPS.indexOf(s)));
     stepped.current = true;
-    window.scrollTo({ top: 0 });
+    scrollPageToTop();
   }, []);
 
   /**
@@ -384,7 +385,7 @@ export default function DeviceNewPage() {
         setFurthest(STEPS.indexOf('details'));
         setStep(to);
         stepped.current = true;
-        window.scrollTo({ top: 0 });
+        scrollPageToTop();
       },
     )();
   }, [detailsForm, go]);
