@@ -15,7 +15,6 @@ import { useEmployeeGroupOptions } from '@/features/policies/api';
 import { LocationPicker } from '@/features/locations/components/location-picker';
 import { useLocationTree, type LocationTree } from '@/features/locations/use-location-tree';
 import { useRuleSetMutations, useRuleSets, useShiftOptions } from '../../api';
-import { listFilterOfLocation } from '../../policy-location';
 import type { RuleSetDto } from '../../types';
 import { RuleSetDialog } from '../rule-set-dialog';
 import { WhichPolicyCard } from '../which-policy-card';
@@ -56,17 +55,18 @@ export function RuleSetsTab() {
   const enterprise = useModuleEnabled('attendance_policies');
   const canManage = can('attendance.manage_rules');
   const branches = useBranchOptions();
-  // Enterprise organisations with a location tree filter the list by location (a branch node = the classic branch filter); the
-  // chips read archived locations too (an expired policy may name one)
+  // Enterprise organisations with a location tree filter the list by the policies' own location — any node, like the other scope
+  // filters an exact match (a branch's node: the policies of that branch itself); the chips read archived locations too (an
+  // expired policy may name one)
   const tree = useLocationTree({ enabled: enterprise, includeArchived: true });
   const byLocation = enterprise && (tree.hasGroupLevels || tree.hasPlaceLevels);
   const [branchId, setBranchId] = useState<string | null>(null);
   const [locationId, setLocationId] = useState<string | null>(null);
   const [includeExpired, setIncludeExpired] = useState(false);
   const query = useMemo(() => ({
-    ...(byLocation ? listFilterOfLocation(locationId ? tree.byId.get(locationId) : null) : { branchId: branchId ?? undefined }),
+    ...(byLocation ? { locationId: locationId ?? undefined } : { branchId: branchId ?? undefined }),
     includeExpired: includeExpired ? 'true' : 'false',
-  }), [byLocation, locationId, tree.byId, branchId, includeExpired]);
+  }), [byLocation, locationId, branchId, includeExpired]);
   const q = useRuleSets(query);
   const { remove } = useRuleSetMutations();
   const [dialog, setDialog] = useState<{ open: boolean; ruleSet: RuleSetDto | null }>({ open: false, ruleSet: null });

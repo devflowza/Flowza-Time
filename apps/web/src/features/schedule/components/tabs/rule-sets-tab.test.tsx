@@ -10,7 +10,7 @@ import { grantAll, mockGet, page, renderWithProviders, resetApiMock, testState }
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/schedule.json';
 import ar from '@/locales/ar/schedule.json';
-import { BR1, BRANCHES, N_SA, locationRoutes } from '@/features/scheduling/test-locations';
+import { BR1, BRANCHES, N_B1, N_SA, locationRoutes } from '@/features/scheduling/test-locations';
 import { RuleSetsTab } from './rule-sets-tab';
 
 registerNamespace('schedule', en, ar);
@@ -69,17 +69,18 @@ describe('Rules tab — policies by location (docs/locations.md §3)', () => {
     expect(screen.getByRole('columnheader', { name: 'Specificity' }).getAttribute('title')).toMatch(/deeper one wins/);
   });
 
-  it('filters by location: a place by its id, a branch node by its branch', async () => {
+  it('filters by the policies\' own location: any node of the tree, by its id', async () => {
     renderWithProviders(<RuleSetsTab />);
     const filter = await screen.findByRole('combobox', { name: 'Location' });
     expect(filter).toHaveTextContent('Any location');
     fireEvent.click(filter);
     fireEvent.click(await screen.findByRole('option', { name: /^Site A/ }));
     await waitFor(() => expect(lastQuery).toMatchObject({ locationId: N_SA }));
-    expect(lastQuery).not.toHaveProperty('branchId');
+    expect(lastQuery?.['branchId']).toBeUndefined();
+    // a branch's node too (the API matches the branch's own policies)
     fireEvent.click(screen.getByRole('combobox', { name: 'Location' }));
     fireEvent.click(await screen.findByRole('option', { name: /^Branch 1/ }));
-    await waitFor(() => expect(lastQuery).toMatchObject({ branchId: BR1 }));
-    expect(lastQuery).not.toHaveProperty('locationId');
+    await waitFor(() => expect(lastQuery).toMatchObject({ locationId: N_B1 }));
+    expect(lastQuery?.['branchId']).toBeUndefined();
   });
 });

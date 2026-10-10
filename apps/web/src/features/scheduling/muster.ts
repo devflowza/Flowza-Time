@@ -57,13 +57,13 @@ export function rememberLocation(orgId: string, userId: string, locationId: stri
   try { window.localStorage.setItem(storageKey(orgId, userId), locationId); } catch { /* the page works without it */ }
 }
 
-/** The first branch node in tree order (depth-first, siblings by name), stopping as soon as it is found. */
+/** The first active branch node in tree order (depth-first, siblings by name), stopping as soon as it is found. */
 function firstBranch(children: LocationTreeIndex['children']): string | null {
   const stack = [...(children.get(null) ?? [])].reverse();
   const seen = new Set<string>();
   while (stack.length) {
     const n = stack.pop()!;
-    if (seen.has(n.id)) continue;
+    if (seen.has(n.id) || n.status === 'archived') continue;
     seen.add(n.id);
     if (n.role === 'branch') return n.id;
     stack.push(...[...(children.get(n.id) ?? [])].reverse());
@@ -72,11 +72,13 @@ function firstBranch(children: LocationTreeIndex['children']): string | null {
 }
 
 /**
- * The location the page shows: the one in the address (a link or the back button), else the remembered one while it still
- * exists, else the first branch of the tree, else its first node (null = nothing to show yet).
+ * The location the page shows: the one in the address (a link, a drill-down or the back button — an archived child the API
+ * still attributes people to included), else the remembered one while it exists and is not archived, else the first active
+ * branch of the tree, else its first active node (null = nothing to show yet).
  */
 export function musterLocation(index: Pick<LocationTreeIndex, 'byId' | 'children' | 'nodes'>, fromUrl: string | null, remembered: string | null): string | null {
   if (fromUrl && UUID.test(fromUrl)) return fromUrl;
-  if (remembered && index.byId.has(remembered)) return remembered;
-  return firstBranch(index.children) ?? index.nodes[0]?.id ?? null;
+  const kept = remembered ? index.byId.get(remembered) : undefined;
+  if (kept && kept.status !== 'archived') return kept.id;
+  return firstBranch(index.children) ?? index.nodes.find((n) => n.status !== 'archived')?.id ?? null;
 }

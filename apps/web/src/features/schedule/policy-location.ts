@@ -25,16 +25,6 @@ export function locationOfScope(index: Pick<LocationTreeIndex, 'branchNodeOf'>, 
   return null;
 }
 
-/**
- * The list filter a picked location becomes: a branch node filters by its branch (`branchId`, the classic branch filter), a
- * group node or a place by the location (`locationId`).
- */
-export function listFilterOfLocation(node: Pick<LocationDto, 'id' | 'role' | 'branchId'> | null | undefined): { branchId?: string; locationId?: string } {
-  if (!node) return {};
-  if (node.role === 'branch' && node.branchId) return { branchId: node.branchId };
-  return { locationId: node.id };
-}
-
 /** The names of a location chain (root first), skipping the ids the caller cannot see. */
 export function chainLabel(index: Pick<LocationTreeIndex, 'byId'>, ids: readonly string[] | null | undefined, name: (n: LocationDto) => string, separator = ' › '): string {
   return (ids ?? []).flatMap((id) => { const n = index.byId.get(id); return n ? [name(n)] : []; }).join(separator);

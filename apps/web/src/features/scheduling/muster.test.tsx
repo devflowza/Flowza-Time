@@ -199,5 +199,9 @@ describe('muster helpers', () => {
     expect(musterLocation(index, N_HQ, N_SA)).toBe(N_HQ);
     expect(musterLocation(index, 'not-a-location', null)).toBe(N_B1);
     expect(musterLocation(indexLocations([], []), null, null)).toBeNull();
+    // an archived branch is never the default, and an archived remembered location is forgotten
+    const archived = indexLocations(NODES.map((n) => (n.id === N_B1 || n.id === N_SB ? { ...n, status: 'archived' as const } : n)), LEVELS);
+    expect(musterLocation(archived, null, null)).toBe(N_B2);
+    expect(musterLocation(archived, null, N_SB)).toBe(N_B2);
   });
 });

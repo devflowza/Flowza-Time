@@ -43,7 +43,8 @@ export default function MusterPage() {
   const org = useActiveMembership()?.organization;
   const can = useCan();
   const modulesOn = useModulesEnabled();
-  const tree = useLocationTree();
+  // archived nodes too: the API lists an archived child while it still attributes people to it, and its name and path must read
+  const tree = useLocationTree({ includeArchived: true });
   const branches = useBranchOptions(true);
   const [params, setParams] = useSearchParams();
   const remembered = useMemo(() => readRememberedLocation(orgId, userId), [orgId, userId]);
@@ -105,7 +106,7 @@ export default function MusterPage() {
         <Card>
           <CardContent className="space-y-3 p-4">
             <div className="flex flex-wrap items-end gap-3">
-              <div className="w-full space-y-1 sm:w-72"><Label htmlFor="muster-location">{t('muster.location')}</Label><LocationPicker id="muster-location" value={locationId} onChange={(id) => go(id)} clearable={false} placeholder={t('muster.pickLocation')} /></div>
+              <div className="w-full space-y-1 sm:w-72"><Label htmlFor="muster-location">{t('muster.location')}</Label><LocationPicker id="muster-location" value={locationId} onChange={(id) => go(id)} clearable={false} includeArchived={node?.status === 'archived'} placeholder={t('muster.pickLocation')} /></div>
               <div className="space-y-1"><Label htmlFor="muster-date">{t('muster.date')}</Label><Input id="muster-date" type="date" dir="ltr" className="w-[160px]" value={date ?? data?.date ?? todayIso(locationTz)} onChange={(e) => setDate(ISO_DATE.test(e.target.value) ? e.target.value : null)} /></div>
               {date ? <Button variant="ghost" size="sm" onClick={() => setDate(null)}>{tc('common.today')}</Button> : null}
             </div>
