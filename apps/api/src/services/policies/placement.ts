@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
 import { DEFAULT_POLICY_SECTIONS, policySectionsOf, resolveAttendanceSettings, shiftBreakSchema, type AttendancePolicySections, type ShiftBreak } from '@flowza/contracts';
-import { additionalShiftOn, loadAdditionalShiftAssignments, loadEmployeeWorkingCalendars, loadPolicyRows, toPolicyCandidate, type RuleSetRow, type Trx } from '@flowza/database';
+import { additionalShiftOn, loadAdditionalShiftAssignments, loadEmployeeWorkingCalendars, loadLocationChains, loadPolicyRows, toPolicyCandidate, type RuleSetRow, type Trx } from '@flowza/database';
 import { resolvePolicy, scheduledBreakMinutes, type PolicyScope } from '@flowza/domain';
 import { timeToMinutes } from '@flowza/shared';
 import { jsonArray, jsonObject } from '../../lib/mappers.js';
@@ -12,7 +12,8 @@ import { jsonArray, jsonObject } from '../../lib/mappers.js';
  *   placement   branch / department from employment history (the per-date working calendar), the primary shift from
  *               `resolveShift` with the organisation's default shift where nothing resolves (not on a rotation off day), and
  *               the additional (double) shift when there is no primary one
- *   scope       + the branch's country and the employee's group on the date
+ *   scope       + the branch's country, the employee's group on the date and their location chain (the work location's path
+ *               when it belongs to the placement's branch, else the branch's node — docs/locations.md §3)
  *   policy      the most specific matching policy (packages/domain resolvePolicy)
  *
  * The callers authorise the employees first (the page of employees is read under the caller's RLS and branch scope) and then
@@ -67,15 +68,20 @@ export async function policiesOn(trx: Trx, orgId: string, employeeIds: readonly 
   const out = new Map<string, EmployeePolicy>();
   if (placements.size === 0) return out;
   const branchIds = [...new Set([...placements.values()].map((p) => p.branchId))];
-  const [branches, groups, rows] = await Promise.all([
+  const [branches, groups, chains, rows] = await Promise.all([
     trx.selectFrom('branches').select(['id', 'countryCode']).where('organizationId', '=', orgId).where('id', 'in', branchIds).execute(),
     groupsOn(trx, orgId, [...placements.keys()], date),
+    loadLocationChains(trx, orgId, [...placements].map(([employeeId, p]) => ({ employeeId, branchId: p.branchId }))),
     loadPolicyRows(trx, orgId, date),
   ]);
   const countries = new Map(branches.map((b) => [b.id, b.countryCode?.trim() || null]));
   const candidates = rows.map(toPolicyCandidate);
   for (const [employeeId, p] of placements) {
-    const scope: PolicyScope = { countryCode: countries.get(p.branchId) ?? null, branchId: p.branchId, departmentId: p.departmentId, employeeGroupId: groups.get(employeeId) ?? null, shiftId: p.shiftId };
+    const chain = chains.get(employeeId);
+    const scope: PolicyScope = {
+      countryCode: countries.get(p.branchId) ?? null, branchId: p.branchId, departmentId: p.departmentId, employeeGroupId: groups.get(employeeId) ?? null, shiftId: p.shiftId,
+      ...(chain ? { locationIds: chain } : {}),
+    };
     const winner = resolvePolicy(candidates, date, scope);
     out.set(employeeId, { scope, row: winner?.row ?? null, sections: winner ? policySectionsOf(winner.row.policy) : DEFAULT_POLICY_SECTIONS });
   }
