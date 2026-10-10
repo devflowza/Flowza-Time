@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Building2, CalendarClock, Globe2, Layers, Pencil, Plus, ScrollText, Trash2, Users } from 'lucide-react';
+import { Building2, CalendarClock, Globe2, Layers, MapPin, Pencil, Plus, ScrollText, Trash2, Users } from 'lucide-react';
 import { countryRulePack } from '@flowza/contracts';
 import { Badge, Button, ConfirmDialog, EmptyState, ErrorState, Switch, Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableSkeleton } from '@/components/ui';
 import { Combobox } from '@/components/forms';
@@ -12,13 +12,20 @@ import { useBranchOptions, useDepartmentOptions } from '@/features/organization/
 import { RowActions } from '@/features/organization/components/row-actions';
 import { toastJobQueued } from '@/features/employees/job-toast';
 import { useEmployeeGroupOptions } from '@/features/policies/api';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree, type LocationTree } from '@/features/locations/use-location-tree';
 import { useRuleSetMutations, useRuleSets, useShiftOptions } from '../../api';
+import { listFilterOfLocation } from '../../policy-location';
 import type { RuleSetDto } from '../../types';
 import { RuleSetDialog } from '../rule-set-dialog';
 import { WhichPolicyCard } from '../which-policy-card';
 
-/** The scope of a policy as chips: country, branch, department, employee group, shift (none = organisation-wide). */
-export function PolicyScopeChips({ policy }: { policy: Pick<RuleSetDto, 'countryCode' | 'branchId' | 'departmentId' | 'employeeGroupId' | 'shiftId'> }) {
+/**
+ * The scope of a policy as chips: country, location / branch, department, employee group, shift (none = organisation-wide).
+ * The where reads as a path of the location tree when the organisation has one ("Muscat HQ › Branch 1 › Site A"); `tree` is
+ * the list's indexed tree (built once for every row).
+ */
+export function PolicyScopeChips({ policy, tree }: { policy: Pick<RuleSetDto, 'countryCode' | 'branchId' | 'departmentId' | 'employeeGroupId' | 'shiftId' | 'locationId'>; tree?: LocationTree }) {
   const { t, i18n } = useTranslation('schedule');
   const enterprise = useModuleEnabled('attendance_policies');
   const branches = useBranchOptions(true);
@@ -27,7 +34,12 @@ export function PolicyScopeChips({ policy }: { policy: Pick<RuleSetDto, 'country
   const shifts = useShiftOptions(true);
   const chips: Array<{ key: string; icon: React.ReactNode; label: string; title: string }> = [];
   if (policy.countryCode) { const p = countryRulePack(policy.countryCode); chips.push({ key: 'country', icon: <Globe2 className="size-3" />, label: p ? (i18n.language === 'ar' ? p.nameAr : p.name) : policy.countryCode, title: t('policyEditor.scope.country') }); }
-  if (policy.branchId) chips.push({ key: 'branch', icon: <Building2 className="size-3" />, label: branches.byId.get(policy.branchId)?.name ?? policy.branchId.slice(0, 8), title: t('policyList.branch') });
+  // a group location or a place (its branch is part of its path) — else the branch, as its node's path below the groups
+  if (policy.locationId) chips.push({ key: 'location', icon: <MapPin className="size-3" />, label: tree?.labelOf(policy.locationId) || policy.locationId.slice(0, 8), title: t('policyList.location') });
+  else if (policy.branchId) {
+    const node = tree?.hasGroupLevels ? tree.branchNodeOf.get(policy.branchId) : undefined;
+    chips.push({ key: 'branch', icon: <Building2 className="size-3" />, label: (node ? tree?.labelOf(node.id) : '') || (branches.byId.get(policy.branchId)?.name ?? policy.branchId.slice(0, 8)), title: t('policyList.branch') });
+  }
   if (policy.departmentId) chips.push({ key: 'department', icon: <Layers className="size-3" />, label: departments.byId.get(policy.departmentId)?.name ?? policy.departmentId.slice(0, 8), title: t('policyEditor.scope.department') });
   if (policy.employeeGroupId) chips.push({ key: 'group', icon: <Users className="size-3" />, label: groups.byId.get(policy.employeeGroupId)?.name ?? policy.employeeGroupId.slice(0, 8), title: t('policyEditor.scope.group') });
   if (policy.shiftId) chips.push({ key: 'shift', icon: <CalendarClock className="size-3" />, label: shifts.byId.get(policy.shiftId)?.name ?? policy.shiftId.slice(0, 8), title: t('policyEditor.scope.shift') });
@@ -44,9 +56,17 @@ export function RuleSetsTab() {
   const enterprise = useModuleEnabled('attendance_policies');
   const canManage = can('attendance.manage_rules');
   const branches = useBranchOptions();
+  // Enterprise organisations with a location tree filter the list by location (a branch node = the classic branch filter); the
+  // chips read archived locations too (an expired policy may name one)
+  const tree = useLocationTree({ enabled: enterprise, includeArchived: true });
+  const byLocation = enterprise && (tree.hasGroupLevels || tree.hasPlaceLevels);
   const [branchId, setBranchId] = useState<string | null>(null);
+  const [locationId, setLocationId] = useState<string | null>(null);
   const [includeExpired, setIncludeExpired] = useState(false);
-  const query = useMemo(() => ({ branchId: branchId ?? undefined, includeExpired: includeExpired ? 'true' : 'false' }), [branchId, includeExpired]);
+  const query = useMemo(() => ({
+    ...(byLocation ? listFilterOfLocation(locationId ? tree.byId.get(locationId) : null) : { branchId: branchId ?? undefined }),
+    includeExpired: includeExpired ? 'true' : 'false',
+  }), [byLocation, locationId, tree.byId, branchId, includeExpired]);
   const q = useRuleSets(query);
   const { remove } = useRuleSetMutations();
   const [dialog, setDialog] = useState<{ open: boolean; ruleSet: RuleSetDto | null }>({ open: false, ruleSet: null });
@@ -59,7 +79,9 @@ export function RuleSetsTab() {
   return (
     <div className="space-y-3">
       <div className="flex flex-wrap items-center gap-2">
-        <Combobox value={branchId} onChange={setBranchId} options={branches.options} loading={branches.isLoading} clearable placeholder={tc('common.branch')} className="h-8 w-44" />
+        {byLocation
+          ? <><label htmlFor="rs-filter-location" className="sr-only">{t('policyList.location')}</label><LocationPicker id="rs-filter-location" value={locationId} onChange={(v) => setLocationId(v)} placeholder={t('policyList.anyLocation')} className="h-8 w-56" /></>
+          : <Combobox value={branchId} onChange={setBranchId} options={branches.options} loading={branches.isLoading} clearable placeholder={tc('common.branch')} className="h-8 w-44" />}
         <label className="flex items-center gap-2 text-sm"><Switch checked={includeExpired} onCheckedChange={setIncludeExpired} aria-label={t('rules.includeExpired')} /> {t('rules.includeExpired')}</label>
         {canManage ? <Button size="sm" className="ms-auto" onClick={() => setDialog({ open: true, ruleSet: null })}><Plus /> {enterprise ? t('policyEditor.add') : t('rules.add')}</Button> : null}
       </div>
@@ -75,7 +97,7 @@ export function RuleSetsTab() {
                 {rows.map((r) => (
                   <TableRow key={r.id} className={!isActive(r) ? 'text-muted-foreground' : undefined}>
                     <TableCell><span className="font-medium">{r.name}</span>{isActive(r) ? <Badge variant="success" className="ms-2">{t('rules.active')}</Badge> : null}{r.description ? <p className="max-w-xs truncate text-xs text-muted-foreground" title={r.description}>{r.description}</p> : null}</TableCell>
-                    <TableCell><PolicyScopeChips policy={r} /></TableCell>
+                    <TableCell><PolicyScopeChips policy={r} tree={tree} /></TableCell>
                     {enterprise ? <TableCell className="tnum text-xs">{r.specificity ?? 0}</TableCell> : null}
                     <TableCell className="whitespace-nowrap text-xs tnum">{fmtDate(r.effectiveFrom)} → {r.effectiveTo ? fmtDate(r.effectiveTo) : '∞'}</TableCell>
                     <TableCell className="text-xs tnum">{t('rules.summaryLine', { graceIn: r.graceInMinutes, fullDay: fmtMinutes(r.minFullDayMinutes), ot: r.overtimeEnabled ? t('rules.otAfter', { min: r.overtimeStartAfterMinutes }) : t('rules.otOff') })}{r.ramadanMode?.enabled ? <Badge variant="secondary" className="ms-2">{t('rules.sections.ramadan')}</Badge> : null}{enterprise && r.policy?.points?.enabled ? <Badge variant="info" className="ms-2">{t('policyList.points')}</Badge> : null}</TableCell>
