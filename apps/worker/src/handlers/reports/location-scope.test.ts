@@ -166,5 +166,9 @@ describe('generated reports narrowed by location', () => {
     const empty = await generate('daily_attendance', { from: DATE, locationId: SITE4 });
     expect(empty.res.status).toBe('COMPLETED');
     expect(empty.text).not.toContain('WORKER');
+    // the per-employee report: chosen employees outside the place give an empty report, not "missing parameters"
+    const detail = await generate('employee_attendance', { from: DATE, to: DATE, locationId: SITE1, employeeIds: [E.site3] });
+    expect(detail.res).toMatchObject({ status: 'COMPLETED' });
+    expect(detail.text).not.toContain('WORKER');
   });
 });

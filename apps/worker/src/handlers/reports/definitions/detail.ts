@@ -51,10 +51,13 @@ export const employeeAttendance: ReportDefinition = {
   async build(trx: Trx, ctx: ReportContext): Promise<ReportDocument> {
     const { from, to } = ctx.params;
     if (!from || !to) throw errors.validation('Missing report parameters.', { issues: [{ path: 'parameters.from', message: 'Required' }, { path: 'parameters.to', message: 'Required' }] });
-    if (!ctx.scope.employeeIds?.length) throw errors.validation('Missing report parameters.', { issues: [{ path: 'parameters.employeeIds', message: 'Required' }] });
+    // employees must be chosen; when they were but the location filter or the requester's scope leaves none of them, the
+    // report is empty (never everyone, never an error about a parameter that was given)
+    if (!ctx.scope.employeeIds?.length && !ctx.params.employeeIds?.length) throw errors.validation('Missing report parameters.', { issues: [{ path: 'parameters.employeeIds', message: 'Required' }] });
     const days = eachDateInclusive(from, to);
     if (days.length > 366) throw errors.validation('The period may not exceed one year.');
-    const roster = await loadRoster(trx, ctx, { employeeIds: ctx.scope.employeeIds });
+    const ids = ctx.scope.employeeIds ?? [];
+    const roster = ids.length ? await loadRoster(trx, ctx, { employeeIds: ids }) : [];
     const records = await loadRecords(trx, ctx, { from, to, employeeIds: roster.map((e) => e.id) });
     const shiftPolicy = await loadShiftAndPolicy(trx, ctx, roster, to);
     const remarks = await loadRemarks(trx, ctx, roster.map((e) => e.id), from, to);
