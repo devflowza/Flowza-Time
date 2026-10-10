@@ -304,6 +304,14 @@ begin
   get diagnostics n = row_count;
   raise notice 'raw punches inserted: %', n;
 
+  -- The nightly day-close sweep had marked the original employees' empty days UNEXCUSED; a day that now carries terminal
+  -- punches is no longer unexplained, so its sweep mark is revoked (the recalculation below then drops the flag and pay effect).
+  update public.attendance_day_marks m set revoked_at = now(), revoke_reason = 'Demo data seed: the day now has terminal punches (Hikvision demo history)'
+  where m.organization_id = org and m.kind = 'UNEXCUSED' and m.source = 'SWEEP' and m.revoked_at is null
+    and exists (select 1 from public.attendance_raw_transactions r join public.employees x on x.organization_id = r.organization_id and x.device_user_id = r.device_employee_id
+                where r.organization_id = m.organization_id and x.id = m.employee_id and r.device_id in (ghl2, soh1, soh2)
+                  and (r.punched_at at time zone tz)::date = m.attendance_date);
+
   ---------------------------------------------------------------------------------------------------------------------
   -- 3. Corrections for some missed punch-outs at the office (3 approved and applied by the worker, 2 pending, 1 rejected)
   ---------------------------------------------------------------------------------------------------------------------
