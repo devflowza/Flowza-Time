@@ -5,6 +5,10 @@ import { useTranslation } from 'react-i18next';
 import { branchInputSchema, RECORD_STATUSES, type BranchDto, type BranchInput } from '@flowza/contracts';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Label } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
+import { useActiveMembership } from '@/features/me/use-me';
+import { useLocationLevels } from '@/features/locations/api';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { LOCATIONS_NS } from '@/features/locations/locale';
 import { useHolidayCalendars, useStructureMutations } from '../api';
 import { blankToUndefined, fromSelect, NONE, toOptionalNumber, toSelect } from '../form-utils';
 import { TimezoneSelect } from './timezone-select';
@@ -12,29 +16,51 @@ import { WeeklyOffToggles } from './weekly-off-toggles';
 
 type FormValues = z.input<typeof branchInputSchema>;
 
-function toDefaults(b: BranchDto | null, orgTimezone: string): FormValues {
-  if (!b) return { code: '', name: '', nameAr: undefined, countryCode: 'OM', city: undefined, address: {}, timezone: orgTimezone, contact: {}, weeklyOffDays: null, holidayCalendarId: null, status: 'active' };
+/** Where the branch sits in the location tree when the dialog opens: its group location, or null for the top level. */
+const initialParentOf = (b: BranchDto | null, defaultParentLocationId: string | null | undefined): string | null => (b ? (b.parentLocationId ?? null) : (defaultParentLocationId ?? null));
+
+function toDefaults(b: BranchDto | null, orgTimezone: string, defaultParentLocationId?: string | null): FormValues {
+  const parentLocationId = initialParentOf(b, defaultParentLocationId);
+  if (!b) return { code: '', name: '', nameAr: undefined, countryCode: 'OM', city: undefined, address: {}, timezone: orgTimezone, contact: {}, weeklyOffDays: null, holidayCalendarId: null, status: 'active', parentLocationId };
   return {
     code: b.code, name: b.name, nameAr: b.nameAr ?? undefined, countryCode: b.countryCode, city: b.city ?? undefined, address: b.address ?? {}, timezone: b.timezone,
     latitude: b.latitude ?? undefined, longitude: b.longitude ?? undefined, geofenceRadiusM: b.geofenceRadiusM ?? undefined, contact: b.contact ?? {},
-    weeklyOffDays: b.weeklyOffDays, holidayCalendarId: b.holidayCalendarId, status: b.status,
+    weeklyOffDays: b.weeklyOffDays, holidayCalendarId: b.holidayCalendarId, status: b.status, parentLocationId,
   };
 }
 
-export function BranchDialog({ open, onOpenChange, branch, orgTimezone, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; branch: BranchDto | null; orgTimezone: string; onCreated?: (created: BranchDto) => void }) {
+/**
+ * Create / edit a branch. With group levels in the location hierarchy (docs/locations.md) the branch is also placed under a
+ * group location ("Part of": Headquarters, a region…); only members with every branch may place a branch, so the field is
+ * read-only for the others and never sent by them. An update sends the placement only when it was changed.
+ */
+export function BranchDialog({ open, onOpenChange, branch, orgTimezone, onCreated, defaultParentLocationId }: {
+  open: boolean; onOpenChange: (o: boolean) => void; branch: BranchDto | null; orgTimezone: string; onCreated?: (created: BranchDto) => void;
+  /** A new branch's group location, preset (Organisation → Locations: "Add a branch here"). */
+  defaultParentLocationId?: string | null;
+}) {
   const { t } = useTranslation('organization');
+  const { t: tl } = useTranslation(LOCATIONS_NS);
   const { t: tc } = useTranslation();
   const { create, update } = useStructureMutations<BranchDto, BranchInput>('branches');
   const calendars = useHolidayCalendars();
-  const form = useForm<FormValues, unknown, BranchInput>({ resolver: zodResolver(branchInputSchema), defaultValues: toDefaults(branch, orgTimezone) });
+  const levels = useLocationLevels(open);
+  const everyBranch = useActiveMembership()?.allBranches ?? false;
+  const hasGroupLevels = (levels.data ?? []).some((l) => l.role === 'group');
+  const placementEditable = hasGroupLevels && everyBranch;
+  const initialParent = initialParentOf(branch, defaultParentLocationId);
+  const form = useForm<FormValues, unknown, BranchInput>({ resolver: zodResolver(branchInputSchema), defaultValues: toDefaults(branch, orgTimezone, defaultParentLocationId) });
   const { register, control, formState: { errors, isSubmitting }, setValue } = form;
   const weeklyOff = useWatch({ control, name: 'weeklyOffDays' });
   const inheritWeeklyOff = weeklyOff === null || weeklyOff === undefined;
 
-  const onSubmit = form.handleSubmit(async (values) => {
+  const onSubmit = form.handleSubmit(async ({ parentLocationId, ...values }) => {
+    // null = the top level; left out when the member may not place branches, or when an edit did not touch it
+    const parent = parentLocationId ?? null;
+    const placement = placementEditable && (!branch || parent !== initialParent) ? { parentLocationId: parent } : {};
     try {
-      if (branch) { await update.mutateAsync({ id: branch.id, input: values }); toast.success(t('branches.updated')); }
-      else { const created = await create.mutateAsync(values); toast.success(t('branches.created')); onCreated?.(created); }
+      if (branch) { await update.mutateAsync({ id: branch.id, input: { ...values, ...placement } }); toast.success(t('branches.updated')); }
+      else { const created = await create.mutateAsync({ ...values, ...placement }); toast.success(t('branches.created')); onCreated?.(created); }
       onOpenChange(false);
     } catch (e) { toastError(e); }
   });
@@ -69,6 +95,13 @@ export function BranchDialog({ open, onOpenChange, branch, orgTimezone, onCreate
             <FormField label={t('fields.addressLine1')} htmlFor="br-addr1" optional className="sm:col-span-2">
               <Input id="br-addr1" {...register('address.line1', { setValueAs: blankToUndefined })} />
             </FormField>
+            {hasGroupLevels ? (
+              <FormField label={tl('branchPlacement.label')} htmlFor="br-parent" optional className="sm:col-span-2" hint={everyBranch ? tl('branchPlacement.hint') : tl('branchPlacement.scoped')}>
+                <Controller control={control} name="parentLocationId" render={({ field }) => (
+                  <LocationPicker id="br-parent" roles={['group']} value={field.value ?? null} onChange={(v) => field.onChange(v)} placeholder={tl('branchPlacement.topLevel')} disabled={!everyBranch} />
+                )} />
+              </FormField>
+            ) : null}
           </section>
 
           <section className="space-y-3">

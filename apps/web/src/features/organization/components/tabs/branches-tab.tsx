@@ -8,6 +8,8 @@ import { Badge, Button, Switch } from '@/components/ui';
 import { fmtNumber } from '@/lib/format';
 import { toastError } from '@/lib/toast';
 import { useCan, useOrgTimezone } from '@/features/me/use-me';
+import { LOCATIONS_NS } from '@/features/locations/locale';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useBranches, useStructureMutations } from '../../api';
 import { useTabTable } from '../../use-tab-table';
 import { BranchDialog } from '../branch-dialog';
@@ -18,12 +20,14 @@ import { StructureToolbar } from './toolbar';
 
 export function BranchesTab() {
   const { t } = useTranslation('organization');
+  const { t: tl } = useTranslation(LOCATIONS_NS);
   const { t: tc } = useTranslation();
   const can = useCan();
   const canManage = can('branch.manage');
   const tz = useOrgTimezone();
   const table = useTabTable({ sort: 'name' });
   const q = useBranches(table.query);
+  const tree = useLocationTree();
   const { update, archive } = useStructureMutations<BranchDto, BranchInput>('branches');
   const [dialog, setDialog] = useState<{ open: boolean; branch: BranchDto | null }>({ open: false, branch: null });
   const [archiving, setArchiving] = useState<BranchDto | null>(null);
@@ -31,6 +35,16 @@ export function BranchesTab() {
   const columns = useMemo<ColumnDef<BranchDto, unknown>[]>(() => [
     { id: 'code', accessorKey: 'code', header: tc('common.code'), cell: ({ row }) => <span className="font-mono text-xs" dir="ltr">{row.original.code}</span> },
     { id: 'name', accessorKey: 'name', header: tc('common.name'), cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.name}</p>{row.original.nameAr ? <p className="truncate text-xs text-muted-foreground" dir="rtl">{row.original.nameAr}</p> : null}</div> },
+    // where the branch sits in the location hierarchy — only once the organisation has levels above its branches
+    ...(tree.hasGroupLevels ? [{
+      id: 'partOf', header: tl('branchPlacement.column'), enableSorting: false,
+      cell: ({ row }) => {
+        const b = row.original;
+        const parentId = b.parentLocationId !== undefined ? b.parentLocationId : (tree.branchNodeOf.get(b.id)?.parentId ?? null);
+        const label = parentId ? tree.labelOf(parentId) : '';
+        return label ? <span className="text-sm">{label}</span> : <span className="text-muted-foreground">—</span>;
+      },
+    } satisfies ColumnDef<BranchDto, unknown>] : []),
     { id: 'city', accessorKey: 'city', header: t('fields.city'), cell: ({ row }) => row.original.city ?? '—' },
     { id: 'timezone', accessorKey: 'timezone', header: tc('common.timezone'), enableSorting: false, cell: ({ row }) => <span className="font-mono text-xs" dir="ltr">{row.original.timezone}</span> },
     { id: 'employees', header: t('fields.employees'), enableSorting: false, cell: ({ row }) => <span className="tnum">{row.original.employeeCount !== undefined ? fmtNumber(row.original.employeeCount) : '—'}</span> },
@@ -45,7 +59,7 @@ export function BranchesTab() {
       { key: 'edit', label: tc('common.edit'), icon: <Pencil />, onSelect: () => setDialog({ open: true, branch: row.original }) },
       { key: 'archive', label: t('actions.archive'), icon: <Archive />, destructive: true, disabled: row.original.status === 'archived', onSelect: () => setArchiving(row.original) },
     ]} /> : null },
-  ], [t, tc, canManage, update]);
+  ], [t, tl, tc, canManage, update, tree]);
 
   return (
     <>

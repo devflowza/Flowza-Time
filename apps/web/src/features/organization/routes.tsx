@@ -8,7 +8,7 @@ import { OrganizationPage, PageFallback } from './pages/lazy';
 
 registerNamespace('organization', en, ar);
 
-/** Routes for the organization feature: /organization?tab=branches|departments|designations|teams */
+/** Routes for the organization feature: /organization?tab=branches|locations|departments|designations|teams */
 export const organizationRoutes: RouteObject[] = [
   { path: 'organization', element: <RequirePermission permissions={['branch.view']}><Suspense fallback={<PageFallback />}><OrganizationPage /></Suspense></RequirePermission> },
 ];
