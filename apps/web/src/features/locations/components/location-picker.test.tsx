@@ -63,6 +63,11 @@ describe('LocationPicker', () => {
     await waitFor(() => expect(onChange).toHaveBeenCalledWith('n-f2', expect.objectContaining({ role: 'place', branchId: 'b1' })));
   });
 
+  it('takes an accessible name when no visible label names it (a toolbar filter)', async () => {
+    renderWithProviders(<LocationPicker value={null} onChange={() => undefined} aria-label="Filter by location" />);
+    expect(await screen.findByRole('combobox', { name: 'Filter by location' })).toBeInTheDocument();
+  });
+
   it('asks for the branch first when places are wanted without one', async () => {
     renderWithProviders(<Harness roles={['place']} branchId={null} />);
     open();

@@ -31,6 +31,8 @@ interface ComboboxProps {
   /** Rows under the list that act on the option set itself; each closes the popover before it runs. */
   actions?: ComboboxAction[];
   'aria-invalid'?: boolean;
+  /** Accessible name when no visible <label htmlFor> names the control (a toolbar filter). */
+  'aria-label'?: string;
 }
 
 /** Accessible searchable select (branches, departments, employees…). Options are provided by the caller (server-side search supported). */
@@ -41,7 +43,7 @@ export function Combobox({ value, onChange, options, placeholder, onSearch, load
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
       <PopoverPrimitive.Trigger asChild>
-        <button id={id} type="button" role="combobox" aria-expanded={open} aria-invalid={rest['aria-invalid']} disabled={disabled} className={cn('flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 aria-invalid:border-destructive', !selected && 'text-muted-foreground', className)}>
+        <button id={id} type="button" role="combobox" aria-expanded={open} aria-invalid={rest['aria-invalid']} aria-label={rest['aria-label']} disabled={disabled} className={cn('flex h-9 w-full items-center justify-between gap-2 rounded-md border border-input bg-card px-3 text-sm shadow-sm focus:outline-none focus:ring-2 focus:ring-ring disabled:opacity-50 aria-invalid:border-destructive', !selected && 'text-muted-foreground', className)}>
           <span className="truncate">{selected?.label ?? placeholder ?? t('common.none')}</span>
           <span className="flex items-center gap-1">
             {clearable && selected ? <X className="size-3.5 opacity-60 hover:opacity-100" onClick={(e) => { e.stopPropagation(); onChange(null); }} aria-label="Clear" /> : null}

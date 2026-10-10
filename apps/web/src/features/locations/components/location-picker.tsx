@@ -29,6 +29,8 @@ export interface LocationPickerProps {
   disabled?: boolean;
   className?: string;
   'aria-invalid'?: boolean;
+  /** Accessible name when no visible <label htmlFor> names the picker (a toolbar filter). */
+  'aria-label'?: string;
 }
 
 /**
@@ -80,6 +82,7 @@ export function LocationPicker({ value, onChange, roles, branchId, includeArchiv
       placeholder={placeholder ?? (placesOnly ? t('picker.placeholderPlace') : t('picker.placeholder'))}
       emptyText={empty}
       aria-invalid={rest['aria-invalid']}
+      aria-label={rest['aria-label']}
     />
   );
 }
