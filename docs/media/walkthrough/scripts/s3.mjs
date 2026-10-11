@@ -469,10 +469,10 @@ export const dashboard = () => {
     ['Riyadh', 'RUH', 30, 39],
   ];
   const activity = [
-    ['Fatma Al Rawahi', 'Checked out · Muscat HQ', '17:31', C.on, 1],
-    ['Noor Al Siyabi', 'Checked out · Salalah', '17:12', C.on, 5],
-    ['Salim Al Harthy', 'Checked out · Muscat HQ', '17:06', C.on, 2],
-    ['Maryam Al Kindi', 'Checked out · Muscat HQ', '17:02', C.on, 4],
+    ['Fatma Al Rawahi', 'Checked out · Muscat HQ', '17:31', C.lv, 1],
+    ['Noor Al Siyabi', 'Checked out · Salalah', '17:12', C.lv, 5],
+    ['Salim Al Harthy', 'Checked out · Muscat HQ', '17:06', C.lv, 2],
+    ['Majid Al Shukaili', 'Checked out · Muscat HQ', '17:02', C.lv, 4],
   ];
   const winC = `
     <div class="row" style="justify-content:space-between;margin-bottom:12px"><div><h2 style="font-size:26px;letter-spacing:-.02em">Good morning, Aisha!</h2><p style="font-size:14.5px;color:#475467;margin-top:2px">Here's how ${ORG} did on 08 Oct 2026.</p></div>
@@ -495,9 +495,9 @@ export const dashboard = () => {
         <div class="card" data-at="b2+4.4" style="padding:16px;background:linear-gradient(135deg,#0f6e56,#1f9873);color:#fff;border:0"><b style="font-size:17px;line-height:1.3;display:block">People on time. Business on track.</b><div style="font-size:13px;opacity:.85;margin:6px 0 10px">Accurate attendance. Smarter teams. A stronger tomorrow.</div><span style="background:#fff;color:#0f6e56;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:700">Explore reports →</span></div>
         <div class="card" style="padding:14px 16px" data-at="b3+1.6" data-hl="b3+4.6~b3+6.2"><div class="row" style="justify-content:space-between"><b style="font-size:15.5px">Awaiting your approval</b><span class="badge" style="background:#d92d20;color:#fff;border-radius:99px;font-size:11.5px;font-weight:700;padding:1px 8px">3</span></div>
           <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">${[
-            ['LuClipboardCheck', 'Regularisation', 'Hamed Al Busaidi', '1 day ago'],
-            ['LuCalendarClock', 'Shift change', 'Noor Al Siyabi', '3 hours ago'],
-            ['LuTreePalm', 'Leave', 'Maryam Al Kindi', '2 hours ago'],
+            ['LuClipboardList', 'Attendance correction', 'Hamed Al Busaidi', '1 day ago'],
+            ['LuTreePalm', 'Leave', 'Maryam Al Kindi', '3 hours ago'],
+            ['LuCalendarPlus', 'Compensatory off', 'Said Al Mamari', '2 hours ago'],
           ]
             .map(
               ([i, l, n, a]) =>

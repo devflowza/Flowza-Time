@@ -186,17 +186,30 @@ export const devices = () => {
   );
   // Closing the push credentials dialog opens the new device's page; it stays Unknown until the first heartbeat.
   const detailPage = `<div class="crumb" id="d-crumb">${ic('LuArrowLeft')} Devices</div>
-    <div class="ph"><div><h2 class="row" style="gap:10px">Reception ${conn('Unknown', '')}</h2><p class="mono">MCT-02</p></div></div>
+    <div class="ph"><div><h2>Reception</h2><p>MCT-02 · Muscat HQ · ZKTeco PUSH / ADMS protocol</p>
+      <div class="row" style="gap:6px;margin-top:8px">${conn('Unknown', '')}${chip('Active')}<span class="pill-s">Device push</span><span class="pill-s mono">SN CQZ7234500183</span></div></div></div>
     <div class="tabs"><span class="on">Overview</span><span>Employees</span><span>Logs</span><span>Commands</span><span>Sync history</span><span>Settings</span></div>
-    <div class="card" style="padding:14px 18px;max-width:560px">${[
-      ['Provider', 'ZKTeco PUSH / ADMS protocol'],
-      ['Branch', 'Muscat HQ'],
-      ['Timezone', 'Asia/Muscat'],
-      ['Status', 'Active'],
-      ['Automatic sync', 'No'],
-    ]
-      .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`)
-      .join('')}</div>`;
+    <div class="grid2" style="gap:12px">
+      <div class="card" style="padding:14px 18px"><div class="cardh" style="margin-bottom:8px">Status</div>${[
+        ['Connection', 'Unknown'],
+        ['Status', 'Active'],
+        ['Integration', 'Device push'],
+        ['Last heartbeat', '—'],
+        ['Automatic sync', 'No'],
+        ['Push token', 'Configured'],
+      ]
+        .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`)
+        .join('')}</div>
+      <div class="card" style="padding:14px 18px"><div class="cardh" style="margin-bottom:8px">Identity</div>${[
+        ['Code', 'MCT-02'],
+        ['Branch', 'Muscat HQ'],
+        ['Provider', 'ZKTeco PUSH / ADMS protocol'],
+        ['Serial number', 'CQZ7234500183'],
+        ['Timezone', 'Asia/Muscat'],
+      ]
+        .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`)
+        .join('')}</div>
+    </div>`;
   const testCard = `<div class="float card" data-at="b2+5.4" data-anim="up" style="left:1300px;top:830px;width:520px;padding:14px 16px;box-shadow:0 24px 48px -12px rgba(16,24,40,.35)">
       <div class="row" style="justify-content:space-between"><div><div class="vendor">Cloud &amp; server providers</div><b style="font-size:15px">Suprema BioStar 2 API · Connection test</b></div></div>
       <div class="row" style="margin-top:12px">${btn('Test connection', { cls: 'ghost sm', icon: 'LuPlug' })}<span class="hint">Uses the settings entered above; secrets are never stored by the test.</span></div>
@@ -389,7 +402,7 @@ export const people = () => {
     ['Branch', 'Muscat HQ', '0', 'b2+0.9'],
     ['Department', 'Warehouse', 'b2+0.9', 'b2+1.6'],
     ['Team', 'Stores team', 'b2+1.6', 'b2+2.4'],
-    ['Employee', 'Khalid Al Amri', 'b2+2.4', 'end+1'],
+    ['Employee', 'Ahmed Al Rashdi', 'b2+2.4', 'end+1'],
   ];
   const stackVals = (i) =>
     `<span style="display:grid">${targets.map(([a, b, from, to]) => `<span style="grid-area:1/1" ${from === '0' ? '' : `data-at="${from}" data-anim="fade" data-d="0.2"`} data-out="${to}">${i === 0 ? a : b}</span>`).join('')}</span>`;

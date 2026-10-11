@@ -275,7 +275,7 @@ export const leave = () => {
         ${btn('Send request', { attrs: 'style="justify-content:center"' })}
       </div></div></div></div>`;
   const status = `<div class="float card" data-at="b2+2.4" data-anim="up" style="left:1150px;top:800px;width:660px;padding:14px 18px;box-shadow:0 24px 48px -12px rgba(16,24,40,.3)">
-      <div class="row" style="justify-content:space-between"><div class="row">${av('Khalid Al Amri', 3)}<div><b style="font-size:15px">Khalid Al Amri · Sun 11 Oct</b><div class="hint">Daily attendance · Sick Leave approved</div></div></div>
+      <div class="row" style="justify-content:space-between"><div class="row">${av('Said Al Mamari', 7)}<div><b style="font-size:15px">Said Al Mamari · Sun 11 Oct</b><div class="hint">Daily attendance · Sick Leave approved</div></div></div>
       <div class="row" style="gap:8px"><span style="text-decoration:line-through;opacity:.5">${chip('Absent', 'red')}</span>${ic('LuArrowRight', 'width="18" height="18" style="color:#98a2b3"')}<span data-at="b2+3.0" data-anim="pop">${chip('Leave', 'blue')}</span></div></div></div>`;
   return scene(
     'leave',
@@ -304,8 +304,8 @@ function calendar() {
   const days = Array.from({ length: 31 }, (_, i) => i + 1);
   const off = (d) => [5, 6].includes(new Date(Date.UTC(2026, 9, d)).getUTCDay()); // Fri, Sat
   const people = [
-    ['Maryam Al Kindi', 'E-1042', [[18, 20, '#175cd3', true, 'b2+0.8']]],
-    ['Khalid Al Amri', 'E-1017', [[11, 11, '#b54708', true, 'b2+1.1']]],
+    ['Maryam Al Kindi', 'E-1042', [[18, 20, '#175cd3', false, 'b2+0.8']]],
+    ['Said Al Mamari', 'E-1052', [[11, 11, '#b54708', true, 'b2+1.1']]],
     ['Noor Al Siyabi', 'E-1038', [[12, 12, '#b42318', true, 'b2+1.4']]],
     ['Yousuf Al Hinai', 'E-1031', [[21, 22, '#0e7490', false, 'b2+1.7']]],
     ['Hamed Al Busaidi', 'E-1044', [[25, 29, '#175cd3', true, 'b2+2.0']]],
