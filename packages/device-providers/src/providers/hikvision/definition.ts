@@ -14,7 +14,7 @@ export const HIKVISION_PUSH_DEFINITION = defineProvider({
   name: 'Hikvision ISAPI event push (HTTP Listening)',
   description: 'Real-time push from Hikvision face/card/fingerprint terminals (MinMoe DS-K1T series and other ISAPI access-control devices): the device posts every access-control event to FlowZa over HTTP Listening. No VPN or port forwarding needed. Employees are enrolled on the device with Employee ID = FlowZa device user id.',
   integrationType: 'DEVICE_PUSH',
-  status: 'beta',
+  status: 'available',
   capabilities: {
     attendancePull: false, attendancePush: true, employeePush: false, employeePull: false, employeeDelete: false,
     fingerprint: true, face: true, card: true, pin: true, deviceStatus: true, remoteRestart: false, webhooks: false, devicePush: true, biometricTemplatePush: false,

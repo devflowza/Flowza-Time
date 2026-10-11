@@ -44,7 +44,7 @@ export function GroupsTab() {
         {canManageGroups ? <Button size="sm" className="ms-auto" onClick={() => setDialog({ open: true, group: null })}><Plus /> {t('groups.add')}</Button> : null}
       </div>
       <p className="text-xs text-muted-foreground">{t('groups.hint')}</p>
-      <div className="rounded-lg border bg-card shadow-card">
+      <div className="rounded-xl border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
           : q.isLoading && !q.data ? <TableSkeleton cols={6} rows={4} />
           : q.data && q.data.length === 0 ? <div className="p-4"><EmptyState icon={Users} title={t('groups.empty')} description={t('groups.emptyHint')} action={canManageGroups ? <Button onClick={() => setDialog({ open: true, group: null })}><Plus /> {t('groups.add')}</Button> : undefined} /></div>

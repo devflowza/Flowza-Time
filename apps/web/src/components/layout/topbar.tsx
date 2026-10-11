@@ -29,12 +29,14 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const unread = useUnreadCount();
 
   return (
-    <header className="sticky top-0 z-30 flex h-14 min-w-0 items-center gap-2 border-b bg-card/80 px-4 backdrop-blur sm:gap-3 sm:px-6">
-      <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onOpenMobileNav} aria-label="Open navigation"><Menu /></Button>
+    // Frosted chrome (globals.css .glass): the page scrolls underneath it instead of under an opaque strip.
+    <header className="glass sticky top-0 z-30 flex h-14 min-w-0 items-center gap-2 border-b border-border/70 px-4 sm:gap-3 sm:px-6">
+      <Button variant="ghost" size="icon" className="shrink-0 md:hidden" onClick={onOpenMobileNav} aria-label={t('nav.openNavigation')}><Menu /></Button>
       {me && me.memberships.length > 0 ? (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" className="flex min-w-0 max-w-[240px] items-center gap-2 rounded-md border px-2.5 py-1.5 text-sm hover:bg-accent" aria-label={t('common.switchOrg')}>
+            <button type="button" className="flex h-9 min-w-0 max-w-[260px] items-center gap-2 rounded-lg border border-border/80 bg-card/70 ps-1.5 pe-2.5 text-sm shadow-xs transition-[background-color,border-color] duration-150 hover:border-border hover:bg-card" aria-label={t('common.switchOrg')}>
+              <span className="flex size-6 shrink-0 items-center justify-center rounded-md bg-primary text-[11px] font-semibold uppercase text-primary-foreground shadow-[inset_0_1px_0_rgb(255_255_255/0.15)]" aria-hidden>{membership?.organization.displayName?.trim().charAt(0) || '·'}</span>
               <span className="min-w-0 truncate font-medium">{membership?.organization.displayName}</span>
               <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
             </button>
@@ -53,8 +55,8 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
       {/* Search is organisation-scoped, so it has nothing to offer a platform admin who has not selected one. */}
       {membership ? (
         <>
-          <button type="button" onClick={() => setSearchOpen(true)} className="ms-auto hidden h-9 w-64 items-center gap-2 rounded-md border bg-background px-3 text-sm text-muted-foreground hover:bg-accent lg:flex">
-            <Search className="size-4" /> {t('common.searchPlaceholder')} <kbd className="ms-auto rounded border px-1.5 text-[10px]">⌘K</kbd>
+          <button type="button" onClick={() => setSearchOpen(true)} className="ms-auto hidden h-9 w-72 items-center gap-2 rounded-lg border border-border/80 bg-card/70 px-3 text-sm text-muted-foreground shadow-xs transition-[background-color,border-color,color] duration-150 hover:border-border hover:bg-card hover:text-foreground lg:flex">
+            <Search className="size-4" /> {t('common.searchPlaceholder')} <kbd className="ms-auto rounded-md border bg-muted px-1.5 py-px font-sans text-[11px] font-medium text-muted-foreground">⌘K</kbd>
           </button>
           <GlobalSearchDialog open={searchOpen} onOpenChange={setSearchOpen} />
         </>
@@ -68,12 +70,12 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
         <Button variant="ghost" size="icon" asChild aria-label={t('nav.notifications')}>
           <Link to="/notifications" className="relative">
             <Bell />
-            {unread > 0 ? <Badge variant="danger" className="absolute -end-1 -top-1 h-4 min-w-4 justify-center px-1 text-[10px]">{unread > 99 ? '99+' : unread}</Badge> : null}
+            {unread > 0 ? <Badge variant="danger" className="absolute -end-0.5 -top-0.5 h-4 min-w-4 justify-center rounded-full bg-destructive px-1 text-[10px] text-destructive-foreground ring-2 ring-background dark:bg-destructive dark:text-destructive-foreground dark:ring-background">{unread > 99 ? '99+' : unread}</Badge> : null}
           </Link>
         </Button>
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
-            <button type="button" className="rounded-full focus-visible:ring-2 focus-visible:ring-ring" aria-label="Account menu"><Avatar name={me?.user.fullName || me?.user.email || '?'} src={me?.user.avatarUrl} /></button>
+            <button type="button" className="ms-1 rounded-full ring-1 ring-border transition-shadow duration-150 hover:ring-foreground/20 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Account menu"><Avatar name={me?.user.fullName || me?.user.email || '?'} src={me?.user.avatarUrl} /></button>
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-56">
             <DropdownMenuLabel className="font-normal">

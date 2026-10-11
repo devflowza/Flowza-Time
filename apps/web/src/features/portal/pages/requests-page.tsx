@@ -37,7 +37,7 @@ function ReasonsTab({ onEdit }: { onEdit: (n: AttendanceNoteDto) => void }) {
   const rows = q.data ?? [];
   if (rows.length === 0) return <EmptyState icon={MessageSquareText} title={t('notes.empty')} description={t('notes.emptyHint')} />;
   return (
-    <div className="rounded-lg border bg-card shadow-card">
+    <div className="rounded-xl border bg-card shadow-card">
       <div className="overflow-x-auto">
         <Table>
           <TableHeader><TableRow>{(['date', 'type', 'details', 'status', 'decision'] as const).map((c) => <TableHead key={c}>{t(`requests.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>
@@ -72,7 +72,7 @@ function RegularisationsTab({ timezone }: { timezone: string }) {
   const rows = q.data ?? [];
   if (rows.length === 0) return <EmptyState icon={ClipboardList} title={t('regularisation.empty')} description={t('regularisation.emptyHint')} />;
   return (
-    <div className="rounded-lg border bg-card shadow-card">
+    <div className="rounded-xl border bg-card shadow-card">
       <div className="overflow-x-auto">
         <Table>
           <TableHeader><TableRow>{(['date', 'type', 'details', 'status', 'decision'] as const).map((c) => <TableHead key={c}>{t(`requests.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>
@@ -138,7 +138,7 @@ function SelfiesTab({ timezone }: { timezone: string }) {
   const rows = q.data ?? [];
   if (rows.length === 0) return <EmptyState icon={Camera} title={t('selfies.empty')} description={t('selfies.emptyHint')} />;
   return (
-    <div className="rounded-lg border bg-card shadow-card">
+    <div className="rounded-xl border bg-card shadow-card">
       <div className="overflow-x-auto">
         <Table>
           <TableHeader><TableRow>{(['submitted', 'type', 'details', 'status', 'decision'] as const).map((c) => <TableHead key={c}>{t(`requests.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>

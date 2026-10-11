@@ -60,7 +60,7 @@ export default function GeofencesPage() {
         locationId ? <EmptyState icon={MapPinned} title={tc('common.noResults')} description={tc('common.noResultsHint')} />
           : <EmptyState icon={MapPinned} title={t('geofences.empty')} description={t('geofences.emptyHint')} action={<Button onClick={() => setEditing('new')}><Plus /> {t('geofences.new')}</Button>} />
       ) : (
-        <div className="rounded-lg border bg-card shadow-card">
+        <div className="rounded-xl border bg-card shadow-card">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader><TableRow>{columns.map((c) => <TableHead key={c}>{t(`geofences.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>

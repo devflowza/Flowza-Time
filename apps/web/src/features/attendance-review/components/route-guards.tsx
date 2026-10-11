@@ -1,11 +1,12 @@
-import { Suspense, lazy } from 'react';
+import { Suspense } from 'react';
 import { useTranslation } from 'react-i18next';
 import { ShieldOff } from 'lucide-react';
 import { EmptyState, Skeleton } from '@/components/ui';
 import { useReviewAccess } from '../api';
+import { lazyPage } from '@/lib/lazy-page';
 
-const NotesReviewPage = lazy(() => import('../pages/notes-review-page'));
-const GeofencesPage = lazy(() => import('../pages/geofences-page'));
+const NotesReviewPage = lazyPage(() => import('../pages/notes-review-page'));
+const GeofencesPage = lazyPage(() => import('../pages/geofences-page'));
 
 function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }
 
@@ -20,3 +21,6 @@ function Guard({ allowed, children }: { allowed: boolean; children: React.ReactN
 export function NotesRoute() { return <Guard allowed={useReviewAccess().notes}><NotesReviewPage /></Guard>; }
 /** /attendance/geofences: attendance.manage_geofences. */
 export function GeofencesRoute() { return <Guard allowed={useReviewAccess().geofences}><GeofencesPage /></Guard>; }
+// the guards hide the lazy pages from the route tree, so they carry the pages' preload (lib/route-preload.ts)
+NotesRoute.preload = NotesReviewPage.preload;
+GeofencesRoute.preload = GeofencesPage.preload;

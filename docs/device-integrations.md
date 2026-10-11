@@ -147,7 +147,7 @@ licence, NDA or native SDK; covers the MinMoe/K1A families Oman distributors sel
 validated in days with one bench terminal. In parallel start the commercial process for the Hik-Partner Pro cloud-attendance
 API key (true cloud-to-cloud path) and evaluate ISUP 5.0 as phase 2.
 
-**Implemented: `hikvision_push` (ISAPI HTTP Listening, `DEVICE_PUSH`, `beta`)** — part (a) of the recommendation, for real-time
+**Implemented: `hikvision_push` (ISAPI HTTP Listening, `DEVICE_PUSH`, `available`)** — part (a) of the recommendation, for real-time
 attendance from MinMoe and other DS-K1T/DS-K1A terminals without VPN or port forwarding:
 
 1. Devices → Add device → *Hikvision ISAPI event push (HTTP Listening)*; enter the serial number (label / System → Device
@@ -405,7 +405,7 @@ Research level is the best level found for that provider's primary path.
 | FlowZa | `mock` | `VENDOR_CLOUD_PULL` (also simulates webhook + device push) | pull yes / push via simulator protocol | yes | yes | yes | yes | yes | yes (simulated, signed) | n/a (`VERIFIED` simulator) | **implemented** (`available`) |
 | ZKTeco | `zkteco_push` | `DEVICE_PUSH` (protocol `iclock`) | pull no / push yes | yes (queued `DATA UPDATE USERINFO`) | yes, asynchronous (`DATA QUERY USERINFO` → OPERLOG) | declared yes | declared yes | declared yes | no | `REPORTED_SECONDARY` | **beta** — protocol handler + provider implemented from public descriptions; **no HTTP route yet**; no hardware run |
 | ZKTeco | `zkteco_biotime` | `ON_PREM_SERVER_API` | pull yes (sliding punch-time window, id dedupe) / push no | yes | yes | no | no | yes (+ PIN) | no | `VERIFIED_OFFICIAL_DOC` (8.0 manual) | **beta** — REST adapter (`providers/zkteco-biotime`), mock-server tested; no live server run |
-| Hikvision | `hikvision_push` | `DEVICE_PUSH` (protocol `hikvision`, ISAPI HTTP Listening) | pull no / push yes (real time) | no (one-way channel) | no | yes | yes | yes | no | `REPORTED_SECONDARY` | **beta** — handler + provider + route implemented from public ISAPI descriptions; no hardware run |
+| Hikvision | `hikvision_push` | `DEVICE_PUSH` (protocol `hikvision`, ISAPI HTTP Listening) | pull no / push yes (real time) | no (one-way channel) | no | yes | yes | yes | no | `REPORTED_SECONDARY` | **implemented** (`available`) — handler + provider + route built from public ISAPI descriptions, then run on a real MinMoe terminal (GN6733356, hosted test tenant); other models/firmware still `REPORTED` |
 | Hikvision | `hikvision_isapi` | `LAN` (Digest) | pull yes (`AcsEvent`, `serialNo`) / push no | yes (`UserInfo`, card best-effort) | yes | yes (verification only, no templates) | yes (verification only) | yes | no (`hikvision_push` covers events) | `REPORTED_SECONDARY` | **beta** — ISAPI adapter (`providers/hikvision-isapi`), shares event mapping with `hikvision_push`; no hardware run |
 | Hikvision | `hikvision_hpp` | `VENDOR_CLOUD_PULL` | pull yes / push no | no | no | no | no | no | declared yes — payload UNKNOWN | `REPORTED_SECONDARY` | placeholder (partner credentials required) |
 | Suprema | `suprema_biostar2` | `ON_PREM_SERVER_API` | pull yes (event id cursor) / push no | yes (+ PIN; card not applied) | yes | yes (verification only, no templates) | yes (verification only) | no | no | `VERIFIED_OFFICIAL_DOC` (Postman collection) | **beta** — REST adapter (`providers/suprema-biostar2`), mock-server tested; no live server run |
@@ -468,7 +468,7 @@ Remaining **drift between declared capabilities and the research** (see also §8
   `pullAttendance` throws `UNSUPPORTED` (nothing to pull); `listEmployees` throws `UNSUPPORTED` with the `QUERY_USERS` command in
   `details` rather than returning an empty page that would look like "no users"; `upsertEmployee`/`deleteEmployee`/`restart`
   return `async: true` with the protocol commands to persist.
-- **Hikvision event push** (`providers/hikvision/*`, `hikvision_push`, protocol key `hikvision`, `status='beta'`, `REPORTED`):
+- **Hikvision event push** (`providers/hikvision/*`, `hikvision_push`, protocol key `hikvision`, `status='available'`, `REPORTED`):
   JSON / multipart / XML event decoding, pass-event → `RawTransaction` mapping, heartbeat and GET-probe liveness, pictures and
   personal fields never stored; the provider derives liveness from `config.lastSeenAt` and honestly throws `UNSUPPORTED` for
   pull and employee operations (one-way channel). See §2.2 for the device setup.

@@ -71,7 +71,7 @@ export function LeaveCalendarTab() {
         <div className="flex items-center gap-2"><Switch id="leave-cal-pending" checked={includePending} onCheckedChange={setIncludePending} /><Label htmlFor="leave-cal-pending" className="text-sm">{t('calendar.includePending')}</Label></div>
         {legend.length ? <ul className="ms-auto flex flex-wrap gap-3 text-xs">{legend.map((e) => <li key={e.leaveTypeId} className="flex items-center gap-1.5"><LeaveTypeDot color={e.color} />{e.leaveTypeName}</li>)}</ul> : null}
       </div>
-      <div className="rounded-lg border bg-card shadow-card">
+      <div className="rounded-xl border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
           : q.isLoading ? <TableSkeleton cols={8} rows={5} />
           : !q.data || q.data.employees.length === 0 ? <div className="p-4"><EmptyState icon={CalendarDays} title={t('calendar.empty')} description={t('calendar.emptyHint')} /></div>

@@ -76,7 +76,7 @@ export function AttendanceTab({ canCorrect, onOpenRecord, initialEmployeeId = nu
             <MonthlyLegend />
           </div>
         ) : (
-          <div className="rounded-lg border bg-card shadow-card">
+          <div className="rounded-xl border bg-card shadow-card">
             <div className="overflow-x-auto">
               <Table>
                 <TableHeader><TableRow>{(['employee', 'status', 'in', 'out', 'worked', 'late'] as const).map((c) => <TableHead key={c}>{t(`attendance.columns.${c}`)}</TableHead>)}</TableRow></TableHeader>

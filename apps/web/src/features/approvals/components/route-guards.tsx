@@ -22,6 +22,8 @@ export function InboxRoute() {
   const access = useApprovalAccess();
   return <RequireAccess allowed={access.inbox}><ApprovalsPage /></RequireAccess>;
 }
+// the guards hide the lazy pages from the route tree, so they carry the pages' preload (lib/route-preload.ts)
+InboxRoute.preload = ApprovalsPage.preload;
 
 /** /approvals/workflows: readable by whoever reads approvals organisation-wide; editing needs approval.manage. */
 export function WorkflowsRoute() {
@@ -29,3 +31,4 @@ export function WorkflowsRoute() {
   const access = useApprovalAccess();
   return <RequireAccess allowed={access.configure || can('attendance.view') || can('leave.view')}><WorkflowsPage /></RequireAccess>;
 }
+WorkflowsRoute.preload = WorkflowsPage.preload;

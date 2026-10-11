@@ -87,7 +87,8 @@ async function inspect(page: Page) {
     const inScroller = (el: Element) => {
       for (let p = el.parentElement; p && p !== document.body; p = p.parentElement) {
         const cs = getComputedStyle(p);
-        if (['auto', 'scroll', 'hidden', 'clip'].includes(cs.overflowX) && p.getBoundingClientRect().right <= vw + 1) return true;
+        // the content panel (#app-scroll) scrolls the whole page from `md` up: content wider than it is the page scrolling sideways
+        if (p.id !== 'app-scroll' && ['auto', 'scroll', 'hidden', 'clip'].includes(cs.overflowX) && p.getBoundingClientRect().right <= vw + 1) return true;
       }
       return false;
     };
@@ -118,7 +119,9 @@ async function inspect(page: Page) {
     // widgets that lay out by direction (tab strips, selects, menus) whose nearest dir says ltr: a Radix root that fell back to 'ltr'
     const widgets = Array.from(document.querySelectorAll('[role="tablist"], [role="combobox"], [role="menu"], [role="listbox"]')).filter(visible);
     const ltrWidgets = widgets.filter((el) => el.closest('[dir]')?.getAttribute('dir') === 'ltr').map(label);
-    return { dir: doc.dir, scrollWidth: doc.scrollWidth, vw, offenders: offenders.slice(0, 8), texts, clipped, ltrWidgets, widgetCount: widgets.length };
+    const panel = document.getElementById('app-scroll');
+    const panelExcess = panel ? panel.scrollWidth - panel.clientWidth : 0;
+    return { dir: doc.dir, scrollWidth: Math.max(doc.scrollWidth, vw + panelExcess), vw, offenders: offenders.slice(0, 8), texts, clipped, ltrWidgets, widgetCount: widgets.length };
   });
 }
 

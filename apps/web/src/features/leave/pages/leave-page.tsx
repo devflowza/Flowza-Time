@@ -238,7 +238,7 @@ function TypesTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-2"><p className="text-sm text-muted-foreground">{t('types.hint')}</p>{canManage ? <Button size="sm" onClick={() => setDialog({ open: true, leaveType: null })}><Plus /> {t('types.add')}</Button> : null}</div>
-      <div className="rounded-lg border bg-card shadow-card">
+      <div className="rounded-xl border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
           : q.isLoading ? <TableSkeleton cols={6} rows={3} />
           : !q.data || q.data.length === 0 ? <div className="p-4"><EmptyState icon={CalendarOff} title={t('types.empty')} description={t('types.emptyHint')} action={canManage ? <div className="flex flex-wrap justify-center gap-2"><Button onClick={() => seedDefaults.mutate(undefined, { onSuccess: (r) => toast.success(t('types.seeded', { count: r.created.length })), onError: toastError })} loading={seedDefaults.isPending}>{t('types.seed')}</Button><Button variant="outline" onClick={() => setDialog({ open: true, leaveType: null })}><Plus /> {t('types.add')}</Button></div> : undefined} /></div>

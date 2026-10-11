@@ -133,5 +133,13 @@ Implement `DeviceProvider`; register in the `ProviderRegistry`; keep `device_pro
   Use the `sidebar-*` and `chart-*` tokens and the `brand-*` scale only — a literal `text-white` in the sidebar disappears on
   the Classic Light style, and a fixed chart colour ignores the tenant's palette. Adding a style means a `[data-theme]` block
   in `globals.css` with the full token set (`theme.test.tsx` enforces parity) plus en/ar names.
-- **Vendor chunking follows specifiers, not packages.** `react-dom` and `react-dom/client` are different module ids; a
-  `manualChunks` entry must list every specifier the app imports or the runtime lands in the entry chunk.
+- **Vendor chunks are matched by package path** (`vite.config.ts` → Rolldown `codeSplitting.groups`), so every sub-path of a
+  package (`react-dom` and `react-dom/client`) lands in the same chunk. Vite 8/Rolldown has no object-form `manualChunks`.
+- **Pages are `lazyPage(() => import(…))`, not `React.lazy`** (`lib/lazy-page.ts`): the sidebar preloads them, and a preloaded
+  page renders without a Suspense round-trip. A guard component that renders a lazy page itself must carry its preload
+  (`MyRoute.preload = MyPage.preload`) or `lib/route-preload.ts` cannot find it.
+- **React Compiler is on; modules importing `react-hook-form` are excluded** (`vite.config.ts`). A form object passed as a prop
+  keeps its reference across validations, so a compiled child would show stale `formState`. Keep RHF reads in a module that
+  imports `react-hook-form` (a type import counts).
+- **The desktop page scrolls inside `#app-scroll`, not the window.** Use `scrollPageToTop()` from `@/lib/scroll`; animate only
+  `transform`/`opacity`; no full-screen `backdrop-filter` (docs/design.md §12).

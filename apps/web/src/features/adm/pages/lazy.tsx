@@ -1,23 +1,23 @@
-import { lazy } from 'react';
 import { Navigate, useParams } from 'react-router';
 import { Skeleton } from '@/components/ui';
+import { lazyPage } from '@/lib/lazy-page';
 
-export const AdminLoginPage = lazy(() => import('../admin-login-page'));
-export const DashboardPage = lazy(() => import('./dashboard-page'));
-export const TenantsPage = lazy(() => import('./tenants-page'));
-export const TenantDetailPage = lazy(() => import('./tenant-detail-page'));
-export const UsersPage = lazy(() => import('./users-page'));
-export const TeamPage = lazy(() => import('./team-page'));
-export const GrantsPage = lazy(() => import('./grants-page'));
-export const PlansPage = lazy(() => import('./plans-page'));
-export const FlagsPage = lazy(() => import('./flags-page'));
-export const ActivityPage = lazy(() => import('./activity-page'));
-export const HealthPage = lazy(() => import('./health-page'));
-export const AccountPage = lazy(() => import('./account-page'));
+export const AdminLoginPage = lazyPage(() => import('../admin-login-page'));
+export const DashboardPage = lazyPage(() => import('./dashboard-page'));
+export const TenantsPage = lazyPage(() => import('./tenants-page'));
+export const TenantDetailPage = lazyPage(() => import('./tenant-detail-page'));
+export const UsersPage = lazyPage(() => import('./users-page'));
+export const TeamPage = lazyPage(() => import('./team-page'));
+export const GrantsPage = lazyPage(() => import('./grants-page'));
+export const PlansPage = lazyPage(() => import('./plans-page'));
+export const FlagsPage = lazyPage(() => import('./flags-page'));
+export const ActivityPage = lazyPage(() => import('./activity-page'));
+export const HealthPage = lazyPage(() => import('./health-page'));
+export const AccountPage = lazyPage(() => import('./account-page'));
 // modules, plans & pricing, billing, platform settings (migration 20260929000600)
-export const ModulesPage = lazy(() => import('./modules-page'));
-export const BillingPage = lazy(() => import('./billing-page'));
-export const SettingsPage = lazy(() => import('./settings-page'));
+export const ModulesPage = lazyPage(() => import('./modules-page'));
+export const BillingPage = lazyPage(() => import('./billing-page'));
+export const SettingsPage = lazyPage(() => import('./settings-page'));
 
 export function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }
 
