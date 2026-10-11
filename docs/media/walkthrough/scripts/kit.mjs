@@ -59,9 +59,11 @@ const PORTAL = [
       ['my', 'My overview', 'LuHouse'],
       ['myatt', 'My attendance', 'LuCalendarCheck'],
       ['myleave', 'My leave', 'LuTreePalm'],
+      ['myprof', 'My profile', 'LuUserRound'],
+      ['checkin', 'Check in / out', 'LuFingerprint'],
       ['myreq', 'My requests', 'LuInbox'],
       ['myshift', 'My shift', 'LuCalendarClock'],
-      ['checkin', 'Check in / out', 'LuFingerprint'],
+      ['myrep', 'My reports', 'LuFileText'],
     ],
   ],
 ];
@@ -92,8 +94,8 @@ export function shell({
     .join('');
   return `<div class="win ${cls}" ${attrs}><div class="chrome"><span class="dot"></span><span class="dot"></span><span class="dot"></span>
     <div class="url">${ic('LuLock')}<span>time.flowza.com${url}</span></div></div>
-    <div class="app"><aside class="nav"><div class="brand">${LOGO}<div>FlowZa Time<small>${ORG}</small></div></div>${nav}</aside>
-    <div class="main"><div class="top"><div class="search">${ic('LuSearch')}<span>Search employees, devices…</span></div>
+    <div class="app"><aside class="nav"><div class="brand">${LOGO}<div>FlowZa Time</div></div>${nav}</aside>
+    <div class="main"><div class="top"><div class="orgsw">${ORG}${ic('LuChevronsUpDown')}</div><div class="search">${ic('LuSearch')}<span>Search…</span><kbd>⌘K</kbd></div>
     <div class="org">${ic('LuBell', 'width="18" height="18"')}<span class="av" style="background:${user[2] || '#137a5d'}">${user[1]}</span><span>${user[0]}</span></div></div>
     <div class="page">${content}</div>${overlay}</div></div></div>`;
 }

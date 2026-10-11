@@ -2,7 +2,7 @@
 
 | File | What it is |
 |---|---|
-| `FlowZa-Time-Enterprise-Walkthrough.mp4` | 3 min 41 s narrated product walkthrough, 1920×1080, H.264/AAC, −16 LUFS, English caption track embedded |
+| `FlowZa-Time-Enterprise-Walkthrough.mp4` | 3 min 45 s narrated product walkthrough, 1920×1080, H.264/AAC, −16 LUFS, English caption track embedded |
 | `captions.en.srt` | The same captions as a sidecar file (for YouTube, LinkedIn, LMS uploads) |
 | `FlowZa-Time-Enterprise.pptx` | 5-slide overview deck (16:9) with speaker notes; its only web reference is flowza.com |
 | `narration.md` | The voice-over script, by scene, with timestamps |
@@ -13,16 +13,16 @@
 | Time | Scene |
 |---|---|
 | 0:00 | Introduction and agenda |
-| 0:12 | 1. Configure devices — Register device, providers, branch timezone, push URL/token, connection test, automatic sync |
-| 0:34 | 2. Branches and sites — code, city, timezone, weekly off days, holiday calendar; branch timezone sets the attendance date; geofences |
-| 0:51 | 3. Employees, departments and shifts — add or import from CSV, line manager, fixed/flexible shifts, breaks, grace, punch windows, assignment precedence |
-| 1:16 | 4. Changing shifts — effective dates, bulk assign, employee shift-change requests, automatic recalculation |
-| 1:32 | 5. Working at another branch — branch deployment Muscat HQ → Sohar: enrolled on the host terminals, removed after the last day, attendance/holidays/payroll stay with the home branch |
-| 2:02 | 6. Leave management — leave types, accrual and carry forward, apply with balance, team calendar, leave instead of absence |
-| 2:20 | 7. Line-manager approvals — reporting line, one inbox, approve/reject/ask/reassign, bulk and e-mail decisions, multi-level workflows with escalation |
-| 2:46 | 8. Shift swap request — day and colleague, manager approval, applies to that day only |
-| 2:59 | 9. Settings and dashboard — settings groups, roles and branch scope, 7 styles × 3 layouts, KPIs, trend, branches, devices, approvals, reports |
-| 3:32 | Close — flowza.com |
+| 0:12 | 1. Configure devices — Register device wizard, providers, push URL/token and first heartbeat, connection test for cloud/server providers |
+| 0:36 | 2. Branches and sites — code, city, timezone, weekly off days, holiday calendar; branch timezone sets the attendance date; geofences |
+| 0:53 | 3. Employees, departments and shifts — add or import from CSV, line manager, fixed/flexible shifts, breaks, grace, punch windows, assignment precedence |
+| 1:17 | 4. Changing shifts — effective dates, bulk assign, employee shift-change requests, automatic recalculation |
+| 1:34 | 5. Working at another branch — branch deployment Muscat HQ → Sohar: added to the host terminals (ID, name, card), removed after the last day; shift, holidays and payroll stay with the home branch |
+| 2:06 | 6. Leave management — leave types, allowance, accrual and carry forward, apply with balance, team calendar, days on leave never marked absent |
+| 2:24 | 7. Line-manager approvals — reporting line, one inbox, approve/reject/ask for information, bulk and e-mail decisions, HR workflows of up to five levels with escalation |
+| 2:51 | 8. Shift swap request — day and colleague, manager approval, applies to that day only |
+| 3:03 | 9. Settings and dashboard — settings groups, roles and branch scope, 7 styles × 3 layouts, the Overview dashboard, reports |
+| 3:36 | Close — flowza.com |
 
 The screens are animated recreations of the web app, built from its real English labels (`apps/web/src/locales/en`), its
 navigation and its FlowZa Green theme (`apps/web/src/styles/globals.css`); they are not screen recordings. People, numbers and

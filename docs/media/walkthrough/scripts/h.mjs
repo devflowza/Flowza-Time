@@ -27,7 +27,7 @@ export const tag = (t, cls = '') => `<span class="tag ${cls}">${t}</span>`;
 export const swap = (at, a, b) =>
   `<span class="stack"><span data-out="${at}" data-anim="fade">${a}</span><span data-at="${at}" data-anim="pop" data-d="0.45">${b}</span></span>`;
 export const F = (label, inner, o = {}) =>
-  `<div class="field" ${o.attrs || ''} ${o.id ? `id="${o.id}"` : ''} ${o.hl ? `data-hl="${o.hl}"` : ''}><label>${label}</label>${inner}${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`;
+  `<div class="field" ${o.attrs || ''} ${o.id ? `id="${o.id}"` : ''} ${o.hl ? `data-hl="${o.hl}"` : ''}><label>${label}${o.req ? '<span class="req"> *</span>' : ''}${o.opt ? '<span class="optl">Optional</span>' : ''}</label>${inner}${o.hint ? `<div class="hint">${o.hint}</div>` : ''}</div>`;
 export const I = (val, o = {}) =>
   `<div class="inp ${o.sel ? 'sel' : ''} ${o.cls || ''}" ${o.id ? `id="${o.id}"` : ''} ${o.focus ? `data-cls="${o.focus}:focus"` : ''}>${o.icon ? ic(o.icon, 'width="16" height="16" style="color:#667085;flex:none"') : ''}${o.type ? `<span data-type="${val}" data-type-at="${o.type}" ${o.cps ? `data-cps="${o.cps}"` : ''}></span>` : `<span class="${o.ph ? 'ph-t' : ''}">${val}</span>`}</div>`;
 export const btn = (label, o = {}) =>

@@ -127,6 +127,8 @@
       const s = x.el.style;
       s.opacity = p;
       s.visibility = p <= 0.001 ? 'hidden' : 'visible';
+      // 'collapse': once faded out, take the element out of the layout so the rows below move up.
+      if (x.k === 'collapse') s.display = x.o != null && t >= x.o + 0.4 ? 'none' : '';
       if (x.k === 'up') s.transform = `translateY(${(1 - p) * 22}px)`;
       else if (x.k === 'down') s.transform = `translateY(${(p - 1) * 22}px)`;
       else if (x.k === 'left') s.transform = `translateX(${(1 - p) * 40}px)`;

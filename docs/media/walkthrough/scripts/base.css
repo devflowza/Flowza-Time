@@ -1436,3 +1436,243 @@ body {
   width: 1780px;
   height: 968px;
 }
+.top .orgsw {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #344054;
+}
+.top .orgsw svg {
+  width: 14px;
+  height: 14px;
+  color: #98a2b3;
+}
+.top .search {
+  max-width: 260px;
+}
+.top .search kbd {
+  margin-left: auto;
+  font-family: inherit;
+  font-size: 11.5px;
+  color: #667085;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  padding: 1px 5px;
+}
+.nav .badge {
+  background: #d92d20;
+  color: #fff;
+}
+.link {
+  color: var(--b700);
+  font-weight: 600;
+  text-decoration: underline;
+  text-underline-offset: 3px;
+  font-size: 13.5px;
+}
+.field label {
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+.field label .req {
+  color: #d92d20;
+}
+.field label .optl {
+  margin-left: auto;
+  font-weight: 450;
+  color: #98a2b3;
+  font-size: 12.5px;
+}
+.crumb {
+  font-size: 13px;
+  color: #667085;
+  margin-bottom: 4px;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.crumb svg {
+  width: 14px;
+  height: 14px;
+}
+.rail {
+  width: 214px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.rail .r {
+  display: flex;
+  gap: 10px;
+  padding: 10px 10px;
+  border-radius: 10px;
+}
+.rail .r i {
+  font-style: normal;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background: #f2f4f7;
+  color: #667085;
+  font-size: 12.5px;
+  font-weight: 700;
+  flex: none;
+}
+.rail .r b {
+  display: block;
+  font-size: 14px;
+  color: #344054;
+}
+.rail .r small {
+  display: block;
+  font-size: 12px;
+  color: #98a2b3;
+  margin-top: 2px;
+  line-height: 1.3;
+}
+.rail .r.on {
+  background: #fff;
+  box-shadow: 0 1px 3px rgba(16, 24, 40, 0.1);
+}
+.rail .r.on i {
+  background: var(--b700);
+  color: #fff;
+}
+.rail .r.done i {
+  background: #ecfdf3;
+  color: #067647;
+}
+.info {
+  border: 1px solid #b2ddff;
+  background: #eff8ff;
+  color: #1849a9;
+  border-radius: 10px;
+  padding: 12px 14px;
+  font-size: 13.5px;
+}
+.info b {
+  display: block;
+  font-size: 14.5px;
+  margin-bottom: 6px;
+  color: #194185;
+}
+.info ol {
+  margin: 0 0 0 18px;
+  line-height: 1.6;
+}
+.amber {
+  border: 1px solid #fedf89;
+  background: #fffaeb;
+  color: #93370d;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 13px;
+  line-height: 1.45;
+}
+.ok-box {
+  border: 1px solid #abefc6;
+  background: #ecfdf3;
+  color: #067647;
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 14px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.ok-box svg {
+  width: 18px;
+  height: 18px;
+}
+.vendor {
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #667085;
+}
+.grp {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 14px;
+}
+.grp .gh {
+  font-size: 12.5px;
+  font-weight: 700;
+  color: #475467;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  margin-bottom: 6px;
+  display: flex;
+  justify-content: space-between;
+}
+.kv {
+  display: flex;
+  justify-content: space-between;
+  font-size: 13.5px;
+  padding: 3px 0;
+  color: #475467;
+}
+.kv b {
+  color: #101828;
+  font-weight: 600;
+}
+.opt-block {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+}
+.opt-block .oh {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: #344054;
+}
+.opt-block .hint {
+  margin-top: 4px;
+}
+.cardh {
+  font-size: 15.5px;
+  font-weight: 700;
+  color: #101828;
+}
+.cardh + .hint {
+  margin: 2px 0 12px;
+}
+.pill-s {
+  font-size: 12px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: 99px;
+  background: #f2f4f7;
+  color: #344054;
+  border: 1px solid var(--border);
+}
+.sw.on.off-x {
+  background: #d0d5dd;
+}
+.sw.on.off-x::after {
+  left: 3px;
+}
+.tbl.tight th,
+.tbl.tight td {
+  padding: 9px 12px;
+  font-size: 13.5px;
+}
+.sel-row {
+  background: #f6fdf9;
+  box-shadow: inset 3px 0 0 #1f9873;
+}

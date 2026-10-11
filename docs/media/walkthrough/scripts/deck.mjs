@@ -345,9 +345,9 @@ pres.addSection({ title: 'Set up' });
       '01  Configure devices',
       [
         'Register ZKTeco, Hikvision, Suprema, Anviz or Matrix terminals',
-        'Code, name and branch; timezone follows the branch',
-        'Test the connection; push terminals get their own URL and token',
-        'Punches sync automatically and every sync job is tracked',
+        'Code, name, branch and timezone',
+        'Push terminals get their own URL and token and go live on their first heartbeat',
+        'Cloud and server connections can be tested before registering',
       ],
     ],
     [
@@ -357,7 +357,7 @@ pres.addSection({ title: 'Set up' });
         'Each branch is a site: code, city and timezone',
         'Its own weekly off days and holiday calendar',
         'The branch timezone decides the attendance date',
-        'Geofences control where mobile check-in is allowed',
+        'Geofences check where web and mobile check-ins happen',
       ],
     ],
     [
@@ -402,7 +402,7 @@ pres.addSection({ title: 'Set up' });
     });
   }
   s.addNotes(
-    'Start with your devices: register the terminal, pick the provider, give it a code, a name and a branch, and test the connection. Next, your sites: each branch has a code, a city, a timezone, weekly off days and a holiday calendar; the branch timezone decides the attendance date. Then add your people, or import them from CSV, define fixed or flexible shifts, and assign them. The most specific assignment wins.',
+    'Start with your devices: register the terminal, pick the provider, and give it a code, a name, a branch and its timezone. Push terminals get their own URL and token and come online with their first heartbeat; cloud and server connections can be tested right away. Next, your sites: each branch has a code, a city, a timezone, weekly off days and a holiday calendar; the branch timezone decides the attendance date. Then add your people, or import them from CSV, define fixed or flexible shifts, and assign them. The most specific assignment wins.',
   );
 }
 
@@ -483,8 +483,8 @@ pres.addSection({ title: 'Workforce changes' });
   });
   node(4.95, 2.85, 2.9, 'Sohar', 'Covering branch', 'Host branch node');
   const steps = [
-    ['LuUserPlus', 'Day one', 'Enrolled on the Sohar terminals'],
-    ['LuFingerprint', 'During', 'Punches at Sohar count automatically'],
+    ['LuUserPlus', 'Day one', 'Added to the Sohar terminals with ID, name and card'],
+    ['LuFingerprint', 'During', 'Card punches count; a fingerprint is enrolled once on site'],
     ['LuUserMinus', 'After the last day', 'Removed from the Sohar terminals'],
   ];
   for (let i = 0; i < 3; i++) {
@@ -521,7 +521,7 @@ pres.addSection({ title: 'Workforce changes' });
     line: { color: C.accent1, width: 0 },
     objectName: 'Deployment outcome',
   });
-  T(s, 'Shift, holidays and payroll stay with Muscat HQ, with no manual fixes', {
+  T(s, 'Shift, holidays and payroll stay with Muscat HQ', {
     x: 1.1,
     y: 5.75,
     w: 6.6,
@@ -584,7 +584,7 @@ pres.addSection({ title: 'Workforce changes' });
     y += h + 0.15;
   }
   s.addNotes(
-    'To change a shift, assign the new one with an effective-from date, and an end date if it is temporary. Change many employees at once, or let employees request a change; past days are recalculated automatically. When Salim, from Muscat, covers Sohar for two weeks, a branch deployment enrols him on the Sohar terminals on day one and removes him after the last day, while his shift, holidays and payroll stay with Muscat. Shift swaps: the employee picks a day and a colleague, the line manager approves, and both schedules change for that day only.',
+    'To change a shift, assign the new one with an effective-from date, and an end date if it is temporary. Change many employees at once, or let employees request a change; past days are recalculated automatically. When Salim, from Muscat, covers Sohar for two weeks, a branch deployment adds Salim to the Sohar terminals with ID, name and card on day one, and removes the record after the last day; a fingerprint is enrolled once on site. Salim’s shift, holidays and payroll stay with Muscat. Shift swaps: the employee picks a day and a colleague, the line manager approves, and both schedules change for that day only.',
   );
 }
 
@@ -640,7 +640,7 @@ pres.addSection({ title: 'Leave & approvals' });
       'Yearly days, monthly accrual and carry forward',
       'Employees apply from the portal and see their balance first',
       'Approved leave shows on the team calendar',
-      'Those days count as leave, not absence',
+      'Days on leave are never marked absent',
     ]),
     {
       x: 0.9,
@@ -712,19 +712,19 @@ pres.addSection({ title: 'Leave & approvals' });
       });
   }
   s.addShape(pres.shapes.ROUNDED_RECTANGLE, {
-    x: 7.85,
+    x: 7.3,
     y: 3.68,
-    w: 3.4,
+    w: 4.5,
     h: 0.4,
     rectRadius: 0.2,
     fill: { color: 'FFFAEB' },
     line: { color: 'FEDF89', width: 1 },
     objectName: 'Escalation tag',
   });
-  T(s, 'Escalates if nobody acts in time', {
-    x: 7.85,
+  T(s, 'Example workflow · escalates if nobody acts in time', {
+    x: 7.3,
     y: 3.68,
-    w: 3.4,
+    w: 4.5,
     h: 0.4,
     fontSize: 12,
     bold: true,
@@ -778,7 +778,7 @@ pres.addSection({ title: 'Leave & approvals' });
   }
   T(
     s,
-    'Approve, reject, ask for information or reassign: one by one, in bulk, or from an email. Workflows add up to five levels; a secondary manager is the backup approver.',
+    'Approve, reject or ask for information: one by one, in bulk, or from an e-mail. HR can add workflows of up to five levels; a secondary manager is the backup approver.',
     {
       x: 6.7,
       y: 5.95,
@@ -791,7 +791,7 @@ pres.addSection({ title: 'Leave & approvals' });
     },
   );
   s.addNotes(
-    'Leave is built in: annual, sick, emergency or maternity leave, with yearly days, monthly accrual and carry forward. Employees apply from their portal and see their balance first; approved leave appears on the team calendar and counts as leave, not absence. Every request goes to the right person: each employee has a line manager and an optional secondary manager. Leave, corrections, regularisations, shift changes and swaps land in one Approvals inbox. Workflows add up to five levels, with escalation when nobody acts in time.',
+    'Leave is built in: annual, sick, emergency or maternity leave, with yearly days, monthly accrual and carry forward. Employees apply from their portal and see their balance first; approved leave appears on the team calendar, and days on leave are never marked absent. Every request goes to the right person: each employee can have a line manager, and a secondary manager as backup. Leave, corrections, regularisations, shift changes and swaps land in one Approvals inbox; approvers approve, reject or ask for information, one by one, in bulk or from an e-mail. HR can add approval workflows of up to five levels, with escalation when nobody acts in time.',
   );
 }
 
@@ -863,8 +863,11 @@ pres.addSection({ title: 'Dashboard' });
   T(
     s,
     [
-      { text: '92%  ', options: { bold: true, fontSize: 24, color: '5DD39E' } },
-      { text: 'attendance rate, up 2.1% on last week', options: { fontSize: 14, color: 'D7E5E0' } },
+      { text: '88%  ', options: { bold: true, fontSize: 24, color: '5DD39E' } },
+      {
+        text: 'attendance rate, 14 more present than last week',
+        options: { fontSize: 14, color: 'D7E5E0' },
+      },
     ],
     { x: 0.9, y: 5.85, w: 5.4, h: 0.75, valign: 'middle', objectName: 'Attendance rate text' },
   );
@@ -921,7 +924,7 @@ pres.addSection({ title: 'Dashboard' });
     },
   );
   s.addNotes(
-    'Finally, configure and monitor. Settings cover regional options, attendance rules, sync, notifications and security, while roles decide who sees which branch. Pick one of seven dashboard styles and a layout: Overview, Operations or Executive. The dashboard shows present, absent, on leave and late compared with last week, then the attendance trend, every branch, device status and the approvals waiting for you, with reports in PDF, Excel or CSV. See it for yourself at flowza.com.',
+    'Finally, configure and monitor. Settings cover regional options, attendance rules, sync, notifications and security, while roles decide who sees which branch. Pick one of seven dashboard styles and a layout: Overview, Operations or Executive. The dashboard shows who is present, absent, on leave or late today, then the attendance trend, attendance by branch, recent activity and the approvals waiting for you, with reports in PDF, Excel or CSV. See it for yourself at flowza.com.',
   );
 }
 
