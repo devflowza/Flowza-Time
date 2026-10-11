@@ -39,7 +39,7 @@ export default function GeofencesPage() {
       {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : q.isLoading ? <TableSkeleton cols={7} rows={4} /> : rows.length === 0 ? (
         <EmptyState icon={MapPinned} title={t('geofences.empty')} description={t('geofences.emptyHint')} action={<Button onClick={() => setEditing('new')}><Plus /> {t('geofences.new')}</Button>} />
       ) : (
-        <div className="rounded-lg border bg-card shadow-card">
+        <div className="rounded-xl border bg-card shadow-card">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader><TableRow>{(['name', 'branch', 'shape', 'enforcement', 'assignments', 'active'] as const).map((c) => <TableHead key={c}>{t(`geofences.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>

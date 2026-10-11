@@ -106,7 +106,7 @@ export function DataTable<T>({ columns, data, total, page, pageSize, onPageChang
           <div className="flex flex-wrap items-center gap-2 ms-auto">{bulkActions(selectedIds)}</div>
         </div>
       ) : null}
-      <div className="rounded-lg border bg-card shadow-card">
+      <div className="rounded-xl border bg-card shadow-card">
         {error ? <div className="p-4"><ErrorState error={error} onRetry={onRetry} /></div>
           : isLoading && !data ? <TableSkeleton cols={Math.min(columns.length, 6)} />
           : data && data.length === 0 ? <div className="p-4"><EmptyState icon={Inbox} title={emptyTitle ?? t('common.noResults')} description={emptyDescription ?? t('common.noResultsHint')} action={emptyAction} /></div>

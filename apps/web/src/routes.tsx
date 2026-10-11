@@ -1,4 +1,4 @@
-import { lazy, Suspense } from 'react';
+import { Suspense } from 'react';
 import { createBrowserRouter, Navigate, Outlet, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { AppShell } from '@/components/layout/app-shell';
@@ -18,6 +18,8 @@ import { useCan, useEmployeeId } from '@/features/me/use-me';
 import { admRoutes } from '@/features/adm/routes';
 import { UnlinkedHome } from '@/components/layout/unlinked-home';
 import { RouteError } from '@/components/layout/route-error';
+import { lazyPage } from '@/lib/lazy-page';
+import { registerPreloadRoutes } from '@/lib/route-preload';
 
 function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }
 function NotFound() {
@@ -28,11 +30,11 @@ function ComingSoonPage() {
   const { t } = useTranslation();
   return <div className="page-container"><EmptyState title={t('common.comingSoon')} /></div>;
 }
-const ComingSoon = lazy(async () => ({ default: ComingSoonPage }));
+const ComingSoon = lazyPage(async () => ({ default: ComingSoonPage }));
 // Lazy like every other page: the dashboard carries the charts vendor chunk, which the shell itself never needs.
-const DashboardPage = lazy(() => import('@/features/dashboard/dashboard-page'));
+const DashboardPage = lazyPage(() => import('@/features/dashboard/dashboard-page'));
 // Notifications review 8-P1-4: the member's own notification preferences, on a page every active member can open.
-const AccountNotificationsPage = lazy(() => import('@/features/notifications/account-notifications-page'));
+const AccountNotificationsPage = lazyPage(() => import('@/features/notifications/account-notifications-page'));
 
 /**
  * Enrolment reachable on a valid session alone, without the shell and without `/me`.
@@ -53,6 +55,8 @@ function HomeRoute() {
   if (!can('dashboard.view')) return employeeId ? <Navigate to="/my" replace /> : <UnlinkedHome />;
   return <Suspense fallback={<PageFallback />}><DashboardPage /></Suspense>;
 }
+// the sidebar preloads a destination's page chunk on hover (lib/route-preload.ts); the dashboard sits behind this guard
+HomeRoute.preload = DashboardPage.preload;
 
 export const router = createBrowserRouter([{
   // Everything sits under one pathless route so no error ever reaches React Router's developer screen; the AppShell and
@@ -93,4 +97,5 @@ export const router = createBrowserRouter([{
     },
   ],
 }]);
+registerPreloadRoutes(router.routes);
 export { ComingSoon, PageFallback };

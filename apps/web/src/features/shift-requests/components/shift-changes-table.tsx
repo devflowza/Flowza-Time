@@ -14,7 +14,7 @@ export function ShiftChangesTable({ rows }: { rows: ShiftChangeRequestDto[] }) {
   const { cancel } = useShiftChangeMutations();
   const [withdrawing, setWithdrawing] = useState<ShiftChangeRequestDto | null>(null);
   return (
-    <div className="rounded-lg border bg-card shadow-card">
+    <div className="rounded-xl border bg-card shadow-card">
       <div className="overflow-x-auto">
         <Table>
           <TableHeader><TableRow>{(['dates', 'kind', 'shifts', 'status', 'decision'] as const).map((c) => <TableHead key={c}>{t(`columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>

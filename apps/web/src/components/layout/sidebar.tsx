@@ -1,8 +1,10 @@
+import { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { Activity, ArrowRightLeft, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, Mail, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
 import type { ModuleKey, Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
+import { preloadRoute, preloadRoutesWhenIdle } from '@/lib/route-preload';
 import { useUiStore } from '@/stores/ui-store';
 import { useActiveMembership, useModulesEnabled, useCan, useEmployeeId, useMe } from '@/features/me/use-me';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui';
@@ -43,16 +45,17 @@ interface NavSection { label?: string; items: NavItem[] }
  */
 const itemClass = (collapsed: boolean) =>
   cn(
-    'group relative flex h-9 items-center rounded-md text-[13px] text-sidebar-foreground transition-colors',
-    'hover:bg-sidebar-hover hover:text-sidebar-strong',
+    'group relative flex h-9 select-none items-center rounded-lg text-[13px] text-sidebar-foreground transition-[background-color,color] duration-150 ease-out',
+    'hover:bg-sidebar-hover hover:text-sidebar-strong active:bg-sidebar-active',
     'focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring',
     'aria-[current=page]:bg-sidebar-active aria-[current=page]:font-medium aria-[current=page]:text-sidebar-active-foreground',
-    // The 3px rail is the "you are here" anchor; logical inset keeps it on the correct edge in Arabic.
-    'before:absolute before:start-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:rounded-e-full before:bg-sidebar-rail before:opacity-0 before:transition-opacity aria-[current=page]:before:opacity-100',
-    collapsed ? 'justify-center px-0' : 'gap-2.5 ps-3 pe-2.5',
+    // The 3px rail is the "you are here" anchor; logical inset keeps it on the correct edge in Arabic. It grows into place
+    // (transform, not height) when the item becomes current.
+    'before:absolute before:start-0 before:top-1/2 before:h-4 before:w-[3px] before:-translate-y-1/2 before:scale-y-50 before:rounded-e-full before:bg-sidebar-rail before:opacity-0 before:transition-[opacity,scale] before:duration-200 before:ease-out aria-[current=page]:before:scale-y-100 aria-[current=page]:before:opacity-100',
+    collapsed ? 'justify-center px-0' : 'gap-3 ps-3 pe-2.5',
   );
 
-const iconClass = 'size-[18px] shrink-0 text-sidebar-foreground/85 transition-colors group-hover:text-sidebar-strong group-aria-[current=page]:text-sidebar-active-icon';
+const iconClass = 'size-[18px] shrink-0 text-sidebar-foreground/80 transition-colors duration-150 group-hover:text-sidebar-strong group-aria-[current=page]:text-sidebar-active-icon';
 
 export function Sidebar() {
   const { t } = useTranslation();
@@ -144,40 +147,50 @@ export function Sidebar() {
   // stays active on its other sub-paths (/attendance/print is still Attendance) — HR portal Prompt 6a review, minor 15a.
   const navPaths = sections.flatMap((s) => s.items.map((it) => it.to));
   const nestedItemMatches = (to: string) => navPaths.some((p) => p !== to && p.startsWith(`${to}/`) && (pathname === p || pathname.startsWith(`${p}/`)));
+  const isVisible = (it: NavItem) => (!it.modules || modulesOn(...it.modules)) && (it.visible !== undefined ? it.visible : !it.permissions || (it.any ? it.permissions.some((p) => can(p)) : can(...it.permissions)));
+  const visiblePaths = sections.flatMap((s) => s.items.filter(isVisible).map((it) => it.to)).join('|');
+
+  // Every destination in the menu is fetched ahead of time while the browser is idle, so opening one never waits on the
+  // network for its code (lib/route-preload.ts). Hover and focus below jump the queue for the item about to be clicked.
+  useEffect(() => (import.meta.env.MODE === 'test' || !visiblePaths ? undefined : preloadRoutesWhenIdle(visiblePaths.split('|'))), [visiblePaths]);
 
   return (
     <aside
-      className={cn('hidden shrink-0 flex-col border-e border-sidebar-border bg-sidebar text-sidebar-foreground transition-[width] duration-200 md:flex', collapsed ? 'w-16' : 'w-60')}
+      // As tall as the viewport, in the frame around the content panel (app-shell.tsx): the menu stays put while the page
+      // scrolls. The width does not animate — tweening it reflows the whole page (every table) on each frame — the labels
+      // fade in instead.
+      className={cn('sticky top-0 hidden h-dvh shrink-0 flex-col bg-sidebar text-sidebar-foreground md:flex', collapsed ? 'w-[68px]' : 'w-60')}
       aria-label="Primary"
     >
-      <div className={cn('flex h-14 shrink-0 items-center gap-2.5 border-b border-sidebar-border', collapsed ? 'justify-center px-0' : 'px-3')}>
-        <img src="/favicon.svg" alt="" className="size-7 shrink-0 rounded-lg" />
-        {!collapsed ? <span className="truncate text-[15px] font-semibold tracking-tight text-sidebar-strong">{t('app.name')}</span> : null}
+      <div className={cn('flex h-14 shrink-0 items-center gap-2.5', collapsed ? 'justify-center px-0' : 'px-4')}>
+        <img src="/favicon.svg" alt="" className="size-7 shrink-0 rounded-lg shadow-[0_0_0_1px_rgb(255_255_255/0.08),0_2px_8px_rgb(0_0_0/0.25)]" />
+        {!collapsed ? <span className="animate-fade-in truncate text-[15px] font-semibold tracking-tight text-sidebar-strong">{t('app.name')}</span> : null}
       </div>
 
-      <nav className="scrollbar-thin flex-1 overflow-y-auto px-2 py-2">
+      <nav className="scrollbar-thin flex-1 overflow-y-auto overscroll-contain px-2.5 pb-3 pt-1">
         {sections.map((section, i) => {
-          const items = section.items.filter((it) => (!it.modules || modulesOn(...it.modules)) && (it.visible !== undefined ? it.visible : !it.permissions || (it.any ? it.permissions.some((p) => can(p)) : can(...it.permissions))));
+          const items = section.items.filter(isVisible);
           if (items.length === 0) return null;
           return (
-            <div key={i} className={i === 0 ? undefined : 'mt-3'}>
+            <div key={i} className={i === 0 ? undefined : 'mt-4'}>
               {section.label && !collapsed ? (
-                <p className="mb-1 px-3 text-[11px] font-semibold uppercase tracking-[0.09em] text-sidebar-foreground/80">{section.label}</p>
+                <p className="animate-fade-in mb-1.5 px-3 text-[11px] font-medium uppercase tracking-[0.08em] text-sidebar-foreground/80">{section.label}</p>
               ) : null}
               {/* A hairline stands in for the heading when collapsed, so the grouping survives without the text. */}
-              {section.label && collapsed ? <div className="mx-3 mb-1 border-t border-sidebar-border" /> : null}
-              <ul className="space-y-px">
+              {section.label && collapsed ? <div className="mx-3 mb-2 border-t border-sidebar-border" /> : null}
+              <ul className="space-y-0.5">
                 {items.map((item) => {
                   const badgeId = item.badge && item.badge > 0 ? `nav-badge-${item.to.replace(/\W+/g, '-')}` : undefined;
                   const link = (
-                    <NavLink to={item.to} end={item.to === '/' || item.to === '/my' || nestedItemMatches(item.to)} className={itemClass(collapsed)} aria-describedby={badgeId}>
+                    <NavLink to={item.to} end={item.to === '/' || item.to === '/my' || nestedItemMatches(item.to)} className={itemClass(collapsed)} aria-describedby={badgeId}
+                      onPointerEnter={() => preloadRoute(item.to)} onFocus={() => preloadRoute(item.to)}>
                       <item.icon className={iconClass} aria-hidden />
-                      {collapsed ? <span className="sr-only">{item.label}</span> : <span className="truncate">{item.label}</span>}
+                      {collapsed ? <span className="sr-only">{item.label}</span> : <span className="animate-fade-in truncate">{item.label}</span>}
                       {/* the count is decorative here; the link DESCRIBES it (aria-describedby) so its name stays the label */}
                       {item.badge && item.badge > 0 ? (
                         collapsed
                           ? <span className="absolute end-2 top-1.5 size-2 rounded-full bg-destructive ring-2 ring-sidebar" aria-hidden data-testid={`nav-badge-${item.to}`} />
-                          : <span className="ms-auto min-w-5 rounded-full bg-destructive px-1.5 text-center text-[10px] font-semibold leading-5 text-destructive-foreground tnum" aria-hidden data-testid={`nav-badge-${item.to}`}>{item.badge > 99 ? '99+' : item.badge}</span>
+                          : <span className="ms-auto min-w-5 rounded-full bg-destructive px-1.5 text-center text-[10px] font-semibold leading-5 text-destructive-foreground tnum shadow-[0_1px_2px_rgb(0_0_0/0.2)]" aria-hidden data-testid={`nav-badge-${item.to}`}>{item.badge > 99 ? '99+' : item.badge}</span>
                       ) : null}
                     </NavLink>
                   );
@@ -201,12 +214,12 @@ export function Sidebar() {
         })}
       </nav>
 
-      <div className="shrink-0 border-t border-sidebar-border p-2">
+      <div className="shrink-0 border-t border-sidebar-border p-2.5">
         <button
           type="button"
           onClick={toggle}
           className={cn(
-            'flex h-9 w-full items-center gap-2.5 rounded-md text-[13px] text-sidebar-foreground/90 transition-colors hover:bg-sidebar-hover hover:text-sidebar-strong',
+            'flex h-9 w-full items-center gap-3 rounded-lg text-[13px] text-sidebar-foreground/90 transition-[background-color,color] duration-150 hover:bg-sidebar-hover hover:text-sidebar-strong',
             collapsed ? 'justify-center px-0' : 'ps-3 pe-2.5',
           )}
           aria-label={collapsed ? t('nav.expand') : t('nav.collapse')}

@@ -98,7 +98,7 @@ export function RosterTab() {
         <li className="flex items-center gap-1.5"><span className="flex h-5 min-w-6 items-center justify-center rounded bg-blue-100 px-0.5 text-[10px] font-semibold text-blue-800 dark:bg-blue-950 dark:text-blue-200">L</span>{t('roster.legendLeave')}</li>
         <li className="flex items-center gap-1.5"><span className="flex h-5 min-w-6 items-center justify-center text-[10px] font-semibold">–</span>{t('roster.legendNone')}</li>
       </ul>
-      <div className="rounded-lg border bg-card shadow-card">
+      <div className="rounded-xl border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
           : q.isLoading || !data ? <TableSkeleton cols={10} rows={5} />
           : data.rows.length === 0 ? <div className="p-4"><EmptyState icon={CalendarDays} title={t('roster.empty')} description={search ? tc('common.noResultsHint') : t('roster.emptyHint')} /></div>

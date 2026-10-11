@@ -10,7 +10,7 @@ export function WidgetCard({ title, subtitle, icon: Icon, action, className, bod
     <Card className={cn('flex min-w-0 flex-col', className)}>
       <div className="flex items-start justify-between gap-3 p-5 pb-3">
         <div className="flex min-w-0 items-center gap-2.5">
-          {Icon ? <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-accent text-brand-700 dark:text-brand-300"><Icon className="size-4" aria-hidden /></span> : null}
+          {Icon ? <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-accent text-brand-700 dark:text-brand-300"><Icon className="size-4" aria-hidden /></span> : null}
           <div className="min-w-0">
             <h2 className="truncate text-[15px] font-semibold leading-tight">{title}</h2>
             {subtitle ? <p className="mt-0.5 truncate text-xs text-muted-foreground">{subtitle}</p> : null}
@@ -34,7 +34,7 @@ export function ViewAllLink({ to, label }: { to: string; label: string }) {
 /** Compact empty state for inside a widget (the page-level EmptyState is too tall for a rail card). */
 export function WidgetEmpty({ icon: Icon, title, hint }: { icon: LucideIcon; title: string; hint?: string }) {
   return (
-    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed px-4 py-7 text-center">
+    <div className="flex flex-col items-center justify-center rounded-lg border border-dashed bg-muted/30 px-4 py-7 text-center">
       <Icon className="mb-2 size-5 text-muted-foreground" aria-hidden />
       <p className="text-sm font-medium">{title}</p>
       {hint ? <p className="mt-0.5 text-xs text-muted-foreground">{hint}</p> : null}

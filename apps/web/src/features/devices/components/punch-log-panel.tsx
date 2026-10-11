@@ -89,7 +89,7 @@ export function PunchLogPanel() {
         </form>
         {hasFilters ? <Button variant="ghost" size="sm" onClick={() => { setPinInput(''); setFilters({ deviceId: undefined, employeeId: undefined, pin: undefined, mapping: undefined, from: undefined, to: undefined }); }}><X /> {tc('common.clearFilters')}</Button> : null}
       </div>
-      <div className="rounded-lg border bg-card shadow-card">
+      <div className="rounded-xl border bg-card shadow-card">
         {q.isError ? <div className="p-4"><ErrorState error={q.error} onRetry={() => void q.refetch()} /></div>
           : q.isLoading && !rows ? <TableSkeleton cols={7} />
           : rows && rows.length === 0 ? <div className="p-4"><EmptyState title={t('punchLog.empty')} description={t('punchLog.emptyHint')} /></div>

@@ -8,13 +8,16 @@ export const meQueryKey = ['me'] as const;
 
 export function useMe() {
   // The cached copy is handed to the query as initial data stamped with its age, so the shell renders at once and the
-  // query still refetches on mount whenever the copy is older than staleTime.
-  const cached = readCachedMe();
+  // query still refetches on mount whenever the copy is older than staleTime. Both are functions on purpose: the query
+  // calls them once, when it is first built. As values they ran on every render of every component that reads /me —
+  // several hundred call sites — and each run read localStorage and parsed the stored session, which showed up as the
+  // shell stalling for a moment on busy screens.
   return useQuery({
     queryKey: meQueryKey,
     queryFn: async () => { const data = (await api.get<Envelope<MeDto>>('/me')).data; writeCachedMe(data); return data; },
     staleTime: 60_000,
-    ...(cached ? { initialData: cached.data, initialDataUpdatedAt: cached.at } : {}),
+    initialData: () => readCachedMe()?.data,
+    initialDataUpdatedAt: () => readCachedMe()?.at,
   });
 }
 

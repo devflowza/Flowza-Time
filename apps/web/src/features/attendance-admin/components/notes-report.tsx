@@ -97,7 +97,7 @@ export function NotesReport({ oversight }: { oversight: boolean }) {
       {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : valid && q.isLoading ? <TableSkeleton cols={10} rows={5} /> : rows.length === 0 ? (
         valid ? <EmptyState icon={FileBarChart} title={t('report.empty')} description={t('report.emptyHint')} /> : null
       ) : (
-        <div className="rounded-lg border bg-card shadow-card">
+        <div className="rounded-xl border bg-card shadow-card">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader><TableRow>{(['employee', 'date', 'day', 'category', 'comment', 'status', 'reviewedBy', 'payEffect', 'impact', 'excused'] as const).map((c) => <TableHead key={c}>{t(`report.columns.${c}`)}</TableHead>)}</TableRow></TableHeader>

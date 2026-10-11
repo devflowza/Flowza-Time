@@ -6,7 +6,7 @@ export const Tooltip = TooltipPrimitive.Root;
 export const TooltipTrigger = TooltipPrimitive.Trigger;
 export const TooltipContent = React.forwardRef<React.ElementRef<typeof TooltipPrimitive.Content>, React.ComponentPropsWithoutRef<typeof TooltipPrimitive.Content>>(({ className, sideOffset = 4, ...props }, ref) => (
   <TooltipPrimitive.Portal>
-    <TooltipPrimitive.Content ref={ref} sideOffset={sideOffset} className={cn('z-50 overflow-hidden rounded-md bg-foreground px-3 py-1.5 text-xs text-background shadow-md', className)} {...props} />
+    <TooltipPrimitive.Content ref={ref} sideOffset={sideOffset} className={cn('z-50 origin-(--radix-tooltip-content-transform-origin) overflow-hidden rounded-md bg-foreground px-2.5 py-1 text-xs font-medium text-background shadow-md data-[state=closed]:animate-pop-out data-[state=delayed-open]:animate-pop-in data-[state=instant-open]:animate-pop-in', className)} {...props} />
   </TooltipPrimitive.Portal>
 ));
 TooltipContent.displayName = 'TooltipContent';

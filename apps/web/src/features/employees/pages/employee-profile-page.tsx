@@ -1,4 +1,4 @@
-import { Suspense, lazy } from 'react';
+import { Suspense } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, RefreshCw } from 'lucide-react';
@@ -18,10 +18,11 @@ import { DangerZone } from '../components/profile/danger-zone';
 import { toastJobQueued } from '../job-toast';
 import { AttendanceGrantsCard } from '@/features/attendance-review/components/attendance-grants-card';
 import { PortalAccessCard } from '@/features/users/components/portal-access-card';
+import { lazyPage } from '@/lib/lazy-page';
 
 // The activity view is the only part of the profile that charts, and Recharts is a 118 kB (gzipped) vendor chunk:
 // loading it lazily keeps it off every other visit to a profile.
-const ActivityTab = lazy(() => import('../components/profile/activity-tab').then((m) => ({ default: m.ActivityTab })));
+const ActivityTab = lazyPage(() => import('../components/profile/activity-tab').then((m) => ({ default: m.ActivityTab })));
 
 const TABS = ['overview', 'history', 'devices', 'attendance', 'activity', 'documents', 'danger'] as const;
 type Tab = (typeof TABS)[number];

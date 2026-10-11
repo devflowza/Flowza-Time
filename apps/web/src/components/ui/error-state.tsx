@@ -21,8 +21,8 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   // say it is on its way, without the alarm colours or a request id nobody needs to report.
   if (isFeatureUnavailableError(error)) {
     return (
-      <div role="status" className="flex flex-col items-center justify-center rounded-lg border border-dashed px-6 py-10 text-center">
-        <div className="mb-3 flex size-12 items-center justify-center rounded-full bg-accent text-brand-700"><Hourglass className="size-6" aria-hidden /></div>
+      <div role="status" className="flex flex-col items-center justify-center rounded-xl border border-dashed bg-muted/30 px-6 py-10 text-center">
+        <div className="mb-4 flex size-12 items-center justify-center rounded-xl border bg-card text-brand-700 shadow-sm dark:text-brand-300"><Hourglass className="size-[22px]" aria-hidden /></div>
         <h3 className="text-sm font-semibold">{t('common.featureUnavailable')}</h3>
         <p className="mt-1 max-w-md text-xs text-muted-foreground">{t('common.featureUnavailableHint')}</p>
         {onRetry ? <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>{t('common.checkAgain')}</Button> : null}
@@ -36,8 +36,8 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
   // rule in front of the API is not the reader's connection, and telling them to check it sends them the wrong way.
   const hint = isNetworkError(error) ? t(networkFailureHintKey(error)) : t('common.errorHint', { requestId: requestId ?? '—' });
   return (
-    <div role="alert" className="flex flex-col items-center justify-center rounded-lg border border-destructive/30 bg-red-50/40 px-6 py-10 text-center dark:bg-red-950/20">
-      <AlertTriangle className="mb-3 size-8 text-destructive" aria-hidden />
+    <div role="alert" className="flex flex-col items-center justify-center rounded-xl border border-destructive/25 bg-red-500/[0.04] px-6 py-10 text-center dark:bg-red-400/[0.06]">
+      <div className="mb-4 flex size-12 items-center justify-center rounded-xl border border-destructive/20 bg-card text-destructive shadow-sm dark:text-red-300"><AlertTriangle className="size-[22px]" aria-hidden /></div>
       <h3 className="text-sm font-semibold">{message}</h3>
       <p className="mt-1 max-w-md text-xs text-muted-foreground">{hint}</p>
       {onRetry ? <Button variant="outline" size="sm" className="mt-4" onClick={onRetry}>{t('common.retry')}</Button> : null}

@@ -18,20 +18,27 @@ names onto CSS variables that `:root` and `.dark` redefine.
 |---|---|
 | `bg-background` / `text-foreground` | Page ground and default text |
 | `bg-card` / `text-card-foreground` | Any raised surface |
+| `bg-popover` / `text-popover-foreground` | Floating layers: menus, selects, popovers (a step above the card in dark mode) |
 | `bg-muted` / `text-muted-foreground` | Recessed panels; secondary and helper text |
-| `border-border`, `border-input` | Hairlines; form control outlines |
+| `bg-muted-strong` | Hover on a muted surface, skeletons, the active tab in dark mode |
+| `border-border`, `border-input` | Hairlines; form control outlines (`input` is a shade darker) |
 | `brand-50 … brand-900` | The product's green. `brand-600/700` for action, `brand-500` for selection and focus |
 | `text-primary`, `bg-primary` | Primary action; already resolves to `brand-700` |
 | `destructive`, `success`, `warning`, `info` | Status only — never decoration |
 | `ring-ring` | Focus ring; equals `brand-500` |
-| `shadow-card` | The only elevation. Two shadows, both tiny. There is no `shadow-lg` tier |
-| `radius-sm/md/lg/xl` | 6 / 8 / 12 / 16px. Cards and panels are `rounded-lg` |
+| `shadow-xs` · `shadow-sm` · `shadow-card` | Resting elevation: controls, small chips, cards. Tinted with the ink colour, never pure black |
+| `shadow-md` · `shadow-lg` | Floating elevation: menus/selects/tooltips (`md`), dialogs and sheets (`lg`). In dark mode depth comes from a lighter surface, a hairline and a top highlight instead |
+| `radius-sm/md/lg/xl/2xl` | 6 / 8 / 12 / 14 / 18px. Controls `rounded-md`, small tiles `rounded-lg`, cards and table panels `rounded-xl`, dialogs and the content panel `rounded-2xl` |
+| `ease-out` · `ease-spring` · `animate-*` | Motion tokens (§12) |
 
 Dark mode is a class on `<html>`, not a media query, so it can be toggled. Any colour written outside the token set
 must define both halves inline (`bg-blue-50/60 dark:bg-blue-950/30`) or it will be unreadable in one of them.
 
-**Type.** Inter for Latin, IBM Plex Sans Arabic for Arabic, JetBrains Mono for codes, serials and configuration keys.
-Anything numeric that lines up in a column gets `.tnum` (tabular figures): attendance totals, step numbers, counts.
+**Type.** Geist for Latin, IBM Plex Sans Arabic for Arabic, Geist Mono for codes, serials and configuration keys — all
+self-hosted through `@fontsource` (imported in `main.tsx`; the Latin face is preloaded from `index.html`, and the Arabic
+faces carry an Arabic-only `unicode-range`, so an English session never downloads them). Headings track tighter as they
+grow (`h1` −0.022em, `h2`/`h3` −0.012em, none in Arabic) and use `text-wrap: balance`. Anything numeric that lines up
+in a column gets `.tnum` (tabular figures): attendance totals, step numbers, counts.
 
 ## 2. Right-to-left is not a theme
 
@@ -88,7 +95,7 @@ row should be visible without scrolling.
 
 ## 5. Components
 
-**Card** is the only surface. `rounded-lg border bg-card shadow-card`. Do not nest a card in a card — use
+**Card** is the only resting surface. `rounded-xl border bg-card shadow-card`. Do not nest a card in a card — use
 `rounded-lg border bg-muted/40 p-4` for a panel inside one.
 
 **Button.** `default` for the one primary action on the screen, `outline` for secondary, `ghost` for tertiary and for
@@ -246,6 +253,44 @@ the member lacks the permission behind its data (`attendance.approve` for approv
 `device.view`). Charts stack disjoint series — "on time" is present minus late, and the headcount ring carries an
 "off / no record" slice — so the numbers always add up to the records or the headcount.
 
+## 12. Motion, smoothness and the frame
+
+The app should never feel like it stalls. Every rule here exists because its opposite was measured as a hitch.
+
+**The frame.** From `md` up the shell is one screen tall and painted in the tenant's sidebar colour; the page sits in a
+rounded panel inset from its edges (`#app-scroll`, `components/layout/app-shell.tsx`) that scrolls on its own, under a
+frosted top bar (`.glass`). On a phone the document scrolls, so the browser chrome can collapse. Code that scrolls the
+page calls `scrollPageToTop()` (`lib/scroll.ts`), never `window.scrollTo` — on a desktop the window does not scroll. A
+new page opens at its top; Back and Forward leave the position alone.
+
+**Navigation never waits on the network.** Pages are `lazyPage(() => import(…))` (`lib/lazy-page.ts`), not
+`React.lazy`. The sidebar preloads every destination it shows while the browser is idle and jumps the queue for the item
+under the pointer or focus (`lib/route-preload.ts`); a preloaded page then renders in the same frame instead of keeping
+the previous page frozen while its code downloads. A route guard component that renders the page itself hides it from
+the route tree, so it carries the page's preload: `NotesRoute.preload = NotesReviewPage.preload`. Measured with 350 ms
+chunk latency: click-to-new-page went from ~480 ms to ~140 ms on average.
+
+**Animate transform and opacity only.** Never `width`, `height`, `top`/`left` or a margin: those re-lay-out the page —
+every table — on each frame (the collapsible sidebar no longer tweens its width; its labels fade in instead). Never a
+full-screen `backdrop-filter`: it is recomputed every frame anything underneath moves, so dialog scrims are a plain tint
+and blur is kept to the small top bar.
+
+**Motion tokens** (`globals.css` `@theme`): `ease-out` and `ease-spring` are critically damped curves — fast start,
+long soft settle, no overshoot. Radix layers animate on their `data-state`: menus, selects, tooltips and popovers use
+`data-[state=open]:animate-pop-in data-[state=closed]:animate-pop-out` scaling from their trigger
+(`origin-(--radix-…-content-transform-origin)`); dialogs `animate-dialog-in/out`; the navigation sheet slides from and
+back to the start edge (`DialogContent variant="sheet"`, mirrored in Arabic). Pages rise and fade in once, when their
+`.page-container` mounts — a refetch, a filter or a tab inside the page does not re-animate. Buttons answer on press
+(`active:scale-[0.97]`), not on release.
+
+**Re-render less.** The React Compiler memoises components and hooks (`vite.config.ts`). Modules that import
+`react-hook-form` are left out: `formState` is a proxy that subscribes on read, and a form object passed down as a prop is
+the same reference after every validation, so a memoised child would never show its errors. Hooks that read storage
+(`useMe`'s cached `/me`) hand it over as `initialData: () => …` so it runs once per query, not once per render.
+
+**Reduced motion and transparency** are honoured globally: animations collapse to an instant cross-fade, and `.glass`
+turns solid under `prefers-reduced-transparency`.
+
 ## 9. Checklist before shipping a screen
 
 - [ ] No physical direction utilities; checked at `dir="rtl"`
@@ -253,5 +298,6 @@ the member lacks the permission behind its data (`attendance.approve` for approv
 - [ ] Keyboard-only pass: every control reachable, focus visible, composite widgets are one tab stop
 - [ ] Loading state is a skeleton shaped like the content; error state offers retry; empty state says what to do next
 - [ ] The layout fills its container at 1920px and survives 360px
+- [ ] Anything that moves animates `transform`/`opacity` only; pages are `lazyPage`; nothing calls `window.scrollTo` (§12)
 - [ ] Every string comes from `t()` and exists in both `en` and `ar`
 - [ ] A regression test that fails against the previous behaviour

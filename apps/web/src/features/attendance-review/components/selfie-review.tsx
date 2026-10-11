@@ -71,7 +71,7 @@ export function SelfieReviewPanel() {
         {(['pending', 'approved', 'rejected'] as const).map((s) => <Button key={s} size="sm" variant={s === status ? 'default' : 'ghost'} aria-pressed={s === status} onClick={() => setStatus(s)}>{t(`selfies.status.${s}`)}</Button>)}
       </div>
       {q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : q.isLoading ? <TableSkeleton cols={6} rows={3} /> : rows.length === 0 ? <EmptyState icon={Camera} title={t('selfies.empty')} description={t('selfies.emptyHint')} /> : (
-        <div className="rounded-lg border bg-card shadow-card">
+        <div className="rounded-xl border bg-card shadow-card">
           <div className="overflow-x-auto">
             <Table>
               <TableHeader><TableRow>{(['employee', 'time', 'direction', 'location', 'status'] as const).map((c) => <TableHead key={c}>{t(`selfies.columns.${c}`)}</TableHead>)}<TableHead /></TableRow></TableHeader>

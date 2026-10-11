@@ -20,7 +20,7 @@ export function RolesTab() {
         {can('role.manage') ? <Button size="sm" onClick={() => navigate('/users/roles/new')}><Plus /> {t('roles.create')}</Button> : null}
       </div>
       {q.isLoading ? <Skeleton className="h-64 w-full" /> : q.isError ? <ErrorState error={q.error} onRetry={() => void q.refetch()} /> : roles.length === 0 ? <EmptyState icon={ShieldCheck} title={t('roles.empty')} /> : (
-        <div className="rounded-lg border bg-card shadow-card">
+        <div className="rounded-xl border bg-card shadow-card">
           <Table>
             <TableHeader><TableRow><TableHead>{tc('common.name')}</TableHead><TableHead>{t('roles.key')}</TableHead><TableHead>{t('roles.type')}</TableHead><TableHead>{t('roles.permissions')}</TableHead><TableHead>{t('roles.members')}</TableHead><TableHead /></TableRow></TableHeader>
             <TableBody>
