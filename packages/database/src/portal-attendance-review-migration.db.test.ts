@@ -12,12 +12,14 @@ import { applyMigrations } from './tools/migrate.js';
  * provider-writing migration re-run — leave `device_providers` byte-identical (P2-19).
  */
 const MIGRATION = '20260928000840_portal_attendance_review_fixes.sql';
-const PROVIDER_MIGRATIONS = ['20260905001600_reference_data.sql', '20260928000450_finance_connector_fixes.sql', '20260928000500_portal_attendance_self_service.sql', MIGRATION, '20260929000100_hikvision_push_provider.sql', '20260929000200_device_provider_adapters.sql'];
+const PROVIDER_MIGRATIONS = ['20260905001600_reference_data.sql', '20260928000450_finance_connector_fixes.sql', '20260928000500_portal_attendance_self_service.sql', MIGRATION, '20260929000100_hikvision_push_provider.sql', '20260929000200_device_provider_adapters.sql',
+  '20261010000100_hikvision_push_available.sql'];
 /**
- * Rows a later migration rewrites (20260929000200 replaced the placeholders the reference data seeded): replaying the chain
- * really changes them twice (old row, then new row), so their stamp legitimately moves; their CONTENT must still come out identical.
+ * Rows a later migration rewrites (20260929000200 replaced the placeholders the reference data seeded; 20261010000100 moved
+ * hikvision_push from beta to available): replaying the chain really changes them twice (old row, then new row), so their stamp
+ * legitimately moves; their CONTENT must still come out identical.
  */
-const SUPERSEDED = new Set(['zkteco_biotime', 'hikvision_isapi', 'suprema_biostar2', 'anviz_crosschex_cloud', 'essl_push', 'fingertec_push', 'matrix_cosec']);
+const SUPERSEDED = new Set(['zkteco_biotime', 'hikvision_isapi', 'suprema_biostar2', 'anviz_crosschex_cloud', 'essl_push', 'fingertec_push', 'matrix_cosec', 'hikvision_push']);
 const ORG = '0c000000-0000-0000-0000-000000000000';
 const BRANCH = '0c000000-0000-0000-0000-00000000000b';
 const E = { requester: '0c000000-0000-0000-0000-0000000000e1', colleague: '0c000000-0000-0000-0000-0000000000e2', third: '0c000000-0000-0000-0000-0000000000e3' };
