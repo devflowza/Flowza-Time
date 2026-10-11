@@ -169,7 +169,8 @@ begin
   insert into public.shift_coverage_requirements (id, organization_id, branch_id, shift_id, weekdays, min_headcount, created_by, created_at)
   select pg_temp.sid('coverage:' || s.code), org, sohar, pg_temp.sid('shift:' || s.code), '{0,1,2,3,4,5,6}', 2, hr_id, t0
   from (values ('SEC-D'), ('SEC-N'), ('WH-M'), ('WH-E'), ('WH-N')) as s(code)
-  on conflict (organization_id, branch_id, shift_id) do update set min_headcount = excluded.min_headcount, weekdays = excluded.weekdays, updated_at = now();
+  -- branch-wide targets (no location): the key includes the location since migration 20261010000100 (nulls not distinct)
+  on conflict (organization_id, branch_id, shift_id, location_id) do update set min_headcount = excluded.min_headcount, weekdays = excluded.weekdays, updated_at = now();
 
   ---------------------------------------------------------------------------------------------------------------------
   -- Attendance policies (attendance_rule_sets with scope + policy sections), all effective from 1 Aug 2026

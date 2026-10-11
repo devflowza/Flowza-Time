@@ -3,6 +3,7 @@ import { Link } from 'react-router';
 import { AlertTriangle } from 'lucide-react';
 import { Badge, Card, CardContent, CardHeader, CardTitle } from '@/components/ui';
 import { fmtDateTime, fmtNumber, fmtRelative } from '@/lib/format';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import type { DeviceDetail } from '../../api';
 import { CapabilityChips, ConnectionBadge, DeviceStatusBadge, IntegrationBadge, TagChips } from '../device-badges';
 
@@ -14,6 +15,9 @@ export function OverviewTab({ device, tz }: { device: DeviceDetail; tz: string }
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation();
   const when = (iso: string | null) => (iso ? <span title={fmtDateTime(iso, tz)} className="tnum">{fmtRelative(iso)}</span> : '—');
+  // the place the terminal is installed in, below its branch ("Site A › Floor 2"); only organisations with places show the row
+  const locations = useLocationTree();
+  const place = locations.labelOf(device.locationId, { fromBranch: true }) || device.locationName || '';
   return (
     <div className="grid gap-4 lg:grid-cols-3">
       <Card className="lg:col-span-2">
@@ -47,6 +51,7 @@ export function OverviewTab({ device, tz }: { device: DeviceDetail; tz: string }
           <dl className="grid gap-3">
             <Item label={tc('common.code')} ltr><span className="font-mono">{device.code}</span></Item>
             <Item label={tc('common.branch')}>{device.branchName ?? device.branchId}</Item>
+            {locations.hasPlaceLevels || place ? <Item label={t('fields.location')}>{place || '—'}</Item> : null}
             <Item label={t('columns.provider')}>{device.providerName ?? device.providerKey}</Item>
             <Item label={t('columns.model')}>{device.manufacturer}{device.modelName ? ` · ${device.modelName}` : ''}</Item>
             <Item label={t('fields.serialNumber')} ltr><span className="font-mono">{device.serialNumber ?? '—'}</span></Item>

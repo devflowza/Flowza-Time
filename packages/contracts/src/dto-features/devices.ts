@@ -18,6 +18,8 @@ export const deviceModelsQuerySchema = z.object({ providerKey: z.string().min(1)
 
 export const deviceListQuerySchema = paginationQuerySchema.extend({
   branchId: uuidSchema.optional(),
+  /** A group / branch location → the devices of its branches; a place → the devices installed in it or below (docs/locations.md). */
+  locationId: uuidSchema.optional(),
   status: z.enum(DEVICE_STATUSES).optional(),
   connectionStatus: z.enum([...CONNECTION_STATUSES, 'vendor_degraded']).optional(),
   providerKey: z.string().max(64).optional(),
@@ -31,7 +33,7 @@ export type DeviceListQuery = z.infer<typeof deviceListQuerySchema>;
 export const deleteDeviceQuerySchema = z.object({ decommission: booleanQuerySchema.default(false) });
 
 /** Fleet summary query — same branch scoping as the list. */
-export const deviceSummaryQuerySchema = z.object({ branchId: uuidSchema.optional(), includeDecommissioned: booleanQuerySchema.default(false) });
+export const deviceSummaryQuerySchema = z.object({ branchId: uuidSchema.optional(), locationId: uuidSchema.optional(), includeDecommissioned: booleanQuerySchema.default(false) });
 export type DeviceSummaryQuery = z.infer<typeof deviceSummaryQuerySchema>;
 /** Counts for list headers / dashboards; keys of `byConnectionStatus` are CONNECTION_STATUSES (+ 'vendor_degraded'), of `byStatus` DEVICE_STATUSES. */
 export const deviceSummaryDtoSchema = z.object({

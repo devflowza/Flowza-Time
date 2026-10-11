@@ -26,11 +26,24 @@ export function useTeam(id: string | null) {
   return useQuery({ queryKey: qk.detail(orgId, 'teams', id ?? ''), queryFn: async () => (await api.get<Envelope<TeamDto>>(`/orgs/${orgId}/teams/${id}`)).data, enabled: !!id });
 }
 
-/** Create / update / archive for one structure entity. Archive is a DELETE that flips status to `archived` on the server. */
+/** One branch, in full (the branch dialog opened from the location tree, which only knows the branch's node). */
+export function useBranch(id: string | null) {
+  const orgId = useOrgId();
+  return useQuery({ queryKey: qk.detail(orgId, 'branches', id ?? ''), queryFn: async () => (await api.get<Envelope<BranchDto>>(`/orgs/${orgId}/branches/${id}`)).data, enabled: !!id });
+}
+
+/**
+ * Create / update / archive for one structure entity. Archive is a DELETE that flips status to `archived` on the server.
+ * A branch write also moves the location tree (a branch's node is created with it, follows its status and its placement),
+ * so branches invalidate the locations and their level counts too.
+ */
 export function useStructureMutations<TDto, TInput>(entity: StructureEntity) {
   const orgId = useOrgId();
   const qc = useQueryClient();
-  const invalidate = () => qc.invalidateQueries({ queryKey: qk.entity(orgId, entity) });
+  const invalidate = () => Promise.all([
+    qc.invalidateQueries({ queryKey: qk.entity(orgId, entity) }),
+    ...(entity === 'branches' ? [qc.invalidateQueries({ queryKey: qk.entity(orgId, 'locations') }), qc.invalidateQueries({ queryKey: qk.entity(orgId, 'location-levels') })] : []),
+  ]);
   const create = useMutation({ mutationFn: async (input: TInput) => (await api.post<Envelope<TDto>>(`/orgs/${orgId}/${entity}`, input)).data, onSuccess: invalidate });
   const update = useMutation({ mutationFn: async ({ id, input }: { id: string; input: Partial<TInput> }) => (await api.patch<Envelope<TDto>>(`/orgs/${orgId}/${entity}/${id}`, input)).data, onSuccess: invalidate });
   const archive = useMutation({ mutationFn: async (id: string) => (await api.delete<Envelope<TDto>>(`/orgs/${orgId}/${entity}/${id}`)).data, onSuccess: invalidate });

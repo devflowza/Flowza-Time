@@ -47,9 +47,14 @@ export function useSelfieReview() {
   return useMutation({ mutationFn: async ({ id, input }: { id: string; input: SelfieReviewInput }) => (await api.post<Envelope<SelfieCheckinDto>>(`/orgs/${orgId}/attendance/selfie-checkins/${id}/review`, input)).data, onSuccess: invalidate });
 }
 
-export function useGeofences(includeInactive = true) {
+/** `locationId`: a region / branch → the fences of its branches; a place → the fences outlining it or a place below it (docs/locations.md). */
+export function useGeofences(includeInactive = true, locationId?: string) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, GEOFENCES, { includeInactive }), queryFn: async () => (await api.get<Envelope<GeofenceDto[]>>(`/orgs/${orgId}/geofences`, { includeInactive })).data });
+  return useQuery({
+    queryKey: qk.list(orgId, GEOFENCES, { includeInactive, locationId }),
+    queryFn: async () => (await api.get<Envelope<GeofenceDto[]>>(`/orgs/${orgId}/geofences`, { includeInactive, locationId })).data,
+    placeholderData: keepPreviousData,
+  });
 }
 export function useGeofenceMutations() {
   const orgId = useOrgId();

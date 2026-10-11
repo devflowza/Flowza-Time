@@ -6,7 +6,7 @@ export const EMPLOYEE_COLUMNS = [
   'e.id', 'e.organizationId', 'e.employeeNumber', 'e.firstName', 'e.middleName', 'e.lastName', 'e.displayName', 'e.displayNameAr', 'e.photoPath', 'e.gender', 'e.dateOfBirth',
   'e.nationalityCode', 'e.email', 'e.phone', 'e.joiningDate', 'e.exitDate', 'e.employmentStatus', 'e.employmentType', 'e.branchId', 'e.departmentId', 'e.designationId',
   'e.managerEmployeeId', 'e.secondaryManagerEmployeeId', 'e.userId', 'e.deviceUserId', 'e.cardNumber', 'e.fingerprintEnrolled', 'e.faceEnrolled', 'e.weeklyOffDays', 'e.customFields', 'e.deletedAt', 'e.createdAt', 'e.updatedAt',
-  'b.name as branchName', 'd.name as departmentName', 'g.name as designationName', 'mgr.displayName as managerName', 'mgr2.displayName as secondaryManagerName',
+  'e.workLocationId', 'b.name as branchName', 'd.name as departmentName', 'g.name as designationName', 'mgr.displayName as managerName', 'mgr2.displayName as secondaryManagerName',
 ] as const;
 
 export interface EmployeeRow {
@@ -16,17 +16,21 @@ export interface EmployeeRow {
   branchId: string; departmentId: string | null; designationId: string | null; managerEmployeeId: string | null; secondaryManagerEmployeeId: string | null; userId: string | null; deviceUserId: string; cardNumber: string | null;
   fingerprintEnrolled: boolean; faceEnrolled: boolean; weeklyOffDays: number[] | null; customFields: unknown; deletedAt: Date | null; createdAt: Date; updatedAt: Date;
   branchName: string | null; departmentName: string | null; designationName: string | null; managerName: string | null; secondaryManagerName: string | null;
+  /** Where the employee works inside the branch (docs/locations.md): a place of `branchId`. */
+  workLocationId: string | null;
 }
 
 export type DeviceSyncSummary = NonNullable<EmployeeDto['deviceSyncSummary']>;
 export const EMPTY_SYNC_SUMMARY: DeviceSyncSummary = { total: 0, inSync: 0, pending: 0, failed: 0, offline: 0 };
 
-export function toEmployeeDto(r: EmployeeRow, deviceSyncSummary?: DeviceSyncSummary): EmployeeDto {
+/** `locationLabels`: place labels by id (`locationLabels` of @flowza/database, one batch per page); a place it lacks prints null. */
+export function toEmployeeDto(r: EmployeeRow, deviceSyncSummary?: DeviceSyncSummary, locationLabels?: ReadonlyMap<string, string>): EmployeeDto {
   return {
     id: r.id, organizationId: r.organizationId, employeeNumber: r.employeeNumber, firstName: r.firstName, middleName: r.middleName, lastName: r.lastName, displayName: r.displayName,
     displayNameAr: r.displayNameAr, photoPath: r.photoPath, photoUrl: null, gender: r.gender, dateOfBirth: isoDateOrNull(r.dateOfBirth), nationalityCode: r.nationalityCode, email: r.email, phone: r.phone,
     joiningDate: isoDate(r.joiningDate), exitDate: isoDateOrNull(r.exitDate), employmentStatus: r.employmentStatus, employmentType: r.employmentType,
-    branchId: r.branchId, branchName: r.branchName ?? undefined, departmentId: r.departmentId, departmentName: r.departmentName, designationId: r.designationId, designationName: r.designationName,
+    branchId: r.branchId, branchName: r.branchName ?? undefined,
+    workLocationId: r.workLocationId, workLocationName: r.workLocationId ? locationLabels?.get(r.workLocationId) ?? null : null, departmentId: r.departmentId, departmentName: r.departmentName, designationId: r.designationId, designationName: r.designationName,
     managerEmployeeId: r.managerEmployeeId, managerName: r.managerName, secondaryManagerEmployeeId: r.secondaryManagerEmployeeId, secondaryManagerName: r.secondaryManagerName,
     userId: r.userId, deviceUserId: r.deviceUserId, cardNumber: r.cardNumber,
     fingerprintEnrolled: r.fingerprintEnrolled, faceEnrolled: r.faceEnrolled, weeklyOffDays: r.weeklyOffDays, customFields: jsonObject(r.customFields),

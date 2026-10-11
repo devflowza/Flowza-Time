@@ -8,7 +8,11 @@
   "fields": {
     "email": "Email", "role": "Role", "selectRole": "Select a role", "branchScope": "Branch scope", "allBranches": "All branches", "allBranchesHint": "Turn off to limit access to selected branches.", "allBranchesScoped": "Your own access is limited to some branches: you can only give access to those branches.",
     "branches": "Branches", "branchesRequired": "Select at least one branch or grant all branches", "noBranches": "No active branches", "lastLogin": "Last sign-in",
-    "linkEmployee": "Linked employee", "linkEmployeeHint": "Lets the user see their own attendance and request corrections."
+    "linkEmployee": "Linked employee", "linkEmployeeHint": "Lets the user see their own attendance and request corrections.",
+    "byLocation": "Add branches by location", "byLocationPlaceholder": "Choose a location…", "byLocationIdle": "Add branches",
+    "byLocationAdd_one": "Add {{count}} branch", "byLocationAdd_other": "Add {{count}} branches",
+    "byLocationAdded_one": "{{count}} branch added from {{name}}", "byLocationAdded_other": "{{count}} branches added from {{name}}",
+    "byLocationNote": "Adds the branches under the location as they are today. Branches added to it later are not included automatically: add them here as well."
   },
   "members": {
     "you": "you", "searchPlaceholder": "Search name or email…", "empty": "No members", "emptyHint": "Invite colleagues to give them access.",

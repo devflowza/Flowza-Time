@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
 import { organizationSettingsSchema, reportParametersSchema, SETTINGS_GROUPS, type OrganizationSettings, type ReportFormat, type ReportParameters } from '@flowza/contracts';
-import { errors } from '@flowza/shared';
-import type { Trx } from '@flowza/database';
+import { AppError, errors } from '@flowza/shared';
+import { resolveLocationFilter, type LocationFilter, type Trx } from '@flowza/database';
 import { formatClock, formatGeneratedAt, formatHoursCell, formatIsoDate, legendItems, luxonDatePattern, reportLabel, resolveAttendanceCode, type AttendanceCode, type CodeInput, type CodeOverrides, type HoursNotation, type LegendItem, type ReportLabelKey, type TimeFormat } from '@flowza/domain';
 import { asObject } from '../attendance/common.js';
 import type { LegendEntry } from './model.js';
@@ -76,6 +76,44 @@ export function resolveScope(params: Record<string, unknown>): ReportScope {
   return { branchIds, departmentId: typeof params['departmentId'] === 'string' ? params['departmentId'] : null, employeeIds: uuidList(params['employeeIds']) };
 }
 
+/** `a ∩ b`, where a null `b` means "no restriction" (then `a`, deduplicated). */
+function intersect(a: readonly string[], b: readonly string[] | null): string[] {
+  const unique = [...new Set(a)];
+  if (b === null) return unique;
+  const allowed = new Set(b);
+  return unique.filter((x) => allowed.has(x));
+}
+
+/**
+ * A `locationId` parameter (docs/locations.md §2) can only NARROW the scope `resolveScope` built from the explicit and injected
+ * parameters: a group / branch location → branchIds = its branches ∩ the scope's branches; a place → branchIds = [its branch] ∩
+ * the scope's branches, employeeIds = the employees working in it or below (`placeEmployeeIds`) ∩ any explicit / injected
+ * employees. An empty intersection stays empty (an empty list selects nobody — never everyone).
+ */
+export function narrowScopeToLocation(scope: ReportScope, filter: LocationFilter, placeEmployeeIds: readonly string[]): ReportScope {
+  if (filter.kind === 'branches') return { ...scope, branchIds: intersect(filter.branchIds, scope.branchIds) };
+  return { ...scope, branchIds: intersect([filter.branchId], scope.branchIds), employeeIds: intersect(placeEmployeeIds, scope.employeeIds) };
+}
+
+/**
+ * Resolves the `locationId` parameter in the organisation's system context (the API checked that the requester could see it)
+ * and narrows `scope` with it. A location that does not exist (any more) fails the report rather than widening it.
+ */
+export async function applyLocationScope(trx: Trx, organizationId: string, locationId: string | null | undefined, scope: ReportScope): Promise<ReportScope> {
+  if (!locationId) return scope;
+  let filter: LocationFilter;
+  try {
+    filter = await resolveLocationFilter(trx, organizationId, locationId);
+  } catch (err) {
+    if (AppError.is(err) && err.code === 'NOT_FOUND') throw errors.validation('The report location no longer exists.', { issues: [{ path: 'parameters.locationId', message: 'Unknown location' }] });
+    throw err;
+  }
+  const placeEmployeeIds = filter.kind === 'places'
+    ? (await trx.selectFrom('employees').select('id').where('organizationId', '=', organizationId).where('workLocationId', 'in', filter.placeIds).execute()).map((e) => e.id)
+    : [];
+  return narrowScopeToLocation(scope, filter, placeEmployeeIds);
+}
+
 export async function loadReportContext(trx: Trx, organizationId: string, request: { parameters: unknown; format: ReportFormat }, now: Date): Promise<ReportContext> {
   const org = await trx.selectFrom('organizations').select(['displayName', 'timezone', 'locale']).where('id', '=', organizationId).executeTakeFirst();
   if (!org) throw errors.notFound('Organization', organizationId);
@@ -100,10 +138,11 @@ export async function loadReportContext(trx: Trx, organizationId: string, reques
   const codeOverrides = (reports.codeOverrides ?? {}) as CodeOverrides;
   const t = (key: string, vars: Record<string, string | number> = {}) => reportLabel(locale, key, vars);
   const today = DateTime.fromJSDate(now).setZone(timezone).toISODate() ?? now.toISOString().slice(0, 10);
+  const scope = await applyLocationScope(trx, organizationId, params.locationId, resolveScope(rawParams));
 
   return {
     organizationId, company: org.displayName, timezone, locale, dir: locale === 'ar' ? 'rtl' : 'ltr', settings, notation, timeFormat, datePattern,
-    firstDayOfWeek: general.firstDayOfWeek ?? 0, codeOverrides, leaveTypes, departments, params, format: request.format, scope: resolveScope(rawParams), now, today,
+    firstDayOfWeek: general.firstDayOfWeek ?? 0, codeOverrides, leaveTypes, departments, params, format: request.format, scope, now, today,
     t,
     code: (input) => resolveAttendanceCode(input, codeOverrides),
     hours: (minutes, opts) => formatHoursCell(minutes, notation, opts),

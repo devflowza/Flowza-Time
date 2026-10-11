@@ -29,6 +29,6 @@ export const featureRoutes: RouteObject[] = [
   ...attendanceReviewRoutes,
   ...attendanceAdminRoutes,
   ...policiesRoutes,
-  // Enterprise round-the-clock scheduling (module advanced_scheduling): /deployments
+  // Enterprise round-the-clock scheduling (module advanced_scheduling): /deployments, /attendance/muster
   ...schedulingRoutes,
 ];

@@ -184,9 +184,12 @@
     },
     "scope": {
       "title": "Who the policy is for",
-      "hint": "Every dimension you set must match; the most specific matching policy wins (shift > group > department > branch > country).",
+      "hint": "Every dimension you set must match; the most specific matching policy wins (shift > group > department > location or branch > country; between two locations the deeper one wins).",
       "country": "Country",
       "anyCountry": "Any country",
+      "location": "Location",
+      "anyLocation": "Organisation-wide",
+      "locationHint": "A headquarters or region covers every branch below it; a site, floor or zone only the people who work there. Leave empty for an organisation-wide policy.",
       "department": "Department",
       "anyDepartment": "Any department",
       "group": "Employee group",
@@ -232,8 +235,10 @@
     "hint": "Policies are effective-dated. Every dimension a policy names must match the employee on the date; the most specific matching policy wins, and without any the default rules apply.",
     "scope": "Scope",
     "specificity": "Specificity",
-    "specificityHint": "Shift 32, group 16, department 8, branch 4, country 2: the highest matching policy wins.",
+    "specificityHint": "Shift 32, group 16, department 8, location or branch 4 (between two locations the deeper one wins), country 2: the highest matching policy wins.",
     "branch": "Branch",
+    "location": "Location",
+    "anyLocation": "Any location",
     "points": "Points"
   },
   "whichPolicy": {
@@ -244,10 +249,12 @@
     "defaults": "No policy matches: the default rules apply.",
     "applies": "Applies",
     "lessSpecific": "Matches, but a more specific policy wins",
+    "location": "Location",
     "mismatch": {
       "DATES": "Not in force on this date",
       "COUNTRY": "Another country",
       "BRANCH": "Another branch",
+      "LOCATION": "Another location: the employee does not work there",
       "DEPARTMENT": "Another department",
       "EMPLOYEE_GROUP": "Another employee group",
       "SHIFT": "Another shift"

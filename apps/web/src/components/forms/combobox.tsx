@@ -6,7 +6,13 @@ import { useTranslation } from 'react-i18next';
 import { cn } from '@/lib/utils';
 import { fieldClass } from '@/components/ui/input';
 
-export interface ComboboxOption { value: string; label: string; description?: string; disabled?: boolean }
+export interface ComboboxOption {
+  value: string; label: string; description?: string; disabled?: boolean;
+  /** Indentation level of a tree row (the location picker); 0 / absent = flush. */
+  depth?: number;
+  /** Extra words the search matches (e.g. a location's path), besides the label. */
+  keywords?: string[];
+}
 /** A row pinned under the list — "Add branch", "Edit Muscat HQ" — rather than one of the values to pick from. */
 export interface ComboboxAction { key: string; label: string; icon?: React.ReactNode; onSelect: () => void }
 
@@ -26,6 +32,8 @@ interface ComboboxProps {
   /** Rows under the list that act on the option set itself; each closes the popover before it runs. */
   actions?: ComboboxAction[];
   'aria-invalid'?: boolean;
+  /** Accessible name when no visible <label htmlFor> names the control (a toolbar filter). */
+  'aria-label'?: string;
 }
 
 /** Accessible searchable select (branches, departments, employees…). Options are provided by the caller (server-side search supported). */
@@ -36,7 +44,7 @@ export function Combobox({ value, onChange, options, placeholder, onSearch, load
   return (
     <PopoverPrimitive.Root open={open} onOpenChange={setOpen}>
       <PopoverPrimitive.Trigger asChild>
-        <button id={id} type="button" role="combobox" aria-expanded={open} aria-invalid={rest['aria-invalid']} disabled={disabled} className={cn('flex h-9 items-center justify-between gap-2 px-3 data-[state=open]:border-ring data-[state=open]:ring-[3px] data-[state=open]:ring-ring/20 data-[state=open]:ring-offset-0', fieldClass, !selected && 'text-muted-foreground', className)}>
+        <button id={id} type="button" role="combobox" aria-expanded={open} aria-invalid={rest['aria-invalid']} aria-label={rest['aria-label']} disabled={disabled} className={cn('flex h-9 items-center justify-between gap-2 px-3 data-[state=open]:border-ring data-[state=open]:ring-[3px] data-[state=open]:ring-ring/20 data-[state=open]:ring-offset-0', fieldClass, !selected && 'text-muted-foreground', className)}>
           <span className="truncate">{selected?.label ?? placeholder ?? t('common.none')}</span>
           <span className="flex items-center gap-1">
             {clearable && selected ? <X className="size-3.5 opacity-60 hover:opacity-100" onClick={(e) => { e.stopPropagation(); onChange(null); }} aria-label="Clear" /> : null}
@@ -54,7 +62,7 @@ export function Combobox({ value, onChange, options, placeholder, onSearch, load
             <Command.List className="max-h-64 overflow-y-auto p-1">
               <Command.Empty className="px-3 py-6 text-center text-sm text-muted-foreground">{emptyText ?? t('common.noResults')}</Command.Empty>
               {options.map((o) => (
-                <Command.Item key={o.value} value={o.label + ' ' + o.value} disabled={o.disabled} onSelect={() => { onChange(o.value); setOpen(false); }} className="flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-muted data-[disabled=true]:opacity-50">
+                <Command.Item key={o.value} value={o.label + ' ' + o.value} keywords={o.keywords} disabled={o.disabled} onSelect={() => { onChange(o.value); setOpen(false); }} style={o.depth ? { paddingInlineStart: `${0.5 + o.depth * 0.75}rem` } : undefined} className="flex cursor-default select-none items-center gap-2 rounded-md px-2 py-1.5 text-sm outline-none data-[selected=true]:bg-muted data-[disabled=true]:opacity-50">
                   <Check className={cn('size-4', o.value === value ? 'opacity-100' : 'opacity-0')} />
                   <span className="flex-1 truncate">{o.label}</span>
                   {o.description ? <span className="truncate text-xs text-muted-foreground">{o.description}</span> : null}

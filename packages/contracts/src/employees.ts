@@ -29,6 +29,8 @@ const employeeFieldsSchema = z.object({
   employmentStatus: z.enum(EMPLOYMENT_STATUSES),
   employmentType: z.enum(EMPLOYMENT_TYPES),
   branchId: uuidSchema,
+  /** Where the employee works inside the branch: a place (site, floor, zone…) of that branch (docs/locations.md); `null` clears it. */
+  workLocationId: uuidSchema.nullable().optional(),
   departmentId: uuidSchema.optional(),
   designationId: uuidSchema.optional(),
   /** Primary (line) manager; `null` on PATCH clears it. Drives team visibility and manager-chain approvals. */
@@ -79,6 +81,8 @@ export type UpdateEmployeeInput = z.infer<typeof updateEmployeeSchema>;
 export const employeeListQuerySchema = paginationQuerySchema.extend({
   search: z.string().trim().max(100).optional(),
   branchId: uuidSchema.optional(),
+  /** A group / branch location → the employees of its branches; a place → the employees working in it or below (docs/locations.md). */
+  locationId: uuidSchema.optional(),
   departmentId: uuidSchema.optional(),
   designationId: uuidSchema.optional(),
   employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional(),
@@ -114,6 +118,10 @@ export const employeeDtoSchema = z.object({
   employmentType: z.enum(EMPLOYMENT_TYPES),
   branchId: uuidSchema,
   branchName: z.string().optional(),
+  /** The place the employee works in inside the branch (null = the branch, no finer place). */
+  workLocationId: uuidSchema.nullable().optional(),
+  /** That place's path below the branch, e.g. "Site A › Floor 2". */
+  workLocationName: z.string().nullable().optional(),
   departmentId: uuidSchema.nullable(),
   departmentName: z.string().nullable().optional(),
   designationId: uuidSchema.nullable(),

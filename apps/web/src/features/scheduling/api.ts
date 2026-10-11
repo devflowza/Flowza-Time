@@ -1,6 +1,6 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
-  AdditionalShiftAssignmentDto, AdditionalShiftAssignmentInput, BranchDeploymentDto, BranchDeploymentInput, RoundTheClockInput, RoundTheClockPlanDto, RoundTheClockResultDto,
+  AdditionalShiftAssignmentDto, AdditionalShiftAssignmentInput, BranchDeploymentDto, BranchDeploymentInput, LocationMusterDto, RoundTheClockInput, RoundTheClockPlanDto, RoundTheClockResultDto,
   ShiftCoverageDto, ShiftCoverageInput, ShiftCoverageReportDto,
 } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
@@ -9,7 +9,7 @@ import { useOrgId } from '@/features/me/use-me';
 
 /*
  * Round-the-clock scheduling (Enterprise, module advanced_scheduling) — TanStack Query hooks over
- * /orgs/:orgId/{round-the-clock, shift-coverage, additional-shift-assignments, branch-deployments}.
+ * /orgs/:orgId/{round-the-clock, shift-coverage, additional-shift-assignments, branch-deployments, locations/:id/muster}.
  *
  * Job ids are NOT interchangeable (AGENTS.md): `enrolJobId` / `cleanupJobId` of a deployment are sync_jobs ids (/sync/:id renders
  * them); `recalculationJobId` is a queue job id (the attendance recalculation tab tracks it).
@@ -74,6 +74,24 @@ export function useAdditionalShiftMutations() {
   const end = useMutation({ mutationFn: async ({ id, effectiveTo }: { id: string; effectiveTo: string | null }) => (await api.patch<Envelope<WithRecalc<AdditionalShiftAssignmentDto>>>(`/orgs/${orgId}/additional-shift-assignments/${id}`, { effectiveTo })).data, onSuccess: invalidate });
   const remove = useMutation({ mutationFn: async (id: string) => (await api.delete<Envelope<{ recalculationJobId: string | null }>>(`/orgs/${orgId}/additional-shift-assignments/${id}`)).data, onSuccess: invalidate });
   return { create, end, remove };
+}
+
+// ---- muster ("on site now") -------------------------------------------------------------------------------------------
+/** How often the muster list refreshes while the page is visible (and whenever the window regains focus). */
+export const MUSTER_REFRESH_MS = 60_000;
+/**
+ * Who was last seen in a location on a day (GET /locations/:id/muster, docs/locations.md §4): the latest punch of each employee
+ * on a terminal placed in the location's subtree. `date` null = the location's local today (the API decides, in the branch's
+ * timezone). Refreshed every minute while the page is visible, and on focus.
+ */
+export function useLocationMuster(locationId: string | null, date: string | null) {
+  const orgId = useOrgId();
+  return useQuery({
+    queryKey: qk.list(orgId, 'location-muster', { locationId, date }),
+    queryFn: async () => (await api.get<Envelope<LocationMusterDto>>(`/orgs/${orgId}/locations/${locationId}/muster`, date ? { date } : undefined)).data,
+    enabled: !!locationId,
+    refetchInterval: MUSTER_REFRESH_MS, refetchIntervalInBackground: false, refetchOnWindowFocus: true,
+  });
 }
 
 // ---- branch deployments -----------------------------------------------------------------------------------------------

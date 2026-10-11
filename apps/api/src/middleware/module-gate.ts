@@ -36,6 +36,8 @@ export const MODULE_ROUTE_RULES: ReadonlyArray<{ pattern: RegExp; modules: reado
   { pattern: /^me\/(shift-swaps|shift-changes)(\/|$)/, modules: ['shift_requests'] },
   { pattern: /^shift-change-requests(\/|$)/, modules: ['shift_requests'] },
   { pattern: /^(additional-shift-assignments|branch-deployments|shift-coverage|round-the-clock)(\/|$)/, modules: ['advanced_scheduling'] },
+  // the muster list of a location (docs/locations.md §4); the location tree itself is core
+  { pattern: /^locations\/[^/]+\/muster(\/|$)/, modules: ['advanced_scheduling'] },
   { pattern: /^(employee-groups|attendance-policies)(\/|$)/, modules: ['attendance_policies'] },
 ];
 

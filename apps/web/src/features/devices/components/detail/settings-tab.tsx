@@ -11,28 +11,37 @@ import { useCan } from '@/features/me/use-me';
 import { BranchPicker } from '@/features/organization/components/branch-picker';
 import { TimezoneSelect } from '@/features/organization/components/timezone-select';
 import { blankToUndefined, toOptionalNumber } from '@/features/organization/form-utils';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useDeviceMutations, useProviders, type DeviceDetail } from '../../api';
 import { ProviderConfigForm } from '../provider-config-form';
 import { isSecretField, normalizeProviderConfig, validateProviderConfig, type ConfigValues } from '../provider-config';
 import { TagsInput } from '../tags-input';
 
 type Values = z.input<typeof updateDeviceSchema>;
+/** The device's location is a place (site, floor, zone…) of its branch (docs/locations.md). */
+const PLACE_ROLES = ['place'] as const;
 
 function GeneralForm({ device, onCredentialsRequired }: { device: DeviceDetail; onCredentialsRequired: () => void }) {
   const { t } = useTranslation('devices');
   const { t: tc } = useTranslation();
   const can = useCan();
   const { update } = useDeviceMutations();
+  const locations = useLocationTree();
   const isPush = device.integrationType === 'DEVICE_PUSH';
   const editable = can('device.update') && device.status !== 'decommissioned';
   // Baseline captured once per mount (the parent keys this form by device id): the device query polls while the user edits,
   // and rebuilding the form from every refetch would throw away unsaved input. After a successful save the baseline moves on.
   const [defaults, setDefaults] = useState<Values>(() => ({
-    name: device.name, code: device.code, branchId: device.branchId, timezone: device.timezone, manufacturer: device.manufacturer, modelName: device.modelName ?? undefined, serialNumber: device.serialNumber ?? undefined,
+    name: device.name, code: device.code, branchId: device.branchId, locationId: device.locationId ?? null, timezone: device.timezone, manufacturer: device.manufacturer, modelName: device.modelName ?? undefined, serialNumber: device.serialNumber ?? undefined,
     endpointUrl: device.endpointUrl ?? undefined, offlineThresholdMinutes: device.offlineThresholdMinutes, autoSyncEnabled: device.autoSyncEnabled, syncIntervalMinutes: device.syncIntervalMinutes, tags: device.tags, notes: device.notes ?? undefined,
   }));
   const form = useForm<Values, unknown, UpdateDeviceInput>({ resolver: zodResolver(updateDeviceSchema), defaultValues: defaults });
-  const { register, control, formState: { errors, isDirty }, reset } = form;
+  const { register, control, formState: { errors, isDirty }, reset, setValue } = form;
+  const branchId = useWatch({ control, name: 'branchId' });
+  // an archived place stays readable on the device that still points at it (it is not in the active tree)
+  const savedLocation = device.locationId ?? null;
+  const archivedLocation = !!savedLocation && locations.byId.size > 0 && !locations.byId.has(savedLocation);
   const endpoint = useWatch({ control, name: 'endpointUrl' });
   const endpointChanged = !isPush && (endpoint ?? '') !== (device.endpointUrl ?? '');
   const autoSync = useWatch({ control, name: 'autoSyncEnabled' });
@@ -59,8 +68,22 @@ function GeneralForm({ device, onCredentialsRequired }: { device: DeviceDetail; 
           <FormField label={tc('common.name')} htmlFor="set-name" required error={errors.name?.message}><Input id="set-name" disabled={!editable} {...register('name')} aria-invalid={!!errors.name} /></FormField>
           <FormField label={tc('common.code')} htmlFor="set-code" required error={errors.code?.message} hint={t('fields.codeHint')}><Input id="set-code" dir="ltr" disabled={!editable} {...register('code')} aria-invalid={!!errors.code} /></FormField>
           <FormField label={tc('common.branch')} htmlFor="set-branch" required error={errors.branchId?.message}>
-            <Controller control={control} name="branchId" render={({ field }) => <BranchPicker id="set-branch" value={field.value ?? null} onChange={(v) => field.onChange(v ?? '')} disabled={!editable} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId} />} />
+            <Controller control={control} name="branchId" render={({ field }) => (
+              <BranchPicker id="set-branch" value={field.value ?? null} disabled={!editable} placeholder={t('fields.selectBranch')} aria-invalid={!!errors.branchId}
+                onChange={(v) => {
+                  // a place belongs to one branch: moving the device clears it (null = cleared on the PATCH)
+                  if ((v ?? '') !== (field.value ?? '')) setValue('locationId', null, { shouldDirty: true });
+                  field.onChange(v ?? '');
+                }} />
+            )} />
           </FormField>
+          {locations.hasPlaceLevels || savedLocation ? (
+            <FormField label={t('fields.location')} htmlFor="set-location" optional error={errors.locationId?.message} hint={t('fields.locationHint')}>
+              <Controller control={control} name="locationId" render={({ field }) => (
+                <LocationPicker id="set-location" value={field.value ?? null} roles={PLACE_ROLES} branchId={branchId || null} includeArchived={archivedLocation} disabled={!editable} onChange={(v) => field.onChange(v)} aria-invalid={!!errors.locationId} />
+              )} />
+            </FormField>
+          ) : null}
           <FormField label={tc('common.timezone')} htmlFor="set-tz" error={errors.timezone?.message} hint={t('fields.timezoneHint')}>
             <Controller control={control} name="timezone" render={({ field }) => <TimezoneSelect id="set-tz" value={field.value ?? undefined} onChange={field.onChange} disabled={!editable} />} />
           </FormField>

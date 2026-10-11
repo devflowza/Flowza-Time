@@ -31,6 +31,7 @@ their shift assignments, the real terminal and its punches, the corrections made
 | Shift requests | Changes: approved (EMP060), approved double shift (EMP056), rejected (EMP078), **pending**: K Kumar → LATE 18–22 Oct, EMP087 nights → days 19–22 Oct, EMP057 extra evening 19–20 Oct. Swaps: approved 24 Sep (EMP084 ↔ EMP089), **pending** 15 Oct (EMP085 ↔ EMP090) |
 | Leave | 2026 allowances (AL 30, CL 6, SL 10, EL 6) for everybody; 20 records (approved past and future, half days, 5 pending, 2 rejected) |
 | Approvals | Workflows "Line manager → HR" for leave, corrections, shift changes and swaps. Pending: 5 leave, 3 shift changes, 1 swap, 2 corrections (+ the regularisation that was already pending) |
+| Locations | Levels Headquarters → Branch → Site → Floor → Zone; **Muscat Headquarters** over both branches; Ghala: Office Building → Ground / First / Second Floor → six zones; Sohar: Main Plant → Main Gate, Production Floor (zones straight under the site) and Warehouse → Loading Dock, Cold Store. The three demo terminals placed (entrance, gate, dock — "james" stays unplaced), every employee's work location from their department, and a Main Gate coverage target of one officer per security shift (step 6) |
 | Attendance | ~5 100 Hikvision HTTP-Listening events 1 Sep → now (punctual / average / late-prone habits, overtime, crews' night shifts, missed punch-outs, duplicates, face / fingerprint / card), handed to the worker: NORMALIZE_RAW, RECALCULATE_RANGE 1 Sep → today, BUILD_PERIOD_SUMMARY for Sep and Oct, APPLY_CORRECTION for the 3 approved corrections |
 
 Days on which an employee already had attendance events (real punches, corrections made while testing) are not touched.
@@ -48,6 +49,7 @@ since the last run.
 03_enterprise.sql           groups, policies, round-the-clock, coverage, double shifts, deployments, shift requests & swaps
 04_leave_attendance.sql     leave, punches, corrections, recalculation jobs
 05_verify.sql               read-only checks once the queue has drained (~30 min)
+06_locations.sql            the location hierarchy (needs migration 20261010000100): levels, tree, placed terminals, work locations
 ```
 
 ## Before a demo

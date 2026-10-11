@@ -13,8 +13,10 @@ export interface ShiftResolution {
   shift: ShiftDto | null; ruleSet: { id: string; name: string; branchId: string | null } | null; scope: { employeeId: string; teamIds: string[]; departmentId: string | null; branchId: string; organizationId: string };
 }
 /**
- * An attendance rule set = the attendance policy: its scope (branch; Enterprise: country, department, employee group, shift),
- * the rules and the `policy` sections. `specificity` orders policies (shift 32 > group 16 > department 8 > branch 4 > country 2).
+ * An attendance rule set = the attendance policy: its scope (branch; Enterprise: country, location, department, employee group,
+ * shift), the rules and the `policy` sections. `specificity` orders policies (shift 32 > group 16 > department 8 > location or
+ * branch 4 > country 2; between two locations the deeper one wins — docs/locations.md §3). `locationId` is a group location
+ * (no `branchId`) or a place (with `branchId` = the place's branch).
  */
 export type RuleSetDto = AttendanceRuleSetInput & { id: string; version: number; specificity?: number; createdAt: string; updatedAt: string };
 /** `branchCount` = branches that picked this calendar (absent from an older API); the default also applies to branches without one. */

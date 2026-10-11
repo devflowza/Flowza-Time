@@ -4,11 +4,12 @@ import type { ClaimPendingDeviceInput, CreateDeviceInput, DeviceCredentialsInput
 import type { DeviceSummaryDto, DeviceSummaryQuery } from '@flowza/contracts';
 import { CONNECTOR_MANAGED_IN_INTEGRATIONS, FLOWZA_FINANCE_PROVIDER_KEY, SELF_SERVICE_PROVIDER_KEY } from '@flowza/contracts';
 import { refuseSelfServiceDevices, refuseSelfServiceProvider } from './self-service-device-guard.js';
-import { emitDomainEvent, maskCredentials, type Trx } from '@flowza/database';
+import { emitDomainEvent, locationLabels, maskCredentials, type Trx } from '@flowza/database';
 import { createThrottler, hostnameBlockReason, ProviderError, type DeviceProvider, type ProviderContext, type ProviderDefinition, type Throttler } from '@flowza/device-providers';
 import { AppError, errors, sha256Hex } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
+import { assertPlaceOfBranch, locationScope } from '../../lib/location-scope.js';
 import { type Actor, audit, diffObjects, runSystem, runUser } from '../../lib/service.js';
 import { loadFeatureFlags, loadSettings } from '../../lib/settings.js';
 import { likeContains, pageOf, resolveSort, toCount } from '../../lib/pagination.js';
@@ -172,14 +173,23 @@ export async function loadDeviceRow(trx: Trx, orgId: string, id: string): Promis
   if (!row) throw errors.notFound('Device', id);
   return row as DeviceRow;
 }
+/** Labels of the places the devices are installed in ("Site A › Floor 2"): one batch per page, under the caller's RLS. */
+function placeLabels(trx: Trx, orgId: string, rows: ReadonlyArray<Pick<DeviceRow, 'locationId'>>): Promise<Map<string, string>> {
+  return locationLabels(trx, orgId, rows.map((r) => r.locationId));
+}
 
-/** Fleet counts by connection/status for the caller's branch scope (the web list header shows these; the list itself is paginated). */
+/**
+ * Fleet counts by connection/status for the caller's branch scope (the web list header shows these; the list itself is paginated).
+ * `locationId` narrows like the list: a group / branch location → its branches, a place → the terminals installed in it or below.
+ */
 export async function summarizeDevices(deps: ApiDeps, actor: Actor, orgId: string, q: DeviceSummaryQuery): Promise<DeviceSummaryDto> {
   const grant = requirePermission(actor.principal, orgId, 'device.view');
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
+    const loc = await locationScope(trx, orgId, q.locationId, scope);
     let base = trx.selectFrom('devices as d').where('d.organizationId', '=', orgId).where('d.providerKey', '!=', SELF_SERVICE_PROVIDER_KEY);
-    if (scope) base = base.where('d.branchId', 'in', scope);
+    if (loc.branchIds) base = base.where('d.branchId', 'in', loc.branchIds);
+    if (loc.placeIds) base = base.where('d.locationId', 'in', loc.placeIds);
     if (!q.includeDecommissioned) base = base.where('d.status', '!=', 'decommissioned');
     const rows = await base.select(['d.status', 'd.connectionStatus', (eb) => eb.fn.countAll().as('n')]).groupBy(['d.status', 'd.connectionStatus']).execute();
     const stale = await base.select((eb) => eb.fn.countAll().as('n')).where('d.status', '=', 'active')
@@ -190,14 +200,20 @@ export async function summarizeDevices(deps: ApiDeps, actor: Actor, orgId: strin
   });
 }
 
+/**
+ * `locationId` (docs/locations.md §2): a group / branch location → the devices of its branches, a place → the devices installed
+ * in it or below — always inside the caller's branch scope and any explicit `branchId` (NOT_FOUND for a location they cannot see).
+ */
 export async function listDevices(deps: ApiDeps, actor: Actor, orgId: string, q: DeviceListQuery): Promise<{ data: DeviceDtoExt[]; total: number }> {
   const grant = requirePermission(actor.principal, orgId, 'device.view');
   const scope = branchFilter(grant, q.branchId);
   const sort = resolveSort(DEVICE_SORT, q.sort, q.order, 'd.name');
   return runUser(deps.db, actor, async (trx) => {
     const page = pageOf(q);
+    const loc = await locationScope(trx, orgId, q.locationId, scope);
     let base = deviceQuery(trx, orgId);
-    if (scope) base = base.where('d.branchId', 'in', scope);
+    if (loc.branchIds) base = base.where('d.branchId', 'in', loc.branchIds);
+    if (loc.placeIds) base = base.where('d.locationId', 'in', loc.placeIds);
     if (q.status) base = base.where('d.status', '=', q.status); else if (!q.includeDecommissioned) base = base.where('d.status', '!=', 'decommissioned');
     if (q.connectionStatus) base = base.where('d.connectionStatus', '=', q.connectionStatus);
     if (q.providerKey) base = base.where('d.providerKey', '=', q.providerKey);
@@ -207,7 +223,8 @@ export async function listDevices(deps: ApiDeps, actor: Actor, orgId: string, q:
     const total = toCount((await base.select((eb) => eb.fn.countAll().as('n')).executeTakeFirst())?.n);
     const rows = (await base.select(DEVICE_COLUMNS).orderBy(sql.raw(sort.column), sort.direction).orderBy('d.id').limit(page.pageSize).offset(page.offset).execute()) as DeviceRow[];
     const counts = await employeeCounts(trx, orgId, rows.map((r) => r.id));
-    return { data: rows.map((r) => toDeviceDto(r, { employeeCount: counts.get(r.id) ?? 0 })), total };
+    const labels = await placeLabels(trx, orgId, rows);
+    return { data: rows.map((r) => toDeviceDto(r, { employeeCount: counts.get(r.id) ?? 0, locationLabels: labels })), total };
   });
 }
 
@@ -220,7 +237,8 @@ export async function getDevice(deps: ApiDeps, actor: Actor, orgId: string, id: 
     const masked = await deps.credentials.masked(trx, id).catch(() => ({}));
     const groups = await trx.selectFrom('deviceGroupMembers').select('groupId').where('deviceId', '=', id).execute();
     const provider = deps.providers.tryGet(row.providerKey);
-    return { ...toDeviceDto(row, { employeeCount: counts.get(id) ?? 0, maskedCredentials: masked }), pushProtocolKey: provider?.pushProtocol?.protocolKey ?? null, groupIds: groups.map((g) => g.groupId) };
+    const labels = await placeLabels(trx, orgId, [row]);
+    return { ...toDeviceDto(row, { employeeCount: counts.get(id) ?? 0, maskedCredentials: masked, locationLabels: labels }), pushProtocolKey: provider?.pushProtocol?.protocolKey ?? null, groupIds: groups.map((g) => g.groupId) };
   });
 }
 
@@ -234,6 +252,8 @@ async function insertDevice(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string
   const branch = await trx.selectFrom('branches').select(['id', 'timezone', 'status']).where('organizationId', '=', orgId).where('id', '=', input.branchId).executeTakeFirst();
   if (!branch) throw errors.validation('Branch not found in this organisation.', { issues: [{ path: 'branchId', message: 'Unknown branch' }] });
   if (branch.status === 'archived') throw errors.validation('Branch is archived.', { issues: [{ path: 'branchId', message: 'Archived' }] });
+  // where the terminal is installed: a place of its branch the caller can see (the composite key refuses anything else again)
+  if (input.locationId) await assertPlaceOfBranch(trx, orgId, input.locationId, input.branchId);
   if (input.modelId) {
     const model = await trx.selectFrom('deviceModels').select(['id', 'providerKey']).where('id', '=', input.modelId).executeTakeFirst();
     if (!model || model.providerKey !== def.key) throw errors.validation('Model does not belong to this provider.', { issues: [{ path: 'modelId', message: 'Unknown model' }] });
@@ -243,14 +263,14 @@ async function insertDevice(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string
   await assertWithinLimit(trx, orgId, 'devices', activeCount);
   const settings = await loadSettings(trx, orgId);
   const row = await trx.insertInto('devices').values({
-    organizationId: orgId, branchId: input.branchId, code: input.code, name: input.name, providerKey: def.key, modelId: input.modelId ?? null, manufacturer: input.manufacturer, modelName: input.modelName ?? null,
+    organizationId: orgId, branchId: input.branchId, locationId: input.locationId ?? null, code: input.code, name: input.name, providerKey: def.key, modelId: input.modelId ?? null, manufacturer: input.manufacturer, modelName: input.modelName ?? null,
     serialNumber: input.serialNumber ?? null, timezone: input.timezone ?? branch.timezone, integrationType, endpointUrl: input.endpointUrl ?? null, config: JSON.stringify(extra.config),
     capabilities: JSON.stringify(def.capabilities), offlineThresholdMinutes: input.offlineThresholdMinutes ?? settings.sync.offlineThresholdMinutes ?? 15,
     autoSyncEnabled: input.autoSyncEnabled ?? (integrationType !== 'DEVICE_PUSH' && def.capabilities.attendancePull), syncIntervalMinutes: input.syncIntervalMinutes ?? settings.sync.defaultIntervalMinutes ?? 5,
     tags: input.tags ?? [], notes: input.notes ?? null, pushTokenHash: extra.pushTokenHash, pushTokenRotatedAt: extra.pushTokenHash ? new Date() : null, createdBy: actor.userId,
     nextAttendanceSyncAt: integrationType !== 'DEVICE_PUSH' && def.capabilities.attendancePull && (input.autoSyncEnabled ?? true) ? new Date() : null,
   }).returning('id').executeTakeFirstOrThrow();
-  await audit(trx, actor, orgId, 'device.created', 'device', { entityId: row.id, branchId: input.branchId, newValue: { code: input.code, name: input.name, providerKey: def.key, branchId: input.branchId, serialNumber: input.serialNumber ?? null, endpointUrl: input.endpointUrl ?? null, config: extra.config, secretFieldsProvided: extra.secretsProvided, pushTokenIssued: extra.pushTokenHash !== null } });
+  await audit(trx, actor, orgId, 'device.created', 'device', { entityId: row.id, branchId: input.branchId, newValue: { code: input.code, name: input.name, providerKey: def.key, branchId: input.branchId, locationId: input.locationId ?? null, serialNumber: input.serialNumber ?? null, endpointUrl: input.endpointUrl ?? null, config: extra.config, secretFieldsProvided: extra.secretsProvided, pushTokenIssued: extra.pushTokenHash !== null } });
   await emitDomainEvent(trx, { organizationId: orgId, eventType: 'device.created', aggregateType: 'device', aggregateId: row.id, payload: { code: input.code, providerKey: def.key, branchId: input.branchId }, actorUserId: actor.userId, requestId: actor.requestId });
   let testJob: CreatedSyncJob | null = null;
   if (integrationType !== 'DEVICE_PUSH' && def.status !== 'placeholder') {
@@ -288,8 +308,8 @@ export async function createDevice(deps: ApiDeps, actor: Actor, orgId: string, i
     return insertDevice(deps, trx, actor, orgId, provider, { ...input, serialNumber }, { pushTokenHash: token?.hash ?? null, secretsProvided: Object.keys(secrets), config });
   });
   const stored = await storeSecrets(deps, actor, orgId, created.id, def, secrets);
-  const device = await runUser(deps.db, actor, (trx) => loadDeviceRow(trx, orgId, created.id));
-  return { device: toDeviceDto(device, { employeeCount: 0 }), pushToken: token?.token ?? null, ...pushUrls(deps, provider, created.id, token?.token ?? null, serialNumber), credentialsStored: stored.stored, credentialsError: stored.error, testConnectionJobId: created.testJob?.id ?? null };
+  const { device, labels } = await runUser(deps.db, actor, async (trx) => { const row = await loadDeviceRow(trx, orgId, created.id); return { device: row, labels: await placeLabels(trx, orgId, [row]) }; });
+  return { device: toDeviceDto(device, { employeeCount: 0, locationLabels: labels }), pushToken: token?.token ?? null, ...pushUrls(deps, provider, created.id, token?.token ?? null, serialNumber), credentialsStored: stored.stored, credentialsError: stored.error, testConnectionJobId: created.testJob?.id ?? null };
 }
 
 const ENDPOINT_KEYS = ['endpointUrl', 'baseUrl', 'host', 'serverUrl', 'port', 'protocol'];
@@ -309,6 +329,10 @@ export async function updateDevice(deps: ApiDeps, actor: Actor, orgId: string, i
       const branch = await trx.selectFrom('branches').select(['id', 'status']).where('organizationId', '=', orgId).where('id', '=', input.branchId).executeTakeFirst();
       if (!branch || branch.status === 'archived') throw errors.validation('Branch not found or archived.', { issues: [{ path: 'branchId', message: 'Unknown branch' }] });
     }
+    // the place is checked against the device's branch AFTER the change (re-sending the stored place unchanged is a no-op); a
+    // move to another branch without a new place drops the old one (app.place_reference_guard) — the response shows it
+    const targetBranchId = input.branchId ?? before.branchId;
+    if (input.locationId && !(input.locationId === before.locationId && targetBranchId === before.branchId)) await assertPlaceOfBranch(trx, orgId, input.locationId, targetBranchId);
     const patch: Record<string, unknown> = {};
     for (const [k, v] of Object.entries(input)) if (v !== undefined) patch[k] = v;
     const endpointChanged = input.endpointUrl !== undefined && (input.endpointUrl ?? null) !== before.endpointUrl;
@@ -320,11 +344,12 @@ export async function updateDevice(deps: ApiDeps, actor: Actor, orgId: string, i
       await audit(trx, actor, orgId, 'device.credentials_invalidated', 'device', { entityId: id, branchId: before.branchId, oldValue: { endpointUrl: before.endpointUrl }, newValue: { endpointUrl: input.endpointUrl ?? null, credentialsDeleted: deleted }, reason: 'endpoint changed' });
     }
     const after = await loadDeviceRow(trx, orgId, id);
-    const diff = diffObjects(toDeviceDto(before) as unknown as Record<string, unknown>, toDeviceDto(after) as unknown as Record<string, unknown>);
+    const labels = await placeLabels(trx, orgId, [before, after]);
+    const diff = diffObjects(toDeviceDto(before, { locationLabels: labels }) as unknown as Record<string, unknown>, toDeviceDto(after, { locationLabels: labels }) as unknown as Record<string, unknown>);
     await audit(trx, actor, orgId, 'device.updated', 'device', { entityId: id, branchId: after.branchId, ...diff });
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'device.updated', aggregateType: 'device', aggregateId: id, payload: { changed: Object.keys(diff.newValue), credentialsRequired }, actorUserId: actor.userId, requestId: actor.requestId });
     const counts = await employeeCounts(trx, orgId, [id]);
-    return { ...toDeviceDto(after, { employeeCount: counts.get(id) ?? 0 }), credentialsRequired };
+    return { ...toDeviceDto(after, { employeeCount: counts.get(id) ?? 0, locationLabels: labels }), credentialsRequired };
   });
 }
 
@@ -375,7 +400,8 @@ export async function removeDevice(deps: ApiDeps, actor: Actor, orgId: string, i
     });
     await audit(trx, actor, orgId, decommission ? 'device.decommissioned' : 'device.disabled', 'device', { entityId: id, branchId: before.branchId, oldValue: { status: before.status }, newValue: { status } });
     await emitDomainEvent(trx, { organizationId: orgId, eventType: 'device.updated', aggregateType: 'device', aggregateId: id, payload: { status }, actorUserId: actor.userId, requestId: actor.requestId });
-    return toDeviceDto(await loadDeviceRow(trx, orgId, id));
+    const after = await loadDeviceRow(trx, orgId, id);
+    return toDeviceDto(after, { locationLabels: await placeLabels(trx, orgId, [after]) });
   });
 }
 

@@ -203,3 +203,47 @@ answer `403 FEATURE_DISABLED` (`details.reason = MODULE_DISABLED`) when the modu
 (double-shift) change request needs `advanced_scheduling` too. The route table is in `docs/enterprise/plan.md` §7; each slice's
 endpoints, permissions, validations and decisions are in `docs/enterprise/reports/` (`e1-shift-requests.md`,
 `e2-policies.md`, `e3-scheduling.md`).
+
+## Location hierarchy (migration 20261010000100)
+
+Customer-named levels and one location tree per organisation (`docs/locations.md`, ADR-009). Levels, the tree, branch placement,
+the place references and the `locationId` filters are core (every plan); location-scoped policies need `attendance_policies`,
+coverage per place and the muster list `advanced_scheduling`. Validation failures are `400 VALIDATION_ERROR` with
+`details.issues[0].path`; conflicts are `409 CONFLICT` with `details.reason`.
+
+### Levels and locations
+| Route | Permission | Notes |
+|---|---|---|
+| `GET /location-levels` | `branch.view` | Ordered levels (top first) with `locationCount`. |
+| `POST /location-levels` | `branch.manage` + every branch | `{ name, nameAr?, icon?, position }` → 201, the whole list (the levels at/below `position` move down; the role follows from the position: at or above the branch level → `group`, below → `place`). 409 `LEVELS_MAX` at 8 levels. |
+| `PATCH /location-levels/:id` | same | `{ name?, nameAr?, icon? }` (role and position never change this way). |
+| `DELETE /location-levels/:id` | same | The whole list. 409 `BRANCH_LEVEL`, 409 `LEVEL_IN_USE` (`details.locations`). |
+| `POST /location-levels/apply-template` | same | `{ template }` (`LOCATION_TEMPLATES`: SIMPLE, CORPORATE, REGIONAL, RETAIL, FACILITIES (ISO 16739), MANUFACTURING (ISA-95), HEALTHCARE, EDUCATION, SECURITY_SERVICES) → the whole list; the branch level keeps its id. 409 `LOCATIONS_EXIST` while any group / place location exists. |
+| `GET /locations?includeArchived=` | `branch.view` | The visible tree, parents first, with rolled-up `employeeCount` / `deviceCount` and `childCount`. A branch-scoped member sees the group nodes and the nodes of their branches. |
+| `GET /locations/:id` | `branch.view` | The node + `ancestors` (root first). 404 when invisible. |
+| `POST /locations` | `branch.manage` (group nodes: every branch; places: the branch in scope) | `{ levelId, parentId?, code?, name, nameAr?, latitude?, longitude? }`. The code is derived from the name when omitted; 409 `CODE_TAKEN` among siblings; 409 `LOCATIONS_MAX` (10 000). Placement errors carry `details.problem` (`PLACE_AT_TOP`, `NOT_DEEPER`, `PLACE_UNDER_GROUP`, `GROUP_UNDER_NON_GROUP`, `CYCLE`, `PARENT_ARCHIVED`). |
+| `PATCH /locations/:id` | same; moving a branch node or touching a group node: every branch | Rename / move (`parentId`) / re-level (same kind: `KIND_CHANGE`, `NOT_ABOVE_CHILDREN`) / point / `status: archived \| active`. A branch node takes `parentId` only (`BRANCH_NODE`). A place moving to another branch: 409 `PLACE_IN_USE` while a device, employee, fence, coverage target or policy of its subtree refers to it. |
+| `DELETE /locations/:id` | same | Archives. 409 `BRANCH_NODE` (archive the branch); 409 `LOCATION_IN_USE` with `children`, `devices`, `employees`, `geofences`, `coverageTargets`, `policies`. |
+| `POST /branches`, `PATCH /branches/:id` | `branch.manage` (+ every branch to change the placement) | `parentLocationId` (a group node; null = the top level). `BranchDto` gains `locationId` (its node) and `parentLocationId`. |
+
+A work location changed inside the branch, a branch placed under another region, or a group / place moved recomputes **today**
+for the people concerned when the organisation has a location-scoped policy (past days keep their values).
+
+### Place references and filters
+| Route | Change |
+|---|---|
+| `POST/PATCH /devices[/:id]` | `locationId` — a visible, active place of the device's (new) branch; null clears; a branch change without a place clears it. DTO `locationId`, `locationName` ("Site A › Floor 2"). `GET /devices`, `/devices/summary`: `?locationId=`. |
+| `POST/PATCH /employees[/:id]` | `workLocationId`, same rules. DTO `workLocationId`, `workLocationName`. `GET /employees?locationId=`. The bulk `assign_branch` audit records `workLocationsCleared`. |
+| `POST/PATCH /geofences[/:id]` | `locationId` (the fence needs a branch). `GET /geofences?locationId=`. |
+| `GET /dashboard/summary`, `/dashboard/trends` | `?locationId=` — a group / branch node → its branches; a place → the employees working there (headcount, attendance) and the terminals installed there. |
+| `POST /reports`, `POST/PATCH /report-schedules`, `POST /reports/share` | `parameters.locationId` / `filters.locationId` — the worker only narrows the requester's scope with it (an empty intersection is an empty report). |
+
+A `locationId` filter the caller cannot see answers 404; a group / branch node selects its branches, a place the place and every
+place below it; the result is always intersected with the caller's branch scope.
+
+### Enterprise uses
+| Route | Module | Change |
+|---|---|---|
+| `POST/PATCH /attendance-rule-sets` | `attendance_policies` | `locationId`: a group node (no `branchId`) or a place (`branchId` = its branch); a branch node is refused. Immutable after creation. The most specific policy wins; between locations the deeper one (`docs/locations.md` §3). `GET /attendance-rule-sets?locationId=` — the policies of that node. The resolve card's `scope` carries `locationId` / `locationIds` and the `LOCATION` mismatch. |
+| `POST /shift-coverage`, `GET /shift-coverage?locationId=` | `advanced_scheduling` | `locationId`: a place of the target's branch (null = whole branch); one target per (branch, shift, place) → 409. The report adds one cell per place target (`{ shiftId, locationId, required, scheduled, gap }`) after the whole-branch cell. |
+| `GET /locations/:id/muster?date=` | `advanced_scheduling` + `attendance.view` | Each employee whose latest punch of the day (the branch's local day) was on a terminal placed in the location's subtree: state `on_site` / `on_break` / `left` / `seen`, `totals`, per-child `children` totals, `deviceCount`. Employees deployed to the branch that day count; portal punches (no terminal) do not. |

@@ -12,6 +12,7 @@ import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { hasPermission, requireBranchAccess, requirePermission } from '../lib/authorize.js';
 import { enqueueJob } from '../lib/jobs.js';
+import { assertLocationVisible } from '../lib/location-scope.js';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonObject } from '../lib/mappers.js';
 import { pageOf, toCount } from '../lib/pagination.js';
 import { type Actor, audit, runUser, withSystemScope } from '../lib/service.js';
@@ -90,6 +91,8 @@ async function validateSpec(trx: Trx, orgId: string, grant: MembershipGrant, rep
     for (const e of emps) requireBranchAccess(grant, e.branchId);
     out['employeeIds'] = ids;
   }
+  // a location the author can see (RLS); every recipient's copy is narrowed by it inside the recipient's own scope (worker)
+  if (typeof out['locationId'] === 'string') await assertLocationVisible(trx, orgId, out['locationId'], 'locationId');
   if (typeof out['leaveTypeCode'] === 'string') {
     const lt = await trx.selectFrom('leaveTypes').select('code').where('organizationId', '=', orgId).where(sql<boolean>`lower(code::text) = lower(${out['leaveTypeCode']})`).where('status', '=', 'active').executeTakeFirst();
     if (!lt) throw errors.validation('Unknown leave type.', { issues: [{ path: 'leaveTypeCode', message: 'Unknown leave type' }] });

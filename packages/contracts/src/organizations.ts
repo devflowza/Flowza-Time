@@ -341,6 +341,8 @@ export const branchInputSchema = z.object({
   weeklyOffDays: weeklyOffDaysSchema.nullable().optional(),
   holidayCalendarId: uuidSchema.nullable().optional(),
   status: z.enum(RECORD_STATUSES).default('active'),
+  /** The group location the branch sits under (Headquarters, Region…; docs/locations.md); null / absent = the top level. */
+  parentLocationId: uuidSchema.nullable().optional(),
 });
 export type BranchInput = z.infer<typeof branchInputSchema>;
 

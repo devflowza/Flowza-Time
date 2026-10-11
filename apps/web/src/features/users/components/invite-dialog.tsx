@@ -15,6 +15,7 @@ import { useEmployeeOptions } from '@/features/employees/api';
 import { CopyButton } from '@/features/audit/components/copy-button';
 import { invitationUrl } from '@/features/auth/invitation-url';
 import { useMemberMutations, useRoles } from '../api';
+import { BranchesByLocation } from './branches-by-location';
 import { LiveInvitationDelivery } from './invitation-delivery';
 
 type FormValues = z.input<typeof inviteMemberSchema>;
@@ -93,6 +94,7 @@ export function InviteDialog({ open, onOpenChange }: { open: boolean; onOpenChan
               </div>
               {!allBranches ? (
                 <FormField label={t('fields.branches')} htmlFor="inv-branches" required error={errors.branchIds?.message}>
+                  <BranchesByLocation id="inv-by-location" selected={branchIds} available={branches.data.map((b) => b.id)} onAdd={(ids) => setValue('branchIds', [...branchIds, ...ids], { shouldDirty: true, shouldValidate: true })} />
                   <ul id="inv-branches" className="grid max-h-48 gap-1 overflow-y-auto rounded-md border p-2 sm:grid-cols-2" aria-invalid={!!errors.branchIds}>
                     {branches.data.map((b) => (
                       <li key={b.id} className="flex items-center gap-2 text-sm">

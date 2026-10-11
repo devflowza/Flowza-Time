@@ -28,6 +28,7 @@ function paramsSummary(p: ReportDto['parameters'], t: (k: string, o?: Record<str
   else if (p.from) parts.push(p.to && p.to !== p.from ? `${fmtDate(p.from)} → ${fmtDate(p.to)}` : fmtDate(p.from));
   if (p.employeeIds?.length) parts.push(t('list.nEmployees', { count: p.employeeIds.length }));
   if (p.branchId) parts.push(t('list.oneBranch'));
+  if (p.locationId) parts.push(t('list.oneLocation'));
   return parts.join(' · ') || '—';
 }
 

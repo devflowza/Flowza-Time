@@ -6,9 +6,10 @@ import { useCan } from '@/features/me/use-me';
 import { BranchesTab } from '../components/tabs/branches-tab';
 import { DepartmentsTab } from '../components/tabs/departments-tab';
 import { DesignationsTab } from '../components/tabs/designations-tab';
+import { LocationsTab } from '../components/tabs/locations-tab';
 import { TeamsTab } from '../components/tabs/teams-tab';
 
-const TABS = ['branches', 'departments', 'designations', 'teams'] as const;
+const TABS = ['branches', 'locations', 'departments', 'designations', 'teams'] as const;
 type Tab = (typeof TABS)[number];
 
 export default function OrganizationPage() {
@@ -16,7 +17,7 @@ export default function OrganizationPage() {
   const can = useCan();
   const [params, setParams] = useSearchParams();
   const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'branches';
-  const visible = TABS.filter((tb) => (tb === 'branches' ? can('branch.view') : can('department.view')));
+  const visible = TABS.filter((tb) => (tb === 'branches' || tb === 'locations' ? can('branch.view') : can('department.view')));
   return (
     <div className="page-container">
       <PageHeader title={t('title')} description={t('subtitle')} />
@@ -25,6 +26,7 @@ export default function OrganizationPage() {
           {visible.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`tabs.${tb}`)}</TabsTrigger>)}
         </TabsList>
         <TabsContent value="branches">{tab === 'branches' ? <BranchesTab /> : null}</TabsContent>
+        <TabsContent value="locations">{tab === 'locations' ? <LocationsTab /> : null}</TabsContent>
         <TabsContent value="departments">{tab === 'departments' ? <DepartmentsTab /> : null}</TabsContent>
         <TabsContent value="designations">{tab === 'designations' ? <DesignationsTab /> : null}</TabsContent>
         <TabsContent value="teams">{tab === 'teams' ? <TeamsTab /> : null}</TabsContent>

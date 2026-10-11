@@ -1,7 +1,7 @@
 import type { Hono } from 'hono';
 import {
   additionalShiftAssignmentInputSchema, additionalShiftAssignmentListQuerySchema, additionalShiftAssignmentUpdateSchema, branchDeploymentInputSchema, branchDeploymentListQuerySchema,
-  cancelBranchDeploymentSchema, roundTheClockInputSchema, shiftCoverageInputSchema, shiftCoverageListQuerySchema, shiftCoverageReportQuerySchema, shiftCoverageUpdateSchema,
+  cancelBranchDeploymentSchema, locationMusterQuerySchema, roundTheClockInputSchema, shiftCoverageInputSchema, shiftCoverageListQuerySchema, shiftCoverageReportQuerySchema, shiftCoverageUpdateSchema,
 } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
@@ -12,14 +12,18 @@ import * as rtc from '../../../services/scheduling/round-the-clock.service.js';
 import * as coverage from '../../../services/scheduling/coverage.service.js';
 import * as additional from '../../../services/scheduling/additional-shifts.service.js';
 import * as deployments from '../../../services/scheduling/deployments.service.js';
+import * as muster from '../../../services/scheduling/muster.service.js';
 
 /**
  * Round-the-clock scheduling (Enterprise, module `advanced_scheduling` — the module gate refuses every path below with 403
  * FEATURE_DISABLED while it is off; docs/enterprise/plan.md §7):
  *   round-the-clock/preview, round-the-clock                 24/7 rotation templates (shift.manage [+ shift.assign])
- *   shift-coverage (+ /:id, /report)                         coverage targets and the scheduled-vs-required report
+ *   shift-coverage (+ /:id, /report)                         coverage targets (whole branch or a place of it) and the
+ *                                                            scheduled-vs-required report
  *   additional-shift-assignments (+ /:id)                    double shifts (shift.view / shift.assign)
  *   branch-deployments (+ /:id/cancel)                       temporary deployment to another branch (employee.view / employee.update)
+ *   locations/:id/muster                                     who was last seen at a location on a day (attendance.view;
+ *                                                            docs/locations.md §4)
  * PATCH bodies are explicit update schemas without defaults (AGENTS.md, Zod 4 `.partial()` pitfall).
  */
 export function registerSchedulingRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
@@ -41,4 +45,6 @@ export function registerSchedulingRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void 
   v1.get('/orgs/:orgId/branch-deployments', async (c) => { const q = query(c, branchDeploymentListQuerySchema); const r = await deployments.listDeployments(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
   v1.post('/orgs/:orgId/branch-deployments', async (c) => created(c, await deployments.createDeployment(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, branchDeploymentInputSchema))));
   v1.post('/orgs/:orgId/branch-deployments/:id/cancel', async (c) => ok(c, await deployments.cancelDeployment(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, cancelBranchDeploymentSchema))));
+  // the muster list of a location (the location routes themselves are core: routes/v1/locations.ts)
+  v1.get('/orgs/:orgId/locations/:id/muster', async (c) => ok(c, await muster.locationMuster(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), query(c, locationMusterQuerySchema))));
 }

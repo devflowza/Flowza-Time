@@ -413,6 +413,19 @@ begin
                    r.attname, r.qname, '0a000000-0000-0000-0000-000000000000', r.attname, r.attname);
   end loop;
 end $$;
+-- the location tree is one per organisation (one branch level, one node per branch — migration 20261010000100): B and C hold
+-- clones of A's instead of their own, which a trigger created with the organisation / its branches (the probe asks about A's
+-- rows in B and C; foreign keys and triggers are off for the clones, and the transaction rolls back). The level check C's
+-- creation queued is a deferred trigger event: run it now, or the probes below could not toggle the table's triggers
+set constraints location_levels_check immediate;
+set constraints location_levels_check deferred;
+do $$
+begin
+  perform set_config('session_replication_role', 'replica', true);
+  delete from public.locations where organization_id in ('0b000000-0000-0000-0000-000000000000', '0e000000-0000-0000-0000-000000000000');
+  delete from public.location_levels where organization_id in ('0b000000-0000-0000-0000-000000000000', '0e000000-0000-0000-0000-000000000000');
+  perform set_config('session_replication_role', 'origin', true);
+end $$;
 -- B's user references become ghosts (nobody); the probe user is a member of org A only
 create temp table p10_clone_b on commit drop as select * from pg_temp.clone_org('0a000000-0000-0000-0000-000000000000', '0b000000-0000-0000-0000-000000000000', ':p10b', null, array[]::text[], 200);
 -- C: membership-defining rows are not cloned (they would make the probe a member of C, which is not the question asked)

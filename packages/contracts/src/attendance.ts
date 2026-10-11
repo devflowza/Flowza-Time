@@ -86,8 +86,9 @@ export const DEFAULT_POLICY_SECTIONS: AttendancePolicySections = attendancePolic
 /**
  * Configurable attendance rules (§107). Mirrors attendance_rule_sets — the attendance POLICY. Scope (Enterprise,
  * attendance_policies): every dimension that is set must match the employee on the date; the most specific matching
- * policy wins (shift > employee group > department > branch > country > organisation — packages/domain resolvePolicy).
- * Without the module only `branchId` may be set (the classic organisation / branch rule sets).
+ * policy wins (shift > employee group > department > location / branch > country > organisation — packages/domain
+ * resolvePolicy; between locations the deeper one). Without the module only `branchId` may be set (the classic organisation /
+ * branch rule sets).
  */
 export const attendanceRuleSetInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -97,6 +98,11 @@ export const attendanceRuleSetInputSchema = z.object({
   departmentId: uuidSchema.nullable().optional(),
   employeeGroupId: uuidSchema.nullable().optional(),
   shiftId: uuidSchema.nullable().optional(),
+  /**
+   * A group location (Headquarters, Region…; then no `branchId`) or a place (Site, Floor, Zone…; then `branchId` is the
+   * place's branch) — docs/locations.md §3. A branch itself is named through `branchId`.
+   */
+  locationId: uuidSchema.nullable().optional(),
   effectiveFrom: isoDateSchema,
   effectiveTo: isoDateSchema.nullable().optional(),
   graceInMinutes: z.number().int().min(0).max(240).default(10),
@@ -131,7 +137,7 @@ export const attendanceRuleSetInputSchema = z.object({
 });
 export type AttendanceRuleSetInput = z.infer<typeof attendanceRuleSetInputSchema>;
 /** The scope and naming fields of a policy — everything that is not a rule the engine applies. */
-export const POLICY_SCOPE_KEYS = ['branchId', 'countryCode', 'departmentId', 'employeeGroupId', 'shiftId'] as const;
+export const POLICY_SCOPE_KEYS = ['branchId', 'countryCode', 'departmentId', 'employeeGroupId', 'shiftId', 'locationId'] as const;
 export type PolicyScopeKey = (typeof POLICY_SCOPE_KEYS)[number];
 export type AttendanceRules = Omit<AttendanceRuleSetInput, 'name' | 'description' | PolicyScopeKey | 'effectiveFrom' | 'effectiveTo'>;
 export const DEFAULT_ATTENDANCE_RULES: AttendanceRules = attendanceRuleSetInputSchema.parse({ name: 'default', effectiveFrom: '2000-01-01' });

@@ -226,7 +226,9 @@ describe('scoped policies, resolution and compliance', () => {
     // e3: branch A, department A, group OFFICE → the group policy (16 + 2) beats the department (8) and the organisation (0)
     const r = await h.request('GET', `${base()}/attendance-policies/resolve?employeeId=${f.e3}&date=2026-02-10`, { token: f.hrUser });
     expect(r.status).toBe(200);
-    expect(r.body.data.scope).toEqual({ countryCode: 'OM', branchId: f.branchA, departmentId: f.departmentA, employeeGroupId: office, shiftId: null });
+    // no work location: the chain is the branch's node (a top-level branch: one id)
+    expect(r.body.data.scope).toEqual({ countryCode: 'OM', branchId: f.branchA, departmentId: f.departmentA, employeeGroupId: office, shiftId: null, locationId: expect.any(String), locationIds: [expect.any(String)] });
+    expect(r.body.data.scope.locationIds[0]).toBe(r.body.data.scope.locationId);
     expect(r.body.data.policy).toMatchObject({ id: groupPolicy, name: 'Oman – Office Employees', specificity: 18 });
     const byName = Object.fromEntries(r.body.data.candidates.map((c: { name: string }) => [c.name, c]));
     expect(byName['Operations']).toMatchObject({ matches: true, mismatch: null, specificity: 8 });

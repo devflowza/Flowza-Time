@@ -41,8 +41,11 @@ export function useDevices(query: ListQuery, enabled = true) {
   const orgId = useOrgId();
   return useQuery({ queryKey: qk.list(orgId, ENTITY, query), queryFn: () => api.get<PageEnvelope<DeviceRow>>(`/orgs/${orgId}/devices`, query), placeholderData: keepPreviousData, enabled, refetchInterval: 30_000 });
 }
-/** Fleet counts from GET /devices/summary (server-side, branch-scoped) — never aggregate a page of the list client-side. */
-export function useDeviceSummary(query: { branchId?: string; includeDecommissioned?: boolean } = {}) {
+/**
+ * Fleet counts from GET /devices/summary (server-side, branch-scoped) — never aggregate a page of the list client-side.
+ * `locationId` narrows them like the list's location filter (docs/locations.md).
+ */
+export function useDeviceSummary(query: { branchId?: string; locationId?: string; includeDecommissioned?: boolean } = {}) {
   const orgId = useOrgId();
   return useQuery({ queryKey: [...qk.entity(orgId, ENTITY), 'summary', query], queryFn: async () => (await api.get<Envelope<DeviceSummaryDto>>(`/orgs/${orgId}/devices/summary`, query)).data, placeholderData: keepPreviousData, refetchInterval: 30_000 });
 }

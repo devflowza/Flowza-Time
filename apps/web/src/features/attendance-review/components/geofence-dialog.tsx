@@ -5,12 +5,17 @@ import { GEOFENCE_ENFORCEMENTS, type GeofenceDto, type GeofenceEnforcement, type
 import { Button, Checkbox, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Textarea } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
 import { ApiError } from '@/lib/api-client';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree } from '@/features/locations/use-location-tree';
+import { cn } from '@/lib/utils';
 import { AR_NS } from '../i18n';
 import { useGeofenceMutations } from '../api';
 import { formatPolygon, parsePolygon } from '../geofence-model';
 
 const ORG_WIDE = '__org__';
 const WEEKDAYS = [1, 2, 3, 4, 5, 6, 7] as const;
+/** A fence outlines a place (site, building, yard…) of its branch (docs/locations.md). */
+const PLACE_ROLES = ['place'] as const;
 
 interface Branch { id: string; name: string }
 
@@ -25,6 +30,14 @@ export function GeofenceDialog({ open, onOpenChange, fence, branches }: { open: 
   const { create, update } = useGeofenceMutations();
   const [name, setName] = useState(fence?.name ?? '');
   const [branchId, setBranchId] = useState<string>(fence?.branchId ?? ORG_WIDE);
+  // the place the fence outlines: only organisations with place levels see it, and only a fence with a branch can have one
+  const locations = useLocationTree();
+  const [locationId, setLocationId] = useState<string | null>(fence?.locationId ?? null);
+  const savedLocation = fence?.locationId ?? null;
+  const showPlaces = locations.hasPlaceLevels || !!savedLocation;
+  const archivedLocation = !!savedLocation && locations.byId.size > 0 && !locations.byId.has(savedLocation);
+  const orgWide = branchId === ORG_WIDE;
+  const changeBranch = (v: string) => { if (v !== branchId) setLocationId(null); setBranchId(v); };
   const [lat, setLat] = useState(fence ? String(fence.latitude) : '');
   const [lng, setLng] = useState(fence ? String(fence.longitude) : '');
   const [radius, setRadius] = useState(String(fence?.radiusM ?? 150));
@@ -57,7 +70,10 @@ export function GeofenceDialog({ open, onOpenChange, fence, branches }: { open: 
     setTouched(true);
     if (invalid) return;
     const body: Omit<GeofenceInput, 'assignments'> = {
-      name: name.trim(), branchId: branchId === ORG_WIDE ? null : branchId, latitude: num(lat), longitude: num(lng), radiusM: num(radius),
+      name: name.trim(), branchId: orgWide ? null : branchId,
+      // sent only where the field exists (null clears it; an organisation-wide fence has no place)
+      ...(showPlaces ? { locationId: orgWide ? null : locationId } : {}),
+      latitude: num(lat), longitude: num(lng), radiusM: num(radius),
       polygon: polygon.ok ? polygon.value : null, enforcement, accuracyThresholdM: num(accuracy), graceM: num(grace),
       activeFrom: activeFrom || null, activeTo: activeTo || null, timeWindows: windows.length ? windows : null, isActive,
     };
@@ -74,14 +90,19 @@ export function GeofenceDialog({ open, onOpenChange, fence, branches }: { open: 
       <DialogContent size="lg">
         <DialogHeader><DialogTitle>{fence ? t('geofences.edit') : t('geofences.new')}</DialogTitle><DialogDescription>{t('geofences.dialogHint')}</DialogDescription></DialogHeader>
         <form className="space-y-4" noValidate onSubmit={(e) => { e.preventDefault(); submit(); }}>
-          <div className="grid gap-4 sm:grid-cols-2">
+          <div className={cn('grid gap-4', showPlaces ? 'sm:grid-cols-3' : 'sm:grid-cols-2')}>
             <FormField label={t('geofences.fields.name')} htmlFor="gf-name" required error={err('name')}><Input id="gf-name" value={name} maxLength={120} onChange={(e) => setName(e.target.value)} /></FormField>
             <FormField label={t('geofences.fields.branch')} htmlFor="gf-branch">
-              <Select value={branchId} onValueChange={setBranchId}>
+              <Select value={branchId} onValueChange={changeBranch}>
                 <SelectTrigger id="gf-branch"><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value={ORG_WIDE}>{t('geofences.fields.orgWide')}</SelectItem>{branches.map((b) => <SelectItem key={b.id} value={b.id}>{b.name}</SelectItem>)}</SelectContent>
               </Select>
             </FormField>
+            {showPlaces ? (
+              <FormField label={t('geofences.fields.location')} htmlFor="gf-location" optional hint={orgWide ? t('geofences.fields.locationNeedsSite') : t('geofences.fields.locationHint')}>
+                <LocationPicker id="gf-location" value={orgWide ? null : locationId} roles={PLACE_ROLES} branchId={orgWide ? null : branchId} includeArchived={archivedLocation} disabled={orgWide} onChange={(v) => setLocationId(v)} />
+              </FormField>
+            ) : null}
           </div>
           <div className="grid gap-4 sm:grid-cols-3">
             <FormField label={t('geofences.fields.latitude')} htmlFor="gf-lat" required error={err('lat')}><Input id="gf-lat" inputMode="decimal" dir="ltr" className="tnum" value={lat} onChange={(e) => setLat(e.target.value)} placeholder="23.5880" /></FormField>

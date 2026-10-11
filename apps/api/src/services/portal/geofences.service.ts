@@ -1,9 +1,10 @@
 import type { GeofenceAssignmentDto, GeofenceAssignmentInput, GeofenceDto, GeofenceEnforcement, GeofenceEvaluateInput, GeofenceEvaluationDto, GeofenceInput, GeofenceScope, GeofenceTimeWindow, GeofenceUpdateInput, GeofenceVerdictDto, SelfGeofenceDto } from '@flowza/contracts';
-import type { Trx } from '@flowza/database';
+import { locationLabels, type Trx } from '@flowza/database';
 import { evaluateGeofence, type GeofenceEvaluation, type GeofenceFence, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireAnyPermission, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
+import { locationScope, placeReferenceError, readLocation } from '../../lib/location-scope.js';
 import { type Actor, audit, diffObjects, runUser, withSystemScope } from '../../lib/service.js';
 import { isoDateOrNull, isoDateTime, jsonArray } from '../../lib/mappers.js';
 import { systemStep } from '../features/context.js';
@@ -25,10 +26,10 @@ import { type EmployeeCtx, loadEmployeeCtx, localInstant, attendancePolicy } fro
  * wins (employee > team > department > branch > organisation) and, within that scope, the WORST verdict of its fences decides.
  */
 
-type FenceRow = { id: string; organizationId: string; branchId: string | null; name: string; latitude: number; longitude: number; radiusM: number; polygon: unknown; enforcement: GeofenceEnforcement; accuracyThresholdM: number; graceM: number; activeFrom: Date | string | null; activeTo: Date | string | null; timeWindows: unknown; isActive: boolean; createdAt: Date; updatedAt: Date };
+type FenceRow = { id: string; organizationId: string; branchId: string | null; locationId: string | null; name: string; latitude: number; longitude: number; radiusM: number; polygon: unknown; enforcement: GeofenceEnforcement; accuracyThresholdM: number; graceM: number; activeFrom: Date | string | null; activeTo: Date | string | null; timeWindows: unknown; isActive: boolean; createdAt: Date; updatedAt: Date };
 type AssignmentRow = { id: string; geofenceId: string; scope: GeofenceScope; targetId: string | null; priority: number; requireOnCheckIn: boolean; requireOnCheckOut: boolean; createdAt: Date };
 
-const FENCE_COLUMNS = ['id', 'organizationId', 'branchId', 'name', 'latitude', 'longitude', 'radiusM', 'polygon', 'enforcement', 'accuracyThresholdM', 'graceM', 'activeFrom', 'activeTo', 'timeWindows', 'isActive', 'createdAt', 'updatedAt'] as const;
+const FENCE_COLUMNS = ['id', 'organizationId', 'branchId', 'locationId', 'name', 'latitude', 'longitude', 'radiusM', 'polygon', 'enforcement', 'accuracyThresholdM', 'graceM', 'activeFrom', 'activeTo', 'timeWindows', 'isActive', 'createdAt', 'updatedAt'] as const;
 const ASSIGNMENT_COLUMNS = ['id', 'geofenceId', 'scope', 'targetId', 'priority', 'requireOnCheckIn', 'requireOnCheckOut', 'createdAt'] as const;
 
 const polygonOf = (v: unknown): Array<[number, number]> | null => {
@@ -218,25 +219,27 @@ async function writeAssignments(t: Trx, actor: Actor, orgId: string, geofenceId:
 
 /**
  * DTOs. Assignments are read under the CALLER's RLS (a branch-scoped reader sees the assignments inside their scope and the
- * organisation-wide ones); names, the full assignment count and the editability are resolved in system scope.
+ * organisation-wide ones); names (branches, the places the fences outline), the full assignment count and the editability are
+ * resolved in system scope.
  */
 async function toDtos(trx: Trx, orgId: string, fences: FenceRow[], grant: MembershipGrant): Promise<GeofenceDto[]> {
   if (fences.length === 0) return [];
   const visible = (await trx.selectFrom('geofenceAssignments').select(ASSIGNMENT_COLUMNS).where('organizationId', '=', orgId).where('geofenceId', 'in', fences.map((f) => f.id))
     .orderBy('priority', 'asc').orderBy('createdAt', 'asc').orderBy('id', 'asc').execute()) as AssignmentRow[];
-  const { all, info, branches } = await withSystemScope(trx, orgId, async (t) => {
+  const { all, info, branches, labels } = await withSystemScope(trx, orgId, async (t) => {
     const allRows = await assignmentsOf(t, orgId, fences.map((f) => f.id));
     return {
       all: allRows,
       info: await targetInfo(t, orgId, allRows),
-      branches: new Map((await t.selectFrom('branches').select(['id', 'name']).where('organizationId', '=', orgId).execute()).map((b) => [b.id, b.name])),
+      branches: await branchNames(t, orgId),
+      labels: await locationLabels(t, orgId, fences.map((f) => f.locationId)),
     };
   });
   return fences.map((f) => {
     const mine = visible.filter((a) => a.geofenceId === f.id);
     const every = all.filter((a) => a.geofenceId === f.id);
     return {
-      ...fenceFields(f, branches),
+      ...fenceFields(f, branches, labels),
       assignments: mine.map((a): GeofenceAssignmentDto => ({ id: a.id, geofenceId: a.geofenceId, scope: a.scope, targetId: a.targetId, targetName: a.scope === 'org' ? null : info.get(targetKey(a.scope, a.targetId))?.name ?? null, priority: Number(a.priority), requireOnCheckIn: a.requireOnCheckIn, requireOnCheckOut: a.requireOnCheckOut, createdAt: isoDateTime(a.createdAt) })),
       editable: canEditFence(grant, f, every, info),
       hiddenAssignments: Math.max(0, every.length - mine.length),
@@ -244,9 +247,14 @@ async function toDtos(trx: Trx, orgId: string, fences: FenceRow[], grant: Member
   });
 }
 
-function fenceFields(f: FenceRow, branches: Map<string, string>): Omit<GeofenceDto, 'assignments' | 'editable' | 'hiddenAssignments'> {
+async function branchNames(t: Trx, orgId: string): Promise<Map<string, string>> {
+  return new Map((await t.selectFrom('branches').select(['id', 'name']).where('organizationId', '=', orgId).execute()).map((b) => [b.id, b.name]));
+}
+
+function fenceFields(f: FenceRow, branches: Map<string, string>, labels: ReadonlyMap<string, string>): Omit<GeofenceDto, 'assignments' | 'editable' | 'hiddenAssignments'> {
   return {
-    id: f.id, organizationId: f.organizationId, branchId: f.branchId, branchName: f.branchId ? branches.get(f.branchId) ?? null : null, name: f.name,
+    id: f.id, organizationId: f.organizationId, branchId: f.branchId, branchName: f.branchId ? branches.get(f.branchId) ?? null : null,
+    locationId: f.locationId, locationName: f.locationId ? labels.get(f.locationId) ?? null : null, name: f.name,
     latitude: Number(f.latitude), longitude: Number(f.longitude), radiusM: Number(f.radiusM), polygon: polygonOf(f.polygon), enforcement: f.enforcement,
     accuracyThresholdM: Number(f.accuracyThresholdM), graceM: Number(f.graceM), activeFrom: isoDateOrNull(f.activeFrom), activeTo: isoDateOrNull(f.activeTo),
     timeWindows: windowsOf(f.timeWindows), isActive: f.isActive, createdAt: isoDateTime(f.createdAt), updatedAt: isoDateTime(f.updatedAt),
@@ -256,12 +264,21 @@ function fenceFields(f: FenceRow, branches: Map<string, string>): Omit<GeofenceD
 const assignmentAudit = (rows: ReadonlyArray<{ scope: GeofenceScope; targetId?: string | null | undefined; priority?: number | undefined; requireOnCheckIn?: boolean | undefined; requireOnCheckOut?: boolean | undefined }>) =>
   rows.map(({ scope, targetId, priority, requireOnCheckIn, requireOnCheckOut }) => ({ scope, targetId: targetId ?? null, priority: Number(priority ?? 100), requireOnCheckIn: requireOnCheckIn ?? true, requireOnCheckOut: requireOnCheckOut ?? true }));
 
-export async function listGeofences(deps: ApiDeps, actor: Actor, orgId: string, q: { branchId?: string | undefined; includeInactive?: boolean | undefined }): Promise<GeofenceDto[]> {
+/**
+ * `locationId` (docs/locations.md §2) narrows like a branch filter: a group / branch location → the fences of its branches, a
+ * place → the fences outlining it or a place below it — organisation-wide fences never match a location; always inside the
+ * caller's branch scope and any explicit `branchId` (NOT_FOUND for a location the caller cannot see).
+ */
+export async function listGeofences(deps: ApiDeps, actor: Actor, orgId: string, q: { branchId?: string | undefined; locationId?: string | undefined; includeInactive?: boolean | undefined }): Promise<GeofenceDto[]> {
   const grant = requireAnyPermission(actor.principal, orgId, 'attendance.manage_geofences', 'attendance.view');
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
     let base = trx.selectFrom('geofences').select(FENCE_COLUMNS).where('organizationId', '=', orgId);
-    if (scope) base = base.where((eb) => (q.branchId ? eb('branchId', 'in', scope) : eb.or([eb('branchId', 'is', null), eb('branchId', 'in', scope)])));
+    if (q.locationId) {
+      const loc = await locationScope(trx, orgId, q.locationId, scope);
+      if (loc.branchIds) base = base.where('branchId', 'in', loc.branchIds);
+      if (loc.placeIds) base = base.where('locationId', 'in', loc.placeIds);
+    } else if (scope) base = base.where((eb) => (q.branchId ? eb('branchId', 'in', scope) : eb.or([eb('branchId', 'is', null), eb('branchId', 'in', scope)])));
     if (!q.includeInactive) base = base.where('isActive', '=', true);
     const rows = (await base.orderBy('name', 'asc').orderBy('id').execute()) as FenceRow[];
     return toDtos(trx, orgId, rows, grant);
@@ -280,7 +297,7 @@ export async function getGeofence(deps: ApiDeps, actor: Actor, orgId: string, id
 
 function fenceValues(input: GeofenceUpdateInput): Record<string, unknown> {
   const v: Record<string, unknown> = {};
-  for (const key of ['name', 'branchId', 'latitude', 'longitude', 'radiusM', 'enforcement', 'accuracyThresholdM', 'graceM', 'activeFrom', 'activeTo', 'isActive'] as const) if (input[key] !== undefined) v[key] = input[key];
+  for (const key of ['name', 'branchId', 'locationId', 'latitude', 'longitude', 'radiusM', 'enforcement', 'accuracyThresholdM', 'graceM', 'activeFrom', 'activeTo', 'isActive'] as const) if (input[key] !== undefined) v[key] = input[key];
   if (input.polygon !== undefined) v['polygon'] = input.polygon === null ? null : JSON.stringify(input.polygon);
   if (input.timeWindows !== undefined) v['timeWindows'] = input.timeWindows === null ? null : JSON.stringify(input.timeWindows);
   return v;
@@ -299,9 +316,12 @@ export async function createGeofence(deps: ApiDeps, actor: Actor, orgId: string,
   // no explicit list: the fence applies to its branch, or to the whole organisation when it has none
   const assignments: GeofenceAssignmentInput[] = input.assignments ?? [input.branchId ? { scope: 'branch', targetId: input.branchId, priority: 100, requireOnCheckIn: true, requireOnCheckOut: true } : { scope: 'org', targetId: null, priority: 100, requireOnCheckIn: true, requireOnCheckOut: true }];
   return runUser(deps.db, actor, async (trx) => {
+    // the place the fence outlines: read under the CALLER's RLS (a place they can see), compared with the fence's branch below
+    const place = input.locationId ? await readLocation(trx, orgId, input.locationId) : null;
     // written by the service's system step after the checks (authenticated holds no write privilege on the geofence tables)
     const row = await systemStep(trx, orgId, async (t) => {
       await requireBranchExists(t, orgId, input.branchId);
+      if (input.locationId) { const err = placeReferenceError(place, input.branchId); if (err) throw err; }
       await checkAssignments(t, grant, orgId, assignments);
       const created = (await t.insertInto('geofences').values({ organizationId: orgId, createdBy: actor.userId, name: input.name, latitude: input.latitude, longitude: input.longitude, radiusM: input.radiusM, ...fenceValues(input) } as never)
         .returning(FENCE_COLUMNS).executeTakeFirstOrThrow()) as FenceRow;
@@ -317,18 +337,24 @@ export async function updateGeofence(deps: ApiDeps, actor: Actor, orgId: string,
   const grant = requirePermission(actor.principal, orgId, 'attendance.manage_geofences');
   if (input.branchId !== undefined) requireFenceScope(grant, input.branchId);
   return runUser(deps.db, actor, async (trx) => {
-    const { before, after, branches } = await systemStep(trx, orgId, async (t) => {
+    // the place the fence outlines: read under the CALLER's RLS (a place they can see), compared with the fence's branch below
+    const place = input.locationId ? await readLocation(trx, orgId, input.locationId) : null;
+    const { before, after, branches, labels } = await systemStep(trx, orgId, async (t) => {
       const { fence } = await lockFenceForChange(t, orgId, id, grant);
       if (input.branchId !== undefined) await requireBranchExists(t, orgId, input.branchId);
+      // a place of the fence's branch AFTER the change (re-sending the stored place unchanged is a no-op); a move to another branch
+      // (or to the whole organisation) without a new place drops the old one (app.place_reference_guard) — the response shows it
+      const branchId = input.branchId !== undefined ? input.branchId : fence.branchId;
+      if (input.locationId && !(input.locationId === fence.locationId && branchId === fence.branchId)) { const err = placeReferenceError(place, branchId); if (err) throw err; }
       const from = input.activeFrom !== undefined ? input.activeFrom : isoDateOrNull(fence.activeFrom);
       const to = input.activeTo !== undefined ? input.activeTo : isoDateOrNull(fence.activeTo);
       if (from && to && to < from) throw errors.validation('activeTo must be on/after activeFrom.', { issues: [{ path: 'activeTo', message: 'Before activeFrom' }] });
       const values = fenceValues(input);
       if (Object.keys(values).length > 0) await t.updateTable('geofences').set(values as never).where('organizationId', '=', orgId).where('id', '=', id).execute();
       const saved = (await loadFenceRow(t, orgId, id))!;
-      return { before: fence, after: saved, branches: new Map((await t.selectFrom('branches').select(['id', 'name']).where('organizationId', '=', orgId).execute()).map((b) => [b.id, b.name])) };
+      return { before: fence, after: saved, branches: await branchNames(t, orgId), labels: await locationLabels(t, orgId, [fence.locationId, saved.locationId]) };
     });
-    const { updatedAt: _bu, ...bv } = fenceFields(before, branches); const { updatedAt: _au, ...av } = fenceFields(after, branches);
+    const { updatedAt: _bu, ...bv } = fenceFields(before, branches, labels); const { updatedAt: _au, ...av } = fenceFields(after, branches, labels);
     const diff = diffObjects(bv as unknown as Record<string, unknown>, av as unknown as Record<string, unknown>);
     await audit(trx, actor, orgId, 'geofence.updated', 'geofence', { entityId: id, branchId: after.branchId, oldValue: diff.oldValue, newValue: diff.newValue });
     return (await toDtos(trx, orgId, [after], grant))[0]!;
@@ -352,14 +378,15 @@ export async function replaceGeofenceAssignments(deps: ApiDeps, actor: Actor, or
 export async function deleteGeofence(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
   const grant = requirePermission(actor.principal, orgId, 'attendance.manage_geofences');
   await runUser(deps.db, actor, async (trx) => {
-    const { fence, previous, branches } = await systemStep(trx, orgId, async (t) => {
+    const { fence, previous, branches, labels } = await systemStep(trx, orgId, async (t) => {
       const locked = await lockFenceForChange(t, orgId, id, grant);
-      const names = new Map((await t.selectFrom('branches').select(['id', 'name']).where('organizationId', '=', orgId).execute()).map((b) => [b.id, b.name]));
+      const names = await branchNames(t, orgId);
+      const places = await locationLabels(t, orgId, [locked.fence.locationId]);
       // assignments cascade; punches keep the fence id and verdict in their raw payload (immutable history)
       await t.deleteFrom('geofences').where('organizationId', '=', orgId).where('id', '=', id).execute();
-      return { fence: locked.fence, previous: locked.assignments, branches: names };
+      return { fence: locked.fence, previous: locked.assignments, branches: names, labels: places };
     });
-    await audit(trx, actor, orgId, 'geofence.deleted', 'geofence', { entityId: id, branchId: fence.branchId, oldValue: { ...fenceFields(fence, branches), assignments: assignmentAudit(previous) } });
+    await audit(trx, actor, orgId, 'geofence.deleted', 'geofence', { entityId: id, branchId: fence.branchId, oldValue: { ...fenceFields(fence, branches, labels), assignments: assignmentAudit(previous) } });
   });
 }
 

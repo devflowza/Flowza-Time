@@ -57,6 +57,8 @@ export const WEEK_PARAMETER_REPORT_TYPES: readonly ReportType[] = REPORT_TYPE_DE
 /** The report's own parameters minus the period (which the period rule derives at run time). */
 export const reportScheduleFiltersSchema = z.object({
   branchId: uuidSchema.optional(),
+  /** As `reportParametersSchema.locationId`: a group / branch location → its branches; a place → the employees working in it or below. */
+  locationId: uuidSchema.optional(),
   departmentId: uuidSchema.optional(),
   employeeIds: z.array(uuidSchema).min(1).max(500).optional(),
   leaveTypeCode: codeSchema.optional(),

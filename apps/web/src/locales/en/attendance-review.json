@@ -184,6 +184,8 @@
     "deleteHint": "Its assignments go with it. Punches already recorded keep the verdict they had.",
     "empty": "No geofences yet",
     "emptyHint": "Create a zone around each site employees punch from in the portal.",
+    "filterLocation": "Filter by location",
+    "allLocations": "All locations",
     "active": "Active",
     "inactive": "Inactive",
     "columns": {
@@ -192,7 +194,8 @@
       "shape": "Shape",
       "enforcement": "Outside the zone",
       "assignments": "Applies to",
-      "active": "Status"
+      "active": "Status",
+      "location": "Location"
     },
     "shape": {
       "circle": "Circle, {{meters}} m",
@@ -218,7 +221,10 @@
       "addWindow": "Add a window",
       "removeWindow": "Remove window",
       "start": "From",
-      "end": "To"
+      "end": "To",
+      "location": "Location",
+      "locationHint": "The place inside the site this zone outlines, e.g. a building or a yard.",
+      "locationNeedsSite": "Choose a site first: a location belongs to one site."
     },
     "weekdays": {
       "1": "Mon",

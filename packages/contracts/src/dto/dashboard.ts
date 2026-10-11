@@ -1,8 +1,9 @@
 import { z } from 'zod';
 import { isoDateSchema, uuidSchema } from '../common.js';
 
-export const dashboardSummaryQuerySchema = z.object({ date: isoDateSchema.optional(), branchId: uuidSchema.optional() });
-export const dashboardTrendsQuerySchema = z.object({ from: isoDateSchema, to: isoDateSchema, branchId: uuidSchema.optional() })
+/** `locationId`: a group / branch location → its branches; a place → the employees working in it or below (docs/locations.md). */
+export const dashboardSummaryQuerySchema = z.object({ date: isoDateSchema.optional(), branchId: uuidSchema.optional(), locationId: uuidSchema.optional() });
+export const dashboardTrendsQuerySchema = z.object({ from: isoDateSchema, to: isoDateSchema, branchId: uuidSchema.optional(), locationId: uuidSchema.optional() })
   .refine((v) => v.to >= v.from, { message: 'to must be on/after from', path: ['to'] });
 export const dashboardBranchesQuerySchema = z.object({ date: isoDateSchema.optional() });
 

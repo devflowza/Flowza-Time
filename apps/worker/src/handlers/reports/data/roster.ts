@@ -1,6 +1,6 @@
 import type { EmploymentStatus } from '@flowza/contracts';
-import type { Trx } from '@flowza/database';
-import { naturalCompare, resolvePolicy, resolveShift, type EngineRuleSet, type EngineShiftAssignment, type EngineShiftPattern } from '@flowza/domain';
+import { loadLocationChains, loadPolicyRows, toPolicyCandidate, type Trx } from '@flowza/database';
+import { naturalCompare, resolvePolicy, resolveShift, type EngineShiftAssignment, type EngineShiftPattern } from '@flowza/domain';
 import { asDate, chunk, isoDate } from '../../attendance/common.js';
 import { toEnginePattern } from '../../attendance/load-inputs.js';
 import type { ReportContext } from '../context.js';
@@ -93,20 +93,23 @@ export interface ShiftAndPolicy { shift: string | null; policy: string | null }
 
 /**
  * Effective shift and attendance rule set ("Policy") per employee on `date`: the same precedence the engine uses
- * (employee > team > department > branch > organisation; branch rule set before the organisation default), resolved
- * for a whole roster with a handful of queries rather than one per employee.
+ * (employee > team > department > branch > organisation; the most specific policy — packages/domain resolvePolicy, with the
+ * employee's location chain: a policy for their place or for a group location above their branch counts), resolved for a
+ * whole roster with a handful of queries rather than one per employee.
  */
 export async function loadShiftAndPolicy(trx: Trx, ctx: ReportContext, employees: readonly RosterEmployee[], date: string): Promise<Map<string, ShiftAndPolicy>> {
   const out = new Map<string, ShiftAndPolicy>();
   if (employees.length === 0) return out;
   const orgId = ctx.organizationId;
-  const [assignmentRows, patternRows, shiftRows, ruleRows, branchRows] = await Promise.all([
+  const [assignmentRows, patternRows, shiftRows, ruleRows, branchRows, chains] = await Promise.all([
     trx.selectFrom('shiftAssignments').select(['id', 'targetType', 'targetId', 'shiftId', 'shiftPatternId', 'effectiveFrom', 'effectiveTo']).where('organizationId', '=', orgId)
       .where('effectiveFrom', '<=', asDate(date)).where((eb) => eb.or([eb('effectiveTo', 'is', null), eb('effectiveTo', '>', asDate(date))])).execute(),
     trx.selectFrom('shiftPatterns').select(['id', 'name', 'cycleLengthDays', 'anchorDate', 'sequence']).where('organizationId', '=', orgId).execute(),
     trx.selectFrom('shifts').select(['id', 'name', 'nameAr', 'code']).where('organizationId', '=', orgId).execute(),
-    trx.selectFrom('attendanceRuleSets').select(['id', 'name', 'branchId', 'countryCode', 'departmentId', 'employeeGroupId', 'shiftId', 'effectiveFrom', 'effectiveTo']).where('organizationId', '=', orgId).execute(),
+    // every policy with its location's depth (docs/locations.md §3) — the engine's loader
+    loadPolicyRows(trx, orgId, date),
     trx.selectFrom('branches').select(['id', 'countryCode']).where('organizationId', '=', orgId).execute(),
+    loadLocationChains(trx, orgId, employees.map((e) => ({ employeeId: e.id, branchId: e.branchId }))),
   ]);
   // the employee group of each employee on the date (Enterprise policy scope)
   const groupOf = new Map<string, string>();
@@ -124,14 +127,15 @@ export async function loadShiftAndPolicy(trx: Trx, ctx: ReportContext, employees
   const patterns: EngineShiftPattern[] = patternRows.map(toEnginePattern);
   const patternName = new Map(patternRows.map((p) => [p.id, p.name]));
   const shiftName = new Map(shiftRows.map((s) => [s.id, (ctx.locale === 'ar' && s.nameAr) || s.name]));
-  const ruleSets: Array<EngineRuleSet & { name: string }> = ruleRows.map((r) => ({ id: r.id, branchId: r.branchId, countryCode: r.countryCode, departmentId: r.departmentId, employeeGroupId: r.employeeGroupId, shiftId: r.shiftId, effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: r.effectiveTo === null ? null : isoDate(r.effectiveTo), rules: {} as EngineRuleSet['rules'], name: r.name }));
+  const ruleSets = ruleRows.map(toPolicyCandidate);
 
   for (const e of employees) {
     const scope = { employeeId: e.id, teamIds: teamsOf.get(e.id) ?? [], departmentId: e.departmentId, branchId: e.branchId, organizationId: orgId };
     const resolved = resolveShift(assignments, patterns, scope, date);
     const shift = resolved.shiftId ? shiftName.get(resolved.shiftId) ?? null : resolved.assignment?.shiftPatternId ? patternName.get(resolved.assignment.shiftPatternId) ?? null : null;
-    const rule = resolvePolicy(ruleSets, date, { countryCode: countryOf.get(e.branchId) ?? null, branchId: e.branchId, departmentId: e.departmentId, employeeGroupId: groupOf.get(e.id) ?? null, shiftId: resolved.shiftId });
-    out.set(e.id, { shift, policy: rule?.name ?? null });
+    const chain = chains.get(e.id);
+    const rule = resolvePolicy(ruleSets, date, { countryCode: countryOf.get(e.branchId) ?? null, branchId: e.branchId, departmentId: e.departmentId, employeeGroupId: groupOf.get(e.id) ?? null, shiftId: resolved.shiftId, ...(chain ? { locationIds: chain } : {}) });
+    out.set(e.id, { shift, policy: rule?.row.name ?? null });
   }
   return out;
 }

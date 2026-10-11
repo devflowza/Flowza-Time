@@ -6,6 +6,7 @@ import { isSelfScopedReport, SELF_SCOPE_PARAMETER, SELF_SCOPE_PERMISSION, type M
 import { AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
+import { assertLocationVisible } from '../../lib/location-scope.js';
 import { type Actor, audit, runUser } from '../../lib/service.js';
 import { enqueueJob } from '../../lib/jobs.js';
 import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
@@ -64,6 +65,9 @@ export async function createReport(deps: ApiDeps, actor: Actor, orgId: string, i
   return runUser(deps.db, actor, async (trx) => {
     const settings = await loadSettings(trx, orgId);
     if (settings.security.exportRequiresReason && !input.reason) throw errors.validation('This organisation requires a reason for exports.', { issues: [{ path: 'reason', message: 'Required' }] });
+    // a location the requester can see (RLS); the worker resolves it again in the organisation's system context and only ever
+    // narrows the injected scope with it: a group / branch location → its branches, a place → the employees working there
+    if (input.parameters.locationId) await assertLocationVisible(trx, orgId, input.parameters.locationId, 'parameters.locationId');
     if (parameters.employeeIds && Array.isArray(parameters.employeeIds) && parameters.employeeIds.length) {
       // every requested employee must exist *and* be visible to the caller; ids RLS hides would otherwise reach the worker (system context) unchecked
       const ids = [...new Set(parameters.employeeIds as string[])];

@@ -50,6 +50,23 @@ export async function enqueueRecalculation(deps: ApiDeps, trx: Trx, actor: Actor
   });
 }
 
+/**
+ * A location change that can change which attendance policy applies to people (docs/locations.md §3) — a work location changed,
+ * a branch, region or place moved in the tree — recomputes TODAY for them, when the organisation has a policy scoped to a
+ * location (otherwise nothing can change). Past days keep the values they were computed with: the work location is not
+ * effective-dated. Future days compute when they arrive.
+ */
+export async function recalcTodayForLocationChange(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, who: { employeeIds?: readonly string[]; branchIds?: readonly string[] }, reason: string): Promise<void> {
+  const employeeIds = [...new Set(who.employeeIds ?? [])];
+  const branchIds = [...new Set(who.branchIds ?? [])];
+  if (employeeIds.length === 0 && branchIds.length === 0) return;
+  const scoped = await systemStep(trx, orgId, (t) => t.selectFrom('attendanceRuleSets').select('id').where('organizationId', '=', orgId).where('locationId', 'is not', null).limit(1).executeTakeFirst());
+  if (!scoped) return;
+  const today = await orgToday(trx, orgId);
+  for (let i = 0; i < employeeIds.length; i += 1000) await enqueueRecalculation(deps, trx, actor, orgId, { fromDate: today, toDate: today, employeeIds: employeeIds.slice(i, i + 1000), reason });
+  for (const branchId of branchIds) await enqueueRecalculation(deps, trx, actor, orgId, { fromDate: today, toDate: today, branchId, reason });
+}
+
 /** Today's date in the organisation's timezone (used to decide whether a change touches the past). */
 export async function orgToday(trx: Trx, orgId: string): Promise<string> {
   const org = await trx.selectFrom('organizations').select('timezone').where('id', '=', orgId).executeTakeFirst();

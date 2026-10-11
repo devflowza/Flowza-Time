@@ -18,6 +18,10 @@
     "updated": "Updated {{when}}",
     "loading": "Refreshing…"
   },
+  "location": {
+    "all": "All locations",
+    "filter": "Filter by location"
+  },
   "kpi": {
     "employees": "Total employees",
     "present": "Present today",

@@ -10,6 +10,7 @@ import { useActiveMembership } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { useEmployeeOptions } from '@/features/employees/api';
 import { useMemberMutations, useRoles, type UpdateMemberInput } from '../api';
+import { BranchesByLocation } from './branches-by-location';
 
 type FormValues = z.input<typeof updateMemberSchema>;
 
@@ -65,6 +66,7 @@ export function MemberDialog({ member, onClose }: { member: MemberDto; onClose: 
           </div>
           {!allBranches ? (
             <FormField label={t('fields.branches')} htmlFor="mem-branches" required error={scopeInvalid ? t('fields.branchesRequired') : undefined}>
+              <BranchesByLocation id="mem-by-location" selected={branchIds} available={branches.data.map((b) => b.id)} disabled={self} onAdd={(ids) => setValue('branchIds', [...branchIds, ...ids], { shouldDirty: true })} />
               <ul id="mem-branches" className="grid max-h-48 gap-1 overflow-y-auto rounded-md border p-2 sm:grid-cols-2">
                 {branches.data.map((b) => (
                   <li key={b.id} className="flex items-center gap-2 text-sm">

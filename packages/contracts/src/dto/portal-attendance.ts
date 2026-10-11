@@ -380,6 +380,8 @@ export type GeofenceAssignmentInput = z.infer<typeof geofenceAssignmentInputSche
 const geofenceShape = {
   name: z.string().trim().min(1).max(120),
   branchId: uuidSchema.nullable().optional(),
+  /** The place the fence outlines (a site, building… of its branch; docs/locations.md). Needs a branch; null clears it. */
+  locationId: uuidSchema.nullable().optional(),
   latitude: latitudeSchema,
   longitude: longitudeSchema,
   radiusM: z.number().int().min(30).max(5000),
@@ -409,6 +411,8 @@ export interface GeofenceAssignmentDto { id: string; geofenceId: string; scope: 
  */
 export interface GeofenceDto {
   id: string; organizationId: string; branchId: string | null; branchName: string | null; name: string; latitude: number; longitude: number; radiusM: number;
+  /** The place the fence outlines and its path below the branch ("Site A › Building 2"); null = the branch / organisation. */
+  locationId?: string | null; locationName?: string | null;
   polygon: Array<[number, number]> | null; enforcement: GeofenceEnforcement; accuracyThresholdM: number; graceM: number; activeFrom: string | null; activeTo: string | null;
   timeWindows: GeofenceTimeWindow[]; isActive: boolean; assignments: GeofenceAssignmentDto[]; createdAt: string; updatedAt: string;
   /**
@@ -420,7 +424,7 @@ export interface GeofenceDto {
   /** How many of the fence's assignments target people outside the caller's scope (they are not listed and not editable). */
   hiddenAssignments?: number;
 }
-export const geofenceListQuerySchema = z.object({ branchId: uuidSchema.optional(), includeInactive: booleanQuerySchema.optional() });
+export const geofenceListQuerySchema = z.object({ branchId: uuidSchema.optional(), locationId: uuidSchema.optional(), includeInactive: booleanQuerySchema.optional() });
 export const geofenceEvaluateSchema = z.object({
   employeeId: uuidSchema,
   lat: latitudeSchema.optional(),

@@ -40,6 +40,20 @@ describe('employee-diff', () => {
     expect(EFFECTIVE_DATED_FIELDS.filter((f) => f in patch)).toEqual([]);
     expect(diffEmployee(withSecondary, { ...withSecondary, secondaryManagerEmployeeId: undefined, managerEmployeeId: undefined } as never)).toEqual({ managerEmployeeId: null, secondaryManagerEmployeeId: null });
   });
+  it('round-trips the work location as a current-state (not effective-dated) field; clearing it sends null', () => {
+    const place = 'a0000000-0000-4000-8000-0000000000c1';
+    const v = toFormValues({ ...employee, workLocationId: place, workLocationName: 'Site A' });
+    expect(v.workLocationId).toBe(place);
+    expect(toFormValues(employee).workLocationId).toBeUndefined();
+    const cleared = diffEmployee(v, { ...v, workLocationId: undefined } as never);
+    expect(cleared).toEqual({ workLocationId: null });
+    expect(updateEmployeeSchema.safeParse(cleared).success).toBe(true);
+    expect(EFFECTIVE_DATED_FIELDS.filter((f) => f in cleared)).toEqual([]);
+    // a branch change clears the place in the same PATCH; only the branch asks for an effective date
+    const moved = diffEmployee(v, { ...v, branchId: 'b2', workLocationId: undefined } as never);
+    expect(moved).toEqual({ branchId: 'b2', workLocationId: null });
+    expect(EFFECTIVE_DATED_FIELDS.filter((f) => f in moved)).toEqual(['branchId']);
+  });
   it('every optional field the form can empty produces a PATCH the API accepts (Save used to fail with "Request validation failed.")', () => {
     const full = toFormValues({
       ...employee, middleName: 'bin', displayNameAr: 'علي', dateOfBirth: '1990-05-01', phone: '+968 9000 0000', departmentId: 'dep1', managerEmployeeId: 'm1', secondaryManagerEmployeeId: 'm2',

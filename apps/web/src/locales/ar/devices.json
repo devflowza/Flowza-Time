@@ -8,6 +8,7 @@
     "allConnections": "كل حالات الاتصال",
     "allProviders": "كل المزوّدين",
     "tagPlaceholder": "وسم…",
+    "locationFilter": "تصفية حسب الموقع",
     "clearSelection": "إلغاء التحديد",
     "empty": "لا توجد أجهزة بعد",
     "emptyHint": "سجّل أول جهاز حضور أو اربط حساب سحابة المورّد. تبدأ البصمات بالتدفق فور اتصال الجهاز."
@@ -25,7 +26,8 @@
     "lastAttendanceSync": "آخر مزامنة حضور",
     "lastEmployeeSync": "آخر مزامنة موظفين",
     "employees": "الموظفون",
-    "provider": "المزوّد"
+    "provider": "المزوّد",
+    "location": "الموقع"
   },
   "connection": {
     "unknown": "غير معروف",
@@ -105,7 +107,9 @@
     "autoSyncHint": "سحب الحضور وفق جدول (للمزوّدين الداعمين للسحب فقط).",
     "syncInterval": "فترة المزامنة",
     "syncIntervalHint": "الدقائق بين عمليات السحب التلقائية (1–1440).",
-    "status": "حالة الجهاز"
+    "status": "حالة الجهاز",
+    "location": "الموقع",
+    "locationHint": "مكان تركيب الجهاز داخل فرعه: موقع أو طابق أو منطقة."
   },
   "actions": {
     "syncAttendance": "مزامنة الحضور",

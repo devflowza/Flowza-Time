@@ -3,7 +3,7 @@
   "jobs": { "view": "View job" },
   "list": {
     "subtitle": "{{count}} employees", "add": "Add employee", "import": "Import from CSV", "searchPlaceholder": "Search number, name, email, device id…",
-    "allStatuses": "All statuses", "allTypes": "All types",
+    "allStatuses": "All statuses", "allTypes": "All types", "location": "Location", "locationFilter": "Filter by location",
     "empty": "No employees yet", "emptyHint": "Add employees one by one or import them from a CSV file. They are pushed to your devices automatically."
   },
   "employmentStatus": { "active": "Active", "on_leave": "On leave", "suspended": "Suspended", "terminated": "Terminated", "resigned": "Resigned" },
@@ -19,7 +19,8 @@
     "designation": "Designation", "manager": "Manager", "managerHint": "Line manager: sees this employee's attendance and leave as a direct report and approves their requests.",
     "secondaryManager": "Secondary manager", "secondaryManagerHint": "Dotted-line manager: also sees this employee as a direct report and is the backup approver when the manager is absent.", "selectBranch": "Select a branch", "weeklyOffDays": "Weekly off days", "weeklyOffDaysHint": "Leave empty to inherit from the branch / organisation.",
     "deviceUserId": "Device user id", "deviceUserIdAuto": "Leave blank to auto-assign the next free numeric id for this organisation.", "deviceUserIdEditHint": "Changing the id re-pushes the employee to every device.",
-    "autoAssigned": "Auto-assigned", "cardNumber": "Card number", "pin": "Device PIN", "pinHint": "4–8 digits; stored hashed and never shown again."
+    "autoAssigned": "Auto-assigned", "cardNumber": "Card number", "pin": "Device PIN", "pinHint": "4–8 digits; stored hashed and never shown again.",
+    "workLocation": "Work location", "workLocationHint": "Where the employee works inside the branch: a site, floor or zone."
   },
   "form": {
     "newTitle": "Add employee", "newHint": "Create the employee record; device enrolment happens when the record is pushed to devices.", "create": "Create employee",

@@ -8,6 +8,7 @@
     "allConnections": "All connections",
     "allProviders": "All providers",
     "tagPlaceholder": "Tag…",
+    "locationFilter": "Filter by location",
     "clearSelection": "Clear selection",
     "empty": "No devices yet",
     "emptyHint": "Register your first attendance terminal or connect a vendor cloud account. Punches start flowing as soon as the device is online."
@@ -25,7 +26,8 @@
     "lastAttendanceSync": "Last attendance sync",
     "lastEmployeeSync": "Last employee sync",
     "employees": "Employees",
-    "provider": "Provider"
+    "provider": "Provider",
+    "location": "Location"
   },
   "connection": {
     "unknown": "Unknown",
@@ -105,7 +107,9 @@
     "autoSyncHint": "Pull attendance on a schedule (pull-capable providers only).",
     "syncInterval": "Sync interval",
     "syncIntervalHint": "Minutes between automatic pulls (1–1440).",
-    "status": "Device status"
+    "status": "Device status",
+    "location": "Location",
+    "locationHint": "Where the terminal is installed in its branch: a site, floor or zone."
   },
   "actions": {
     "syncAttendance": "Sync attendance",

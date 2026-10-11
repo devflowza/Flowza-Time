@@ -6,7 +6,7 @@ export const DEVICE_COLUMNS = [
   'd.id', 'd.organizationId', 'd.branchId', 'b.name as branchName', 'd.code', 'd.name', 'd.providerKey', 'p.name as providerName', 'd.modelId', 'd.manufacturer', 'd.modelName', 'd.serialNumber',
   'd.timezone', 'd.integrationType', 'd.endpointUrl', 'd.config', 'd.capabilities', 'd.status', 'd.connectionStatus', 'd.lastHeartbeatAt', 'd.lastAttendanceSyncAt', 'd.lastEmployeeSyncAt',
   'd.lastSuccessfulCommunicationAt', 'd.lastErrorCode', 'd.lastError', 'd.firmwareVersion', 'd.offlineThresholdMinutes', 'd.autoSyncEnabled', 'd.syncIntervalMinutes', 'd.tags', 'd.createdAt', 'd.updatedAt',
-  'd.pushTokenHash', 'd.generation', 'd.notes', 'd.consecutiveFailures',
+  'd.pushTokenHash', 'd.generation', 'd.notes', 'd.consecutiveFailures', 'd.locationId',
 ] as const;
 
 export interface DeviceRow {
@@ -14,14 +14,18 @@ export interface DeviceRow {
   modelName: string | null; serialNumber: string | null; timezone: string; integrationType: DeviceDto['integrationType']; endpointUrl: string | null; config: unknown; capabilities: unknown; status: DeviceDto['status'];
   connectionStatus: string; lastHeartbeatAt: Date | null; lastAttendanceSyncAt: Date | null; lastEmployeeSyncAt: Date | null; lastSuccessfulCommunicationAt: Date | null; lastErrorCode: string | null; lastError: string | null;
   firmwareVersion: string | null; offlineThresholdMinutes: number; autoSyncEnabled: boolean; syncIntervalMinutes: number; tags: string[]; createdAt: Date; updatedAt: Date; pushTokenHash: string | null; generation: number; notes: string | null; consecutiveFailures: number;
+  /** The place the terminal is installed in (docs/locations.md), a place of `branchId`. */
+  locationId: string | null;
 }
 
 export type DeviceDtoExt = DeviceDto & { hasPushToken: boolean; generation: number; notes: string | null; consecutiveFailures: number };
 
-export function toDeviceDto(r: DeviceRow, extra: { employeeCount?: number; maskedCredentials?: Record<string, unknown> } = {}): DeviceDtoExt {
+/** `locationLabels`: place labels by id (`locationLabels` of @flowza/database, one batch per page); a place it lacks prints null. */
+export function toDeviceDto(r: DeviceRow, extra: { employeeCount?: number; maskedCredentials?: Record<string, unknown>; locationLabels?: ReadonlyMap<string, string> } = {}): DeviceDtoExt {
   const caps = deviceCapabilitiesSchema.safeParse(jsonObject(r.capabilities));
   return {
-    id: r.id, organizationId: r.organizationId, branchId: r.branchId, ...(r.branchName ? { branchName: r.branchName } : {}), code: r.code, name: r.name, providerKey: r.providerKey,
+    id: r.id, organizationId: r.organizationId, branchId: r.branchId, ...(r.branchName ? { branchName: r.branchName } : {}),
+    locationId: r.locationId, locationName: r.locationId ? extra.locationLabels?.get(r.locationId) ?? null : null, code: r.code, name: r.name, providerKey: r.providerKey,
     ...(r.providerName ? { providerName: r.providerName } : {}), modelId: r.modelId, manufacturer: r.manufacturer, modelName: r.modelName, serialNumber: r.serialNumber, timezone: r.timezone,
     integrationType: r.integrationType, endpointUrl: r.endpointUrl, config: jsonObject(r.config), capabilities: caps.success ? caps.data : deviceCapabilitiesSchema.parse({}),
     status: r.status, connectionStatus: (r.connectionStatus === 'vendor_degraded' ? 'degraded' : r.connectionStatus) as DeviceDto['connectionStatus'],

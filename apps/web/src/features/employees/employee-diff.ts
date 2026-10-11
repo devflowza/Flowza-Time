@@ -13,7 +13,7 @@ export function toFormValues(e: EmployeeDetail): EmployeeFormValues {
     employeeNumber: e.employeeNumber, firstName: e.firstName, middleName: e.middleName ?? undefined, lastName: e.lastName, displayName: e.displayName, displayNameAr: e.displayNameAr ?? undefined,
     gender: e.gender, dateOfBirth: e.dateOfBirth ?? undefined, nationalityCode: e.nationalityCode ?? undefined, email: e.email ?? undefined, phone: e.phone ?? undefined,
     joiningDate: e.joiningDate, exitDate: e.exitDate, employmentStatus: e.employmentStatus, employmentType: e.employmentType,
-    branchId: e.branchId, departmentId: e.departmentId ?? undefined, designationId: e.designationId ?? undefined, managerEmployeeId: e.managerEmployeeId ?? undefined,
+    branchId: e.branchId, workLocationId: e.workLocationId ?? undefined, departmentId: e.departmentId ?? undefined, designationId: e.designationId ?? undefined, managerEmployeeId: e.managerEmployeeId ?? undefined,
     secondaryManagerEmployeeId: e.secondaryManagerEmployeeId ?? undefined,
     deviceUserId: e.deviceUserId, cardNumber: e.cardNumber ?? undefined, pin: undefined, weeklyOffDays: e.weeklyOffDays ?? undefined,
   };

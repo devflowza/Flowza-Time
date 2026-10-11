@@ -1,7 +1,7 @@
 {
   "title": "Organisation structure",
-  "subtitle": "Branches, departments, designations and teams. Archived rows stay for history and can be reactivated.",
-  "tabs": { "branches": "Branches", "departments": "Departments", "designations": "Designations", "teams": "Teams" },
+  "subtitle": "Branches, locations, departments, designations and teams. Archived rows stay for history and can be reactivated.",
+  "tabs": { "branches": "Branches", "locations": "Locations", "departments": "Departments", "designations": "Designations", "teams": "Teams" },
   "status": { "active": "Active", "inactive": "Inactive", "archived": "Archived" },
   "days": { "0": "Sun", "1": "Mon", "2": "Tue", "3": "Wed", "4": "Thu", "5": "Fri", "6": "Sat" },
   "filters": { "allStatuses": "All statuses" },

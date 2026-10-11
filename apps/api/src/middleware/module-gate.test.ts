@@ -25,4 +25,9 @@ describe('modulesForPath (routes relative to /orgs/:orgId/)', () => {
     'attendance-rule-sets', 'attendance-rule-sets/r1', 'shift-assignments', 'shift-patterns', 'shift-roster'])('%s is the core: no module', (path) => {
     expect(modulesForPath(path)).toEqual([]);
   });
+
+  it('the muster list of a location is round-the-clock scheduling; the location tree itself is the core', () => {
+    expect(modulesForPath('locations/l1/muster')).toEqual(['advanced_scheduling']);
+    for (const path of ['locations', 'locations/l1', 'location-levels', 'location-levels/apply-template']) expect(modulesForPath(path), path).toEqual([]);
+  });
 });

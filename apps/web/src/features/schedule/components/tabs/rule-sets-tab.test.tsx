@@ -1,15 +1,16 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { screen, within } from '@testing-library/react';
+import { fireEvent, screen, waitFor, within } from '@testing-library/react';
 
 vi.mock('@/lib/api-client', async () => (await import('@/features/employees/test-mocks')).apiClientModule);
 vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/test-mocks')).useMeModule);
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import { grantAll, mockGet, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
+import { grantAll, mockGet, page, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/schedule.json';
 import ar from '@/locales/ar/schedule.json';
+import { BR1, BRANCHES, N_B1, N_SA, locationRoutes } from '@/features/scheduling/test-locations';
 import { RuleSetsTab } from './rule-sets-tab';
 
 registerNamespace('schedule', en, ar);
@@ -46,5 +47,40 @@ describe('Rules tab — attendance policies', () => {
     expect(await screen.findByText('Organisation default')).toBeInTheDocument();
     expect(screen.queryByRole('columnheader', { name: 'Specificity' })).toBeNull();
     expect(screen.queryByTestId('which-policy-card')).toBeNull();
+  });
+});
+
+describe('Rules tab — policies by location (docs/locations.md §3)', () => {
+  const LOCATED = [
+    { ...base, id: 'p-site', name: 'Site A policy', branchId: BR1, locationId: N_SA, specificity: 4 },
+    { ...base, id: 'p-branch', name: 'Branch 1 policy', branchId: BR1, locationId: null, specificity: 4 },
+  ];
+  let lastQuery: Record<string, unknown> | undefined;
+  beforeEach(() => {
+    resetApiMock(); grantAll(); lastQuery = undefined;
+    mockGet({ ...locationRoutes(), '/orgs/org-1/branches': page(BRANCHES), '/orgs/org-1/attendance-rule-sets': (q: Record<string, unknown> | undefined) => { lastQuery = q; return { data: LOCATED }; } });
+  });
+
+  it('shows the scope as a path of the tree and says that the deeper location wins', async () => {
+    renderWithProviders(<RuleSetsTab />);
+    await waitFor(() => expect(screen.getByTestId('scope-location')).toHaveTextContent('Muscat HQ › Branch 1 › Site A'));
+    // a branch policy reads as its node's path below the groups
+    expect(screen.getByTestId('scope-branch')).toHaveTextContent('Muscat HQ › Branch 1');
+    expect(screen.getByRole('columnheader', { name: 'Specificity' }).getAttribute('title')).toMatch(/deeper one wins/);
+  });
+
+  it('filters by the policies\' own location: any node of the tree, by its id', async () => {
+    renderWithProviders(<RuleSetsTab />);
+    const filter = await screen.findByRole('combobox', { name: 'Location' });
+    expect(filter).toHaveTextContent('Any location');
+    fireEvent.click(filter);
+    fireEvent.click(await screen.findByRole('option', { name: /^Site A/ }));
+    await waitFor(() => expect(lastQuery).toMatchObject({ locationId: N_SA }));
+    expect(lastQuery?.['branchId']).toBeUndefined();
+    // a branch's node too (the API matches the branch's own policies)
+    fireEvent.click(screen.getByRole('combobox', { name: 'Location' }));
+    fireEvent.click(await screen.findByRole('option', { name: /^Branch 1/ }));
+    await waitFor(() => expect(lastQuery).toMatchObject({ locationId: N_B1 }));
+    expect(lastQuery?.['branchId']).toBeUndefined();
   });
 });

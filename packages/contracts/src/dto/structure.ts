@@ -28,6 +28,10 @@ export const branchDtoSchema = z.object({
   holidayCalendarId: uuidSchema.nullable(),
   status: z.enum(RECORD_STATUSES),
   employeeCount: z.number().int().optional(),
+  /** The branch's node in the location tree (docs/locations.md). */
+  locationId: uuidSchema.nullable().optional(),
+  /** The group location the branch sits under (null = the top level). */
+  parentLocationId: uuidSchema.nullable().optional(),
   createdAt: isoDateTimeSchema,
   updatedAt: isoDateTimeSchema,
 });
@@ -102,6 +106,8 @@ export const updateBranchSchema = z.object({
   weeklyOffDays: weeklyOffDaysSchema.nullable().optional(),
   holidayCalendarId: uuidSchema.nullable().optional(),
   status: z.enum(RECORD_STATUSES).optional(),
+  /** Move the branch under a group location (null = to the top level). */
+  parentLocationId: uuidSchema.nullable().optional(),
 });
 export type UpdateBranchInput = z.infer<typeof updateBranchSchema>;
 export const updateDepartmentSchema = z.object({

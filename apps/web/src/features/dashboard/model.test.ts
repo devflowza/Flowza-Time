@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { DashboardTrendPoint } from '@flowza/contracts';
-import { daypart, daysUntil, deltaVsLastWeek, firstName, pct, quoteIndex, sparkValues, todaySlices, toTrendPoints, trendWindow } from './model';
+import { indexLocations } from '@/features/locations/tree';
+import { BRANCH_1, BRANCH_2, BRANCH_3, LEVELS, LOC, NODES } from '@/features/employees/location-test-fixtures';
+import { branchRowsInLocation, daypart, daysUntil, deltaVsLastWeek, firstName, pct, quoteIndex, sparkValues, todaySlices, toTrendPoints, trendWindow } from './model';
 
 const point = (date: string, present: number, late: number, absent: number, onLeave: number, extra: Partial<DashboardTrendPoint> = {}): DashboardTrendPoint => ({ date, present, late, absent, onLeave, missingPunch: 0, overtimeMinutes: 0, ...extra });
 
@@ -43,6 +45,19 @@ describe('dashboard model', () => {
     const points = toTrendPoints(Array.from({ length: 10 }, (_, i) => point(`2026-09-${String(i + 1).padStart(2, '0')}`, i, 0, 0, 0)));
     expect(sparkValues(points, 'present')).toEqual([3, 4, 5, 6, 7, 8, 9]);
     expect(sparkValues(points, 'present', 3)).toEqual([7, 8, 9]);
+  });
+
+  it('keeps the branch rows under the location filter: a region its branches, a branch itself, a place its branch', () => {
+    const tree = indexLocations(NODES, LEVELS);
+    const rows = [BRANCH_1, BRANCH_2, BRANCH_3, 'b-unplaced'].map((branchId) => ({ branchId }));
+    const ids = (locationId: string | null) => branchRowsInLocation(rows, tree, locationId).map((r) => r.branchId);
+    expect(ids(null)).toEqual([BRANCH_1, BRANCH_2, BRANCH_3, 'b-unplaced']);
+    expect(ids(LOC.hq)).toEqual([BRANCH_1, BRANCH_2]);
+    expect(ids(LOC.south)).toEqual([BRANCH_3]);
+    expect(ids(LOC.branch2)).toEqual([BRANCH_2]);
+    expect(ids(LOC.floor2)).toEqual([BRANCH_1]);
+    // a location the tree does not know (yet) filters nothing out
+    expect(ids('a0000000-0000-4000-8000-0000000000ff')).toHaveLength(4);
   });
 
   it('greeting helpers', () => {

@@ -99,6 +99,8 @@ export type LeaveSource = "EXTERNAL" | "INTERNAL";
 
 export type LeaveStatus = "APPROVED" | "CANCELLED" | "INFO_REQUESTED" | "PENDING" | "REJECTED";
 
+export type LocationLevelRole = "branch" | "group" | "place";
+
 export type LoginEvent = "failed" | "logout" | "mfa_challenge" | "password_reset" | "success";
 
 export type LogLevel = "debug" | "error" | "info" | "warn";
@@ -627,6 +629,7 @@ export interface AttendanceRuleSets {
   holidayWorkCountsAsOvertime: Generated<boolean>;
   id: Generated<string>;
   lateThresholdMinutes: Generated<number>;
+  locationId: string | null;
   minFullDayMinutes: Generated<number>;
   missingPunchBehavior: Generated<MissingPunchBehavior>;
   name: string;
@@ -970,6 +973,7 @@ export interface Devices {
   lastErrorCode: string | null;
   lastHeartbeatAt: Timestamp | null;
   lastSuccessfulCommunicationAt: Timestamp | null;
+  locationId: string | null;
   manufacturer: string;
   modelId: string | null;
   modelName: string | null;
@@ -1170,6 +1174,7 @@ export interface Employees {
   updatedBy: string | null;
   userId: string | null;
   weeklyOffDays: number[] | null;
+  workLocationId: string | null;
 }
 
 export interface EmploymentHistory {
@@ -1273,6 +1278,7 @@ export interface Geofences {
   id: Generated<string>;
   isActive: Generated<boolean>;
   latitude: number;
+  locationId: string | null;
   longitude: number;
   name: string;
   organizationId: string;
@@ -1535,6 +1541,38 @@ export interface LeaveYearCloses {
   ranOn: Timestamp;
   requestedBy: string | null;
   summary: Generated<Json>;
+}
+
+export interface LocationLevels {
+  createdAt: Generated<Timestamp>;
+  icon: Generated<string>;
+  id: Generated<string>;
+  name: string;
+  nameAr: string | null;
+  organizationId: string;
+  position: number;
+  role: LocationLevelRole;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface Locations {
+  branchId: string | null;
+  code: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  depth: Generated<number | null>;
+  id: Generated<string>;
+  latitude: Numeric | null;
+  levelId: string;
+  longitude: Numeric | null;
+  name: string | null;
+  nameAr: string | null;
+  organizationId: string;
+  parentId: string | null;
+  path: string[];
+  role: LocationLevelRole;
+  status: Generated<RecordStatus>;
+  updatedAt: Generated<Timestamp>;
 }
 
 export interface LoginHistory {
@@ -1990,6 +2028,7 @@ export interface ShiftCoverageRequirements {
   createdAt: Generated<Timestamp>;
   createdBy: string | null;
   id: Generated<string>;
+  locationId: string | null;
   minHeadcount: number;
   organizationId: string;
   shiftId: string;
@@ -2297,6 +2336,8 @@ export interface DB {
   leaveRequestComments: LeaveRequestComments;
   leaveTypes: LeaveTypes;
   leaveYearCloses: LeaveYearCloses;
+  locationLevels: LocationLevels;
+  locations: Locations;
   loginHistory: LoginHistory;
   membershipBranches: MembershipBranches;
   missingPunchReminders: MissingPunchReminders;

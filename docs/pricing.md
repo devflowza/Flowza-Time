@@ -51,8 +51,13 @@ in integer baisa, and is used by the API (invoices, revenue figures) and the web
 | `report_schedules` | Scheduled reports | schedules and sharing on `/reports`; `report-schedules`, `report-deliveries`, `report-recipients`, `reports/share` |
 | `finance_integration` | Flowza Finance integration | Settings → Integrations; `integrations/finance*` |
 | `shift_requests` (**Enterprise**) | Shift change & swap requests | `/my/shift` (change requests, swaps), Shifts → Shift requests; `me/shift-changes*`, `me/shift-swaps*`, `shift-change-requests` |
-| `advanced_scheduling` (**Enterprise**) | Round-the-clock scheduling | Shifts → Round-the-clock / Coverage / Double shifts, `/deployments`; `round-the-clock*`, `shift-coverage*`, `additional-shift-assignments*`, `branch-deployments*` |
-| `attendance_policies` (**Enterprise**) | Global attendance policies | `/attendance/policies`, the policy scope and sections of Shifts → Rules; `employee-groups*`, `attendance-policies*` (and, on the core `attendance-rule-sets` route, any scope beyond the branch or a non-default `policy`) |
+| `advanced_scheduling` (**Enterprise**) | Round-the-clock scheduling | Shifts → Round-the-clock / Coverage / Double shifts, `/deployments`, the muster list; `round-the-clock*`, `shift-coverage*` (coverage targets per location), `additional-shift-assignments*`, `branch-deployments*`, `locations/:id/muster` |
+| `attendance_policies` (**Enterprise**) | Global attendance policies | `/attendance/policies`, the policy scope and sections of Shifts → Rules; `employee-groups*`, `attendance-policies*` (and, on the core `attendance-rule-sets` route, any scope beyond the branch — a location included — or a non-default `policy`) |
+
+The **location hierarchy** (customer-named levels — Headquarters → Branch → Site → Floor → Zone — and the location tree,
+`docs/locations.md`) is core, on every plan: levels, templates, the tree, branch placement, device / employee / geofence
+locations and the location filters. Its Enterprise uses ride on the modules above: location-scoped policies
+(`attendance_policies`), coverage targets per location and the muster list (`advanced_scheduling`).
 
 The three Enterprise modules (migration `20261007000100`, design and benchmark in `docs/enterprise/plan.md`) are in the Enterprise
 plan only; a platform admin can switch one on for any tenant (Tenant → Modules). **Shift swaps** used to come with the

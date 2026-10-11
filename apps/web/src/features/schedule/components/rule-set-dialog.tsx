@@ -12,12 +12,15 @@ import { todayIso } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useDebounced } from '@/hooks/use-debounced';
-import { useModuleEnabled, useOrgTimezone } from '@/features/me/use-me';
+import { useActiveMembership, useModuleEnabled, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { blankToUndefined, toNumber } from '@/features/organization/form-utils';
 import { toastJobQueued } from '@/features/employees/job-toast';
 import { useEmployeeGroupOptions, usePolicyCompliance } from '@/features/policies/api';
+import { LocationPicker } from '@/features/locations/components/location-picker';
+import { useLocationTree, type LocationTree } from '@/features/locations/use-location-tree';
 import { useRuleSetMutations, useShiftOptions } from '../api';
+import { locationOfScope, scopeOfLocation } from '../policy-location';
 import type { RuleSetDto } from '../types';
 
 type FormValues = z.input<typeof attendanceRuleSetInputSchema>;
@@ -25,7 +28,8 @@ type Path = FieldPath<FormValues>;
 const OT_ROUNDING = [0, 5, 10, 15, 30, 60] as const;
 const PUNCH_ROUNDING = [0, 5, 10, 15, 30] as const;
 const GEOFENCE_MODES = ['inherit', 'off', 'flag', 'block'] as const;
-const ENTERPRISE_SCOPE_KEYS = ['countryCode', 'departmentId', 'employeeGroupId', 'shiftId'] as const;
+/** Scope dimensions beyond the branch (Enterprise attendance_policies): a request without the module never carries them. */
+const ENTERPRISE_SCOPE_KEYS = ['countryCode', 'departmentId', 'employeeGroupId', 'shiftId', 'locationId'] as const;
 
 /**
  * The sections of the attendance policy editor, in order. `discipline` and `regularisation` exist only with the Enterprise
@@ -35,7 +39,7 @@ const SECTIONS = ['general', 'late', 'attendance', 'overtime', 'discipline', 're
 type SectionKey = (typeof SECTIONS)[number];
 const ENTERPRISE_SECTIONS: ReadonlySet<SectionKey> = new Set(['discipline', 'regularisation']);
 const FIELD_SECTIONS: Record<string, SectionKey> = {
-  name: 'general', description: 'general', branchId: 'general', countryCode: 'general', departmentId: 'general', employeeGroupId: 'general', shiftId: 'general', effectiveFrom: 'general', effectiveTo: 'general',
+  name: 'general', description: 'general', branchId: 'general', locationId: 'general', countryCode: 'general', departmentId: 'general', employeeGroupId: 'general', shiftId: 'general', effectiveFrom: 'general', effectiveTo: 'general',
   graceInMinutes: 'late', graceOutMinutes: 'late', lateThresholdMinutes: 'late', earlyDepartureThresholdMinutes: 'late', punchRoundingMinutes: 'late', punchRoundingMode: 'late', workedRoundingMinutes: 'late', workedRoundingMode: 'late',
   minFullDayMinutes: 'attendance', halfDayThresholdMinutes: 'attendance', punchInterpretation: 'attendance', duplicatePunchWindowSeconds: 'attendance', missingPunchBehavior: 'attendance', autoAbsentWithoutPunches: 'attendance',
   overtimeEnabled: 'overtime', overtimeStartAfterMinutes: 'overtime', overtimeMinBlockMinutes: 'overtime', overtimeRoundingMinutes: 'overtime', overtimeMaxMinutesPerDay: 'overtime', countEarlyInAsOvertime: 'overtime', overtimeRequiresScheduledHours: 'overtime', weeklyOffWorkCountsAsOvertime: 'overtime', holidayWorkCountsAsOvertime: 'overtime',
@@ -60,7 +64,7 @@ function errorPaths(errors: FieldErrors<FormValues>, prefix = ''): string[] {
 
 function toDefaults(r: RuleSetDto | null, today: string, pack: CountryPackCode | null): FormValues {
   if (!r) {
-    const blank: FormValues = { ...DEFAULT_ATTENDANCE_RULES, name: '', description: '', branchId: null, countryCode: null, departmentId: null, employeeGroupId: null, shiftId: null, effectiveFrom: today, effectiveTo: null, overtimeMaxMinutesPerDay: null, policy: structuredClone(DEFAULT_POLICY_SECTIONS) };
+    const blank: FormValues = { ...DEFAULT_ATTENDANCE_RULES, name: '', description: '', branchId: null, locationId: null, countryCode: null, departmentId: null, employeeGroupId: null, shiftId: null, effectiveFrom: today, effectiveTo: null, overtimeMaxMinutesPerDay: null, policy: structuredClone(DEFAULT_POLICY_SECTIONS) };
     const p = pack ? COUNTRY_RULE_PACKS[pack] : null;
     if (!p) return blank;
     const d = policyDefaultsFromPack(p);
@@ -168,12 +172,35 @@ function EscalationEditor({ control, register, errors }: { control: Control<Form
   );
 }
 
+/** The nodes a member scoped to some branches may name: their branches and the places in them. */
+const BRANCH_SCOPED_ROLES = ['branch', 'place'] as const;
+
+/**
+ * The policy's "where" as one Location field (Enterprise, organisations with group or place levels — docs/locations.md §3): any
+ * node of the tree. A branch node is stored as `branchId`, a group node (Headquarters, Region…) as `locationId` alone, a place
+ * (Site, Floor, Zone…) as `locationId` + its branch. A stored policy shows its location, else its branch's node. A member scoped
+ * to some branches only names one of their branches or a place in it (a group location spans branches beyond their scope).
+ */
+function PolicyLocationField({ control, setScope, tree, editing, error }: { control: Control<FormValues>; setScope: (where: { branchId: string | null; locationId: string | null }) => void; tree: LocationTree; editing: boolean; error?: string }) {
+  const { t } = useTranslation('schedule');
+  const allBranches = useActiveMembership()?.allBranches ?? true;
+  const branchId = useWatch({ control, name: 'branchId' }) ?? null;
+  const locationId = useWatch({ control, name: 'locationId' }) ?? null;
+  return (
+    <FormField label={t('policyEditor.scope.location')} htmlFor="rs-location" optional hint={editing ? t('policyEditor.scope.immutable') : t('policyEditor.scope.locationHint')} error={error}>
+      <LocationPicker id="rs-location" value={locationOfScope(tree, { branchId, locationId })} onChange={(_, node) => setScope(scopeOfLocation(node))} roles={allBranches || editing ? undefined : BRANCH_SCOPED_ROLES}
+        clearable={!editing} disabled={editing} includeArchived={editing} placeholder={t('policyEditor.scope.anyLocation')} aria-invalid={!!error} />
+    </FormField>
+  );
+}
+
 /**
  * The attendance POLICY editor (attendanceRuleSetInputSchema): an effective-dated rule set with its scope and sections —
  * General, Late & early, Attendance, Overtime, Discipline, Regularisation, Ramadan. The Enterprise parts (scope beyond the
  * branch, country packs and compliance, very / repeated late, check-in methods, weekly overtime and rates, points, limits)
  * appear only with the module attendance_policies; without it the request never carries non-default sections or extra scope.
- * `pack` opens a new policy prefilled from a country rule pack.
+ * With the module, an organisation that has group or place levels names the policy's branch through a Location field instead
+ * (a region, a branch, a site, a floor…). `pack` opens a new policy prefilled from a country rule pack.
  */
 export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { open: boolean; onOpenChange: (o: boolean) => void; ruleSet: RuleSetDto | null; pack?: CountryPackCode | null }) {
   const { t, i18n } = useTranslation('schedule');
@@ -196,6 +223,14 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
   const groups = useEmployeeGroupOptions(enterprise);
   const shifts = useShiftOptions();
   const editing = !!ruleSet;
+  // the location tree (Enterprise only); a stored policy may name an archived location or branch, which must stay readable
+  const tree = useLocationTree({ enabled: enterprise, includeArchived: editing });
+  const byLocation = enterprise && (tree.hasGroupLevels || tree.hasPlaceLevels || !!ruleSet?.locationId);
+  const setScope = (where: { branchId: string | null; locationId: string | null }) => {
+    const opts = { shouldDirty: true, shouldValidate: form.formState.isSubmitted } as const;
+    setValue('branchId', where.branchId, opts);
+    setValue('locationId', where.locationId, opts);
+  };
   const packName = (code: string) => { const p = countryRulePack(code); return p ? (i18n.language === 'ar' ? p.nameAr : p.name) : code; };
   const countryOptions = useMemo<ComboboxOption[]>(() => {
     const codes: string[] = [...COUNTRY_PACK_CODES];
@@ -338,9 +373,11 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
               <Section title={t('policyEditor.scope.title')} hint={enterprise ? t('policyEditor.scope.hint') : undefined}>
                 <div className="grid gap-4 sm:grid-cols-2">
                   {enterprise ? scopeCombo('countryCode', t('policyEditor.scope.country'), countryOptions, false, t('policyEditor.scope.anyCountry')) : null}
-                  <FormField label={tc('common.branch')} htmlFor="rs-branch" optional hint={editing ? t('policyEditor.scope.immutable') : t('rules.branchHint')} error={errors.branchId?.message}>
-                    <Controller control={control} name="branchId" render={({ field }) => <Combobox id="rs-branch" value={field.value ?? null} onChange={(v) => field.onChange(v)} options={branches.options} loading={branches.isLoading} clearable={!editing} disabled={editing} placeholder={t('rules.orgWide')} />} />
-                  </FormField>
+                  {byLocation ? <PolicyLocationField control={control} setScope={setScope} tree={tree} editing={editing} error={errors.locationId?.message ?? errors.branchId?.message} /> : (
+                    <FormField label={tc('common.branch')} htmlFor="rs-branch" optional hint={editing ? t('policyEditor.scope.immutable') : t('rules.branchHint')} error={errors.branchId?.message}>
+                      <Controller control={control} name="branchId" render={({ field }) => <Combobox id="rs-branch" value={field.value ?? null} onChange={(v) => field.onChange(v)} options={branches.options} loading={branches.isLoading} clearable={!editing} disabled={editing} placeholder={t('rules.orgWide')} />} />
+                    </FormField>
+                  )}
                   {enterprise ? <>
                     {scopeCombo('departmentId', t('policyEditor.scope.department'), departments.options, departments.isLoading, t('policyEditor.scope.anyDepartment'))}
                     {scopeCombo('employeeGroupId', t('policyEditor.scope.group'), groups.options, groups.isLoading, t('policyEditor.scope.anyGroup'))}
