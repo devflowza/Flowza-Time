@@ -1,23 +1,36 @@
 #!/usr/bin/env bash
 # Regenerates the walkthrough video, its captions and the deck from the sources in this folder.
-# One-time tool setup is described in ../README.md. usage: TOOLS=/path/to/tools bash make.sh [--deck-only]
+# One-time tool setup is described in ../README.md.
+#   TOOLS=/path/to/tools bash make.sh                 # deck + video + captions
+#   TOOLS=/path/to/tools bash make.sh deck            # deck only
+#   TOOLS=/path/to/tools bash make.sh stills deploy@b2+5 dashboard@end ...   # still frames into $WORK/stills
 set -euo pipefail
 HERE="$(cd "$(dirname "$0")" && pwd)"
 OUT="$(cd "$HERE/.." && pwd)"
 TOOLS="${TOOLS:?set TOOLS to the folder prepared in README.md (node_modules/, venv/, model/)}"
-WORK="${WORK:-$(mktemp -d)}"
+# Work files (voiced lines are cached here, so keep it between runs) live outside the repository.
+WORK="${WORK:-${XDG_CACHE_HOME:-$HOME/.cache}/flowza-walkthrough}"
+MODE="${1:-all}"
 mkdir -p "$WORK"
-# ES modules resolve packages from the script's folder upwards, so link the tool packages in (node_modules is git-ignored).
-if [ ! -e "$HERE/node_modules" ]; then ln -s "$TOOLS/node_modules" "$HERE/node_modules"; trap 'rm -f "$HERE/node_modules"' EXIT; fi
 
-node "$HERE/deck.mjs" "$OUT/FlowZa-Time-Enterprise.pptx"
-[ "${1:-}" = "--deck-only" ] && exit 0
+# ES modules resolve packages from the script's own folder upwards, so run a copy of the sources next to the tools.
+SRC="$WORK/src"
+rm -rf "$SRC" && mkdir -p "$SRC" && cp "$HERE"/*.mjs "$HERE"/*.js "$HERE"/*.css "$HERE"/*.json "$HERE"/*.py "$SRC"/
+ln -s "$TOOLS/node_modules" "$SRC/node_modules"
 
-"$TOOLS/venv/bin/python" -I "$HERE/tts.py" "$TOOLS/model" "$HERE/script.json" "$WORK"
-node "$HERE/build.mjs" "$WORK/video.html"
-node "$HERE/render.mjs" "$WORK/video.html" "$WORK/timings.json" "$WORK/video_noaudio.mp4" 30 3
+node "$SRC/deck.mjs" "$OUT/FlowZa-Time-Enterprise.pptx"
+[ "$MODE" = "deck" ] && exit 0
+
+"$TOOLS/venv/bin/python" -I "$SRC/tts.py" "$TOOLS/model" "$SRC/script.json" "$WORK"
+node "$SRC/build.mjs" "$WORK/video.html"
+if [ "$MODE" = "stills" ]; then
+  shift
+  node "$SRC/still.mjs" "$WORK/video.html" "$WORK/timings.json" "$WORK/stills" "$@"
+  exit 0
+fi
+node "$SRC/render.mjs" "$WORK/video.html" "$WORK/timings.json" "$WORK/video_noaudio.mp4" 30 3
 TOTAL="$(python3 -c "import json,sys; print(json.load(open(sys.argv[1]))['total'])" "$WORK/timings.json")"
-"$TOOLS/venv/bin/python" -I "$HERE/music.py" "$TOTAL" "$WORK/music.wav"
+"$TOOLS/venv/bin/python" -I "$SRC/music.py" "$TOTAL" "$WORK/music.wav"
 
 # Voice in both channels; the music bed is ducked under the voice, then everything is normalised to -16 LUFS.
 ffmpeg -y -loglevel error -i "$WORK/narration.wav" -i "$WORK/music.wav" -filter_complex \

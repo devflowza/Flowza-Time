@@ -33,26 +33,28 @@ it is not built yet.
 ## Regenerating
 
 Edit `scripts/script.json` (narration; each string is one voiced line that the animation syncs to) or a scene in
-`scripts/s1.mjs` – `s3.mjs` (scene markup and timing, written as `bN+seconds` = seconds after line N of that scene starts), then
-run `scripts/make.sh`. A full run takes about 6 minutes on 4 cores; `--deck-only` rebuilds just the deck (`scripts/deck.mjs`).
+`scripts/s1.mjs` – `s3.mjs` (scene markup and timing, written as `bN+seconds` = seconds after line N of that scene starts),
+then run `scripts/make.sh`. A full run takes about 6 minutes on 4 cores.
 
-One-time setup of a tools folder (nothing here is a workspace dependency):
-
-```bash
-TOOLS=~/flowza-media-tools && mkdir -p $TOOLS/model && cd $TOOLS
-npm init -y >/dev/null && npm install pptxgenjs react react-dom react-icons sharp   # deck + icons
-python3 -m venv venv && venv/bin/pip install kokoro-onnx soundfile                  # offline neural voice
-curl -L -o model/kokoro-v1.0.onnx https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
-curl -L -o model/voices-v1.0.bin  https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
-```
-
-Also needed on the machine: Node 22 with Playwright's Chromium, `ffmpeg`, Python 3, and the Inter font (the scenes are set in
-Inter). Then:
+One-time setup of a tools folder outside the repository (nothing here is a workspace dependency):
 
 ```bash
-TOOLS=~/flowza-media-tools bash docs/media/walkthrough/scripts/make.sh
+export TOOLS=~/flowza-media-tools && mkdir -p "$TOOLS/model"
+npm --prefix "$TOOLS" install pptxgenjs react react-dom react-icons sharp playwright   # deck, icons, frame capture
+npx --prefix "$TOOLS" playwright install chromium                                      # skip if Chromium is already set up
+python3 -m venv "$TOOLS/venv" && "$TOOLS/venv/bin/pip" install kokoro-onnx soundfile   # offline neural voice
+curl -L -o "$TOOLS/model/kokoro-v1.0.onnx" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/kokoro-v1.0.onnx
+curl -L -o "$TOOLS/model/voices-v1.0.bin" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
 ```
 
-Voice: Kokoro `af_heart` at 1.06× speed. Music: a soft synthesised pad (`scripts/music.py`) ducked under the voice.
-To check a frame without rendering the video, build the page and grab stills:
-`node scripts/build.mjs /tmp/v.html && node scripts/still.mjs /tmp/v.html <work>/timings.json /tmp/shots deploy@b2+5`.
+Also needed: Node 22, `ffmpeg`, Python 3 and the Inter font (the scenes are set in Inter). Then, from the repository root:
+
+```bash
+TOOLS=~/flowza-media-tools bash docs/media/walkthrough/scripts/make.sh                            # deck, video, captions
+TOOLS=~/flowza-media-tools bash docs/media/walkthrough/scripts/make.sh deck                       # deck only
+TOOLS=~/flowza-media-tools bash docs/media/walkthrough/scripts/make.sh stills deploy@b2+5 dashboard@end   # check frames
+```
+
+Work files go to `$WORK` (default `~/.cache/flowza-walkthrough`): keep it between runs and only edited narration lines are
+voiced again. Stills land in `$WORK/stills`. Voice: Kokoro `af_heart` at 1.06× speed. Music: a soft synthesised pad
+(`scripts/music.py`) ducked under the voice.
