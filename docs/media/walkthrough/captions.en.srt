@@ -115,18 +115,18 @@ Finally, configure and monitor. Settings cover regional options, attendance rule
 Under Settings, Dashboard, pick one of seven styles, and a layout: Overview, Operations, or Executive.
 
 30
-00:03:21,541 --> 00:03:26,137
-The dashboard shows today at a glance: who is present, absent, on leave or late.
+00:03:21,541 --> 00:03:26,457
+The dashboard shows each day at a glance: who was present, absent, on leave or late.
 
 31
-00:03:26,487 --> 00:03:35,298
+00:03:26,807 --> 00:03:35,618
 Then the attendance trend, attendance by branch, recent activity, and the approvals waiting for you, with reports in PDF, Excel or CSV.
 
 32
-00:03:37,198 --> 00:03:40,194
+00:03:37,518 --> 00:03:40,514
 FlowZa Time. People on time, business on track.
 
 33
-00:03:40,544 --> 00:03:42,719
+00:03:40,864 --> 00:03:43,039
 See it for yourself at flowza.com.
 

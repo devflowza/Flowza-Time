@@ -800,7 +800,7 @@ pres.addSection({ title: 'Dashboard' });
 {
   const s = pres.addSlide({ masterName: 'Closing dark', sectionTitle: 'Dashboard' });
   s.addText('Configure once, watch it live', { placeholder: 'title' });
-  T(s, 'Example dashboard: today at a glance', {
+  T(s, 'Example dashboard: one working day at a glance', {
     x: 0.6,
     y: 1.35,
     w: 6,
@@ -924,7 +924,7 @@ pres.addSection({ title: 'Dashboard' });
     },
   );
   s.addNotes(
-    'Finally, configure and monitor. Settings cover regional options, attendance rules, sync, notifications and security, while roles decide who sees which branch. Pick one of seven dashboard styles and a layout: Overview, Operations or Executive. The dashboard shows who is present, absent, on leave or late today, then the attendance trend, attendance by branch, recent activity and the approvals waiting for you, with reports in PDF, Excel or CSV. See it for yourself at flowza.com.',
+    'Finally, configure and monitor. Settings cover regional options, attendance rules, sync, notifications and security, while roles decide who sees which branch. Pick one of seven dashboard styles and a layout: Overview, Operations or Executive. The dashboard shows each day at a glance: who was present, absent, on leave or late, then the attendance trend, attendance by branch, recent activity and the approvals waiting for you, with reports in PDF, Excel or CSV. See it for yourself at flowza.com.',
   );
 }
 

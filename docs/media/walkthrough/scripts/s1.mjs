@@ -107,7 +107,7 @@ export const devices = () => {
   ].join('');
   const newRow = devRow(
     ['Reception', 'MCT-02', 'ZKTeco', '—', 'Muscat HQ', '', '', '—'],
-    'id="d-newrow" data-hl="b2+6.0~end" style="background:#f6fdf9"',
+    'id="d-newrow" data-hl="b2+6.6~end" style="background:#f6fdf9"',
     swap('b2+7.6', conn('Unknown', ''), conn('Online', 'just now')),
   );
   const provs = [
@@ -184,6 +184,19 @@ export const devices = () => {
       <div class="amber">Enter the URL and token in the terminal's server settings (or the vendor's webhook configuration). Rotating the token invalidates the previous one immediately.</div></div>
     <div class="mfoot">${btn('Close', { cls: 'ghost', id: 'd-close' })}</div>`,
   );
+  // Closing the push credentials dialog opens the new device's page; it stays Unknown until the first heartbeat.
+  const detailPage = `<div class="crumb" id="d-crumb">${ic('LuArrowLeft')} Devices</div>
+    <div class="ph"><div><h2 class="row" style="gap:10px">Reception ${conn('Unknown', '')}</h2><p class="mono">MCT-02</p></div></div>
+    <div class="tabs"><span class="on">Overview</span><span>Employees</span><span>Logs</span><span>Commands</span><span>Sync history</span><span>Settings</span></div>
+    <div class="card" style="padding:14px 18px;max-width:560px">${[
+      ['Provider', 'ZKTeco PUSH / ADMS protocol'],
+      ['Branch', 'Muscat HQ'],
+      ['Timezone', 'Asia/Muscat'],
+      ['Status', 'Active'],
+      ['Automatic sync', 'No'],
+    ]
+      .map(([k, v]) => `<div class="kv"><span>${k}</span><b>${v}</b></div>`)
+      .join('')}</div>`;
   const testCard = `<div class="float card" data-at="b2+5.4" data-anim="up" style="left:1300px;top:830px;width:520px;padding:14px 16px;box-shadow:0 24px 48px -12px rgba(16,24,40,.35)">
       <div class="row" style="justify-content:space-between"><div><div class="vendor">Cloud &amp; server providers</div><b style="font-size:15px">Suprema BioStar 2 API · Connection test</b></div></div>
       <div class="row" style="margin-top:12px">${btn('Test connection', { cls: 'ghost sm', icon: 'LuPlug' })}<span class="hint">Uses the settings entered above; secrets are never stored by the test.</span></div>
@@ -216,9 +229,15 @@ export const devices = () => {
       }) +
       shell({
         active: 'dev',
+        url: '/devices/5b7f2c9e',
+        content: detailPage,
+        attrs: 'data-at="b2+5.7" data-out="b2+6.6" data-anim="fade"',
+      }) +
+      shell({
+        active: 'dev',
         url: '/devices',
         content: devicesList('21 devices', cardsAfter, newRow),
-        attrs: 'data-at="b2+5.8" data-anim="fade"',
+        attrs: 'data-at="b2+6.5" data-anim="fade"',
       }) +
       testCard +
       toast('b2+3.5', 'b2+5.8', 'Reception registered', '').replace(
@@ -226,9 +245,9 @@ export const devices = () => {
         'class="toast float" style="right:96px;bottom:110px"',
       ) +
       CURSOR(
-        'b0+0.6:900,760|b0+1.9:#d-reg|b0+7.4:.p-zk|b0+8.8:#d-next1|b1+0.4:#d-code|b1+3.2:#d-next2|b2+2.2:#d-next3|b2+3.0:#d-save|b2+5.5:#d-close',
-        'b0+1.9|b0+7.4|b0+8.8|b1+3.2|b2+2.2|b2+3.0|b2+5.5',
-        'b2+6.0',
+        'b0+0.6:900,760|b0+1.9:#d-reg|b0+7.4:.p-zk|b0+8.8:#d-next1|b1+0.4:#d-code|b1+3.2:#d-next2|b2+2.2:#d-next3|b2+3.0:#d-save|b2+5.5:#d-close|b2+6.3:#d-crumb',
+        'b0+1.9|b0+7.4|b0+8.8|b1+3.2|b2+2.2|b2+3.0|b2+5.5|b2+6.3',
+        'b2+6.7',
       ),
   );
 };
@@ -239,7 +258,7 @@ export const branches = () => {
     ['MCT', 'Muscat HQ', 'مسقط', 'Muscat', 'Asia/Muscat', 214, null],
     ['SOH', 'Sohar', 'صحار', 'Sohar', 'Asia/Muscat', 96, null],
     ['SLL', 'Salalah', 'صلالة', 'Salalah', 'Asia/Muscat', 71, null],
-    ['DXB', 'Dubai', 'دبي', 'Dubai', 'Asia/Dubai', 48, ['Sat', 'Sun']],
+    ['SUR', 'Sur', 'صور', 'Sur', 'Asia/Muscat', 48, null],
     ['RUH', 'Riyadh', 'الرياض', 'Riyadh', 'Asia/Riyadh', 39, null],
   ];
   const offCell = (d) =>
@@ -316,7 +335,7 @@ export const people = () => {
   const emps = [
     ['E-1001', 'Fatma Al Rawahi', 'Muscat HQ', 'Finance', 'Finance manager'],
     ['E-1017', 'Khalid Al Amri', 'Muscat HQ', 'Warehouse', 'Store keeper'],
-    ['E-1023', 'Salim Al Harthy', 'Muscat HQ', 'Warehouse', 'Warehouse supervisor'],
+    ['E-1023', 'Salim Al Harthy', 'Muscat HQ', 'Operations', 'Warehouse supervisor'],
     ['E-1031', 'Yousuf Al Hinai', 'Muscat HQ', 'Warehouse', 'Forklift operator'],
     ['E-1038', 'Noor Al Siyabi', 'Salalah', 'Sales', 'Sales executive'],
   ];
@@ -378,7 +397,7 @@ export const people = () => {
     <div class="ph"><div><h2>Shifts &amp; schedules</h2><p>Shifts, rotational patterns, who works which shift, and the attendance rule sets that turn punches into results.</p></div></div>
     <div class="tabs"><span>Shifts</span><span>Patterns</span><span class="on">Assignments</span><span>Rule sets</span><span>Roster</span><span>Shift requests</span></div>
     <div class="card"><table class="tbl" style="font-size:14px"><tr><th>Target</th><th>Shift / pattern</th><th>Branch</th><th>Effective</th></tr>
-      <tr><td class="strong">Whole organisation <small style="display:block">${tag('Organisation')}</small></td><td>General</td><td>All branches</td><td>01 Jan 2026 → open ${chip('Active')}</td></tr>
+      <tr><td class="strong">Organisation <small style="display:block">${tag('Organisation')}</small></td><td>General</td><td>All branches</td><td>01 Jan 2026 → open ${chip('Active')}</td></tr>
       <tr><td class="strong">Warehouse <small style="display:block">${tag('Department')}</small></td><td>Night</td><td>Muscat HQ</td><td>11 Oct 2026 → open ${chip('Active')}</td></tr></table></div>`;
   const assignDlg = modal(
     'b2+0.2',

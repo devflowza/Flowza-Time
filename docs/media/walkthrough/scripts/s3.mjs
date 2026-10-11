@@ -150,6 +150,7 @@ export const approvals = () => {
         overlay: approveDlg,
         badge: 5,
         user: FATMA,
+        manager: true,
         attrs: 'data-out="b3"',
       }) +
       shell({
@@ -215,7 +216,16 @@ export const swapScene = () => {
           )
           .join('')}
       </div>
-      <div class="card" style="padding:12px 14px"><b>Assignment history</b><div style="margin-top:10px;font-size:14px"><b style="font-weight:600">Morning</b> <span class="pill-s">Team</span><div class="hint">From 01 Sep 2026</div></div><div style="margin-top:10px;font-size:14px"><b style="font-weight:600">General</b> <span class="pill-s">Organisation</span><div class="hint">01 Jan 2026 → 31 Aug 2026</div></div></div>
+      <div class="card" style="padding:12px 14px"><b>Assignment history</b>${[
+        ['Night', 'Department', 'From 11 Oct 2026'],
+        ['Morning', 'Team', 'From 01 Sep 2026'],
+        ['General', 'Organisation', 'From 01 Jan 2026'],
+      ]
+        .map(
+          ([n, t, d]) =>
+            `<div style="margin-top:10px;font-size:14px"><b style="font-weight:600">${n}</b> <span class="pill-s">${t}</span><div class="hint">${d}</div></div>`,
+        )
+        .join('')}</div>
     </div>
     <div class="card" style="margin-top:12px"><div style="padding:12px 14px;font-weight:700;border-bottom:1px solid #eef0f3">Shift swaps</div>
       <table class="tbl tight"><tr><th>Day</th><th>Between</th><th>Shifts</th><th>Status</th><th>Reason / decision</th></tr>
@@ -389,23 +399,26 @@ export const dashboard = () => {
     )
     .join('');
   const trend = [
+    [33, 1, 0, 3],
+    [29, 2, 0, 2],
     [381, 21, 16, 20],
     [384, 19, 15, 21],
-    [36, 2, 0, 3],
-    [30, 1, 0, 2],
     [379, 23, 17, 22],
     [386, 18, 14, 21],
+    [374, 24, 17, 22],
+    [36, 2, 0, 3],
+    [30, 1, 0, 2],
     [383, 20, 16, 22],
     [388, 17, 13, 22],
     [390, 19, 12, 21],
-    [34, 1, 0, 3],
-    [31, 2, 0, 2],
     [385, 22, 15, 23],
-    [389, 20, 13, 22],
     [393, 19, 14, 23],
   ];
   const tdays = [
-    '28 Sep',
+    '25 Sep',
+    '26',
+    '27',
+    '28',
     '29',
     '30',
     '1 Oct',
@@ -415,10 +428,7 @@ export const dashboard = () => {
     '5',
     '6',
     '7',
-    '8',
-    '9',
-    '10',
-    '11 Oct',
+    '8 Oct',
   ];
   const trendHtml = `<div class="trend" style="height:170px">${trend
     .map(
@@ -454,19 +464,19 @@ export const dashboard = () => {
   const branchRows = [
     ['Muscat HQ', 'MCT', 197, 214],
     ['Sohar', 'SOH', 86, 96],
-    ['Dubai', 'DXB', 43, 48],
+    ['Sur', 'SUR', 43, 48],
     ['Salalah', 'SLL', 56, 71],
     ['Riyadh', 'RUH', 30, 39],
   ];
   const activity = [
-    ['Salim Al Harthy', 'Checked in · Sohar', '07:56', C.on, 2],
-    ['Yousuf Al Hinai', 'Late check-in · Muscat HQ', '08:24', C.late, 2],
-    ['Noor Al Siyabi', 'Checked in · Muscat HQ', '07:49', C.on, 5],
-    ['Fatma Al Rawahi', 'Checked in · Muscat HQ', '07:41', C.on, 1],
+    ['Fatma Al Rawahi', 'Checked out · Muscat HQ', '17:31', C.on, 1],
+    ['Noor Al Siyabi', 'Checked out · Salalah', '17:12', C.on, 5],
+    ['Salim Al Harthy', 'Checked out · Muscat HQ', '17:06', C.on, 2],
+    ['Maryam Al Kindi', 'Checked out · Muscat HQ', '17:02', C.on, 4],
   ];
   const winC = `
-    <div class="row" style="justify-content:space-between;margin-bottom:12px"><div><h2 style="font-size:26px;letter-spacing:-.02em">Good morning, Aisha!</h2><p style="font-size:14.5px;color:#475467;margin-top:2px">Here's what's happening at ${ORG} today.</p></div>
-      <div class="row" style="gap:12px"><span class="row" style="gap:6px;font-size:13px;color:#475467"><i style="width:8px;height:8px;border-radius:50%;background:#12b76a;display:inline-block"></i>Updated 1 minute ago</span><span class="seg"><span>${ic('LuChevronLeft', 'width="14" height="14"')}</span><span class="on">Sun, 11 Oct 2026</span><span>${ic('LuChevronRight', 'width="14" height="14"')}</span></span></div></div>
+    <div class="row" style="justify-content:space-between;margin-bottom:12px"><div><h2 style="font-size:26px;letter-spacing:-.02em">Good morning, Aisha!</h2><p style="font-size:14.5px;color:#475467;margin-top:2px">Here's how ${ORG} did on 08 Oct 2026.</p></div>
+      <div class="row" style="gap:12px"><span class="row" style="gap:6px;font-size:13px;color:#475467"><i style="width:8px;height:8px;border-radius:50%;background:#12b76a;display:inline-block"></i>Updated 1 minute ago</span><span class="seg"><span>${ic('LuChevronLeft', 'width="14" height="14"')}</span><span class="on">Thu, 08 Oct 2026</span><span>${ic('LuChevronRight', 'width="14" height="14"')}</span></span>${btn('Today', { cls: 'ghost sm' })}</div></div>
     <div style="display:grid;grid-template-columns:repeat(6,1fr);gap:12px">${kpiHtml}</div>
     <div style="display:grid;grid-template-columns:9fr 3fr;gap:12px;margin-top:12px">
       <div style="display:flex;flex-direction:column;gap:12px">
@@ -485,9 +495,9 @@ export const dashboard = () => {
         <div class="card" data-at="b2+4.4" style="padding:16px;background:linear-gradient(135deg,#0f6e56,#1f9873);color:#fff;border:0"><b style="font-size:17px;line-height:1.3;display:block">People on time. Business on track.</b><div style="font-size:13px;opacity:.85;margin:6px 0 10px">Accurate attendance. Smarter teams. A stronger tomorrow.</div><span style="background:#fff;color:#0f6e56;border-radius:8px;padding:6px 10px;font-size:13px;font-weight:700">Explore reports →</span></div>
         <div class="card" style="padding:14px 16px" data-at="b3+1.6" data-hl="b3+4.6~b3+6.2"><div class="row" style="justify-content:space-between"><b style="font-size:15.5px">Awaiting your approval</b><span class="badge" style="background:#d92d20;color:#fff;border-radius:99px;font-size:11.5px;font-weight:700;padding:1px 8px">3</span></div>
           <div style="display:flex;flex-direction:column;gap:10px;margin-top:10px">${[
-            ['LuTreePalm', 'Leave', 'Maryam Al Kindi', '2 hours ago'],
+            ['LuClipboardCheck', 'Regularisation', 'Hamed Al Busaidi', '1 day ago'],
             ['LuCalendarClock', 'Shift change', 'Noor Al Siyabi', '3 hours ago'],
-            ['LuClipboardCheck', 'Regularisation', 'Hamed Al Busaidi', 'yesterday'],
+            ['LuTreePalm', 'Leave', 'Maryam Al Kindi', '2 hours ago'],
           ]
             .map(
               ([i, l, n, a]) =>

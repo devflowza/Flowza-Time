@@ -19,33 +19,33 @@ export const change = () => {
   const winA = `${shiftsHeader('Assignments')}
     <div class="row" style="margin-bottom:12px"><div class="inp sel" style="width:170px;height:36px"><span>All targets</span></div><div class="inp sel" style="width:150px;height:36px"><span class="ph-t">Shift</span></div><span style="margin-left:auto">${btn('Assign shift', { icon: 'LuPlus', id: 'c-assign' })}</span></div>
     <div class="card"><table class="tbl"><tr><th>Target</th><th>Shift / pattern</th><th>Branch</th><th>Effective</th></tr>
-      ${tr('Whole organisation', 'Organisation', 'General', 'All branches', '01 Jan 2026 → open')}
+      ${tr('Organisation', 'Organisation', 'General', 'All branches', '01 Jan 2026 → open')}
       ${tr('Warehouse', 'Department', 'Night', 'Muscat HQ', '11 Oct 2026 → open')}
       ${tr('Stores team', 'Team', 'Morning', 'Muscat HQ', '01 Sep 2026 → open')}
-      ${tr('Khalid Al Amri', 'Employee', 'Evening', 'Muscat HQ', '04 Oct 2026 → 29 Oct 2026', 'data-at="b0+5.0" data-hl="b0+5.1~b1" style="background:#f6fdf9"')}</table></div>`;
+      ${tr('Said Al Mamari', 'Employee', 'Evening', 'Muscat HQ', '04 Oct 2026 → 29 Oct 2026', 'data-at="b0+5.0" data-hl="b0+5.1~b1" style="background:#f6fdf9"')}</table></div>`;
   const ovA = modal(
     'b0+0.9',
     'b0+4.8',
     'left:110px;top:110px;width:720px',
     `
     ${mhead('Assign shift', 'The most specific assignment wins: employee › team › department › branch › organisation. Overlapping ranges for the same target are rejected.')}
-    <div class="grid2" style="gap:12px">${F('Assign to', I('Employee', { sel: 1 }), { req: 1 })}${F('Target', I('Khalid Al Amri', { sel: 1 }), { req: 1 })}</div>
+    <div class="grid2" style="gap:12px">${F('Assign to', I('Employee', { sel: 1 }), { req: 1 })}${F('Target', I('Said Al Mamari', { sel: 1 }), { req: 1 })}</div>
     <div class="opt-block" style="margin-top:12px"><span class="seg"><span class="on">Single shift</span><span>Rotational pattern</span></span><div style="margin-top:10px">${F('Shift', I('Evening', { sel: 1 }), { req: 1, hl: 'b0+1.4~b0+2.1' })}</div></div>
     <div class="grid2" style="gap:12px;margin-top:12px">${F('Effective from', I('04 Oct 2026', { type: 'b0+2.2', icon: 'LuCalendar', focus: 'b0+2.1~b0+3.1', id: 'c-from' }), { req: 1, hint: 'Past dates trigger a recalculation.' })}${F('Effective to (last day)', I('29 Oct 2026', { type: 'b0+3.4', icon: 'LuCalendar', focus: 'b0+3.3~b0+4.4' }), { opt: 1, hl: 'b0+3.3~b0+4.6', hint: 'Included: the assignment still applies on this day. Leave empty for no end.' })}</div>
     <div class="mfoot">${btn('Cancel', { cls: 'ghost' })}${btn('Assign', { id: 'c-save' })}</div>`,
   );
   const emps = [
-    ['E-1031', 'Yousuf Al Hinai', 'Forklift operator'],
-    ['E-1023', 'Salim Al Harthy', 'Warehouse supervisor'],
-    ['E-1044', 'Hamed Al Busaidi', 'Driver'],
-    ['E-1017', 'Khalid Al Amri', 'Store keeper'],
-    ['E-1052', 'Said Al Mamari', 'Store keeper'],
+    ['E-1031', 'Yousuf Al Hinai', 'Forklift operator', 'Warehouse'],
+    ['E-1044', 'Hamed Al Busaidi', 'Driver', 'Logistics'],
+    ['E-1060', 'Majid Al Shukaili', 'Forklift operator', 'Warehouse'],
+    ['E-1023', 'Salim Al Harthy', 'Warehouse supervisor', 'Operations'],
+    ['E-1052', 'Said Al Mamari', 'Store keeper', 'Warehouse'],
   ];
   const winB = `
     <div class="ph"><div><h2>Employees</h2><p>468 employees</p></div><div class="row">${btn('Export', { cls: 'ghost', icon: 'LuDownload' })}${btn('Import', { cls: 'ghost', icon: 'LuFileUp' })}${btn('Add employee', { icon: 'LuPlus' })}</div></div>
     <div style="position:relative;height:50px;margin-bottom:8px"><div class="row card" data-at="b1+1.0" style="position:absolute;inset:0;padding:8px 12px;background:#eefaf5;border-color:#d5f2e5;justify-content:space-between"><b style="font-size:14.5px;color:#0e4e3f">3 selected</b><div class="row" style="gap:6px">${btn('Assign…', { cls: 'ghost sm', id: 'c-bulk', icon: 'LuChevronDown' })}${btn('Sync to devices', { cls: 'ghost sm' })}${btn('Export', { cls: 'ghost sm' })}${btn('Clear selection', { cls: 'ghost sm' })}</div></div></div>
     <div class="card"><table class="tbl"><tr><th style="width:40px">${cb()}</th><th>Employee number</th><th>Name</th><th>Department</th><th>Designation</th><th>Status</th></tr>
-      ${emps.map((e, k) => `<tr><td>${cb(k < 3 ? `b1+${(0.3 + k * 0.3).toFixed(1)}` : null, `c-cb${k}`)}</td><td class="mono">${e[0]}</td><td>${who(e[1], '', k + 2)}</td><td>Warehouse</td><td>${e[2]}</td><td>${chip('Active')}</td></tr>`).join('')}</table></div>`;
+      ${emps.map((e, k) => `<tr><td>${cb(k < 3 ? `b1+${(0.3 + k * 0.3).toFixed(1)}` : null, `c-cb${k}`)}</td><td class="mono">${e[0]}</td><td>${who(e[1], '', k + 2)}</td><td>${e[3]}</td><td>${e[2]}</td><td>${chip('Active')}</td></tr>`).join('')}</table></div>`;
   const ovB =
     `<div class="float menu" data-at="b1+1.6" data-out="b1+2.5" style="right:470px;top:196px">${[
       ['LuBuilding2', 'Assign branch (3)'],
@@ -135,7 +135,7 @@ export const deploy = () => {
     <div class="row" style="margin-bottom:12px"><div class="inp sel" style="width:170px;height:36px"><span>All statuses</span></div><div class="inp sel" style="width:150px;height:36px"><span class="ph-t">Branch</span></div></div>
     <div class="card"><table class="tbl"><tr><th>Employee</th><th>From → to</th><th>Period</th><th>Status</th><th>Terminals</th></tr>
       <tr><td>${person('Noor Al Siyabi', 'E-1038', 5)}</td><td>${route('Salalah', 'Muscat HQ')}</td><td class="tnum">01 Oct 2026 → 14 Oct 2026</td><td>${chip('Active', 'green', 'class="nodot"')}</td><td><span class="link">Enrolment job</span></td></tr>
-      <tr><td>${person('Hamed Al Busaidi', 'E-1044', 6)}</td><td>${route('Sohar', 'Dubai')}</td><td class="tnum">20 Sep 2026 → 30 Sep 2026</td><td>${chip('Ended', 'gray', 'class="nodot"')}</td><td><span class="link">Removal job</span></td></tr>
+      <tr><td>${person('Hamed Al Busaidi', 'E-1044', 6)}</td><td>${route('Sohar', 'Sur')}</td><td class="tnum">20 Sep 2026 → 30 Sep 2026</td><td>${chip('Ended', 'gray', 'class="nodot"')}</td><td><span class="link">Removal job</span></td></tr>
       <tr id="dp-row" data-at="b2+0.2" data-hl="b2+0.3~b2+3" style="background:#f6fdf9"><td>${person('Salim Al Harthy', 'E-1023', 2)}</td><td>${route('Muscat HQ', 'Sohar')}</td><td class="tnum">11 Oct 2026 → 22 Oct 2026</td><td>${chip('Active', 'green', 'class="nodot"')}</td><td><span class="link">Enrolment job</span></td></tr>
     </table></div>`;
   const story = `<div class="float card" data-at="b0+0.2" data-out="b1+0.4" data-anim="zoom" style="left:960px;top:470px;width:820px;padding:26px 28px;box-shadow:0 30px 60px -12px rgba(16,24,40,.35)">

@@ -22,7 +22,7 @@
 | 2:24 | 7. Line-manager approvals — reporting line, one inbox, approve/reject/ask for information, bulk and e-mail decisions, HR workflows of up to five levels with escalation |
 | 2:51 | 8. Shift swap request — day and colleague, manager approval, applies to that day only |
 | 3:03 | 9. Settings and dashboard — settings groups, roles and branch scope, 7 styles × 3 layouts, the Overview dashboard, reports |
-| 3:36 | Close — flowza.com |
+| 3:37 | Close — flowza.com |
 
 The screens are animated recreations of the web app, built from its real English labels (`apps/web/src/locales/en`), its
 navigation and its FlowZa Green theme (`apps/web/src/styles/globals.css`); they are not screen recordings. People, numbers and

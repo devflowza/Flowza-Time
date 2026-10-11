@@ -60,10 +60,10 @@ Voice-over for `FlowZa-Time-Enterprise-Walkthrough.mp4` (3 min 45 s). Timestamps
 
 > Finally, configure and monitor. Settings cover regional options, attendance rules, sync, notifications and security, while roles decide who sees which branch.
 > Under Settings, Dashboard, pick one of seven styles, and a layout: Overview, Operations, or Executive.
-> The dashboard shows today at a glance: who is present, absent, on leave or late.
+> The dashboard shows each day at a glance: who was present, absent, on leave or late.
 > Then the attendance trend, attendance by branch, recent activity, and the approvals waiting for you, with reports in PDF, Excel or CSV.
 
-## 3:36 · Close
+## 3:37 · Close
 
 > FlowZa Time. People on time, business on track.
 > See it for yourself at flowza.com.

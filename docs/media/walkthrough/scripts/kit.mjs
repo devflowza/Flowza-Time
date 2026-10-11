@@ -68,6 +68,39 @@ const PORTAL = [
   ],
 ];
 
+// What a plain Line Manager (system role) sees: the portal, the team page, approvals and team attendance review.
+const MANAGER = [
+  [null, [['dash', 'Dashboard', 'LuLayoutDashboard']]],
+  [
+    'My workspace',
+    [
+      ['my', 'My overview', 'LuHouse'],
+      ['myatt', 'My attendance', 'LuCalendarCheck'],
+      ['myleave', 'My leave', 'LuTreePalm'],
+      ['myreq', 'My requests', 'LuInbox'],
+      ['myshift', 'My shift', 'LuCalendarClock'],
+    ],
+  ],
+  ['My team', [['team', 'Team overview', 'LuContactRound']]],
+  [
+    'Workforce',
+    [
+      ['appr', 'Approvals', 'LuSquareCheck'],
+      ['attsum', 'Attendance summary', 'LuSigma'],
+      ['reasons', 'Attendance reasons', 'LuMessageSquareText'],
+      ['regs', 'Regularisations', 'LuClipboardCheck'],
+    ],
+  ],
+  [
+    'Time',
+    [
+      ['shifts', 'Shifts', 'LuCalendarDays'],
+      ['hol', 'Holidays', 'LuCalendarOff'],
+      ['rep', 'Reports', 'LuChartColumn'],
+    ],
+  ],
+];
+
 export const ORG = 'Majan Gulf Trading';
 export function shell({
   active,
@@ -77,10 +110,11 @@ export function shell({
   badge = 0,
   user = ['Aisha Al Balushi', 'AB'],
   portal = false,
+  manager = false,
   attrs = '',
   cls = '',
 }) {
-  const nav = (portal ? PORTAL : NAV)
+  const nav = (portal ? PORTAL : manager ? MANAGER : NAV)
     .map(
       ([sec, items]) =>
         (sec ? `<div class="sec">${sec}</div>` : '') +
