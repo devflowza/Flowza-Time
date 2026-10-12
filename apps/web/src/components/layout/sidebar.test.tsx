@@ -169,6 +169,29 @@ describe('Sidebar', () => {
     }
   });
 
+  it('lists the org chart right after Employees for the directory key (employee.view) and marks it current on its page', () => {
+    grant('dashboard.view', 'employee.view');
+    let r = renderWithProviders(<Sidebar />, { route: '/employees/org-chart' });
+    const orgChart = screen.getByRole('link', { name: 'Org chart' });
+    expect(orgChart).toHaveAttribute('href', '/employees/org-chart');
+    const workforce = screen.getAllByRole('link').map((a) => a.getAttribute('href'));
+    expect(workforce.indexOf('/employees/org-chart')).toBe(workforce.indexOf('/employees') + 1);
+    // the nested item wins on its own page; Employees stays current on the list and on a profile
+    expect(orgChart).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Employees' })).not.toHaveAttribute('aria-current');
+    r.unmount();
+    r = renderWithProviders(<Sidebar />, { route: '/employees/e1' });
+    expect(screen.getByRole('link', { name: 'Employees' })).toHaveAttribute('aria-current', 'page');
+    expect(screen.getByRole('link', { name: 'Org chart' })).not.toHaveAttribute('aria-current');
+    r.unmount();
+    // a line manager's team key opens /team, not the organisation-wide chart
+    testState.employeeId = 'e1';
+    testState.teamSize = 2;
+    grant('dashboard.view', 'employee.view_team');
+    renderWithProviders(<Sidebar />);
+    expect(screen.queryByRole('link', { name: 'Org chart' })).not.toBeInTheDocument();
+  });
+
   it('hides the platform entry from an ordinary tenant user', () => {
     renderWithProviders(<Sidebar />);
     expect(screen.queryByRole('link', { name: 'Platform admin' })).not.toBeInTheDocument();

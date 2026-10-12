@@ -13,6 +13,7 @@ import { useOrgId, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { useEmployeeMutations } from '../api';
 import { toastJobQueued } from '../job-toast';
+import { AssignManagerDialog } from './assign-manager-dialog';
 
 export type BulkKind = Exclude<BulkEmployeeAction['action'], 'export'> | 'export';
 
@@ -53,6 +54,8 @@ export function BulkActionDialog({ kind, employeeIds, onClose, onDone }: { kind:
   });
 
   if (!kind) return null;
+  // synchronous and effective-dated like the others, but with its own choices (line, deliberate removal)
+  if (kind === 'assign_manager') return <AssignManagerDialog employeeIds={employeeIds} onClose={onClose} onDone={onDone} />;
   if (kind === 'sync_devices') {
     return <ConfirmDialog open onOpenChange={(o) => !o && onClose()} title={t('bulk.syncTitle', { count })} description={t('bulk.syncHint')} confirmLabel={t('bulk.syncConfirm')} loading={bulk.isPending} onConfirm={() => run({ action: 'sync_devices', employeeIds })} />;
   }

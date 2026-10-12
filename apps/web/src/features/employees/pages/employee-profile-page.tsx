@@ -1,7 +1,7 @@
 import { Suspense } from 'react';
 import { Link, useNavigate, useParams, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { ArrowLeft, RefreshCw } from 'lucide-react';
+import { ArrowLeft, RefreshCw, Workflow } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { Avatar, Badge, Button, ErrorState, Skeleton, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { fmtDate } from '@/lib/format';
@@ -17,6 +17,7 @@ import { AttendanceTab } from '../components/profile/attendance-tab';
 import { DocumentsTab } from '../components/profile/documents-tab';
 import { DangerZone } from '../components/profile/danger-zone';
 import { toastJobQueued } from '../job-toast';
+import { LEFT_EMPLOYMENT } from '../org-chart/use-assign-manager';
 import { AttendanceGrantsCard } from '@/features/attendance-review/components/attendance-grants-card';
 import { PortalAccessCard } from '@/features/users/components/portal-access-card';
 import { lazyPage } from '@/lib/lazy-page';
@@ -96,6 +97,8 @@ export default function EmployeeProfilePage() {
                   {e.managerEmployeeId ? <Link to={`/employees/${e.managerEmployeeId}`} className="font-medium text-foreground hover:underline">{e.managerName ?? '—'}</Link> : <span>{t('profile.noManager')}</span>}
                   {e.secondaryManagerEmployeeId ? <> · <span>{t('profile.alsoReportsTo')} </span><Link to={`/employees/${e.secondaryManagerEmployeeId}`} className="font-medium text-foreground hover:underline">{e.secondaryManagerName ?? '—'}</Link></> : null}
                 </p>
+                {/* where the employee sits among the organisation's reporting lines (HR's directory key; line managers have /team; leavers are not on it) */}
+                {directory && !e.deletedAt && !LEFT_EMPLOYMENT.includes(e.employmentStatus) ? <Link to={`/employees/org-chart?focus=${e.id}`} className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><Workflow className="size-3.5" aria-hidden /> {t('profile.viewInOrgChart')}</Link> : null}
               </div>
             </div>
             <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>

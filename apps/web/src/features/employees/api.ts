@@ -4,7 +4,7 @@ import type { BulkEmployeeAction, CreateEmployeeInput, DeleteEmployeeInput, Empl
 import type { z } from 'zod';
 import type { identityDocumentInputSchema } from '@flowza/contracts';
 import type { ComboboxOption } from '@/components/forms';
-import { api, apiFetch, type Envelope, type PageEnvelope } from '@/lib/api-client';
+import { api, apiFetch, ApiError, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { supabase } from '@/lib/supabase';
 import { env } from '@/lib/env';
@@ -17,6 +17,26 @@ export type IdentityDocumentInput = z.input<typeof identityDocumentInputSchema>;
 export type BulkResult = { kind: 'job'; jobId: string } | { kind: 'sync'; updated: number; employeeIds: string[] };
 
 const ENTITY = 'employees';
+/** The employees query entity (lists and details), for modules that read the cache by key. */
+export const EMPLOYEES_ENTITY = ENTITY;
+/** The org chart's query entity (org-chart/api.ts): every employee change refreshes it too, so the chart is never stale. */
+export const ORG_CHART_ENTITY = 'org-chart';
+
+/**
+ * An id as exactly one URL path segment, whatever it holds — it may come from a link somebody put together (`?focus=`, a route
+ * param). Encoded, so `/`, `?` and `#` stay inside the segment, and never `.` or `..`, which `new URL()` would resolve as a
+ * step up the path: either way the request could otherwise reach another API route with the reader's token.
+ */
+export function idSegment(id: string): string {
+  const segment = encodeURIComponent(id);
+  if (segment === '' || segment === '.' || segment === '..') throw new ApiError(404, 'NOT_FOUND', 'Not found.');
+  return segment;
+}
+
+/** GET /employees/:id as query options, shared by the profile and the org chart (which fetches it imperatively). */
+export function employeeDetailQuery(orgId: string, id: string) {
+  return { queryKey: qk.detail(orgId, ENTITY, id), queryFn: async () => (await api.get<Envelope<EmployeeDetail>>(`/orgs/${orgId}/employees/${idSegment(id)}`)).data };
+}
 
 export function useEmployees(query: EmployeeQuery, enabled = true) {
   const orgId = useOrgId();
@@ -24,7 +44,7 @@ export function useEmployees(query: EmployeeQuery, enabled = true) {
 }
 export function useEmployee(id: string | undefined) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.detail(orgId, ENTITY, id ?? ''), queryFn: async () => (await api.get<Envelope<EmployeeDetail>>(`/orgs/${orgId}/employees/${id}`)).data, enabled: !!id });
+  return useQuery({ ...employeeDetailQuery(orgId, id ?? ''), enabled: !!id });
 }
 export function useEmployeeHistory(id: string) {
   const orgId = useOrgId();
@@ -63,7 +83,8 @@ export function useUserLimit(enabled = true) {
 export function useEmployeeMutations() {
   const orgId = useOrgId();
   const qc = useQueryClient();
-  const invalidateAll = () => qc.invalidateQueries({ queryKey: qk.entity(orgId, ENTITY) });
+  // a change to anybody can move a card on the org chart (manager, branch, department, status), so both refresh
+  const invalidateAll = () => Promise.all([qc.invalidateQueries({ queryKey: qk.entity(orgId, ENTITY) }), qc.invalidateQueries({ queryKey: qk.entity(orgId, ORG_CHART_ENTITY) })]);
   const create = useMutation({ mutationFn: async (input: CreateEmployeeInput) => (await api.post<Envelope<EmployeeDto>>(`/orgs/${orgId}/employees`, input, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: invalidateAll });
   const update = useMutation({ mutationFn: async ({ id, input }: { id: string; input: UpdateEmployeeInput }) => (await api.patch<Envelope<EmployeeDto>>(`/orgs/${orgId}/employees/${id}`, input)).data, onSuccess: invalidateAll });
   const remove = useMutation({ mutationFn: async ({ id, input }: { id: string; input?: DeleteEmployeeInput }) => (await apiFetch<Envelope<EmployeeDto>>(`/orgs/${orgId}/employees/${id}`, { method: 'DELETE', body: input })).data, onSuccess: invalidateAll });
@@ -98,7 +119,7 @@ export function useImportMutations() {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: qk.entity(orgId, 'employee-imports') });
   const upload = useMutation({ mutationFn: async (input: ImportUploadInput) => (await api.post<Envelope<ImportJobDto>>(`/orgs/${orgId}/employees/imports`, input, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: invalidate });
-  const confirm = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<JobAccepted>>(`/orgs/${orgId}/employees/imports/${id}/confirm`, undefined, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: qk.entity(orgId, ENTITY) }); } });
+  const confirm = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<JobAccepted>>(`/orgs/${orgId}/employees/imports/${id}/confirm`, undefined, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: qk.entity(orgId, ENTITY) }); void qc.invalidateQueries({ queryKey: qk.entity(orgId, ORG_CHART_ENTITY) }); } });
   const cancel = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<ImportJobDto>>(`/orgs/${orgId}/employees/imports/${id}/cancel`)).data, onSuccess: invalidate });
   return { upload, confirm, cancel };
 }

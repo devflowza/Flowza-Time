@@ -5,7 +5,7 @@ import { RequirePermission } from '@/components/layout/protected-route';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import en from '@/locales/en/employees.json';
 import ar from '@/locales/ar/employees.json';
-import { EmployeeImportPage, EmployeeNewPage, EmployeeProfilePage, EmployeesListPage, PageFallback } from './pages/lazy';
+import { EmployeeImportPage, EmployeeNewPage, EmployeeProfilePage, EmployeesListPage, OrgChartPage, PageFallback } from './pages/lazy';
 
 registerNamespace('employees', en, ar);
 
@@ -20,5 +20,7 @@ export const employeesRoutes: RouteObject[] = [
   { path: 'employees', element: wrap(['employee.view'], <EmployeesListPage />) },
   { path: 'employees/new', element: wrap(['employee.create'], <EmployeeNewPage />) },
   { path: 'employees/import', element: wrap(['employee.import'], <EmployeeImportPage />) },
+  // the organisation-wide reporting lines (a static segment: React Router ranks it above employees/:id)
+  { path: 'employees/org-chart', element: wrap(['employee.view'], <OrgChartPage />) },
   { path: 'employees/:id', element: wrap(['employee.view', 'employee.view_team'], <EmployeeProfilePage />, true) },
 ];
