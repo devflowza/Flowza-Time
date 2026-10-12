@@ -151,6 +151,20 @@ async function loadEmployeeRow(trx: Trx, orgId: string, id: string): Promise<Emp
   return row as EmployeeRow;
 }
 
+/**
+ * Every API writer of an employee's record and employment history (PATCH, archive, the bulk actions) locks the employee
+ * rows FIRST, in id order, and only then reads them: a concurrent writer waits, and the read that follows (READ COMMITTED:
+ * a new snapshot per statement) sees its committed change — no history row built from a stale read replaces another
+ * writer's, and two overlapping bulk changes cannot deadlock. NO KEY UPDATE is the strength an UPDATE of these columns
+ * takes anyway; unlike FOR UPDATE it does not block the KEY SHARE lock a foreign-key check (a new manager link pointing at
+ * the row) takes. Rows RLS does not let the caller update are simply not locked: the read after it answers as before
+ * (404, 403 or "missing").
+ */
+async function lockEmployees(trx: Trx, orgId: string, ids: readonly string[]): Promise<void> {
+  if (ids.length === 0) return;
+  await trx.selectFrom('employees').select('id').where('organizationId', '=', orgId).where('id', 'in', [...ids]).orderBy('id').forNoKeyUpdate().execute();
+}
+
 async function loadEmployeeDto(trx: Trx, orgId: string, id: string): Promise<EmployeeDto> {
   const row = await loadEmployeeRow(trx, orgId, id);
   const summaries = await syncSummaries(trx, orgId, [id]);
@@ -237,31 +251,40 @@ async function assertReferences(trx: Trx, orgId: string, refs: { branchId?: stri
 export const MAX_REPORTING_DEPTH = 20;
 
 /**
+ * Which of `employeeIds` the person `start` already reports to, directly or through other managers: ONE walk upwards from
+ * `start`, following both the primary and the secondary link of every ancestor, up to MAX_REPORTING_DEPTH levels (the
+ * bound of the database trigger), intersected with the ids. Runs in the organisation's system scope, read-only, returning
+ * ids the caller already named: a branch-scoped caller's RLS view would hide part of the chain.
+ */
+async function reportsUpTo(trx: Trx, orgId: string, start: string, employeeIds: readonly string[]): Promise<string[]> {
+  if (employeeIds.length === 0) return [];
+  return withSystemScope(trx, orgId, async (t) => {
+    const { rows } = await sql<{ id: string }>`
+      with recursive up(id, depth) as (
+        select ${start}::uuid, 1
+        union
+        select l.manager_id, u.depth + 1
+        from up u
+        join public.employees e on e.id = u.id and e.organization_id = ${orgId}::uuid
+        cross join lateral (values (e.manager_employee_id), (e.secondary_manager_employee_id)) as l(manager_id)
+        where u.depth < ${MAX_REPORTING_DEPTH} and l.manager_id is not null
+      )
+      select distinct up.id from up where up.id = any(${[...employeeIds]}::uuid[])`.execute(t);
+    return rows.map((r) => r.id);
+  });
+}
+
+/**
  * Refuses a manager link that would close a loop in the reporting line: the proposed (primary or secondary) manager
- * already reports to the employee, directly or through other managers. Walks upwards from each proposed manager, following
- * both the primary and the secondary link of every ancestor, up to MAX_REPORTING_DEPTH levels — the rule the database
- * trigger enforces again; validating here names the field instead of surfacing a check violation. Only CHANGED links are
- * passed in (an unchanged one was checked when it was set). Runs in the organisation's system scope, read-only, returning
- * a verdict only: a branch-scoped caller's RLS view would hide part of the chain.
+ * already reports to the employee, directly or through other managers (reportsUpTo) — the rule the database trigger
+ * enforces again; validating here names the field instead of surfacing a check violation. Only CHANGED links are
+ * passed in (an unchanged one was checked when it was set).
  */
 async function assertNoReportingCycle(trx: Trx, orgId: string, employeeId: string, links: { managerEmployeeId?: string | null; secondaryManagerEmployeeId?: string | null }): Promise<void> {
   for (const field of ['managerEmployeeId', 'secondaryManagerEmployeeId'] as const) {
     const start = links[field];
     if (!start) continue;
-    const loops = start === employeeId || await withSystemScope(trx, orgId, async (t) => {
-      const { rows } = await sql<{ loops: boolean }>`
-        with recursive up(id, depth) as (
-          select ${start}::uuid, 1
-          union
-          select l.manager_id, u.depth + 1
-          from up u
-          join public.employees e on e.id = u.id and e.organization_id = ${orgId}::uuid
-          cross join lateral (values (e.manager_employee_id), (e.secondary_manager_employee_id)) as l(manager_id)
-          where u.depth < ${MAX_REPORTING_DEPTH} and l.manager_id is not null
-        )
-        select exists (select 1 from up where up.id = ${employeeId}::uuid) as loops`.execute(t);
-      return rows[0]?.loops === true;
-    });
+    const loops = start === employeeId || (await reportsUpTo(trx, orgId, start, [employeeId])).length > 0;
     if (loops) {
       throw errors.validation('This person already reports to the employee (directly or through other managers), so they cannot also be the employee\'s manager: the reporting line would go round in a circle.', { issues: [{ path: field, message: 'Reporting cycle' }] });
     }
@@ -321,6 +344,38 @@ export async function applyHistoryTransition(trx: Trx, orgId: string, employeeId
     await trx.updateTable('employmentHistory').set({ effectiveTo: effectiveFrom }).where('id', '=', current.id).execute();
   }
   await trx.insertInto('employmentHistory').values({ organizationId: orgId, employeeId, effectiveFrom, effectiveTo: null, ...values, createdBy: actorUserId }).execute();
+}
+
+/** How many employees a bulk date error names in its message (all of them are in its details). */
+const DATE_ERROR_NAMED = 5;
+
+/**
+ * applyHistoryTransition's date rule for a whole bulk selection, checked BEFORE anything is written: the change cannot start
+ * before an employee's joining date nor before their open employment record (a future joiner, a change already dated
+ * later). One error names every such employee — message: their employee numbers and dates; details: `employeeIds` and
+ * `earliestEffectiveFrom` ({ id: date }); issues[0]: the first date that suits all of them — instead of the first one
+ * failing the batch with nobody identified. One query for the selection; applyHistoryTransition keeps the rule per row.
+ */
+async function assertBulkEffectiveFrom(trx: Trx, orgId: string, employees: ReadonlyArray<{ id: string; employeeNumber: string; joiningDate: Date | string }>, effectiveFrom: string): Promise<void> {
+  if (employees.length === 0) return;
+  const open = await trx.selectFrom('employmentHistory').select(['employeeId', (eb) => eb.fn.max('effectiveFrom').as('from')])
+    .where('organizationId', '=', orgId).where('employeeId', 'in', employees.map((e) => e.id)).where('effectiveTo', 'is', null).groupBy('employeeId').execute();
+  const openFrom = new Map(open.map((r) => [r.employeeId, isoDate(r.from)]));
+  const late: Array<{ id: string; employeeNumber: string; from: string }> = [];
+  for (const e of employees) {
+    const joining = isoDate(e.joiningDate);
+    const current = openFrom.get(e.id);
+    const from = current && current > joining ? current : joining;
+    if (effectiveFrom < from) late.push({ id: e.id, employeeNumber: e.employeeNumber, from });
+  }
+  if (late.length === 0) return;
+  const latest = late.reduce((a, b) => (a > b.from ? a : b.from), effectiveFrom);
+  const named = late.slice(0, DATE_ERROR_NAMED).map((x) => `${x.employeeNumber} (from ${x.from})`).join(', ');
+  const more = late.length > DATE_ERROR_NAMED ? ` and ${late.length - DATE_ERROR_NAMED} more` : '';
+  throw errors.validation(
+    `The change date ${effectiveFrom} is before the joining date or the current employment record of ${late.length} selected employee${late.length === 1 ? '' : 's'}: ${named}${more}. Choose ${latest} or later, or leave them out of the selection.`,
+    { issues: [{ path: 'effectiveFrom', message: `Must be on/after ${latest}` }], employeeIds: late.map((x) => x.id), earliestEffectiveFrom: Object.fromEntries(late.map((x) => [x.id, x.from])) },
+  );
 }
 
 /**
@@ -404,6 +459,8 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
   const grant = requirePermission(actor.principal, orgId, 'employee.update');
   requireBranchAccess(grant, input.branchId);
   return runUser(deps.db, actor, async (trx) => {
+    // locked before it is read: `before` feeds the next employment record (lockEmployees)
+    await lockEmployees(trx, orgId, [id]);
     const before = await loadEmployeeRow(trx, orgId, id);
     if (before.deletedAt) throw errors.invalidState('The employee has been deleted.');
     requireBranchAccess(grant, before.branchId);
@@ -485,6 +542,7 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
 export async function deleteEmployee(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: DeleteEmployeeInput): Promise<EmployeeDto> {
   const grant = requirePermission(actor.principal, orgId, 'employee.delete', 'employee.update');
   return runUser(deps.db, actor, async (trx) => {
+    await lockEmployees(trx, orgId, [id]);
     const before = await loadEmployeeRow(trx, orgId, id);
     requireBranchAccess(grant, before.branchId);
     if (before.deletedAt) throw errors.invalidState('The employee is already deleted.');
@@ -559,22 +617,26 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
         if (input.action === 'assign_branch') await assertReferences(trx, orgId, { branchId: input.branchId });
         if (input.action === 'assign_department') await assertReferences(trx, orgId, { departmentId: input.departmentId });
         const effectiveFrom = input.effectiveFrom ?? (await orgToday(trx, orgId));
-        const employees = await visibleEmployees(trx, orgId, grant, input.employeeIds);
+        const employees = await visibleEmployees(trx, orgId, grant, input.employeeIds, { lock: true });
         // re-activating leavers takes users again: all of them fit under the user limit, or the whole change is refused
         if (input.action === 'set_status' && !hasLeft(input.employmentStatus)) {
           const rejoining = employees.filter((e) => hasLeft(e.employmentStatus)).length;
           if (rejoining > 0) await assertUserCapacity(trx, orgId, rejoining);
         }
-        const changed: string[] = [];
-        const leavers: string[] = [];
-        // a transfer drops a work location of the old branch (app.place_reference_guard): recorded in the bulk audit row
-        const workLocationsCleared: Array<{ employeeId: string; workLocationId: string }> = [];
-        for (const e of employees) {
+        const plans = employees.map((e) => {
           const next = snapshotOf(e);
           if (input.action === 'assign_branch') next.branchId = input.branchId;
           if (input.action === 'assign_department') next.departmentId = input.departmentId;
           if (input.action === 'set_status') next.employmentStatus = input.employmentStatus;
-          if (!snapshotChanged(snapshotOf(e), next)) continue;
+          return { e, next };
+        }).filter(({ e, next }) => snapshotChanged(snapshotOf(e), next));
+        // a date some of them cannot take refuses the change once, naming them all
+        await assertBulkEffectiveFrom(trx, orgId, plans.map((p) => p.e), effectiveFrom);
+        const changed: string[] = [];
+        const leavers: string[] = [];
+        // a transfer drops a work location of the old branch (app.place_reference_guard): recorded in the bulk audit row
+        const workLocationsCleared: Array<{ employeeId: string; workLocationId: string }> = [];
+        for (const { e, next } of plans) {
           await applyHistoryTransition(trx, orgId, e.id, next, effectiveFrom, `Bulk ${input.action}`, actor.userId, isoDate(e.joiningDate));
           await trx.updateTable('employees').set({ branchId: next.branchId, departmentId: next.departmentId, employmentStatus: next.employmentStatus, updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', e.id).execute();
           if (e.workLocationId && next.branchId !== e.branchId) workLocationsCleared.push({ employeeId: e.id, workLocationId: e.workLocationId });
@@ -595,12 +657,72 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
         return { kind: 'sync', updated: changed.length, employeeIds: changed };
       });
     }
+    case 'assign_manager': {
+      // one manager for many employees, on the solid (primary) or the dotted (secondary) line; null removes the link. The
+      // reporting line is no device data (nothing is pushed) and no attendance input (nothing is recalculated)
+      const grant = requirePermission(actor.principal, orgId, 'employee.update');
+      const { line } = input;
+      // the ids are compared as strings below (unchanged, promoted, skipped, self): lower-cased like the uuids Postgres
+      // returns — the schema accepts upper-case hex, which SQL would treat as the same id and JS would not
+      const managerId = input.managerEmployeeId?.toLowerCase() ?? null;
+      const ids = [...new Set(input.employeeIds.map((id) => id.toLowerCase()))];
+      if (managerId && ids.includes(managerId)) throw errors.validation('An employee cannot be their own manager: remove the manager from the selected employees.', { issues: [{ path: 'employeeIds', message: 'Contains the manager' }] });
+      return runUser(deps.db, actor, async (trx) => {
+        if (managerId) {
+          // in the organisation, not archived and visible to the caller (RLS) — and still working here: a leaver leads nobody
+          await assertReferences(trx, orgId, { managerEmployeeId: managerId });
+          const manager = await trx.selectFrom('employees').select('employmentStatus').where('organizationId', '=', orgId).where('id', '=', managerId).executeTakeFirst();
+          if (manager && hasLeft(manager.employmentStatus)) throw errors.validation('This person has left the organisation and cannot be assigned as a manager.', { issues: [{ path: 'managerEmployeeId', message: 'Has left' }] });
+        }
+        const employees = await visibleEmployees(trx, orgId, grant, ids, { lock: true });
+        if (managerId) {
+          // the manager's own reporting line must not pass through any of the employees (one walk for the whole selection). Sound
+          // for the batch: the new links all point AT the manager, so they only close a loop through a chain that is checked here
+          const loops = await reportsUpTo(trx, orgId, managerId, employees.map((e) => e.id));
+          if (loops.length) {
+            throw errors.validation('The manager already reports to some of the selected employees (directly or through other managers), so the reporting line would go round in a circle. Remove them from the selection.', { issues: [{ path: 'managerEmployeeId', message: 'Reporting cycle' }], employeeIds: loops });
+          }
+        }
+        // the solid line is part of the employment record (effective-dated); the dotted line is a plain column
+        const effectiveFrom = line === 'primary' ? input.effectiveFrom ?? (await orgToday(trx, orgId)) : null;
+        // a future joiner (or a record already dated later) among those whose solid line changes: one error naming them all
+        if (effectiveFrom) await assertBulkEffectiveFrom(trx, orgId, employees.filter((e) => e.managerEmployeeId !== managerId), effectiveFrom);
+        const changed: string[] = [];
+        const secondaryCleared: string[] = [];
+        const skipped: string[] = [];
+        for (const e of employees) {
+          if (line === 'primary') {
+            if (e.managerEmployeeId === managerId) continue;
+            // the dotted-line manager promoted to the solid line leaves the dotted line (the check constraint forbids both)
+            const clearSecondary = managerId !== null && e.secondaryManagerEmployeeId === managerId;
+            await applyHistoryTransition(trx, orgId, e.id, { ...snapshotOf(e), managerEmployeeId: managerId }, effectiveFrom!, `Bulk ${input.action}`, actor.userId, isoDate(e.joiningDate));
+            await trx.updateTable('employees').set({ managerEmployeeId: managerId, ...(clearSecondary ? { secondaryManagerEmployeeId: null } : {}), updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', e.id).execute();
+            if (clearSecondary) secondaryCleared.push(e.id);
+          } else {
+            if (e.secondaryManagerEmployeeId === managerId) continue;
+            // already the solid-line manager: a dotted line to the same person says nothing (and the check constraint refuses it)
+            if (managerId !== null && e.managerEmployeeId === managerId) { skipped.push(e.id); continue; }
+            await trx.updateTable('employees').set({ secondaryManagerEmployeeId: managerId, updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', e.id).execute();
+          }
+          await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.updated', aggregateType: 'employee', aggregateId: e.id, payload: { bulk: input.action, line, transition: line === 'primary', branchId: e.branchId }, actorUserId: actor.userId, requestId: actor.requestId });
+          changed.push(e.id);
+        }
+        await audit(trx, actor, orgId, 'employee.bulk_updated', 'employee', { newValue: { action: input.action, line, managerEmployeeId: managerId, ...(effectiveFrom ? { effectiveFrom } : {}), employeeIds: changed, ...(secondaryCleared.length ? { secondaryCleared } : {}), ...(skipped.length ? { skipped } : {}) } });
+        return { kind: 'sync', updated: changed.length, employeeIds: changed };
+      });
+    }
   }
 }
 
-async function visibleEmployees(trx: Trx, orgId: string, grant: MembershipGrant, ids: string[]) {
-  const unique = [...new Set(ids)];
-  const rows = await trx.selectFrom('employees').select(['id', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'employmentType', 'employmentStatus', 'joiningDate', 'workLocationId']).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('id', 'in', unique).execute();
+/**
+ * The selected employees, all visible to the caller and in their branch scope (else nothing happens). Ids are compared in
+ * lower case, the way Postgres returns uuids (the schema accepts upper-case hex too). A writer passes `lock`: the rows are
+ * locked (lockEmployees) BEFORE they are read, so the snapshots built from them are the committed ones.
+ */
+async function visibleEmployees(trx: Trx, orgId: string, grant: MembershipGrant, ids: string[], opts: { lock?: boolean } = {}) {
+  const unique = [...new Set(ids.map((id) => id.toLowerCase()))];
+  if (opts.lock) await lockEmployees(trx, orgId, unique);
+  const rows = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'secondaryManagerEmployeeId', 'employmentType', 'employmentStatus', 'joiningDate', 'workLocationId']).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('id', 'in', unique).orderBy('id').execute();
   if (rows.length !== unique.length) throw errors.validation('One or more employees were not found or are outside your branch scope.', { missing: unique.filter((id) => !rows.some((r) => r.id === id)) });
   for (const r of rows) requireBranchAccess(grant, r.branchId);
   return rows;
