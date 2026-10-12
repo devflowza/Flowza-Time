@@ -5,6 +5,7 @@ export * from './devices.js';
 export * from './attendance.js';
 export * from './shifts.js';
 export * from './employees.js';
+export * from './org-chart.js';
 export * from './organizations.js';
 export * from './sync.js';
 export * from './reports.js';
