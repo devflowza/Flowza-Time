@@ -1,9 +1,21 @@
 name: Deploy
 
-# Manual on purpose. There is no staging environment yet, so every deploy from here reaches the production database
-# holding real attendance records. Promoting this to `on: push` after CI passes is a small change — make it once a
-# staging target exists, or once you are content that CI green is sufficient evidence to ship.
+# Every merge to main deploys: migrations first, then the API, the worker and the reports worker (target `all`), then the
+# readiness probe. There is no staging environment, so a merge reaches the production database holding real attendance
+# records: the pull request review is the gate. Until 2026-10-13 the workflow was manual only, and merged releases waited
+# days for a manual run — the GitHub App that merges pull requests cannot start a workflow by hand. A manual run
+# (Actions → Deploy → Run workflow) stays for a targeted redeploy and for the `check` / `skip` modes.
 on:
+  push:
+    branches: [main]
+    # What the images do not contain (.dockerignore) ships without an API deploy. GitHub reads only the first 300 changed
+    # files of a push; a larger, mostly-web merge whose API files fall beyond them needs a manual run.
+    paths-ignore:
+      - 'apps/web/**'
+      - 'docs/**'
+      - '**/*.md'
+      - 'supabase/tests/**'
+      - 'supabase/seeds/**'
   workflow_dispatch:
     inputs:
       target:
@@ -47,6 +59,11 @@ jobs:
     name: Deploy to Fly.io
     runs-on: ubuntu-latest
     environment: production
+    # A push carries no inputs: it deploys with the manual run's defaults (keep them in step with the inputs above).
+    env:
+      TARGET: ${{ inputs.target || 'all' }}
+      MIGRATIONS: ${{ inputs.migrations || 'apply' }}
+      READY_URL: ${{ inputs.ready_url || 'https://time-api.flowza.ai/api/ready' }}
     steps:
       - uses: actions/checkout@v4
 
@@ -68,10 +85,10 @@ jobs:
       # through the Supabase *session* pooler (port 5432, user postgres.<project ref>): GitHub's runners have no IPv6, and
       # the direct db.<ref>.supabase.co host is IPv6-only. It is used here only, never by the running apps.
       - name: Apply database migrations
-        if: inputs.migrations != 'skip'
+        if: env.MIGRATIONS != 'skip'
         env:
           DATABASE_URL_ADMIN: ${{ secrets.DATABASE_URL_ADMIN }}
-          MODE: ${{ inputs.migrations }}
+          MODE: ${{ env.MIGRATIONS }}
         run: |
           if [ -z "$DATABASE_URL_ADMIN" ]; then
             echo "::error::DATABASE_URL_ADMIN is not set. Add it as a repository secret (the session pooler URL of the postgres role, see docs/deployment.md), or run the deploy with migrations: skip."
@@ -81,11 +98,11 @@ jobs:
           if [ "$MODE" = "check" ]; then bash scripts/db-migrate-hosted.sh --check; else bash scripts/db-migrate-hosted.sh; fi
 
       - name: Migrations skipped
-        if: inputs.migrations == 'skip'
+        if: env.MIGRATIONS == 'skip'
         run: echo "::warning::Deployed without checking migrations. Code that needs a migration not yet applied will fail until it is."
 
       - name: Deploy the API
-        if: inputs.target == 'all' || inputs.target == 'both' || inputs.target == 'api'
+        if: env.TARGET == 'all' || env.TARGET == 'both' || env.TARGET == 'api'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config fly.api.toml --remote-only --wait-timeout 600
@@ -94,7 +111,7 @@ jobs:
       # Cloudflare and the Fly certificate as well as on the app. Those are one-time setup steps, so on a first deploy
       # the probe can be red while both deploys are perfectly good — and the worker deploy must not be collateral.
       - name: Deploy the worker
-        if: inputs.target == 'all' || inputs.target == 'both' || inputs.target == 'worker'
+        if: env.TARGET == 'all' || env.TARGET == 'both' || env.TARGET == 'worker'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: flyctl deploy --config fly.worker.toml --remote-only --wait-timeout 600
@@ -102,7 +119,7 @@ jobs:
       # PDF reports run on their own machine (docs/adr/ADR-008-report-rendering.md). Created on first use; secrets are a
       # one-time manual step because they are the same credentials as the general worker.
       - name: Deploy the reports worker
-        if: inputs.target == 'all' || inputs.target == 'reports'
+        if: env.TARGET == 'all' || env.TARGET == 'reports'
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
@@ -114,9 +131,7 @@ jobs:
       # No -f: it makes curl exit non-zero and write nothing, turning a real "503 degraded" — which names the failing
       # dependency — into an indistinguishable 000 with an empty body.
       - name: Verify the API is ready
-        if: inputs.target == 'all' || inputs.target == 'both' || inputs.target == 'api'
-        env:
-          READY_URL: ${{ inputs.ready_url }}
+        if: env.TARGET == 'all' || env.TARGET == 'both' || env.TARGET == 'api'
         run: |
           for attempt in $(seq 1 12); do
             code=$(curl -sS -o /tmp/ready.json -w '%{http_code}' "$READY_URL" || echo 000)
