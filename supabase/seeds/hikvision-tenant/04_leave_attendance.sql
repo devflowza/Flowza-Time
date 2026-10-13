@@ -7,9 +7,14 @@
 --
 -- The shift of each day is resolved like the engine does (EMPLOYEE > TEAM > DEPARTMENT > BRANCH > ORGANIZATION, latest
 -- effective first, rotation patterns mapped from their anchor date). Days on which an employee already has attendance events
--- (the real terminal "james", corrections made while testing) are left exactly as they are. Deterministic: every decision is
--- a hash of employee + date, and the dedupe index keeps the append-only raw table free of duplicates on a re-run (which only
--- adds the days since the last run).
+-- other than the demo terminals' own (the real terminal "james", corrections made while testing) are left exactly as they
+-- are. Deterministic: every decision is a hash of employee + date, and the dedupe index keeps the append-only raw table free
+-- of duplicates.
+--
+-- Re-running on a later day tops the history up: it starts the day before the last demo punch and inserts only punches
+-- after it (the punch-outs and night shifts the last run cut off at its `now()`, then every day since, up to the current
+-- minute), continues the terminals' event serial numbers, recalculates that window only and rebuilds the payroll summaries
+-- of the months it touches. The leave and correction records are created once.
 set client_min_messages = warning;
 
 create or replace function pg_temp.sid(p text) returns uuid language sql immutable as
@@ -112,6 +117,10 @@ declare
   tz text := 'Asia/Muscat';
   d_from date := '2026-09-01';
   d_to date := (now() at time zone 'Asia/Muscat')::date;
+  -- top-up window: punches after the last demo punch, from the day before it (a night shift that began then ends after it)
+  cutoff timestamptz := coalesce((select max(r.punched_at) from public.attendance_raw_transactions r
+                                  where r.organization_id = '78a5a348-69b6-4c51-8d72-3697f72c50f0' and r.device_id in (ghl2, soh1, soh2)), '-infinity');
+  fill_from date := case when cutoff = '-infinity' then d_from else greatest(d_from, (cutoff at time zone 'Asia/Muscat')::date - 1) end;
   org_off smallint[] := (select weekly_off_days from public.organizations where id = '78a5a348-69b6-4c51-8d72-3697f72c50f0');
   e record; l record; c record; d date; key text;
   sh public.shifts%rowtype; add_sh public.shifts%rowtype; has_add boolean; sh_id uuid;
@@ -186,10 +195,13 @@ begin
   ---------------------------------------------------------------------------------------------------------------------
   -- 2. Punches
   ---------------------------------------------------------------------------------------------------------------------
-  create temp table seed_punch (emp uuid, num text, pin text, br uuid, dev uuid, at timestamptz, dir text, verify text) on commit drop;
+  create temp table seed_punch (emp uuid, num text, pin text, br uuid, dev uuid, at timestamptz, dir text, verify text, d date) on commit drop;
   create temp table seed_missing (emp uuid, num text, dept text, d date, br uuid, expected_out timestamptz) on commit drop;
+  create temp table seed_inserted (dev uuid, pin text, at timestamptz) on commit drop;
+  -- days someone else wrote: the real terminal, corrections, self-service (the demo terminals' own events are this seed's)
   create temp table seed_skip on commit drop as
-    select distinct ev.employee_id as emp, (ev.punched_at at time zone tz)::date as day from public.attendance_events ev where ev.organization_id = org;
+    select distinct ev.employee_id as emp, (ev.punched_at at time zone tz)::date as day from public.attendance_events ev
+    where ev.organization_id = org and not (ev.source = 'DEVICE' and ev.device_id in (ghl2, soh1, soh2));
 
   for e in
     select emp.id, emp.employee_number as num, emp.device_user_id as pin, emp.joining_date, emp.branch_id as home, emp.department_id as dept_id, dp.code as dept,
@@ -202,7 +214,7 @@ begin
     where emp.organization_id = org and emp.deleted_at is null and emp.employment_status = 'active'
   loop
     crew := e.dept in ('WH', 'SEC');
-    for d in select generate_series(greatest(d_from, e.joining_date), d_to, interval '1 day')::date loop
+    for d in select generate_series(greatest(fill_from, e.joining_date), d_to, interval '1 day')::date loop
       continue when exists (select 1 from seed_skip s where s.emp = e.id and s.day = d);
       key := e.num || ':' || d::text;
 
@@ -210,6 +222,9 @@ begin
         where lr.organization_id = org and lr.employee_id = e.id and lr.status = 'APPROVED' and lr.start_date <= d and lr.end_date >= d order by lr.is_half_day limit 1;
       on_leave := found;
       continue when on_leave and not lv_half;
+      -- away on a full-day request still waiting for approval (an emergency leave filed from home)
+      continue when exists (select 1 from public.leave_records lr where lr.organization_id = org and lr.employee_id = e.id and lr.status = 'PENDING'
+                              and not lr.is_half_day and lr.start_date <= d and lr.end_date >= d);
       continue when extract(dow from d)::int = any (e.woff);
       continue when exists (select 1 from public.holidays h where h.organization_id = org and h.date <= d and coalesce(h.end_date, h.date) >= d and (h.branch_ids is null or e.home = any (h.branch_ids)));
 
@@ -267,58 +282,74 @@ begin
       verify := case when e.uv < 0.72 then 'face' when e.uv < 0.88 and e.fp then 'fingerprint' when e.has_card then 'card' else 'face' end;
       if pg_temp.u(key || ':vday') < 0.06 then verify := case when e.has_card then 'card' else 'face' end; end if;
 
-      if not missing_in then insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, in_at, 'in', verify); end if;
+      if not missing_in then insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, in_at, 'in', verify, d); end if;
       if pg_temp.u(key || ':dup') < 0.02 then
-        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, in_at + make_interval(secs => 20 + floor(pg_temp.u(key || ':dup2') * 30)::int), 'in', verify);
+        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, in_at + make_interval(secs => 20 + floor(pg_temp.u(key || ':dup2') * 30)::int), 'in', verify, d);
       end if;
       if has_add then
         -- double shift: out after the office day, back for the evening shift, out at its end
-        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, out_at, 'out', verify);
-        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, ((d + add_sh.start_time) - make_interval(mins => 2 + floor(pg_temp.u(key || ':add-in') * 8)::int)) at time zone tz, 'in', verify);
-        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, ((d + add_sh.end_time) + make_interval(mins => 1 + floor(pg_temp.u(key || ':add-out') * 12)::int)) at time zone tz, 'out', verify);
+        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, out_at, 'out', verify, d);
+        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, ((d + add_sh.start_time) - make_interval(mins => 2 + floor(pg_temp.u(key || ':add-in') * 8)::int)) at time zone tz, 'in', verify, d);
+        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, ((d + add_sh.end_time) + make_interval(mins => 1 + floor(pg_temp.u(key || ':add-out') * 12)::int)) at time zone tz, 'out', verify, d);
       elsif missing_out then
         insert into seed_missing values (e.id, e.num, e.dept, d, br, out_at);
       else
-        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, out_at, 'out', verify);
+        insert into seed_punch values (e.id, e.num, e.pin, br, dev_id, out_at, 'out', verify, d);
       end if;
     end loop;
   end loop;
 
-  -- Hikvision ISAPI AccessControllerEvent rows, as the HTTP-Listening endpoint stores them (allowlisted payload, no picture)
-  insert into public.attendance_raw_transactions (organization_id, device_id, branch_id, provider_key, provider_transaction_id, device_employee_id, employee_id, punched_at, device_local_time, verification_method, direction,
-    raw_payload, received_at, source, sync_job_id, dedupe_hash, processing_status, assumed_timezone, clock_skew_seconds, device_generation)
-  select org, p.dev, dv.branch_id, 'hikvision_push', (5000 + row_number() over (partition by p.dev order by p.at, p.pin))::text, p.pin, null, p.at,
-         to_char(p.at at time zone tz, 'YYYY-MM-DD"T"HH24:MI:SS') || '+04:00', p.verify::public.verification_method, p.dir::public.punch_direction,
-         jsonb_build_object('mask', 'no', 'doorNo', 1, 'dateTime', to_char(p.at at time zone tz, 'YYYY-MM-DD"T"HH24:MI:SS') || '+04:00', 'protocol', 'hikvision',
-                            'serialNo', 5000 + row_number() over (partition by p.dev order by p.at, p.pin), 'userType', 'normal', 'eventType', 'AccessControllerEvent',
-                            'employeeNo', p.pin, 'cardReaderNo', 1, 'serialNumber', dv.serial_number,
-                            'subEventType', case p.verify when 'face' then 75 when 'fingerprint' then 38 else 1 end, 'majorEventType', 5, 'activePostCount', 1,
-                            'attendanceStatus', case p.dir when 'in' then 'checkIn' else 'checkOut' end, 'currentVerifyMode', 'faceOrFpOrCardOrPw'),
-         p.at + make_interval(secs => 1 + floor(pg_temp.u(p.num || p.at::text || ':rcv') * 6)::int), 'DEVICE_PUSH', null,
-         encode(extensions.digest(p.dev::text || '|1|' || p.pin || '|' || to_char(p.at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') || '|' || p.verify || '|' || p.dir, 'sha256'), 'hex'),
-         'pending', tz, floor(pg_temp.u(p.num || p.at::text || ':skew') * 4)::int, 1
-  from seed_punch p
-  join public.devices dv on dv.id = p.dev
-  where p.at <= now()
-  on conflict (organization_id, device_id, dedupe_hash, punched_at) do nothing;
+  -- Hikvision ISAPI AccessControllerEvent rows, as the HTTP-Listening endpoint stores them (allowlisted payload, no picture);
+  -- each terminal's event serial number carries on from its last event
+  with last_serial as (
+    select r.device_id as dev, max(r.provider_transaction_id::bigint) as n from public.attendance_raw_transactions r
+    where r.organization_id = org and r.device_id in (ghl2, soh1, soh2) and r.provider_transaction_id ~ '^[0-9]+$' group by 1
+  ), s as (
+    select p.*, dv.branch_id as dev_branch, dv.serial_number as dev_serial,
+           coalesce(ls.n, 5000) + row_number() over (partition by p.dev order by p.at, p.pin) as serial
+    from seed_punch p
+    join public.devices dv on dv.id = p.dev
+    left join last_serial ls on ls.dev = p.dev
+    where p.at > cutoff and p.at <= now()
+  ), ins as (
+    insert into public.attendance_raw_transactions (organization_id, device_id, branch_id, provider_key, provider_transaction_id, device_employee_id, employee_id, punched_at, device_local_time, verification_method, direction,
+      raw_payload, received_at, source, sync_job_id, dedupe_hash, processing_status, assumed_timezone, clock_skew_seconds, device_generation)
+    select org, s.dev, s.dev_branch, 'hikvision_push', s.serial::text, s.pin, null, s.at,
+           to_char(s.at at time zone tz, 'YYYY-MM-DD"T"HH24:MI:SS') || '+04:00', s.verify::public.verification_method, s.dir::public.punch_direction,
+           jsonb_build_object('mask', 'no', 'doorNo', 1, 'dateTime', to_char(s.at at time zone tz, 'YYYY-MM-DD"T"HH24:MI:SS') || '+04:00', 'protocol', 'hikvision',
+                              'serialNo', s.serial, 'userType', 'normal', 'eventType', 'AccessControllerEvent',
+                              'employeeNo', s.pin, 'cardReaderNo', 1, 'serialNumber', s.dev_serial,
+                              'subEventType', case s.verify when 'face' then 75 when 'fingerprint' then 38 else 1 end, 'majorEventType', 5, 'activePostCount', 1,
+                              'attendanceStatus', case s.dir when 'in' then 'checkIn' else 'checkOut' end, 'currentVerifyMode', 'faceOrFpOrCardOrPw'),
+           s.at + make_interval(secs => 1 + floor(pg_temp.u(s.num || s.at::text || ':rcv') * 6)::int), 'DEVICE_PUSH', null,
+           encode(extensions.digest(s.dev::text || '|1|' || s.pin || '|' || to_char(s.at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') || '|' || s.verify || '|' || s.dir, 'sha256'), 'hex'),
+           'pending', tz, floor(pg_temp.u(s.num || s.at::text || ':skew') * 4)::int, 1
+    from s
+    on conflict (organization_id, device_id, dedupe_hash, punched_at) do nothing
+    returning device_id, device_employee_id, punched_at
+  )
+  insert into seed_inserted select device_id, device_employee_id, punched_at from ins;
   get diagnostics n = row_count;
-  raise notice 'raw punches inserted: %', n;
+  raise notice 'raw punches inserted: % (after %, % → %)', n, cutoff, fill_from, d_to;
 
-  -- The nightly day-close sweep had marked the original employees' empty days UNEXCUSED; a day that now carries terminal
-  -- punches is no longer unexplained, so its sweep mark is revoked (the recalculation below then drops the flag and pay effect).
+  -- The nightly day-close sweep marks a working day without an explanation UNEXCUSED once its grace period is over: the
+  -- original employees' empty days before the history existed, and the days whose punch-outs or night shifts the last run
+  -- cut off. A day this run has just given its terminal punches is no longer unexplained, so its sweep mark is revoked (the
+  -- recalculation below then drops the flag and pay effect).
   update public.attendance_day_marks m set revoked_at = now(), revoke_reason = 'Demo data seed: the day now has terminal punches (Hikvision demo history)'
   where m.organization_id = org and m.kind = 'UNEXCUSED' and m.source = 'SWEEP' and m.revoked_at is null
-    and exists (select 1 from public.attendance_raw_transactions r join public.employees x on x.organization_id = r.organization_id and x.device_user_id = r.device_employee_id
-                where r.organization_id = m.organization_id and x.id = m.employee_id and r.device_id in (ghl2, soh1, soh2)
-                  and (r.punched_at at time zone tz)::date = m.attendance_date);
+    and exists (select 1 from seed_inserted i join seed_punch p on p.dev = i.dev and p.pin = i.pin and p.at = i.at
+                where p.emp = m.employee_id and p.d = m.attendance_date);
 
   ---------------------------------------------------------------------------------------------------------------------
-  -- 3. Corrections for some missed punch-outs at the office (3 approved and applied by the worker, 2 pending, 1 rejected)
+  -- 3. Corrections for some missed punch-outs at the office (3 approved and applied by the worker, 2 pending, 1 rejected);
+  --    first run only — a top-up leaves its missed punch-outs for the day-close sweep, like a real month
   ---------------------------------------------------------------------------------------------------------------------
   for c in
     select m.*, row_number() over (order by m.d, m.num) as rn
     from seed_missing m
     where m.num like 'EMP%' and m.dept not in ('WH', 'SEC') and m.d <= d_to - 3
+      and not exists (select 1 from public.attendance_corrections ac where ac.organization_id = org and ac.reason like 'Forgot to punch out%')
     order by m.d, m.num limit 6
   loop
     if c.dept = 'IT' then seat1 := kumar_user; path1 := 'primary'; seat2 := hr_id; path2 := 'role';
@@ -342,7 +373,8 @@ begin
   end loop;
 
   ---------------------------------------------------------------------------------------------------------------------
-  -- 4. Hand over to the worker: normalise now, recalculate 1 Sep → today in 10 minutes, payroll summaries in 30
+  -- 4. Hand over to the worker: normalise now, recalculate the window (1 Sep on the first run) → today in 10 minutes,
+  --    payroll summaries of the months it touches in 30
   ---------------------------------------------------------------------------------------------------------------------
   update public.devices set connection_status = 'online', last_heartbeat_at = now(), last_successful_communication_at = now(), last_attendance_sync_at = now(), updated_at = now()
   where id in (ghl2, soh1, soh2);
@@ -350,7 +382,7 @@ begin
   perform app.enqueue_job('processing', 'NORMALIZE_RAW', org, jsonb_build_object('organizationId', org), 6, now(), 'normalize:' || org::text, 3, 600, 'seed-hikvision');
 
   insert into public.attendance_recalculation_requests (id, organization_id, from_date, to_date, reason, requested_by, status)
-  values (gen_random_uuid(), org, d_from, d_to, 'Enterprise demo data: Hikvision terminal history, policies, rotations and leave (demo seed)', owner_id, 'QUEUED') returning id into req;
+  values (gen_random_uuid(), org, fill_from, d_to, 'Enterprise demo data: Hikvision terminal history, policies, rotations and leave (demo seed)', owner_id, 'QUEUED') returning id into req;
   job_id := app.enqueue_job('processing', 'RECALCULATE_RANGE', org, jsonb_build_object('organizationId', org, 'requestId', req), 3, now() + interval '10 minutes', 'recalculate:' || req::text, 3, 3600, 'seed-hikvision');
   update public.attendance_recalculation_requests set queue_job_id = job_id where id = req;
 
@@ -359,13 +391,14 @@ begin
   -- the punch-less days (leave, weekly offs, absences, rotation off days) in minutes. Both are idempotent.
   perform app.enqueue_job('processing', 'RECOMPUTE_DAILY', org, jsonb_build_object('organizationId', org, 'employeeId', x.id, 'date', g::date, 'reason', 'RECALCULATION'),
                           5, now() + interval '2 minutes', 'recompute:' || x.id || ':' || g::date, 5, 120, 'seed-hikvision')
-  from public.employees x, generate_series(d_from, d_to, interval '1 day') g
+  from public.employees x, generate_series(fill_from, d_to, interval '1 day') g
   where x.organization_id = org and x.deleted_at is null and x.employment_status = 'active' and g::date >= x.joining_date;
 
   perform app.enqueue_job('processing', 'BUILD_PERIOD_SUMMARY', org,
     jsonb_build_object('organizationId', org, 'periodStart', p.ps, 'periodEnd', p.pe, 'finalize', false, 'requestedBy', owner_id),
     4, now() + interval '30 minutes', 'period:' || org::text || ':all:' || p.ps || ':' || p.pe || ':build', 6, 600, 'seed-hikvision')
-  from (values (date '2026-09-01', date '2026-09-30'), (date '2026-10-01', date '2026-10-31')) as p(ps, pe);
+  from (select m::date as ps, (m + interval '1 month - 1 day')::date as pe
+        from generate_series(date_trunc('month', fill_from::timestamp), date_trunc('month', d_to::timestamp), interval '1 month') m) as p;
 end $$;
 
 select 'leave_attendance' as step,
