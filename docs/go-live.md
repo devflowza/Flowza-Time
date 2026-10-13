@@ -18,12 +18,18 @@ So this file is two things at once, and which one you are reading matters:
 
 Verified against the project rather than assumed, 2026-10-13:
 
-- **Sign-in history is not readable from SQL.** `public.login_history` holds **0 rows against 22 auth users**: the
-  password-verification hook (step 5b) that would fill it is gated behind Supabase's Team plan, and this project is on
-  Pro. `auth.audit_log_entries` is empty too — empty even for events that *do* audit — so it is not the fallback it
-  appears to be. Rejected sign-ins survive only in the Supabase **log stream** (`auth_logs`), which is queryable
-  through the Logs Explorer and the Management API but not from Postgres. Risk **D27** in `docs/risks.md` holds the
-  evidence, the log-stream mitigation and the decision to accept this for pilot; read it there rather than
+- **There is no sign-in *history*, and no record of failures, in SQL.** `public.login_history` holds **0 rows against
+  22 auth users**: the password-verification hook (step 5b) that would fill it is gated behind Supabase's Team plan and
+  this project is on Pro. `auth.audit_log_entries` is empty too — empty even for events that *do* audit — so it is not
+  the fallback it appears to be, and rejected attempts survive only in the Supabase **log stream** (`auth_logs`),
+  queryable through the Logs Explorer and the Management API but not from Postgres.
+
+  What *is* available is the **latest** successful sign-in per user: GoTrue maintains `auth.users.last_sign_in_at`, and
+  since migration `20261013000100` `/me` copies it into `user_profiles.last_login_at`, which is what the members table
+  and the platform console display. Before that migration the column was never written by anything and read "Never"
+  for every user.
+
+  Risk **D27** in `docs/risks.md` holds the evidence and the accepted log-stream mitigation; read it there rather than
   re-deriving it.
 
 Nothing in this file contains a secret. Every value written as `<…>` is generated or copied by the operator and stored
@@ -492,8 +498,11 @@ The old password keeps working until it is replaced, as with any reset: requesti
 > Pro, and the dropdown greys the entry out with "Team or Enterprise Plan required". Nothing in the database is
 > missing — the function, the grant and the schema usage are all in place and it would start working the moment the
 > plan allowed it. `auth.audit_log_entries` is not a substitute: it is empty on this project too (checked 2026-10-13),
-> so there is no second source of sign-in events **in SQL**. Rejections do survive in the Supabase log stream —
-> see risk **D27** in `docs/risks.md` for the evidence and the mitigation that was accepted instead.
+> so there is no second source of sign-in *events* in SQL. Rejections survive in the Supabase log stream — see risk
+> **D27** in `docs/risks.md` for the evidence and the mitigation accepted instead. The *latest* successful sign-in per
+> user is a separate matter and is covered: `app.touch_last_login()` copies `auth.users.last_sign_in_at` into
+> `user_profiles.last_login_at` on every `/me` (migration `20261013000100`), which is what populates "Last sign-in" in
+> the members table and the platform console.
 
 `app.on_password_verification_attempt(jsonb)` exists in the database and is already granted to `supabase_auth_admin`,
 but Supabase Auth does not call it until it is registered.
