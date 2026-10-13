@@ -8,6 +8,7 @@ on:
     paths:
       - 'supabase/**'
       - 'scripts/db-reset-local.sh'
+      - 'scripts/db-migrate-populated-check.sh'
       - 'packages/database/**'
       - 'pnpm-lock.yaml'
       - '.github/workflows/migrations.yml'
@@ -43,7 +44,10 @@ jobs:
       PGPORT: '54329'
       PGUSER: postgres
     steps:
+      # Full history: the populated-database step diffs the branch against its base to find the migrations it adds.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: pnpm/action-setup@v4
         with:
           version: ${{ env.PNPM_VERSION }}
@@ -57,9 +61,19 @@ jobs:
         run: bash supabase/tests/run-rls-tests.sh
       - name: Migration idempotency (second apply on a fresh DB must be identical)
         run: PGDATABASE=flowza_ci2 bash scripts/db-reset-local.sh >/dev/null && echo ok
-      # Only the database package is installed: codegen needs kysely-codegen, tsx and pg, not the whole workspace.
-      - run: pnpm install --frozen-lockfile --filter "@flowza/database..."
+      # The database package and its workspace dependencies, plus the root (TypeScript): codegen needs kysely-codegen, tsx
+      # and pg; the seed below imports @flowza/contracts, domain and shared, which resolve through their dist/.
+      - run: pnpm install --frozen-lockfile --filter "@flowza/database..." --filter flowza-time
       - name: Generated types are up to date
         run: |
           DATABASE_URL_ADMIN=postgres://postgres@127.0.0.1:54329/flowza_ci2 pnpm --filter @flowza/database run codegen
           git diff --exit-code -- packages/database/src/generated/db.ts
+      # CI's empty database hides migrations that fail on real data: the location hierarchy migration passed this job and
+      # then failed on production's first apply (2026-10-13), because its backfill only queued deferred checks when rows
+      # existed. Apply the migrations this branch adds to a seeded database, one transaction each, as the Deploy workflow does.
+      - name: Added migrations apply on a populated database
+        env:
+          BASE_REF: ${{ github.base_ref || 'main' }}
+        run: |
+          pnpm --filter "@flowza/database^..." run build
+          bash scripts/db-migrate-populated-check.sh "origin/$BASE_REF"
