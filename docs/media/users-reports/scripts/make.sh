@@ -16,10 +16,13 @@ PY="$TOOLS/venv/bin/python"
 cleanup() { rm -rf "$REPO/apps/worker/.media-gen" "$REPO/apps/web/.media-gen"; }
 trap cleanup EXIT
 
-# 1. the reports, made by the worker's own code from seeded demo data (the scripts run from inside the app they import)
-mkdir -p "$REPO/apps/worker/.media-gen"
-cp "$HERE/gen-reports.ts" "$REPO/apps/worker/.media-gen/"
-(cd "$REPO/apps/worker" && CHROMIUM_PATH="$CHROMIUM_PATH" ./node_modules/.bin/tsx .media-gen/gen-reports.ts "$WORK/reports")
+# 1. the reports, made by the worker's own code from seeded demo data (the scripts run from inside the app they import);
+#    REUSE_REPORTS=1 keeps the ones already in $WORK/reports (only narration or recording changed)
+if [ "${REUSE_REPORTS:-0}" != 1 ] || [ ! -f "$WORK/reports/detail-report-2025.pdf" ]; then
+  mkdir -p "$REPO/apps/worker/.media-gen"
+  cp "$HERE/gen-reports.ts" "$REPO/apps/worker/.media-gen/"
+  (cd "$REPO/apps/worker" && CHROMIUM_PATH="$CHROMIUM_PATH" ./node_modules/.bin/tsx .media-gen/gen-reports.ts "$WORK/reports")
+fi
 
 # 2. the voice, one clip per narration line
 "$PY" -I "$HERE/tts.py" "$TOOLS/model" "$HERE/script.json" "$WORK"
@@ -28,7 +31,7 @@ cp "$HERE/gen-reports.ts" "$REPO/apps/worker/.media-gen/"
 python3 -I "$HERE/prep_media.py" "$WORK/reports" "$WORK/media"
 
 # 4. the recording: the production web bundle against the demo world
-[ -d "$REPO/apps/web/dist-e2e" ] || pnpm --dir "$REPO/apps/web" run build:e2e
+pnpm --dir "$REPO/apps/web" run build:e2e   # every run: the video must show the current UI
 mkdir -p "$REPO/apps/web/.media-gen"
 cp "$HERE"/{playwright.config.ts,record.spec.ts,world.ts,people.json,overlay.js,viewer.html,script.json} "$REPO/apps/web/.media-gen/"
 (cd "$REPO/apps/web" && LANGUAGE=en_GB WORK="$WORK" PLAYWRIGHT_CHROMIUM_EXECUTABLE="$CHROMIUM_PATH" pnpm exec playwright test -c .media-gen/playwright.config.ts record)
@@ -36,7 +39,7 @@ cp "$HERE"/{playwright.config.ts,record.spec.ts,world.ts,people.json,overlay.js,
 # 5. picture, voice, music and captions
 TOTAL="$("$PY" -I "$HERE/assemble.py" "$WORK")"
 ffmpeg -y -loglevel error -f concat -safe 0 -i "$WORK/frames.txt" \
-  -vf "fps=30,scale=1920:1080:flags=lanczos,format=yuv420p" -c:v libx264 -preset slow -crf 17 -tune stillimage "$WORK/video_noaudio.mp4"
+  -vf "fps=30,scale=1920:1080:flags=lanczos,format=yuv420p" -c:v libx264 -preset slow -crf 19 -tune stillimage "$WORK/video_noaudio.mp4"
 "$PY" -I "$REPO/docs/media/walkthrough/scripts/music.py" "$TOTAL" "$WORK/music.wav"
 # voice in both channels; the music bed is ducked under the voice, then everything is normalised to -16 LUFS
 ffmpeg -y -loglevel error -i "$WORK/narration.wav" -i "$WORK/music.wav" -filter_complex \

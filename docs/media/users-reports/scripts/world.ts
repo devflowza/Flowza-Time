@@ -9,7 +9,7 @@ import { readFileSync } from 'node:fs';
 import type { EmployeeDto, MeDto, Permission } from '@flowza/contracts';
 import { ALL_PERMISSIONS, ORG_ID, USER_ID, meFixture, page, type MockBackendOptions } from '../e2e/support/mock-backend';
 
-type Row = { num: string; first: string; last: string; gender: string; nat: string; email: string; phone: string; joined: string; exit: string | null; status: string; type: string; branch: string; dept: string; desig: string; manager: string | null; pin: string; card: string };
+type Row = { num: string; first: string; last: string; gender: string; nat: string | null; email: string; phone: string | null; joined: string; exit: string | null; status: string; type: string; branch: string; dept: string; desig: string; manager: string | null; pin: string; card: string };
 const PEOPLE: Row[] = JSON.parse(readFileSync(new URL('./people.json', import.meta.url), 'utf8'));
 
 /** "Now" of the video: Tuesday 13 October 2026, 9:40 am in Muscat. */
@@ -75,15 +75,16 @@ const ROLE_ROWS: Array<[string, string, string, string]> = [
   ['5', 'branch_manager', 'Branch Manager', 'Manages attendance for assigned branches only'], ['6', 'attendance_admin', 'Attendance Admin', 'Manages devices, synchronisation and attendance rules'],
   ['7', 'payroll', 'Payroll / Finance', 'Read-only attendance and payroll summaries'], ['8', 'employee', 'Employee', 'Self-service access to own attendance'],
   ['9', 'manager', 'Line Manager', 'Sees and approves for direct reports'],
+  ['10', 'auditor', 'Auditor', 'Read-only access to organisation data, attendance, leave, payroll summaries, reports and the audit log'],
 ];
-export const ROLES = ROLE_ROWS.map(([n, key, name, description]) => ({ id: `10000000-0000-0000-0000-00000000000${n}`, organizationId: null, key, name, description, isSystem: true, permissions: [], memberCount: 1, createdAt: ts('2026-01-01'), updatedAt: ts('2026-01-01') }));
+export const ROLES = ROLE_ROWS.map(([n, key, name, description]) => ({ id: `10000000-0000-0000-0000-${n.padStart(12, '0')}`, organizationId: null, key, name, description, isSystem: true, permissions: [], memberCount: 1, createdAt: ts('2026-01-01'), updatedAt: ts('2026-01-01') }));
 const roleOf = (key: string) => ROLES.find((r) => r.key === key)!;
 const MEMBERS: Array<[string, string, string]> = [
   ['MG-1001', 'acme@flowza.ai', 'owner'], ['MG-1002', 'orgadmin@flowza.ai', 'org_admin'], ['MG-1003', 'hradmin@flowza.ai', 'hr_admin'], ['MG-1004', 'hruser@flowza.ai', 'hr_user'],
   ['MG-1016', 'attadmin@flowza.ai', 'attendance_admin'], ['MG-1006', 'payroll@flowza.ai', 'payroll'], ['MG-1010', 'manager@flowza.ai', 'manager'], ['MG-2001', 'brmanager@flowza.ai', 'branch_manager'],
-  ['MG-1012', 'employee@flowza.ai', 'employee'], ['MG-1024', 'deepa.kumar@majangulf.om', 'employee'],
+  ['MG-1012', 'employee@flowza.ai', 'employee'], ['MG-1007', 'auditor@flowza.ai', 'auditor'], ['MG-1024', 'deepa.kumar@majangulf.om', 'employee'],
 ];
-const LAST_LOGIN: Record<string, string> = { 'MG-1001': '2026-10-12T14:22:00Z', 'MG-1002': '2026-10-13T05:31:00Z', 'MG-1003': '2026-10-13T04:58:00Z', 'MG-1004': '2026-10-12T11:05:00Z', 'MG-1016': '2026-10-13T04:12:00Z', 'MG-1006': '2026-10-08T09:40:00Z', 'MG-1010': '2026-10-13T05:02:00Z', 'MG-2001': '2026-10-11T06:15:00Z', 'MG-1012': '2026-10-12T04:47:00Z', 'MG-1024': '2026-09-24T05:20:00Z' };
+const LAST_LOGIN: Record<string, string> = { 'MG-1001': '2026-10-12T14:22:00Z', 'MG-1002': '2026-10-13T05:31:00Z', 'MG-1003': '2026-10-13T04:58:00Z', 'MG-1004': '2026-10-12T11:05:00Z', 'MG-1016': '2026-10-13T04:12:00Z', 'MG-1006': '2026-10-08T09:40:00Z', 'MG-1010': '2026-10-13T05:02:00Z', 'MG-2001': '2026-10-11T06:15:00Z', 'MG-1012': '2026-10-12T04:47:00Z', 'MG-1007': '2026-10-09T10:12:00Z', 'MG-1024': '2026-09-24T05:20:00Z' };
 
 /** The report files the video opens: served at the signed URL as the viewer page (see viewer.html) — a PDF viewer is not available in headless Chromium. */
 export interface ReportFile { reportType: string; fileName: string; viewer: string; rowCount: number; bytes: number }
@@ -146,7 +147,13 @@ export function createWorld(opts: { limit: number; extraActive?: Row[] }): World
     [`${org}/roles`]: { data: ROLES },
     [`${org}/members`]: (url: URL) => {
       const q = (url.searchParams.get('search') ?? '').toLowerCase();
-      return page(members.filter((m) => !q || `${m.fullName} ${m.email}`.toLowerCase().includes(q)), 1, 25);
+      const status = url.searchParams.get('status');
+      const roleId = url.searchParams.get('roleId');
+      const key = ({ fullName: 'fullName', email: 'email', role: 'roleName', status: 'status' } as Record<string, keyof (typeof members)[number]>)[url.searchParams.get('sort') ?? 'fullName'] ?? 'fullName';
+      const dir = url.searchParams.get('order') === 'desc' ? -1 : 1;
+      const rows = members.filter((m) => !q || `${m.fullName} ${m.email}`.toLowerCase().includes(q)).filter((m) => !status || m.status === status).filter((m) => !roleId || m.roleId === roleId)
+        .sort((a, b) => dir * String(a[key]).localeCompare(String(b[key]), 'en'));
+      return page(rows, 1, 25);
     },
     [`${org}/invitations`]: () => page(invitations),
     [`${org}/reports`]: () => {
@@ -165,13 +172,15 @@ export function createWorld(opts: { limit: number; extraActive?: Row[] }): World
     post: {
       [`${org}/employees`]: (body) => {
         const b = body as Record<string, string | undefined>;
-        if (world.used() >= world.limit) return { status: 409, body: { code: 'USER_LIMIT_REACHED', message: 'Maximum users reached', requestId: 'demo' } };
+        if (!['terminated', 'resigned'].includes(b['employmentStatus'] ?? 'active') && world.used() >= world.limit) {
+          return { status: 402, body: { code: 'ENTITLEMENT_EXCEEDED', message: `Maximum users reached: ${world.used()} of ${world.limit} users are in use. Ask your FlowZa Time provider to increase the user limit.`, details: { metric: 'employees', reason: 'USER_LIMIT_REACHED', limit: world.limit, used: world.used(), adding: 1 }, requestId: 'demo' } };
+        }
         const nextPin = String(Math.max(...employees.map((e) => Number(e.deviceUserId) || 0)) + 1);
         const b0 = BRANCHES.find((x) => x.id === b['branchId'])!;
         const d0 = DEPARTMENTS.find((x) => x.id === b['departmentId']);
         const g0 = DESIGNATIONS.find((x) => x.id === b['designationId']);
         const m0 = employees.find((x) => x.id === b['managerEmployeeId']);
-        const e = toEmployee({ num: b['employeeNumber']!, first: b['firstName']!, last: b['lastName']!, gender: b['gender'] ?? 'unspecified', nat: 'OM', email: b['email'] ?? '', phone: '', joined: b['joiningDate']!, exit: null, status: 'active', type: b['employmentType'] ?? 'full_time', branch: b0.code, dept: d0?.code ?? 'ADM', desig: g0?.code ?? 'OA', manager: m0?.employeeNumber ?? null, pin: b['deviceUserId'] ?? nextPin, card: b['cardNumber'] ?? '' });
+        const e = toEmployee({ num: b['employeeNumber']!, first: b['firstName']!, last: b['lastName']!, gender: b['gender'] ?? 'unspecified', nat: b['nationalityCode'] ?? null, email: b['email'] ?? '', phone: b['phone'] ?? null, joined: b['joiningDate']!, exit: null, status: 'active', type: b['employmentType'] ?? 'full_time', branch: b0.code, dept: d0?.code ?? 'ADM', desig: g0?.code ?? 'OA', manager: m0?.employeeNumber ?? null, pin: b['deviceUserId'] ?? nextPin, card: b['cardNumber'] ?? '' });
         Object.assign(e, { managerEmployeeId: m0?.id ?? null, managerName: m0?.displayName ?? null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), deviceSyncSummary: { total: 2, inSync: 0, pending: 2, failed: 0, offline: 0 } });
         employees.push(e);
         return { status: 201, body: { data: e } };

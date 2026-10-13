@@ -37,12 +37,12 @@
       "id": "add",
       "chapter": "1 · Add a user",
       "beats": [
-        "In FlowZa Time, the people who punch in on your attendance devices are your employees, and each active employee counts as one user of your subscription.",
+        "In FlowZa Time, the people who punch in on your attendance devices are your employees, and every employee who hasn't left counts as one user of your subscription.",
         "To add one, open Employees and choose Add employee.",
         "Enter a unique employee number, then the first and last name, and the email address.",
         "Under Employment, check the joining date, then choose the branch, the department, the designation and the line manager.",
-        "Under Device identity, leave the device user ID empty to get the next free number automatically, and add a card number if the employee uses a card.",
-        "Choose Create employee. The new user is saved, and sent to your attendance devices automatically."
+        "Under Device identity, leave the device user ID empty to have one assigned automatically, and add a card number if the employee uses a card.",
+        "Choose Create employee. The new user is saved and, by default, sent to the attendance devices of the employee's branch."
       ]
     },
     {
@@ -50,24 +50,25 @@
       "chapter": "2 · Remove a user and add a new one",
       "beats": [
         "When every user of your subscription is in use, the Employees page shows Maximum users reached, and Add employee is switched off.",
-        "To free a user, archive someone who has left. Deepa Kumar has resigned, so open the profile and go to the Danger zone tab.",
+        "To free a user, archive someone who has left. Deepa Kumar has left the company, so open the profile and go to the Danger zone tab.",
         "Choose Archive employee, check the exit date, add a reason, and confirm.",
         "The employee is marked as terminated and removed from every device, and a linked sign-in is suspended too. The attendance history is kept, and one user is free again.",
         "Now choose Add employee and enter the new joiner exactly as before: the employee number, the name and the email.",
-        "Then the branch, department, designation and line manager. Choose Create employee, and the new joiner takes the free user.",
+        "Then the branch, department, designation and line manager.",
+        "Choose Create employee, and the new joiner takes the free user.",
         "To let the new person sign in to FlowZa Time, open Users and roles and choose Invite member. Enter the email, pick a role, and link the employee record.",
-        "Search the list for Deepa Kumar: the sign-in now shows as Suspended. To end anyone else's access, open the member's actions and choose Suspend."
+        "Search the list for Deepa Kumar: the sign-in now shows as Suspended. To end another member's access, open their actions, choose Suspend and confirm."
       ]
     },
     {
       "id": "monthly",
-      "chapter": "3 · Monthly detailed report",
+      "chapter": "3 · Monthly Attendance Report, Detailed",
       "beats": [
         "Now the reports. Open Reports, and choose the Monthly Attendance Report.",
         "Pick the month, and set the Layout to Detailed, which shows every day's IN and OUT times and hours.",
         "You can narrow it to a branch or a department. Keep PDF as the format, and choose Queue report.",
         "The report is built in the background and listed under My reports. When it is completed, choose View.",
-        "The detailed monthly report has one page per employee. Let's open it in a new tab and go through every column."
+        "With the Detailed layout, there is one page per employee. Let's open it in a new tab and go through every column."
       ]
     },
     {
@@ -76,37 +77,37 @@
       "beats": [
         "At the top: the employee number and name, the department, card number, shift and designation.",
         "Days counts the days of each attendance code. Arun had nineteen present days, one absence, eight weekly offs, one sick leave and one missed punch.",
-        "Then there is one row per day. Date is the day of the month, with the weekday.",
+        "Then there is a row for each IN and OUT pair, usually one per day. Date is the day of the month, with the weekday.",
         "Att Code is the day's attendance code: PR present, AB absent, OF weekly off, HL holiday, MP missed punch, and leave codes such as SL for sick leave or AL for annual leave.",
-        "IN Time and OUT Time are the first check-in and the last check-out, as recorded by the device.",
+        "IN Time and OUT Time are the first check-in and the last check-out, from the device or from an approved correction.",
         "Wrk Hrs is the time from IN to OUT, in hours and minutes. On the first, seven fifty-two to five oh six makes nine fourteen.",
         "Tot Hrs is the time actually worked, without the unpaid lunch hour: eight hours fourteen. Hours are written as hours dot minutes, so 8.14 means eight hours and fourteen minutes.",
-        "Base Hrs is what the shift requires: eight hours on a working day, and nothing on a weekly off or a holiday.",
-        "OT1 is overtime on a working day. On the third, Arun stayed until seven eighteen in the evening, which earned one hour thirty.",
-        "OT2 is overtime on a weekly off or a holiday. Working on Saturday the fifth earned three hours fifty-six.",
-        "UT is under time: the base hours not worked. A late start on the second left the day fifteen minutes short, and the missed punch on the seventh counts all eight hours until it is corrected.",
+        "Base Hrs is what the shift requires on a day with punches: eight hours here. Absences, leave, weekly offs and holidays show none.",
+        "OT1 is overtime on a working day, under your overtime rules. Here the first half hour after the shift doesn't count, and overtime is counted in half hours: leaving at seven eighteen on the third earned one hour thirty.",
+        "OT2 is overtime on a weekly off or a holiday, when your attendance settings count that work as overtime. Saturday the fifth earned three hours fifty-six.",
+        "UT is under time: Base Hrs minus Tot Hrs. A late start on the second left seven forty-five worked, fifteen minutes short, and the missed punch on the seventh counts all eight hours until it is corrected.",
         "The Total row adds up the month: Tot Hrs, Base Hrs, OT1, OT2 and UT. The legend at the end of the report lists every attendance code."
       ]
     },
     {
       "id": "yearly",
-      "chapter": "4 · Yearly detailed report",
+      "chapter": "4 · Detail Report for a whole year",
       "beats": [
         "For a yearly report, choose the Detail Report.",
-        "Set From to the first of January and To to the thirty-first of December, and add the employees you need. A Detail Report covers up to one full year.",
+        "Set From to the first of January and To to the thirty-first of December, and add the employees, up to sixty for a full year. A Detail Report covers up to one year.",
         "Queue the report, and view it when it is ready.",
-        "It has the same employee details at the top, and one row for every day of the year: three hundred and sixty-five rows for twenty twenty-five.",
+        "It has the same employee details at the top, without the Days line, and one row for every day of the year: three hundred and sixty-five rows for twenty twenty-five.",
         "The columns are the ones you just saw, in this order: Date, Att Code, IN Time, OUT Time, Base Hrs, Work Hrs, Tot Hrs, OT1, OT2 and UT.",
         "Work Hrs is the time from IN to OUT, like Wrk Hrs in the monthly report. Public holidays, such as New Year's Day, show as HL.",
-        "Remarks shows the reason recorded with an attendance correction, like this forgotten punch-out on the fourteenth of January.",
-        "On the last page, the Total row gives the whole year: eighteen hundred and seventy hours worked, twenty and a half hours of OT1, nearly twelve hours of OT2, and thirty-eight hours of under time."
+        "Remarks shows the reason given with an approved attendance correction, like this forgotten punch-out on the fourteenth of January.",
+        "After the last day, the totals row gives the whole year: eighteen hundred and seventy hours worked, twenty and a half hours of OT1, nearly twelve hours of OT2, and thirty-eight hours of under time."
       ]
     },
     {
       "id": "outro",
       "title": "That's it",
       "beats": [
-        "Reports can also be downloaded as Excel or CSV, and stay under My reports for seven days. For one line per employee over a whole year, use the Summary Report with the same dates."
+        "To get a spreadsheet instead, choose Excel or CSV as the format. Files can be downloaded from My reports for seven days. For one line per employee over a whole year, use the Summary Report with the same dates."
       ]
     }
   ]

@@ -1,0 +1,168 @@
+1
+00:00:00,844 --> 00:00:12,613
+This short guide shows how to add a user in FlowZa Time, how to remove a user and add a new one, and how to generate the monthly and yearly detailed reports, with every column explained.
+
+2
+00:00:16,196 --> 00:00:26,064
+In FlowZa Time, the people who punch in on your attendance devices are your employees, and every employee who hasn't left counts as one user of your subscription.
+
+3
+00:00:26,118 --> 00:00:29,503
+To add one, open Employees and choose Add employee.
+
+4
+00:00:29,554 --> 00:00:34,700
+Enter a unique employee number, then the first and last name, and the email address.
+
+5
+00:00:40,073 --> 00:00:47,151
+Under Employment, check the joining date, then choose the branch, the department, the designation and the line manager.
+
+6
+00:00:55,662 --> 00:01:04,930
+Under Device identity, leave the device user ID empty to have one assigned automatically, and add a card number if the employee uses a card.
+
+7
+00:01:04,980 --> 00:01:12,540
+Choose Create employee. The new user is saved and, by default, sent to the attendance devices of the employee's branch.
+
+8
+00:01:16,472 --> 00:01:24,305
+When every user of your subscription is in use, the Employees page shows Maximum users reached, and Add employee is switched off.
+
+9
+00:01:24,358 --> 00:01:33,109
+To free a user, archive someone who has left. Deepa Kumar has left the company, so open the profile and go to the Danger zone tab.
+
+10
+00:01:33,162 --> 00:01:37,685
+Choose Archive employee, check the exit date, add a reason, and confirm.
+
+11
+00:01:39,644 --> 00:01:50,406
+The employee is marked as terminated and removed from every device, and a linked sign-in is suspended too. The attendance history is kept, and one user is free again.
+
+12
+00:01:50,461 --> 00:01:57,649
+Now choose Add employee and enter the new joiner exactly as before: the employee number, the name and the email.
+
+13
+00:02:01,125 --> 00:02:04,752
+Then the branch, department, designation and line manager.
+
+14
+00:02:15,513 --> 00:02:19,228
+Choose Create employee, and the new joiner takes the free user.
+
+15
+00:02:19,280 --> 00:02:29,034
+To let the new person sign in to FlowZa Time, open Users and roles and choose Invite member. Enter the email, pick a role, and link the employee record.
+
+16
+00:02:35,436 --> 00:02:45,232
+Search the list for Deepa Kumar: the sign-in now shows as Suspended. To end another member's access, open their actions, choose Suspend and confirm.
+
+17
+00:02:47,919 --> 00:02:52,728
+Now the reports. Open Reports, and choose the Monthly Attendance Report.
+
+18
+00:02:52,778 --> 00:02:59,155
+Pick the month, and set the Layout to Detailed, which shows every day's IN and OUT times and hours.
+
+19
+00:02:59,206 --> 00:03:05,630
+You can narrow it to a branch or a department. Keep PDF as the format, and choose Queue report.
+
+20
+00:03:05,680 --> 00:03:11,849
+The report is built in the background and listed under My reports. When it is completed, choose View.
+
+21
+00:03:12,510 --> 00:03:19,605
+With the Detailed layout, there is one page per employee. Let's open it in a new tab and go through every column.
+
+22
+00:03:20,262 --> 00:03:26,043
+At the top: the employee number and name, the department, card number, shift and designation.
+
+23
+00:03:26,095 --> 00:03:35,187
+Days counts the days of each attendance code. Arun had nineteen present days, one absence, eight weekly offs, one sick leave and one missed punch.
+
+24
+00:03:35,239 --> 00:03:42,338
+Then there is a row for each IN and OUT pair, usually one per day. Date is the day of the month, with the weekday.
+
+25
+00:03:42,388 --> 00:03:55,741
+Att Code is the day's attendance code: PR present, AB absent, OF weekly off, HL holiday, MP missed punch, and leave codes such as SL for sick leave or AL for annual leave.
+
+26
+00:03:55,792 --> 00:04:02,527
+IN Time and OUT Time are the first check-in and the last check-out, from the device or from an approved correction.
+
+27
+00:04:02,580 --> 00:04:11,388
+Wrk Hrs is the time from IN to OUT, in hours and minutes. On the first, seven fifty-two to five oh six makes nine fourteen.
+
+28
+00:04:11,441 --> 00:04:23,615
+Tot Hrs is the time actually worked, without the unpaid lunch hour: eight hours fourteen. Hours are written as hours dot minutes, so 8.14 means eight hours and fourteen minutes.
+
+29
+00:04:23,670 --> 00:04:32,300
+Base Hrs is what the shift requires on a day with punches: eight hours here. Absences, leave, weekly offs and holidays show none.
+
+30
+00:04:32,350 --> 00:04:46,256
+OT1 is overtime on a working day, under your overtime rules. Here the first half hour after the shift doesn't count, and overtime is counted in half hours: leaving at seven eighteen on the third earned one hour thirty.
+
+31
+00:04:46,308 --> 00:04:56,845
+OT2 is overtime on a weekly off or a holiday, when your attendance settings count that work as overtime. Saturday the fifth earned three hours fifty-six.
+
+32
+00:04:56,896 --> 00:05:10,601
+UT is under time: Base Hrs minus Tot Hrs. A late start on the second left seven forty-five worked, fifteen minutes short, and the missed punch on the seventh counts all eight hours until it is corrected.
+
+33
+00:05:10,653 --> 00:05:21,286
+The Total row adds up the month: Tot Hrs, Base Hrs, OT1, OT2 and UT. The legend at the end of the report lists every attendance code.
+
+34
+00:05:25,203 --> 00:05:28,257
+For a yearly report, choose the Detail Report.
+
+35
+00:05:28,308 --> 00:05:38,540
+Set From to the first of January and To to the thirty-first of December, and add the employees, up to sixty for a full year. A Detail Report covers up to one year.
+
+36
+00:05:38,590 --> 00:05:41,088
+Queue the report, and view it when it is ready.
+
+37
+00:05:46,735 --> 00:05:57,304
+It has the same employee details at the top, without the Days line, and one row for every day of the year: three hundred and sixty-five rows for twenty twenty-five.
+
+38
+00:05:57,355 --> 00:06:08,315
+The columns are the ones you just saw, in this order: Date, Att Code, IN Time, OUT Time, Base Hrs, Work Hrs, Tot Hrs, OT1, OT2 and UT.
+
+39
+00:06:08,366 --> 00:06:17,536
+Work Hrs is the time from IN to OUT, like Wrk Hrs in the monthly report. Public holidays, such as New Year's Day, show as HL.
+
+40
+00:06:17,589 --> 00:06:25,255
+Remarks shows the reason given with an approved attendance correction, like this forgotten punch-out on the fourteenth of January.
+
+41
+00:06:25,307 --> 00:06:38,077
+After the last day, the totals row gives the whole year: eighteen hundred and seventy hours worked, twenty and a half hours of OT1, nearly twelve hours of OT2, and thirty-eight hours of under time.
+
+42
+00:06:39,073 --> 00:06:53,133
+To get a spreadsheet instead, choose Excel or CSV as the format. Files can be downloaded from My reports for seven days. For one line per employee over a whole year, use the Summary Report with the same dates.
+

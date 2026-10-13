@@ -2,7 +2,7 @@
 
 | File | What it is |
 |---|---|
-| `FlowZa-Time-Users-and-Reports.mp4` | __DURATION__ narrated how-to, 1920×1080, H.264/AAC, −16 LUFS, English caption track embedded |
+| `FlowZa-Time-Users-and-Reports.mp4` | 6 min 54 s narrated how-to, 1920×1080, H.264/AAC, −16 LUFS, English caption track embedded |
 | `captions.en.srt` | The same captions as a sidecar file (for YouTube, LinkedIn, LMS uploads) |
 | `sample-monthly-attendance-detailed-2026-09.pdf` | The Monthly Attendance Report (Detailed layout) the video walks through |
 | `sample-detail-report-2025.pdf` | The yearly Detail Report (1 Jan – 31 Dec 2025) the video walks through |
@@ -12,44 +12,55 @@
 
 | Time | Chapter |
 |---|---|
-__CHAPTERS__
+| 0:00 | Introduction |
+| 0:13 | 1 · Add a user — Employees → Add employee: number, name, email, branch, department, designation, line manager, device identity |
+| 1:13 | 2 · Remove a user and add a new one — Maximum users reached, Danger zone → Archive employee, the replacement, Users & roles → Invite member, Suspend |
+| 2:44 | 3 · Monthly Attendance Report, Detailed — request it, My reports, View, open in a new tab |
+| 3:19 | Reading the monthly report — employee details, Days, Date, Att Code, IN/OUT Time, Wrk Hrs, Tot Hrs, Base Hrs, OT1, OT2, UT, Total, legend |
+| 5:22 | 4 · Detail Report for a whole year — 1 Jan to 31 Dec, column order, Work Hrs, HL, Remarks, the year's totals |
+| 6:38 | Recap — Excel/CSV, seven days in My reports, the Summary Report |
 
 ## The report columns
 
-Both reports print the same identity block per employee and one row per day. The examples are the figures in the sample
-PDFs (Arun Menon, September 2026; Salim Al Hinai, 2025).
+Both reports print an identity block per employee and a row per day (the monthly report prints a row per IN/OUT pair: one
+per day under the default first/last punch rule, one per visit when punches are paired, with the hours on the day's last
+row). The examples are the figures in the sample PDFs (Arun Menon, September 2026; Salim Al Hinai, 2025).
 
 | Column | Meaning | Example |
 |---|---|---|
 | Employee, Dept, Card No, Shift, Designation | Who the page is about: employee number and name, department, card number, shift (as at the end of the period), designation | MG-1010 Arun Menon · Information Technology · Office Hours 08:00–17:00 |
 | Days (monthly) | Days per attendance code in the month (plus LOP days when there are any) | PR 19 · AB 1 · OF 8 · SL 1 · MP 1 |
 | Date | The day, with its weekday | 01-Sep-26 Tue |
-| Att Code | The day's attendance code: PR present, AB absent, OF weekly off, HL holiday, HDP / HDL half day present / on leave, MP missed punch, or the leave type's own code (AL annual, SL sick…). The legend at the end of each report lists the codes in use | 14-Sep-26 AB, 07-Sep-26 MP |
-| IN Time / OUT Time | First check-in and last check-out recorded by the device | 7:52 am / 5:06 pm |
+| Att Code | The day's attendance code: PR present, AB absent, OF weekly off, HL holiday, HDP / HDL half day present / on leave, MP missed punch, or the leave type's own code (AL annual, SL sick…). The legend at the end of each report lists every code, the organisation's leave types included | 14-Sep-26 AB, 07-Sep-26 MP |
+| IN Time / OUT Time | First check-in and last check-out of the day: device punches, plus any approved correction | 7:52 am / 5:06 pm |
 | Wrk Hrs (monthly) / Work Hrs (Detail Report) | Time from IN to OUT, in hours:minutes | 9:14 |
 | Tot Hrs | Time actually worked, without unpaid breaks (the lunch hour) | 8.14 |
-| Base Hrs | Hours the shift requires that day; none on a weekly off or holiday | 8.00 |
-| OT1 | Overtime on a working day, under the organisation's overtime rules | 03-Sep-26: out at 7:18 pm → 1.30 |
-| OT2 | Overtime on a weekly off or a holiday | 05-Sep-26 (Saturday) → 3.56 |
-| UT | Under time: Base Hrs not worked. A missed punch counts the whole base until it is corrected | 02-Sep-26 → 0.15; 07-Sep-26 (MP) → 8.00 |
+| Base Hrs | Hours the shift requires on a day with punches; blank on absences, leave, weekly offs and holidays | 8.00 |
+| OT1 | Overtime on a working day, under the organisation's overtime rules (here: the first 30 min after the shift do not count, then whole half hours) | 03-Sep-26: out at 7:18 pm → 1.30 |
+| OT2 | Overtime on a weekly off or a holiday, when Settings → Attendance counts that work as overtime (new organisations only record it) | 05-Sep-26 (Saturday) → 3.56 |
+| UT | Under time: Base Hrs minus Tot Hrs. A missed punch counts the whole base until it is corrected | 02-Sep-26: 8.00 − 7.45 → 0.15; 07-Sep-26 (MP) → 8.00 |
 | Remarks (Detail Report) | The reason recorded with an approved attendance correction | 14-Jan-25: Forgot to punch out |
-| Total row | The period's sums: Tot Hrs, Base Hrs (monthly), OT1, OT2, UT | 2025: 1870.16 · 20.30 · 11.45 · 38.20 |
+| Total row | The period's sums: Tot Hrs, Base Hrs (monthly), OT1, OT2, UT; unlabelled on the Detail Report, after each employee's last day | 2025: 1870.16 · 20.30 · 11.45 · 38.20 |
 
 Hours are printed as hours.minutes (`8.14` is 8 h 14 min, not a decimal); a tenant can switch to `hh:mm` under
 Settings → Reports. Report layouts, codes and the notation are documented in `docs/reports.md`.
 
 ## Points the video relies on
 
-- Each active employee is one user of the subscription; the user limit is set by the platform (55 in the demo). At the limit
+- Each employee who has not left (not archived, terminated or resigned) is one user of the subscription; the user limit
+  is set by a platform admin (55 users in the video's demo data; the seeded demo tenant falls back to its plan's limit). At the limit
   the Employees page shows "Maximum users reached" and Add employee is disabled; archiving an employee (Danger zone →
-  Archive employee) frees the user. Archiving marks the employee terminated, removes them from every device, suspends a
-  linked sign-in (`apps/api/src/services/offboarding.ts`) and keeps the attendance history.
+  Archive employee) frees the user. Archiving records the status Terminated (whatever the reason; only support can reverse
+  it), removes the employee from every device, suspends a linked sign-in (`apps/api/src/services/offboarding.ts`) and keeps
+  the attendance history. New employees are pushed to the devices of their branch while Settings → Device synchronisation →
+  "Push new employees automatically" is on (the default).
 - Signing in is separate from being an employee: Users & roles → Invite member (role, branch scope, linked employee).
   Inviting needs `user.manage` (Organisation Admin or Owner; HR Admin can add and archive employees but not invite), so the
   video is recorded as the demo tenant's Organisation Admin.
 - "Monthly detailed" is the Monthly Attendance Report with Layout = Detailed. "Yearly detailed" is the Detail Report with
-  From = 1 January and To = 31 December; it covers at most one year. For one line per employee over a year, the Summary
-  Report takes the same dates.
+  From = 1 January and To = 31 December; it covers at most one year, and a full year fits 62 employees per file (the
+  250,000-cell cap). For one line per employee over a year, the Summary Report takes the same dates. The format (PDF, Excel,
+  CSV) is chosen when the report is requested; files can be downloaded from My reports for seven days.
 
 ## How it was made
 
@@ -59,9 +70,10 @@ Settings → Reports. Report layouts, codes and the notation are documented in `
   captions, the chapter cards and the highlight boxes are an overlay drawn for the recording (`scripts/overlay.js`).
 - **The reports are real output**: `scripts/gen-reports.ts` seeds the Majan Gulf IT team into a local Postgres with every
   migration applied, feeds 21 months of raw device punches through the worker's own NORMALIZE_RAW and RECOMPUTE_DAILY
-  (the attendance engine, with the demo tenant's "Company standard" rule set and Oman holidays), applies one correction,
-  and runs GENERATE_REPORT with the Chromium PDF renderer. A few days are pinned so the pages show every code and every
-  hours column; the rest is generated.
+  (the attendance engine, with the demo tenant's "Company standard" rule set, Oman holidays and weekly-off/holiday work
+  set to count as overtime), applies one correction, and runs GENERATE_REPORT with the Chromium PDF renderer. A few days
+  are pinned so the pages show the everyday codes (PR, AB, OF, MP) and every hours column; leave and holidays come from
+  the seeded leave records and calendar, the rest is generated.
 - **The report viewer is a stand-in**: headless Chromium has no PDF viewer, so the report's signed URL serves
   `scripts/viewer.html`, which shows the PDF's own pages (rendered by `pdftoppm`) and places highlights from the PDF's word
   positions (`pdftotext -bbox`). In a normal browser the same link opens the browser's PDF viewer.
@@ -83,13 +95,17 @@ curl -L -o "$TOOLS/model/kokoro-v1.0.onnx" https://github.com/thewh1teagle/kokor
 curl -L -o "$TOOLS/model/voices-v1.0.bin" https://github.com/thewh1teagle/kokoro-onnx/releases/download/model-files-v1.0/voices-v1.0.bin
 ```
 
-Also needed: `pnpm install` and `pnpm build:packages`, the local Postgres of `scripts/local-pg.sh` (running), a Chromium
-binary, `ffmpeg`, `poppler-utils` (`pdftoppm`, `pdftotext`) and the Inter font. Then, from the repository root:
+Also needed: `pnpm install` and `pnpm build:packages`, the local Postgres of the repository's `scripts/local-pg.sh`
+(running), a Chromium binary, `ffmpeg`, `poppler-utils` (`pdftoppm`, `pdftotext`), the Inter font (overlay) and Noto Sans
+(the reports' print font, as on the reports worker; without it the PDFs fall back to Liberation Sans). Then, from the repository root:
 
 ```bash
 TOOLS=~/flowza-media-tools CHROMIUM_PATH=/path/to/chrome bash docs/media/users-reports/scripts/make.sh
 ```
 
-Work files go to `$WORK` (default `~/.cache/flowza-users-reports`); keep it between runs and only edited narration lines are
-voiced again. The scripts that import app code are copied into `apps/worker/.media-gen/` and `apps/web/.media-gen/` for the
+`REUSE_REPORTS=1` keeps the reports already in `$WORK/reports` when only the narration or the recording changed.
+
+Work files go to `$WORK` (default `${XDG_CACHE_HOME:-~/.cache}/flowza-users-reports`); keep it between runs and only edited narration lines are
+voiced again. The web bundle (`apps/web/dist-e2e`) is rebuilt on every run, so the video always shows the current UI. The
+scripts that import app code are copied into `apps/worker/.media-gen/` and `apps/web/.media-gen/` for the
 run and removed afterwards.

@@ -132,7 +132,8 @@ async function scrollTo(target: Locator) {
 }
 
 /** One narration line: caption on, actions run, and it lasts at least as long as its voice clip (+ a short pause). */
-async function line(scene: string, i: number, act?: (at: (s: number) => Promise<void>) => Promise<unknown>, opts: { wide?: boolean } = {}) {
+type Cue = (phrase: string, after?: string) => Promise<void>;
+async function line(scene: string, i: number, act?: (cue: Cue, at: (s: number) => Promise<void>) => Promise<unknown>, opts: { wide?: boolean } = {}) {
   const text = SCRIPT.scenes.find((s) => s.id === scene)!.beats[i]!;
   const dur = VOICE[scene]![i]!;
   const t = now();
@@ -141,7 +142,13 @@ async function line(scene: string, i: number, act?: (at: (s: number) => Promise<
   lines.push({ scene, i, t, dur, text, wide });
   await caption(text, wide);
   const at = async (s: number) => { const wait = t + s - now(); if (wait > 0) await sleep(wait * 1000); };
-  if (act) await act(at);
+  // when the voice reaches a phrase: speech runs at an even pace, so its share of the text is its share of the clip
+  const cue: Cue = (phrase, after) => {
+    const k = text.indexOf(phrase, after ? text.indexOf(after) : 0);
+    if (k < 0) throw new Error(`cue "${phrase}" is not in ${scene} ${i}`);
+    return at(Math.max(0, dur * (k / text.length) - 0.15));
+  };
+  if (act) await act(cue, at);
   await at(dur + GAP / 1000);
 }
 async function chapter(scene: string, under?: () => Promise<unknown>) {
@@ -164,6 +171,9 @@ const union = (rs: Rect[]): Rect => { const x0 = Math.min(...rs.map((r) => r.x))
 class Layout {
   words: Word[];
   constructor(key: string) { this.words = JSON.parse(fs.readFileSync(path.join(MEDIA, `${key}.words.json`), 'utf8')); }
+  /** the last place a word is printed (its page varies with the font and the data) */
+  last(t: string) { const w = this.words.filter((x) => x.t === t).at(-1); if (!w) throw new Error(`no word ${t}`); return w; }
+  get pages() { return Math.max(...this.words.map((w) => w.p)) + 1; }
   word(p: number, t: string, after = 0) { const w = this.words.find((x) => x.p === p && x.t === t && x.y >= after); if (!w) throw new Error(`no word ${t} on page ${p}`); return w; }
   /** header labels of the day table on page p → their rects */
   header(p: number, labels: string[]) {
@@ -281,7 +291,7 @@ test('record the users and reports how-to', async ({ page, context }) => {
   await page.getByText('Majan Gulf').first().waitFor();
   await sleep(1500);
   const intro = SCRIPT.scenes.find((s) => s.id === 'intro')!;
-  await card({ kicker: 'How-to guide', title: intro.title, items: ['Add a user', 'Remove a user and add a new one', 'Monthly detailed report', 'Yearly detailed report'] });
+  await card({ kicker: 'How-to guide', title: intro.title, items: ['Add a user', 'Remove a user and add a new one', 'Monthly Attendance Report (Detailed)', 'Detail Report for a whole year'] });
   await sleep(700);
   await cast.attach(page);
   await sleep(900);
@@ -298,12 +308,12 @@ test('record the users and reports how-to', async ({ page, context }) => {
   // ---- 1 · add a user
   await chapter('add');
   await line('add', 0, async () => { await sleep(1800); await moveTo(nav('Employees'), 900); });
-  await line('add', 1, async (at) => {
+  await line('add', 1, async (cue) => {
     await click(nav('Employees'));
     await page.getByRole('button', { name: 'Add employee' }).waitFor();
     await sleep(500);
     await spot(page.getByTestId('user-limit-banner'));
-    await at(3.2);
+    await cue('choose Add employee');
     await spot(null);
     await click(page.getByRole('button', { name: 'Add employee' }));
     await page.locator('#emp-number').waitFor();
@@ -345,10 +355,10 @@ test('record the users and reports how-to', async ({ page, context }) => {
     mouse.set(page, { x: 980, y: 420 });
     await rec('cursor', 980, 420);
   });
-  await line('replace', 0, async (at) => {
+  await line('replace', 0, async (cue) => {
     await sleep(400);
     await spot(page.getByTestId('user-limit-banner'));
-    await at(4.2);
+    await cue('and Add employee');
     await spot(page.getByRole('button', { name: 'Add employee' }));
     await moveTo(page.getByRole('button', { name: 'Add employee' }), 800);
   });
@@ -374,10 +384,10 @@ test('record the users and reports how-to', async ({ page, context }) => {
     await type(page.locator('#dz-reason'), 'Resigned', 70);
     await click(dialog.getByRole('button', { name: 'Archive employee' }));
   });
-  await line('replace', 3, async (at) => {
+  await line('replace', 3, async (cue) => {
     await page.getByRole('button', { name: 'Add employee' }).waitFor();
     await sleep(900);
-    await at(6.5);
+    await cue('one user is free');
     await spot(page.getByTestId('user-limit-meter').first());
   });
   await spot(null);
@@ -395,11 +405,12 @@ test('record the users and reports how-to', async ({ page, context }) => {
     await pick(page.locator('#emp-desig'), 'Customer Support Executive', 'Custom', 'fast');
     await pick(page.locator('#emp-manager'), /Faisal Al Rawahi/, 'Faisal', 'fast');
     await type(page.locator('#emp-card'), '0100000028', 20);
-    await click(page.getByRole('button', { name: 'Create employee' }));
-    await page.getByRole('heading', { name: 'Yousuf Al Hashmi' }).waitFor();
-    await sleep(600);
   });
   await line('replace', 6, async () => {
+    await click(page.getByRole('button', { name: 'Create employee' }));
+    await page.getByRole('heading', { name: 'Yousuf Al Hashmi' }).waitFor();
+  });
+  await line('replace', 7, async () => {
     await click(nav('Users & roles'));
     await page.getByRole('button', { name: 'Invite member' }).waitFor();
     await sleep(300);
@@ -413,7 +424,7 @@ test('record the users and reports how-to', async ({ page, context }) => {
     await sleep(1500);
     await click(page.getByRole('dialog').getByRole('button', { name: 'Close' }).last());
   });
-  await line('replace', 7, async (at) => {
+  await line('replace', 8, async (cue) => {
     // the search puts Deepa Kumar's row at the top, clear of the caption
     const search = page.getByPlaceholder('Search name or email…');
     await type(search, 'Deepa', 70);
@@ -421,7 +432,7 @@ test('record the users and reports how-to', async ({ page, context }) => {
     await deepa.waitFor();
     await sleep(500);
     await spot(deepa);
-    await at(4.6);
+    await cue('To end another');
     await spot(null);
     await search.fill('');
     await page.locator('tbody tr').filter({ hasText: 'Aisha Al Rawahi' }).first().waitFor();
@@ -470,7 +481,7 @@ test('record the users and reports how-to', async ({ page, context }) => {
   });
   const monthlyTab = await (async () => {
     let tab!: Page;
-    await line('monthly', 4, async (at) => { await at(3.6); tab = await openReportTab(context); });
+    await line('monthly', 4, async (cue) => { await cue("Let's open"); tab = await openReportTab(context); });
     return tab;
   })();
 
@@ -490,38 +501,38 @@ test('record the users and reports how-to', async ({ page, context }) => {
   await line('columns', 0, async () => { await v.focus(0, pad(identR, 6), { fill: 0.92 }); await sleep(1100); await v.mark(0, [union([m.word(0, 'Employee:'), m.word(0, 'Designation:'), m.word(0, 'Lead')]), union([m.word(0, 'Dept:'), m.word(0, 'Shift:'), m.word(0, '08:00–17:00'), m.word(0, 'Technology')])]); });
   await line('columns', 1, async () => { await v.mark(0, [days], { tag: 'Days', dim: true }); });
   await line('columns', 2, async () => { await v.focus(0, pad(top, 4), { fill: 0.95 }); await sleep(900); await v.mark(0, [mc('Date')], { tag: 'Date', dim: true }); });
-  await line('columns', 3, async (at) => {
+  await line('columns', 3, async (cue) => {
     await v.mark(0, [mc('Att Code')], { tag: 'Att Code', dim: true });
     const code = (d: string) => cell(mc('Att Code'), mrow(d));
-    await at(3.6); await v.mark(0, [code('01-Sep-26 Tue'), code('02-Sep-26 Wed'), code('03-Sep-26 Thu')], { tag: 'PR' });
-    await at(5.0); await v.focus(0, pad({ x: L, y: mh.y - 4, w: R - L, h: mrow('14-Sep-26 Mon').y + 12 - mh.y }, 4), { fill: 0.95 }); await v.mark(0, [code('14-Sep-26 Mon')], { tag: 'AB' });
-    await at(6.6); await v.mark(0, [code('04-Sep-26 Fri'), code('05-Sep-26 Sat'), code('11-Sep-26 Fri'), code('12-Sep-26 Sat')], { tag: 'OF' });
-    await at(9.4); await v.mark(0, [code('07-Sep-26 Mon')], { tag: 'MP' });
-    await at(11.6); await v.focus(0, pad({ x: L, y: mrow('11-Sep-26 Fri').y - 4, w: R - L, h: mrow('26-Sep-26 Sat').y - mrow('11-Sep-26 Fri').y + 14 }, 4), { fill: 0.95 }); await v.mark(0, [code('22-Sep-26 Tue')], { tag: 'SL' });
+    await cue('PR present'); await v.mark(0, [code('01-Sep-26 Tue'), code('02-Sep-26 Wed'), code('03-Sep-26 Thu')], { tag: 'PR' });
+    await cue('AB absent'); await v.focus(0, pad({ x: L, y: mh.y - 4, w: R - L, h: mrow('14-Sep-26 Mon').y + 12 - mh.y }, 4), { fill: 0.95 }); await v.mark(0, [code('14-Sep-26 Mon')], { tag: 'AB' });
+    await cue('OF weekly'); await v.mark(0, [code('04-Sep-26 Fri'), code('05-Sep-26 Sat'), code('11-Sep-26 Fri'), code('12-Sep-26 Sat')], { tag: 'OF' });
+    await cue('MP missed'); await v.mark(0, [code('07-Sep-26 Mon')], { tag: 'MP' });
+    await cue('SL for'); await v.focus(0, pad({ x: L, y: mrow('11-Sep-26 Fri').y - 4, w: R - L, h: mrow('26-Sep-26 Sat').y - mrow('11-Sep-26 Fri').y + 14 }, 4), { fill: 0.95 }); await v.mark(0, [code('22-Sep-26 Tue')], { tag: 'SL' });
   });
   await line('columns', 4, async () => { await v.focus(0, pad(top, 4), { fill: 0.95 }); await v.mark(0, [mc('IN Time'), mc('OUT Time')], { tag: 'IN Time · OUT Time' }); });
   const r1 = mrow('01-Sep-26 Tue');
-  await line('columns', 5, async (at) => { await v.mark(0, [mc('Wrk Hrs')], { tag: 'Wrk Hrs', dim: true }); await at(4.6); await v.mark(0, [cell(union([mc('IN Time'), mc('OUT Time')]), r1), cell(mc('Wrk Hrs'), r1)], { tag: '7:52 am → 5:06 pm = 9:14' }); });
-  await line('columns', 6, async (at) => { await v.mark(0, [mc('Tot Hrs')], { tag: 'Tot Hrs', dim: true }); await at(4.4); await v.mark(0, [cell(mc('Tot Hrs'), r1)], { tag: '8.14 = 8 h 14 min' }); });
-  await line('columns', 7, async (at) => { await v.mark(0, [mc('Base Hrs')], { tag: 'Base Hrs', dim: true }); await at(5.4); await v.mark(0, [cell(mc('Base Hrs'), mrow('05-Sep-26 Sat'))], { tag: 'weekly off: none' }); });
-  await line('columns', 8, async (at) => { await v.mark(0, [mc('OT1')], { tag: 'OT1', dim: true }); await at(3.0); const r3 = mrow('03-Sep-26 Thu'); await v.mark(0, [cell(mc('OUT Time'), r3), cell(mc('OT1'), r3)], { tag: 'OT1 1.30' }); });
-  await line('columns', 9, async (at) => { await v.mark(0, [mc('OT2')], { tag: 'OT2', dim: true }); await at(3.6); const r5 = mrow('05-Sep-26 Sat'); await v.mark(0, [cell(mc('Att Code'), r5), cell(mc('OT2'), r5)], { tag: 'OT2 3.56' }); });
-  await line('columns', 10, async (at) => {
+  await line('columns', 5, async (cue) => { await v.mark(0, [mc('Wrk Hrs')], { tag: 'Wrk Hrs', dim: true }); await cue('On the first'); await v.mark(0, [cell(union([mc('IN Time'), mc('OUT Time')]), r1), cell(mc('Wrk Hrs'), r1)], { tag: '7:52 am → 5:06 pm = 9:14' }); });
+  await line('columns', 6, async (cue) => { await v.mark(0, [mc('Tot Hrs')], { tag: 'Tot Hrs', dim: true }); await cue('eight hours fourteen'); await v.mark(0, [cell(mc('Tot Hrs'), r1)], { tag: '8.14 = 8 h 14 min' }); });
+  await line('columns', 7, async (cue) => { await v.mark(0, [mc('Base Hrs')], { tag: 'Base Hrs', dim: true }); await cue('Absences'); await v.mark(0, ['04-Sep-26 Fri', '05-Sep-26 Sat', '14-Sep-26 Mon'].map((d) => cell(mc('Base Hrs'), mrow(d))), { tag: 'none' }); });
+  await line('columns', 8, async (cue) => { await v.mark(0, [mc('OT1')], { tag: 'OT1', dim: true }); await cue('leaving at seven'); const r3 = mrow('03-Sep-26 Thu'); await v.mark(0, [cell(mc('OUT Time'), r3), cell(mc('OT1'), r3)], { tag: 'out 7:18 pm → OT1 1.30' }); });
+  await line('columns', 9, async (cue) => { await v.mark(0, [mc('OT2')], { tag: 'OT2', dim: true }); await cue('Saturday the fifth'); const r5 = mrow('05-Sep-26 Sat'); await v.mark(0, [cell(mc('Att Code'), r5), cell(mc('OT2'), r5)], { tag: 'OT2 3.56' }); });
+  await line('columns', 10, async (cue) => {
     await v.mark(0, [mc('UT')], { tag: 'UT', dim: true });
-    await at(3.4); const r2 = mrow('02-Sep-26 Wed'); await v.mark(0, [cell(mc('IN Time'), r2), cell(mc('UT'), r2)], { tag: 'UT 0.15' });
-    await at(7.4); const r7 = mrow('07-Sep-26 Mon'); await v.mark(0, [cell(mc('Att Code'), r7), cell(mc('UT'), r7)], { tag: 'MP: UT 8.00' });
+    await cue('A late start'); const r2 = mrow('02-Sep-26 Wed'); await v.mark(0, [cell(mc('IN Time'), r2), cell(mc('Tot Hrs'), r2), cell(mc('UT'), r2)], { tag: '8.00 − 7.45 = UT 0.15' });
+    await cue('the missed punch'); const r7 = mrow('07-Sep-26 Mon'); await v.mark(0, [cell(mc('Att Code'), r7), cell(mc('UT'), r7)], { tag: 'MP: UT 8.00' });
   });
-  await line('columns', 11, async (at) => {
+  await line('columns', 11, async (cue) => {
     const tot = m.row(0, 'Total', L, R);
     await v.focus(0, pad({ x: L, y: mrow('20-Sep-26 Sun').y - 4, w: R - L, h: tot.y + tot.h - mrow('20-Sep-26 Sun').y + 8 }, 4), { fill: 0.95 });
     await sleep(900);
     await v.mark(0, [tot], { tag: 'Total', dim: true });
-    await at(5.4);
-    const note = m.word(4, 'NOTE');
-    const legend = union(m.words.filter((w) => w.p === 4 && w.y >= note.y - 1 && w.y < note.y + 30));
-    await v.focus(4, pad(legend, 10), { fill: 0.9, ms: 1400 });
+    await cue('The legend');
+    const note = m.last('NOTE');
+    const legend = union(m.words.filter((w) => w.p === note.p && w.y >= note.y - 1 && w.y < note.y + 30));
+    await v.focus(note.p, pad(legend, 10), { fill: 0.9, ms: 1400 });
     await sleep(1300);
-    await v.mark(4, [legend], { tag: 'Legend' });
+    await v.mark(note.p, [legend], { tag: 'Legend' });
   });
   await caption(null);
   await v.clear();
@@ -561,43 +572,44 @@ test('record the users and reports how-to', async ({ page, context }) => {
   });
   const y = new Layout('yearly');
   const YCOLS = ['Date', 'Att Code', 'IN Time', 'OUT Time', 'Base Hrs', 'Work Hrs', 'Tot Hrs', 'OT1', 'OT2', 'UT', 'Remarks'];
-  const yLast = y.word(6, '1870.16');
-  const { hd: yh, col: yc } = y.columns(0, YCOLS, 820);
+  const yLast = y.last('1870.16');
+  // the table ends at the last date printed on the page (the page footer is not part of any column)
+  const lastRow = Math.max(...y.words.filter((w) => w.p === 0 && /^\d\d-[A-Z][a-z]{2}-\d\d$/.test(w.t)).map((w) => w.y + w.h));
+  const { hd: yh, col: yc } = y.columns(0, YCOLS, lastRow);
   const YR = 559;
   const yrow = (d: string) => y.row(0, d, yh.left, YR);
   let yearlyTab!: Page;
-  await line('yearly', 3, async (at) => {
+  await line('yearly', 3, async (cue) => {
     yearlyTab = await openReportTab(context);
     const yv = viewer(yearlyTab);
     await sleep(500);
-    await at(5.2);
+    await cue('one row for every day');
     // the year at a glance: down through the pages, then back to January
-    await yearlyTab.evaluate(() => (window as never as { viewer: { focus: (...a: unknown[]) => void } }).viewer.focus(3, { x: 0, y: 0, w: 595, h: 842 }, { fill: 0.98, maxScale: 0.32, minScale: 0.15, ms: 1500 }));
+    await yearlyTab.evaluate((p) => (window as never as { viewer: { focus: (...a: unknown[]) => void } }).viewer.focus(p, { x: 0, y: 0, w: 595, h: 842 }, { fill: 0.98, maxScale: 0.32, minScale: 0.15, ms: 1500 }), Math.floor((y.pages - 1) / 2));
     await sleep(2300);
     await yv.focus(0, pad({ x: yh.left, y: yh.y - 60, w: YR - yh.left, h: yrow('16-Jan-25 Thu').y - yh.y + 72 }, 4), { fill: 0.95, ms: 1300 });
   });
   const yv = viewer(yearlyTab);
-  await line('yearly', 4, async (at) => {
-    const step = (VOICE['yearly']![4]! - 4.2) / YCOLS.length;
-    for (const [i, k] of YCOLS.slice(0, 10).entries()) { await at(3.9 + i * step); await yv.mark(0, [yc(k)], { tag: k }); }
+  await line('yearly', 4, async (cue) => {
+    for (const k of YCOLS.slice(0, 10)) { await cue(k === 'Date' ? 'Date,' : k === 'UT' ? 'and UT' : k, 'in this order'); await yv.mark(0, [yc(k)], { tag: k }); }
   });
-  await line('yearly', 5, async (at) => {
+  await line('yearly', 5, async (cue) => {
     await yv.mark(0, [yc('Work Hrs')], { tag: 'Work Hrs', dim: true });
-    await at(4.6);
+    await cue('Public holidays');
     await yv.mark(0, [cell(yc('Att Code'), yrow('01-Jan-25 Wed'))], { tag: 'HL' });
   });
-  await line('yearly', 6, async (at) => {
+  await line('yearly', 6, async (cue) => {
     await yv.mark(0, [yc('Remarks')], { tag: 'Remarks', dim: true });
-    await at(3.4);
+    await cue('like this forgotten');
     const r14 = yrow('14-Jan-25 Tue');
     await yv.mark(0, [r14], { tag: 'Forgot to punch out' });
   });
-  await line('yearly', 7, async (at) => {
+  await line('yearly', 7, async (cue) => {
     const tot = { x: yh.left, y: yLast.y - 1.5, w: YR - yh.left, h: yLast.h + 3 };
-    await yv.focus(6, pad({ x: yh.left, y: tot.y - 40, w: YR - yh.left, h: 120 }, 4), { fill: 0.95, ms: 1500 });
+    await yv.focus(yLast.p, pad({ x: yh.left, y: tot.y - 40, w: YR - yh.left, h: 120 }, 4), { fill: 0.95, ms: 1500 });
     await sleep(1600);
-    await yv.mark(6, [tot], { tag: 'Total for 2025', dim: true });
-    void at;
+    await yv.mark(yLast.p, [tot], { tag: 'Total for 2025', dim: true });
+    void cue;
   });
   await caption(null);
   await yv.clear();
