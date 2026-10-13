@@ -91,7 +91,8 @@ under the caller's own RLS policies rather than with blanket privileges.
 ## 2. Deploy the API
 
 The repository ships Fly.io configuration for both services: `fly.api.toml` and `fly.worker.toml` at the root, plus
-`.github/workflows/deploy.yml` (manual dispatch — there is no staging environment, so every deploy reaches production).
+`.github/workflows/deploy.yml` (runs on every merge to `main`, and by hand for a targeted redeploy — there is no staging
+environment, so every deploy reaches production).
 Region is `bom` (Mumbai) to sit beside the `ap-south-1` Supabase project; a request makes several database round trips,
 so the distance is paid multiple times per request.
 

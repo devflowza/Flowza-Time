@@ -73,8 +73,12 @@ scheduler holds a session-level advisory lock on a dedicated connection; with tr
 be a direct (session) connection — set `DATABASE_URL_WORKER` to the session pooler (port 5432) or direct host.
 
 ## Migrations in the Deploy workflow
-`.github/workflows/deploy.yml` applies the pending migrations **before** it deploys any code (input `migrations`, default
-`apply`), with `scripts/db-migrate-hosted.sh`:
+`.github/workflows/deploy.yml` runs on **every merge to `main`** (a push carries no inputs: target `all`, migrations
+`apply`, the default readiness URL) unless the merge only touches what the images leave out — `apps/web` (Cloudflare Pages
+publishes it), `docs`, Markdown, `supabase/tests`, `supabase/seeds`. A manual run (Actions → Deploy → Run workflow) picks the
+target and the migration mode. There is no staging environment: the pull request review is the gate before production.
+It applies the pending migrations **before** it deploys any code (input `migrations`, default `apply`), with
+`scripts/db-migrate-hosted.sh`:
 
 - **Ledger.** `supabase_migrations.schema_migrations`, matched by **name**: the file name without its timestamp and `.sql`
   (the first 21 files are recorded as `flowza_<last four digits of the version>_<name>`). That is how every hosted migration
