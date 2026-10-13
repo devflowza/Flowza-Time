@@ -97,6 +97,9 @@ It applies the pending migrations **before** it deploys any code (input `migrati
   **session pooler** — `postgresql://postgres.<project ref>:<password>@<pooler host>:5432/postgres` (Supabase → Connect →
   Session pooler). GitHub-hosted runners have no IPv6 and `db.<ref>.supabase.co` is IPv6-only without the IPv4 add-on. The
   running apps never receive it. Without it the deploy stops at the migration step (or run it with `migrations: skip`).
+- **Tested on data first.** The Migrations CI job also applies the migrations a pull request adds to a *seeded* database, one
+  transaction each (`scripts/db-migrate-populated-check.sh <base ref>`): an empty database hides backfills that only fail
+  when rows exist, as the location hierarchy migration did on its first production apply.
 - **Applying by hand** (Supabase MCP / SQL editor) still works: record the migration under its name and the script treats
   it as applied.
 
