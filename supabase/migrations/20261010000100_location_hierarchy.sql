@@ -281,6 +281,11 @@ select b.organization_id, l.id, 'branch', b.id, '{}'
 from public.branches b join public.location_levels l on l.organization_id = b.organization_id and l.role = 'branch'
 where not exists (select 1 from public.locations x where x.branch_id = b.id and x.role = 'branch')
 on conflict (branch_id) where role = 'branch' do nothing;
+-- Run the deferred level check on the backfilled levels now. Every inserted level queues one, and Postgres refuses ALTER
+-- TABLE on a table with pending trigger events: the first production apply (2026-10-13, 6 organisations) failed on the
+-- RLS statement below, while CI's empty database queues none. Deferred again for the rest of the transaction.
+set constraints public.location_levels_check immediate;
+set constraints public.location_levels_check deferred;
 
 -- RLS: read with branch.view (group nodes, or the nodes of an allowed branch); write with branch.manage — levels, group and
 -- branch nodes for members with every branch, place nodes for members whose scope holds their branch
