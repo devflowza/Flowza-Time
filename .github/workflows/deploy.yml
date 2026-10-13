@@ -65,7 +65,7 @@ jobs:
       MIGRATIONS: ${{ inputs.migrations || 'apply' }}
       READY_URL: ${{ inputs.ready_url || 'https://time-api.flowza.ai/api/ready' }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: superfly/flyctl-actions/setup-flyctl@master
 

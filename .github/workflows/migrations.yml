@@ -45,7 +45,7 @@ jobs:
       PGUSER: postgres
     steps:
       # Full history: the populated-database step diffs the branch against its base to find the migrations it adds.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
       - uses: pnpm/action-setup@v4
