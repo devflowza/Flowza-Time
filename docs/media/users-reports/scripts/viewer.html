@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Report</title>
+<!--
+  Stand-in for the browser's PDF viewer in the recording (headless Chromium has none): the generated PDF's pages, rendered
+  with pdftoppm, under a plain viewer toolbar. window.viewer moves a camera over the pages and draws highlight boxes from
+  the PDF's own word coordinates (pdftotext -bbox), so the boxes sit exactly on the printed columns and rows.
+-->
+<style>
+  :root { --bar: 48px; }
+  html, body { margin: 0; height: 100%; background: #525659; overflow: hidden; font-family: Inter, system-ui, sans-serif; }
+  .bar { position: fixed; inset: 0 0 auto 0; height: var(--bar); background: #323639; color: #f1f3f4; display: flex; align-items: center; gap: 18px; padding: 0 18px; z-index: 5; box-shadow: 0 1px 3px rgba(0,0,0,.4); font-size: 14px; }
+  .bar .name { font-weight: 500; flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .bar .pages, .bar .zoom { display: flex; align-items: center; gap: 8px; color: #e8eaed; }
+  .bar .box { background: #191b1c; border-radius: 3px; padding: 3px 8px; min-width: 18px; text-align: center; }
+  .bar .sep { width: 1px; height: 20px; background: #5f6368; }
+  .bar svg { width: 20px; height: 20px; fill: none; stroke: #e8eaed; stroke-width: 1.8; }
+  .stage { position: fixed; inset: var(--bar) 0 0 0; overflow: hidden; }
+  .doc { position: absolute; left: 0; top: 0; transform-origin: 0 0; transition: transform 1s cubic-bezier(.45, .05, .25, 1); }
+  .page { position: absolute; background: #fff; box-shadow: 0 2px 10px rgba(0,0,0,.45); }
+  .page img { display: block; width: 100%; height: 100%; }
+  .hl { position: absolute; border: 2.5px solid #059669; background: rgba(16,185,129,.13); border-radius: 3px; opacity: 0; transition: opacity .35s ease; box-sizing: border-box; }
+  .hl.on { opacity: 1; }
+  .hl.dim { box-shadow: 0 0 0 4000px rgba(20, 24, 22, .22); }
+  .tag { position: absolute; transform: translateY(-100%); margin-top: -5px; padding: 3px 8px; border-radius: 5px; background: #059669; color: #fff; font-weight: 700; white-space: nowrap; opacity: 0; transition: opacity .35s ease; }
+  .tag.on { opacity: 1; }
+</style>
+</head>
+<body>
+<div class="bar">
+  <svg viewBox="0 0 24 24"><path d="M4 6h16M4 12h16M4 18h16"/></svg>
+  <div class="name" id="name"></div>
+  <div class="pages"><span class="box" id="pg">1</span><span>/</span><span id="pn">1</span></div>
+  <div class="sep"></div>
+  <div class="zoom"><svg viewBox="0 0 24 24"><path d="M6 12h12"/></svg><span class="box" id="zm">100%</span><svg viewBox="0 0 24 24"><path d="M6 12h12M12 6v12"/></svg></div>
+  <div class="sep"></div>
+  <svg viewBox="0 0 24 24"><path d="M12 4v11m0 0-4-4m4 4 4-4M5 19h14"/></svg>
+  <svg viewBox="0 0 24 24"><path d="M7 9V4h10v5M7 17H5v-7h14v7h-2M8 14h8v6H8z"/></svg>
+</div>
+<div class="stage" id="stage"><div class="doc" id="doc"></div></div>
+<script>
+(async () => {
+  const q = new URLSearchParams(location.search);
+  const manifest = await (await fetch(`/__media/${q.get('viewer')}.json`)).json();
+  const embedded = window.top !== window;
+  const stage = document.getElementById('stage');
+  const doc = document.getElementById('doc');
+  document.getElementById('name').textContent = manifest.fileName;
+  document.getElementById('pn').textContent = manifest.pages.length;
+  document.title = manifest.fileName;
+  const GAP = 14;
+  const SAFE_BOTTOM = embedded ? 0 : 120;
+  // page width in doc units; 1 doc unit = 1 CSS px at scale 1
+  const PW = 900;
+  const k = PW / manifest.widthPt;
+  const PH = manifest.heightPt * k;
+  const tops = manifest.pages.map((_, i) => GAP + i * (PH + GAP));
+  manifest.pages.forEach((src, i) => {
+    const p = document.createElement('div');
+    p.className = 'page';
+    Object.assign(p.style, { left: '0px', top: `${tops[i]}px`, width: `${PW}px`, height: `${PH}px` });
+    p.innerHTML = `<img src="${src}" alt="">`;
+    doc.appendChild(p);
+  });
+  const vw = () => stage.clientWidth, vh = () => stage.clientHeight;
+  let cam = { cx: PW / 2, cy: 0, s: 1 };
+  const apply = (ms = 1000) => {
+    doc.style.transition = ms ? `transform ${ms}ms cubic-bezier(.45,.05,.25,1)` : 'none';
+    doc.style.transform = `translate(${vw() / 2 - cam.cx * cam.s}px, ${vh() / 2 - cam.cy * cam.s}px) scale(${cam.s})`;
+    const page = Math.max(0, tops.findLastIndex((t) => t <= cam.cy + 1)) + 1;
+    document.getElementById('pg').textContent = Math.min(page, manifest.pages.length);
+    document.getElementById('zm').textContent = `${Math.round(cam.s * PW / (manifest.widthPt * 4 / 3) * 100)}%`;
+  };
+  // a rectangle in PDF points on a page (0-based) → doc units
+  const toDoc = (p, r) => ({ x: r.x * k, y: tops[p] + r.y * k, w: r.w * k, h: r.h * k });
+  const fitWidth = (page = 0, ms = 0) => { const s = Math.min(1.6, (vw() - 60) / PW); cam = { s, cx: PW / 2, cy: tops[page] + (vh() / 2 - 12) / s }; apply(ms); };
+  let marks = [];
+  const clear = () => { for (const m of marks) { m.classList.remove('on'); setTimeout(() => m.remove(), 400); } marks = []; };
+  window.viewer = {
+    ready: true,
+    pages: manifest.pages.length,
+    fitWidth,
+    /** centre a region (PDF points on a page) and zoom so it fills about `fill` of the stage */
+    focus(page, r, { fill = 0.86, maxScale = 2.4, minScale = 0.15, ms = 1000 } = {}) {
+      const d = toDoc(page, r);
+      // the bottom of the stage is kept clear for the narration caption
+      const h = vh() - SAFE_BOTTOM;
+      const s = Math.max(minScale, Math.min(maxScale, (vw() * fill) / d.w, (h * fill) / d.h));
+      cam = { s, cx: d.x + d.w / 2, cy: d.y + d.h / 2 + SAFE_BOTTOM / 2 / s };
+      apply(ms);
+    },
+    /** highlight boxes (PDF points); `dim` darkens the rest of the page for a single box */
+    mark(page, rects, { tag = '', dim = false, keep = false } = {}) {
+      if (!keep) clear();
+      rects.forEach((r, i) => {
+        const d = toDoc(page, r);
+        const el = document.createElement('div');
+        el.className = `hl${dim && rects.length === 1 ? ' dim' : ''}`;
+        Object.assign(el.style, { left: `${d.x - 3}px`, top: `${d.y - 2}px`, width: `${d.w + 6}px`, height: `${d.h + 4}px` });
+        doc.appendChild(el); marks.push(el);
+        if (i === 0 && tag) {
+          const t = document.createElement('div');
+          t.className = 'tag'; t.textContent = tag;
+          // the tag stays the same size on screen whatever the zoom
+          const fs = 15 / cam.s;
+          Object.assign(t.style, { left: `${d.x - 3}px`, top: `${d.y - 2}px`, fontSize: `${fs}px`, padding: `${3 / cam.s}px ${8 / cam.s}px`, borderRadius: `${5 / cam.s}px`, marginTop: `${-5 / cam.s}px` });
+          doc.appendChild(t); marks.push(t);
+        }
+        requestAnimationFrame(() => requestAnimationFrame(() => el.classList.add('on')));
+      });
+      requestAnimationFrame(() => requestAnimationFrame(() => marks.forEach((m) => m.classList.add('on'))));
+    },
+    clear,
+  };
+  await Promise.all([...document.images].map((im) => im.decode().catch(() => undefined)));
+  fitWidth(0, 0);
+  window.viewer.loaded = true;
+})();
+</script>
+</body>
+</html>
