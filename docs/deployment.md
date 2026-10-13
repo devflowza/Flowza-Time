@@ -1,8 +1,9 @@
 # Deployment
 
-Bringing a fresh environment up for the first time — role passwords, secrets, the API and worker,
-the auth hook, the first platform admin and the first organisation, in the order they unblock each other — is
-[`docs/go-live.md`](go-live.md). This file describes the shape of a deployment; that one is the checklist.
+Bringing a fresh environment up — role passwords, secrets, the API and the workers, the auth URLs, the first
+platform admin and the first organisation, in the order they unblock each other — is [`docs/go-live.md`](go-live.md),
+which doubles as the record of how the live deployment was built and of what remains undone on it. This file describes
+the shape of a deployment; that one is the procedure and the history.
 
 ## Topology
 | Component | Where | Notes |
