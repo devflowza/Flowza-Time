@@ -48,6 +48,11 @@ export async function getMe(deps: ApiDeps, actor: Actor): Promise<MeDto> {
       jsonArrayFrom(eb.selectFrom('subscriptions').select(['organizationId', 'status']).where('organizationId', 'in', orgKeys)).as('subscriptions'),
       // the caller's approval work per active membership (review P1-6 / P2-11): one indexed query, the inbox's own definition
       jsonArrayFrom(eb.selectFrom(sql<{ organizationId: string; actionable: number; delegatedToMe: boolean }>`app.approval_inbox_summary()`.as('s')).select(['s.organizationId', 's.actionable', 's.delegatedToMe'])).as('approvals'),
+      // Stamps user_profiles.last_login_at from auth.users.last_sign_in_at (migration 20261013000100). It rides in this
+      // statement rather than taking its own round trip, and only writes when GoTrue's value has moved, so a page load
+      // costs nothing. /me is the only request every signed-in user makes, which is what makes it the right place.
+      // Nothing reads the result here — the column is displayed by the members and platform-console endpoints.
+      eb.fn<Date | string | null>('app.touch_last_login', []).as('lastLoginStamped'),
     ]).executeTakeFirstOrThrow();
     // a first-time user has no profile row yet: the rare slow path creates it
     const profile = bundle.profile ? toProfileDto(bundle.profile) : await ensureProfile(trx, actor);
