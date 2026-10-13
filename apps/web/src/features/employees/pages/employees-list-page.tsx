@@ -1,8 +1,8 @@
 import { useCallback, useMemo, useState } from 'react';
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
-import { useNavigate } from 'react-router';
+import { Link, useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Building2, CalendarClock, Download, FileUp, Network, Plus, RefreshCw, UserCog, X, Users } from 'lucide-react';
+import { Building2, CalendarClock, Download, FileUp, Network, Plus, RefreshCw, UserCog, Workflow, X, Users } from 'lucide-react';
 import { EMPLOYMENT_STATUSES, EMPLOYMENT_TYPES, type EmployeeDto } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
@@ -60,6 +60,7 @@ export default function EmployeesListPage() {
     ...(showPlaces ? [{ id: 'workLocation', header: t('fields.workLocation'), enableSorting: false, cell: ({ row }) => workPlaceOf(row.original) || '—' } satisfies ColumnDef<EmployeeDto, unknown>] : []),
     { id: 'department', header: tc('common.department'), cell: ({ row }) => row.original.departmentName ?? '—' },
     { id: 'designation', header: t('fields.designation'), cell: ({ row }) => row.original.designationName ?? '—' },
+    { id: 'manager', header: t('fields.manager'), enableSorting: false, cell: ({ row }) => row.original.managerName ?? '—' },
     { id: 'employmentStatus', accessorKey: 'employmentStatus', header: tc('common.status'), cell: ({ row }) => <EmploymentStatusBadge status={row.original.employmentStatus} /> },
     { id: 'joiningDate', accessorKey: 'joiningDate', header: t('fields.joiningDate'), cell: ({ row }) => <span className="tnum">{fmtDate(row.original.joiningDate)}</span> },
     { id: 'devices', header: t('sync.devices'), enableSorting: false, cell: ({ row }) => <DeviceSyncSummary summary={row.original.deviceSyncSummary} /> },
@@ -98,6 +99,7 @@ export default function EmployeesListPage() {
     <div className="page-container">
       <PageHeader title={t('title')} description={q.data ? t('list.subtitle', { count: q.data.meta.total }) : undefined} actions={
         <>
+          <Button asChild variant="outline" size="sm"><Link to="/employees/org-chart"><Workflow /> {t('orgChart.title')}</Link></Button>
           {can('employee.export', 'report.export') ? <Button variant="outline" size="sm" onClick={() => openBulk('export', [])}><Download /> {tc('common.export')}</Button> : null}
           {can('employee.import') ? <Button variant="outline" size="sm" onClick={() => navigate('/employees/import')}><FileUp /> {tc('common.import')}</Button> : null}
           {can('employee.create') ? <Button size="sm" disabled={full} title={fullTitle} onClick={() => navigate('/employees/new')}><Plus /> {t('list.add')}</Button> : null}
@@ -127,6 +129,7 @@ export default function EmployeesListPage() {
                   <DropdownMenuContent align="end">
                     <DropdownMenuItem onSelect={() => openBulk('assign_branch', ids)}><Building2 /> {t('bulk.assign_branch.title', { count: ids.length })}</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => openBulk('assign_department', ids)}><Network /> {t('bulk.assign_department.title', { count: ids.length })}</DropdownMenuItem>
+                    <DropdownMenuItem onSelect={() => openBulk('assign_manager', ids)}><Workflow /> {t('bulk.assign_manager.title', { count: ids.length })}</DropdownMenuItem>
                     {can('shift.assign') ? <DropdownMenuItem onSelect={() => openBulk('assign_shift', ids)}><CalendarClock /> {t('bulk.assign_shift.title', { count: ids.length })}</DropdownMenuItem> : null}
                     <DropdownMenuItem onSelect={() => openBulk('set_status', ids)}><UserCog /> {t('bulk.set_status.title', { count: ids.length })}</DropdownMenuItem>
                   </DropdownMenuContent>

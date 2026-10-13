@@ -144,12 +144,21 @@ export const employeeDtoSchema = z.object({
 });
 export type EmployeeDto = z.infer<typeof employeeDtoSchema>;
 
+/**
+ * The two reporting lines of an employee: the line manager (`primary` — team visibility, first approver, effective-dated in the
+ * employment history) and the dotted-line manager (`secondary` — also sees the employee, backup approver when the primary is away).
+ */
+export const MANAGER_LINES = ['primary', 'secondary'] as const;
+export type ManagerLine = (typeof MANAGER_LINES)[number];
+
 export const bulkEmployeeActionSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('assign_branch'), employeeIds: z.array(uuidSchema).min(1).max(1000), branchId: uuidSchema, effectiveFrom: isoDateSchema.optional() }),
   z.object({ action: z.literal('assign_department'), employeeIds: z.array(uuidSchema).min(1).max(1000), departmentId: uuidSchema.nullable(), effectiveFrom: isoDateSchema.optional() }),
   z.object({ action: z.literal('assign_shift'), employeeIds: z.array(uuidSchema).min(1).max(1000), shiftId: uuidSchema, effectiveFrom: isoDateSchema, effectiveTo: isoDateSchema.nullable().optional() }),
   z.object({ action: z.literal('sync_devices'), employeeIds: z.array(uuidSchema).min(1).max(1000), deviceIds: z.array(uuidSchema).max(500).optional() }),
   z.object({ action: z.literal('set_status'), employeeIds: z.array(uuidSchema).min(1).max(1000), employmentStatus: z.enum(EMPLOYMENT_STATUSES), effectiveFrom: isoDateSchema.optional() }),
+  /** Every selected employee reports to `managerEmployeeId` on the given line; `null` removes that manager. */
+  z.object({ action: z.literal('assign_manager'), employeeIds: z.array(uuidSchema).min(1).max(1000), managerEmployeeId: uuidSchema.nullable(), line: z.enum(MANAGER_LINES).default('primary'), effectiveFrom: isoDateSchema.optional() }),
   z.object({ action: z.literal('export'), employeeIds: z.array(uuidSchema).max(10000).optional(), format: z.enum(['csv', 'xlsx']).default('xlsx') }),
 ]);
 export type BulkEmployeeAction = z.infer<typeof bulkEmployeeActionSchema>;

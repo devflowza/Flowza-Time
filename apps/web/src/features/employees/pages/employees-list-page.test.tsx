@@ -8,12 +8,13 @@ vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-m
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
 import { apiMock, grantAll, mockGet, page, renderWithProviders, resetApiMock } from '../test-utils';
+import { toast } from '@/lib/toast';
 import EmployeesListPage from './employees-list-page';
 
-const emp = (id: string, name: string, n: string): EmployeeDto => ({
+const emp = (id: string, name: string, n: string, extra: Partial<EmployeeDto> = {}): EmployeeDto => ({
   id, organizationId: 'org-1', employeeNumber: n, firstName: name, middleName: null, lastName: 'X', displayName: name, displayNameAr: null, photoPath: null, photoUrl: null, gender: 'unspecified', dateOfBirth: null, nationalityCode: null,
   email: `${name.toLowerCase()}@acme.om`, phone: null, joiningDate: '2024-02-01', exitDate: null, employmentStatus: 'active', employmentType: 'full_time', branchId: 'b1', branchName: 'Muscat', departmentId: null, departmentName: null, designationId: null, designationName: null,
-  managerEmployeeId: null, managerName: null, userId: null, deviceUserId: n, cardNumber: null, fingerprintEnrolled: false, faceEnrolled: false, weeklyOffDays: null, customFields: {}, deviceSyncSummary: { total: 2, inSync: 1, pending: 0, failed: 1, offline: 0 }, deletedAt: null, createdAt: '2024-02-01T00:00:00Z', updatedAt: '2024-02-01T00:00:00Z',
+  managerEmployeeId: null, managerName: null, userId: null, deviceUserId: n, cardNumber: null, fingerprintEnrolled: false, faceEnrolled: false, weeklyOffDays: null, customFields: {}, deviceSyncSummary: { total: 2, inSync: 1, pending: 0, failed: 1, offline: 0 }, deletedAt: null, createdAt: '2024-02-01T00:00:00Z', updatedAt: '2024-02-01T00:00:00Z', ...extra,
 });
 
 describe('EmployeesListPage', () => {
@@ -86,5 +87,76 @@ describe('EmployeesListPage', () => {
     fireEvent.change(screen.getByRole('searchbox'), { target: { value: 'sar' } });
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('search=sar'), { timeout: 2000 });
     await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/employees', expect.objectContaining({ search: 'sar', page: 1 })));
+  });
+
+  it('shows each employee\'s line manager in a Manager column and links to the org chart', async () => {
+    mockGet({ '/orgs/org-1/employees': page([emp('e1', 'Ali', '1001', { managerEmployeeId: 'e9', managerName: 'Khalid Al-Harthy' }), emp('e2', 'Sara', '1002')]), '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]) });
+    renderWithProviders(<EmployeesListPage />, { route: '/employees' });
+    await screen.findAllByText('Ali');
+    expect(screen.getByRole('columnheader', { name: 'Manager' })).toBeInTheDocument();
+    expect(screen.getAllByText('Khalid Al-Harthy').length).toBeGreaterThan(0);
+    // per row, under the Manager heading: Ali's manager, an em dash for Sara who has none
+    const col = screen.getAllByRole('columnheader').findIndex((h) => h.textContent?.trim() === 'Manager');
+    const managerCell = (name: string) => within(screen.getAllByText(name).map((el) => el.closest('tr')).find((tr) => tr !== null)!).getAllByRole('cell')[col];
+    expect(managerCell('Ali')).toHaveTextContent('Khalid Al-Harthy');
+    expect(managerCell('Sara')).toHaveTextContent(/^—$/);
+    expect(screen.getByRole('link', { name: /Org chart/ })).toHaveAttribute('href', '/employees/org-chart');
+  });
+
+  it('bulk-assigns a manager: the line manager with a date, a dotted-line manager without one, or a deliberate removal', async () => {
+    mockGet({ '/orgs/org-1/employees': page([emp('e1', 'Ali', '1001'), emp('e2', 'Sara', '1002'), emp('e3', 'Mona', '1003')]), '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]) });
+    apiMock.post.mockResolvedValue({ data: { updated: 2, employeeIds: ['e1', 'e2'] } });
+    const success = vi.spyOn(toast, 'success');
+    renderWithProviders(<EmployeesListPage />, { route: '/employees' });
+    await screen.findAllByText('Ali');
+    const openDialog = async () => {
+      fireEvent.click(screen.getAllByLabelText('Select row')[0]!);
+      fireEvent.click(screen.getAllByLabelText('Select row')[1]!);
+      fireEvent.keyDown(screen.getByRole('button', { name: /Assign…/ }), { key: 'ArrowDown' });
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Assign manager (2)' }));
+      return screen.findByRole('dialog', { name: 'Assign manager (2)' });
+    };
+    const pickMona = async (dialog: HTMLElement, field: RegExp) => {
+      fireEvent.click(within(dialog).getByRole('combobox', { name: field }));
+      const listbox = await screen.findByRole('listbox');
+      // the selected employees are not offered as their own manager
+      expect(within(listbox).queryByRole('option', { name: /Ali/ })).not.toBeInTheDocument();
+      expect(within(listbox).queryByRole('option', { name: /Sara/ })).not.toBeInTheDocument();
+      fireEvent.click(within(listbox).getByRole('option', { name: /Mona/ }));
+    };
+    const bulkCall = (n: number) => apiMock.post.mock.calls[n]!;
+
+    // 1) line manager, effective-dated
+    let dialog = await openDialog();
+    const apply = within(dialog).getByRole('button', { name: 'Apply to 2' });
+    // nothing chosen yet: neither a manager nor an explicit removal
+    expect(apply).toBeDisabled();
+    expect(within(dialog).getByRole('radio', { name: /Line manager/ })).toBeChecked();
+    await pickMona(dialog, /New line manager/);
+    fireEvent.change(within(dialog).getByLabelText('Effective from'), { target: { value: '2026-11-01' } });
+    expect(apply).toBeEnabled();
+    fireEvent.click(apply);
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
+    expect(bulkCall(0)).toEqual(['/orgs/org-1/employees/bulk', { action: 'assign_manager', employeeIds: ['e1', 'e2'], managerEmployeeId: 'e3', line: 'primary', effectiveFrom: '2026-11-01' }, expect.objectContaining({ idempotencyKey: expect.any(String) })]);
+    await waitFor(() => expect(success).toHaveBeenCalledWith('2 employees updated'));
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    // 2) the dotted line: no effective date (it is not part of the employment history)
+    dialog = await openDialog();
+    fireEvent.click(within(dialog).getByRole('radio', { name: /Secondary \(dotted-line\) manager/ }));
+    expect(within(dialog).queryByLabelText('Effective from')).not.toBeInTheDocument();
+    await pickMona(dialog, /New secondary manager/);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Apply to 2' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(2));
+    expect(bulkCall(1)[1]).toEqual({ action: 'assign_manager', employeeIds: ['e1', 'e2'], managerEmployeeId: 'e3', line: 'secondary' });
+    await waitFor(() => expect(screen.queryByRole('dialog')).not.toBeInTheDocument());
+
+    // 3) removing is deliberate: the checkbox, not an empty picker
+    dialog = await openDialog();
+    fireEvent.click(within(dialog).getByRole('checkbox', { name: 'Remove the manager instead' }));
+    expect(within(dialog).getByRole('combobox', { name: /New line manager/ })).toBeDisabled();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Remove manager' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(3));
+    expect(bulkCall(2)[1]).toEqual({ action: 'assign_manager', employeeIds: ['e1', 'e2'], managerEmployeeId: null, line: 'primary', effectiveFrom: expect.stringMatching(/^\d{4}-\d{2}-\d{2}$/) });
   });
 });

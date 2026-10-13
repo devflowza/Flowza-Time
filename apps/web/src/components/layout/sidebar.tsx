@@ -1,7 +1,7 @@
 import { useEffect } from 'react';
 import { NavLink, useLocation } from 'react-router';
 import { useTranslation } from 'react-i18next';
-import { Activity, ArrowRightLeft, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, Mail, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserCheck, UserRound, Users, UserX, Wallet, type LucideIcon } from 'lucide-react';
+import { Activity, ArrowRightLeft, BarChart3, Building2, CalendarCheck, CalendarClock, CalendarDays, CalendarOff, CheckSquare, ClipboardCheck, ClipboardList, ContactRound, Cpu, FileText, Fingerprint, GitCompare, House, Inbox, KeyRound, LayoutDashboard, ListChecks, Mail, MapPinned, MessageSquareText, Network, Palmtree, PanelLeftClose, PanelLeftOpen, RefreshCw, Settings, ShieldCheck, Sigma, UserCheck, UserRound, Users, UserX, Wallet, Workflow, type LucideIcon } from 'lucide-react';
 import type { ModuleKey, Permission } from '@flowza/contracts';
 import { cn } from '@/lib/utils';
 import { preloadRoute, preloadRoutesWhenIdle } from '@/lib/route-preload';
@@ -101,6 +101,8 @@ export function Sidebar() {
     ...(isManager || team.page ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound, modules: ['manager_workspace'] }] as NavItem[] }] : []),
     { label: t('nav.sections.workforce'), items: [
       { to: '/employees', label: t('nav.employees'), icon: Users, permissions: ['employee.view'] },
+      // who reports to whom, organisation-wide (line managers with employee.view_team have /team instead)
+      { to: '/employees/org-chart', label: t('nav.orgChart'), icon: Workflow, permissions: ['employee.view'] },
       { to: '/attendance', label: t('nav.attendance'), icon: Activity, permissions: ['attendance.view'] },
       { to: '/corrections', label: t('nav.corrections'), icon: ClipboardList, permissions: ['attendance.view'] },
       // engine v2: approvers of attendance or leave, approval admins, line managers (their team's requests) and anybody

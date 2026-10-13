@@ -39,6 +39,8 @@ describe('EmployeeProfilePage for a line manager (employee.view_team)', () => {
     expect(tabNames()).toEqual(['Overview']);
     // no directory to go back to: the breadcrumb leads to the team
     expect(screen.getByRole('link', { name: 'My team' })).toHaveAttribute('href', '/team');
+    // nor an organisation-wide org chart (employee.view)
+    expect(screen.queryByRole('link', { name: /View in org chart/ })).not.toBeInTheDocument();
   });
 
   it('shows the tabs RLS fills from the viewer\'s own rows on their own profile, and falls back to Overview for a hidden tab in the URL', async () => {
@@ -55,6 +57,8 @@ describe('EmployeeProfilePage for a line manager (employee.view_team)', () => {
     await screen.findByRole('heading', { name: 'Salma' });
     expect(tabNames()).toEqual(['Overview', 'Employment history', 'Devices', 'Attendance', 'Activity', 'Documents', 'Danger zone']);
     expect(screen.getByRole('link', { name: 'Employees' })).toHaveAttribute('href', '/employees');
+    // next to "Reports to …": the org chart opened on this person
+    expect(screen.getByRole('link', { name: /View in org chart/ })).toHaveAttribute('href', '/employees/org-chart?focus=e5');
     unmount();
     grant('attendance.view_own');
     renderWithProviders(profileRoute(), { route: '/employees/e5', path: '/employees/:id' });

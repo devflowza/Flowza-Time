@@ -40,9 +40,87 @@
     "assign_department": { "title": "Assign department ({{count}})", "hint": "Sets the department of the selected employees.", "clearHint": "Leave empty to remove the department." },
     "assign_shift": { "title": "Assign shift ({{count}})", "hint": "Closes open employee shift assignments and starts a new one.", "shift": "Shift", "select": "Select a shift", "none": "No shifts found. Create shifts first.", "effectiveTo": "Effective to (last day)", "effectiveToHint": "Included: the shift still applies on this day. Leave empty for no end." },
     "set_status": { "title": "Set status ({{count}})", "hint": "Changes the employment status. Termination removes the employees from devices." },
+    "assign_manager": { "title": "Assign manager ({{count}})", "hint": "Sets who the selected employees report to." },
     "export": { "title": "Export employees", "hint": "A file is generated in the background; sensitive columns are masked unless you may view them.", "format": "Format" }
   },
-  "profile": { "archived": "Archived", "joined": "Joined {{date}}", "reportsTo": "Reports to", "alsoReportsTo": "also", "noManager": "no manager assigned", "tabs": { "overview": "Overview", "history": "Employment history", "devices": "Devices", "attendance": "Attendance", "activity": "Activity", "documents": "Documents", "danger": "Danger zone" } },
+  "assignManager": {
+    "titleOne": "Change the manager of {{name}}", "titleSecondaryOne": "Set the secondary manager of {{name}}",
+    "hint": "The line manager sees these employees' attendance and leave as their team and approves their requests.",
+    "currentManager": "Currently reports to {{name}}.", "line": "Reporting line",
+    "lines": {
+      "primary": "Line manager", "primaryHint": "Solid line: team visibility, approvals and the org chart.",
+      "secondary": "Secondary (dotted-line) manager", "secondaryHint": "Also sees them as direct reports and is the backup approver."
+    },
+    "manager": "New line manager", "secondaryManager": "New secondary manager", "pick": "Search for a person…",
+    "remove": "Remove the manager instead", "removeSecondary": "Remove the secondary manager instead",
+    "removeHint": "They will report to nobody from the effective date. People with no manager and no reports appear under Unassigned on the org chart.",
+    "removeSecondaryHint": "The dotted line is removed at once; the line manager stays.",
+    "effectiveHint": "The employment history records the new manager from this date.",
+    "promoteHint": "Anyone whose secondary manager is the new line manager has that dotted line promoted to the solid line.",
+    "secondaryNow": "The secondary manager changes at once; it is not part of the employment history.",
+    "submit": "Save", "submitRemove": "Remove manager", "noChanges": "Nothing changed.",
+    "why": {
+      "already": "They already report to this person.", "alreadySecondary": "This person is already their line manager or secondary manager.",
+      "noManager": "They have no line manager.", "noSecondary": "They have no secondary manager."
+    },
+    "unchanged_one": "{{count}} employee was left as before.", "unchanged_other": "{{count}} employees were left as before.",
+    "replacesOutside_one": "{{count}} person reports to a manager outside this view of the org chart (another branch or department); that reporting line will be replaced.",
+    "replacesOutside_other": "{{count}} people report to a manager outside this view of the org chart (another branch or department); that reporting line will be replaced.",
+    "cycleTitle": "That would make a reporting loop",
+    "cycle": "The chosen manager already reports to {{names}}, directly or through other managers. Remove them from the selection, or pick another manager."
+  },
+  "orgChart": {
+    "title": "Org chart", "subtitle": "Who reports to whom across the organisation. Find a person, open a team, or rearrange reporting lines.",
+    "backToList": "Employees", "find": "Find a person", "chartLabel": "Reporting lines", "canvasLabel": "Org chart canvas", "teamOf": "Team of {{name}}",
+    "levelError": "This team could not be loaded.", "showMore": "Show {{count}} more", "collapseAll": "Collapse all",
+    "dragHint": "Drag a card onto another person to change who they report to, or use the ⋯ menu on a card.",
+    "zoom": { "label": "Zoom", "in": "Zoom in", "out": "Zoom out", "reset": "Reset zoom" },
+    "card": {
+      "reports_one": "{{count}} report", "reports_other": "{{count}} reports", "alsoReportsTo": "Also reports to {{name}}", "actions": "Actions for {{name}}",
+      "changeManager": "Change manager…", "setSecondary": "Set secondary manager…", "addReports": "Add direct reports…",
+      "removeManager": "Remove manager", "removeSecondary": "Remove secondary manager", "viewProfile": "View profile"
+    },
+    "unassigned": {
+      "button": "Unassigned", "title": "Unassigned", "hint": "People with no manager in this view of the chart and nobody reporting to them.",
+      "hintEdit": "No manager in this view of the chart and no direct reports. Drag a person onto their manager, or select people and assign a manager.",
+      "close": "Close unassigned", "search": "Search unassigned people", "searchPlaceholder": "Search number or name…",
+      "selectAll": "Select all shown", "select": "Select {{name}}", "empty": "Everyone is on the chart.", "noMatch": "Nobody unassigned matches “{{search}}”.",
+      "assignSelected": "Assign manager to selected ({{count}})", "selectAllFree": "Select all shown who have no manager",
+      "outsideManager": "Reports to someone outside this view",
+      "notListed": "The person you looked for is not in this list any more: they may have been given a manager meanwhile."
+    },
+    "addReports": {
+      "title": "Add direct reports to {{name}}", "hint": "The people you choose will report to {{name}} as their line manager, replacing their current manager from the effective date.",
+      "search": "Search employees", "searchPlaceholder": "Search number or name…", "results": "Employees", "already": "Already in this team",
+      "reportsTo": "Reports to {{name}}", "noManager": "No manager", "chosen": "Chosen ({{count}})", "noneChosen": "Nobody chosen yet.",
+      "unchoose": "Remove {{name}}", "submit": "Add to team ({{count}})", "above": "Above {{name}} in the reporting line"
+    },
+    "move": {
+      "title": "Change manager?", "description": "Make {{employee}} report to {{manager}}.", "confirm": "Change manager",
+      "outsideManager": "{{employee}} currently reports to a manager outside this view of the org chart (another branch or department); that reporting line will be replaced."
+    },
+    "remove": {
+      "title": "Remove the manager of {{name}}?", "titleSecondary": "Remove the secondary manager of {{name}}?",
+      "description": "{{name}} will report to nobody from the effective date.", "descriptionSecondary": "The dotted line from {{name}} to {{manager}} is removed at once."
+    },
+    "dnd": {
+      "self": "A person cannot report to themselves.", "already": "{{employee}} already reports to {{manager}}.",
+      "cycle": "{{manager}} is in {{employee}}'s own team, so {{employee}} cannot report to them. Pick someone outside that team."
+    },
+    "focus": { "notOnChart": "This person is not on the chart: they left, or they are outside the branch or department shown." },
+    "empty": {
+      "noLines": "No reporting lines yet", "noLinesHint_one": "{{count}} person has no manager yet. Build the chart in any of these ways:", "noLinesHint_other": "{{count}} people have no manager yet. Build the chart in any of these ways:",
+      "wayDrag": "Open Unassigned and drag a person onto their manager.", "wayAddReports": "Open Unassigned and use “Add direct reports…” in a person's ⋯ menu.",
+      "wayBulk": "On the Employees list, select people and choose Assign… → Assign manager.", "wayImport": "Import a CSV with the managerEmployeeNumber column.",
+      "askAdmin": "Ask an administrator to assign managers.", "openUnassigned": "Show unassigned people",
+      "noMatches": "Nobody matches these filters", "noMatchesHint": "Choose another branch or department.",
+      "noEmployees": "Nobody on the chart yet", "noEmployeesHint": "Add employees first; the chart is drawn from each employee's manager.",
+      "noLinesInView": "No reporting lines in this view",
+      "noLinesInViewHint_one": "{{count}} person in this view has no manager inside it; they may report to someone in another branch or department. To build the chart here:",
+      "noLinesInViewHint_other": "{{count}} people in this view have no manager inside it; some may report to someone in another branch or department. To build the chart here:"
+    }
+  },
+  "profile": { "archived": "Archived", "joined": "Joined {{date}}", "reportsTo": "Reports to", "alsoReportsTo": "also", "noManager": "no manager assigned", "viewInOrgChart": "View in org chart", "tabs": { "overview": "Overview", "history": "Employment history", "devices": "Devices", "attendance": "Attendance", "activity": "Activity", "documents": "Documents", "danger": "Danger zone" } },
   "history": { "empty": "No employment history", "emptyHint": "History rows are created automatically when employment details change.", "current": "Current", "reason": "Reason", "recorded": "Recorded {{at}}" },
   "devices": {
     "device": "Device", "connection": "Connection", "syncStatus": "Sync status", "enrolment": "Enrolment", "lastSync": "Last sync", "lastSuccess": "Last success {{at}}", "removing": "Removing", "error": "Error",

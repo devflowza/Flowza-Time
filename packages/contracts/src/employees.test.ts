@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { updateEmployeeSchema } from './employees.js';
+import { bulkEmployeeActionSchema, updateEmployeeSchema } from './employees.js';
 
 /**
  * `PATCH /employees/:id`. The profile form sends only the changed keys and `null` for a field the user emptied, so the
@@ -27,5 +27,22 @@ describe('updateEmployeeSchema', () => {
     expect(updateEmployeeSchema.parse({ cardNumber: ' 00123 ' })).toEqual({ cardNumber: '00123' });
     expect(updateEmployeeSchema.parse({ nationalityCode: 'om' })).toEqual({ nationalityCode: 'OM' });
     expect(updateEmployeeSchema.parse({})).toEqual({});
+  });
+});
+
+describe('bulkEmployeeActionSchema — assign_manager', () => {
+  const ids = ['00000000-0000-4000-8000-000000000001'];
+  const manager = '00000000-0000-4000-8000-000000000002';
+
+  it('defaults to the primary line and takes null to remove the manager', () => {
+    expect(bulkEmployeeActionSchema.parse({ action: 'assign_manager', employeeIds: ids, managerEmployeeId: manager })).toEqual({ action: 'assign_manager', employeeIds: ids, managerEmployeeId: manager, line: 'primary' });
+    expect(bulkEmployeeActionSchema.parse({ action: 'assign_manager', employeeIds: ids, managerEmployeeId: null, line: 'secondary', effectiveFrom: '2026-10-01' })).toEqual({ action: 'assign_manager', employeeIds: ids, managerEmployeeId: null, line: 'secondary', effectiveFrom: '2026-10-01' });
+  });
+
+  it('requires the manager key, at least one employee and a known line', () => {
+    expect(bulkEmployeeActionSchema.safeParse({ action: 'assign_manager', employeeIds: ids }).success).toBe(false);
+    expect(bulkEmployeeActionSchema.safeParse({ action: 'assign_manager', employeeIds: [], managerEmployeeId: manager }).success).toBe(false);
+    expect(bulkEmployeeActionSchema.safeParse({ action: 'assign_manager', employeeIds: ids, managerEmployeeId: manager, line: 'dotted' }).success).toBe(false);
+    expect(bulkEmployeeActionSchema.safeParse({ action: 'assign_manager', employeeIds: ids, managerEmployeeId: 'not-a-uuid' }).success).toBe(false);
   });
 });
