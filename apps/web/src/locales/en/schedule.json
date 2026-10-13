@@ -44,11 +44,11 @@
     "hint": "Rule sets are effective-dated. The branch-specific set in force on a date wins over the organisation-wide one; without any, the platform defaults apply.", "add": "Add rule set", "edit": "Edit rule set", "dialogHint": "Changing a rule set that covers past dates recalculates the affected records.",
     "created": "Rule set created", "updated": "Rule set updated", "deleted": "Rule set deleted", "recalcHint": "Affected records are being recalculated.", "branchImmutable": "The branch of a rule set cannot change; create a new rule set for another branch.", "deleteTitle": "Delete “{{name}}”?", "deleteHint": "Records computed with this rule set are recalculated with the next applicable one.",
     "branchHint": "Leave empty for an organisation-wide rule set.", "orgWide": "Organisation-wide", "effectiveFrom": "Effective from", "effectiveTo": "Effective to", "effectiveToHint": "The rule set stops applying on this date (the date itself is not included). Leave empty for no end.", "includeExpired": "Show expired", "effective": "Effective", "summary": "Key rules", "version": "Version", "active": "In force",
-    "summaryLine": "Grace {{graceIn}} min · full day {{fullDay}} · {{ot}}", "otAfter": "OT after {{min}} min", "otOff": "OT off", "empty": "No rule sets", "emptyHint": "Platform defaults apply (10 min grace, 7 h full day, OT after 30 min). Add a rule set to customise.",
+    "summaryLine": "Grace {{graceIn}} min · full day {{fullDay}} · {{ot}}", "otAfter": "OT after {{min}} min", "otOff": "OT off", "empty": "No rule sets", "emptyHint": "Platform defaults apply (10 min grace, 7 h full day, every overtime minute after the shift end). Add a rule set to customise.",
     "noRounding": "No rounding", "minutesValue": "{{count}} min", "noLimit": "No limit", "ramadanAll": "All employees", "ramadanFlagged": "Flagged employees only",
     "sections": {
       "grace": "Grace & thresholds", "graceHint": "How much lateness is tolerated and what counts as a full or half day.",
-      "overtime": "Overtime", "overtimeHint": "The time worked after the shift end is overtime; here, when it starts counting and how it is rounded and capped.",
+      "overtime": "Overtime", "overtimeHint": "Every minute worked after the shift end is overtime, in exact minutes; here, the minimum that earns it, optional rounding and the daily cap.",
       "rounding": "Rounding", "roundingHint": "Round individual punches and/or the worked total.",
       "punches": "Punch interpretation", "punchesHint": "How raw punches are paired into IN/OUT and de-duplicated.",
       "missing": "Missing punch", "missingHint": "What happens when only one punch exists for the day.",
@@ -56,7 +56,7 @@
     },
     "fields": {
       "graceInMinutes": "Grace in (min)", "graceOutMinutes": "Grace out (min)", "lateThresholdMinutes": "Late threshold (min)", "earlyDepartureThresholdMinutes": "Early departure threshold (min)", "minFullDayMinutes": "Full day (min)", "halfDayThresholdMinutes": "Half day (min)",
-      "overtimeEnabled": "Overtime enabled", "overtimeStartAfterMinutes": "OT starts after (min)", "overtimeMinBlockMinutes": "Minimum OT block (min)", "overtimeRoundingMinutes": "OT rounding", "overtimeMaxMinutesPerDay": "Max OT per day (min)",
+      "overtimeEnabled": "Overtime enabled", "overtimeStartAfterMinutes": "OT starts after (min)", "overtimeMinBlockMinutes": "Minimum OT (min)", "overtimeRoundingMinutes": "OT rounding", "overtimeMaxMinutesPerDay": "Max OT per day (min)",
       "countEarlyInAsOvertime": "Early arrival counts as OT", "overtimeRequiresScheduledHours": "OT only beyond the scheduled hours", "weeklyOffWorkCountsAsOvertime": "Weekly-off work is OT", "holidayWorkCountsAsOvertime": "Holiday work is OT",
       "punchRoundingMinutes": "Punch rounding", "punchRoundingMode": "Punch rounding mode", "workedRoundingMinutes": "Worked-time rounding", "workedRoundingMode": "Worked-time rounding mode",
       "punchInterpretation": "Interpretation", "duplicatePunchWindowSeconds": "Duplicate window (s)", "missingPunchBehavior": "Behaviour", "autoAbsentWithoutPunches": "Auto-absent without punches",
@@ -64,7 +64,7 @@
     },
     "hints": {
       "lateThresholdMinutes": "Lateness beyond this is flagged (0 = any).", "minFullDayMinutes": "Worked minutes needed for a full day.", "halfDayThresholdMinutes": "Below full day but at least this = half day.",
-      "overtimeEnabled": "Turn off to never compute overtime.", "overtimeStartAfterMinutes": "Minutes past the shift end before OT counts.", "overtimeMinBlockMinutes": "OT below this is discarded.", "overtimeMaxMinutesPerDay": "Empty = no cap.",
+      "overtimeEnabled": "Turn off to never compute overtime.", "overtimeStartAfterMinutes": "OT counts once the employee works at least this long past the shift end, then from the first minute. 0 = every minute.", "overtimeMinBlockMinutes": "OT below this is discarded; longer OT counts in exact minutes.", "overtimeRoundingMinutes": "No rounding = exact minutes. Otherwise OT is rounded down to this step.", "overtimeMaxMinutesPerDay": "Empty = no cap.",
       "countEarlyInAsOvertime": "Minutes before the shift start count as OT.", "overtimeRequiresScheduledHours": "On: a late arrival who makes up the time after the shift end earns no OT. Off: every minute worked after the shift end is OT.", "weeklyOffWorkCountsAsOvertime": "All worked minutes on a weekly off day are OT.", "holidayWorkCountsAsOvertime": "All worked minutes on a holiday are OT.",
       "punchInterpretation": "FIRST_LAST: first punch IN, last OUT. PAIRED: alternate IN/OUT. DIRECTIONAL: trust the device direction.", "duplicatePunchWindowSeconds": "Punches closer than this are collapsed.",
       "autoAbsentWithoutPunches": "Mark employees with no punches absent after the shift ends.", "ramadanMinutes": "Scheduled minutes per day during Ramadan (60–600)."

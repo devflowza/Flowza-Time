@@ -182,11 +182,11 @@ begin
     ramadan_mode, policy, created_by, created_at)
   values
     (pg_temp.sid('policy:company'), org, 'Company standard', 'Baseline for everybody no other policy covers.', null, null, null, null, null, '2026-08-01',
-     10, 5, 0, 0, 420, 240, true, 30, 30, 15, 240, false, 'FIRST_LAST', 60, 'FLAG_ONLY', true, true, true, ramadan_off, '{}'::jsonb, hr_id, t0),
+     10, 5, 0, 0, 420, 240, true, 30, 30, 0, 240, false, 'FIRST_LAST', 60, 'FLAG_ONLY', true, true, true, ramadan_off, '{}'::jsonb, hr_id, t0),
 
     (pg_temp.sid('policy:oman-office'), org, 'Oman – Office Employees', 'Created from the Oman country pack (Labour Law 53/2023): 8 h days, 40 h weeks, overtime capped at 4 h a day, rest-day and holiday work at 200 %.',
      null, 'OM', null, pg_temp.sid('group:OFFICE'), null, '2026-08-01',
-     10, 5, 0, 0, 420, 240, true, 30, 30, 15, 240, false, 'FIRST_LAST', 60, 'FLAG_ONLY', true, true, true, ramadan_om,
+     10, 5, 0, 0, 420, 240, true, 30, 30, 0, 240, false, 'FIRST_LAST', 60, 'FLAG_ONLY', true, true, true, ramadan_om,
      '{"countryPack":{"code":"OM","version":"2026.10"},
        "late":{"veryLateAfterMinutes":60,"repeatedLate":{"occurrences":3,"periodDays":30}},
        "methods":{"web":true,"mobile":true,"selfie":true,"requireGeofence":"flag"},
@@ -197,7 +197,7 @@ begin
 
     (pg_temp.sid('policy:sohar-shift'), org, 'Sohar Plant – 24/7 Shift Workers', 'Security and warehouse crews: terminal check-in only, automatic check-out at the shift end when a punch-out is missing, stricter points.',
      sohar, null, null, pg_temp.sid('group:SHIFT'), null, '2026-08-01',
-     5, 5, 0, 0, 420, 240, true, 15, 15, 15, 240, false, 'FIRST_LAST', 60, 'ASSUME_SHIFT_END', true, true, true, ramadan_off,
+     5, 5, 0, 0, 420, 240, true, 15, 15, 0, 240, false, 'FIRST_LAST', 60, 'ASSUME_SHIFT_END', true, true, true, ramadan_off,
      '{"countryPack":{"code":"OM","version":"2026.10"},
        "late":{"veryLateAfterMinutes":30,"repeatedLate":{"occurrences":3,"periodDays":28}},
        "methods":{"web":false,"mobile":false,"selfie":false,"requireGeofence":"block"},
@@ -208,7 +208,7 @@ begin
 
     (pg_temp.sid('policy:security-night'), org, 'Security – Night shift', 'Night guards (18:00–06:00): 15 minutes of grace, half a point per late arrival.',
      sohar, null, null, null, pg_temp.sid('shift:SEC-N'), '2026-08-01',
-     15, 5, 0, 0, 420, 240, true, 15, 15, 15, 240, false, 'FIRST_LAST', 60, 'ASSUME_SHIFT_END', true, true, true, ramadan_off,
+     15, 5, 0, 0, 420, 240, true, 15, 15, 0, 240, false, 'FIRST_LAST', 60, 'ASSUME_SHIFT_END', true, true, true, ramadan_off,
      '{"countryPack":{"code":"OM","version":"2026.10"},
        "late":{"veryLateAfterMinutes":45,"repeatedLate":{"occurrences":3,"periodDays":28}},
        "methods":{"web":false,"mobile":false,"selfie":false,"requireGeofence":"block"},
@@ -237,7 +237,7 @@ begin
 
     (pg_temp.sid('policy:sohar-maintenance'), org, 'Sohar Plant – Maintenance', 'Plant day staff (07:00–16:00, Sunday–Thursday).',
      sohar, null, null, null, null, '2026-08-01',
-     10, 5, 0, 0, 420, 240, true, 30, 30, 15, 240, false, 'FIRST_LAST', 60, 'FLAG_ONLY', true, true, true, ramadan_off,
+     10, 5, 0, 0, 420, 240, true, 30, 30, 0, 240, false, 'FIRST_LAST', 60, 'FLAG_ONLY', true, true, true, ramadan_off,
      '{"countryPack":{"code":"OM","version":"2026.10"},
        "late":{"veryLateAfterMinutes":60,"repeatedLate":{"occurrences":3,"periodDays":30}},
        "methods":{"web":true,"mobile":false,"selfie":false,"requireGeofence":"block"},
@@ -246,7 +246,8 @@ begin
                  "escalation":[{"points":3,"action":"NOTIFY_MANAGER"},{"points":6,"action":"VERBAL_WARNING"},{"points":9,"action":"WRITTEN_WARNING"}]},
        "regularisation":{"maxPerMonth":3,"backdateDays":7}}'::jsonb, hr_id, t0)
   on conflict (id) do update set name = excluded.name, description = excluded.description, grace_in_minutes = excluded.grace_in_minutes, grace_out_minutes = excluded.grace_out_minutes,
-    overtime_enabled = excluded.overtime_enabled, overtime_start_after_minutes = excluded.overtime_start_after_minutes, overtime_max_minutes_per_day = excluded.overtime_max_minutes_per_day,
+    overtime_enabled = excluded.overtime_enabled, overtime_start_after_minutes = excluded.overtime_start_after_minutes, overtime_min_block_minutes = excluded.overtime_min_block_minutes,
+    overtime_rounding_minutes = excluded.overtime_rounding_minutes, overtime_max_minutes_per_day = excluded.overtime_max_minutes_per_day,
     missing_punch_behavior = excluded.missing_punch_behavior, ramadan_mode = excluded.ramadan_mode, policy = excluded.policy, updated_at = now();
 
   ---------------------------------------------------------------------------------------------------------------------

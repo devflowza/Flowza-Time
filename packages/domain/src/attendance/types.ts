@@ -183,5 +183,9 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * instead of PRESENT with 0 worked minutes.
  * 1.4.0 — Enterprise: VERY_LATE when the arrival is more than the policy's `late.veryLateAfterMinutes` after the scheduled start;
  * DOUBLE_SHIFT for a composite day of two shifts (composeDoubleShift). Nothing changes for a day without either.
+ * 1.5.0 — Regular overtime is recorded in exact minutes: the rule set's threshold ("OT starts after") and minimum block only
+ * decide whether a day earns overtime — once reached, it counts from the first minute after the shift end — instead of being
+ * deducted (the first half hour was lost) and floored to whole blocks (overtime came in half hours / hours). Rounding and the
+ * daily cap are unchanged.
  */
-export const ENGINE_VERSION = 'attendance-engine/1.4.0';
+export const ENGINE_VERSION = 'attendance-engine/1.5.0';

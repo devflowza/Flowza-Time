@@ -39,9 +39,13 @@ Records inside a locked period are skipped and listed in the recalculation summa
    symmetric with `graceOutMinutes` / `earlyDepartureThresholdMinutes`; worked = span − unpaid breaks (worked rounding);
    overtime (engine 1.2.0) = the minutes WORKED after the expected end (before the expected start too with
    `countEarlyInAsOvertime`) — measured on the worked spans, so a punched break out there does not count, and never more than
-   the minutes worked — less `overtimeStartAfterMinutes`, rounded DOWN to `overtimeRoundingMinutes`, whole
-   `overtimeMinBlockMinutes` blocks, capped by `overtimeMaxMinutesPerDay`. By default every minute after the shift end counts
-   (threshold, rounding and block 0); `overtimeRequiresScheduledHours` keeps only the part beyond the scheduled minutes (a late
+   the minutes worked — recorded in **exact minutes** (engine 1.5.0): `overtimeStartAfterMinutes` ("OT starts after") and
+   `overtimeMinBlockMinutes` ("Minimum OT") only decide whether the day earns overtime — a basis that reaches them counts
+   from its first minute, a shorter one is none (30 / 30: 38 min after the end → 38, 29 → 0) — then the optional rounding
+   DOWN to `overtimeRoundingMinutes` and the cap `overtimeMaxMinutesPerDay`. Engines ≤ 1.4.0 deducted the threshold and kept
+   whole blocks only (105 min after the end under 30 / 30 → 60, 38 → 0); migration 20261013000200 also set the 15-minute
+   overtime rounding that older rule sets carried back to none. By default every minute after the shift end counts
+   (threshold, rounding and minimum 0); `overtimeRequiresScheduledHours` keeps only the part beyond the scheduled minutes (a late
    arrival who makes up the time after the end earns none — the rule of engines ≤ 1.1.0, kept by rule sets saved before 1.2.0);
    flexible shifts (engine 1.1.0): **check in at any time, leave after the required time** — the expected check-out
    (`expected_end_at`) is the (rounded) first IN + required minutes + the shift's unpaid breaks (no break on a half day),
@@ -52,7 +56,7 @@ Records inside a locked period are skipped and listed in the recalculation summa
    8 h, grace 1: 7h59m → no early departure, 7h58m → 2 min; engines ≤ 1.2.0 shaved the grace off every shortfall, so
    7h58m showed 1 min). FIXED shifts keep `lastOut` vs `expectedEnd − grace`. The expected check-out is on
    the record from the moment of the check-in (PENDING day), so the portal's check-in page ("You can check out from …")
-   and the missing check-out reminder use it. OT = worked − required − threshold. **Overnight** (engine 1.3.0): a
+   and the missing check-out reminder use it. OT = worked − required, under the same threshold / minimum rule. **Overnight** (engine 1.3.0): a
    check-in still open at the day boundary is closed by the next day's leading check-out (`PUNCH_OUT`, not an undirected
    `PUNCH`) within required + unpaid breaks + 4 h (at most 20 h) — 22:00 → 06:00 is 8 h worked on the check-in day,
    `CROSS_MIDNIGHT`, no `MISSING_OUT`, and the next day does not see a stray check-out. Until that limit has passed the

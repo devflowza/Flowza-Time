@@ -26,7 +26,10 @@ describe('RuleSetDialog — overtime', () => {
     apiMock.post.mockResolvedValue({ data: { id: 'rs1', recalculationJobId: null } });
     renderWithProviders(<RuleSetDialog open onOpenChange={vi.fn()} ruleSet={null} />);
     expect(screen.getByLabelText('OT starts after (min)')).toHaveValue(0);
-    expect(screen.getByLabelText('Minimum OT block (min)')).toHaveValue(0);
+    expect(screen.getByLabelText('Minimum OT (min)')).toHaveValue(0);
+    // the threshold and the minimum say what they do: they qualify a day for overtime, which then counts in exact minutes
+    expect(screen.getByText(/then from the first minute\. 0 = every minute\./)).toBeInTheDocument();
+    expect(screen.getByText(/No rounding = exact minutes\./)).toBeInTheDocument();
     const strict = screen.getByRole('switch', { name: 'OT only beyond the scheduled hours' });
     expect(strict).not.toBeChecked();
     fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Policy 2026' } });

@@ -8,7 +8,7 @@ const D1 = '2026-03-11';
 const FRIDAY = '2026-03-13';
 const AFTER_WINDOW = at(DATE, '23:30'); // window of the 09:00–17:00 shift closes at 23:00
 const DURING_SHIFT = at(DATE, '12:00');
-/** An organisation's overtime policy on top of "the time after the shift end": a 30-min threshold, DOWN to 15 min, 30-min blocks. */
+/** An organisation's overtime policy on top of "the time after the shift end": a 30-min threshold, DOWN to 15 min, a 30-min minimum. */
 const OT_POLICY = { overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 15 } as const;
 
 function day(...times: string[]) {
@@ -125,13 +125,43 @@ describe('calculateDailyRecord — overtime', () => {
 
   it('applies the organisation\'s threshold, rounding, minimum block and cap', () => {
     const r = calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: rules(OT_POLICY) }));
-    // 110 min after end − 30 threshold = 80 → DOWN 15 → 75 → 30-min blocks → 60
-    expect(r).toMatchObject({ overtimeMinutes: 60, overtimeCategory: 'REGULAR', workedMinutes: 590 });
+    // 110 min after the end reach the 30 min threshold → all 110 count → DOWN 15 → 105 (≥ the 30 min minimum)
+    expect(r).toMatchObject({ overtimeMinutes: 105, overtimeCategory: 'REGULAR', workedMinutes: 590 });
     expect(r.flags).toContain('OVERTIME');
     const capped = calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: rules({ ...OT_POLICY, overtimeMaxMinutesPerDay: 45 }) }));
     expect(capped.overtimeMinutes).toBe(45);
     const raw = calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: rules({ overtimeStartAfterMinutes: 0, overtimeMinBlockMinutes: 0, overtimeRoundingMinutes: 0 }) }));
     expect(raw.overtimeMinutes).toBe(110);
+  });
+
+  it('counts overtime in exact minutes from the shift end once the threshold is reached — the first half hour included', () => {
+    // a 30 min "OT starts after" and a 30 min minimum without rounding: engines ≤ 1.4.0 recorded 60 for 105 min (30 deducted,
+    // whole 30 min blocks) and nothing for 38 min
+    const policy = rules({ overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 0 });
+    const r = calculateDailyRecord(input({ events: day('09:00', '18:45'), rules: policy }));
+    expect(r).toMatchObject({ workedMinutes: 585, overtimeMinutes: 105, overtimeCategory: 'REGULAR' });
+    const step = r.trace.steps.find((s) => s.step === 'overtime');
+    expect(step?.detail).toBe('105 min worked after the expected end → 105 min overtime (30 min threshold reached, counted from the first minute)');
+    expect(step?.values).toMatchObject({ afterEndMinutes: 105, rawOvertimeMinutes: 105, thresholdMinutes: 30, minimumMinutes: 30, roundingMinutes: 0, capMinutes: null, overtimeMinutes: 105 });
+    resetIds();
+    expect(calculateDailyRecord(input({ events: day('09:00', '17:38'), rules: policy })).overtimeMinutes).toBe(38);
+    resetIds();
+    expect(calculateDailyRecord(input({ events: day('09:00', '17:30'), rules: policy })).overtimeMinutes).toBe(30); // reaching it is enough
+    resetIds();
+    const short = calculateDailyRecord(input({ events: day('09:00', '17:29'), rules: policy }));
+    expect(short).toMatchObject({ overtimeMinutes: 0, overtimeCategory: null });
+    expect(short.flags).not.toContain('OVERTIME');
+    expect(short.trace.steps.find((s) => s.step === 'overtime')?.detail).toBe('29 min worked after the expected end → no overtime (under the 30 min threshold)');
+  });
+
+  it('a minimum OT block discards shorter overtime but never cuts longer overtime to whole blocks', () => {
+    const hourMinimum = rules({ overtimeMinBlockMinutes: 60 });
+    expect(calculateDailyRecord(input({ events: day('09:00', '17:50'), rules: hourMinimum })).overtimeMinutes).toBe(0);
+    resetIds();
+    expect(calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: hourMinimum })).overtimeMinutes).toBe(110); // not 60
+    resetIds();
+    // whole hours only when the policy asks for it explicitly: rounding DOWN to 60
+    expect(calculateDailyRecord(input({ events: day('09:00', '18:50'), rules: rules({ overtimeRoundingMinutes: 60 }) })).overtimeMinutes).toBe(60);
   });
 
   it('does not award overtime below the threshold or when disabled', () => {
@@ -149,6 +179,10 @@ describe('calculateDailyRecord — overtime', () => {
     const strict = calculateDailyRecord(input({ events: day('09:30', '18:00'), rules: rules({ overtimeRequiresScheduledHours: true }) }));
     expect(strict).toMatchObject({ workedMinutes: 510, overtimeMinutes: 30 });
     expect(strict.trace.steps.find((s) => s.step === 'overtime')?.values).toMatchObject({ afterEndMinutes: 60, beyondScheduledMinutes: 30, requiresScheduledHours: true, rawOvertimeMinutes: 30 });
+    resetIds();
+    // the threshold qualifies the strict basis too: 30 beyond the scheduled minutes reach a 30 min threshold in full
+    const strictThreshold = calculateDailyRecord(input({ events: day('09:30', '18:00'), rules: rules({ overtimeRequiresScheduledHours: true, overtimeStartAfterMinutes: 30 }) }));
+    expect(strictThreshold).toMatchObject({ workedMinutes: 510, overtimeMinutes: 30 });
   });
 
   it('a break punched after the shift end is not overtime (PAIRED gap, DIRECTIONAL break span)', () => {
@@ -169,12 +203,17 @@ describe('calculateDailyRecord — overtime', () => {
     expect(off.overtimeMinutes).toBe(0);
   });
 
-  it('finaliseOvertime rounds down, keeps whole blocks and caps', () => {
-    expect(finaliseOvertime(80, rules(OT_POLICY))).toBe(60);
-    expect(finaliseOvertime(29, rules(OT_POLICY))).toBe(0);
+  it('finaliseOvertime: the threshold and the minimum decide whether, rounding and the cap how much', () => {
+    expect(finaliseOvertime(80, rules(OT_POLICY))).toBe(75); // threshold reached, nothing deducted, DOWN 15
+    expect(finaliseOvertime(29, rules(OT_POLICY))).toBe(0); // under the threshold
     expect(finaliseOvertime(125, rules({ ...OT_POLICY, overtimeMaxMinutesPerDay: 90 }))).toBe(90);
     expect(finaliseOvertime(47, rules({ overtimeMinBlockMinutes: 0, overtimeRoundingMinutes: 0 }))).toBe(47);
     expect(finaliseOvertime(80, rules())).toBe(80); // the default keeps every minute
+    const exact = rules({ overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30 });
+    expect([29, 30, 38, 105, 141].map((m) => finaliseOvertime(m, exact))).toEqual([0, 30, 38, 105, 141]);
+    expect(finaliseOvertime(40, rules({ overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 15 }))).toBe(30); // DOWN 15, then ≥ the minimum
+    expect(finaliseOvertime(25, rules({ overtimeMinBlockMinutes: 15, overtimeRoundingMinutes: 30 }))).toBe(0); // rounded to 0
+    expect(finaliseOvertime(-5, rules())).toBe(0);
   });
 });
 
@@ -466,6 +505,15 @@ describe('calculateDailyRecord — flexible shifts and no shift', () => {
     const under = calculateDailyRecord(input({ shift: flexibleShift(), events: day('10:00', '15:00') }));
     expect(under).toMatchObject({ status: 'PRESENT', workedMinutes: 300, overtimeMinutes: 0, expectedEndAt: at(DATE, '18:00'), earlyDepartureMinutes: 180 });
     expect(under.flags).toEqual(['EARLY_DEPARTURE', 'UNDER_HOURS']);
+  });
+
+  it('flexible: a threshold the extra time reaches does not shave it (534 worked of 480 required → 54, not 24 → 0)', () => {
+    const policy = rules({ overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30 });
+    const r = calculateDailyRecord(input({ shift: flexibleShift(), events: day('10:00', '18:54'), rules: policy }));
+    expect(r).toMatchObject({ workedMinutes: 534, overtimeMinutes: 54, overtimeCategory: 'REGULAR' });
+    expect(r.trace.steps.find((s) => s.step === 'overtime')?.detail).toBe('FLEXIBLE: 534 worked − 480 required = 54 min → 54 min overtime (30 min threshold reached, counted from the first minute)');
+    resetIds();
+    expect(calculateDailyRecord(input({ shift: flexibleShift(), events: day('10:00', '18:20'), rules: policy })).overtimeMinutes).toBe(0);
   });
 
   it('flexible without core hours: check in at any time, the expected check-out is the check-in + the required minutes', () => {

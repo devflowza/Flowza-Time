@@ -95,7 +95,7 @@ async function seedTenant(db: Database, rng: Prng): Promise<Ids> {
   // leave v2: the organisation's comp-off type (credits are redeemed through it; hidden from the ordinary apply form)
   await db.insertInto('leaveTypes').values({ organizationId: ORG.id, code: 'CO', name: 'Compensatory Off', nameAr: 'إجازة تعويضية', isPaid: true, color: '#6941c6', status: 'active', isSpecial: true, portalVisible: false, systemKey: 'COMP_OFF' }).execute();
   const ruleSetId = rng.uuid();
-  await db.insertInto('attendanceRuleSets').values({ id: ruleSetId, organizationId: ORG.id, name: 'Company default', effectiveFrom: '2025-01-01', graceInMinutes: 10, graceOutMinutes: 5, lateThresholdMinutes: 0, minFullDayMinutes: 420, halfDayThresholdMinutes: 240, overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 15, punchInterpretation: 'FIRST_LAST', missingPunchBehavior: 'FLAG_ONLY' }).execute();
+  await db.insertInto('attendanceRuleSets').values({ id: ruleSetId, organizationId: ORG.id, name: 'Company default', effectiveFrom: '2025-01-01', graceInMinutes: 10, graceOutMinutes: 5, lateThresholdMinutes: 0, minFullDayMinutes: 420, halfDayThresholdMinutes: 240, overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 0, punchInterpretation: 'FIRST_LAST', missingPunchBehavior: 'FLAG_ONLY' }).execute();
 
   // users (auth.users directly — local/dev only; hosted projects create users through the Auth admin API)
   const users: Record<string, string> = {};
@@ -273,7 +273,7 @@ async function seedShifts(db: Database, rng: Prng, ids: Ids, employees: SeedEmpl
 const VERIFY = ['fingerprint', 'face', 'card'] as const;
 
 async function seedAttendance(db: Database, rng: Prng, ids: Ids, employees: SeedEmployee[], devices: SeedDevice[], shifts: SeedShifts, days: number, today: string, log: (m: string) => void) {
-  const rules: AttendanceRules = { ...DEFAULT_ATTENDANCE_RULES, graceInMinutes: 10, graceOutMinutes: 5, overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 15 };
+  const rules: AttendanceRules = { ...DEFAULT_ATTENDANCE_RULES, graceInMinutes: 10, graceOutMinutes: 5, overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 0 };
   const holidays = new Map<string, { id: string; name: string; isHalfDay: boolean }>();
   for (const h of await db.selectFrom('holidays').select(['id', 'name', 'date', 'endDate', 'isHalfDay']).where('organizationId', '=', ORG.id).execute()) {
     let d = DateTime.fromISO(String(h.date).slice(0, 10)); const end = h.endDate ? DateTime.fromISO(String(h.endDate).slice(0, 10)) : d;

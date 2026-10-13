@@ -112,8 +112,10 @@ export const attendanceRuleSetInputSchema = z.object({
   minFullDayMinutes: z.number().int().min(0).max(1440).default(420),
   halfDayThresholdMinutes: z.number().int().min(0).max(1440).default(240),
   overtimeEnabled: z.boolean().default(true),
-  // Regular overtime is the time worked after the shift end (before its start too with `countEarlyInAsOvertime`); by default
-  // every minute counts. The threshold, rounding, minimum block and cap below are the organisation's policy on top of it.
+  // Regular overtime is the time worked after the shift end (before its start too with `countEarlyInAsOvertime`), in exact
+  // minutes; by default every minute counts. The organisation's policy on top of it (engine 1.5.0): the threshold and the
+  // minimum only decide whether a day earns overtime (once reached it counts from the first minute, never shaved or cut to
+  // whole blocks), then the optional rounding DOWN and the daily cap.
   overtimeStartAfterMinutes: z.number().int().min(0).max(480).default(0),
   overtimeMinBlockMinutes: z.number().int().min(0).max(480).default(0),
   overtimeRoundingMinutes: z.union([z.literal(0), z.literal(5), z.literal(10), z.literal(15), z.literal(30), z.literal(60)]).default(0),

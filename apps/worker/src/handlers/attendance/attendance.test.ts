@@ -72,7 +72,7 @@ beforeAll(async () => {
     { organizationId: ORG, targetType: 'ORGANIZATION', targetId: ORG, shiftId: SHIFT_M, effectiveFrom: '2026-01-01' },
     { organizationId: ORG, targetType: 'EMPLOYEE', targetId: E2, shiftId: SHIFT_N, branchId: BRANCH_A, effectiveFrom: '2026-01-01' },
   ]).execute();
-  // an overtime policy on top of "the time after the shift end": 30-min threshold, DOWN to 15 min, whole 30-min blocks
+  // an overtime policy on top of "the time after the shift end": 30-min threshold, DOWN to 15 min, a 30-min minimum
   await a.insertInto('attendanceRuleSets').values({ id: RULES, organizationId: ORG, name: 'Default', effectiveFrom: '2026-01-01', overtimeStartAfterMinutes: 30, overtimeMinBlockMinutes: 30, overtimeRoundingMinutes: 15, ramadanMode: JSON.stringify({}) }).execute();
   await a.insertInto('leaveTypes').values({ id: LEAVE_TYPE, organizationId: ORG, code: 'ANNUAL', name: 'Annual', isPaid: true }).execute();
   const emp = (id: string, n: string, deviceUserId: string) => ({ id, organizationId: ORG, employeeNumber: n, firstName: 'F', lastName: n, displayName: `F ${n}`, joiningDate: '2025-01-01', branchId: BRANCH_A, deviceUserId, customFields: JSON.stringify({}) });
@@ -223,10 +223,11 @@ describe('RECOMPUTE_DAILY', () => {
     expect(await record(E1, '2026-03-19')).toMatchObject({ status: 'PENDING' });
   });
 
-  it('computes regular overtime beyond the shift end in whole blocks', async () => {
+  it('computes regular overtime after the shift end in exact minutes once the threshold is reached', async () => {
     await recompute(E1, '2026-03-18');
     const r = await record(E1, '2026-03-18');
-    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 602, overtimeMinutes: 90, overtimeCategory: 'REGULAR', lateMinutes: 0 });
+    // 17:00–19:00 = 120 min reach the 30 min threshold → all 120 count (engines ≤ 1.4.0 deducted the threshold: 90)
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 602, overtimeMinutes: 120, overtimeCategory: 'REGULAR', lateMinutes: 0 });
     expect(r.flags).toEqual(['OVERTIME']);
   });
 
@@ -450,8 +451,8 @@ describe('BUILD_PERIOD_SUMMARY', () => {
     expect(res).toMatchObject({ employees: 1, built: 1, changed: 1, finalized: 0, pendingDays: 1 });
     const s = await h.tdb.adminDb.selectFrom('attendancePeriodSummaries').selectAll().where('employeeId', '=', E1).executeTakeFirstOrThrow();
     // 03-05 ABSENT (bypass), 03-09 LEAVE, 03-10 PRESENT late 10, 03-11 HOLIDAY, 03-13 + 03-14 WEEKLY_OFF, 03-16 ABSENT, 03-17 MISSING_PUNCH (missing out:
-    // a missing-punch day only, not present — engine 1.3.0), 03-18 PRESENT OT 90, 03-19 PENDING
-    expect(s).toMatchObject({ branchId: BRANCH_A, status: 'draft', version: 1, workingDays: 7, presentDays: '2.00', absentDays: '2.00', leaveDays: '1.00', paidLeaveDays: '1.00', holidayDays: 1, weeklyOffDays: 2, halfDays: 0, missingPunchDays: 1, lateDays: 1, lateMinutes: 10, overtimeMinutes: 90, overtimeWeeklyOffMinutes: 0, overtimeHolidayMinutes: 0, regularMinutes: 465 + 512, earlyDepartureMinutes: 0 });
+    // a missing-punch day only, not present — engine 1.3.0), 03-18 PRESENT OT 120, 03-19 PENDING
+    expect(s).toMatchObject({ branchId: BRANCH_A, status: 'draft', version: 1, workingDays: 7, presentDays: '2.00', absentDays: '2.00', leaveDays: '1.00', paidLeaveDays: '1.00', holidayDays: 1, weeklyOffDays: 2, halfDays: 0, missingPunchDays: 1, lateDays: 1, lateMinutes: 10, overtimeMinutes: 120, overtimeWeeklyOffMinutes: 0, overtimeHolidayMinutes: 0, regularMinutes: 465 + 482, earlyDepartureMinutes: 0 });
     const versions = s.recordVersions as Record<string, number>;
     expect(Object.keys(versions)).toHaveLength(10);
     expect(versions[(await record(E1, '2026-03-17')).id]).toBe(2);

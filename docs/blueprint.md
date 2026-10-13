@@ -636,9 +636,10 @@ and recorded in the trace. Flexible shifts use a configurable day boundary (defa
 
 Late = `max(0, firstIn − (shiftStart + grace))`; early departure likewise at the end; worked = OUT − IN −
 unpaid breaks (fixed break minutes or measured); overtime = the time worked after the shift end (before its start
-with early-in) past the OT threshold, in minimum blocks — or, with `overtimeRequiresScheduledHours`, only the part beyond the
-scheduled minutes; rounding (none/5/10/15 min; nearest/up/down; applied to IN, OUT and/or
-total — raw timestamps stay untouched and the trace shows both); minimum full-day/half-day thresholds;
+with early-in), in exact minutes — the OT threshold and minimum only decide whether a day earns it, then it counts from the
+first minute (engine 1.5.0) — or, with `overtimeRequiresScheduledHours`, only the part beyond the scheduled minutes;
+rounding (none/5/10/15 min; nearest/up/down; applied to IN, OUT and/or total — raw timestamps stay untouched and
+the trace shows both); minimum full-day/half-day thresholds;
 missing-punch behaviour (flag only / assume shift end / treat as absent); auto-absent when no punches
 and no leave/holiday/off; holiday & weekly-off precedence (holiday > weekly off > leave > punches — a
 punch on a holiday yields `HOLIDAY` status with `WORKED_ON_HOLIDAY` flag and OT per rule); Ramadan

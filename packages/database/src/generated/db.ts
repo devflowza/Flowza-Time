@@ -636,12 +636,21 @@ export interface AttendanceRuleSets {
   organizationId: string;
   overtimeEnabled: Generated<boolean>;
   overtimeMaxMinutesPerDay: number | null;
+  /**
+   * Regular overtime shorter than this is discarded; longer overtime counts minute for minute (engine 1.5.0, not whole blocks). 0 = no minimum.
+   */
   overtimeMinBlockMinutes: Generated<number>;
   /**
    * Regular overtime only beyond the scheduled minutes (a late arrival making up the time after the shift end earns none). Off: every minute worked after the shift end counts.
    */
   overtimeRequiresScheduledHours: Generated<boolean>;
+  /**
+   * Optional rounding of regular overtime, DOWN to this many minutes. 0 (the default) = exact minutes.
+   */
   overtimeRoundingMinutes: Generated<number>;
+  /**
+   * Regular overtime is earned only when the minutes worked past the shift end reach this; it then counts from the first minute (engine 1.5.0). 0 = every minute.
+   */
   overtimeStartAfterMinutes: Generated<number>;
   /**
    * Policy sections (very late, check-in methods, overtime rates and weekly threshold, attendance points, escalation, regularisation limits, country pack provenance) — @flowza/contracts attendancePolicySectionsSchema.

@@ -298,8 +298,8 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
   const rn = (name: Path, key: string, opts: { min?: number; max?: number; hint?: boolean; warn?: boolean } = {}) => n(name, t(`rules.fields.${key}`), { min: opts.min, max: opts.max, hint: opts.hint ? t(`rules.hints.${key}`) : undefined, warn: opts.warn ? name : undefined });
   const b = (name: Path, label: string, hint?: string) => <Bool key={name} name={name} id={`rs-${name.replace(/\./g, '-')}`} label={label} hint={hint} control={control} />;
   const rb = (name: Path, key: string) => b(name, t(`rules.fields.${key}`), t(`rules.hints.${key}`));
-  const roundingSelect = (name: 'overtimeRoundingMinutes' | 'punchRoundingMinutes' | 'workedRoundingMinutes', values: readonly number[], label: string) => (
-    <FormField label={label} htmlFor={`rs-${name}`} error={errors[name]?.message}>
+  const roundingSelect = (name: 'overtimeRoundingMinutes' | 'punchRoundingMinutes' | 'workedRoundingMinutes', values: readonly number[], label: string, hint?: string) => (
+    <FormField label={label} htmlFor={`rs-${name}`} hint={hint} error={errors[name]?.message}>
       <Controller control={control} name={name} render={({ field }) => (
         <Select value={String(field.value ?? 0)} onValueChange={(v) => field.onChange(Number(v))}>
           <SelectTrigger id={`rs-${name}`}><SelectValue /></SelectTrigger>
@@ -459,7 +459,7 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
                 {rb('overtimeEnabled', 'overtimeEnabled')}
                 <div className={`grid gap-3 sm:grid-cols-2 ${otEnabled ? '' : 'opacity-50'}`}>
                   {rn('overtimeStartAfterMinutes', 'overtimeStartAfterMinutes', { max: 480, hint: true })}{rn('overtimeMinBlockMinutes', 'overtimeMinBlockMinutes', { max: 480, hint: true })}
-                  {roundingSelect('overtimeRoundingMinutes', OT_ROUNDING, t('rules.fields.overtimeRoundingMinutes'))}
+                  {roundingSelect('overtimeRoundingMinutes', OT_ROUNDING, t('rules.fields.overtimeRoundingMinutes'), t('rules.hints.overtimeRoundingMinutes'))}
                   {n('overtimeMaxMinutesPerDay', t('rules.fields.overtimeMaxMinutesPerDay'), { max: 1440, nullable: true, hint: t('rules.hints.overtimeMaxMinutesPerDay'), placeholder: t('rules.noLimit'), warn: 'overtimeMaxMinutesPerDay' })}
                 </div>
                 {rb('overtimeRequiresScheduledHours', 'overtimeRequiresScheduledHours')}

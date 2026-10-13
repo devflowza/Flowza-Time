@@ -609,7 +609,8 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
     // expected start when countEarlyInAsOvertime — measured on the worked spans (a punched break out there is not work) and
     // never more than the minutes worked: an employee who checks out after the shift end earns the additional time. With
     // `overtimeRequiresScheduledHours` (the stricter policy) only the part beyond the scheduled minutes counts, so a late
-    // arrival who merely completes the scheduled hours after the shift end earns nothing.
+    // arrival who merely completes the scheduled hours after the shift end earns nothing. Engine 1.5.0: that basis is the
+    // overtime minute for minute; the policy's threshold and minimum only decide whether the day earns it (finaliseOvertime).
     const spans = workedSpans(interpretation, firstIn, lastOut);
     const afterEnd = minutesWithin(spans, schedule.expectedEnd, null);
     const earlyIn = rules.countEarlyInAsOvertime ? minutesWithin(spans, null, schedule.expectedStart) : 0;
@@ -617,14 +618,13 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
     const beyondScheduled = Math.max(0, workedMinutes - schedule.scheduledMinutes);
     const strict = rules.overtimeRequiresScheduledHours;
     const basis = strict ? Math.min(beyondScheduled, outsideShift) : outsideShift;
-    const raw = Math.max(0, basis - rules.overtimeStartAfterMinutes);
-    overtimeMinutes = finaliseOvertime(raw, rules);
+    overtimeMinutes = finaliseOvertime(basis, rules);
     const outside = `${afterEnd} min worked after the expected end${rules.countEarlyInAsOvertime ? ` + ${earlyIn} min early in` : ''}${outsideShift < afterEnd + earlyIn ? ` (at most the ${workedMinutes} worked)` : ''}`;
-    rec.step('overtime', `${strict ? `min(${workedMinutes} worked − ${schedule.scheduledMinutes} scheduled = ${beyondScheduled}, ${outside})` : outside} − ${rules.overtimeStartAfterMinutes} min threshold = ${raw} raw → ${overtimeMinutes} min (round DOWN ${rules.overtimeRoundingMinutes}, block ${rules.overtimeMinBlockMinutes}, cap ${rules.overtimeMaxMinutesPerDay ?? '∞'})`, { workedMinutes, scheduledMinutes: schedule.scheduledMinutes, beyondScheduledMinutes: beyondScheduled, afterEndMinutes: afterEnd, earlyInMinutes: earlyIn, outsideShiftMinutes: outsideShift, requiresScheduledHours: strict, rawOvertimeMinutes: raw, overtimeMinutes });
+    rec.step('overtime', `${strict ? `min(${workedMinutes} worked − ${schedule.scheduledMinutes} scheduled = ${beyondScheduled}, ${outside})` : outside} → ${overtimeOutcome(basis, overtimeMinutes, rules)}`, { workedMinutes, scheduledMinutes: schedule.scheduledMinutes, beyondScheduledMinutes: beyondScheduled, afterEndMinutes: afterEnd, earlyInMinutes: earlyIn, outsideShiftMinutes: outsideShift, requiresScheduledHours: strict, rawOvertimeMinutes: basis, ...overtimePolicyValues(rules), overtimeMinutes });
   } else if (firstIn && lastOut && schedule.kind === 'FLEXIBLE') {
-    const raw = Math.max(0, workedMinutes - schedule.scheduledMinutes - rules.overtimeStartAfterMinutes);
-    overtimeMinutes = finaliseOvertime(raw, rules);
-    rec.step('overtime', `FLEXIBLE: ${workedMinutes} worked − ${schedule.scheduledMinutes} required − ${rules.overtimeStartAfterMinutes} threshold = ${raw} raw → ${overtimeMinutes} min`, { workedMinutes, requiredMinutes: schedule.scheduledMinutes, rawOvertimeMinutes: raw, overtimeMinutes });
+    const basis = Math.max(0, workedMinutes - schedule.scheduledMinutes);
+    overtimeMinutes = finaliseOvertime(basis, rules);
+    rec.step('overtime', `FLEXIBLE: ${workedMinutes} worked − ${schedule.scheduledMinutes} required = ${basis} min → ${overtimeOutcome(basis, overtimeMinutes, rules)}`, { workedMinutes, requiredMinutes: schedule.scheduledMinutes, rawOvertimeMinutes: basis, ...overtimePolicyValues(rules), overtimeMinutes });
   } else {
     rec.step('overtime', 'no overtime basis (no shift or incomplete punches)', { kind: schedule.kind });
   }
@@ -668,12 +668,38 @@ function minutesWithin(spans: readonly Span[], from: DateTime | null, to: DateTi
   return Math.round(total);
 }
 
-/** Round DOWN to the OT rounding interval, keep whole minimum blocks, apply the daily cap. */
-export function finaliseOvertime(rawMinutes: number, rules: AttendanceRules): number {
-  const rounded = roundMinutes(Math.max(0, rawMinutes), rules.overtimeRoundingMinutes, 'DOWN');
-  const block = rules.overtimeMinBlockMinutes;
-  const blocked = block > 0 ? Math.floor(rounded / block) * block : rounded;
-  return capOvertime(blocked, rules);
+/**
+ * The overtime a day records from its basis (the minutes worked outside the shift, or beyond the required minutes), in exact
+ * minutes (engine 1.5.0). The threshold ("OT starts after") and the minimum ("Minimum OT") decide WHETHER the day earns
+ * overtime, never how much: a basis that reaches them counts from its first minute, a shorter one is no overtime. Engines
+ * ≤ 1.4.0 deducted the threshold and kept whole blocks only, so 105 min after the shift end under a 30 min threshold and
+ * 30 min blocks recorded 60, and 38 min recorded none. The rounding (DOWN, off by default) and the daily cap apply as set.
+ */
+export function finaliseOvertime(basisMinutes: number, rules: AttendanceRules): number {
+  const basis = Math.max(0, basisMinutes);
+  if (basis < rules.overtimeStartAfterMinutes) return 0;
+  const rounded = roundMinutes(basis, rules.overtimeRoundingMinutes, 'DOWN');
+  if (rounded < rules.overtimeMinBlockMinutes) return 0;
+  return capOvertime(rounded, rules);
+}
+
+/** How `finaliseOvertime` treated the basis, for the trace: "105 min overtime (30 min threshold reached, counted from the first minute)". */
+function overtimeOutcome(basis: number, overtime: number, rules: AttendanceRules): string {
+  if (basis <= 0) return 'no overtime';
+  const { overtimeStartAfterMinutes: threshold, overtimeMinBlockMinutes: minimum, overtimeRoundingMinutes: rounding, overtimeMaxMinutesPerDay: cap } = rules;
+  const notes: string[] = [];
+  if (threshold > 0) notes.push(basis >= threshold ? `${threshold} min threshold reached, counted from the first minute` : `under the ${threshold} min threshold`);
+  if (basis >= threshold) {
+    const rounded = roundMinutes(basis, rounding, 'DOWN');
+    if (rounding > 0) notes.push(`rounded DOWN to ${rounding} min steps`);
+    if (rounded < minimum) notes.push(`under the ${minimum} min minimum`);
+    else if (typeof cap === 'number' && rounded > cap) notes.push(`capped at ${cap} min`);
+  }
+  return `${overtime > 0 ? `${overtime} min overtime` : 'no overtime'}${notes.length > 0 ? ` (${notes.join('; ')})` : ''}`;
+}
+
+function overtimePolicyValues(rules: AttendanceRules): Record<string, number | null> {
+  return { thresholdMinutes: rules.overtimeStartAfterMinutes, minimumMinutes: rules.overtimeMinBlockMinutes, roundingMinutes: rules.overtimeRoundingMinutes, capMinutes: rules.overtimeMaxMinutesPerDay ?? null };
 }
 
 function capOvertime(minutes: number, rules: AttendanceRules): number {
