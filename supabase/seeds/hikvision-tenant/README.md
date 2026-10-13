@@ -40,8 +40,7 @@ Days on which an employee already had attendance events (real punches, correctio
 
 Run the files in order on the admin connection (Supabase SQL editor or MCP `execute_sql`, or
 `psql "$DATABASE_URL_ADMIN" -v ON_ERROR_STOP=1 -f …`). Every step is idempotent (uuid v5 ids in the tenant namespace,
-upserts, `on conflict do nothing` on the append-only tables); re-running step 4 on a later day adds the punches of the days
-since the last run.
+upserts, `on conflict do nothing` on the append-only tables); re-running step 4 on a later day tops the history up (below).
 
 ```
 01_plan.sql                 Enterprise plan, user limit 100, modules back to plan
@@ -62,4 +61,9 @@ update public.devices set connection_status = 'online', last_heartbeat_at = now(
 where organization_id = '78a5a348-69b6-4c51-8d72-3697f72c50f0' and serial_number like 'FZD-%';
 ```
 
-and re-run `04_leave_attendance.sql` to add the punches of the days since the last run.
+and re-run `04_leave_attendance.sql` to fill the days since the last run, up to the current minute (step 4 also brings the
+terminals back online). The top-up starts the day before the last demo punch and adds only punches after it: the
+punch-outs and night shifts the previous run cut off at its `now()`, then every day since, then today's punch-ins so far
+(people on shift show as clocked in). Terminal event serial numbers carry on, the sweep's UNEXCUSED marks on the days it
+completes are revoked, only that window is recalculated (plus the payroll summary of its months), an employee with a
+pending full-day leave request stays away, and the leave and correction records are not created again. Allow ~15 minutes.
