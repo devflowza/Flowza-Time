@@ -37,6 +37,8 @@ export interface MeetingRoomDto {
   id: string;
   branchId: string;
   branchName: string | null;
+  /** The IANA zone of the room's branch (resolved by the API): a booking's wall-clock window is read in it. */
+  timezone: string;
   locationId: string;
   /** The place's path below the branch, e.g. "HQ Tower › Floor 3 › Boardroom". */
   locationName: string | null;
@@ -48,9 +50,12 @@ export interface MeetingRoomDto {
   status: 'active' | 'inactive';
   /** The ACCESS terminals placed in the room. */
   readers: Array<{ id: string; code: string; name: string; connectionStatus: string }>;
-  /** Today's scheduled meetings in the room. */
+  /** The room's scheduled meetings starting today (the branch's calendar day). */
   meetingsToday: number;
 }
+
+/** A booking may start at most this many minutes in the past (later: meeting.rooms only — a backdated meeting reveals the room's log). */
+export const MEETING_BACKDATE_GRACE_MINUTES = 15;
 
 export const meetingInputSchema = z.object({
   roomId: uuidSchema,
@@ -100,6 +105,8 @@ export interface MeetingWalkInDto {
 export interface MeetingDto {
   id: string;
   branchId: string;
+  /** The IANA zone of the room's branch: the meeting's local day and times. */
+  timezone: string;
   roomId: string;
   roomName: string;
   title: string;
@@ -116,15 +123,21 @@ export interface MeetingDto {
   attendedCount: number;
   lateCount: number;
   absentCount: number;
+  /** Uninvited people who entered during the meeting (their identities: `walkIns`, room administrators only). */
   walkInCount: number;
 }
 export interface MeetingDetailDto extends MeetingDto {
   attendees: MeetingAttendeeDto[];
+  /**
+   * Who walked in — a slice of the room access log, so only for meeting.rooms holders; anyone else gets [] and reads
+   * `walkInCount` alone.
+   */
   walkIns: MeetingWalkInDto[];
   /** The room has no ACCESS reader: attendance cannot be measured. */
   noReader: boolean;
 }
 
+/** `from` / `to`: the LOCAL dates of the entries (each in its branch's zone), inclusive; paged in the database. */
 export const accessLogQuerySchema = z.object({
   from: isoDateSchema,
   to: isoDateSchema,
@@ -145,9 +158,9 @@ export interface AccessEventDto {
   employeeId: string | null;
   employeeName: string | null;
   deviceEmployeeId: string;
-  /** Restricted room and the person was neither allowed nor invited to a meeting in progress. */
+  /** Restricted room and the person was neither allowed nor expected (invitee / organiser) at a meeting covering the entry. */
   unauthorized: boolean;
-  /** The meeting in progress in that room at that moment, if any. */
+  /** The meeting the entry belongs to: the one the person is expected at, else the one in progress, else the upcoming one. */
   meetingId: string | null;
   meetingTitle: string | null;
 }

@@ -18,15 +18,14 @@ const ROOM = 'a0000000-0000-4000-8000-000000000001';
 const E1 = 'e1000000-0000-4000-8000-000000000001';
 const E2 = 'e2000000-0000-4000-8000-000000000002';
 const D1 = 'd1000000-0000-4000-8000-000000000001';
-const T = '2026-10-01T00:00:00Z';
-// the room's branch runs on Riyadh time (UTC+3) while the organisation is in Muscat (UTC+4): times show in the room's zone
-const BRANCHES = [{ id: BR1, organizationId: 'org-1', code: 'B1', name: 'Branch 1', nameAr: null, countryCode: 'OM', city: null, address: {}, timezone: 'Asia/Riyadh', latitude: null, longitude: null, geofenceRadiusM: null, status: 'active', createdAt: T, updatedAt: T }];
+// the room's branch runs on Riyadh time (UTC+3) while the organisation is in Muscat (UTC+4): times show in the room's zone, which
+// the API puts on every room and meeting — the branches themselves are NOT readable here (meeting.view does not imply branch.view)
 const room = (over: Partial<MeetingRoomDto> = {}): MeetingRoomDto => ({
-  id: ROOM, branchId: BR1, branchName: 'Branch 1', locationId: 'c0000000-0000-4000-8000-0000000000d2', locationName: 'HQ Tower › Floor 3 › Boardroom', name: 'Boardroom', capacity: 10, restricted: true,
+  id: ROOM, branchId: BR1, branchName: 'Branch 1', timezone: 'Asia/Riyadh', locationId: 'c0000000-0000-4000-8000-0000000000d2', locationName: 'HQ Tower › Floor 3 › Boardroom', name: 'Boardroom', capacity: 10, restricted: true,
   allowedDepartmentIds: [], allowedEmployeeIds: [], status: 'active', readers: [{ id: 'dev-1', code: 'ACC-1', name: 'Boardroom reader', connectionStatus: 'online' }], meetingsToday: 2, ...over,
 });
 const meeting = (id: string, over: Partial<MeetingDto> = {}): MeetingDto => ({
-  id, branchId: BR1, roomId: ROOM, roomName: 'Boardroom', title: `Meeting ${id}`, description: null, startsAt: '2026-10-15T06:00:00Z', endsAt: '2026-10-15T07:00:00Z', lateAfterMinutes: 5,
+  id, branchId: BR1, timezone: 'Asia/Riyadh', roomId: ROOM, roomName: 'Boardroom', title: `Meeting ${id}`, description: null, startsAt: '2026-10-15T06:00:00Z', endsAt: '2026-10-15T07:00:00Z', lateAfterMinutes: 5,
   organizerEmployeeId: 'e9', organizerName: 'Salim Al Harthy', status: 'scheduled', phase: 'over', invitedCount: 4, attendedCount: 3, lateCount: 1, absentCount: 1, walkInCount: 2, ...over,
 });
 const M1 = meeting('m1', { title: 'Budget review' });
@@ -54,7 +53,6 @@ function routes(over: Record<string, unknown> = {}) {
     '/orgs/org-1/meeting-rooms': { data: [room()] },
     '/orgs/org-1/meetings': { data: [M1, M2] },
     '/orgs/org-1/meetings/m1': { data: DETAIL },
-    '/orgs/org-1/branches': page(BRANCHES),
     '/orgs/org-1/employees': page(EMPLOYEES),
     '/orgs/org-1/departments': page([{ id: D1, code: 'FIN', name: 'Finance', branchName: null, status: 'active' }]),
     ...locationRoutes(),
@@ -118,6 +116,16 @@ describe('meetings page — attendance from the room readers (docs/time-away.md 
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith('/orgs/org-1/meetings/m1/cancel', {}));
   });
 
+  it('without meeting.rooms the walk-ins arrive as a count only, and the dialog says where they are', async () => {
+    grant('meeting.view');
+    routes({ '/orgs/org-1/meetings/m1': { data: { ...DETAIL, walkIns: [] } } });
+    renderWithProviders(<MeetingsPage />, { route: '/meetings?date=2026-10-15&meeting=m1' });
+    const dialog = await screen.findByRole('dialog');
+    expect(await within(dialog).findByTestId('meeting-walk-ins-empty')).toHaveTextContent('2 entered without an invitation');
+    expect(within(dialog).getByTestId('meeting-stat-walkIns')).toHaveTextContent('2');
+    expect(within(dialog).queryByTestId('meeting-walk-ins')).not.toBeInTheDocument();
+  });
+
   it('a meeting.view holder sees no cancel action and no access log', async () => {
     grant('meeting.view');
     renderWithProviders(<MeetingsPage />, { route: '/meetings?date=2026-10-15&meeting=m1' });
@@ -164,6 +172,24 @@ describe('meetings page — attendance from the room readers (docs/time-away.md 
     }));
     // the new meeting opens
     await waitFor(() => expect(screen.getByTestId('location')).toHaveTextContent('meeting=m9'));
+  });
+
+  it('a meeting.manage holder who does not administer the rooms cannot book in the past (a room administrator can)', async () => {
+    grant('meeting.view', 'meeting.manage');
+    renderWithProviders(<MeetingsPage />, { route: '/meetings?date=2026-10-15' });
+    await screen.findByTestId('meeting-m1');
+    await waitFor(() => expect(screen.getByRole('button', { name: 'New meeting' })).toBeEnabled());
+    fireEvent.click(screen.getByRole('button', { name: 'New meeting' }));
+    const dialog = await screen.findByRole('dialog', { name: 'New meeting' });
+    fireEvent.change(within(dialog).getByLabelText(/^Title/), { target: { value: 'Peek' } });
+    fireEvent.change(within(dialog).getByLabelText(/^Date/), { target: { value: '2026-01-05' } });
+    fireEvent.change(within(dialog).getByLabelText(/^Starts/), { target: { value: '09:00' } });
+    fireEvent.change(within(dialog).getByLabelText(/^Ends/), { target: { value: '10:00' } });
+    fireEvent.click(within(dialog).getByRole('combobox', { name: /^Invitees/ }));
+    fireEvent.click(await screen.findByRole('option', { name: /Badr Al Said/ }));
+    expect(within(dialog).getByText('The meeting cannot start in the past.')).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByTestId('meeting-save'));
+    expect(apiMock.post).not.toHaveBeenCalled();
   });
 
   it('refuses an end before the start and more invitees than the room holds', async () => {
@@ -233,6 +259,8 @@ describe('meetings page — attendance from the room readers (docs/time-away.md 
     renderWithProviders(<MeetingsPage />, { route: '/meetings?tab=access&from=2026-10-10&to=2026-10-15' });
     expect((await screen.findAllByText('Khalid Al Hinai')).length).toBeGreaterThan(0);
     expect(screen.getAllByText('Unauthorised').length).toBeGreaterThan(0);
+    // 06:20Z in the room's zone (Riyadh), not the organisation's
+    expect(screen.getAllByText(/15 Oct, 09:20/).length).toBeGreaterThan(0);
     fireEvent.click(screen.getByRole('switch', { name: 'Unauthorised only' }));
     await waitFor(() => expect(apiMock.get).toHaveBeenLastCalledWith('/orgs/org-1/access-events', expect.objectContaining({ from: '2026-10-10', to: '2026-10-15', unauthorizedOnly: 'true', page: 1 })));
   });

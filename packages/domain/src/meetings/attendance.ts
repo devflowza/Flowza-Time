@@ -6,7 +6,11 @@
  *     to `lateAfterMinutes` after the start, LATE after it (minutes late from the start). Every entry in that window counts.
  *   - No entry: UPCOMING before the start, ABSENT from the start on (an invitee still on the way is absent until they enter).
  *   - A person who entered in that window without an invitation is a WALK-IN; in a RESTRICTED room a walk-in who is neither
- *     allowed (department / employee) is UNAUTHORISED, and so is any entry by an unknown card.
+ *     allowed (department / employee) is UNAUTHORISED, and so is any entry by an unknown card. The ORGANISER is expected like an
+ *     invitee (never a walk-in), and so is a person expected at ANOTHER meeting of the room whose arrival window holds the entry
+ *     (back-to-back bookings overlap by the arrival window: an early arrival for the next meeting is not a walk-in of this one).
+ *   - A meeting counts for an entry while it is scheduled, or when it was cancelled only AFTER the entry: a later cancellation
+ *     never rewrites the verdict of an entry made while the meeting stood (`meetingLiveAt`).
  */
 
 export type AttendeeStatus = 'ON_TIME' | 'LATE' | 'ABSENT' | 'UPCOMING';
@@ -16,6 +20,11 @@ export interface MeetingSpec { startsAt: string; endsAt: string; lateAfterMinute
 export interface RoomAccessRule { restricted: boolean; allowedDepartmentIds: readonly string[]; allowedEmployeeIds: readonly string[] }
 export interface RoomEntry { employeeId: string | null; deviceEmployeeId: string; occurredAt: string }
 export interface MeetingInviteeSpec { employeeId: string; required: boolean }
+/** A meeting of a room as the access verdicts see it: who is expected (organiser + invitees) and whether it stood at an instant. */
+export interface RoomMeetingSpec {
+  id: string; startsAt: string; endsAt: string; organizerEmployeeId: string | null; inviteeIds: readonly string[];
+  status: 'scheduled' | 'cancelled'; cancelledAt: string | null;
+}
 
 export interface AttendeeResult { employeeId: string; required: boolean; status: AttendeeStatus; enteredAt: string | null; lateMinutes: number; entries: number }
 export interface WalkInResult { employeeId: string | null; deviceEmployeeId: string; enteredAt: string; unauthorized: boolean }
@@ -44,6 +53,35 @@ export function accessAllowed(room: RoomAccessRule, person: { employeeId: string
   return room.allowedEmployeeIds.includes(person.employeeId) || (person.departmentId !== null && room.allowedDepartmentIds.includes(person.departmentId));
 }
 
+/** Did the meeting stand at `at`: scheduled, or cancelled only after it (a later cancellation keeps the entries made before it)? */
+export function meetingLiveAt(m: Pick<RoomMeetingSpec, 'status' | 'cancelledAt'>, at: string): boolean {
+  return m.status === 'scheduled' || (m.cancelledAt !== null && ms(m.cancelledAt) > ms(at));
+}
+
+/** Is `at` inside the meeting's arrival window (from `arrivalWindowMinutes` before the start to the end, both inclusive)? */
+export function inArrivalWindow(m: Pick<MeetingSpec, 'startsAt' | 'endsAt'>, at: string, arrivalWindowMinutes = ARRIVAL_WINDOW_MINUTES): boolean {
+  const t = ms(at);
+  return t >= ms(m.startsAt) - arrivalWindowMinutes * 60_000 && t <= ms(m.endsAt);
+}
+
+const expects = (m: Pick<RoomMeetingSpec, 'organizerEmployeeId' | 'inviteeIds'>, employeeId: string): boolean => m.organizerEmployeeId === employeeId || m.inviteeIds.includes(employeeId);
+
+/**
+ * The meeting an entry into a room belongs to, among that room's meetings. Every meeting that stood at the entry and whose arrival
+ * window holds it is a candidate (back-to-back bookings overlap); `invited` = the person organises or is invited to ANY candidate.
+ * The meeting reported is deterministic: the earliest candidate the person is expected at, else the one in progress, else the
+ * upcoming one, else the earliest (an entry at the very end of a meeting).
+ */
+export function entryMeeting<M extends RoomMeetingSpec>(entry: { employeeId: string | null; occurredAt: string }, meetings: readonly M[], arrivalWindowMinutes = ARRIVAL_WINDOW_MINUTES): { meeting: M | null; invited: boolean } {
+  const t = ms(entry.occurredAt);
+  const candidates = meetings.filter((m) => meetingLiveAt(m, entry.occurredAt) && inArrivalWindow(m, entry.occurredAt, arrivalWindowMinutes))
+    .sort((a, b) => ms(a.startsAt) - ms(b.startsAt) || a.id.localeCompare(b.id));
+  const who = entry.employeeId;
+  const mine = who === null ? undefined : candidates.find((m) => expects(m, who));
+  const meeting = mine ?? candidates.find((m) => ms(m.startsAt) <= t && t < ms(m.endsAt)) ?? candidates.find((m) => ms(m.startsAt) > t) ?? candidates[0] ?? null;
+  return { meeting, invited: mine !== undefined };
+}
+
 export function meetingAttendance(params: {
   meeting: MeetingSpec;
   invitees: readonly MeetingInviteeSpec[];
@@ -53,6 +91,10 @@ export function meetingAttendance(params: {
   departmentOf: ReadonlyMap<string, string | null>;
   now: string;
   arrivalWindowMinutes?: number;
+  /** The organiser: expected like an invitee (never a walk-in, never unauthorised), though not on the attendee list. */
+  organizerEmployeeId?: string | null;
+  /** The room's OTHER meetings around this one: a person expected at one of them whose arrival window holds the entry is not a walk-in here. */
+  otherMeetings?: readonly RoomMeetingSpec[];
 }): MeetingAttendanceResult {
   const { meeting, room } = params;
   const start = ms(meeting.startsAt);
@@ -62,6 +104,7 @@ export function meetingAttendance(params: {
   const inWindow = [...params.entries].filter((e) => { const t = ms(e.occurredAt); return t >= from && t <= end; })
     .sort((a, b) => ms(a.occurredAt) - ms(b.occurredAt) || a.deviceEmployeeId.localeCompare(b.deviceEmployeeId));
   const invited = new Set(params.invitees.map((i) => i.employeeId));
+  const others = params.otherMeetings ?? [];
 
   const attendees = [...params.invitees].sort((a, b) => a.employeeId.localeCompare(b.employeeId)).map((inv): AttendeeResult => {
     const mine = inWindow.filter((e) => e.employeeId === inv.employeeId);
@@ -75,7 +118,7 @@ export function meetingAttendance(params: {
   const seen = new Set<string>();
   const walkIns: WalkInResult[] = [];
   for (const e of inWindow) {
-    if (e.employeeId !== null && invited.has(e.employeeId)) continue;
+    if (e.employeeId !== null && (invited.has(e.employeeId) || e.employeeId === params.organizerEmployeeId || (others.length > 0 && entryMeeting(e, others, params.arrivalWindowMinutes).invited))) continue;
     const key = e.employeeId ?? `card:${e.deviceEmployeeId}`;
     if (seen.has(key)) continue;
     seen.add(key);

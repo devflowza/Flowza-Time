@@ -34,6 +34,7 @@
     "attendees": "Attendees",
     "walkIns": "Walk-ins",
     "noWalkIns": "Nobody entered without an invitation.",
+    "walkInsHidden": "{{count}} entered without an invitation. Who they were is in the room access log, for the room administrators.",
     "noReader": "This room has no access reader, so attendance cannot be measured. Install a terminal with the punch role \"Door / meeting-room reader\" in the room's location.",
     "columns": { "employee": "Employee", "department": "Department", "required": "Invitation", "status": "Status", "enteredAt": "Entered", "late": "Late by", "entries": "Entries", "person": "Person" },
     "required": "Required",
@@ -51,6 +52,7 @@
   "form": {
     "title": "New meeting",
     "hint": "Times are in the room's local time ({{zone}}).",
+    "hintNoRoom": "Times are in the selected room's local time.",
     "meetingTitle": "Title",
     "description": "Description",
     "room": "Room",
@@ -61,6 +63,7 @@
     "end": "Ends",
     "endBeforeStart": "The meeting must end after it starts.",
     "tooLong": "A meeting lasts at most 12 hours.",
+    "inPast": "The meeting cannot start in the past.",
     "lateAfter": "Late after (minutes)",
     "lateAfterHint": "Entering the room later than this after the start counts as late.",
     "lateAfterRange": "Between 0 and 120 minutes.",

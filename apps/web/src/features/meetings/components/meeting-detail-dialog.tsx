@@ -8,13 +8,13 @@ import { toast, toastError } from '@/lib/toast';
 import { useCan } from '@/features/me/use-me';
 import { useMeeting, useMeetingMutations } from '../api';
 import { MEETINGS_NS } from '../i18n';
-import { useBranchZone } from '../use-zone';
 import { AttendeeStatusBadge, MeetingPhaseBadge, UnauthorizedBadge } from './badges';
 
 /**
  * One meeting: when and where, who was invited and how each of them came (on time / late by n minutes / absent / not yet, the
  * first entry and how many times they entered), and who walked in uninvited — unauthorised when the room is restricted and
- * they are not allowed in. Without a reader in the room nothing can be measured, which the dialog says first.
+ * they are not allowed in. Who walked in is a slice of the room access log: without meeting.rooms the API sends the count only,
+ * which the dialog says. Times are in the room's zone (`meeting.timezone`). Without a reader nothing can be measured.
  */
 export function MeetingDetailDialog({ meetingId, onClose }: { meetingId: string | null; onClose: () => void }) {
   const { t } = useTranslation(MEETINGS_NS);
@@ -45,7 +45,7 @@ function MeetingDetail({ meeting: m, onClose }: { meeting: MeetingDetailDto; onC
   const { t } = useTranslation(MEETINGS_NS);
   const { t: tc } = useTranslation();
   const can = useCan();
-  const zone = useBranchZone()(m.branchId);
+  const zone = m.timezone;
   const { cancel } = useMeetingMutations();
   const [confirming, setConfirming] = useState(false);
   const canCancel = can('meeting.manage') && m.status === 'scheduled' && m.phase !== 'over';
@@ -97,7 +97,7 @@ function MeetingDetail({ meeting: m, onClose }: { meeting: MeetingDetailDto; onC
 
       <section aria-labelledby="mtg-walkins" className="space-y-2">
         <h3 id="mtg-walkins" className="text-sm font-semibold">{t('detail.walkIns')}</h3>
-        {m.walkIns.length === 0 ? <p className="text-sm text-muted-foreground">{t('detail.noWalkIns')}</p> : (
+        {m.walkIns.length === 0 ? <p className="text-sm text-muted-foreground" data-testid="meeting-walk-ins-empty">{m.walkInCount > 0 ? t('detail.walkInsHidden', { count: m.walkInCount }) : t('detail.noWalkIns')}</p> : (
           <ul className="divide-y rounded-md border" data-testid="meeting-walk-ins">
             {m.walkIns.map((w, i) => (
               <li key={`${w.deviceEmployeeId}-${w.enteredAt}-${i}`} className="flex flex-wrap items-center gap-x-3 gap-y-1 px-3 py-2 text-sm">

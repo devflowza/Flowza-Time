@@ -12,18 +12,17 @@ import { useOrgTimezone } from '@/features/me/use-me';
 import { useAccessEvents, useMeetingRooms } from '../api';
 import { MEETINGS_NS } from '../i18n';
 import { ISO_DATE } from '../model';
-import { useBranchZone } from '../use-zone';
 import { UnauthorizedBadge } from './badges';
 
 /**
  * The room access log (meeting.rooms): every entry through a meeting-room reader, newest first — who (or which unknown card),
- * which room and reader, the meeting in progress, and whether the entry was unauthorised. Filters live in the address
- * (`from`, `to`, `room`, `unauthorized`), default the last seven days.
+ * which room and reader, the meeting it belongs to, and whether the entry was unauthorised. Filters live in the address
+ * (`from`, `to`, `room`, `unauthorized`), default the last seven days; the dates are the entries' local dates and the API pages
+ * and filters them. Times show in the room's zone (`room.timezone`), the organisation's only for a room not in the list.
  */
 export function AccessTab() {
   const { t } = useTranslation(MEETINGS_NS);
   const orgTz = useOrgTimezone();
-  const zoneOf = useBranchZone();
   const table = useServerTable({ pageSize: 50 });
   const f = table.state.filters;
   const today = todayIso(orgTz);
@@ -35,8 +34,8 @@ export function AccessTab() {
   const pageSize = Math.min(table.state.pageSize, 200);
   const rooms = useMeetingRooms();
   const q = useAccessEvents({ from, to: to < from ? from : to, roomId, unauthorizedOnly, page: table.state.page, pageSize });
-  const roomBranch = useMemo(() => new Map((rooms.data ?? []).map((r) => [r.id, r.branchId])), [rooms.data]);
-  const zoneOfEvent = (e: AccessEventDto) => zoneOf(e.roomId ? roomBranch.get(e.roomId) : null);
+  const roomZone = useMemo(() => new Map((rooms.data ?? []).map((r) => [r.id, r.timezone])), [rooms.data]);
+  const zoneOfEvent = (e: AccessEventDto) => (e.roomId ? roomZone.get(e.roomId) : undefined) ?? orgTz;
   const roomOptions = useMemo<ComboboxOption[]>(() => (rooms.data ?? []).map((r) => ({ value: r.id, label: r.name, description: r.locationName ?? undefined })), [rooms.data]);
 
   const person = (e: AccessEventDto) => e.employeeName ?? <span className="font-mono text-xs text-muted-foreground" dir="ltr">{t('access.unknownCard', { id: e.deviceEmployeeId })}</span>;

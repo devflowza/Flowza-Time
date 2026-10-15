@@ -11,7 +11,6 @@ import { useActiveMembership, useCan, useOrgTimezone } from '@/features/me/use-m
 import { useMeetingRooms, useMeetings } from '../api';
 import { MEETINGS_NS } from '../i18n';
 import { ISO_DATE, meetingDay, periodDays, shiftPeriod, type MeetingsView } from '../model';
-import { useBranchZone } from '../use-zone';
 import { MeetingPhaseBadge } from './badges';
 import { MeetingDetailDialog } from './meeting-detail-dialog';
 import { MeetingDialog } from './meeting-dialog';
@@ -27,7 +26,6 @@ export function MeetingsTab() {
   const can = useCan();
   const orgTz = useOrgTimezone();
   const firstDay = useActiveMembership()?.settings.general?.firstDayOfWeek ?? 0;
-  const zoneOf = useBranchZone();
   const [params, setParams] = useSearchParams();
   const today = todayIso(orgTz);
   const view: MeetingsView = params.get('view') === 'week' ? 'week' : 'day';
@@ -52,12 +50,12 @@ export function MeetingsTab() {
   }, { replace });
   const open = (id: string) => set({ meeting: id }, false);
 
-  // the API widens the window by the timezone spread: keep the meetings whose local day (their branch's zone) is on screen
+  // the API widens the window by the timezone spread: keep the meetings whose local day (their branch's zone, from the API) is on screen
   const byDay = useMemo(() => {
     const map = new Map<string, MeetingDto[]>(days.map((d) => [d, []]));
-    for (const m of q.data ?? []) map.get(meetingDay(m, zoneOf(m.branchId)))?.push(m);
+    for (const m of q.data ?? []) map.get(meetingDay(m, m.timezone))?.push(m);
     return map;
-  }, [q.data, days, zoneOf]);
+  }, [q.data, days]);
   const total = [...byDay.values()].reduce((n, list) => n + list.length, 0);
   const roomOptions = useMemo<ComboboxOption[]>(() => (rooms.data ?? []).map((r) => ({ value: r.id, label: r.name, description: r.locationName ?? r.branchName ?? undefined })), [rooms.data]);
 
@@ -94,7 +92,7 @@ export function MeetingsTab() {
               <section key={d} aria-label={fmtDate(d, 'cccc dd MMMM')} className="space-y-2">
                 {view === 'week' ? <h3 className="text-sm font-semibold">{fmtDate(d, 'cccc dd MMM')}</h3> : null}
                 <ul className="space-y-2">
-                  {byDay.get(d)!.map((m) => <li key={m.id}><MeetingCard meeting={m} zone={zoneOf(m.branchId)} onOpen={() => open(m.id)} /></li>)}
+                  {byDay.get(d)!.map((m) => <li key={m.id}><MeetingCard meeting={m} zone={m.timezone} onOpen={() => open(m.id)} /></li>)}
                 </ul>
               </section>
             ))}
@@ -103,7 +101,7 @@ export function MeetingsTab() {
 
       {creating ? (
         <MeetingDialog open onOpenChange={setCreating} rooms={rooms.data ?? []} roomId={roomId} day={date}
-          onCreated={(m) => set({ meeting: m.id, date: meetingDay(m, zoneOf(m.branchId)) === today ? null : meetingDay(m, zoneOf(m.branchId)) }, false)} />
+          onCreated={(m) => set({ meeting: m.id, date: meetingDay(m, m.timezone) === today ? null : meetingDay(m, m.timezone) }, false)} />
       ) : null}
       <MeetingDetailDialog meetingId={openId} onClose={() => set({ meeting: null }, false)} />
     </div>
