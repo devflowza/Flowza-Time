@@ -41,6 +41,28 @@ describe('nextScheduleRun', () => {
     expect(nextScheduleRun(t, at('2026-10-19T06:30:00Z')).toISOString()).toBe('2026-10-26T07:00:00.000Z');
   });
 
+  it('daily: every weekday of the mask at the run time (Sunday–Thursday in Muscat)', () => {
+    const t = { cadence: 'daily' as const, runDay: 0b0011111, runTime: '07:30', timezone: 'Asia/Muscat' };
+    // Wednesday 14 Oct 2026, 08:00 local → Thursday 15 Oct 07:30 local
+    expect(nextScheduleRun(t, at('2026-10-14T04:00:00Z')).toISOString()).toBe('2026-10-15T03:30:00.000Z');
+    // Thursday after the run → skips Friday and Saturday → Sunday 18 Oct
+    expect(nextScheduleRun(t, at('2026-10-15T03:30:00Z')).toISOString()).toBe('2026-10-18T03:30:00.000Z');
+    // Saturday → Sunday
+    expect(nextScheduleRun(t, at('2026-10-17T10:00:00Z')).toISOString()).toBe('2026-10-18T03:30:00.000Z');
+    // the last run at or before a Saturday is Thursday's
+    expect(latestScheduleRunAtOrBefore(t, at('2026-10-17T10:00:00Z')).toISOString()).toBe('2026-10-15T03:30:00.000Z');
+    // an empty mask runs every day
+    expect(nextScheduleRun({ ...t, runDay: 0 }, at('2026-10-15T03:30:00Z')).toISOString()).toBe('2026-10-16T03:30:00.000Z');
+  });
+
+  it('daily: a late run counts the working mornings it skipped, not the weekend', () => {
+    const t = { cadence: 'daily' as const, runDay: 0b0011111, runTime: '07:00', timezone: 'UTC' };
+    // stored Thursday 8 Oct, now Tuesday 13 Oct 09:00 → missed Thu, Sun, Mon; the run covers Tuesday's occurrence
+    const due = dueOccurrence(t, at('2026-10-08T07:00:00Z'), at('2026-10-13T09:00:00Z'));
+    expect(due.scheduledFor.toISOString()).toBe('2026-10-13T07:00:00.000Z');
+    expect(due.missed).toBe(3);
+  });
+
   it('falls back to UTC for an invalid zone', () => {
     const t = { cadence: 'monthly' as const, runDay: 5, runTime: '07:00', timezone: 'Not/AZone' };
     expect(nextScheduleRun(t, at('2026-09-01T00:00:00Z')).toISOString()).toBe('2026-09-05T07:00:00.000Z');
@@ -87,6 +109,18 @@ describe('schedulePeriod', () => {
     expect(schedulePeriod({ periodRule: 'custom', customFromDay: 26, customToDay: 25 }, at('2026-09-25T04:00:00Z'), 'UTC')).toEqual({ from: '2026-07-26', to: '2026-08-25' });
     expect(schedulePeriod({ periodRule: 'custom', customFromDay: 16, customToDay: 15 }, at('2027-01-03T04:00:00Z'), 'UTC')).toEqual({ from: '2026-11-16', to: '2026-12-15' });
   });
+  it('previous_day = yesterday, and after days without a run every day since the previous run (each day reported once)', () => {
+    const sunToThu = 0b0011111;
+    // Monday 19 Oct → Sunday
+    expect(schedulePeriod({ periodRule: 'previous_day', runDays: sunToThu }, at('2026-10-19T03:00:00Z'), 'Asia/Muscat')).toEqual({ from: '2026-10-18', to: '2026-10-18' });
+    // Sunday 18 Oct → Thursday to Saturday (Thursday's own run covered Wednesday)
+    expect(schedulePeriod({ periodRule: 'previous_day', runDays: sunToThu }, at('2026-10-18T03:00:00Z'), 'Asia/Muscat')).toEqual({ from: '2026-10-15', to: '2026-10-17' });
+    // no mask (or every day) → yesterday only
+    expect(schedulePeriod({ periodRule: 'previous_day' }, at('2026-10-18T03:00:00Z'), 'Asia/Muscat')).toEqual({ from: '2026-10-17', to: '2026-10-17' });
+    expect(schedulePeriod({ periodRule: 'previous_day', runDays: 127 }, at('2026-10-18T03:00:00Z'), 'Asia/Muscat')).toEqual({ from: '2026-10-17', to: '2026-10-17' });
+    // one run a week → the seven days before it
+    expect(schedulePeriod({ periodRule: 'previous_day', runDays: 1 << 0 }, at('2026-10-18T03:00:00Z'), 'Asia/Muscat')).toEqual({ from: '2026-10-11', to: '2026-10-17' });
+  });
   it('uses the local date of the occurrence', () => {
     // 2026-08-31T21:00Z is already 1 Sep in Muscat
     expect(schedulePeriod({ periodRule: 'previous_month' }, at('2026-08-31T21:00:00Z'), 'Asia/Muscat')).toEqual({ from: '2026-08-01', to: '2026-08-31' });
@@ -98,6 +132,7 @@ describe('periodParameters', () => {
   const p = { from: '2026-08-01', to: '2026-08-31' };
   it('maps the period onto each report type', () => {
     expect(periodParameters('monthly_attendance', p)).toEqual({ month: '2026-08' });
+    expect(periodParameters('daily_attendance', { from: '2026-10-15', to: '2026-10-17' })).toEqual({ from: '2026-10-15', to: '2026-10-17' });
     expect(periodParameters('late_report', p)).toEqual({ from: '2026-08-01', to: '2026-08-31' });
     expect(periodParameters('weekly_attendance', { from: '2026-09-20', to: '2026-09-26' })).toEqual({ from: '2026-09-20' });
     expect(periodParameters('employee_directory', p)).toEqual({});

@@ -6,7 +6,7 @@
   "schedule": {
     "newTitle": "جدول جديد", "editTitle": "تعديل الجدول", "subtitle": "اختر التقرير ووقت تشغيله ومن يستلمه.", "create": "إنشاء الجدول",
     "name": "الاسم", "namePlaceholder": "مثال: الحضور الشهري لمديري الفروع", "nameRequired": "أدخل اسمًا للجدول.",
-    "typeInvalid": "اختر تقريرًا قابلًا للجدولة.", "cadence": "التكرار", "runDay": "يوم الشهر", "runWeekday": "يوم الأسبوع",
+    "typeInvalid": "اختر تقريرًا قابلًا للجدولة.", "cadence": "التكرار", "runDay": "يوم الشهر", "runWeekday": "يوم الأسبوع", "runWeekdays": "أيام التشغيل", "runWeekdaysHint": "يغطي كل تشغيل الأيام منذ التشغيل السابق: تشغيل الأحد بعد أسبوع من الأحد إلى الخميس يغطي من الخميس إلى السبت.",
     "runDayInvalid": "اختر يومًا صالحًا.", "runTime": "الوقت", "runTimeHint": "بتوقيت المنظمة.", "runTimeInvalid": "أدخل وقتًا (HH:MM).",
     "period": "الفترة المشمولة", "periodInvalid": "هذه الفترة لا تناسب التقرير أو التكرار.",
     "customFrom": "من يوم (الشهر السابق)", "customTo": "إلى يوم", "customInvalid": "تبدأ الفترة من يوم في الشهر السابق وتنتهي في يوم أبكر منه (مثل 26 ← 25).",
@@ -17,8 +17,8 @@
     "created": "تم إنشاء الجدول", "saved": "تم حفظ الجدول", "deleted": "تم حذف الجدول",
     "deleteTitle": "حذف هذا الجدول؟", "deleteHint": "سيتوقف «{{name}}» عن التشغيل. تبقى التقارير المرسلة لدى مستلميها."
   },
-  "cadence": { "monthly": "شهري", "weekly": "أسبوعي", "monthlyOn": "شهريًا في اليوم {{day}} الساعة {{time}}", "weeklyOn": "كل {{day}} الساعة {{time}}" },
-  "period": { "previous_month": "الشهر السابق", "month_to_date": "من بداية الشهر حتى الآن", "previous_week": "الأسبوع السابق", "custom": "فترة قطع مخصصة", "customRange": "اليوم {{from}} ← اليوم {{to}}" },
+  "cadence": { "monthly": "شهري", "weekly": "أسبوعي", "daily": "يومي", "dailyOn": "{{days}} الساعة {{time}}", "everyDay": "كل يوم", "monthlyOn": "شهريًا في اليوم {{day}} الساعة {{time}}", "weeklyOn": "كل {{day}} الساعة {{time}}" },
+  "period": { "previous_month": "الشهر السابق", "month_to_date": "من بداية الشهر حتى الآن", "previous_week": "الأسبوع السابق", "previous_day": "اليوم السابق (منذ آخر تشغيل)", "custom": "فترة قطع مخصصة", "customRange": "اليوم {{from}} ← اليوم {{to}}" },
   "runStatus": { "success": "أُرسل", "partial": "أُرسل جزئيًا", "failed": "فشل", "skipped": "لم يُرسل شيء" },
   "recipients": {
     "label": "المستلمون", "required": "اختر مستلمًا واحدًا على الأقل.", "managers": "المديرون", "roles": "الأدوار", "people": "الأشخاص",

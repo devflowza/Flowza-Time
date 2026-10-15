@@ -5,12 +5,11 @@ import { useTranslation } from 'react-i18next';
 import type { z } from 'zod';
 import { CalendarClock } from 'lucide-react';
 import {
-  createReportScheduleSchema, MONTHLY_ATTENDANCE_LAYOUTS, SCHEDULABLE_REPORT_TYPES, WEEK_PARAMETER_REPORT_TYPES,
+  createReportScheduleSchema, DAILY_ONLY_REPORT_TYPES, DAILY_RUN_DAYS_DEFAULT, MONTHLY_ATTENDANCE_LAYOUTS, SCHEDULABLE_REPORT_TYPES, WEEK_PARAMETER_REPORT_TYPES,
   type CreateReportScheduleInput, type ReportPeriodRule, type ReportScheduleCadence, type ReportScheduleDto, type ReportType,
 } from '@flowza/contracts';
 import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/components/ui';
 import { Combobox } from '@/components/forms';
-import { fmtDate } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useActiveMembership } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
@@ -19,7 +18,7 @@ import { EmployeeMultiSelect } from '@/features/attendance/components/employee-m
 import '../schedules-i18n';
 import { useReportTypes, type ReportTypeDef } from '../api';
 import { useScheduleMutations } from '../schedules-api';
-import { allowedPeriodRules } from '../schedule-utils';
+import { allowedPeriodRules, weekdayName } from '../schedule-utils';
 import { RecipientsPicker } from './recipients-picker';
 import { ChannelsField } from './share-report-dialog';
 
@@ -28,17 +27,20 @@ const PERIOD_PARAMS = new Set(['from', 'to', 'month']);
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 const MONTH_DAYS = Array.from({ length: 28 }, (_, i) => i + 1);
 
+const runDayFor = (c: ReportScheduleCadence, firstDay: number): number => (c === 'daily' ? DAILY_RUN_DAYS_DEFAULT : c === 'weekly' ? firstDay : 1);
+
 function defaultsFor(def: ReportTypeDef | undefined, firstDay: number): Partial<FormValues> {
   if (!def) return {};
   const week = WEEK_PARAMETER_REPORT_TYPES.includes(def.key);
-  const cadence: ReportScheduleCadence = week ? 'weekly' : 'monthly';
+  const day = DAILY_ONLY_REPORT_TYPES.includes(def.key);
+  const cadence: ReportScheduleCadence = day ? 'daily' : week ? 'weekly' : 'monthly';
   const format = def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats[0];
-  return { reportType: def.key, format, cadence, runDay: week ? firstDay : 1, periodRule: allowedPeriodRules(cadence, def.key)[0] ?? 'previous_month', customFromDay: null, customToDay: null };
+  return { reportType: def.key, format, cadence, runDay: runDayFor(cadence, firstDay), periodRule: allowedPeriodRules(cadence, def.key)[0] ?? 'previous_month', customFromDay: null, customToDay: null };
 }
 
 /**
- * Create / edit a report schedule (HR portal Prompt 6a): report type + filters, cadence (monthly on a day 1–28 or weekly on a
- * weekday) at a local time, the period each run covers, recipients and channels. The worker runs it every due occurrence —
+ * Create / edit a report schedule (HR portal Prompt 6a): report type + filters, cadence (monthly on a day 1–28, weekly on a
+ * weekday, or daily on chosen weekdays — a manager's morning roll call) at a local time, the period each run covers, recipients and channels. The worker runs it every due occurrence —
  * each recipient receives a copy generated under their own access scope.
  */
 export function ScheduleDialog({ schedule, onClose }: { schedule: ReportScheduleDto | null; onClose: () => void }) {
@@ -74,7 +76,7 @@ export function ScheduleDialog({ schedule, onClose }: { schedule: ReportSchedule
   };
   const onCadence = (c: ReportScheduleCadence) => {
     setValue('cadence', c);
-    setValue('runDay', c === 'weekly' ? firstDay : 1);
+    setValue('runDay', runDayFor(c, firstDay));
     const allowed = allowedPeriodRules(c, reportType);
     if (!allowed.includes(periodRule)) setValue('periodRule', allowed[0] ?? 'previous_month');
   };
@@ -117,19 +119,35 @@ export function ScheduleDialog({ schedule, onClose }: { schedule: ReportSchedule
             <FormField label={t('schedule.cadence')} htmlFor="sc-cadence" required>
               <Select value={cadence} onValueChange={(v) => onCadence(v as ReportScheduleCadence)}>
                 <SelectTrigger id="sc-cadence" aria-label={t('schedule.cadence')}><SelectValue /></SelectTrigger>
-                <SelectContent>{(['monthly', 'weekly'] as const).map((c) => <SelectItem key={c} value={c} disabled={allowedPeriodRules(c, reportType).length === 0}>{t(`cadence.${c}`)}</SelectItem>)}</SelectContent>
+                <SelectContent>{(['daily', 'weekly', 'monthly'] as const).map((c) => <SelectItem key={c} value={c} disabled={allowedPeriodRules(c, reportType).length === 0}>{t(`cadence.${c}`)}</SelectItem>)}</SelectContent>
               </Select>
             </FormField>
+            {cadence === 'daily' ? (
+              <FormField label={t('schedule.runWeekdays')} htmlFor="sc-days" required hint={t('schedule.runWeekdaysHint')} error={errors.runDay ? t('schedule.runDayInvalid') : undefined}>
+                <Controller control={control} name="runDay" render={({ field }) => {
+                  const mask = Number(field.value ?? 0);
+                  return (
+                    <div id="sc-days" role="group" aria-label={t('schedule.runWeekdays')} className="flex flex-wrap gap-1.5">
+                      {WEEKDAYS.map((d) => {
+                        const on = (mask & (1 << d)) !== 0;
+                        return <Button key={d} type="button" size="sm" variant={on ? 'default' : 'outline'} aria-pressed={on} onClick={() => field.onChange(mask ^ (1 << d))}>{weekdayName(d, 'ccc')}</Button>;
+                      })}
+                    </div>
+                  );
+                }} />
+              </FormField>
+            ) : (
             <FormField label={cadence === 'weekly' ? t('schedule.runWeekday') : t('schedule.runDay')} htmlFor="sc-day" required error={errors.runDay ? t('schedule.runDayInvalid') : undefined}>
               <Controller control={control} name="runDay" render={({ field }) => (
                 <Select value={String(field.value ?? '')} onValueChange={(v) => field.onChange(Number(v))}>
                   <SelectTrigger id="sc-day" aria-label={cadence === 'weekly' ? t('schedule.runWeekday') : t('schedule.runDay')}><SelectValue /></SelectTrigger>
                   <SelectContent>{cadence === 'weekly'
-                    ? WEEKDAYS.map((d) => <SelectItem key={d} value={String(d)}>{fmtDate(`2024-01-${String(7 + d).padStart(2, '0')}`, 'cccc')}</SelectItem>)
+                    ? WEEKDAYS.map((d) => <SelectItem key={d} value={String(d)}>{weekdayName(d)}</SelectItem>)
                     : MONTH_DAYS.map((d) => <SelectItem key={d} value={String(d)}>{d}</SelectItem>)}</SelectContent>
                 </Select>
               )} />
             </FormField>
+            )}
             <FormField label={t('schedule.runTime')} htmlFor="sc-time" required hint={t('schedule.runTimeHint')} error={errors.runTime ? t('schedule.runTimeInvalid') : undefined}><Input id="sc-time" type="time" dir="ltr" {...register('runTime')} aria-invalid={!!errors.runTime} /></FormField>
             <FormField label={t('schedule.period')} htmlFor="sc-period" required error={errors.periodRule ? t('schedule.periodInvalid') : undefined}>
               <Controller control={control} name="periodRule" render={({ field }) => (

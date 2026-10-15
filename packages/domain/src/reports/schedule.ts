@@ -10,7 +10,7 @@ import { isValidTimezone } from '@flowza/shared';
 
 export interface ScheduleTiming {
   cadence: ReportScheduleCadence;
-  /** monthly: day of month 1–28; weekly: 0 = Sunday … 6 = Saturday. */
+  /** monthly: day of month 1–28; weekly: 0 = Sunday … 6 = Saturday; daily: weekday mask (bit d = weekday d, 1–127). */
   runDay: number;
   /** `HH:mm` or `HH:mm:ss`, local time. */
   runTime: string;
@@ -23,6 +23,8 @@ export interface SchedulePeriodRule {
   customToDay?: number | null;
   /** First day of the week for `previous_week` (0 = Sunday … 6 = Saturday; organisation setting general.firstDayOfWeek). */
   firstDayOfWeek?: number;
+  /** `previous_day`: the daily schedule's weekday mask (its `runDay`), so a run after days without one covers them too. */
+  runDays?: number;
 }
 
 export interface ReportPeriod { from: string; to: string }
@@ -39,9 +41,16 @@ function clock(runTime: string): { hour: number; minute: number } {
 /** Luxon weekday (1 = Monday … 7 = Sunday) of a 0 = Sunday … 6 = Saturday day number. */
 const luxonWeekday = (day: number): number => (((day % 7) + 7) % 7 === 0 ? 7 : ((day % 7) + 7) % 7);
 
+/** Does a daily schedule run on this local day (its weekday is in the mask; an empty mask runs every day)? */
+function dailyRunsOn(t: ScheduleTiming, local: DateTime): boolean {
+  const mask = t.runDay & 0b1111111;
+  return mask === 0 || (mask & (1 << (local.weekday % 7))) !== 0;
+}
+
 /** The occurrence of the schedule in the month / week that contains `local` (it may lie before or after `local`). */
 function occurrenceAround(t: ScheduleTiming, local: DateTime): DateTime {
   const { hour, minute } = clock(t.runTime);
+  if (t.cadence === 'daily') return local.set({ hour, minute, second: 0, millisecond: 0 });
   if (t.cadence === 'monthly') return local.set({ day: Math.min(28, Math.max(1, t.runDay)), hour, minute, second: 0, millisecond: 0 });
   const target = luxonWeekday(t.runDay);
   return local.set({ hour, minute, second: 0, millisecond: 0 }).plus({ days: target - local.weekday });
@@ -54,10 +63,22 @@ const step = (t: ScheduleTiming, dt: DateTime, n: number): DateTime => {
   return moved.set({ hour, minute, second: 0, millisecond: 0 });
 };
 
+/** A daily run moves one day at a time until it lands on a weekday of its mask (at most a week). */
+const stepDaily = (t: ScheduleTiming, dt: DateTime, dir: 1 | -1): DateTime => {
+  const { hour, minute } = clock(t.runTime);
+  let d = dt;
+  for (let i = 0; i < 8; i += 1) { d = d.plus({ days: dir }).set({ hour, minute, second: 0, millisecond: 0 }); if (dailyRunsOn(t, d)) return d; }
+  return d;
+};
+
 /** The first occurrence strictly after `after`. */
 export function nextScheduleRun(t: ScheduleTiming, after: Date): Date {
   const local = DateTime.fromJSDate(after, { zone: zoneOf(t.timezone) });
   let candidate = occurrenceAround(t, local);
+  if (t.cadence === 'daily') {
+    if (candidate.toMillis() <= local.toMillis() || !dailyRunsOn(t, candidate)) candidate = stepDaily(t, candidate, 1);
+    return candidate.toUTC().toJSDate();
+  }
   if (candidate.toMillis() <= local.toMillis()) candidate = step(t, candidate, 1);
   return candidate.toUTC().toJSDate();
 }
@@ -66,6 +87,10 @@ export function nextScheduleRun(t: ScheduleTiming, after: Date): Date {
 export function latestScheduleRunAtOrBefore(t: ScheduleTiming, at: Date): Date {
   const local = DateTime.fromJSDate(at, { zone: zoneOf(t.timezone) });
   let candidate = occurrenceAround(t, local);
+  if (t.cadence === 'daily') {
+    if (candidate.toMillis() > local.toMillis() || !dailyRunsOn(t, candidate)) candidate = stepDaily(t, candidate, -1);
+    return candidate.toUTC().toJSDate();
+  }
   if (candidate.toMillis() > local.toMillis()) candidate = step(t, candidate, -1);
   return candidate.toUTC().toJSDate();
 }
@@ -90,7 +115,10 @@ export function dueOccurrence(t: ScheduleTiming, storedNextRunAt: Date, now: Dat
  *  - month_to_date: the first of the month up to YESTERDAY (a run on the 1st therefore covers the whole previous month);
  *  - previous_week: the whole week before the run's week (weeks start on `firstDayOfWeek`);
  *  - custom: the last complete cut-off period `customFromDay` of one month → `customToDay` of the next (e.g. 26 → 25),
- *    i.e. the one ending before the run's date.
+ *    i.e. the one ending before the run's date;
+ *  - previous_day: the day before the run (daily schedules: yesterday's attendance every working morning) — and, after days
+ *    without a run (a Sunday–Thursday mask on a Sunday), every day since the previous run (Thursday to Saturday), so each
+ *    day is reported exactly once.
  */
 export function schedulePeriod(rule: SchedulePeriodRule, scheduledFor: Date, timezone: string): ReportPeriod {
   const local = DateTime.fromJSDate(scheduledFor, { zone: zoneOf(timezone) }).startOf('day');
@@ -110,6 +138,14 @@ export function schedulePeriod(rule: SchedulePeriodRule, scheduledFor: Date, tim
       const weekStart = local.minus({ days: offset });
       const from = weekStart.minus({ weeks: 1 });
       return { from: iso(from), to: iso(from.plus({ days: 6 })) };
+    }
+    case 'previous_day': {
+      const to = local.minus({ days: 1 });
+      const mask = (rule.runDays ?? 0) & 0b1111111;
+      let from = to;
+      // back to the day of the previous run: the days after it up to yesterday had no report yet
+      while (mask !== 0 && (mask & (1 << (from.weekday % 7))) === 0 && local.diff(from, 'days').days < 7) from = from.minus({ days: 1 });
+      return { from: iso(from), to: iso(to) };
     }
     case 'custom': {
       const fromDay = Math.min(28, Math.max(1, rule.customFromDay ?? 26));
@@ -160,7 +196,7 @@ export interface RecipientGrant {
   permissions: readonly string[];
   allBranches: boolean;
   branchIds: readonly string[];
-  /** Direct reports (primary or secondary manager), leavers excluded — the same set as `app.team_employee_ids()`. */
+  /** The recipient's team (direct reports, or the reporting line under the hierarchy scope), leavers excluded — the same set as `app.team_employee_ids()`. */
   teamEmployeeIds?: readonly string[];
   /**
    * The recipient's OWN employee record (`org_memberships.employee_id`, only while it is not deleted and not a leaver), with its

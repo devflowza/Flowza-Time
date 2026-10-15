@@ -156,7 +156,7 @@ function timingOf(s: { cadence: string; runDay: number; runTime: string }, timez
 function toScheduleDto(s: ScheduleRow, timing: { timezone: string; firstDayOfWeek: number }, names: Map<string, string>): ReportScheduleDto {
   const recipients = jsonObject(s.recipients);
   const summary = s.lastSummary === null ? null : jsonObject(s.lastSummary);
-  const nextPeriod = s.nextRunAt ? schedulePeriod({ periodRule: s.periodRule as ReportPeriodRule, customFromDay: s.customFromDay, customToDay: s.customToDay, firstDayOfWeek: timing.firstDayOfWeek }, new Date(s.nextRunAt), timing.timezone) : null;
+  const nextPeriod = s.nextRunAt ? schedulePeriod({ periodRule: s.periodRule as ReportPeriodRule, customFromDay: s.customFromDay, customToDay: s.customToDay, firstDayOfWeek: timing.firstDayOfWeek, runDays: s.runDay }, new Date(s.nextRunAt), timing.timezone) : null;
   return {
     id: s.id, name: s.name, reportType: s.reportType as ReportType, format: s.format, filters: jsonObject(s.filters) as ReportScheduleFilters, branchId: s.branchId,
     cadence: s.cadence as ReportScheduleCadence, runDay: s.runDay, runTime: String(s.runTime).slice(0, 5), periodRule: s.periodRule as ReportPeriodRule,
@@ -316,7 +316,7 @@ export async function runScheduleNow(deps: ApiDeps, actor: Actor, orgId: string,
     await validateSpec(trx, orgId, grant, row.reportType as ReportType, row.format, jsonObject(row.filters), { requireNonPeriod: true });
     await systemStep(trx, orgId, (t) => consumeShareQuota(t, orgId));
     const timing = await orgTiming(trx, orgId);
-    const period = schedulePeriod({ periodRule: row.periodRule as ReportPeriodRule, customFromDay: row.customFromDay, customToDay: row.customToDay, firstDayOfWeek: timing.firstDayOfWeek }, new Date(), timing.timezone);
+    const period = schedulePeriod({ periodRule: row.periodRule as ReportPeriodRule, customFromDay: row.customFromDay, customToDay: row.customToDay, firstDayOfWeek: timing.firstDayOfWeek, runDays: row.runDay }, new Date(), timing.timezone);
     const runKey = `manual:${randomUUID()}`;
     const jobId = await enqueueJob(deps.queue, trx, { queue: REPORT_DELIVERY_QUEUE, jobType: REPORT_DELIVERY_JOB_TYPE, organizationId: orgId, payload: { organizationId: orgId, mode: 'manual', scheduleId: id, runKey, requestedBy: actor.userId }, correlationId: actor.requestId, priority: 5 });
     await audit(trx, actor, orgId, 'report_schedule.run_requested', 'report_schedule', { entityId: id, branchId: row.branchId, newValue: { runKey, period, jobId } });

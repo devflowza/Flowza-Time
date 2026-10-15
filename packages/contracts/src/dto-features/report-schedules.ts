@@ -13,15 +13,21 @@ import { REPORT_TYPE_DEFINITIONS } from './reports.js';
  * session (a 5-minute signed URL minted on click); no bearer link ever leaves the application.
  */
 
-export const REPORT_SCHEDULE_CADENCES = ['monthly', 'weekly'] as const;
+/** `daily` (migration 20261015000400): runs on the weekdays of the `runDay` mask and covers the previous day. */
+export const REPORT_SCHEDULE_CADENCES = ['monthly', 'weekly', 'daily'] as const;
 export type ReportScheduleCadence = (typeof REPORT_SCHEDULE_CADENCES)[number];
-export const REPORT_PERIOD_RULES = ['previous_month', 'month_to_date', 'previous_week', 'custom'] as const;
+export const REPORT_PERIOD_RULES = ['previous_month', 'month_to_date', 'previous_week', 'custom', 'previous_day'] as const;
 export type ReportPeriodRule = (typeof REPORT_PERIOD_RULES)[number];
 /** Period rules a cadence may use (mirrors report_schedules_cadence_period_check). */
 export const PERIOD_RULES_BY_CADENCE: Record<ReportScheduleCadence, readonly ReportPeriodRule[]> = {
   monthly: ['previous_month', 'month_to_date', 'custom'],
   weekly: ['previous_week', 'month_to_date'],
+  daily: ['previous_day'],
 };
+/** A daily schedule's `runDay`: a mask of the weekdays it runs on (bit d = weekday d, 0 = Sunday … 6 = Saturday). */
+export const DAILY_RUN_DAYS_DEFAULT = 0b0011111; // Sunday–Thursday
+export const dailyRunDays = (mask: number): number[] => [0, 1, 2, 3, 4, 5, 6].filter((d) => (mask & (1 << d)) !== 0);
+export const dailyRunMask = (days: readonly number[]): number => days.reduce((m, d) => m | (1 << (((d % 7) + 7) % 7)), 0);
 export const REPORT_DELIVERY_CHANNELS = ['in_app', 'email'] as const;
 export type ReportDeliveryChannel = (typeof REPORT_DELIVERY_CHANNELS)[number];
 /** `cancelled`: the recipient cancelled their queued copy (HR portal Prompt 6a review — minor 14). */
@@ -41,11 +47,13 @@ export const REPORT_SHARES_PER_HOUR = 10;
 
 /**
  * Report types a schedule / share can carry: every available type whose period can be derived from a date range. The daily
- * report covers ONE day, which neither cadence produces, so it is shared from the Reports page as an ordinary request.
+ * report covers ONE day: it is scheduled with the daily cadence only (DAILY_ONLY_REPORT_TYPES).
  */
 export const SCHEDULABLE_REPORT_TYPES: readonly ReportType[] = REPORT_TYPE_DEFINITIONS
-  .filter((d) => d.status === 'available' && d.key !== 'daily_attendance')
+  .filter((d) => d.status === 'available')
   .map((d) => d.key);
+/** Report types that cover one day: a daily schedule only. */
+export const DAILY_ONLY_REPORT_TYPES: readonly ReportType[] = ['daily_attendance'];
 
 /** Types whose period parameter is a whole month (`month`): only whole-month rules make sense for them. */
 export const MONTH_PARAMETER_REPORT_TYPES: readonly ReportType[] = REPORT_TYPE_DEFINITIONS.filter((d) => d.requiredParameters.includes('month')).map((d) => d.key);
@@ -83,6 +91,8 @@ const periodRuleRefinement = (v: { cadence?: ReportScheduleCadence; periodRule?:
   if (v.cadence && v.periodRule && !PERIOD_RULES_BY_CADENCE[v.cadence].includes(v.periodRule)) ctx.addIssue({ code: 'custom', path: ['periodRule'], message: `A ${v.cadence} schedule cannot use ${v.periodRule}` });
   if (v.cadence === 'monthly' && v.runDay !== undefined && (v.runDay < 1 || v.runDay > 28)) ctx.addIssue({ code: 'custom', path: ['runDay'], message: 'Run day must be 1–28' });
   if (v.cadence === 'weekly' && v.runDay !== undefined && (v.runDay < 0 || v.runDay > 6)) ctx.addIssue({ code: 'custom', path: ['runDay'], message: 'Run day must be a weekday (0–6)' });
+  if (v.cadence === 'daily' && v.runDay !== undefined && (v.runDay < 1 || v.runDay > 127)) ctx.addIssue({ code: 'custom', path: ['runDay'], message: 'Choose at least one weekday' });
+  if (v.reportType && DAILY_ONLY_REPORT_TYPES.includes(v.reportType) && v.cadence && v.cadence !== 'daily') ctx.addIssue({ code: 'custom', path: ['cadence'], message: 'This report covers one day: use a daily schedule' });
   if (v.periodRule === 'custom' && (v.customFromDay == null || v.customToDay == null)) ctx.addIssue({ code: 'custom', path: ['customFromDay'], message: 'A custom period needs a from day and a to day' });
   if (v.periodRule === 'custom' && v.customFromDay != null && v.customToDay != null && v.customFromDay <= v.customToDay) {
     ctx.addIssue({ code: 'custom', path: ['customFromDay'], message: 'A custom period runs from a day of the previous month to an earlier day of the next (e.g. 26 → 25)' });
@@ -102,8 +112,8 @@ const scheduleShape = {
   format: z.enum(REPORT_FORMATS).default('pdf'),
   filters: reportScheduleFiltersSchema.default({}),
   cadence: z.enum(REPORT_SCHEDULE_CADENCES),
-  /** monthly: day of month 1–28; weekly: 0 = Sunday … 6 = Saturday. */
-  runDay: z.coerce.number().int().min(0).max(28),
+  /** monthly: day of month 1–28; weekly: 0 = Sunday … 6 = Saturday; daily: a weekday mask 1–127 (bit d = weekday d). */
+  runDay: z.coerce.number().int().min(0).max(127),
   /** Local time (organisation timezone) the run starts. */
   runTime: timeSchema.default('07:00'),
   periodRule: z.enum(REPORT_PERIOD_RULES),

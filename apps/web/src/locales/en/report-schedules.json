@@ -6,7 +6,7 @@
   "schedule": {
     "newTitle": "New schedule", "editTitle": "Edit schedule", "subtitle": "Choose the report, when it runs and who receives it.", "create": "Create schedule",
     "name": "Name", "namePlaceholder": "e.g. Monthly attendance for branch managers", "nameRequired": "Give the schedule a name.",
-    "typeInvalid": "Choose a report that can be scheduled.", "cadence": "Frequency", "runDay": "Day of the month", "runWeekday": "Day of the week",
+    "typeInvalid": "Choose a report that can be scheduled.", "cadence": "Frequency", "runDay": "Day of the month", "runWeekday": "Day of the week", "runWeekdays": "Days it runs", "runWeekdaysHint": "Each run covers the days since the previous one: a Sunday run after a Sunday–Thursday week covers Thursday to Saturday.",
     "runDayInvalid": "Choose a valid day.", "runTime": "Time", "runTimeHint": "In the organisation's time zone.", "runTimeInvalid": "Enter a time (HH:MM).",
     "period": "Period covered", "periodInvalid": "This period does not fit the report or the frequency.",
     "customFrom": "From day (previous month)", "customTo": "To day", "customInvalid": "The period runs from a day of the previous month to an earlier day (e.g. 26 → 25).",
@@ -17,8 +17,8 @@
     "created": "Schedule created", "saved": "Schedule saved", "deleted": "Schedule deleted",
     "deleteTitle": "Delete this schedule?", "deleteHint": "“{{name}}” stops running. Reports already sent stay with their recipients."
   },
-  "cadence": { "monthly": "Monthly", "weekly": "Weekly", "monthlyOn": "Monthly on day {{day}} at {{time}}", "weeklyOn": "Every {{day}} at {{time}}" },
-  "period": { "previous_month": "Previous month", "month_to_date": "Month to date", "previous_week": "Previous week", "custom": "Custom cut-off", "customRange": "Day {{from}} → day {{to}}" },
+  "cadence": { "monthly": "Monthly", "weekly": "Weekly", "daily": "Daily", "dailyOn": "{{days}} at {{time}}", "everyDay": "Every day", "monthlyOn": "Monthly on day {{day}} at {{time}}", "weeklyOn": "Every {{day}} at {{time}}" },
+  "period": { "previous_month": "Previous month", "month_to_date": "Month to date", "previous_week": "Previous week", "previous_day": "Previous day (since the last run)", "custom": "Custom cut-off", "customRange": "Day {{from}} → day {{to}}" },
   "runStatus": { "success": "Sent", "partial": "Partly sent", "failed": "Failed", "skipped": "Nothing sent" },
   "recipients": {
     "label": "Recipients", "required": "Choose at least one recipient.", "managers": "Managers", "roles": "Roles", "people": "People",
