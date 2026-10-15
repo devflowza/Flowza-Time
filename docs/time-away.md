@@ -58,8 +58,13 @@ the gaps between closed work segments and the `BREAK_START → BREAK_END` spans 
 
 Persisted on `attendance_daily_records`: `away_minutes`, `official_duty_minutes`, `permission_minutes`,
 `unapproved_away_minutes`; the intervals are in the trace step `timeAway`. Flags: `TIME_AWAY`, `UNAPPROVED_AWAY`. While the
-employee is still at work (day `PENDING`), the completed out-and-backs are already reported. With the policy off nothing
-changes — every pre-1.5.0 test passes unchanged.
+employee is still at work (day `PENDING`), the completed out-and-backs are already reported — and the gap before an open
+check-in only on such a working day: it is reported, never deducted (a weekly-off or holiday day still in progress keeps its
+worked minutes). The shift's fixed unpaid break stays a floor: a day whose gaps are official, short or excused still loses its
+unpaid lunch like a plain day (a scheduled break range is not charged twice where a permission or unapproved gap covers it).
+Under `ASSUME_SHIFT_END`, a step-out never closed (the day ends on an open break) is classified from the break-out to the
+assumed check-out, so approved windows and unapproved time apply instead of paying the absence; `FLAG_ONLY` is unchanged.
+With the policy off nothing changes — every pre-1.5.0 test passes unchanged.
 
 Example (08:00–14:00, two-way terminal): IN 08:00, OUT 10:00, IN 12:05, OUT 14:00 with an approved official window
 10:00–12:00 → 125 min away, all official (the return is within the 10-minute grace), worked 360, PRESENT. Without the
@@ -69,13 +74,19 @@ approval → 125 unapproved, worked 235, `UNAPPROVED_AWAY`, `UNDER_HOURS`.
 
 * **Plan a window** — `POST /orgs/:orgId/me/time-away` (kind, from–to, reason, destination).
 * **Step out** — `POST /me/time-away/step-out` (kind, expected return): a break-out punch on the self-service device
-  (server clock) + a window [now, expected return]. Only while on site; idempotent on the client's key.
+  (server clock) + a window [now, expected return]. Only while on site; idempotent on the client's key. When the employee's
+  own planned window covers now, the break-out is linked to it (same kind) instead of filing a second one. A step-out
+  window ends at the return ("I'm back", or the first terminal arrival), so its rest never blocks the next step-out.
+* **Punch status** — after a step-out or "I'm back" the working day stays open: the portal offers Check out (a break-in or
+  break-out counts as "in"; a portal check-in while stepped out is refused — come back with "I'm back" or on the terminal).
 * **I'm back** — `POST /me/time-away/back`: a break-in punch, only when `returnBy = device_or_portal`; with `device` the
   return must be a terminal punch (proof of presence).
 * **Withdraw** — `POST /me/time-away/:id/cancel` (pending only).
 * **Status** — `GET /me/time-away/status`: policy, on site / away, today's classified intervals, today's requests.
-* Decisions go through `/approvals` (line manager, secondary stand-in, or a workflow). Approval recomputes the day
-  (history reason `TIME_AWAY`); only APPROVED windows ever reach the engine.
+* Decisions go through `/approvals` (line manager, secondary stand-in, or a workflow). Approval recomputes the day — and the
+  day before, for a night shift whose punch window reaches past midnight (history reason `TIME_AWAY`); only APPROVED
+  windows ever reach the engine. Every path that files a window takes the employee's self-punch lock, then the time-away
+  lock, so the overlap and quota checks never race.
 * Limits: one day, ≤ 16 h, ≤ 7 days back / 60 ahead, no overlap (exclusion constraint), personal quota and longest window.
 * HR / manager: `GET /time-away` (list) and `GET /time-away/summary?month=` (per-employee totals from the daily records).
 
@@ -86,9 +97,19 @@ approval → 125 unapproved, worked 235, `UNAPPROVED_AWAY`, `UNDER_HOURS`.
 * `meetings` + `meeting_invitees` — one meeting per room at a time (exclusion constraint), capacity checked.
 * Attendance on read (`packages/domain/src/meetings/attendance.ts`): first entry from 15 min before the start to the end →
   ON_TIME, or LATE after `lateAfterMinutes` (minutes from the start); no entry → ABSENT (UPCOMING before the start);
-  uninvited entries → walk-ins, **unauthorised** in a restricted room unless allowed.
-* Access log (`GET /access-events`, permission `meeting.rooms`): every entry with the meeting in progress and the verdict.
-* Permissions: `meeting.view`, `meeting.manage`, `meeting.rooms`.
+  uninvited entries → walk-ins, **unauthorised** in a restricted room unless allowed. The organiser counts as invited, and an
+  early arrival for the next meeting in the room is not a walk-in of the previous one. A meeting cannot be booked more than
+  15 minutes in the past without `meeting.rooms`, and walk-in identities are shown to `meeting.rooms` holders only (others
+  see a count) — the room's movement record stays with the room administrators.
+* Access log (`GET /access-events`, permission `meeting.rooms`): every entry (unknown badges included, employee null) with
+  the meeting it belongs to and the verdict; paginated and filtered in SQL, by the entry's local date in its branch zone. A
+  meeting cancelled after an entry still covers that entry.
+* Permissions: `meeting.view`, `meeting.manage`, `meeting.rooms`. Built-in roles: owner, org admin, HR admin and attendance
+  admin hold all three; the branch manager holds `meeting.view` + `meeting.manage` in its branches; HR user and auditor hold
+  `meeting.view`. The built-in **Manager** role holds none: it is team-scoped (its direct reports), while meeting access is
+  organisation / branch wide (every meeting with its attendees, booking and cancelling any room). Employees see their own
+  invitations without a key (`GET /me/meetings`); an organisation that wants its line managers to book rooms gives them a
+  custom role with `meeting.view` + `meeting.manage`, as for `report.export` (§6).
 * Pushing door permissions to the controllers is not part of this change: the reader enforces its own access groups;
   FlowZa records and audits the entries.
 
@@ -116,6 +137,12 @@ Manager + `report.export`).
   the team key, the organisation key in branch scope (`supabase/tests/rls_time_away_meetings.sql`).
 * The room access log is a movement record: only `meeting.rooms` holders and the person themself read it; meeting
   attendance is served for meetings the caller can see.
+* Rooms and meetings are read with `meeting.view` and written with `meeting.rooms` / `meeting.manage`, in branch scope.
+  Invitations (`meeting_invitees`, no branch column) follow their meeting, like approval steps follow their request: read
+  with `meeting.view` where the meeting itself is readable under the caller's RLS, or one's own invitation; inserted,
+  changed or deleted with `meeting.manage` only for a meeting inside the caller's branches (the row as it becomes too, so
+  an invitation is never moved onto another branch's meeting). A branch-scoped manager never reads, adds or drops an
+  invitation of another branch's meeting. The data API stays closed (`meeting_invitees_no_data_api`).
 * `app._team_of` is not executable by any application role.
 * Step-out uses the server clock; the punch goes through the same raw → normaliser → engine pipeline as a terminal's.
 
