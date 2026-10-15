@@ -259,29 +259,104 @@ A worker keeps the lock of every job it runs alive (`WORKER_HEARTBEAT_INTERVAL_M
 its running jobs and hands the rest back to the queue, so keep that below the platform's kill timeout (Fly.io: 5 s by
 default).
 
-Email stays on `console` (logged, not sent) until you set `EMAIL_PROVIDER=resend`, `RESEND_API_KEY` and `EMAIL_FROM`.
+Email stays on `console` (logged, not sent) until a provider is configured: `EMAIL_PROVIDER=ses` with the `SES_`
+secrets (below, the live setup), or `EMAIL_PROVIDER=resend` with `RESEND_API_KEY`; `EMAIL_FROM` with either.
 Notifications are written to the outbox either way, so nothing is lost by starting on `console`.
 
 **This is a separate path from Supabase's auth email** (§5c) and the two are easy to confuse. Supabase sends
 confirmation, password-reset and magic-link mail through its own SMTP settings; this variable only governs the
 worker's own notifications — device offline, report ready, and so on. Invited users receive their *account*
 confirmation via Supabase regardless of what `EMAIL_PROVIDER` is set to. The invitation itself is e-mailed by the worker
-(`SEND_INVITATION_EMAIL`, 5 attempts with backoff; a message Resend refuses, such as an unverified sender domain, fails at
-once). Users & roles → Invitations shows each e-mail's status (sending, e-mailed, retrying, failed, with the provider's
+(`SEND_INVITATION_EMAIL`, 5 attempts with backoff; a message the provider refuses, such as an unverified sender domain, fails
+at once). Users & roles → Invitations shows each e-mail's status (sending, e-mailed, retrying, failed, with the provider's
 reason) and offers **Retry** on a failed one. On `console` the e-mail is only logged: the status reads *Not delivered* and
-the administrator shares the copy link instead. `EMAIL_FROM` must be on a domain verified in Resend.
+the administrator shares the copy link instead. `EMAIL_FROM` must be on the domain verified with the provider.
+
+### Worker e-mail through Amazon SES
+
+The worker sends through Amazon SES (`EMAIL_PROVIDER = "ses"` in `fly.worker.toml`, `apps/worker/src/lib/ses.ts`): the AWS
+account FlowZa Sign moved to on 2026-09-15 (its ADR 0189) and FlowZa Club sends from (Club's RUNBOOK §3.5a), paid per message
+(about USD 0.10 per 1,000) instead of a Resend plan. Time keeps its own domain and its own credentials, for the reasons §5c
+gives for not sharing a sending domain:
+
+| | |
+| --- | --- |
+| AWS account / region | `529976313111`, `ap-south-1` (out of the sandbox: 50,000 a day, 14 a second, shared with Sign and Club) |
+| Identity | `time.flowza.ai`: Easy DKIM, custom MAIL FROM `mail.time.flowza.ai` |
+| Configuration set | `flowza-time-transactional`, the identity's default (no event destination; account-level suppression for bounces and complaints) |
+| IAM users | `flowza-time-ses` (the worker's API key) and `flowza-time-ses-smtp` (Supabase Auth, §5c): never Sign's or Club's key |
+| Sender | `FlowZa Time <no-reply@time.flowza.ai>`: the address recipients already know |
+
+1. **The identity.** SES console, region **Asia Pacific (Mumbai) ap-south-1** → Identities → Create identity → Domain
+   `time.flowza.ai`; Easy DKIM, RSA 2048; *Use a custom MAIL FROM domain* `mail.time.flowza.ai`, *Use default MAIL FROM on MX
+   failure*. Add the records SES lists to the `flowza.ai` Cloudflare zone, every one **DNS only** (a proxied CNAME hides the
+   DKIM key and the identity never verifies):
+
+   | Type | Name | Content |
+   |---|---|---|
+   | CNAME ×3 | `<token>._domainkey.time` | `<token>.dkim.amazonses.com` |
+   | MX (10) | `mail.time` | `feedback-smtp.ap-south-1.amazonses.com` |
+   | TXT | `mail.time` | `v=spf1 include:amazonses.com ~all` |
+
+   Resend's records (`resend._domainkey.time`, `send.time`) stay until Resend is retired; nothing above collides with them,
+   and the root's Microsoft 365 SPF is untouched. Wait for *Identity status: Verified* and *MAIL FROM: Successful*.
+2. **The configuration set.** Configuration sets → Create `flowza-time-transactional`. Then the identity → Configuration set
+   → *Default configuration set* `flowza-time-transactional`, so Supabase's SMTP mail (which cannot name one) counts in it too.
+3. **The worker's key.** IAM → Users → Create `flowza-time-ses`, no console access, with this one inline policy; then Security
+   credentials → Create access key (*Application running outside AWS*):
+
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Action": ["ses:SendEmail", "ses:SendRawEmail"],
+       "Resource": [
+         "arn:aws:ses:ap-south-1:529976313111:identity/time.flowza.ai",
+         "arn:aws:ses:ap-south-1:529976313111:configuration-set/flowza-time-transactional"
+       ]
+     }]
+   }
+   ```
+
+   The configuration set is in the policy because every send uses it (named by the worker, or the identity's default): a
+   policy with the identity alone answers `AccessDeniedException`.
+4. **The secrets, staged before the deploy** (`--stage` stores them without restarting the running worker, which is still on
+   the previous `EMAIL_PROVIDER`):
+
+   ```bash
+   flyctl secrets set --stage --app flowza-time-worker \
+     SES_ACCESS_KEY_ID='AKIA…' SES_SECRET_ACCESS_KEY='…' SES_REGION=ap-south-1 SES_CONFIGURATION_SET=flowza-time-transactional
+   ```
+
+5. **Deploy the worker** (a merge to `main`, or the deploy workflow with target `worker`). It logs
+   `{"event":"email_provider","provider":"ses","region":"ap-south-1",…}` at boot. Prove it: resend an invitation to an
+   address you read, and check Users & roles → Invitations reads *E-mailed*, Audit → E-mail log shows provider `ses` with
+   SES's message id, and SES → Account dashboard counts the send.
+
+A failed send names the problem, in the invitation and the e-mail log: `SES is not configured on this worker: set …` (secrets
+missing; the worker never falls back to console), `MessageRejected` (`EMAIL_FROM` is not on the verified identity, or the
+identity is not verified in `SES_REGION`), `AccessDeniedException` (the policy does not cover the identity or the
+configuration set), `UnrecognizedClientException` / `InvalidSignatureException` (a wrong or rotated key). Throttling and
+SES's own 5xx are retried with the queue's backoff; everything else fails at once. SES takes no idempotency key, so a send
+that times out after SES accepted it can arrive twice when the queue retries it.
+
+**Rolling back** is `EMAIL_PROVIDER = "resend"` in `fly.worker.toml` and a worker deploy; keep `RESEND_API_KEY` set until SES
+has carried mail for a while.
 
 ### E-mail activity log (Audit → E-mail log)
 
 Every invitation and notification e-mail is logged (`public.email_messages` + its timeline `public.email_events`, migration
 `20260930000500`, kept by triggers on `invitations` / `notification_deliveries`): queued, each failed attempt with the
-provider's reason, sent (with Resend's message id), skipped. The page (`/email-log`, audit viewers with access to every
+provider's reason, sent (with the provider's message id), skipped. The page (`/email-log`, audit viewers with access to every
 branch) also warns when e-mails have waited more than 5 minutes for a worker — the symptom of a worker that is down **or
 was not redeployed with the API** (on 2026-09-30 the web was on the delivery-status build while the API and worker were
 not: Resend accepted every invitation, but the dialog said *Sending…* forever) — and when the worker "sent" with the
 console mailer. Deploy with target `all` whenever a change spans the API and the worker.
 
-*Sent* only means Resend accepted the message. To see **delivered, bounced, spam complaints and opens**, connect Resend's
+*Sent* only means the provider accepted the message. On SES that is all the log shows for now: SES's delivery events
+(an SNS topic on the configuration set) are not wired to the API yet, and its account-level suppression list stops mail to
+an address that bounced or complained. On Resend, to see **delivered, bounced, spam complaints and opens**, connect Resend's
 webhook to the API:
 
 1. Resend dashboard → Webhooks → Add endpoint: `https://<api-host>/webhooks/email/resend`, events `email.delivered`,
@@ -308,7 +383,7 @@ available on this worker". See `docs/reports.md` and the comments in `fly.report
 
 ```bash
 flyctl apps create flowza-time-reports --org <your fly org>          # once
-# same secrets as the general worker, minus RESEND_API_KEY (this worker sends no mail)
+# same secrets as the general worker, minus the mail ones (SES_*, RESEND_API_KEY): this worker sends no mail
 flyctl secrets set --app flowza-time-reports   DATABASE_URL_WORKER='...' FLOWZA_CREDENTIALS_MASTER_KEYS='...' SUPABASE_URL='...' SUPABASE_SERVICE_ROLE_KEY='...'
 flyctl deploy --config fly.reports.toml --remote-only --ha=false
 flyctl logs --app flowza-time-reports    # expect worker_started with queues: ["reports"]
@@ -530,43 +605,51 @@ Supabase's built-in email sender is rate-limited to a handful of messages an hou
 Until custom SMTP is configured, `signUp` creates the account but the confirmation email never arrives, so an invited
 owner **cannot complete onboarding at all**. Configuring it raises the auth email limit to 30/hour.
 
-Sending is via **Resend on its own subdomain**, `time.flowza.ai`, deliberately not the root domain and not the
-`send.flowza.ai` that other FlowZa applications use:
+Sending is via **Amazon SES's SMTP interface on Time's own subdomain**, `time.flowza.ai` (the identity of §3, "Worker
+e-mail through Amazon SES"), deliberately not the root domain and not the `send.flowza.com` / `send.flowza.ai` that other
+FlowZa applications use:
 
 - The root carries Microsoft 365 business mail — `MX → flowza-ai.mail.protection.outlook.com` and a hard-fail SPF,
   `v=spf1 include:spf.protection.outlook.com -all`. Adding a sender to that record risks the company's own email.
   A subdomain needs no change to it at all.
 - A shared sending domain means one application's reputation is every application's reputation.
 
-Add the domain in Resend (Manual setup, **not** Auto configure — the latter asks for OAuth write access to the whole
-Cloudflare zone, which hosts every other FlowZa application). Then add exactly three records:
+The identity, its DNS records and the configuration set are §3's steps 1 and 2; do them first. Then the SMTP credential,
+its own IAM user so the worker's key and this one rotate apart:
 
-| Type | Name | Content |
-|---|---|---|
-| TXT | `resend._domainkey.time` | the DKIM public key Resend shows |
-| TXT | `send.time` | `v=spf1 include:amazonses.com ~all` |
-| MX (10) | `send.time` | `feedback-smtp.<region>.amazonses.com` |
+1. SES console (ap-south-1) → SMTP settings → **Create SMTP credentials**, IAM user name `flowza-time-ses-smtp`. Copy the
+   *SMTP user name* and *SMTP password* it shows once.
+2. IAM → Users → `flowza-time-ses-smtp` → replace the policy SES attached (`ses:SendRawEmail` on `*`, any domain) with:
 
-Skip the inbound MX Resend offers on `time.flowza.ai` itself: it is for *receiving* mail, which this application does
-not do, and it would collide with the proxied CNAME that serves the web app.
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [{
+       "Effect": "Allow",
+       "Action": "ses:SendRawEmail",
+       "Resource": [
+         "arn:aws:ses:ap-south-1:529976313111:identity/time.flowza.ai",
+         "arn:aws:ses:ap-south-1:529976313111:configuration-set/flowza-time-transactional"
+       ]
+     }]
+   }
+   ```
 
-Create a key scoped to **Sending access on `time.flowza.ai` only** (`flowza-time-prd-sending`), so a leak cannot send
-as another application's domain. Resend will not let a key be scoped to a domain until that domain is verified — wait
-for verification rather than creating an all-domains key.
-
-**Dashboard → Authentication → Emails → SMTP Settings:**
+**Dashboard → Authentication → Emails → SMTP Settings** (project `Flowza-Time`):
 
 | Field | Value |
 |---|---|
-| Host | `smtp.resend.com` |
+| Host | `email-smtp.ap-south-1.amazonaws.com` |
 | Port | `465` |
-| Username | `resend` — a literal, **not** the sender name |
-| Password | the Resend API key |
+| Username | the SMTP user name (`AKIA…`) |
+| Password | the SMTP password — **not** the IAM secret access key |
 | Sender email | `no-reply@time.flowza.ai` |
 | Sender name | `FlowZa Time` |
 
-The username trips people up: it is always the literal string `resend`. Putting anything else there — the sender name
-is the easy mistake — fails with `535 "Invalid username"`, which reads like a password problem and is not.
+The password trips people up: SES derives an SMTP password from the IAM secret for one region, and the secret itself is
+refused with `535 Authentication Credentials Invalid`, which reads like a wrong user name and is not. A password made for
+another region fails the same way. `554 Message rejected: Email address is not verified` is a sender off
+`time.flowza.ai`, or the identity not yet verified in ap-south-1.
 
 Verify by triggering a real send and reading the auth log, rather than trusting the form:
 
@@ -578,8 +661,22 @@ curl -i -X POST 'https://<project-ref>.supabase.co/auth/v1/recover' \
 #   select log_attributes['error'] from logs where source='auth_logs' and log_attributes['path']='/recover'
 ```
 
-Then confirm **Delivered** in Resend → Emails, and that Resend → API keys shows the *expected* key as recently used.
-A domain-scoped key that sent successfully is itself proof the From domain and DKIM signature were the intended ones.
+Then confirm the message arrived, and that SES → Account dashboard counts the send. In the received message's headers,
+`DKIM-Signature: … d=time.flowza.ai` and `Return-Path: …@mail.time.flowza.ai` prove the identity and MAIL FROM are the
+intended ones.
+
+**Rolling back** to Resend, the sender before SES (keep the key until SES has carried mail for a while):
+
+| Field | Value |
+|---|---|
+| Host | `smtp.resend.com` |
+| Port | `465` |
+| Username | `resend` — a literal, **not** the sender name (anything else fails with `535 "Invalid username"`) |
+| Password | the Resend key `flowza-time-prd-sending`, scoped to sending on `time.flowza.ai` |
+| Sender email | `no-reply@time.flowza.ai` |
+| Sender name | `FlowZa Time` |
+
+Resend's own records on the zone (`resend._domainkey.time`, and `send.time`'s SPF and MX) stay until Resend is retired.
 
 ---
 
@@ -695,9 +792,10 @@ Sign out and back in so the new membership is in the session, and the workspace 
 - **Zero-touch device claiming trusts knowledge of the serial number** (`docs/risks.md` D26) — an open design item, not
   an oversight.
 - **Auth email sends** (§5c): Supabase custom SMTP via Resend on `time.flowza.ai`, verified end to end — confirmation,
-  password reset and magic links reach the inbox. The **worker's own** notification email is still on `console`, so
-  device-offline and report-ready messages are logged and not sent until `EMAIL_PROVIDER=resend` and `RESEND_API_KEY`
-  are set on `flowza-time-worker`.
+  password reset and magic links reach the inbox. Moving it to Amazon SES's SMTP (§5c) is a dashboard change made by hand.
+- **Worker e-mail** (§3): `fly.worker.toml` selects Amazon SES. Until the `SES_` secrets are set on `flowza-time-worker`,
+  every invitation and notification e-mail fails at once with the names of the missing ones. SES's delivery events are
+  not wired to the e-mail log yet, so an SES message reads *sent*, never *delivered* or *bounced*.
 - **No invitation email is sent by the application.** The invitation link is delivered by the administrator copying it
   out of the UI. Automating it needs a dedicated queued job: the outbox relay routes by *permission within an
   organisation*, which cannot address someone who is not a member yet, and the plaintext token must not be written to

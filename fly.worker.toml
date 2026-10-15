@@ -10,7 +10,12 @@
 #                            transaction pooling the connection is handed to another transaction and the lock is lost.
 #   FLOWZA_CREDENTIALS_MASTER_KEYS  -- must be BYTE-IDENTICAL to the API's, or the worker cannot decrypt the device
 #                                     credentials the API encrypted and every sync fails to authenticate.
-#   RESEND_API_KEY        -- only when EMAIL_PROVIDER is switched to "resend".
+#   SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY, SES_REGION, SES_CONFIGURATION_SET
+#                         -- Amazon SES (EMAIL_PROVIDER = "ses" below; docs/go-live.md §3). Stage them with
+#                            `flyctl secrets set --stage` BEFORE deploying this file: without them every e-mail fails
+#                            at once with the names of the ones missing.
+#   RESEND_API_KEY        -- only when EMAIL_PROVIDER is switched back to "resend" (the rollback; keep it set until SES
+#                            has carried mail for a while).
 
 app = "flowza-time-worker"
 primary_region = "sin"
@@ -33,12 +38,14 @@ primary_region = "sin"
   SCHEDULER_ENABLED = "true"
   API_PUBLIC_URL = "https://time-api.flowza.ai"
   WEB_PUBLIC_URL = "https://time.flowza.ai"
-  # Sends through Resend on the verified time.flowza.ai domain. Requires RESEND_API_KEY as a Fly secret; without it
-  # createMailer falls back to console and warns loudly at boot rather than failing silently.
+  # Sends through Amazon SES (apps/worker/src/lib/ses.ts) on the time.flowza.ai identity verified in ap-south-1, the
+  # account FlowZa Sign and FlowZa Club send from. Requires the SES_ secrets above; a missing one fails every send with
+  # its name (Users & roles → Invitations and Audit → E-mail log show it) — never a quiet console fallback. Rolling back
+  # is setting this to "resend" again, with RESEND_API_KEY still set.
   #
-  # This governs the WORKER's own notifications only (device offline, report ready). Supabase sends confirmation,
+  # This governs the WORKER's mail only (invitations, device offline, report ready). Supabase sends confirmation,
   # password-reset and magic-link mail through its own SMTP settings — a separate path with a separate credential.
-  EMAIL_PROVIDER = "resend"
+  EMAIL_PROVIDER = "ses"
   EMAIL_FROM = "FlowZa Time <no-reply@time.flowza.ai>"
 
 [[vm]]

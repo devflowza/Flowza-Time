@@ -17,6 +17,7 @@
     "@flowza/domain": "workspace:*",
     "@flowza/shared": "workspace:*",
     "@supabase/supabase-js": "^2.115.0",
+    "aws4fetch": "1.0.20",
     "exceljs": "^4.4.0",
     "kysely": "^0.29.5",
     "luxon": "^3.7.2",

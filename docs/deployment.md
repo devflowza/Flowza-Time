@@ -12,7 +12,7 @@ the shape of a deployment; that one is the procedure and the history.
 | `apps/api` | Container (Fly.io / Railway / Render / Cloud Run) | `apps/api/Dockerfile`; stateless; scale horizontally; `/api/health`, `/api/ready` |
 | `apps/worker` | Container (same platform) | `apps/worker/Dockerfile`; run ≥2 instances for HA — the scheduler leader is elected with a Postgres advisory lock |
 | Database/Auth/Storage/Realtime | Supabase project per environment | Region closest to customers (see residency) |
-| Email | Resend (or console in dev) | `EMAIL_PROVIDER`, `RESEND_API_KEY` (worker); `RESEND_WEBHOOK_SECRET` (API, delivery events for the e-mail log) |
+| Email | Amazon SES (Resend still supported; console in dev) | `EMAIL_PROVIDER`, `SES_ACCESS_KEY_ID`, `SES_SECRET_ACCESS_KEY`, `SES_REGION`, `SES_CONFIGURATION_SET`, `EMAIL_FROM` (worker); `RESEND_API_KEY` (worker, Resend only); `RESEND_WEBHOOK_SECRET` (API, Resend delivery events for the e-mail log) |
 
 ## Static hosting for `apps/web` (Cloudflare Pages, Netlify, Vercel)
 

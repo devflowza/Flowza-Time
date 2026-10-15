@@ -8,7 +8,7 @@ vi.mock('@supabase/supabase-js', () => ({
   createClient: () => ({ channel: () => ({ send: realtime.send }), removeChannel: realtime.removeChannel, storage: { from: () => ({}) } }),
 }));
 
-import { createPlatformClients } from './platform.js';
+import { createMailer, createPlatformClients } from './platform.js';
 
 const log = { info: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), child: () => log } as unknown as Logger;
 const config = (env: WorkerConfig['NODE_ENV']) => ({ NODE_ENV: env, SUPABASE_URL: undefined, SUPABASE_SERVICE_ROLE_KEY: undefined } as unknown as WorkerConfig);
@@ -48,5 +48,24 @@ describe('createPlatformClients realtime with SUPABASE_URL / SUPABASE_SERVICE_RO
     await expect(publisher.publish('org:x:attendance', 'attendance.created', {})).resolves.toBeUndefined();
     expect(warn).toHaveBeenLastCalledWith(expect.objectContaining({ event: 'realtime_publish_failed', err: 'socket closed' }));
     expect(realtime.removeChannel).toHaveBeenCalled();
+  });
+});
+
+describe('createMailer with EMAIL_PROVIDER=ses', () => {
+  const ses = (env: Partial<WorkerConfig>) => ({ EMAIL_PROVIDER: 'ses', EMAIL_FROM: 'FlowZa Time <no-reply@time.flowza.ai>', ...env } as unknown as WorkerConfig);
+
+  it('never falls back to console: a half-configured SES fails every send with what is missing, and says so at boot', async () => {
+    const error = vi.fn();
+    const mailer = createMailer(ses({ SES_REGION: 'ap-south-1' }), { ...log, error } as unknown as Logger);
+    expect(error).toHaveBeenCalledWith(expect.objectContaining({ event: 'email_provider_unconfigured', provider: 'ses', reason: expect.stringContaining('SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY') }));
+    await expect(mailer.send({ to: 'a@example.com', subject: 's', html: 'h' })).rejects.toMatchObject({
+      code: 'PROVIDER_ERROR', retryable: false, message: 'email send failed: SES is not configured on this worker: set SES_ACCESS_KEY_ID, SES_SECRET_ACCESS_KEY',
+    });
+  });
+
+  it('sends through SES once the key, the secret and the region are set', () => {
+    const info = vi.fn();
+    createMailer(ses({ SES_ACCESS_KEY_ID: 'AKIA', SES_SECRET_ACCESS_KEY: 's', SES_REGION: 'ap-south-1', SES_CONFIGURATION_SET: 'flowza-time-transactional' }), { ...log, info } as unknown as Logger);
+    expect(info).toHaveBeenCalledWith({ event: 'email_provider', provider: 'ses', region: 'ap-south-1', from: 'FlowZa Time <no-reply@time.flowza.ai>', configurationSet: 'flowza-time-transactional' });
   });
 });
