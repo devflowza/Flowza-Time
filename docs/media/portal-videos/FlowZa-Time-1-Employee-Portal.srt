@@ -1,0 +1,43 @@
+1
+00:00:00,250 --> 00:00:04,389
+The employee portal. Everything Ahmed needs, on his phone or his desk.
+
+2
+00:00:05,090 --> 00:00:07,095
+Ahmed signs in with his work e-mail.
+
+3
+00:00:14,649 --> 00:00:21,582
+My overview shows today: his shift, eight to two, the time he checked in on the entrance terminal, and the month at a glance.
+
+4
+00:00:22,085 --> 00:00:30,170
+My attendance has the month calendar. Every day is calculated from his punches. Open a day to see each punch and how the day was worked out.
+
+5
+00:00:30,672 --> 00:00:40,507
+The Activity tab is his bar graph: time on site in green, and time away during working hours, split into official duty, approved permission, and unapproved time.
+
+6
+00:00:41,011 --> 00:00:52,744
+Now Ahmed has to visit a client. Our site has an entry terminal only, so he taps Step out, picks Official duty, his expected return and the reason. His manager is asked to approve.
+
+7
+00:01:14,007 --> 00:01:20,407
+The portal shows he is away. When he returns he checks in on the terminal, or taps I'm back if the policy allows it.
+
+8
+00:01:28,508 --> 00:01:34,524
+Time away can also be planned ahead. Personal permission shows how much of the monthly allowance is left.
+
+9
+00:01:39,949 --> 00:01:46,904
+My leave shows every balance. Apply for leave picks the type and the dates, and shows the days it will use before he sends it.
+
+10
+00:01:59,450 --> 00:02:08,303
+Need to swap a shift? In My shift, Request swap picks the day and a colleague. His manager approves it, and both schedules change for that day only.
+
+11
+00:02:20,859 --> 00:02:24,358
+Attendance, time away, leave and shift swaps, in one portal.

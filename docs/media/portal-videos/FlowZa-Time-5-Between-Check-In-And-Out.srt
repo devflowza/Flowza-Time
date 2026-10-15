@@ -1,0 +1,39 @@
+1
+00:00:00,250 --> 00:00:05,775
+Between check-in and check-out: how FlowZa measures time away from the site during working hours.
+
+2
+00:00:15,921 --> 00:00:28,230
+There are two kinds of site. With two-way terminals, the employee punches out when leaving and in when coming back. With an entry terminal only, he steps out from the portal, and checks in on the terminal when he returns.
+
+3
+00:00:28,935 --> 00:00:38,535
+Each terminal declares its role: entry only, exit only, in and out keys, or a door reader for a meeting room. Room entries never split the working day.
+
+4
+00:00:40,250 --> 00:00:51,749
+The attendance policy turns it on. Official duty counts as worked. Personal permission is excused, up to four hours a month. Anything else is unapproved, and flagged after fifteen minutes.
+
+5
+00:00:55,183 --> 00:01:03,759
+Every gap between the first check-in and the last check-out is classified. On this day, a two-hour client visit was approved, so the whole day counts.
+
+6
+00:01:04,817 --> 00:01:10,278
+On this day, forty-five minutes away had no approval: they are deducted, and the day is flagged.
+
+7
+00:01:14,229 --> 00:01:19,541
+The employee and the manager see the same picture: time on site, and time away by kind.
+
+8
+00:01:25,628 --> 00:01:33,137
+Meeting rooms with readers add one more answer: who attended, who was late, who was absent, and who walked in without an invitation.
+
+9
+00:01:40,160 --> 00:01:43,104
+HR closes the month with the totals per person.
+
+10
+00:01:45,784 --> 00:01:48,856
+Every minute between check-in and check-out, accounted for.

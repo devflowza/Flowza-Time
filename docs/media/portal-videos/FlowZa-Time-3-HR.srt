@@ -1,0 +1,43 @@
+1
+00:00:00,250 --> 00:00:07,162
+HR: the whole organisation, every department, time away, the morning roll call, holidays, leave and meetings.
+
+2
+00:00:07,865 --> 00:00:09,209
+Fatma runs HR.
+
+3
+00:00:17,254 --> 00:00:23,974
+The dashboard shows today across every branch: present, absent, on leave and late, with the trend and each branch.
+
+4
+00:00:24,563 --> 00:00:32,200
+Attendance, Daily lists every employee's day. Filter by department, and open a day to see its punches and its calculation.
+
+5
+00:00:37,507 --> 00:00:45,742
+The Time away report totals the month for each person: away, official duty, permission and unapproved time, with the days that were flagged.
+
+6
+00:00:49,287 --> 00:01:02,556
+HR schedules the morning roll call once: the daily report, Sunday to Thursday at seven thirty, to every manager. Each manager receives only their own team, and a Sunday run covers Thursday to Saturday.
+
+7
+00:01:03,057 --> 00:01:11,377
+Organization holds branches, locations and departments. The org chart shows the reporting lines, managers of managers included.
+
+8
+00:01:14,299 --> 00:01:21,680
+Holidays: add a public or company holiday to the calendar, or remove one. Attendance is recalculated for those days.
+
+9
+00:01:35,533 --> 00:01:38,946
+Leave covers requests, the team calendar and every balance.
+
+10
+00:01:44,853 --> 00:01:49,866
+Meetings shows who attended, who came late and who was absent, from the meeting-room readers.
+
+11
+00:01:53,252 --> 00:01:55,641
+One view of the organisation, for HR.

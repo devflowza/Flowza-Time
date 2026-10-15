@@ -1,0 +1,39 @@
+1
+00:00:00,250 --> 00:00:06,991
+The manager portal: your team today, the morning roll call, every request in one inbox, and the whole reporting line.
+
+2
+00:00:07,694 --> 00:00:09,870
+Nasser leads the IT and QA team.
+
+3
+00:00:16,928 --> 00:00:25,312
+Team, Today is the daily roll call: who checked in, who is late, absent or on leave, and who is in right now. It refreshes every minute.
+
+4
+00:00:33,886 --> 00:00:44,446
+And every working morning at seven thirty, the morning roll call arrives: yesterday's daily report for his team only. Who checked in and when, who was late, and who was absent.
+
+5
+00:00:44,951 --> 00:00:49,687
+Approvals collects everything waiting for him: time away, leave and shift swaps.
+
+6
+00:00:50,187 --> 00:00:59,552
+A time-away request shows the window, the kind, the destination and, for personal permission, the month's allowance. He approves, and the day is recalculated.
+
+7
+00:01:04,110 --> 00:01:09,251
+Leave shows the balance before and after. A shift swap shows both people and both shifts.
+
+8
+00:01:18,882 --> 00:01:24,322
+The attendance tab is the month for the whole team: present, late, absent and leave, day by day.
+
+9
+00:01:35,202 --> 00:01:43,031
+Managers have managers. Hamed, Head of Technology, sees his managers and, through them, their teams, labelled with who they report to.
+
+10
+00:01:58,346 --> 00:02:01,759
+One inbox, one roll call, every level of the hierarchy.
