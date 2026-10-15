@@ -65,6 +65,20 @@ describe('TeamPage', () => {
     expect(apiMock.get).not.toHaveBeenCalled();
   });
 
+  it('names the team after the organisation\'s team scope: direct reports, or the whole reporting line', () => {
+    renderWithProviders(<TeamPage />, { route: '/team' });
+    expect(screen.getByText('2 direct reports')).toBeInTheDocument();
+  });
+
+  it('under the hierarchy scope the header counts the reporting line, not only direct reports', () => {
+    testState.teamSize = 51;
+    testState.settings = { attendance: { team: { scope: 'hierarchy' } } };
+    try {
+      renderWithProviders(<TeamPage />, { route: '/team' });
+      expect(screen.getByText('51 people in your reporting line')).toBeInTheDocument();
+    } finally { testState.settings = {}; }
+  });
+
   describe('Today', () => {
     it('shows the totals and one card per report: status, in / out, live state, worked so far, leave, pending items', async () => {
       mockTeam({ '/orgs/org-1/team/summary': { data: teamSummary([

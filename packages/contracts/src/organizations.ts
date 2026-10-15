@@ -423,7 +423,10 @@ export const meDtoSchema = z.object({
     employeeId: uuidSchema.nullable(),
     /** True when at least one active employee reports (primary or secondary manager) to the linked employee record. */
     isManager: z.boolean().default(false),
-    /** Number of direct reports (defaults keep a /me document cached before this field existed parseable). */
+    /**
+     * Size of the caller's team: direct reports, or the whole reporting line under the organisation's `attendance.team.scope`
+     * `hierarchy` (defaults keep a /me document cached before this field existed parseable).
+     */
     teamSize: z.number().int().min(0).default(0),
     /**
      * The caller's own approval work in the organisation: `actionable` = pending seats waiting for them (theirs, or of
