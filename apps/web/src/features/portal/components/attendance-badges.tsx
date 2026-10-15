@@ -1,11 +1,11 @@
 import { useTranslation } from 'react-i18next';
-import type { AttendanceNoteStatus, GeofenceVerdict, RegularisationStatus, SelfieCheckinStatus, ShiftSwapStatus } from '@flowza/contracts';
+import type { AttendanceNoteStatus, GeofenceVerdict, RegularisationStatus, SelfieCheckinStatus, ShiftSwapStatus, TimeAwayStatus } from '@flowza/contracts';
 import { Badge } from '@/components/ui';
 import { PA_NS } from '../attendance-i18n';
 
 type Tone = 'success' | 'warning' | 'danger' | 'neutral' | 'info';
 const NOTE_TONE: Record<AttendanceNoteStatus, Tone> = { pending: 'warning', info_requested: 'info', approved: 'success', excused: 'success', rejected: 'danger' };
-const REQUEST_TONE: Record<RegularisationStatus | ShiftSwapStatus, Tone> = { pending: 'warning', approved: 'success', rejected: 'danger', cancelled: 'neutral' };
+const REQUEST_TONE: Record<RegularisationStatus | ShiftSwapStatus | TimeAwayStatus, Tone> = { pending: 'warning', approved: 'success', rejected: 'danger', cancelled: 'neutral' };
 const SELFIE_TONE: Record<SelfieCheckinStatus, Tone> = { pending: 'warning', approved: 'success', rejected: 'danger' };
 const VERDICT_TONE: Record<GeofenceVerdict, Tone> = { no_fence: 'neutral', allowed: 'success', flagged: 'warning', logged: 'info', denied_outside: 'danger', denied_mock: 'danger' };
 
@@ -20,6 +20,11 @@ export function RegularisationStatusBadge({ status }: { status: RegularisationSt
 export function SwapStatusBadge({ status }: { status: ShiftSwapStatus }) {
   const { t } = useTranslation(PA_NS);
   return <Badge variant={REQUEST_TONE[status] ?? 'neutral'} dot>{t(`swap.status.${status}`)}</Badge>;
+}
+/** A time-away request (planned window or step-out) through its approval. */
+export function TimeAwayStatusBadge({ status }: { status: TimeAwayStatus }) {
+  const { t } = useTranslation(PA_NS);
+  return <Badge variant={REQUEST_TONE[status] ?? 'neutral'} dot>{t(`timeAway.status.${status}`)}</Badge>;
 }
 export function SelfieStatusBadge({ status }: { status: SelfieCheckinStatus }) {
   const { t } = useTranslation(PA_NS);

@@ -192,6 +192,30 @@ describe('Sidebar', () => {
     expect(screen.queryByRole('link', { name: 'Org chart' })).not.toBeInTheDocument();
   });
 
+  it('shows Time away to HR and to line managers of a team, and Meetings only with the meeting_rooms module (docs/time-away.md)', () => {
+    grant('dashboard.view', 'attendance.view', 'meeting.view');
+    let r = renderWithProviders(<Sidebar />);
+    expect(screen.getByRole('link', { name: 'Time away' })).toHaveAttribute('href', '/attendance/time-away');
+    expect(screen.getByRole('link', { name: 'Meetings' })).toHaveAttribute('href', '/meetings');
+    r.unmount();
+    // the Enterprise module is off: no entry, whatever the keys
+    testState.disabledModules = new Set(['meeting_rooms']);
+    r = renderWithProviders(<Sidebar />);
+    expect(screen.queryByRole('link', { name: 'Meetings' })).not.toBeInTheDocument();
+    r.unmount();
+    testState.disabledModules = new Set();
+    // a team key alone shows the report only to a member who has direct reports (the API scopes it to them)
+    grant('dashboard.view', 'attendance.view_team');
+    r = renderWithProviders(<Sidebar />);
+    expect(screen.queryByRole('link', { name: 'Time away' })).not.toBeInTheDocument();
+    r.unmount();
+    testState.employeeId = 'e1';
+    testState.teamSize = 2;
+    renderWithProviders(<Sidebar />);
+    expect(screen.getByRole('link', { name: 'Time away' })).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Meetings' })).not.toBeInTheDocument();
+  });
+
   it('hides the platform entry from an ordinary tenant user', () => {
     renderWithProviders(<Sidebar />);
     expect(screen.queryByRole('link', { name: 'Platform admin' })).not.toBeInTheDocument();

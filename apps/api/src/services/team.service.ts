@@ -51,7 +51,7 @@ function requireReport(scope: TeamScope, employeeId: string): void {
   if (!isTeamMember(scope.grant, employeeId) || employeeId === scope.grant.employeeId) throw errors.forbidden('This employee is not one of your direct reports.');
 }
 
-interface ReportRow { id: string; employeeNumber: string; displayName: string; branchId: string; departmentId: string | null; designationId: string | null; managerEmployeeId: string | null }
+interface ReportRow { id: string; employeeNumber: string; displayName: string; branchId: string; departmentId: string | null; designationId: string | null; managerEmployeeId: string | null; secondaryManagerEmployeeId: string | null }
 
 /**
  * The reports the caller may read in this area, under RLS: the team key reaches every report (the team predicate carries
@@ -59,13 +59,15 @@ interface ReportRow { id: string; employeeNumber: string; displayName: string; b
  */
 async function reachableReports(trx: Trx, orgId: string, scope: TeamScope, ids: readonly string[]): Promise<ReportRow[]> {
   if (ids.length === 0) return [];
-  const rows = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'displayName', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId'])
+  const rows = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'displayName', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'secondaryManagerEmployeeId'])
     .where('organizationId', '=', orgId).where('id', 'in', [...ids]).where('deletedAt', 'is', null)
     .orderBy('displayName').orderBy('id').execute();
   return rows.filter((e) => scope.teamKey || scope.grant.allBranches || scope.grant.branchIds.includes(e.branchId));
 }
 
-const relationOf = (scope: TeamScope, e: Pick<ReportRow, 'managerEmployeeId'>): TeamRelation => (e.managerEmployeeId === scope.grant.employeeId ? 'primary' : 'secondary');
+/** Primary / secondary line manager of the report, or `indirect` (further down the line: organisation team scope `hierarchy`). */
+const relationOf = (scope: TeamScope, e: Pick<ReportRow, 'managerEmployeeId' | 'secondaryManagerEmployeeId'>): TeamRelation =>
+  e.managerEmployeeId === scope.grant.employeeId ? 'primary' : e.secondaryManagerEmployeeId === scope.grant.employeeId ? 'secondary' : 'indirect';
 
 interface StructureNames { branch: Map<string, { name: string; timezone: string | null }>; department: Map<string, string>; designation: Map<string, string>; orgTimezone: string }
 
@@ -219,7 +221,9 @@ export async function summary(deps: ApiDeps, actor: Actor, orgId: string, q: Tea
       return {
         employeeId: e.id, employeeNumber: e.employeeNumber, employeeName: e.displayName,
         designationName: e.designationId ? names.designation.get(e.designationId) ?? null : null, departmentName: e.departmentId ? names.department.get(e.departmentId) ?? null : null,
-        branchId: e.branchId, branchName: names.branch.get(e.branchId)?.name ?? null, relation: relationOf(scope, e), date, timezone: zoneOf(e),
+        branchId: e.branchId, branchName: names.branch.get(e.branchId)?.name ?? null, relation: relationOf(scope, e),
+        // an indirect report's own manager is in the team too (the walk goes through them)
+        managerName: relationOf(scope, e) === 'indirect' ? reports.find((r) => r.id === e.managerEmployeeId)?.displayName ?? null : null, date, timezone: zoneOf(e),
         status, recordStatus: record ? (record.status as AttendanceStatus) : null, recordId: record?.id ?? null, flags: flags as AttendanceFlag[],
         firstInAt: isoDateTimeOrNull(record?.firstInAt) ?? (punches[0] ? punches[0].punchedAt.toISOString() : null), lastOutAt: isoDateTimeOrNull(record?.lastOutAt),
         liveState, lastPunchAt: last ? last.punchedAt.toISOString() : null, workedMinutes: worked, workedIsLive: live && punches.length > 0, lateMinutes: record?.lateMinutes ?? 0,

@@ -1,10 +1,11 @@
 import type { DateTime } from 'luxon';
-import { ATTENDANCE_FLAGS, DEFAULT_ATTENDANCE_SETTINGS, type AttendanceFlag, type AttendanceRules, type AttendanceStatus } from '@flowza/contracts';
+import { ATTENDANCE_FLAGS, DEFAULT_ATTENDANCE_SETTINGS, type AttendanceFlag, type AttendanceRules, type AttendanceStatus, type ShiftBreak } from '@flowza/contracts';
 import { addDays, dayOfWeek, minutesBetween } from '@flowza/shared';
 import { attributeEvents } from './attribute.js';
-import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
+import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, placeScheduledBreak, scheduledBreakMinutes, type Interpretation } from './interpret.js';
 import { carryOvernightCheckOuts, openCheckIn, overnightMaxSpanMinutes } from './overnight.js';
 import { roundMinutes, roundPunches } from './rounding.js';
+import { awayIntervalsOf, breakAllowanceMinutes, classifyTimeAway, timeAwayInactiveReason, traceAwayIntervals, type EngineTimeAway, type TimeAwayClassification } from './time-away.js';
 import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EnginePunchPayload, type EngineShift, type TraceStep } from './types.js';
 import { assertTimezone, computePunchWindow, localInstant, parseInstant, toUtcIso, type PunchWindow } from './window.js';
 
@@ -65,6 +66,14 @@ class Recorder {
     this.flagSet.add(flag);
   }
 
+  /** Overwrite the first step named `step` in place (it keeps its position in the trace), or record it when there is none. */
+  replace(step: string, detail: string, values?: Record<string, unknown>): void {
+    const entry: TraceStep = values ? { step, detail, values } : { step, detail };
+    const index = this.steps.findIndex((s) => s.step === step);
+    if (index < 0) this.steps.push(entry);
+    else this.steps[index] = entry;
+  }
+
   /** Flags in the canonical `ATTENDANCE_FLAGS` order so equal inputs always serialise identically. */
   flags(): AttendanceFlag[] {
     return ATTENDANCE_FLAGS.filter((f) => this.flagSet.has(f));
@@ -98,7 +107,17 @@ interface WorkContext {
   zone: string;
   window: PunchWindow;
   rec: Recorder;
+  /**
+   * Engine 1.5.0: the day's classified away time when the policy measures it, else null (time-away.ts). Only the gaps inside
+   * [first IN, last closed OUT]: this is what `measureWork` deducts, never the open tail of a day still in progress.
+   */
+  away: TimeAwayClassification | null;
+  /** The employee's approved time-away windows for the day (to classify again once an assumed check-out is known). */
+  awayWindows: readonly EngineTimeAway[];
 }
+
+/** What classifying the day's away time needs besides the intervals. */
+type AwayContext = Pick<WorkContext, 'rules' | 'shift' | 'zone' | 'awayWindows'>;
 
 interface MeasureOptions {
   /** Instants substituted for a missing punch (ASSUME_SHIFT_END); never reported as timestamps. */
@@ -118,6 +137,11 @@ interface WorkFigures {
   earlyDepartureMinutes: number;
   overtimeMinutes: number;
   overtimeCategory: DailyCalculationResult['overtimeCategory'];
+  /**
+   * Engine 1.5.0: away minutes deducted from the worked minutes that still count towards the day's status (approved personal
+   * permission when the policy excuses it, approved official duty when the policy does not pay it). 0 without time away.
+   */
+  excusedMinutes: number;
 }
 
 const iso = (dt: DateTime | null): string | null => (dt ? toUtcIso(dt) : null);
@@ -256,6 +280,30 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
     measuredBreakMinutes: interpretation.measuredBreakMinutes,
   });
 
+  // Whether the day is over (its punch window closed, or an overnight check-out can no longer arrive) — traced at step 6.
+  const now = input.now ? parseInstant(input.now, zone) : null;
+  // a flexible day that ends with an open check-in is not judged before its overnight check-out could still arrive
+  const openIn = window.kind === 'FLEXIBLE' && shift ? openCheckIn(attributed) : null;
+  const overnightUntil = openIn && shift ? parseInstant(openIn.punchedAt, zone).plus({ minutes: overnightMaxSpanMinutes(shift) }) : null;
+  const dayEnd = overnightUntil && overnightUntil > window.windowEnd ? overnightUntil : window.windowEnd;
+  const dayOver = now === null || now >= dayEnd;
+
+  // 3b. Time away inside the working day (engine 1.5.0, time-away.ts): classify every measured gap against the approved windows.
+  // Work is measured on the gaps inside [first IN, last closed OUT] only (`away`). A working day that stays PENDING below
+  // (step 9: back on site, not checked out yet, window open) also REPORTS the gap before the open stretch the employee came
+  // back for; that gap lies after the last closed OUT, so it is never deducted. Any other day reports what it deducts: a
+  // weekly off / holiday / leave day in progress keeps its real worked minutes, and no later sweep would recompute it.
+  const awayPolicy = rules.policy.timeAway;
+  const awayInactive = timeAwayInactiveReason(awayPolicy, interpretation.mode);
+  const awayCtx: AwayContext = { rules, shift, zone, awayWindows: input.timeAway ?? [] };
+  const away = awayInactive === null ? classifyAway(awayCtx, awayIntervalsOf(interpretation)) : null;
+  const endsPending = !dayOver && interpretation.missingOut && employedOn(input) && dayTypeOf(input) === 'WORKING';
+  const reportedAway = away && endsPending ? classifyAway(awayCtx, awayIntervalsOf(interpretation, { includeOpenTail: true })) : away;
+  if (reportedAway) recordTimeAway(rec, awayCtx, reportedAway);
+  else if (awayPolicy.enabled) {
+    rec.step('timeAway', 'the policy measures time away, but FIRST_LAST keeps only the first and the last punch → not measured (use PAIRED or DIRECTIONAL)', { inactive: awayInactive });
+  }
+
   const trace: CalculationTrace = {
     engineVersion: ENGINE_VERSION,
     inputs: {
@@ -284,8 +332,9 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
     eventIds: attributed.map((e) => e.id),
     trace,
   };
-  const emptyWork: WorkFigures = { firstIn: null, lastOut: null, workedMinutes: 0, breakMinutes: 0, lateMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 0, overtimeCategory: null };
-  const finish = (status: AttendanceStatus, schedule: Schedule | null, work: WorkFigures): DailyCalculationResult => ({
+  const emptyWork: WorkFigures = { firstIn: null, lastOut: null, workedMinutes: 0, breakMinutes: 0, lateMinutes: 0, earlyDepartureMinutes: 0, overtimeMinutes: 0, overtimeCategory: null, excusedMinutes: 0 };
+  // `reported`: the away time the record carries (an ASSUME_SHIFT_END day that ends on an open step-out classifies it again)
+  const finish = (status: AttendanceStatus, schedule: Schedule | null, work: WorkFigures, reported: TimeAwayClassification | null = reportedAway): DailyCalculationResult => ({
     ...base,
     expectedStartAt: iso(schedule?.expectedStart ?? null),
     expectedEndAt: iso(schedule?.expectedEnd ?? null),
@@ -298,6 +347,10 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
     earlyDepartureMinutes: work.earlyDepartureMinutes,
     overtimeMinutes: work.overtimeMinutes,
     overtimeCategory: work.overtimeCategory,
+    awayMinutes: reported?.awayMinutes ?? 0,
+    officialDutyMinutes: reported?.officialMinutes ?? 0,
+    permissionMinutes: reported?.permissionMinutes ?? 0,
+    unapprovedAwayMinutes: reported?.unapprovedMinutes ?? 0,
     status,
     flags: rec.flags(),
     lopDays: 0,
@@ -322,13 +375,7 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   // (plus unpaid breaks) are done — rounded like the worked minutes, so leaving at the expected end is never "under hours".
   const anchorIn = roundPunches(interpretation.firstIn, null, rules.punchRoundingMinutes, rules.punchRoundingMode).firstIn;
   const schedule = buildSchedule(input, window, halfDayOff, rec, anchorIn);
-  const ctx: WorkContext = { rules, shift, date, zone, window, rec };
-  const now = input.now ? parseInstant(input.now, zone) : null;
-  // a flexible day that ends with an open check-in is not judged before its overnight check-out could still arrive
-  const openIn = window.kind === 'FLEXIBLE' && shift ? openCheckIn(attributed) : null;
-  const overnightUntil = openIn && shift ? parseInstant(openIn.punchedAt, zone).plus({ minutes: overnightMaxSpanMinutes(shift) }) : null;
-  const dayEnd = overnightUntil && overnightUntil > window.windowEnd ? overnightUntil : window.windowEnd;
-  const dayOver = now === null || now >= dayEnd;
+  const ctx: WorkContext = { rules, shift, date, zone, window, rec, away, awayWindows: awayCtx.awayWindows };
   rec.step('now', now ? `now ${toUtcIso(now)} → window ${dayOver ? 'closed' : 'open'}${dayEnd !== window.windowEnd ? ` (open check-in: an overnight check-out is awaited until ${toUtcIso(dayEnd)})` : ''}` : 'no `now` supplied → day treated as over', { now: iso(now), dayOver, ...(dayEnd !== window.windowEnd ? { awaitCheckOutUntil: toUtcIso(dayEnd) } : {}) });
 
   // 7. Non-working days: status is fixed; work (if any) is recorded and may count as overtime.
@@ -407,28 +454,105 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   const work = measureWork(ctx, interpretation, schedule);
   if (interpretation.missingOut) rec.flag('MISSING_OUT'); // PAIRED/DIRECTIONAL: last segment open but an earlier OUT exists
   if (interpretation.missingIn) rec.flag('MISSING_IN'); // DIRECTIONAL: an OUT preceded the first IN
-  const status = classifyWorkingStatus(work.workedMinutes, schedule, rules, halfDayOff, rec);
+  if (work.excusedMinutes > 0) rec.step('timeAway.status', `${work.excusedMinutes} min of approved time away count towards the day's status (not paid): ${work.workedMinutes} + ${work.excusedMinutes} = ${work.workedMinutes + work.excusedMinutes} min`, { workedMinutes: work.workedMinutes, excusedMinutes: work.excusedMinutes });
+  const status = classifyWorkingStatus(work.workedMinutes + work.excusedMinutes, schedule, rules, halfDayOff, rec);
   return finish(status, schedule, work);
 }
 
 /* ------------------------------------------------------------------------------------------------ */
 
-function classifyDay(input: DailyCalculationInput, rec: Recorder): DayType {
-  if (input.holiday && !input.holiday.isHalfDay) {
-    rec.step('dayType', `holiday "${input.holiday.name}" → HOLIDAY`, { holidayId: input.holiday.id });
-    return 'HOLIDAY';
-  }
-  const weekday = dayOfWeek(input.attendanceDate);
-  if (input.weeklyOffDays.includes(weekday)) {
-    rec.step('dayType', `weekday ${weekday} is a weekly off day → WEEKLY_OFF`, { weekday, weeklyOffDays: input.weeklyOffDays });
-    return 'WEEKLY_OFF';
-  }
-  if (input.leave && !input.leave.isHalfDay) {
-    rec.step('dayType', `approved full-day leave ${input.leave.leaveTypeCode} → LEAVE`, { leaveId: input.leave.id, isPaid: input.leave.isPaid });
-    return 'LEAVE';
-  }
-  rec.step('dayType', 'working day', { holiday: input.holiday?.id ?? null, leave: input.leave?.id ?? null });
+/** The day type, holiday > weekly off > leave > working (untraced: `classifyDay` records it). */
+function dayTypeOf(input: DailyCalculationInput): DayType {
+  if (input.holiday && !input.holiday.isHalfDay) return 'HOLIDAY';
+  if (input.weeklyOffDays.includes(dayOfWeek(input.attendanceDate))) return 'WEEKLY_OFF';
+  if (input.leave && !input.leave.isHalfDay) return 'LEAVE';
   return 'WORKING';
+}
+
+/** The date lies inside the employment (step 4 returns NOT_JOINED / EXITED otherwise). */
+function employedOn(input: DailyCalculationInput): boolean {
+  const { joiningDate, exitDate } = input.employment;
+  return input.attendanceDate >= joiningDate && (exitDate === null || input.attendanceDate <= exitDate);
+}
+
+function classifyDay(input: DailyCalculationInput, rec: Recorder): DayType {
+  const dayType = dayTypeOf(input);
+  if (dayType === 'HOLIDAY' && input.holiday) rec.step('dayType', `holiday "${input.holiday.name}" → HOLIDAY`, { holidayId: input.holiday.id });
+  else if (dayType === 'WEEKLY_OFF') {
+    const weekday = dayOfWeek(input.attendanceDate);
+    rec.step('dayType', `weekday ${weekday} is a weekly off day → WEEKLY_OFF`, { weekday, weeklyOffDays: input.weeklyOffDays });
+  } else if (dayType === 'LEAVE' && input.leave) rec.step('dayType', `approved full-day leave ${input.leave.leaveTypeCode} → LEAVE`, { leaveId: input.leave.id, isPaid: input.leave.isPaid });
+  else rec.step('dayType', 'working day', { holiday: input.holiday?.id ?? null, leave: input.leave?.id ?? null });
+  return dayType;
+}
+
+/** Classify away intervals against the day's approved windows and the shift's break allowance (time-away.ts). */
+function classifyAway(ctx: AwayContext, intervals: readonly Span[]): TimeAwayClassification {
+  return classifyTimeAway({ intervals, windows: ctx.awayWindows, zone: ctx.zone, policy: ctx.rules.policy.timeAway, breakAllowanceMinutes: breakAllowanceMinutes(ctx.shift?.breaks ?? []) });
+}
+
+/**
+ * Flags and the `timeAway` trace step of a classification (the API reads the day's intervals back from that step). `replace`:
+ * a later classification of the same day overwrites the step in place; it only ever adds an interval at the end of the day,
+ * so the flags it raises are a superset of the earlier ones.
+ */
+function recordTimeAway(rec: Recorder, ctx: AwayContext, away: TimeAwayClassification, replace = false): void {
+  const policy = ctx.rules.policy.timeAway;
+  const allowance = breakAllowanceMinutes(ctx.shift?.breaks ?? []);
+  const beyondBreaks = away.officialMinutes + away.permissionMinutes + away.unapprovedMinutes;
+  if (beyondBreaks > 0) rec.flag('TIME_AWAY');
+  const unapprovedFlagged = away.unapprovedMinutes > policy.flagUnapprovedAfterMinutes;
+  if (unapprovedFlagged) rec.flag('UNAPPROVED_AWAY');
+  const detail = `${away.intervals.length} away interval(s), ${away.awayMinutes} min: ${away.officialMinutes} official, ${away.permissionMinutes} permission, ${away.breakMinutes} break (allowance ${allowance}), ${away.unapprovedMinutes} unapproved${unapprovedFlagged ? ` (> ${policy.flagUnapprovedAfterMinutes} min → flagged)` : ''}, ${away.shortMinutes} under ${policy.ignoreUnderMinutes} min`;
+  const values = {
+    intervals: traceAwayIntervals(away),
+    awayMinutes: away.awayMinutes,
+    officialMinutes: away.officialMinutes,
+    permissionMinutes: away.permissionMinutes,
+    breakMinutes: away.breakMinutes,
+    unapprovedMinutes: away.unapprovedMinutes,
+    shortMinutes: away.shortMinutes,
+    breakAllowanceMinutes: allowance,
+    approvedWindows: ctx.awayWindows.map((w) => ({ id: w.id, kind: w.kind, startsAt: w.startsAt, endsAt: w.endsAt })),
+  };
+  if (replace) rec.replace('timeAway', detail, values);
+  else rec.step('timeAway', detail, values);
+}
+
+/**
+ * A step-out never closed (DIRECTIONAL: a break-out with no return) on a day whose check-out is assumed at the shift end: the
+ * assumed OUT would pay the whole absence. With time away measured, [break start, assumed OUT] is classified with the day's
+ * other gaps, so an approved window still counts as official duty / permission and the rest is break allowance / unapproved.
+ * Null (nothing changes) when time away is off, no break is open, or the break started at / after the assumed OUT.
+ */
+function awayWithOpenBreak(ctx: WorkContext, interpretation: Interpretation, assumedOut: DateTime): TimeAwayClassification | null {
+  const open = interpretation.openBreak;
+  if (ctx.away === null || open === null || assumedOut <= open) return null;
+  // the open break is the day's last gap (with no closed OUT the closed breaks all ended before it), so the earlier intervals
+  // classify exactly as before and only this one is added
+  const away = classifyAway(ctx, [...awayIntervalsOf(interpretation), { start: open, end: assumedOut }]);
+  recordTimeAway(ctx.rec, ctx, away, true);
+  ctx.rec.step('timeAway.openBreak', `stepped out at ${toUtcIso(open)} and never came back → [${toUtcIso(open)}, assumed OUT ${toUtcIso(assumedOut)}] (${minutesBetween(open, assumedOut)} min) classified as time away`, { openBreakAt: toUtcIso(open), assumedOut: toUtcIso(assumedOut), minutes: minutesBetween(open, assumedOut) });
+  return away;
+}
+
+/**
+ * The shift's unpaid break a day with time away still deducts at the least: a fixed-length unpaid break in full, a scheduled
+ * unpaid range for its part inside [firstIn, lastOut] that is not already deducted as permission / unapproved / unpaid
+ * official time (`deducted`). Official duty that counts as worked and short gaps are worked time: they never use up the lunch
+ * a plain day deducts.
+ */
+function unpaidBreakFloor(breaks: readonly ShiftBreak[], deducted: readonly Span[], firstIn: DateTime, lastOut: DateTime, ctx: Pick<WorkContext, 'date' | 'zone' | 'window'>): number {
+  let total = 0;
+  for (const b of breaks) {
+    if (b.paid) continue;
+    if ('minutes' in b) { total += b.minutes; continue; }
+    const placed = placeScheduledBreak(b, ctx.date, ctx.zone, ctx.window.crossesMidnight, firstIn);
+    const start = placed.start > firstIn ? placed.start : firstIn;
+    const end = placed.end < lastOut ? placed.end : lastOut;
+    if (end > start) total += Math.max(0, minutesBetween(start, end) - minutesWithin(deducted, start, end));
+  }
+  return total;
 }
 
 function halfDayPart(input: DailyCalculationInput, rec: Recorder): HalfDayOff {
@@ -541,7 +665,31 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
 
   let workedMinutes = 0;
   let breakMinutes = 0;
-  if (firstIn && lastOut) {
+  let excusedMinutes = 0;
+  const away = ctx.away;
+  if (firstIn && lastOut && away && away.intervals.length > 0) {
+    // Engine 1.5.0: the classified away time replaces the measured-break deduction. The break allowance is deducted like a
+    // measured break (its paid part credited back), permission and unapproved time are deducted, official duty is worked
+    // time when the policy says so, and a gap under the tolerance stays worked time.
+    // The shift's unpaid break stays a floor: only a measured BREAK uses it up, so a day of official duty or short gaps loses
+    // the same lunch as a plain day and permission costs its own minutes on top — never more than the span leaves.
+    const policy = rules.policy.timeAway;
+    const paidAllowance = scheduledBreakMinutes(shift?.breaks ?? []).paid;
+    const paidBreak = Math.min(away.breakMinutes, paidAllowance);
+    const measuredBreak = away.breakMinutes - paidBreak;
+    const officialDeducted = policy.officialCountsAsWorked ? 0 : away.officialMinutes;
+    const span = Math.max(0, minutesBetween(firstIn, lastOut));
+    const otherDeducted = away.permissionMinutes + away.unapprovedMinutes + officialDeducted;
+    const deductedSpans = away.intervals.filter((i) => i.kind === 'PERMISSION' || i.kind === 'UNAPPROVED' || (i.kind === 'OFFICIAL' && officialDeducted > 0));
+    const floor = Math.min(unpaidBreakFloor(shift?.breaks ?? [], deductedSpans, firstIn, lastOut, ctx), Math.max(0, span - otherDeducted));
+    breakMinutes = Math.max(measuredBreak, floor);
+    const deducted = breakMinutes + otherDeducted;
+    const rawWorked = Math.max(0, span - deducted);
+    workedMinutes = Math.max(0, roundMinutes(rawWorked, rules.workedRoundingMinutes, rules.workedRoundingMode));
+    excusedMinutes = (policy.permissionExcusesShortfall ? away.permissionMinutes : 0) + officialDeducted;
+    rec.step('breaks', `TIME_AWAY: ${breakMinutes} min unpaid break deducted${floor > measuredBreak ? ` (the shift's unpaid break; ${measuredBreak} min measured)` : ''}, ${paidBreak} min paid`, { source: 'TIME_AWAY', unpaidMinutes: breakMinutes, paidMinutes: paidBreak, measuredUnpaidMinutes: measuredBreak, floorMinutes: floor, detail: `break allowance used ${away.breakMinutes} min, paid allowance ${paidAllowance} min, unpaid shift break ${floor} min` });
+    rec.step('worked', `${span} min span − ${breakMinutes} break − ${away.permissionMinutes} permission − ${away.unapprovedMinutes} unapproved${officialDeducted ? ` − ${officialDeducted} official (not paid)` : ''} = ${rawWorked}${workedMinutes !== rawWorked ? ` → rounded ${rules.workedRoundingMode} ${rules.workedRoundingMinutes} = ${workedMinutes}` : ''} min (${away.officialMinutes - officialDeducted} official + ${away.shortMinutes} short gaps kept as worked)`, { spanMinutes: span, rawWorkedMinutes: rawWorked, workedMinutes, deductedMinutes: deducted, excusedMinutes });
+  } else if (firstIn && lastOut) {
     const breaks = computeBreaks({ breaks: shift?.breaks ?? [], interpretation, firstIn, lastOut, attendanceDate: date, zone, crossesMidnight: window.crossesMidnight });
     breakMinutes = breaks.unpaidMinutes;
     const span = Math.max(0, minutesBetween(firstIn, lastOut));
@@ -581,7 +729,7 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
     // within it is forgiven, a larger one counts in full, so the figure always matches the worked minutes on the record. On a
     // half day the expected check-out carries no break (the break falls in the half not worked): it is the measure there.
     const beforeEnd = Math.max(0, minutesBetween(lastOut, schedule.expectedEnd));
-    const shortOfRequired = firstIn && schedule.halfDayOff === null ? Math.max(0, schedule.scheduledMinutes - workedMinutes) : 0;
+    const shortOfRequired = firstIn && schedule.halfDayOff === null ? Math.max(0, schedule.scheduledMinutes - workedMinutes - excusedMinutes) : 0;
     const shortfall = Math.max(beforeEnd, shortOfRequired);
     earlyDepartureMinutes = shortfall > graceOut ? shortfall : 0;
     const flagged = earlyDepartureMinutes > rules.earlyDepartureThresholdMinutes;
@@ -633,7 +781,7 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
     rec.flag('OVERTIME');
   }
 
-  return { firstIn, lastOut, workedMinutes, breakMinutes, lateMinutes, earlyDepartureMinutes, overtimeMinutes, overtimeCategory };
+  return { firstIn, lastOut, workedMinutes, breakMinutes, lateMinutes, earlyDepartureMinutes, overtimeMinutes, overtimeCategory, excusedMinutes };
 }
 
 type Span = { start: DateTime; end: DateTime };
@@ -683,7 +831,8 @@ function capOvertime(minutes: number, rules: AttendanceRules): number {
 
 type MissingSide = 'IN' | 'OUT';
 
-function resolveMissingPunch(side: MissingSide, ctx: WorkContext, interpretation: Interpretation, schedule: Schedule): [AttendanceStatus, Schedule, WorkFigures] {
+/** The status, schedule and figures of a day with a missing punch, and — when it differs from step 3b's — the away time it reports. */
+function resolveMissingPunch(side: MissingSide, ctx: WorkContext, interpretation: Interpretation, schedule: Schedule): [AttendanceStatus, Schedule, WorkFigures, TimeAwayClassification?] {
   const { rules, rec } = ctx;
   const flag: AttendanceFlag = side === 'OUT' ? 'MISSING_OUT' : 'MISSING_IN';
   rec.flag(flag);
@@ -719,10 +868,13 @@ function resolveMissingPunch(side: MissingSide, ctx: WorkContext, interpretation
         return [unresolvedStatus, schedule, partial()];
       }
       rec.step('missingPunch', `${flag} → ASSUME_SHIFT_END: ${side} assumed at ${toUtcIso(assumed)}; status follows the assumed worked minutes`, { behaviour, assumed: toUtcIso(assumed) });
-      const work = measureWork(ctx, interpretation, schedule, { assumed: side === 'OUT' ? { lastOut: assumed } : { firstIn: assumed } });
+      // a step-out never closed is time away up to the assumed check-out, not worked time (time away measured only)
+      const openBreakAway = side === 'OUT' ? awayWithOpenBreak(ctx, interpretation, assumed) : null;
+      const work = measureWork(openBreakAway ? { ...ctx, away: openBreakAway } : ctx, interpretation, schedule, { assumed: side === 'OUT' ? { lastOut: assumed } : { firstIn: assumed } });
       // The assumed instant is not a punch: keep the real timestamps only.
       const figures: WorkFigures = side === 'OUT' ? { ...work, lastOut: null } : { ...work, firstIn: null };
-      return [classifyWorkingStatus(work.workedMinutes, schedule, rules, schedule.halfDayOff, rec), schedule, figures];
+      const status = classifyWorkingStatus(work.workedMinutes + work.excusedMinutes, schedule, rules, schedule.halfDayOff, rec);
+      return openBreakAway ? [status, schedule, figures, openBreakAway] : [status, schedule, figures];
     }
     default: {
       const exhaustive: never = behaviour;

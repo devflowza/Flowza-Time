@@ -82,15 +82,35 @@ async function loadRecipientGrants(trx: Trx, organizationId: string, recipients:
   const branches = restricted.length ? await trx.selectFrom('membershipBranches').select(['membershipId', 'branchId']).where('membershipId', 'in', restricted).execute() : [];
   const branchesByMembership = new Map<string, string[]>();
   for (const b of branches) branchesByMembership.set(b.membershipId, [...(branchesByMembership.get(b.membershipId) ?? []), b.branchId]);
-  // direct reports (primary or secondary manager), leavers excluded, and only while the manager's own record is active — the
-  // same rule as app.team_employee_ids() / the principal snapshot
+  // the team (direct reports — primary or secondary manager — or, with the organisation's team scope `hierarchy`, the reporting
+  // line to depth 5), leavers excluded, and only while the manager's own record is active: the same walk as app._team_of(),
+  // which feeds app.team_employee_ids() and the principal snapshot (migration 20261015000300)
   const team = await sql<{ membershipId: string; employeeId: string }>`
-    select m.id as "membershipId", e.id as "employeeId"
-    from public.org_memberships m
-    join public.employees me on me.id = m.employee_id and me.organization_id = m.organization_id and me.deleted_at is null and me.employment_status not in ('terminated', 'resigned')
-    join public.employees e on e.organization_id = m.organization_id and e.deleted_at is null and e.employment_status not in ('terminated', 'resigned')
-      and (e.manager_employee_id = m.employee_id or e.secondary_manager_employee_id = m.employee_id)
-    where m.id = any(${unique.map((m) => m.id)}::uuid[])`.execute(trx);
+    with recursive opts as (
+      select coalesce((select s.attendance -> 'team' ->> 'scope' from public.organization_settings s where s.organization_id = ${organizationId}::uuid), 'direct') = 'hierarchy' as deep
+    ),
+    roots as (
+      select m.id as membership_id, m.employee_id
+      from public.org_memberships m
+      join public.employees me on me.id = m.employee_id and me.organization_id = m.organization_id and me.deleted_at is null and me.employment_status not in ('terminated', 'resigned')
+      where m.id = any(${unique.map((m) => m.id)}::uuid[])
+    ),
+    chain as (
+      select r.membership_id, e.id, 1 as depth
+      from roots r
+      join public.employees e on e.organization_id = ${organizationId}::uuid and e.deleted_at is null and e.employment_status not in ('terminated', 'resigned')
+        and (e.manager_employee_id = r.employee_id or e.secondary_manager_employee_id = r.employee_id)
+      union
+      select c.membership_id, e.id, c.depth + 1
+      from chain c
+      cross join opts
+      join public.employees e on e.organization_id = ${organizationId}::uuid
+      where opts.deep and c.depth < 5 and e.deleted_at is null and e.employment_status not in ('terminated', 'resigned')
+        and (e.manager_employee_id = c.id or (e.manager_employee_id is null and e.secondary_manager_employee_id = c.id))
+    )
+    select distinct c.membership_id as "membershipId", c.id as "employeeId"
+    from chain c join roots r on r.membership_id = c.membership_id
+    where c.id <> r.employee_id`.execute(trx);
   const teamByMembership = new Map<string, string[]>();
   for (const t of team.rows) teamByMembership.set(t.membershipId, [...(teamByMembership.get(t.membershipId) ?? []), t.employeeId]);
   // the recipient's own employee record — what somebody without report access may still receive a copy about (self scope);
@@ -212,7 +232,7 @@ export async function runReportDelivery(trx: Trx, deps: Pick<WorkerDeps, 'queue'
     occurrence = now;
     runKey = p.runKey;
   }
-  const period = schedulePeriod({ periodRule: s.periodRule as ReportPeriodRule, customFromDay: s.customFromDay, customToDay: s.customToDay, firstDayOfWeek: timing.firstDayOfWeek }, occurrence, timing.timezone);
+  const period = schedulePeriod({ periodRule: s.periodRule as ReportPeriodRule, customFromDay: s.customFromDay, customToDay: s.customToDay, firstDayOfWeek: timing.firstDayOfWeek, runDays: s.runDay }, occurrence, timing.timezone);
   const filters = asObject(s.filters);
   const parameters = { ...filters, ...periodParameters(s.reportType as ReportType, period) };
   const recipients = asObject(s.recipients);

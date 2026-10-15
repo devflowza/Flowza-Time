@@ -24,7 +24,7 @@ describe('module switches', () => {
     const enterpriseOnly = (m: Record<string, boolean>) => Object.entries(m).filter(([k]) => (ENTERPRISE_MODULE_KEYS as readonly string[]).includes(k));
     const a = await modulesOf(F.ownerA, F.orgA);
     expect(Object.entries(a.modules).filter(([k]) => !(ENTERPRISE_MODULE_KEYS as readonly string[]).includes(k)).every(([, on]) => on)).toBe(true);
-    expect(Object.keys(a.modules).sort()).toEqual(['advanced_scheduling', 'attendance_policies', 'devices', 'finance_integration', 'geofences', 'leave', 'manager_workspace', 'payroll', 'report_schedules', 'self_service', 'shift_requests']);
+    expect(Object.keys(a.modules).sort()).toEqual(['advanced_scheduling', 'attendance_policies', 'devices', 'finance_integration', 'geofences', 'leave', 'manager_workspace', 'meeting_rooms', 'payroll', 'report_schedules', 'self_service', 'shift_requests']);
     // the Enterprise modules (migration 20261007000100) are off on business and trial
     expect(enterpriseOnly(a.modules).every(([, on]) => !on)).toBe(true);
     const b = await modulesOf(F.ownerB, F.orgB);

@@ -1,0 +1,216 @@
+{
+  "employee": [
+    {
+      "id": "title",
+      "text": "The employee portal. Everything Ahmed needs, on his phone or his desk."
+    },
+    {
+      "id": "signin",
+      "text": "Ahmed signs in with his work e-mail."
+    },
+    {
+      "id": "overview",
+      "text": "My overview shows today: his shift, eight to two, the time he checked in on the entrance terminal, and the month at a glance."
+    },
+    {
+      "id": "calendar",
+      "text": "My attendance has the month calendar. Every day is calculated from his punches. Open a day to see each punch and how the day was worked out."
+    },
+    {
+      "id": "activity",
+      "text": "The Activity tab is his bar graph: time on site in green, and time away during working hours, split into official duty, approved permission, and unapproved time."
+    },
+    {
+      "id": "stepout",
+      "text": "Now Ahmed has to visit a client. Our site has an entry terminal only, so he taps Step out, picks Official duty, his expected return and the reason. His manager is asked to approve."
+    },
+    {
+      "id": "back",
+      "text": "The portal shows he is away. When he returns he checks in on the terminal, or taps I'm back if the policy allows it."
+    },
+    {
+      "id": "requests",
+      "text": "Time away can also be planned ahead. Personal permission shows how much of the monthly allowance is left."
+    },
+    {
+      "id": "leave",
+      "text": "My leave shows every balance. Apply for leave picks the type and the dates, and shows the days it will use before he sends it."
+    },
+    {
+      "id": "swap",
+      "text": "Need to swap a shift? In My shift, Request swap picks the day and a colleague. His manager approves it, and both schedules change for that day only."
+    },
+    {
+      "id": "end",
+      "text": "Attendance, time away, leave and shift swaps, in one portal."
+    }
+  ],
+  "manager": [
+    {
+      "id": "title",
+      "text": "The manager portal: your team today, the morning roll call, every request in one inbox, and the whole reporting line."
+    },
+    {
+      "id": "signin",
+      "text": "Nasser leads the IT and QA team."
+    },
+    {
+      "id": "today",
+      "text": "Team, Today is the daily roll call: who checked in, who is late, absent or on leave, and who is in right now. It refreshes every minute."
+    },
+    {
+      "id": "rollcall",
+      "text": "And every working morning at seven thirty, the morning roll call arrives: yesterday's daily report for his team only. Who checked in and when, who was late, and who was absent."
+    },
+    {
+      "id": "inbox",
+      "text": "Approvals collects everything waiting for him: time away, leave and shift swaps."
+    },
+    {
+      "id": "timeaway",
+      "text": "A time-away request shows the window, the kind, the destination and, for personal permission, the month's allowance. He approves, and the day is recalculated."
+    },
+    {
+      "id": "leave",
+      "text": "Leave shows the balance before and after. A shift swap shows both people and both shifts."
+    },
+    {
+      "id": "month",
+      "text": "The attendance tab is the month for the whole team: present, late, absent and leave, day by day."
+    },
+    {
+      "id": "head",
+      "text": "Managers have managers. Hamed, Head of Technology, sees his managers and, through them, their teams, labelled with who they report to."
+    },
+    {
+      "id": "end",
+      "text": "One inbox, one roll call, every level of the hierarchy."
+    }
+  ],
+  "hr": [
+    {
+      "id": "title",
+      "text": "HR: the whole organisation, every department, time away, the morning roll call, holidays, leave and meetings."
+    },
+    {
+      "id": "signin",
+      "text": "Fatma runs HR."
+    },
+    {
+      "id": "dashboard",
+      "text": "The dashboard shows today across every branch: present, absent, on leave and late, with the trend and each branch."
+    },
+    {
+      "id": "daily",
+      "text": "Attendance, Daily lists every employee's day. Filter by department, and open a day to see its punches and its calculation."
+    },
+    {
+      "id": "timeaway",
+      "text": "The Time away report totals the month for each person: away, official duty, permission and unapproved time, with the days that were flagged."
+    },
+    {
+      "id": "schedule",
+      "text": "HR schedules the morning roll call once: the daily report, Sunday to Thursday at seven thirty, to every manager. Each manager receives only their own team, and a Sunday run covers Thursday to Saturday."
+    },
+    {
+      "id": "structure",
+      "text": "Organization holds branches, locations and departments. The org chart shows the reporting lines, managers of managers included."
+    },
+    {
+      "id": "holidays",
+      "text": "Holidays: add a public or company holiday to the calendar, or remove one. Attendance is recalculated for those days."
+    },
+    {
+      "id": "leave",
+      "text": "Leave covers requests, the team calendar and every balance."
+    },
+    {
+      "id": "meetings",
+      "text": "Meetings shows who attended, who came late and who was absent, from the meeting-room readers."
+    },
+    {
+      "id": "end",
+      "text": "One view of the organisation, for HR."
+    }
+  ],
+  "admin": [
+    {
+      "id": "title",
+      "text": "The administrator: settings, people and roles, terminals, locations, audit and modules."
+    },
+    {
+      "id": "signin",
+      "text": "Khalid is the owner of the account."
+    },
+    {
+      "id": "settings",
+      "text": "Settings covers regional options, attendance rules, self-service check-in, notifications and security. Here he lets managers see their whole reporting line."
+    },
+    {
+      "id": "users",
+      "text": "Users and roles decide who sees what. Every role is a set of permissions, scoped to branches."
+    },
+    {
+      "id": "devices",
+      "text": "Devices lists every terminal with its role: an entry-only gate, an exit-only gate, a two-way lobby terminal, and the meeting-room readers."
+    },
+    {
+      "id": "register",
+      "text": "Registering a terminal takes its provider, its branch and place, and what its punches mean."
+    },
+    {
+      "id": "locations",
+      "text": "Locations are the tree of branches, floors and rooms. A meeting room is a place with its own readers."
+    },
+    {
+      "id": "audit",
+      "text": "The audit log records every change and every request: who, what and when."
+    },
+    {
+      "id": "end",
+      "text": "Everything under control, in one console."
+    }
+  ],
+  "timeaway": [
+    {
+      "id": "title",
+      "text": "Between check-in and check-out: how FlowZa measures time away from the site during working hours."
+    },
+    {
+      "id": "layouts",
+      "text": "There are two kinds of site. With two-way terminals, the employee punches out when leaving and in when coming back. With an entry terminal only, he steps out from the portal, and checks in on the terminal when he returns."
+    },
+    {
+      "id": "devices",
+      "text": "Each terminal declares its role: entry only, exit only, in and out keys, or a door reader for a meeting room. Room entries never split the working day."
+    },
+    {
+      "id": "policy",
+      "text": "The attendance policy turns it on. Official duty counts as worked. Personal permission is excused, up to four hours a month. Anything else is unapproved, and flagged after fifteen minutes."
+    },
+    {
+      "id": "trace",
+      "text": "Every gap between the first check-in and the last check-out is classified. On this day, a two-hour client visit was approved, so the whole day counts."
+    },
+    {
+      "id": "unapproved",
+      "text": "On this day, forty-five minutes away had no approval: they are deducted, and the day is flagged."
+    },
+    {
+      "id": "chart",
+      "text": "The employee and the manager see the same picture: time on site, and time away by kind."
+    },
+    {
+      "id": "meetings",
+      "text": "Meeting rooms with readers add one more answer: who attended, who was late, who was absent, and who walked in without an invitation."
+    },
+    {
+      "id": "report",
+      "text": "HR closes the month with the totals per person."
+    },
+    {
+      "id": "end",
+      "text": "Every minute between check-in and check-out, accounted for."
+    }
+  ]
+}

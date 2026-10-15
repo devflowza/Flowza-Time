@@ -77,6 +77,24 @@ describe('report schedules — CRUD and permissions', () => {
     expect(resumed.body.data.nextRunAt).not.toBeNull();
   });
 
+  it('a PATCH that changes the cadence must name runDay (a stored run day is never read under another cadence)', async () => {
+    const weekly = await h.request('POST', `${base()}/report-schedules`, { token: f.owner, body: schedule({ name: 'Thursday late report', cadence: 'weekly', runDay: 4, runTime: '06:30', periodRule: 'previous_week' }) });
+    expect(weekly.status).toBe(201);
+    const sid = weekly.body.data.id;
+    // weekly 4 (Thursday) would pass as daily mask 4 (Tuesday only), and daily mask 3 as weekly Wednesday
+    const toDaily = await h.request('PATCH', `${base()}/report-schedules/${sid}`, { token: f.owner, body: { cadence: 'daily', periodRule: 'previous_day' } });
+    expect(toDaily.status).toBe(400);
+    expect(toDaily.body.details.issues).toEqual([{ path: 'runDay', message: 'Required when the cadence changes' }]);
+    const unchanged = await h.request('GET', `${base()}/report-schedules/${sid}`, { token: f.owner });
+    expect(unchanged.body.data).toMatchObject({ cadence: 'weekly', runDay: 4 });
+    // the same cadence restated, or a cadence change that names its run day, is accepted
+    expect((await h.request('PATCH', `${base()}/report-schedules/${sid}`, { token: f.owner, body: { cadence: 'weekly', name: 'Thursday late report (2)' } })).status).toBe(200);
+    const monthly = await h.request('PATCH', `${base()}/report-schedules/${sid}`, { token: f.owner, body: { cadence: 'monthly', runDay: 2, periodRule: 'previous_month' } });
+    expect(monthly.status).toBe(200);
+    expect(monthly.body.data).toMatchObject({ cadence: 'monthly', runDay: 2 });
+    expect((await h.request('DELETE', `${base()}/report-schedules/${sid}`, { token: f.owner })).status).toBe(204);
+  });
+
   it('reads need report.view, writes report.schedule (+ the report type permissions)', async () => {
     const hrAdminList = await h.request('GET', `${base()}/report-schedules`, { token: f.hrAdmin });
     expect(hrAdminList.status).toBe(200);

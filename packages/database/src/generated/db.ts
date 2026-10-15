@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "ATTENDANCE_NOTE" | "COMP_OFF" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "OVERTIME_CLAIM" | "REGULARISATION" | "SHIFT_CHANGE" | "SHIFT_SWAP";
+export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "ATTENDANCE_NOTE" | "COMP_OFF" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "OVERTIME_CLAIM" | "REGULARISATION" | "SHIFT_CHANGE" | "SHIFT_SWAP" | "TIME_AWAY";
 
 export type ApprovalStatus = "APPROVED" | "CANCELLED" | "INVALIDATED" | "PENDING" | "REJECTED" | "SKIPPED";
 
@@ -44,6 +44,8 @@ export type DeliveryStatus = "failed" | "pending" | "sent" | "skipped";
 export type DeviceCommandStatus = "acked" | "expired" | "failed" | "pending" | "sent";
 
 export type DeviceEmployeeSyncStatus = "FAILED" | "IN_SYNC" | "OFFLINE" | "OUT_OF_SYNC" | "PENDING" | "REMOVED" | "REMOVING" | "UNSUPPORTED";
+
+export type DevicePunchRole = "ACCESS" | "AUTO" | "CHECK_IN" | "CHECK_OUT";
 
 export type DeviceStatus = "active" | "decommissioned" | "disabled";
 
@@ -105,6 +107,8 @@ export type LoginEvent = "failed" | "logout" | "mfa_challenge" | "password_reset
 
 export type LogLevel = "debug" | "error" | "info" | "warn";
 
+export type MeetingStatus = "cancelled" | "scheduled";
+
 export type MembershipStatus = "active" | "invited" | "suspended";
 
 export type MissingPunchBehavior = "ASSUME_SHIFT_END" | "FLAG_ONLY" | "TREAT_AS_ABSENT" | "TREAT_AS_HALF_DAY";
@@ -133,7 +137,7 @@ export type RawSource = "DEVICE_PUSH" | "IMPORT" | "MANUAL" | "POLL" | "SELF_SER
 
 export type RecalculationStatus = "CANCELLED" | "COMPLETED" | "FAILED" | "QUEUED" | "RUNNING";
 
-export type RecordHistoryReason = "CORRECTION" | "HOLIDAY_CHANGE" | "INITIAL" | "LEAVE_CHANGE" | "MANUAL_OVERRIDE" | "NEW_EVENT" | "RECALCULATION" | "RULE_CHANGE" | "SHIFT_CHANGE" | "UNLOCK";
+export type RecordHistoryReason = "CORRECTION" | "HOLIDAY_CHANGE" | "INITIAL" | "LEAVE_CHANGE" | "MANUAL_OVERRIDE" | "NEW_EVENT" | "RECALCULATION" | "RULE_CHANGE" | "SHIFT_CHANGE" | "TIME_AWAY" | "UNLOCK";
 
 export type RecordStatus = "active" | "archived" | "inactive";
 
@@ -167,6 +171,12 @@ export type SyncStatus = "CANCELLED" | "FAILED" | "PARTIAL_SUCCESS" | "PENDING" 
 
 export type SyncTrigger = "DEVICE_PUSH" | "MANUAL" | "SCHEDULED" | "SYSTEM" | "WEBHOOK";
 
+export type TimeAwayKind = "OFFICIAL" | "PERSONAL";
+
+export type TimeAwaySource = "request" | "step_out";
+
+export type TimeAwayStatus = "approved" | "cancelled" | "pending" | "rejected";
+
 export type Timestamp = ColumnType<Date, Date | string, Date | string>;
 
 export type VerificationMethod = "card" | "face" | "fingerprint" | "iris" | "manual" | "mobile" | "palm" | "password" | "pin" | "unknown";
@@ -174,6 +184,21 @@ export type VerificationMethod = "card" | "face" | "fingerprint" | "iris" | "man
 export type VerificationStatus = "REPORTED" | "UNVERIFIED" | "VERIFIED";
 
 export type WebhookEventStatus = "duplicate" | "failed" | "processed" | "queued" | "received" | "rejected";
+
+export interface AccessEvents {
+  branchId: string;
+  createdAt: Generated<Timestamp>;
+  deviceEmployeeId: string;
+  deviceId: string;
+  direction: Generated<PunchDirection>;
+  employeeId: string | null;
+  id: Generated<string>;
+  locationId: string | null;
+  occurredAt: Timestamp;
+  organizationId: string;
+  rawTransactionId: Int8;
+  roomId: string | null;
+}
 
 export interface AdditionalShiftAssignments {
   branchId: string | null;
@@ -383,6 +408,10 @@ export interface AttendanceDailyRecordHistory {
 
 export interface AttendanceDailyRecords {
   attendanceDate: Timestamp;
+  /**
+   * Measured time away from the site between the first IN and the last OUT (breaks included), engine 1.5.0.
+   */
+  awayMinutes: Generated<number>;
   branchId: string;
   breakMinutes: Generated<number>;
   calculationVersion: Generated<number>;
@@ -401,9 +430,17 @@ export interface AttendanceDailyRecords {
   lastOutAt: Timestamp | null;
   lateMinutes: Generated<number>;
   lockedAt: Timestamp | null;
+  /**
+   * Away minutes inside an approved OFFICIAL time-away window.
+   */
+  officialDutyMinutes: Generated<number>;
   organizationId: string;
   overtimeCategory: string | null;
   overtimeMinutes: Generated<number>;
+  /**
+   * Away minutes inside an approved PERSONAL time-away window (excused, unpaid).
+   */
+  permissionMinutes: Generated<number>;
   punchCount: Generated<number>;
   ruleSetId: string | null;
   scheduledMinutes: Generated<number>;
@@ -412,6 +449,10 @@ export interface AttendanceDailyRecords {
   status: Generated<AttendanceStatus>;
   timezone: string;
   trace: Generated<Json>;
+  /**
+   * Away minutes beyond the breaks with no approved window.
+   */
+  unapprovedAwayMinutes: Generated<number>;
   updatedAt: Generated<Timestamp>;
   workedMinutes: Generated<number>;
 }
@@ -983,6 +1024,10 @@ export interface Devices {
   offlineThresholdMinutes: Generated<number>;
   organizationId: string;
   providerKey: string;
+  /**
+   * What the terminal's punches mean: AUTO (reported direction), CHECK_IN (entry-only), CHECK_OUT (exit-only), ACCESS (door / meeting-room reader: room access, not attendance).
+   */
+  punchRole: Generated<DevicePunchRole>;
   pushTokenHash: string | null;
   pushTokenRotatedAt: Timestamp | null;
   serialNumber: string | null;
@@ -1584,6 +1629,49 @@ export interface LoginHistory {
   occurredAt: Generated<Timestamp>;
   userAgent: string | null;
   userId: string | null;
+}
+
+export interface MeetingInvitees {
+  createdAt: Generated<Timestamp>;
+  employeeId: string;
+  isRequired: Generated<boolean>;
+  meetingId: string;
+  organizationId: string;
+}
+
+export interface MeetingRooms {
+  allowedDepartmentIds: Generated<string[]>;
+  allowedEmployeeIds: Generated<string[]>;
+  branchId: string;
+  capacity: number | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  id: Generated<string>;
+  locationId: string;
+  name: string;
+  organizationId: string;
+  restricted: Generated<boolean>;
+  status: Generated<RecordStatus>;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface Meetings {
+  branchId: string;
+  cancelledAt: Timestamp | null;
+  cancelledBy: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  description: string | null;
+  endsAt: Timestamp;
+  id: Generated<string>;
+  lateAfterMinutes: Generated<number>;
+  organizationId: string;
+  organizerEmployeeId: string | null;
+  roomId: string;
+  startsAt: Timestamp;
+  status: Generated<MeetingStatus>;
+  title: string;
+  updatedAt: Generated<Timestamp>;
 }
 
 export interface MembershipBranches {
@@ -2234,6 +2322,30 @@ export interface Teams {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface TimeAwayRequests {
+  approvalRequestId: string | null;
+  attendanceDate: Timestamp;
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  decidedAt: Timestamp | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  destination: string | null;
+  employeeId: string;
+  endsAt: Timestamp;
+  id: Generated<string>;
+  kind: TimeAwayKind;
+  organizationId: string;
+  reason: string;
+  returnedAt: Timestamp | null;
+  source: Generated<TimeAwaySource>;
+  startsAt: Timestamp;
+  status: Generated<TimeAwayStatus>;
+  stepOutRawId: Int8 | null;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface UsageQuotas {
   count: Generated<number>;
   metric: string;
@@ -2266,6 +2378,7 @@ export interface UserProfiles {
 }
 
 export interface DB {
+  accessEvents: AccessEvents;
   additionalShiftAssignments: AdditionalShiftAssignments;
   apiKeys: ApiKeys;
   approvalDelegations: ApprovalDelegations;
@@ -2339,6 +2452,9 @@ export interface DB {
   locationLevels: LocationLevels;
   locations: Locations;
   loginHistory: LoginHistory;
+  meetingInvitees: MeetingInvitees;
+  meetingRooms: MeetingRooms;
+  meetings: Meetings;
   membershipBranches: MembershipBranches;
   missingPunchReminders: MissingPunchReminders;
   modules: Modules;
@@ -2381,6 +2497,7 @@ export interface DB {
   syncLogs: SyncLogs;
   teamMembers: TeamMembers;
   teams: Teams;
+  timeAwayRequests: TimeAwayRequests;
   usageQuotas: UsageQuotas;
   usageRecords: UsageRecords;
   userProfiles: UserProfiles;

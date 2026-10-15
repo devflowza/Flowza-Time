@@ -14,7 +14,7 @@ import { likeContains, pageOf, prefixTsQuery, toCount } from '../../lib/paginati
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject } from '../../lib/mappers.js';
 import { systemStep } from './context.js';
 import { enqueueRecalculation } from './recalc.js';
-import { DAILY_RECORD_COLUMNS, toDailyRecordDto, toDayMarkDto, type DailyRecordRow } from './mappers.js';
+import { awayIntervalsFromTrace, DAILY_RECORD_COLUMNS, toDailyRecordDto, toDayMarkDto, type DailyRecordRow } from './mappers.js';
 import { dv } from './sql-helpers.js';
 import { canCancel, cancelForEntity, decideWithin, submit } from '../approvals/engine.js';
 import { listInbox, requestDtoWithin } from '../approvals/queries.js';
@@ -199,6 +199,7 @@ function activityPeriod(range: ActivityRange, anchor: string, firstDayOfWeek: nu
 interface ActivityRow {
   id: string; attendanceDate: Date | string; status: AttendanceStatus; shiftName: string | null; flags: string[]; expectedStartAt: Date | null; expectedEndAt: Date | null; scheduledMinutes: number;
   firstInAt: Date | null; lastOutAt: Date | null; workedMinutes: number; breakMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; overtimeMinutes: number; overtimeCategory: string | null; punchCount: number; tracePunches: unknown;
+  awayMinutes: number; officialDutyMinutes: number; permissionMinutes: number; unapprovedAwayMinutes: number; traceAway: unknown;
 }
 
 /** `summarisePeriod` switches exhaustively on the category, so an unexpected value from the column has to become null. */
@@ -222,14 +223,22 @@ function toActivityDay(r: ActivityRow, withDetail: boolean): AttendanceActivityD
     punchCount: r.punchCount, flags: jsonArray<string>(r.flags),
     segments: withDetail ? activitySegments(punches, { firstInAt, lastOutAt }) : [],
     punches: punches.filter((p) => typeof p.punchedAt === 'string').map((p) => ({ at: p.punchedAt!, role: typeof p.role === 'string' ? p.role : 'PUNCH', eventId: typeof p.eventId === 'string' ? p.eventId : null })),
+    // engine 1.5.0: the classified away time (all 0 / [] unless the policy measures time away)
+    away: { awayMinutes: r.awayMinutes, officialDutyMinutes: r.officialDutyMinutes, permissionMinutes: r.permissionMinutes, unapprovedAwayMinutes: r.unapprovedAwayMinutes },
+    awayIntervals: withDetail ? awayIntervalsFromTrace({ steps: [{ step: 'timeAway', values: { intervals: r.traceAway } }] }) : [],
   };
+}
+
+const ZERO_AWAY = { awayMinutes: 0, officialDutyMinutes: 0, permissionMinutes: 0, unapprovedAwayMinutes: 0 };
+function addAway(a: typeof ZERO_AWAY, b: typeof ZERO_AWAY | undefined): typeof ZERO_AWAY {
+  return b ? { awayMinutes: a.awayMinutes + b.awayMinutes, officialDutyMinutes: a.officialDutyMinutes + b.officialDutyMinutes, permissionMinutes: a.permissionMinutes + b.permissionMinutes, unapprovedAwayMinutes: a.unapprovedAwayMinutes + b.unapprovedAwayMinutes } : a;
 }
 
 function monthBuckets(days: readonly AttendanceActivityDayDto[]): AttendanceActivityMonthDto[] {
   const by = new Map<string, AttendanceActivityMonthDto>();
   for (const d of days) {
     const month = d.date.slice(0, 7);
-    const b = by.get(month) ?? { month, recordedDays: 0, presentDays: 0, absentDays: 0, leaveDays: 0, lateDays: 0, scheduledMinutes: 0, officeMinutes: 0, fieldMinutes: 0, overtimeMinutes: 0 };
+    const b = by.get(month) ?? { month, recordedDays: 0, presentDays: 0, absentDays: 0, leaveDays: 0, lateDays: 0, scheduledMinutes: 0, officeMinutes: 0, fieldMinutes: 0, overtimeMinutes: 0, away: { ...ZERO_AWAY } };
     b.recordedDays += 1;
     if (d.status === 'PRESENT' || d.status === 'MISSING_PUNCH') b.presentDays += 1;
     else if (d.status === 'HALF_DAY') { b.presentDays += 0.5; b.absentDays += 0.5; }
@@ -237,6 +246,7 @@ function monthBuckets(days: readonly AttendanceActivityDayDto[]): AttendanceActi
     else if (d.status === 'LEAVE') b.leaveDays += 1;
     if (d.flags.includes('LATE')) b.lateDays += 1;
     b.scheduledMinutes += d.scheduledMinutes; b.officeMinutes += d.officeMinutes; b.fieldMinutes += d.fieldMinutes; b.overtimeMinutes += d.overtimeMinutes;
+    b.away = addAway(b.away ?? { ...ZERO_AWAY }, d.away);
     by.set(month, b);
   }
   return [...by.values()].sort((a, b) => a.month.localeCompare(b.month));
@@ -267,7 +277,9 @@ export async function listActivity(deps: ApiDeps, actor: Actor, orgId: string, q
     // `trace -> 'punches'` rather than the whole trace: the calculation steps are the bulk of the column and the
     // activity view never shows them, which keeps a year of records to a few hundred KB.
     const rows = (await trx.selectFrom('attendanceDailyRecords as r').leftJoin('shifts as s', 's.id', 'r.shiftId')
-      .select(['r.id', 'r.attendanceDate', 'r.status', 's.name as shiftName', 'r.flags', 'r.expectedStartAt', 'r.expectedEndAt', 'r.scheduledMinutes', 'r.firstInAt', 'r.lastOutAt', 'r.workedMinutes', 'r.breakMinutes', 'r.lateMinutes', 'r.earlyDepartureMinutes', 'r.overtimeMinutes', 'r.overtimeCategory', 'r.punchCount', sql<unknown>`r.trace -> 'punches'`.as('tracePunches')])
+      .select(['r.id', 'r.attendanceDate', 'r.status', 's.name as shiftName', 'r.flags', 'r.expectedStartAt', 'r.expectedEndAt', 'r.scheduledMinutes', 'r.firstInAt', 'r.lastOutAt', 'r.workedMinutes', 'r.breakMinutes', 'r.lateMinutes', 'r.earlyDepartureMinutes', 'r.overtimeMinutes', 'r.overtimeCategory', 'r.punchCount', sql<unknown>`r.trace -> 'punches'`.as('tracePunches'),
+        'r.awayMinutes', 'r.officialDutyMinutes', 'r.permissionMinutes', 'r.unapprovedAwayMinutes',
+        sql<unknown>`jsonb_path_query_first(r.trace, '$.steps[*] ? (@.step == "timeAway").values.intervals')`.as('traceAway')])
       .where('r.organizationId', '=', orgId).where('r.employeeId', '=', q.employeeId).where('r.attendanceDate', '>=', dv(from)).where('r.attendanceDate', '<=', dv(to))
       .orderBy('r.attendanceDate').execute()) as ActivityRow[];
 
@@ -286,6 +298,7 @@ export async function listActivity(deps: ApiDeps, actor: Actor, orgId: string, q
         scheduledMinutes: sum((d) => d.scheduledMinutes), spanMinutes: sum((d) => d.spanMinutes), officeMinutes, fieldMinutes: sum((d) => d.fieldMinutes),
         overtimeMinutes: period.totalOvertimeMinutes, regularMinutes: period.regularMinutes, lateMinutes: period.lateMinutes, earlyDepartureMinutes: period.earlyDepartureMinutes,
         averageOfficeMinutes: workedDays === 0 ? 0 : Math.round(officeMinutes / workedDays),
+        away: days.reduce((a, d) => addAway(a, d.away), { ...ZERO_AWAY }),
       },
     };
   });

@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, inclusiveDayCount, REPORT_TYPE_DEFINITIONS } from './dto-features/reports.js';
 import { unmatchedAssignBlockedReason } from './dto-features/hr-workspace.js';
-import { reportScheduleFiltersSchema } from './dto-features/report-schedules.js';
+import { createReportScheduleSchema, DAILY_RUN_DAYS_DEFAULT, dailyRunDays, dailyRunMask, reportScheduleFiltersSchema } from './dto-features/report-schedules.js';
 import { createReportRequestSchema } from './reports.js';
 
 /**
@@ -57,5 +57,22 @@ describe('6a-D4 Assign on devices whose punches never use the device mapping', (
     expect(unmatchedAssignBlockedReason('mock')).toBeNull();
     expect(unmatchedAssignBlockedReason('zkteco_push')).toBeNull();
     expect(unmatchedAssignBlockedReason('')).toBeNull();
+  });
+});
+
+describe('the daily report schedule (a manager\'s morning roll call)', () => {
+  const base = { name: 'Morning roll call', reportType: 'daily_attendance' as const, recipients: { userIds: [], roleKeys: ['manager'] } };
+  it('accepts a daily schedule of the Daily Report on a weekday mask, covering the previous day', () => {
+    const r = createReportScheduleSchema.safeParse({ ...base, cadence: 'daily', runDay: DAILY_RUN_DAYS_DEFAULT, periodRule: 'previous_day' });
+    expect(r.success).toBe(true);
+    expect(dailyRunDays(DAILY_RUN_DAYS_DEFAULT)).toEqual([0, 1, 2, 3, 4]);
+    expect(dailyRunMask([0, 1, 2, 3, 4])).toBe(DAILY_RUN_DAYS_DEFAULT);
+  });
+  it('refuses an empty mask, the Daily Report on a monthly schedule, and previous_day on another cadence', () => {
+    expect(createReportScheduleSchema.safeParse({ ...base, cadence: 'daily', runDay: 0, periodRule: 'previous_day' }).success).toBe(false);
+    expect(createReportScheduleSchema.safeParse({ ...base, cadence: 'monthly', runDay: 1, periodRule: 'previous_month' }).success).toBe(false);
+    expect(createReportScheduleSchema.safeParse({ ...base, reportType: 'late_report', cadence: 'weekly', runDay: 0, periodRule: 'previous_day' }).success).toBe(false);
+    expect(createReportScheduleSchema.safeParse({ ...base, reportType: 'late_report', cadence: 'daily', runDay: 31, periodRule: 'previous_day' }).success).toBe(true);
+    expect(createReportScheduleSchema.safeParse({ ...base, cadence: 'daily', runDay: 128, periodRule: 'previous_day' }).success).toBe(false);
   });
 });

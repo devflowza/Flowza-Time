@@ -49,7 +49,8 @@ export default function TeamPage() {
 
   return (
     <div className="page-container space-y-5">
-      <PageHeader title={t('title')} description={t('subtitle', { count: membership?.teamSize ?? 0 })} />
+      {/* under the organisation's "whole reporting hierarchy" scope the team is the reporting line, not only direct reports */}
+      <PageHeader title={t('title')} description={t(membership?.settings.attendance?.team?.scope === 'hierarchy' ? 'subtitleHierarchy' : 'subtitle', { count: membership?.teamSize ?? 0 })} />
       <Tabs value={tab} onValueChange={setTab}>
         <TabsList aria-label={t('title')} className="max-w-full overflow-x-auto">
           {visible.map((tb) => (

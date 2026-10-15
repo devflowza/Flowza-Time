@@ -42,6 +42,10 @@ export async function approvalEntityFacts(trx: Trx, orgId: string, entityType: A
       const r = await trx.selectFrom('shiftChangeRequests').select(['fromDate', 'toDate']).where('organizationId', '=', orgId).where('id', '=', entityId).executeTakeFirst();
       return { ...NONE, date: day(r?.fromDate), endDate: day(r?.toDate) };
     }
+    case 'TIME_AWAY': {
+      const r = await trx.selectFrom('timeAwayRequests').select('attendanceDate').where('organizationId', '=', orgId).where('id', '=', entityId).executeTakeFirst();
+      return { ...NONE, date: day(r?.attendanceDate) };
+    }
     case 'COMP_OFF': {
       const r = await trx.selectFrom('compOffCredits').select('workedOn').where('organizationId', '=', orgId).where('id', '=', entityId).executeTakeFirst();
       return { ...NONE, date: day(r?.workedOn) };

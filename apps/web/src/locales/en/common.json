@@ -58,6 +58,7 @@
     "shift_requests": {"name": "Shift change & swap requests", "description": "Employees ask for another shift, an additional (double) shift or a swap with a colleague; managers decide through the approval workflow."},
     "advanced_scheduling": {"name": "Round-the-clock scheduling", "description": "24/7 multi-shift rotations from templates, coverage targets, double shifts and temporary deployment to another branch."},
     "attendance_policies": {"name": "Global attendance policies", "description": "Attendance policies by country, branch, department, employee group and shift; country rule packs; attendance points and disciplinary escalation."},
+    "meeting_rooms": {"name": "Meeting rooms & access", "description": "Meeting-room bookings with attendance measured by the room's access readers, walk-ins, restricted rooms and the room access log."},
     "enterpriseBadge": "Enterprise",
     "disabledTitle": "{{names}} is not part of your subscription",
     "disabledHint": "This module is switched off for your organisation. Your owner can ask FlowZa to enable it — Settings → Subscription shows your plan.",

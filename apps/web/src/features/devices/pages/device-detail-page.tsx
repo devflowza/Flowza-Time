@@ -10,7 +10,7 @@ import { useOrgTimezone } from '@/features/me/use-me';
 import { useLocationTree } from '@/features/locations/use-location-tree';
 import { toastJobAccepted } from '@/features/sync/job-toast';
 import { useDevice, useDeviceMutations, type DeviceAction } from '../api';
-import { ConnectionBadge, DeviceStatusBadge, IntegrationBadge } from '../components/device-badges';
+import { ConnectionBadge, DeviceStatusBadge, IntegrationBadge, PunchRoleBadge } from '../components/device-badges';
 import { PushCredentialsDialog } from '../components/push-credentials-dialog';
 import { TestConnectionResult } from '../components/test-connection-result';
 import { DeviceActions, type DeviceActionKind } from '../components/detail/device-actions';
@@ -91,6 +91,7 @@ export default function DeviceDetailPage() {
               <ConnectionBadge status={d.connectionStatus} lastHeartbeatAt={d.lastHeartbeatAt} />
               <DeviceStatusBadge status={d.status} />
               <IntegrationBadge type={d.integrationType} />
+              <PunchRoleBadge role={d.punchRole} showAuto />
               {d.serialNumber ? <Badge variant="outline" className="font-mono" dir="ltr">SN {d.serialNumber}</Badge> : null}
               {d.status !== 'active' ? <span className="text-xs text-muted-foreground">{t('detail.notActiveHint', { status: t(`deviceStatus.${d.status}`) })}</span> : null}
             </div>

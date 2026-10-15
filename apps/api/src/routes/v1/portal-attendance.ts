@@ -4,6 +4,7 @@ import {
   portalCancelSchema, selfieListQuerySchema, selfieReviewSchema, SELFIE_MAX_BYTES, selfNoteInputSchema, selfNotesQuerySchema, selfNoteUpdateSchema, selfPunchPreviewSchema, selfPunchSchema,
   selfPunchStatusQuerySchema, selfRegularisationInputSchema, selfRegularisationsQuerySchema, selfSelfieFormSchema, selfSelfieSchema, selfShiftSwapInputSchema, selfShiftSwapsQuerySchema,
   selfStatsQuerySchema, swapCandidatesQuerySchema, cancelShiftChangeSchema, selfShiftChangeInputSchema, selfShiftChangesQuerySchema, shiftChangeListQuerySchema, shiftChangeOptionsQuerySchema,
+  myTimeAwayQuerySchema, timeAwayBackInputSchema, timeAwayCancelInputSchema, timeAwayListQuerySchema, timeAwayRequestInputSchema, timeAwayStepOutInputSchema, timeAwaySummaryQuerySchema,
 } from '@flowza/contracts';
 import { AppError, errors } from '@flowza/shared';
 import type { AppEnv } from '../../middleware/request-context.js';
@@ -19,6 +20,7 @@ import * as regularisations from '../../services/portal/regularisations.service.
 import * as shift from '../../services/portal/shift.service.js';
 import * as shiftChanges from '../../services/portal/shift-change.service.js';
 import * as stats from '../../services/portal/stats.service.js';
+import * as timeAway from '../../services/portal/time-away.service.js';
 
 /**
  * Employee-portal attendance (HR portal Prompt 4). `/orgs/:orgId/me/…` acts on the caller's own employee record (never an id
@@ -68,6 +70,17 @@ export function registerPortalAttendanceRoutes(v1: Hono<AppEnv>, deps: ApiDeps):
   v1.get('/orgs/:orgId/me/regularisations', async (c) => ok(c, await regularisations.listMyRegularisations(deps, actorOf(c, deps), param(c, 'orgId'), query(c, selfRegularisationsQuerySchema))));
   v1.post('/orgs/:orgId/me/regularisations', async (c) => created(c, await regularisations.submitRegularisation(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, selfRegularisationInputSchema))));
   v1.post('/orgs/:orgId/me/regularisations/:id/cancel', async (c) => ok(c, await regularisations.cancelMyRegularisation(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), (await optionalBody(c, portalCancelSchema)).reason)));
+
+  // ----- time away inside the working day (docs/time-away.md): plan a window, step out / come back, withdraw
+  v1.get('/orgs/:orgId/me/time-away/status', async (c) => ok(c, await timeAway.getTimeAwayStatus(deps, actorOf(c, deps), param(c, 'orgId'))));
+  v1.get('/orgs/:orgId/me/time-away', async (c) => ok(c, await timeAway.listMyTimeAway(deps, actorOf(c, deps), param(c, 'orgId'), query(c, myTimeAwayQuerySchema))));
+  v1.post('/orgs/:orgId/me/time-away', async (c) => created(c, await timeAway.requestTimeAway(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, timeAwayRequestInputSchema))));
+  v1.post('/orgs/:orgId/me/time-away/step-out', async (c) => created(c, await timeAway.stepOut(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, timeAwayStepOutInputSchema))));
+  v1.post('/orgs/:orgId/me/time-away/back', async (c) => ok(c, await timeAway.comeBack(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, timeAwayBackInputSchema))));
+  v1.post('/orgs/:orgId/me/time-away/:id/cancel', async (c) => ok(c, await timeAway.cancelMyTimeAway(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), (await optionalBody(c, timeAwayCancelInputSchema)).reason)));
+  // HR (attendance.view, branch scope) / line manager (attendance.view_team): the list and the monthly totals; decisions go through /approvals
+  v1.get('/orgs/:orgId/time-away', async (c) => { const q = query(c, timeAwayListQuerySchema); const r = await timeAway.listTimeAway(deps, actorOf(c, deps), param(c, 'orgId'), q); return paginated(c, r.data, q.page, q.pageSize, r.total); });
+  v1.get('/orgs/:orgId/time-away/summary', async (c) => ok(c, await timeAway.timeAwaySummary(deps, actorOf(c, deps), param(c, 'orgId'), query(c, timeAwaySummaryQuerySchema))));
 
   // ----- shift tab + swaps
   v1.get('/orgs/:orgId/me/shift', async (c) => ok(c, await shift.getMyShift(deps, actorOf(c, deps), param(c, 'orgId'))));

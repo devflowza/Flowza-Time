@@ -17,6 +17,7 @@ import { useDeviceMutations, useProviders, type DeviceDetail } from '../../api';
 import { ProviderConfigForm } from '../provider-config-form';
 import { isSecretField, normalizeProviderConfig, validateProviderConfig, type ConfigValues } from '../provider-config';
 import { TagsInput } from '../tags-input';
+import { PunchRoleSelect } from '../punch-role-select';
 
 type Values = z.input<typeof updateDeviceSchema>;
 /** The device's location is a place (site, floor, zone…) of its branch (docs/locations.md). */
@@ -33,7 +34,7 @@ function GeneralForm({ device, onCredentialsRequired }: { device: DeviceDetail; 
   // Baseline captured once per mount (the parent keys this form by device id): the device query polls while the user edits,
   // and rebuilding the form from every refetch would throw away unsaved input. After a successful save the baseline moves on.
   const [defaults, setDefaults] = useState<Values>(() => ({
-    name: device.name, code: device.code, branchId: device.branchId, locationId: device.locationId ?? null, timezone: device.timezone, manufacturer: device.manufacturer, modelName: device.modelName ?? undefined, serialNumber: device.serialNumber ?? undefined,
+    name: device.name, code: device.code, branchId: device.branchId, locationId: device.locationId ?? null, punchRole: device.punchRole ?? 'AUTO', timezone: device.timezone, manufacturer: device.manufacturer, modelName: device.modelName ?? undefined, serialNumber: device.serialNumber ?? undefined,
     endpointUrl: device.endpointUrl ?? undefined, offlineThresholdMinutes: device.offlineThresholdMinutes, autoSyncEnabled: device.autoSyncEnabled, syncIntervalMinutes: device.syncIntervalMinutes, tags: device.tags, notes: device.notes ?? undefined,
   }));
   const form = useForm<Values, unknown, UpdateDeviceInput>({ resolver: zodResolver(updateDeviceSchema), defaultValues: defaults });
@@ -45,6 +46,9 @@ function GeneralForm({ device, onCredentialsRequired }: { device: DeviceDetail; 
   const endpoint = useWatch({ control, name: 'endpointUrl' });
   const endpointChanged = !isPush && (endpoint ?? '') !== (device.endpointUrl ?? '');
   const autoSync = useWatch({ control, name: 'autoSyncEnabled' });
+  const punchRole = useWatch({ control, name: 'punchRole' }) ?? 'AUTO';
+  const locationId = useWatch({ control, name: 'locationId' });
+  const punchRoleChanged = punchRole !== (device.punchRole ?? 'AUTO');
 
   const submit = form.handleSubmit((values) => {
     // Only send what changed: PATCH semantics, nothing is reset by omission.
@@ -84,6 +88,11 @@ function GeneralForm({ device, onCredentialsRequired }: { device: DeviceDetail; 
               )} />
             </FormField>
           ) : null}
+          {/* what a punch on this terminal means (docs/time-away.md); a change applies to the punches received from then on */}
+          <FormField label={t('punchRole.label')} htmlFor="set-punch-role" error={errors.punchRole?.message}
+            hint={[t(`punchRole.descriptions.${punchRole}`), punchRole === 'ACCESS' && !locationId && locations.hasPlaceLevels ? t('punchRole.accessNeedsLocation') : null, punchRoleChanged ? t('punchRole.appliesFromNow') : null].filter(Boolean).join(' ')}>
+            <Controller control={control} name="punchRole" render={({ field }) => <PunchRoleSelect id="set-punch-role" value={field.value ?? 'AUTO'} onChange={field.onChange} disabled={!editable} />} />
+          </FormField>
           <FormField label={tc('common.timezone')} htmlFor="set-tz" error={errors.timezone?.message} hint={t('fields.timezoneHint')}>
             <Controller control={control} name="timezone" render={({ field }) => <TimezoneSelect id="set-tz" value={field.value ?? undefined} onChange={field.onChange} disabled={!editable} />} />
           </FormField>

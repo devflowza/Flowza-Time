@@ -20,6 +20,7 @@ import { VerdictChip } from '../components/attendance-badges';
 import { LocationProblem, VerdictBanner } from '../components/verdict-banner';
 import { SelfieDialog } from '../components/selfie-dialog';
 import { SectionTitle } from '../components/parts';
+import { TimeAwayCard } from '../components/time-away-card';
 import { DeploymentBanner } from '@/features/scheduling/components/deployment-banner';
 
 /** The server's clock, ticking locally from the offset measured when the status was read (display only; the API stamps punches). */
@@ -34,8 +35,17 @@ function useServerClock(serverTime: string | undefined, receivedAt: number, time
 const refusalOf = (e: unknown): { reason: SelfPunchRefusal | string; message: string } | null =>
   e instanceof ApiError && typeof e.details?.['reason'] === 'string' ? { reason: e.details['reason'], message: e.message } : null;
 
+/** Directions a punch of today is named by (a portal step-out is a break-out, "I'm back" a break-in); the rest is "Punch". */
+const NAMED_DIRECTIONS: ReadonlySet<string> = new Set(['in', 'out', 'break_out', 'break_in']);
+
 /** A fix less precise than this is worth a warning before punching (Finance B-31): the zone check may not be able to place it. */
 const ACCURACY_WARNING_M = 50;
+
+/**
+ * The state line names the latest punch. A step-out and "I'm back" keep the working day open — the API reads both as
+ * `lastDirection: 'in'`, so the button offers Check out — but the line says what happened: stepped out, back; else in / out.
+ */
+const STATE_KEYS: Readonly<Record<string, string>> = { out: 'checkin.checkedOutAt', break_out: 'checkin.steppedOutAt', break_in: 'checkin.backAt' };
 
 function nextDirection(status: SelfPunchStatusDto | undefined, queued: ReadonlyArray<{ direction: SelfPunchDirection }>): SelfPunchDirection {
   const last = queued.length ? queued[queued.length - 1]!.direction : status?.lastDirection ?? null;
@@ -164,7 +174,8 @@ export default function CheckInPage() {
   const refusals = previewResult?.refusals ?? [];
   const blocked = hardBlockers.length > 0 || refusals.length > 0;
   const near = fix && s && s.fences.length ? nearestFence(fix, s.fences) : null;
-  const lastPunch = s?.punches.length ? s.punches[s.punches.length - 1] : null;
+  // the latest punch by time: the API lists today's punches newest first, the e2e mock backend oldest first
+  const lastPunch = s?.punches.length ? s.punches.reduce((a, b) => (Date.parse(b.punchedAt) > Date.parse(a.punchedAt) ? b : a)) : null;
   const punchWindow = direction === 'in' ? s?.policy.checkInWindow : s?.policy.checkOutWindow;
   // the shift line names today's shift (resolved live), so the record's NO_SHIFT chip would only repeat it — or contradict it
   // while the record waits for its recalculation after a shift change
@@ -187,7 +198,7 @@ export default function CheckInPage() {
             </div>
             <div className="text-end text-sm">
               {status.isLoading ? <Skeleton className="h-5 w-40" /> : lastPunch ? (
-                <p data-testid="punch-state">{t(lastPunch.direction === 'out' ? 'checkin.checkedOutAt' : 'checkin.checkedInAt', { time: fmtTime(lastPunch.punchedAt, tz) })}</p>
+                <p data-testid="punch-state">{t(STATE_KEYS[lastPunch.direction] ?? 'checkin.checkedInAt', { time: fmtTime(lastPunch.punchedAt, tz) })}</p>
               ) : <p data-testid="punch-state" className="text-muted-foreground">{t('checkin.notYet')}</p>}
               {s?.today ? <span className="mt-1 inline-flex flex-wrap items-center justify-end gap-1.5"><AttendanceStatusBadge status={s.today.status} /><FlagChips flags={dayFlags} max={2} size="xs" /></span> : null}
               <CheckOutFrom status={s} clock={clock} />
@@ -239,7 +250,7 @@ export default function CheckInPage() {
               <ul className="divide-y" data-testid="today-punches">
                 {s.punches.map((p) => (
                   <li key={p.id} className="flex items-center justify-between gap-2 py-2">
-                    <span className="flex items-center gap-2 text-sm"><span className="font-semibold tnum" dir="ltr">{fmtTime(p.punchedAt, tz)}</span><Badge variant="outline">{t(`checkin.direction.${p.direction === 'in' || p.direction === 'out' ? p.direction : 'unknown'}`)}</Badge></span>
+                    <span className="flex items-center gap-2 text-sm"><span className="font-semibold tnum" dir="ltr">{fmtTime(p.punchedAt, tz)}</span><Badge variant="outline">{t(`checkin.direction.${NAMED_DIRECTIONS.has(p.direction) ? p.direction : 'unknown'}`)}</Badge></span>
                     <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><VerdictChip verdict={p.verdict} />{p.source === 'SELF_SERVICE' ? t('checkin.viaPortal') : p.deviceName ?? t('checkin.viaTerminal')}</span>
                   </li>
                 ))}
@@ -248,6 +259,9 @@ export default function CheckInPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* time away inside the working day (docs/time-away.md): step out, "I'm back", today's classified away time */}
+      <TimeAwayCard nowMs={clock.toMillis()} />
 
       {offline.items.length > 0 ? (
         <Card className="border-amber-200 dark:border-amber-900" data-testid="offline-queue">

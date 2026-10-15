@@ -22,6 +22,9 @@ import '@/features/team/i18n';
 import '@/features/policies/i18n';
 import { Scale } from 'lucide-react';
 import '@/features/scheduling/i18n';
+import { DoorOpen, Presentation } from 'lucide-react';
+import '@/features/meetings/i18n';
+import '@/features/time-away/i18n';
 
 registerNamespace('portal', portalEn, portalAr);
 // HR portal Prompt 4: check-in / requests / shift entries and the reasons / geofences review pages
@@ -121,6 +124,10 @@ export function Sidebar() {
       { to: '/deployments', label: t('scheduling:nav.deployments'), icon: ArrowRightLeft, permissions: ['employee.view'], modules: ['advanced_scheduling'] },
       // Enterprise: who is on site now, per location of the tree (the muster list — docs/locations.md §4)
       { to: '/attendance/muster', label: t('scheduling:nav.muster'), icon: UserCheck, permissions: ['attendance.view'], modules: ['advanced_scheduling'] },
+      // time away during working hours (docs/time-away.md): HR organisation-wide, line managers their team (attendance.view_team)
+      { to: '/attendance/time-away', label: t('time-away:nav.timeAway'), icon: DoorOpen, visible: can('attendance.view') || (can('attendance.view_team') && hasDirectReports) },
+      // Enterprise: meeting rooms, who attended each meeting and the room access log
+      { to: '/meetings', label: t('meetings:nav.meetings'), icon: Presentation, permissions: ['meeting.view'], modules: ['meeting_rooms'] },
     ] },
     { label: t('nav.sections.devices'), items: [
       { to: '/devices', label: t('nav.devices'), icon: Cpu, permissions: ['device.view'], modules: ['devices'] },

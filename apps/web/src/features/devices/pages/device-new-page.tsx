@@ -23,6 +23,7 @@ import { CapabilityChips, IntegrationBadge, ProviderStatusBadge, VerificationBad
 import { ProviderConfigForm } from '../components/provider-config-form';
 import { normalizeProviderConfig, validateProviderConfig, type ConfigValues } from '../components/provider-config';
 import { PushCredentialsDialog } from '../components/push-credentials-dialog';
+import { PunchRoleSelect } from '../components/punch-role-select';
 import { TestConnectionResult } from '../components/test-connection-result';
 import { TagsInput } from '../components/tags-input';
 import { scrollPageToTop } from '@/lib/scroll';
@@ -35,7 +36,7 @@ import { scrollPageToTop } from '@/lib/scroll';
 const STEPS = ['device', 'details', 'connection', 'review'] as const;
 type Step = (typeof STEPS)[number];
 
-const detailsSchema = createDeviceSchema.pick({ code: true, name: true, branchId: true, locationId: true, timezone: true, tags: true, serialNumber: true, modelName: true, manufacturer: true, notes: true });
+const detailsSchema = createDeviceSchema.pick({ code: true, name: true, branchId: true, locationId: true, punchRole: true, timezone: true, tags: true, serialNumber: true, modelName: true, manufacturer: true, notes: true });
 /** The device's location is a place (site, floor, zone…) of its branch (docs/locations.md). */
 const PLACE_ROLES = ['place'] as const;
 type DetailsValues = z.input<typeof detailsSchema>;
@@ -273,6 +274,8 @@ function DetailsStep({ form, isPush, showPlaces, onSubmit, onBack }: { form: Det
   const { t: tc } = useTranslation();
   const { register, control, formState: { errors }, setValue, getValues } = form;
   const branchId = useWatch({ control, name: 'branchId' });
+  const punchRole = useWatch({ control, name: 'punchRole' }) ?? 'AUTO';
+  const locationId = useWatch({ control, name: 'locationId' });
 
   /**
    * Zod's own messages are written for whoever wrote the schema — a blank Branch reported "Invalid GUID", a blank Code
@@ -315,6 +318,11 @@ function DetailsStep({ form, isPush, showPlaces, onSubmit, onBack }: { form: Det
             )} />
           </FormField>
         ) : null}
+        {/* what a punch on this terminal means: two-way, entry-only, exit-only, or a door / meeting-room reader (docs/time-away.md) */}
+        <FormField label={t('punchRole.label')} htmlFor="dev-punch-role" error={err('punchRole')}
+          hint={punchRole === 'ACCESS' && !locationId && showPlaces ? `${t('punchRole.descriptions.ACCESS')} ${t('punchRole.accessNeedsLocation')}` : t(`punchRole.descriptions.${punchRole}`)}>
+          <Controller control={control} name="punchRole" render={({ field }) => <PunchRoleSelect id="dev-punch-role" value={field.value ?? 'AUTO'} onChange={field.onChange} />} />
+        </FormField>
         <FormField label={tc('common.timezone')} htmlFor="dev-tz" error={err('timezone')} hint={t('fields.timezoneHint')} optional>
           <Controller control={control} name="timezone" render={({ field }) => <TimezoneSelect id="dev-tz" value={field.value ?? undefined} onChange={field.onChange} />} />
         </FormField>
@@ -378,7 +386,7 @@ export default function DeviceNewPage() {
   // typed. The resolver widens with the provider: a push terminal is identified by its serial number, so that field is
   // required for one of the two integration shapes only.
   const schema = useMemo(() => (isPush ? detailsSchema.extend({ serialNumber: createDeviceSchema.shape.serialNumber.unwrap().min(1) }) : detailsSchema), [isPush]);
-  const detailsForm = useForm<DetailsValues, unknown, Details>({ resolver: zodResolver(schema), defaultValues: { code: '', name: '', branchId: '', locationId: undefined, timezone: orgTz, tags: [], manufacturer: '', modelName: undefined, serialNumber: undefined, notes: undefined } });
+  const detailsForm = useForm<DetailsValues, unknown, Details>({ resolver: zodResolver(schema), defaultValues: { code: '', name: '', branchId: '', locationId: undefined, punchRole: 'AUTO', timezone: orgTz, tags: [], manufacturer: '', modelName: undefined, serialNumber: undefined, notes: undefined } });
 
   const go = useCallback((s: Step) => {
     setStep(s);
@@ -427,7 +435,7 @@ export default function DeviceNewPage() {
     setTestResult(null);
     // Changing the provider changes what the hardware is, so the identifiers typed for the previous one no longer
     // describe it — which is what the old remount-on-provider-key did implicitly.
-    detailsForm.reset({ code: '', name: '', branchId: '', locationId: undefined, timezone: orgTz, tags: [], manufacturer: p.vendor, modelName: undefined, serialNumber: undefined, notes: undefined });
+    detailsForm.reset({ code: '', name: '', branchId: '', locationId: undefined, punchRole: 'AUTO', timezone: orgTz, tags: [], manufacturer: p.vendor, modelName: undefined, serialNumber: undefined, notes: undefined });
     setDetails(null);
   };
 
@@ -553,6 +561,7 @@ export default function DeviceNewPage() {
                   <Row label={tc('common.code')}><span className="font-mono">{details.code}</span></Row>
                   <Row label={tc('common.name')}>{details.name}</Row>
                   {locations.hasPlaceLevels || details.locationId ? <Row label={t('fields.location')}>{locations.labelOf(details.locationId, { fromBranch: true }) || '—'}</Row> : null}
+                  <Row label={t('punchRole.label')}>{t(`punchRole.options.${details.punchRole ?? 'AUTO'}`)}</Row>
                   <Row label={tc('common.timezone')}><span dir="ltr">{details.timezone ?? '—'}</span></Row>
                   <Row label={t('fields.serialNumber')}><span className="font-mono" dir="ltr">{details.serialNumber ?? '—'}</span></Row>
                   <Row label={t('fields.tags')}>{details.tags?.length ? details.tags.map((x) => <Badge key={x} variant="secondary" className="me-1 font-normal">{x}</Badge>) : '—'}</Row>

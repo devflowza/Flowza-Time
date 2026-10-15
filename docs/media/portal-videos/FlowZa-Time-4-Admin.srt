@@ -1,0 +1,35 @@
+1
+00:00:00,251 --> 00:00:05,563
+The administrator: settings, people and roles, terminals, locations, audit and modules.
+
+2
+00:00:06,265 --> 00:00:08,121
+Khalid is the owner of the account.
+
+3
+00:00:16,494 --> 00:00:26,286
+Settings covers regional options, attendance rules, self-service check-in, notifications and security. Here he lets managers see their whole reporting line.
+
+4
+00:00:28,780 --> 00:00:34,604
+Users and roles decide who sees what. Every role is a set of permissions, scoped to branches.
+
+5
+00:00:40,428 --> 00:00:48,641
+Devices lists every terminal with its role: an entry-only gate, an exit-only gate, a two-way lobby terminal, and the meeting-room readers.
+
+6
+00:00:49,141 --> 00:00:54,368
+Registering a terminal takes its provider, its branch and place, and what its punches mean.
+
+7
+00:01:07,766 --> 00:01:13,739
+Locations are the tree of branches, floors and rooms. A meeting room is a place with its own readers.
+
+8
+00:01:14,239 --> 00:01:18,634
+The audit log records every change and every request: who, what and when.
+
+9
+00:01:22,323 --> 00:01:24,606
+Everything under control, in one console.

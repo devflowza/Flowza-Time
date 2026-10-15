@@ -5,10 +5,11 @@ import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import type { z } from 'zod';
 import { AlertTriangle, Info, Plus, Trash2 } from 'lucide-react';
-import { COUNTRY_PACK_CODES, COUNTRY_RULE_PACKS, DEFAULT_POLICY_SECTIONS, DISCIPLINE_ACTIONS, MISSING_PUNCH_BEHAVIORS, PUNCH_INTERPRETATIONS, ROUNDING_MODES, attendanceRuleSetInputSchema, countryRulePack, DEFAULT_ATTENDANCE_RULES, policyDefaultsFromPack, type AttendanceRuleSetInput, type ComplianceWarningDto, type CountryPackCode } from '@flowza/contracts';
+import { COUNTRY_PACK_CODES, COUNTRY_RULE_PACKS, DEFAULT_POLICY_SECTIONS, DISCIPLINE_ACTIONS, MISSING_PUNCH_BEHAVIORS, PUNCH_INTERPRETATIONS, ROUNDING_MODES, attendanceRuleSetInputSchema, countryRulePack, DEFAULT_ATTENDANCE_RULES, policyDefaultsFromPack, policySectionsOf, type AttendanceRuleSetInput, type ComplianceWarningDto, type CountryPackCode } from '@flowza/contracts';
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { Combobox, type ComboboxOption } from '@/components/forms';
 import { todayIso } from '@/lib/format';
+import { ApiError } from '@/lib/api-client';
 import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
 import { useDebounced } from '@/hooks/use-debounced';
@@ -34,8 +35,10 @@ const ENTERPRISE_SCOPE_KEYS = ['countryCode', 'departmentId', 'employeeGroupId',
 /**
  * The sections of the attendance policy editor, in order. `discipline` and `regularisation` exist only with the Enterprise
  * module attendance_policies; without it they — and the Enterprise fields of the other sections — are hidden, not disabled.
+ * `timeAway` (time away inside the working day, docs/time-away.md) is core attendance: every plan edits it.
  */
-const SECTIONS = ['general', 'late', 'attendance', 'overtime', 'discipline', 'regularisation', 'ramadan'] as const;
+const SECTIONS = ['general', 'late', 'attendance', 'overtime', 'discipline', 'regularisation', 'timeAway', 'ramadan'] as const;
+const RETURN_BY = ['device_or_portal', 'device'] as const;
 type SectionKey = (typeof SECTIONS)[number];
 const ENTERPRISE_SECTIONS: ReadonlySet<SectionKey> = new Set(['discipline', 'regularisation']);
 const FIELD_SECTIONS: Record<string, SectionKey> = {
@@ -43,7 +46,7 @@ const FIELD_SECTIONS: Record<string, SectionKey> = {
   graceInMinutes: 'late', graceOutMinutes: 'late', lateThresholdMinutes: 'late', earlyDepartureThresholdMinutes: 'late', punchRoundingMinutes: 'late', punchRoundingMode: 'late', workedRoundingMinutes: 'late', workedRoundingMode: 'late',
   minFullDayMinutes: 'attendance', halfDayThresholdMinutes: 'attendance', punchInterpretation: 'attendance', duplicatePunchWindowSeconds: 'attendance', missingPunchBehavior: 'attendance', autoAbsentWithoutPunches: 'attendance',
   overtimeEnabled: 'overtime', overtimeStartAfterMinutes: 'overtime', overtimeMinBlockMinutes: 'overtime', overtimeRoundingMinutes: 'overtime', overtimeMaxMinutesPerDay: 'overtime', countEarlyInAsOvertime: 'overtime', overtimeRequiresScheduledHours: 'overtime', weeklyOffWorkCountsAsOvertime: 'overtime', holidayWorkCountsAsOvertime: 'overtime',
-  ramadanMode: 'ramadan', 'policy.countryPack': 'general', 'policy.late': 'late', 'policy.methods': 'attendance', 'policy.overtime': 'overtime', 'policy.points': 'discipline', 'policy.regularisation': 'regularisation',
+  ramadanMode: 'ramadan', 'policy.countryPack': 'general', 'policy.late': 'late', 'policy.methods': 'attendance', 'policy.overtime': 'overtime', 'policy.points': 'discipline', 'policy.regularisation': 'regularisation', 'policy.timeAway': 'timeAway',
 };
 /** The section a field path belongs to (`policy.overtime.rates.regular` → overtime). */
 function sectionOfField(path: string): SectionKey {
@@ -71,8 +74,11 @@ function toDefaults(r: RuleSetDto | null, today: string, pack: CountryPackCode |
     return { ...blank, ...d, name: p.name, policy: { ...blank.policy, countryPack: d.policy.countryPack, overtime: { ...DEFAULT_POLICY_SECTIONS.overtime, ...d.policy.overtime } } };
   }
   const { id: _id, version: _v, createdAt: _c, updatedAt: _u, specificity: _s, ...rules } = r;
-  return { ...DEFAULT_ATTENDANCE_RULES, ...rules, description: rules.description ?? '', policy: rules.policy ?? structuredClone(DEFAULT_POLICY_SECTIONS), ramadanMode: { ...DEFAULT_ATTENDANCE_RULES.ramadanMode, ...(rules.ramadanMode ?? {}) } };
+  // defaults filled in section by section, so a policy stored before a section existed (time away) edits from its defaults
+  return { ...DEFAULT_ATTENDANCE_RULES, ...rules, description: rules.description ?? '', policy: rules.policy ? policySectionsOf(rules.policy) : structuredClone(DEFAULT_POLICY_SECTIONS), ramadanMode: { ...DEFAULT_ATTENDANCE_RULES.ramadanMode, ...(rules.ramadanMode ?? {}) } };
 }
+/** The time-away section of a form's policy, defaults filled in, as text — to tell whether the editor changed it. */
+const timeAwayKey = (policy: unknown): string => JSON.stringify(policySectionsOf(policy).timeAway);
 
 const nullableNumber = (v: unknown): unknown => (v === '' || v === null || v === undefined ? null : Number(v));
 
@@ -196,9 +202,10 @@ function PolicyLocationField({ control, setScope, tree, editing, error }: { cont
 
 /**
  * The attendance POLICY editor (attendanceRuleSetInputSchema): an effective-dated rule set with its scope and sections —
- * General, Late & early, Attendance, Overtime, Discipline, Regularisation, Ramadan. The Enterprise parts (scope beyond the
- * branch, country packs and compliance, very / repeated late, check-in methods, weekly overtime and rates, points, limits)
- * appear only with the module attendance_policies; without it the request never carries non-default sections or extra scope.
+ * General, Late & early, Attendance, Overtime, Discipline, Regularisation, Time away, Ramadan. The Enterprise parts (scope
+ * beyond the branch, country packs and compliance, very / repeated late, check-in methods, weekly overtime and rates, points,
+ * limits) appear only with the module attendance_policies; without it the request carries no extra scope, and the policy
+ * sections only when the core Time away section changed (the Enterprise sections then go back as they were).
  * With the module, an organisation that has group or place levels names the policy's branch through a Location field instead
  * (a region, a branch, a site, a floor…). `pack` opens a new policy prefilled from a country rule pack.
  */
@@ -216,6 +223,9 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
   const otEnabled = useWatch({ control, name: 'overtimeEnabled' }) ?? true;
   const ramadan = useWatch({ control, name: 'ramadanMode.enabled' }) ?? false;
   const pointsOn = useWatch({ control, name: 'policy.points.enabled' }) ?? false;
+  const timeAwayOn = useWatch({ control, name: 'policy.timeAway.enabled' }) ?? false;
+  const interpretation = useWatch({ control, name: 'punchInterpretation' }) ?? 'FIRST_LAST';
+  const timeAwayUnmeasurable = timeAwayOn && interpretation === 'FIRST_LAST';
   const branchId = useWatch({ control, name: 'branchId' }) ?? null;
   const countryCode = useWatch({ control, name: 'countryCode' }) ?? null;
   const countryPack = useWatch({ control, name: 'policy.countryPack' }) ?? null;
@@ -272,21 +282,35 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
     toast.success(t('policyEditor.packApplied', { country: packName(code), version: p.version }));
   };
 
-  /** Without the module the request carries neither the policy sections nor a scope beyond the branch. */
+  /**
+   * Without the module the request carries no scope beyond the branch, and the policy sections only when the core Time away
+   * section changed: the API accepts them as long as the Enterprise sections are the stored (or default) ones, which the
+   * form keeps untouched.
+   */
   const toRequest = (values: AttendanceRuleSetInput): Partial<AttendanceRuleSetInput> => {
     if (enterprise) return values;
     const out: Partial<AttendanceRuleSetInput> = { ...values };
-    delete out.policy;
+    if (timeAwayKey(values.policy) === timeAwayKey(form.formState.defaultValues?.policy)) delete out.policy;
     for (const k of ENTERPRISE_SCOPE_KEYS) delete out[k];
     return out;
   };
   const onSubmit = form.handleSubmit(async (values) => {
+    // FIRST_LAST keeps only the first and the last punch, so it never measures a gap: the API refuses the pair (TIME_AWAY_NEEDS_PAIRS)
+    if (values.policy?.timeAway.enabled && values.punchInterpretation === 'FIRST_LAST') {
+      form.setError('punchInterpretation', { type: 'timeAway', message: t('policyEditor.timeAway.needsPairs') });
+      setTab('attendance');
+      return;
+    }
     try {
       const body = toRequest(values);
       const res = ruleSet ? await update.mutateAsync({ id: ruleSet.id, input: body }) : await create.mutateAsync(body);
       if (res.recalculationJobId) toastJobQueued(res.recalculationJobId, navigate, t('rules.recalcHint'), { to: '/attendance?tab=recalc' }); else toast.success(ruleSet ? t('rules.updated') : t('rules.created'));
       onOpenChange(false);
-    } catch (e) { toastError(e); }
+    } catch (e) {
+      // the API refuses time away on a FIRST_LAST policy too (e.g. an interpretation stored meanwhile)
+      if (e instanceof ApiError && e.details?.['reason'] === 'TIME_AWAY_NEEDS_PAIRS') { form.setError('punchInterpretation', { type: 'timeAway', message: t('policyEditor.timeAway.needsPairs') }); setTab('attendance'); return; }
+      toastError(e);
+    }
   }, (errs) => {
     // open the first section with an error (hidden sections are still validated)
     const first = SECTIONS.find((s) => errorPaths(errs).some((p) => sectionOfField(p) === s));
@@ -428,7 +452,7 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
                 <div className="grid gap-3 sm:grid-cols-2">
                   <FormField label={t('rules.fields.punchInterpretation')} htmlFor="rs-interp" hint={t('rules.hints.punchInterpretation')} error={errors.punchInterpretation?.message}>
                     <Controller control={control} name="punchInterpretation" render={({ field }) => (
-                      <Select value={field.value ?? 'FIRST_LAST'} onValueChange={field.onChange}><SelectTrigger id="rs-interp"><SelectValue /></SelectTrigger><SelectContent>{PUNCH_INTERPRETATIONS.map((m) => <SelectItem key={m} value={m}>{t(`rules.interpretations.${m}`)}</SelectItem>)}</SelectContent></Select>
+                      <Select value={field.value ?? 'FIRST_LAST'} onValueChange={(v) => { field.onChange(v); form.clearErrors('punchInterpretation'); }}><SelectTrigger id="rs-interp"><SelectValue /></SelectTrigger><SelectContent>{PUNCH_INTERPRETATIONS.map((m) => <SelectItem key={m} value={m}>{t(`rules.interpretations.${m}`)}</SelectItem>)}</SelectContent></Select>
                     )} />
                   </FormField>
                   {rn('duplicatePunchWindowSeconds', 'duplicatePunchWindowSeconds', { max: 3600, hint: true })}
@@ -504,6 +528,42 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
                 </Section>
               </TabsContent>
             ) : null}
+
+            {/* core attendance (every plan): time away inside the working day, docs/time-away.md */}
+            <TabsContent value="timeAway" forceMount className="space-y-4 data-[state=inactive]:hidden">
+              <Section title={t('policyEditor.sections.timeAway')} hint={t('policyEditor.sections.timeAwayHint')}>
+                {b('policy.timeAway.enabled', t('policyEditor.fields.timeAwayEnabled'), t('policyEditor.hints.timeAwayEnabled'))}
+                {timeAwayUnmeasurable ? (
+                  <p role="alert" data-testid="time-away-needs-pairs" className="flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950/40 dark:text-amber-100">
+                    <AlertTriangle className="mt-0.5 size-3.5 shrink-0" aria-hidden />
+                    <span>{t('policyEditor.timeAway.needsPairs')} <button type="button" className="font-medium underline" onClick={() => setTab('attendance')}>{t('policyEditor.timeAway.openAttendance')}</button></span>
+                  </p>
+                ) : <p className="flex items-start gap-1.5 text-xs text-muted-foreground"><Info className="mt-0.5 size-3.5 shrink-0" aria-hidden />{t('policyEditor.timeAway.pairsHint')}</p>}
+                <div className={cn('space-y-3', !timeAwayOn && 'opacity-50')}>
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    {n('policy.timeAway.ignoreUnderMinutes', t('policyEditor.fields.ignoreUnderMinutes'), { min: 0, max: 60, hint: t('policyEditor.hints.ignoreUnderMinutes') })}
+                    {n('policy.timeAway.returnGraceMinutes', t('policyEditor.fields.returnGraceMinutes'), { min: 0, max: 120, hint: t('policyEditor.hints.returnGraceMinutes') })}
+                    {n('policy.timeAway.flagUnapprovedAfterMinutes', t('policyEditor.fields.flagUnapprovedAfterMinutes'), { min: 0, max: 480, hint: t('policyEditor.hints.flagUnapprovedAfterMinutes') })}
+                  </div>
+                  <div className="grid gap-2 sm:grid-cols-2">
+                    {b('policy.timeAway.officialCountsAsWorked', t('policyEditor.fields.officialCountsAsWorked'), t('policyEditor.hints.officialCountsAsWorked'))}
+                    {b('policy.timeAway.permissionExcusesShortfall', t('policyEditor.fields.permissionExcusesShortfall'), t('policyEditor.hints.permissionExcusesShortfall'))}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {n('policy.timeAway.personalMonthlyQuotaMinutes', t('policyEditor.fields.personalMonthlyQuotaMinutes'), { min: 0, max: 10080, nullable: true, placeholder: t('rules.noLimit'), hint: t('policyEditor.hints.personalMonthlyQuotaMinutes') })}
+                    {n('policy.timeAway.personalMaxMinutes', t('policyEditor.fields.personalMaxMinutes'), { min: 15, max: 960, nullable: true, placeholder: t('rules.noLimit'), hint: t('policyEditor.hints.personalMaxMinutes') })}
+                  </div>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    {b('policy.timeAway.stepOutFromPortal', t('policyEditor.fields.stepOutFromPortal'), t('policyEditor.hints.stepOutFromPortal'))}
+                    <FormField label={t('policyEditor.fields.returnBy')} htmlFor="rs-return-by" hint={t('policyEditor.hints.returnBy')}>
+                      <Controller control={control} name="policy.timeAway.returnBy" render={({ field }) => (
+                        <Select value={field.value ?? 'device_or_portal'} onValueChange={field.onChange}><SelectTrigger id="rs-return-by"><SelectValue /></SelectTrigger><SelectContent>{RETURN_BY.map((v) => <SelectItem key={v} value={v}>{t(`policyEditor.returnBy.${v}`)}</SelectItem>)}</SelectContent></Select>
+                      )} />
+                    </FormField>
+                  </div>
+                </div>
+              </Section>
+            </TabsContent>
 
             <TabsContent value="ramadan" forceMount className="space-y-4 data-[state=inactive]:hidden">
               <Section title={t('rules.sections.ramadan')} hint={t('rules.sections.ramadanHint')}>

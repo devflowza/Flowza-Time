@@ -1,7 +1,7 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { z } from 'zod';
-import type { AttendanceEventType, PunchDirection, ShiftBreak, VerificationMethod } from '@flowza/contracts';
+import type { AttendanceEventType, DevicePunchRole, PunchDirection, ShiftBreak, VerificationMethod } from '@flowza/contracts';
 import { SELF_SERVICE_PROVIDER_KEY, shiftBreakSchema, uuidSchema } from '@flowza/contracts';
 import { overnightMaxSpanMinutes } from '@flowza/domain';
 import { addDays, event, isValidTimezone, localDateOf, timeToMinutes } from '@flowza/shared';
@@ -25,6 +25,18 @@ export function eventTypeForDirection(direction: PunchDirection): AttendanceEven
     case 'break_in': return 'BREAK_END';
     default: return 'PUNCH';
   }
+}
+
+/**
+ * A terminal's punch → event type, by what the terminal is for (`devices.punch_role`, docs/time-away.md): an entry-only
+ * terminal (CHECK_IN) only ever records arrivals and an exit-only one (CHECK_OUT) departures, whatever key was pressed — so a
+ * site with one entry reader and the portal's "Step out" still measures time away; AUTO keeps the reported direction. ACCESS
+ * readers never get here (their punches are room access, see `normalizeBatch`).
+ */
+export function eventTypeForPunch(direction: PunchDirection, role: DevicePunchRole): AttendanceEventType {
+  if (role === 'CHECK_IN') return 'PUNCH_IN';
+  if (role === 'CHECK_OUT') return 'PUNCH_OUT';
+  return eventTypeForDirection(direction);
 }
 
 /**
@@ -124,7 +136,8 @@ export async function loadLastComputedAt(trx: Trx, organizationId: string, days:
 /**
  * One batch of the normaliser (§E.4, docs/attendance-engine.md "Worker integration contract"): resolves the employee for
  * each pending raw punch, attaches the branch effective on the local date of the punch, inserts the event and enqueues
- * throttled recomputes (`recomputeRunAt`). Rows that cannot be resolved become `unmatched` (visible in reconciliation); `held` and
+ * throttled recomputes (`recomputeRunAt`). Rows that cannot be resolved become `unmatched` (visible in reconciliation) — except an
+ * ACCESS reader's, which are room entries whoever swiped (`access_events.employee_id` null for an unknown card); `held` and
  * `quarantined` rows are never touched here.
  */
 export async function normalizeBatch(trx: Trx, organizationId: string, now: Date, queue: JobContext['deps']['queue']): Promise<NormalizeBatchResult> {
@@ -150,7 +163,7 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
       .where('organizationId', '=', organizationId).where('providerKey', 'in', providerKeys).where('deviceUserId', 'in', deviceUserIds).execute(),
     trx.selectFrom('employees').select(['id', 'deviceUserId'])
       .where('organizationId', '=', organizationId).where('deviceUserId', 'in', deviceUserIds).where('deletedAt', 'is', null).execute(),
-    trx.selectFrom('devices').select(['id', 'timezone', 'branchId', 'providerKey']).where('organizationId', '=', organizationId).where('id', 'in', deviceIds).execute(),
+    trx.selectFrom('devices').select(['id', 'timezone', 'branchId', 'providerKey', 'punchRole', 'locationId']).where('organizationId', '=', organizationId).where('id', 'in', deviceIds).execute(),
     trx.selectFrom('branches').select(['id', 'timezone']).where('organizationId', '=', organizationId).execute(),
     loadNeighbourReach(trx, organizationId),
   ]);
@@ -158,6 +171,12 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
   const identityMap = new Map(identities.map((i) => [`${i.providerKey}|${i.deviceUserId}`, i.employeeId]));
   const deviceUserMap = new Map(byDeviceUser.map((e) => [e.deviceUserId, e.id]));
   const deviceMap = new Map(devices.map((d) => [d.id, d]));
+  // ACCESS readers (door / meeting room): their punches are room access, never attendance — the meeting room placed where the
+  // reader is resolves once per batch
+  const accessLocations = uniq(devices.filter((d) => d.punchRole === 'ACCESS' && d.locationId !== null).map((d) => d.locationId as string));
+  const roomByLocation = new Map((accessLocations.length
+    ? await trx.selectFrom('meetingRooms').select(['id', 'locationId']).where('organizationId', '=', organizationId).where('locationId', 'in', accessLocations).where('status', '=', 'active').execute()
+    : []).map((m) => [m.locationId, m.id]));
   const branchTz = new Map(branches.map((b) => [b.id, b.timezone]));
   // Flowza Finance connector rows carry Finance's employee number, or — when Finance could not attribute the punch — a namespaced
   // `pin:<serial>:<pin>` identity. They resolve ONLY by employee number (finance-identity.ts, review D7): never through the
@@ -196,7 +215,9 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
 
   // 2. Build events + touched (employee, local date) pairs.
   const eventRows: Array<{ organizationId: string; employeeId: string; branchId: string; deviceId: string; rawTransactionId: string; source: EventSource; eventType: AttendanceEventType; punchedAt: Date; verificationMethod: VerificationMethod }> = [];
-  const normalized: Array<{ id: string; employeeId: string }> = [];
+  // employeeId null = an ACCESS reader entry by a card that matched no live employee (still processed, see below)
+  const normalized: Array<{ id: string; employeeId: string | null }> = [];
+  const accessRows: Array<{ organizationId: string; branchId: string; deviceId: string; locationId: string | null; roomId: string | null; employeeId: string | null; deviceEmployeeId: string; occurredAt: Date; direction: PunchDirection; rawTransactionId: string }> = [];
   const unmatched: string[] = [];
   const touched = new Map<string, { employeeId: string; date: string }>();
   const touch = (employeeId: string, date: string): void => { touched.set(`${employeeId}|${date}`, { employeeId, date }); };
@@ -204,8 +225,18 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
   for (const r of rows) {
     const employeeId = resolveEmployee(r);
     const employee = employeeId ? employeeMap.get(employeeId) : undefined;
-    if (!employeeId || !employee) { unmatched.push(r.id); continue; }
     const device = deviceMap.get(r.deviceId);
+    if (device?.punchRole === 'ACCESS' && r.source !== 'SELF_SERVICE') {
+      // a room entry: recorded for meeting attendance / the access log, the raw row is processed, no attendance event. Checked
+      // before the unmatched rule: a card that matches no live employee (visitor, unknown PIN, ex-employee) is still an entry —
+      // employee null, reported unauthorised by the access log — never an unmatched attendance punch (review C11)
+      const accessEmployeeId = employeeId && employee ? employeeId : null;
+      const occurredAt = r.punchedAt instanceof Date ? r.punchedAt : new Date(r.punchedAt);
+      accessRows.push({ organizationId, branchId: device.branchId, deviceId: r.deviceId, locationId: device.locationId, roomId: device.locationId ? roomByLocation.get(device.locationId) ?? null : null, employeeId: accessEmployeeId, deviceEmployeeId: r.deviceEmployeeId, occurredAt, direction: r.direction, rawTransactionId: r.id });
+      normalized.push({ id: r.id, employeeId: accessEmployeeId });
+      continue;
+    }
+    if (!employeeId || !employee) { unmatched.push(r.id); continue; }
     const fallbackTz = branchTz.get(employee.branchId) ?? 'UTC';
     const deviceTz = device && isValidTimezone(device.timezone) ? device.timezone : fallbackTz;
     const punchedAt = r.punchedAt instanceof Date ? r.punchedAt : new Date(r.punchedAt);
@@ -221,7 +252,7 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
       tz = branchTz.get(branchId) ?? deviceTz;
       localDate = localDateOf(punchedAt, tz);
     }
-    eventRows.push({ organizationId, employeeId, branchId, deviceId: r.deviceId, rawTransactionId: r.id, source: eventSourceForRaw(r.source), eventType: eventTypeForDirection(r.direction), punchedAt, verificationMethod: r.verificationMethod });
+    eventRows.push({ organizationId, employeeId, branchId, deviceId: r.deviceId, rawTransactionId: r.id, source: eventSourceForRaw(r.source), eventType: r.source === 'SELF_SERVICE' ? eventTypeForDirection(r.direction) : eventTypeForPunch(r.direction, device?.punchRole ?? 'AUTO'), punchedAt, verificationMethod: r.verificationMethod });
     normalized.push({ id: r.id, employeeId });
     touch(employeeId, localDate);
     // the punch may fall inside the punch window of the previous / next attendance date (§G.3 cross-midnight): recompute those too
@@ -238,6 +269,9 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
       .onConflict((oc) => oc.columns(['rawTransactionId', 'punchedAt']).where('rawTransactionId', 'is not', null).doNothing())
       .executeTakeFirst();
     inserted += Number(res.numInsertedOrUpdatedRows ?? 0);
+  }
+  for (let i = 0; i < accessRows.length; i += 500) {
+    await trx.insertInto('accessEvents').values(accessRows.slice(i, i + 500)).onConflict((oc) => oc.columns(['organizationId', 'rawTransactionId']).doNothing()).execute();
   }
   if (normalized.length) {
     await sql`update public.attendance_raw_transactions r

@@ -105,6 +105,7 @@
       "overtime": "Overtime",
       "discipline": "Discipline",
       "regularisation": "Regularisation",
+      "timeAway": "Time away",
       "ramadan": "Ramadan"
     },
     "sections": {
@@ -120,7 +121,9 @@
       "points": "Attendance points",
       "pointsHint": "Points per occurrence, counted over a rolling window; reaching a threshold calls for the escalation step.",
       "regularisation": "Regularisation limits",
-      "regularisationHint": "Limits on the employees' own regularisation requests."
+      "regularisationHint": "Limits on the employees' own regularisation requests.",
+      "timeAway": "Time away inside the working day",
+      "timeAwayHint": "Every gap between the first check-in and the last check-out is classified: inside an approved official-duty window it is official duty, inside an approved personal window it is permission, then the shift's break allowance, and the rest is unapproved."
     },
     "fields": {
       "description": "Description",
@@ -141,7 +144,17 @@
       "stepPoints": "At points",
       "stepAction": "Action",
       "maxPerMonth": "Max requests per month",
-      "backdateDays": "How many days back"
+      "backdateDays": "How many days back",
+      "timeAwayEnabled": "Measure time away",
+      "ignoreUnderMinutes": "Ignore gaps under (min)",
+      "returnGraceMinutes": "Return grace (min)",
+      "flagUnapprovedAfterMinutes": "Flag unapproved after (min)",
+      "officialCountsAsWorked": "Official duty counts as worked time",
+      "permissionExcusesShortfall": "Permission excuses the shortfall",
+      "personalMonthlyQuotaMinutes": "Personal permission per month (min)",
+      "personalMaxMinutes": "Longest single permission (min)",
+      "stepOutFromPortal": "Step out from the portal",
+      "returnBy": "Return recorded by"
     },
     "hints": {
       "veryLateAfterMinutes": "Measured from the scheduled start, not after the grace. Empty = off.",
@@ -152,7 +165,17 @@
       "maxDailyWorkMinutes": "Days above it are reported in the overtime summary.",
       "pointsEnabled": "Off: the points report shows this policy's employees with no points.",
       "expiryDays": "A point counts for this many days, then drops off.",
-      "backdateDays": "A request may concern a day at most this many days ago."
+      "backdateDays": "A request may concern a day at most this many days ago.",
+      "timeAwayEnabled": "Employees request official duty or personal permission; the engine classifies the measured time away against the approved windows.",
+      "ignoreUnderMinutes": "A shorter gap (a step outside the reader's reach) stays worked time.",
+      "returnGraceMinutes": "Coming back this long after an approved window ends still counts as inside it.",
+      "flagUnapprovedAfterMinutes": "Unapproved time away beyond this flags the day “Unapproved time away”.",
+      "officialCountsAsWorked": "Off: approved official duty is excused but not paid.",
+      "permissionExcusesShortfall": "Approved permission does not make the day a half day or under hours; the minutes stay unpaid.",
+      "personalMonthlyQuotaMinutes": "Per calendar month; requests beyond it are refused. Empty = no limit.",
+      "personalMaxMinutes": "Empty = no limit.",
+      "stepOutFromPortal": "A break-out punch from the portal plus a request for the expected window.",
+      "returnBy": "Terminal only is proof of presence; the portal's “I'm back” is easier on a site without a terminal at the exit."
     },
     "points": {
       "late": "Late",
@@ -174,6 +197,15 @@
       "off": "Not required",
       "flag": "Flag outside",
       "block": "Block outside"
+    },
+    "returnBy": {
+      "device_or_portal": "Terminal or the portal's “I'm back”",
+      "device": "Terminal check-in only"
+    },
+    "timeAway": {
+      "needsPairs": "Time away needs the punches between the first check-in and the last check-out: choose Paired or Directional punch interpretation (First / last ignores them).",
+      "pairsHint": "Needs Paired or Directional punch interpretation (Attendance tab): First / last keeps only the first and the last punch of a day.",
+      "openAttendance": "Open the Attendance tab"
     },
     "actions": {
       "NOTIFY_MANAGER": "Notify manager",

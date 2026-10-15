@@ -11,6 +11,8 @@ import { StackedBars, type Series } from '@/features/dashboard/charts';
 import { ActivityTimeline } from './activity-timeline';
 import { ActivityDetails } from './activity-details';
 import { datesOf, targetMinutes } from './activity-model';
+import { AwayIntervalList, AwayStatCards } from './activity-away';
+import { AWAY_SERIES, AWAY_SERIES_COLOR, awayBreakdown, hasAwayData } from './away-model';
 
 const UNIT: Record<ActivityRange, 'days' | 'weeks' | 'months' | 'years'> = { day: 'days', week: 'weeks', month: 'months', year: 'years' };
 
@@ -18,7 +20,9 @@ const UNIT: Record<ActivityRange, 'days' | 'weeks' | 'months' | 'years'> = { day
  * Activity history: how the employee's days were actually shaped. The bars stack the productive hours (green, the time
  * the engine counted as worked) on the hours spent away between the first and the last punch (blue — field work, a
  * client visit or a break), and the heartbeat below them puts those spans back on the clock. The year range is charted
- * by month, because 365 timelines show nothing.
+ * by month, because 365 timelines show nothing. When the policy measures time away (engine 1.5.0, docs/time-away.md) the
+ * bars split the span by how the engine classified it instead — on site, official duty, permission, break, unapproved —
+ * the period's away totals join the figures and a single day lists its classified intervals.
  */
 export function ActivityTab({ employeeId }: { employeeId: string }) {
   const { t, i18n } = useTranslation('employees');
@@ -32,11 +36,14 @@ export function ActivityTab({ employeeId }: { employeeId: string }) {
   // The anchor survives a range change: a week in August becomes August, not this month.
   const shift = (direction: -1 | 1) => setAnchor((a) => DateTime.fromISO(a, { zone: 'utc' }).plus({ [UNIT[range]]: direction }).toISODate() ?? a);
 
-  const series = useMemo<Series[]>(() => [
-    { key: 'office', label: t('activity.legend.office'), color: 'var(--color-chart-office)' },
-    { key: 'field', label: t('activity.legend.field'), color: 'var(--color-chart-field)' },
-  ], [t]);
-  const chart = useMemo(() => toChartData(data), [data]);
+  const away = useMemo(() => hasAwayData(data), [data]);
+  const series = useMemo<Series[]>(() => (away
+    ? AWAY_SERIES.map((key) => ({ key, label: t(`activity.legend.${key}`), color: AWAY_SERIES_COLOR[key] }))
+    : [
+      { key: 'office', label: t('activity.legend.office'), color: 'var(--color-chart-office)' },
+      { key: 'field', label: t('activity.legend.field'), color: 'var(--color-chart-field)' },
+    ]), [t, away]);
+  const chart = useMemo(() => toChartData(data, away), [data, away]);
   const target = useMemo(() => (data && data.range !== 'year' ? targetMinutes(data.days) : null), [data]);
   const hasRecords = !!data && (data.range === 'year' ? data.months.length > 0 : data.days.length > 0);
 
@@ -67,6 +74,7 @@ export function ActivityTab({ employeeId }: { employeeId: string }) {
                 <StatCard icon={MapPin} tone="info" label={t('activity.stats.field')} value={fmtMinutes(data.totals.fieldMinutes)} hint={t('activity.stats.fieldHint', { percent: sharePercent(data.totals.fieldMinutes, data.totals.spanMinutes) })} />
                 <StatCard icon={TrendingUp} tone="default" label={t('activity.stats.overtime')} value={fmtMinutes(data.totals.overtimeMinutes)} hint={t('activity.stats.overtimeHint', { scheduled: fmtMinutes(data.totals.scheduledMinutes) })} />
                 <StatCard icon={Timer} tone={data.totals.lateDays > 0 ? 'warning' : 'default'} label={t('activity.stats.attendance')} value={t('activity.stats.presentOf', { present: data.totals.presentDays, total: data.totals.workingDays })} hint={t('activity.stats.lateHint', { count: data.totals.lateDays, minutes: fmtMinutes(data.totals.lateMinutes) })} />
+                {away && data.totals.away ? <div className="sm:col-span-2 xl:col-span-4"><AwayStatCards away={data.totals.away} spanMinutes={data.totals.spanMinutes} /></div> : null}
               </div>
             )}
         </CardContent>
@@ -76,7 +84,7 @@ export function ActivityTab({ employeeId }: { employeeId: string }) {
       <Card>
         <CardHeader>
           <CardTitle>{t('activity.chart.title')}</CardTitle>
-          <CardDescription>{t('activity.chart.hint')}</CardDescription>
+          <CardDescription>{t(away ? 'activity.chart.hintAway' : 'activity.chart.hint')}</CardDescription>
           <ul className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
             {series.map((s) => <li key={s.key} className="inline-flex items-center gap-1.5"><span className="size-2 rounded-full" style={{ background: s.color }} aria-hidden />{s.label}</li>)}
             {target ? <li className="inline-flex items-center gap-1.5"><span className="h-px w-4 border-t border-dashed border-muted-foreground" aria-hidden />{t('activity.legend.scheduled', { hours: fmtMinutes(target) })}</li> : null}
@@ -96,6 +104,7 @@ export function ActivityTab({ employeeId }: { employeeId: string }) {
                   </section>
                 )}
                 {data.range === 'day' && data.days[0] ? <PunchLog day={data.days[0]} timezone={data.timezone} /> : null}
+                {data.range === 'day' && data.days[0]?.awayIntervals?.length ? <AwayLog day={data.days[0]} timezone={data.timezone} /> : null}
               </>
             )}
         </CardContent>
@@ -133,16 +142,38 @@ function PunchLog({ day, timezone }: { day: AttendanceActivityDayDto; timezone: 
   );
 }
 
-/** Bars are drawn in hours: minutes would put four-digit ticks on the axis for a month. */
-function toChartData(data: AttendanceActivityDto | undefined): Record<string, string | number>[] {
+/** The day's away time as the engine classified it, interval by interval (a single-day period only). */
+function AwayLog({ day, timezone }: { day: AttendanceActivityDayDto; timezone: string }) {
+  const { t } = useTranslation('employees');
+  return (
+    <section className="space-y-2" aria-labelledby="activity-away-title">
+      <h3 id="activity-away-title" className="text-sm font-medium">{t('activity.away.title')}</h3>
+      <AwayIntervalList intervals={day.awayIntervals ?? []} timezone={timezone} labelOf={(kind) => t(`activity.away.kinds.${kind}`)} />
+    </section>
+  );
+}
+
+/**
+ * Bars are drawn in hours: minutes would put four-digit ticks on the axis for a month. With time away the span splits into
+ * on site + the classified away kinds (`awayBreakdown`); without it, into the productive minutes and the rest.
+ */
+function toChartData(data: AttendanceActivityDto | undefined, away: boolean): Record<string, string | number>[] {
   if (!data) return [];
   const hours = (minutes: number): number => Math.round((minutes / 60) * 100) / 100;
-  if (data.range === 'year') return data.months.map((m) => ({ label: fmtDate(`${m.month}-01`, 'MMM'), office: hours(m.officeMinutes), field: hours(m.fieldMinutes) }));
+  const inHours = (b: Record<string, number>): Record<string, number> => Object.fromEntries(Object.entries(b).map(([k, v]) => [k, hours(v)]));
+  if (data.range === 'year') {
+    return data.months.map((m): Record<string, string | number> => {
+      const label = fmtDate(`${m.month}-01`, 'MMM');
+      return away ? { label, ...inHours(awayBreakdown(m.officeMinutes + m.fieldMinutes, m.away)) } : { label, office: hours(m.officeMinutes), field: hours(m.fieldMinutes) };
+    });
+  }
   // Every calendar day of the period, not only the recorded ones, so the bars and the heartbeat below them line up.
   const byDate = new Map(data.days.map((d) => [d.date, d]));
-  return datesOf(data.from, data.to).map((date) => {
+  return datesOf(data.from, data.to).map((date): Record<string, string | number> => {
     const d = byDate.get(date);
-    return { label: fmtDate(date, data.range === 'day' ? 'EEE dd MMM' : 'dd MMM'), office: hours(d?.officeMinutes ?? 0), field: hours(d?.fieldMinutes ?? 0) };
+    const label = fmtDate(date, data.range === 'day' ? 'EEE dd MMM' : 'dd MMM');
+    if (away) return { label, ...inHours(awayBreakdown(d?.spanMinutes ?? 0, d?.away, d?.awayIntervals)) };
+    return { label, office: hours(d?.officeMinutes ?? 0), field: hours(d?.fieldMinutes ?? 0) };
   });
 }
 

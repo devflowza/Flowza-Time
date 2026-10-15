@@ -16,8 +16,10 @@ import { NoteStatusBadge, RegularisationStatusBadge, SelfieStatusBadge, VerdictC
 import { SwapsTable } from '../components/swaps-table';
 import { NoteDialog } from '../components/note-dialog';
 import { RegularisationDialog } from '../components/regularisation-dialog';
+import { TimeAwayTab } from '../components/time-away-requests';
+import { useTimeAwayStatus } from '../time-away-api';
 
-const TABS = ['reasons', 'regularisations', 'swaps', 'selfies'] as const;
+const TABS = ['reasons', 'regularisations', 'time-away', 'swaps', 'selfies'] as const;
 type Tab = (typeof TABS)[number];
 
 /** The pay effect a rejected reason carried (charged to a leave type, or unpaid). */
@@ -161,7 +163,10 @@ function SelfiesTab({ timezone }: { timezone: string }) {
   );
 }
 
-/** /my/requests?tab=reasons|regularisations|swaps|selfies — what the employee asked for and the decisions on it. */
+/**
+ * /my/requests?tab=reasons|regularisations|time-away|swaps|selfies — what the employee asked for and the decisions on it. The
+ * time-away tab is offered when the employee's policy measures time away (or when a link asks for it).
+ */
 export default function MyRequestsPage() {
   const { t } = useTranslation(PA_NS);
   const tz = useOrgTimezone();
@@ -169,7 +174,8 @@ export default function MyRequestsPage() {
   const [params, setParams] = useSearchParams();
   // shift swaps are an Enterprise feature (module shift_requests): without it the tab is not offered (no 403 from the page)
   const swapsOn = useModuleEnabled('shift_requests');
-  const tabs = TABS.filter((tb) => tb !== 'swaps' || swapsOn);
+  const timeAwayOn = !!useTimeAwayStatus().data?.policy.enabled || params.get('tab') === 'time-away';
+  const tabs = TABS.filter((tb) => (tb !== 'swaps' || swapsOn) && (tb !== 'time-away' || timeAwayOn));
   const tab: Tab = (tabs as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'reasons';
   const [editing, setEditing] = useState<AttendanceNoteDto | null>(null);
   const [newNote, setNewNote] = useState(false);
@@ -186,6 +192,7 @@ export default function MyRequestsPage() {
         <TabsList aria-label={t('requests.title')} className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`requests.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
         <TabsContent value="reasons">{tab === 'reasons' ? <ReasonsTab onEdit={setEditing} /> : null}</TabsContent>
         <TabsContent value="regularisations">{tab === 'regularisations' ? <RegularisationsTab timezone={tz} /> : null}</TabsContent>
+        <TabsContent value="time-away">{tab === 'time-away' ? <TimeAwayTab fallbackTimezone={tz} /> : null}</TabsContent>
         <TabsContent value="swaps">{tab === 'swaps' ? <SwapsTab /> : null}</TabsContent>
         <TabsContent value="selfies">{tab === 'selfies' ? <SelfiesTab timezone={tz} /> : null}</TabsContent>
       </Tabs>

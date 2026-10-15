@@ -34,7 +34,7 @@ export const ar: LocaleTemplates = {
   },
   entities: {
     ATTENDANCE_CORRECTION: 'تصحيح حضور', LEAVE: 'طلب إجازة', OVERTIME: 'عمل إضافي', MISSING_PUNCH: 'بصمة مفقودة', SHIFT_CHANGE: 'تغيير مناوبة',
-    MANUAL_ATTENDANCE: 'حضور يدوي', ATTENDANCE_NOTE: 'سبب حضور', SHIFT_SWAP: 'تبديل مناوبة', COMP_OFF: 'إجازة تعويضية', REGULARISATION: 'تسوية حضور', OVERTIME_CLAIM: 'مطالبة عمل إضافي',
+    MANUAL_ATTENDANCE: 'حضور يدوي', ATTENDANCE_NOTE: 'سبب حضور', SHIFT_SWAP: 'تبديل مناوبة', COMP_OFF: 'إجازة تعويضية', REGULARISATION: 'تسوية حضور', OVERTIME_CLAIM: 'مطالبة عمل إضافي', TIME_AWAY: 'استئذان / مهمة رسمية',
   },
   reportTypes: {
     daily_attendance: 'الحضور اليومي', monthly_attendance: 'الحضور الشهري', employee_attendance: 'حضور الموظف', branch_attendance: 'حضور الفرع',

@@ -1,4 +1,4 @@
-import { deviceCapabilitiesSchema, lopDaysOf, type AttendanceDailyRecordDto, type DayMarkDto, type DeviceCommandDto, type DeviceDto, type DeviceGroupDto, type DeviceLogDto, type PendingDeviceDto, type ReportRequestDto, type SyncJobDto, type SyncJobItemDto } from '@flowza/contracts';
+import { deviceCapabilitiesSchema, lopDaysOf, type AttendanceAwayIntervalDto, type AttendanceDailyRecordDto, type DayMarkDto, type DeviceCommandDto, type DeviceDto, type DeviceGroupDto, type DeviceLogDto, type PendingDeviceDto, type ReportRequestDto, type SyncJobDto, type SyncJobItemDto } from '@flowza/contracts';
 import type { DayMarkRow } from '@flowza/database';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
 
@@ -6,7 +6,7 @@ export const DEVICE_COLUMNS = [
   'd.id', 'd.organizationId', 'd.branchId', 'b.name as branchName', 'd.code', 'd.name', 'd.providerKey', 'p.name as providerName', 'd.modelId', 'd.manufacturer', 'd.modelName', 'd.serialNumber',
   'd.timezone', 'd.integrationType', 'd.endpointUrl', 'd.config', 'd.capabilities', 'd.status', 'd.connectionStatus', 'd.lastHeartbeatAt', 'd.lastAttendanceSyncAt', 'd.lastEmployeeSyncAt',
   'd.lastSuccessfulCommunicationAt', 'd.lastErrorCode', 'd.lastError', 'd.firmwareVersion', 'd.offlineThresholdMinutes', 'd.autoSyncEnabled', 'd.syncIntervalMinutes', 'd.tags', 'd.createdAt', 'd.updatedAt',
-  'd.pushTokenHash', 'd.generation', 'd.notes', 'd.consecutiveFailures', 'd.locationId',
+  'd.pushTokenHash', 'd.generation', 'd.notes', 'd.consecutiveFailures', 'd.locationId', 'd.punchRole',
 ] as const;
 
 export interface DeviceRow {
@@ -16,6 +16,8 @@ export interface DeviceRow {
   firmwareVersion: string | null; offlineThresholdMinutes: number; autoSyncEnabled: boolean; syncIntervalMinutes: number; tags: string[]; createdAt: Date; updatedAt: Date; pushTokenHash: string | null; generation: number; notes: string | null; consecutiveFailures: number;
   /** The place the terminal is installed in (docs/locations.md), a place of `branchId`. */
   locationId: string | null;
+  /** What its punches mean (docs/time-away.md); optional for callers that select an older column list. */
+  punchRole?: DeviceDto['punchRole'];
 }
 
 export type DeviceDtoExt = DeviceDto & { hasPushToken: boolean; generation: number; notes: string | null; consecutiveFailures: number };
@@ -25,7 +27,7 @@ export function toDeviceDto(r: DeviceRow, extra: { employeeCount?: number; maske
   const caps = deviceCapabilitiesSchema.safeParse(jsonObject(r.capabilities));
   return {
     id: r.id, organizationId: r.organizationId, branchId: r.branchId, ...(r.branchName ? { branchName: r.branchName } : {}),
-    locationId: r.locationId, locationName: r.locationId ? extra.locationLabels?.get(r.locationId) ?? null : null, code: r.code, name: r.name, providerKey: r.providerKey,
+    locationId: r.locationId, locationName: r.locationId ? extra.locationLabels?.get(r.locationId) ?? null : null, punchRole: r.punchRole ?? 'AUTO', code: r.code, name: r.name, providerKey: r.providerKey,
     ...(r.providerName ? { providerName: r.providerName } : {}), modelId: r.modelId, manufacturer: r.manufacturer, modelName: r.modelName, serialNumber: r.serialNumber, timezone: r.timezone,
     integrationType: r.integrationType, endpointUrl: r.endpointUrl, config: jsonObject(r.config), capabilities: caps.success ? caps.data : deviceCapabilitiesSchema.parse({}),
     status: r.status, connectionStatus: (r.connectionStatus === 'vendor_degraded' ? 'degraded' : r.connectionStatus) as DeviceDto['connectionStatus'],
@@ -78,10 +80,12 @@ export function toSyncItemDto(r: SyncItemRow): SyncJobItemDto {
   };
 }
 
-export const DAILY_RECORD_COLUMNS = ['r.id', 'r.employeeId', 'e.employeeNumber', 'e.displayName as employeeName', 'r.attendanceDate', 'r.branchId', 'b.name as branchName', 'r.departmentId', 'dp.name as departmentName', 'r.shiftId', 's.name as shiftName', 'r.timezone', 'r.expectedStartAt', 'r.expectedEndAt', 'r.scheduledMinutes', 'r.firstInAt', 'r.lastOutAt', 'r.workedMinutes', 'r.breakMinutes', 'r.lateMinutes', 'r.earlyDepartureMinutes', 'r.overtimeMinutes', 'r.overtimeCategory', 'r.status', 'r.flags', 'r.punchCount', 'r.hasCorrection', 'r.calculationVersion', 'r.computedAt', 'r.lockedAt'] as const;
+export const DAILY_RECORD_COLUMNS = ['r.id', 'r.employeeId', 'e.employeeNumber', 'e.displayName as employeeName', 'r.attendanceDate', 'r.branchId', 'b.name as branchName', 'r.departmentId', 'dp.name as departmentName', 'r.shiftId', 's.name as shiftName', 'r.timezone', 'r.expectedStartAt', 'r.expectedEndAt', 'r.scheduledMinutes', 'r.firstInAt', 'r.lastOutAt', 'r.workedMinutes', 'r.breakMinutes', 'r.lateMinutes', 'r.earlyDepartureMinutes', 'r.overtimeMinutes', 'r.overtimeCategory', 'r.status', 'r.flags', 'r.punchCount', 'r.hasCorrection', 'r.calculationVersion', 'r.computedAt', 'r.lockedAt', 'r.awayMinutes', 'r.officialDutyMinutes', 'r.permissionMinutes', 'r.unapprovedAwayMinutes'] as const;
 export interface DailyRecordRow {
   id: string; employeeId: string; employeeNumber: string; employeeName: string; attendanceDate: Date | string; branchId: string; branchName: string | null; departmentId: string | null; departmentName: string | null; shiftId: string | null; shiftName: string | null; timezone: string; expectedStartAt: Date | null; expectedEndAt: Date | null;
   scheduledMinutes: number; firstInAt: Date | null; lastOutAt: Date | null; workedMinutes: number; breakMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; overtimeMinutes: number; overtimeCategory: string | null; status: AttendanceDailyRecordDto['status']; flags: string[]; punchCount: number; hasCorrection: boolean; calculationVersion: number; computedAt: Date; lockedAt: Date | null;
+  /** Engine 1.5.0 (time away); optional so callers selecting an older column list keep compiling. */
+  awayMinutes?: number; officialDutyMinutes?: number; permissionMinutes?: number; unapprovedAwayMinutes?: number;
 }
 export function toDailyRecordDto(r: DailyRecordRow): AttendanceDailyRecordDto & { branchName: string | null; departmentName: string | null } {
   const flags = jsonArray<string>(r.flags);
@@ -91,6 +95,7 @@ export function toDailyRecordDto(r: DailyRecordRow): AttendanceDailyRecordDto & 
     earlyDepartureMinutes: r.earlyDepartureMinutes, overtimeMinutes: r.overtimeMinutes, overtimeCategory: r.overtimeCategory, status: r.status, flags, punchCount: r.punchCount, hasCorrection: r.hasCorrection, calculationVersion: r.calculationVersion, computedAt: isoDateTime(r.computedAt), lockedAt: isoDateTimeOrNull(r.lockedAt),
     // policy-parity marks (HR portal Prompt 3): derived from the flags with the same rule the engine and the reports use
     lopDays: lopDaysOf(flags), unexcused: flags.includes('UNEXCUSED'),
+    awayMinutes: r.awayMinutes ?? 0, officialDutyMinutes: r.officialDutyMinutes ?? 0, permissionMinutes: r.permissionMinutes ?? 0, unapprovedAwayMinutes: r.unapprovedAwayMinutes ?? 0,
   };
 }
 
@@ -108,4 +113,19 @@ export function toReportDto(r: ReportRow): ReportRequestDto & { branchId: string
     id: r.id, reportType: r.reportType as ReportRequestDto['reportType'], format: r.format, parameters: jsonObject(r.parameters) as ReportRequestDto['parameters'], status: r.status, rowCount: r.rowCount, fileSizeBytes: numberOrNull(r.fileSizeBytes), error: r.error, requestedBy: r.requestedBy, requestedByName: r.requestedByName ?? null,
     createdAt: isoDateTime(r.createdAt), completedAt: isoDateTimeOrNull(r.completedAt), expiresAt: isoDateTimeOrNull(r.expiresAt), downloadUrl: null, branchId: r.branchId, jobId: r.queueJobId === null ? null : String(r.queueJobId), startedAt: isoDateTimeOrNull(r.startedAt),
   };
+}
+
+/** The `timeAway` step's intervals of a stored trace (engine 1.5.0); [] for older records or a policy that measures nothing. */
+export function awayIntervalsFromTrace(trace: unknown): AttendanceAwayIntervalDto[] {
+  const steps = jsonObject(trace)['steps'];
+  if (!Array.isArray(steps)) return [];
+  const step = steps.find((s) => jsonObject(s)['step'] === 'timeAway');
+  const intervals = jsonObject(jsonObject(step)['values'])['intervals'];
+  if (!Array.isArray(intervals)) return [];
+  return intervals.flatMap((i) => {
+    const o = jsonObject(i);
+    const kind = o['kind'];
+    if (typeof o['startAt'] !== 'string' || typeof o['endAt'] !== 'string' || (kind !== 'BREAK' && kind !== 'OFFICIAL' && kind !== 'PERMISSION' && kind !== 'UNAPPROVED' && kind !== 'SHORT')) return [];
+    return [{ kind, startAt: o['startAt'], endAt: o['endAt'], minutes: typeof o['minutes'] === 'number' ? o['minutes'] : 0, requestId: typeof o['requestId'] === 'string' ? o['requestId'] : null }];
+  });
 }

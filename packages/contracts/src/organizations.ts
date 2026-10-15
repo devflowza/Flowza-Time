@@ -171,6 +171,15 @@ export const attendanceStatsSettingsSchema = z.object({
 });
 
 /**
+ * Who a line manager's team is (migration 20261015000300): `direct` = direct reports (primary or secondary manager);
+ * `hierarchy` = the whole reporting line under the manager, to depth 5. Read by RLS (`app.team_employee_ids()`) and the
+ * principal snapshot alike, so every team surface — Team, approvals "All my team", leave, reports — follows it.
+ */
+export const attendanceTeamSettingsSchema = z.object({
+  scope: z.enum(['direct', 'hierarchy']).default('direct'),
+});
+
+/**
  * `organization_settings.attendance` — the organisation-wide attendance policy switches (HR portal Prompt 3). Detailed
  * thresholds (grace, late/half-day limits, rounding, overtime, missing-punch behaviour) live in effective-dated
  * `attendance_rule_sets`; this group carries what Finance's `attendance_policies` singleton had and rule sets do not:
@@ -191,6 +200,7 @@ export const attendanceSettingsSchema = z.object({
   unexcused: attendanceUnexcusedSettingsSchema.prefault({}),
   notes: attendanceNotesSettingsSchema.prefault({}),
   stats: attendanceStatsSettingsSchema.prefault({}),
+  team: attendanceTeamSettingsSchema.prefault({}),
 });
 export type AttendanceSettings = z.output<typeof attendanceSettingsSchema>;
 export type AttendanceSettingsInput = z.input<typeof attendanceSettingsSchema>;
@@ -413,7 +423,10 @@ export const meDtoSchema = z.object({
     employeeId: uuidSchema.nullable(),
     /** True when at least one active employee reports (primary or secondary manager) to the linked employee record. */
     isManager: z.boolean().default(false),
-    /** Number of direct reports (defaults keep a /me document cached before this field existed parseable). */
+    /**
+     * Size of the caller's team: direct reports, or the whole reporting line under the organisation's `attendance.team.scope`
+     * `hierarchy` (defaults keep a /me document cached before this field existed parseable).
+     */
     teamSize: z.number().int().min(0).default(0),
     /**
      * The caller's own approval work in the organisation: `actionable` = pending seats waiting for them (theirs, or of

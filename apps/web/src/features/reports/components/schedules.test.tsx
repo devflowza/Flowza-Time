@@ -46,6 +46,11 @@ describe('schedule helpers', () => {
     expect(allowedPeriodRules('monthly', 'late_report')).toEqual(['previous_month', 'month_to_date', 'custom']);
     expect(allowedPeriodRules('weekly', 'weekly_attendance')).toEqual(['previous_week']);
     expect(allowedPeriodRules('monthly', 'weekly_attendance')).toEqual([]);
+    // the Daily Report: a daily schedule covering the previous day (the manager's morning roll call), nothing else
+    expect(allowedPeriodRules('daily', 'daily_attendance')).toEqual(['previous_day']);
+    expect(allowedPeriodRules('monthly', 'daily_attendance')).toEqual([]);
+    expect(allowedPeriodRules('daily', 'late_report')).toEqual(['previous_day']);
+    expect(allowedPeriodRules('daily', 'monthly_attendance')).toEqual([]);
     const t = (k: string, o?: Record<string, unknown>) => `${k}|${String(o?.['detail'] ?? '')}`;
     expect(skipReasonLabel(t, 'missing_permission:report.export')).toBe('skip.missing_permission|report.export');
     expect(skipReasonLabel(t, null)).toBe('');

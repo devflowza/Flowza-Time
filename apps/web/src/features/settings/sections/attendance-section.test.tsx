@@ -76,6 +76,18 @@ describe('AttendanceSection (policy parity)', () => {
     expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/attendance', { ...current, selfService: { ...current.selfService, regularisation: false } });
   });
 
+  it('sets a line manager\'s team to the whole reporting hierarchy (attendance.team.scope)', async () => {
+    apiMock.put.mockImplementation(async (_path: string, value: unknown) => ({ data: value }));
+    renderWithProviders(<AttendanceSection />);
+    const scope = await screen.findByRole('combobox', { name: /A manager's team/ });
+    expect(scope).toHaveTextContent('Direct reports');
+    fireEvent.keyDown(scope, { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Whole reporting hierarchy (up to 5 levels)' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1));
+    expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/attendance', { ...current, team: { scope: 'hierarchy' } });
+  });
+
   it('rejects an invalid address in the IP allow-list', async () => {
     renderWithProviders(<AttendanceSection />);
     const ips = await screen.findByLabelText(/IP allow-list/);

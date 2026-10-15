@@ -19,7 +19,7 @@ import { useLocationTree } from '@/features/locations/use-location-tree';
 import { useSyncMutations } from '@/features/sync/api';
 import { toastJobAccepted } from '@/features/sync/job-toast';
 import { useDeviceSummary, useDevices, useGroupMutations, useGroupOptions, useProviders, type DeviceRow } from '../api';
-import { ConnectionBadge, DeviceStatusBadge, ProviderStatusBadge, TagChips } from '../components/device-badges';
+import { ConnectionBadge, DeviceStatusBadge, ProviderStatusBadge, PunchRoleBadge, TagChips } from '../components/device-badges';
 import { PendingDevicesPanel } from '../components/pending-devices-panel';
 import { DevicesHubTabs } from '../components/hub-tabs';
 import { PinMappingPanel } from '../components/pin-mapping-panel';
@@ -88,7 +88,8 @@ function DevicesPanel() {
   }, [summary.data]);
 
   const columns = useMemo<ColumnDef<DeviceRow, unknown>[]>(() => [
-    { id: 'name', accessorKey: 'name', header: tc('common.name'), cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{row.original.name}</p><p className="truncate font-mono text-xs text-muted-foreground" dir="ltr">{row.original.code}</p></div> },
+    // the punch role shows only when it is not the ordinary two-way terminal (entry-only, exit-only, door / meeting-room reader)
+    { id: 'name', accessorKey: 'name', header: tc('common.name'), cell: ({ row }) => <div className="min-w-0"><p className="flex items-center gap-1.5"><span className="truncate font-medium">{row.original.name}</span><PunchRoleBadge role={row.original.punchRole} /></p><p className="truncate font-mono text-xs text-muted-foreground" dir="ltr">{row.original.code}</p></div> },
     { id: 'model', header: t('columns.model'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate">{row.original.manufacturer}</p><p className="truncate text-xs text-muted-foreground">{row.original.modelName ?? '—'}</p></div> },
     { id: 'branch', header: tc('common.branch'), cell: ({ row }) => row.original.branchName ?? '—' },
     ...(showPlaces ? [{ id: 'location', header: t('columns.location'), enableSorting: false, cell: ({ row }) => placeOf(row.original) || '—' } satisfies ColumnDef<DeviceRow, unknown>] : []),
@@ -175,7 +176,7 @@ function DevicesPanel() {
           )}
           renderCard={(d) => (
             <div className="flex items-center gap-3">
-              <div className="min-w-0 flex-1"><p className="truncate font-medium">{d.name}</p><p className="truncate text-xs text-muted-foreground">{d.code} · {d.branchName ?? '—'}{placeOf(d) ? ` › ${placeOf(d)}` : ''}</p></div>
+              <div className="min-w-0 flex-1"><p className="flex items-center gap-1.5"><span className="truncate font-medium">{d.name}</span><PunchRoleBadge role={d.punchRole} /></p><p className="truncate text-xs text-muted-foreground">{d.code} · {d.branchName ?? '—'}{placeOf(d) ? ` › ${placeOf(d)}` : ''}</p></div>
               <ConnectionBadge status={d.connectionStatus} lastHeartbeatAt={d.lastHeartbeatAt} showRelative={false} />
             </div>
           )}

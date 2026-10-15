@@ -15,6 +15,8 @@ export const PERMISSIONS = [
   'report.view', 'report.manage', 'report.export', 'report.schedule',
   'approval.manage', 'approval.delegate',
   'audit.view', 'notification.manage',
+  // meeting rooms (Enterprise module meeting_rooms, migration 20261015000200)
+  'meeting.view', 'meeting.manage', 'meeting.rooms',
 ] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 

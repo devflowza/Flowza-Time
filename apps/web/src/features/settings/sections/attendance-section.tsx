@@ -19,7 +19,8 @@ import { SectionError, SectionSkeleton, SettingsSection, SwitchRow } from '../co
  * Settings → Attendance: the organisation-wide attendance policy (`organization_settings.attendance`). Detailed
  * thresholds (grace, late / half-day limits, rounding, overtime, missing-punch behaviour) live in effective-dated rule
  * sets; this form carries the switches around them: processing defaults, self-service check-in, missed punches and the
- * day close, work on non-working days, unexcused days and their pay effect, attendance notes and the statistics targets.
+ * day close, work on non-working days, unexcused days and their pay effect, attendance notes, the statistics targets and who a
+ * line manager's team is (direct reports or the whole reporting line).
  * The whole group is PUT in one go and validated with the shared contract schema.
  */
 const schema = organizationSettingsSchema.shape.attendance.unwrap();
@@ -208,6 +209,14 @@ function AttendanceForm({ initial }: { initial: OrganizationSettings['attendance
           {switchRow('notes.requireReasonForLate', 'att-nt-late', t('attendance.notes.requireLate'))}
           {switchRow('notes.requireReasonForAbsent', 'att-nt-absent', t('attendance.notes.requireAbsent'))}
         </div>
+      </Group>
+
+      <Group title={t('attendance.team.title')} hint={t('attendance.team.hint')}>
+        <FormField label={t('attendance.team.scope')} htmlFor="att-team-scope" className="sm:max-w-md" hint={t('attendance.team.scopeHint')}>
+          <Controller control={control} name="team.scope" render={({ field }) => (
+            <Select value={field.value ?? 'direct'} onValueChange={field.onChange} disabled={readOnly}><SelectTrigger id="att-team-scope"><SelectValue /></SelectTrigger><SelectContent>{(['direct', 'hierarchy'] as const).map((v) => <SelectItem key={v} value={v}>{t(`attendance.team.options.${v}`)}</SelectItem>)}</SelectContent></Select>
+          )} />
+        </FormField>
       </Group>
 
       <Group title={t('attendance.stats.title')} hint={t('attendance.stats.hint')}>

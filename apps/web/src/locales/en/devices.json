@@ -111,6 +111,19 @@
     "location": "Location",
     "locationHint": "Where the terminal is installed in its branch: a site, floor or zone."
   },
+  "punchRole": {
+    "label": "Punch role",
+    "options": { "AUTO": "In / out (two-way terminal)", "CHECK_IN": "Check-in only", "CHECK_OUT": "Check-out only", "ACCESS": "Door / meeting-room reader" },
+    "descriptions": {
+      "AUTO": "The terminal reports the direction of each punch (in or out), and that direction is used.",
+      "CHECK_IN": "Entry-only terminal: every punch on it is an arrival.",
+      "CHECK_OUT": "Exit-only terminal: every punch on it is a departure.",
+      "ACCESS": "Room access only (meeting rooms, doors): its punches are recorded in the room access log and never count as attendance."
+    },
+    "badge": { "AUTO": "IN/OUT", "CHECK_IN": "Check-in only", "CHECK_OUT": "Check-out only", "ACCESS": "Access reader" },
+    "appliesFromNow": "Applies to the punches received from now on.",
+    "accessNeedsLocation": "Place the reader in the meeting room's location so that its entries reach the room."
+  },
   "actions": {
     "syncAttendance": "Sync attendance",
     "syncEmployees": "Sync employees",

@@ -96,10 +96,12 @@ async function loadGrants(trx: Trx, orgId: string, employeeId: string): Promise<
 
 type RawPunchRow = { id: string; punchedAt: Date; direction: string; source: string; rawPayload: unknown; processingStatus: string; deviceName: string | null; providerKey: string };
 
+/** The employee's recent attendance punches: a meeting-room reader's entries (punch role ACCESS) are room access, not punches. */
 async function recentRawPunches(trx: Trx, orgId: string, employeeId: string, since: Date): Promise<RawPunchRow[]> {
   return withSystemScope(trx, orgId, async (t) => (await t.selectFrom('attendanceRawTransactions as rt').leftJoin('devices as d', 'd.id', 'rt.deviceId')
     .select(['rt.id', 'rt.punchedAt', 'rt.direction', 'rt.source', 'rt.rawPayload', 'rt.processingStatus', 'd.name as deviceName', 'rt.providerKey'])
     .where('rt.organizationId', '=', orgId).where('rt.employeeId', '=', employeeId).where('rt.punchedAt', '>=', since)
+    .where((eb) => eb.or([eb('d.punchRole', 'is', null), eb('d.punchRole', '!=', 'ACCESS')]))
     .orderBy('rt.punchedAt', 'desc').orderBy('rt.id', 'desc').limit(60).execute()).map((r) => ({ ...r, id: String(r.id) })) as RawPunchRow[]);
 }
 
@@ -240,11 +242,22 @@ interface Assessment {
   viaDeployment: { id: string; branchId: string } | null;
 }
 
+/**
+ * Whether the working day is open (`in`) or closed (`out`) after the latest raw punch (docs/time-away.md): a step-out
+ * (break_out) and the return from one (break_in) keep the day open — after "I'm back" the employee is on site, and while
+ * stepped out they are still inside their day and end it with Check out; a portal IN while stepped out is refused as
+ * ALREADY_CHECKED_IN (they come back with "I'm back" or on the terminal). A direction-less punch says nothing (null).
+ */
+export function dayDirectionOf(direction: string | null | undefined): SelfPunchDirection | null {
+  if (direction === 'in' || direction === 'break_in' || direction === 'break_out') return 'in';
+  return direction === 'out' ? 'out' : null;
+}
+
 async function assess(trx: Trx, orgId: string, ctx: PunchContext, input: { channel: SelfPunchChannel; direction: SelfPunchDirection; lat?: number | undefined; lng?: number | undefined; accuracy?: number | undefined; isMock?: boolean | undefined }, ip: string | null, at: Date, opts: { sequence: boolean }): Promise<Assessment> {
   const refusals = await standingRefusals(trx, orgId, ctx, input.channel, ip, at);
   const recent = await recentRawPunches(trx, orgId, ctx.emp.id, new Date(at.getTime() - SEQUENCE_WINDOW_MS));
   const last = recent[0] ?? null;
-  const lastDirection: SelfPunchDirection | null = last && (last.direction === 'in' || last.direction === 'out') ? last.direction : null;
+  const lastDirection = dayDirectionOf(last?.direction);
   if (opts.sequence && lastDirection === input.direction) refusals.push(input.direction === 'in' ? 'ALREADY_CHECKED_IN' : 'NOT_CHECKED_IN');
   // the duplicate window is per DIRECTION (review P1-4): a second check-in within it is a double tap, a check-out right after
   // a check-in is not (the sequence rules judge it). A genuine duplicate is the FIRST refusal: the punch is already recorded.
@@ -310,7 +323,7 @@ export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string,
     const recent = await recentRawPunches(trx, orgId, self.employeeId, new Date(Math.min(now.getTime() - SEQUENCE_WINDOW_MS, todayStart)));
     const inWindow = recent.filter((r) => now.getTime() - r.punchedAt.getTime() <= SEQUENCE_WINDOW_MS);
     const last = inWindow[0];
-    const lastDirection: SelfPunchDirection | null = last && (last.direction === 'in' || last.direction === 'out') ? last.direction : null;
+    const lastDirection = dayDirectionOf(last?.direction);
     const record = await withSystemScope(trx, orgId, (t) => t.selectFrom('attendanceDailyRecords').select(['status', 'flags', 'firstInAt', 'lastOutAt', 'workedMinutes', 'expectedEndAt', 'scheduledMinutes'])
       .where('organizationId', '=', orgId).where('employeeId', '=', self.employeeId).where('attendanceDate', '=', sql<Date>`${local.date}::date`).executeTakeFirst());
     // today's shift, resolved live (the shift tab's resolver): named even before today's record exists or catches up with a change

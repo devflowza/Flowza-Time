@@ -8,6 +8,7 @@ import { isoDate, isoDateTimeOrNull } from '../../lib/mappers.js';
 import { toCount } from '../../lib/pagination.js';
 import { dv } from '../features/sql-helpers.js';
 import { attendancePolicy, loadEmployeeCtx, localInstant, portalSelf } from './common.js';
+import { dayDirectionOf } from './punch.service.js';
 
 /**
  * The employee's own statistics (HR portal Prompt 4, `computeSelfStats` in packages/domain): attendance % against the
@@ -68,11 +69,15 @@ export async function portalOverviewExtras(deps: ApiDeps, actor: Actor, orgId: s
         const now = new Date();
         const policy = settings.selfService;
         const since = new Date(now.getTime() - 20 * 3_600_000);
-        const punches = await t.selectFrom('attendanceRawTransactions').select(['punchedAt', 'direction']).where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('punchedAt', '>=', since)
-          .orderBy('punchedAt', 'desc').limit(50).execute();
+        // a meeting-room reader's entries (punch role ACCESS) are room access, not attendance punches
+        const punches = await t.selectFrom('attendanceRawTransactions as rt').leftJoin('devices as d', 'd.id', 'rt.deviceId').select(['rt.punchedAt', 'rt.direction'])
+          .where('rt.organizationId', '=', orgId).where('rt.employeeId', '=', employeeId).where('rt.punchedAt', '>=', since)
+          .where((eb) => eb.or([eb('d.punchRole', 'is', null), eb('d.punchRole', '!=', 'ACCESS')]))
+          .orderBy('rt.punchedAt', 'desc').limit(50).execute();
         const today = localInstant(now, emp.timezone).date;
         const last = punches[0];
-        const lastDirection = last && (last.direction === 'in' || last.direction === 'out') ? last.direction : null;
+        // a step-out / "I'm back" punch keeps the day open, as on the check-in page (punch.service dayDirectionOf)
+        const lastDirection = dayDirectionOf(last?.direction);
         const enabled = policy.webCheckIn || policy.mobileCheckIn;
         out.punch = {
           lastDirection, lastPunchAt: last ? last.punchedAt.toISOString() : null, punchesToday: punches.filter((p) => localInstant(p.punchedAt, emp.timezone).date === today).length,

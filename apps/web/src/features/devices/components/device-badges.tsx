@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import type { ConnectionStatus, DeviceCapabilities, DeviceEmployeeSyncStatus, DeviceStatus, IntegrationType, ProviderStatus, VerificationStatus } from '@flowza/contracts';
+import type { ConnectionStatus, DeviceCapabilities, DeviceEmployeeSyncStatus, DevicePunchRole, DeviceStatus, IntegrationType, ProviderStatus, VerificationStatus } from '@flowza/contracts';
 import { CAPABILITY_KEYS } from '@flowza/contracts';
 import { Badge, Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui';
 import { fmtRelative } from '@/lib/format';
@@ -36,6 +36,17 @@ export function VerificationBadge({ status }: { status: VerificationStatus }) {
 export function IntegrationBadge({ type }: { type: IntegrationType }) {
   const { t } = useTranslation('devices');
   return <Badge variant="outline" className="font-normal">{t(`integration.${type}`)}</Badge>;
+}
+/**
+ * What the terminal's punches mean. A two-way terminal (AUTO) is the ordinary case: it shows as a subtle "IN/OUT" only where
+ * `showAuto` asks for it (the detail page), and not at all in lists.
+ */
+export function PunchRoleBadge({ role, showAuto = false }: { role: DevicePunchRole | undefined; showAuto?: boolean }) {
+  const { t } = useTranslation('devices');
+  const r = role ?? 'AUTO';
+  if (r === 'AUTO' && !showAuto) return null;
+  const variant = r === 'ACCESS' ? 'info' : r === 'AUTO' ? 'outline' : 'secondary';
+  return <Badge variant={variant} className={cn('font-normal', r === 'AUTO' && 'text-muted-foreground')} title={t(`punchRole.descriptions.${r}`)} data-punch-role={r}>{t(`punchRole.badge.${r}`)}</Badge>;
 }
 export function EmployeeSyncBadge({ status }: { status: DeviceEmployeeSyncStatus }) {
   const { t } = useTranslation('devices');

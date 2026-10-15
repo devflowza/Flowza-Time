@@ -263,14 +263,14 @@ async function insertDevice(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string
   await assertWithinLimit(trx, orgId, 'devices', activeCount);
   const settings = await loadSettings(trx, orgId);
   const row = await trx.insertInto('devices').values({
-    organizationId: orgId, branchId: input.branchId, locationId: input.locationId ?? null, code: input.code, name: input.name, providerKey: def.key, modelId: input.modelId ?? null, manufacturer: input.manufacturer, modelName: input.modelName ?? null,
+    organizationId: orgId, branchId: input.branchId, locationId: input.locationId ?? null, punchRole: input.punchRole ?? 'AUTO', code: input.code, name: input.name, providerKey: def.key, modelId: input.modelId ?? null, manufacturer: input.manufacturer, modelName: input.modelName ?? null,
     serialNumber: input.serialNumber ?? null, timezone: input.timezone ?? branch.timezone, integrationType, endpointUrl: input.endpointUrl ?? null, config: JSON.stringify(extra.config),
     capabilities: JSON.stringify(def.capabilities), offlineThresholdMinutes: input.offlineThresholdMinutes ?? settings.sync.offlineThresholdMinutes ?? 15,
     autoSyncEnabled: input.autoSyncEnabled ?? (integrationType !== 'DEVICE_PUSH' && def.capabilities.attendancePull), syncIntervalMinutes: input.syncIntervalMinutes ?? settings.sync.defaultIntervalMinutes ?? 5,
     tags: input.tags ?? [], notes: input.notes ?? null, pushTokenHash: extra.pushTokenHash, pushTokenRotatedAt: extra.pushTokenHash ? new Date() : null, createdBy: actor.userId,
     nextAttendanceSyncAt: integrationType !== 'DEVICE_PUSH' && def.capabilities.attendancePull && (input.autoSyncEnabled ?? true) ? new Date() : null,
   }).returning('id').executeTakeFirstOrThrow();
-  await audit(trx, actor, orgId, 'device.created', 'device', { entityId: row.id, branchId: input.branchId, newValue: { code: input.code, name: input.name, providerKey: def.key, branchId: input.branchId, locationId: input.locationId ?? null, serialNumber: input.serialNumber ?? null, endpointUrl: input.endpointUrl ?? null, config: extra.config, secretFieldsProvided: extra.secretsProvided, pushTokenIssued: extra.pushTokenHash !== null } });
+  await audit(trx, actor, orgId, 'device.created', 'device', { entityId: row.id, branchId: input.branchId, newValue: { code: input.code, name: input.name, providerKey: def.key, branchId: input.branchId, locationId: input.locationId ?? null, punchRole: input.punchRole ?? 'AUTO', serialNumber: input.serialNumber ?? null, endpointUrl: input.endpointUrl ?? null, config: extra.config, secretFieldsProvided: extra.secretsProvided, pushTokenIssued: extra.pushTokenHash !== null } });
   await emitDomainEvent(trx, { organizationId: orgId, eventType: 'device.created', aggregateType: 'device', aggregateId: row.id, payload: { code: input.code, providerKey: def.key, branchId: input.branchId }, actorUserId: actor.userId, requestId: actor.requestId });
   let testJob: CreatedSyncJob | null = null;
   if (integrationType !== 'DEVICE_PUSH' && def.status !== 'placeholder') {

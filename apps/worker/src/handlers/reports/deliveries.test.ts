@@ -290,3 +290,32 @@ describe('each employee receives the report about themselves (Flowza Finance par
     expect(await h.tdb.adminDb.selectFrom('notificationDeliveries').select('channel').where('notificationId', '=', n.id).execute()).toEqual([{ channel: 'EMAIL' }]);
   });
 });
+
+describe('the daily roll call (cadence daily, period previous_day) follows the manager team scope', () => {
+  const E4 = '0c600000-0000-4000-a000-0000000000e4'; // branch A, reports to E1 (who reports to E3, the team lead)
+  const DAILY = '0c600000-0000-4000-a000-0000000000c2';
+  const leadCopy = async (runKey: string) => {
+    const d = (await deliveries(runKey)).find((r) => r.recipientUserId === LEAD)!;
+    return h.tdb.adminDb.selectFrom('reportRequests').select('parameters').where('id', '=', d.reportRequestId!).executeTakeFirstOrThrow();
+  };
+  it('direct scope: the lead receives yesterday for their direct report; hierarchy scope: the whole reporting line', async () => {
+    const a = h.tdb.adminDb;
+    await a.insertInto('employees').values({ id: E4, organizationId: ORG, employeeNumber: '4', firstName: '4', lastName: '.', displayName: 'Employee 4', joiningDate: '2024-01-01', branchId: BRANCH_A, deviceUserId: '4', managerEmployeeId: E1 }).execute();
+    await a.insertInto('reportSchedules').values({
+      id: DAILY, organizationId: ORG, name: 'Morning roll call', reportType: 'daily_attendance', format: 'csv', filters: JSON.stringify({}), cadence: 'daily', runDay: 0b0011111, runTime: '07:30',
+      periodRule: 'previous_day', recipients: JSON.stringify({ userIds: [LEAD], roleKeys: [] }), channels: ['in_app'], isActive: true, nextRunAt: new Date('2026-10-18T03:30:00Z'), createdBy: OWNER,
+    }).execute();
+    clock = new Date('2026-10-18T03:30:00Z'); // Sunday 18 Oct 07:30 in Muscat → Thursday to Saturday (Thursday's run covered Wednesday)
+    const direct = await runReportDeliveryHandler(ctx('RUN_REPORT_SCHEDULE', { organizationId: ORG, mode: 'manual', scheduleId: DAILY, runKey: 'manual:daily-direct', requestedBy: OWNER }));
+    expect(direct).toMatchObject({ outcome: 'delivered', queued: 1, period: { from: '2026-10-15', to: '2026-10-17' } });
+    expect((await leadCopy('manual:daily-direct')).parameters).toEqual({ from: '2026-10-15', to: '2026-10-17', employeeIds: [E1] });
+
+    await a.updateTable('organizationSettings').set({ attendance: sql`jsonb_set(coalesce(attendance, '{}'::jsonb), '{team}', '{"scope":"hierarchy"}')` }).where('organizationId', '=', ORG).execute();
+    clock = new Date('2026-10-19T03:30:00Z'); // Monday → Sunday only
+    const deep = await runReportDeliveryHandler(ctx('RUN_REPORT_SCHEDULE', { organizationId: ORG, mode: 'manual', scheduleId: DAILY, runKey: 'manual:daily-deep', requestedBy: OWNER }));
+    expect(deep).toMatchObject({ outcome: 'delivered', queued: 1, period: { from: '2026-10-18', to: '2026-10-18' } });
+    const ids = (await leadCopy('manual:daily-deep')).parameters as { employeeIds: string[] };
+    expect([...ids.employeeIds].sort()).toEqual([E1, E4].sort());
+    await a.updateTable('organizationSettings').set({ attendance: sql`coalesce(attendance, '{}'::jsonb) - 'team'` }).where('organizationId', '=', ORG).execute();
+  });
+});

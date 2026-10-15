@@ -39,12 +39,16 @@ export const MODULE_ROUTE_RULES: ReadonlyArray<{ pattern: RegExp; modules: reado
   // the muster list of a location (docs/locations.md §4); the location tree itself is core
   { pattern: /^locations\/[^/]+\/muster(\/|$)/, modules: ['advanced_scheduling'] },
   { pattern: /^(employee-groups|attendance-policies)(\/|$)/, modules: ['attendance_policies'] },
+  // meeting rooms & access (migration 20261015000200, docs/time-away.md §4); the readers' punch role stays core
+  { pattern: /^(meeting-rooms|meetings|access-events)(\/|$)/, modules: ['meeting_rooms'] },
+  { pattern: /^me\/meetings(\/|$)/, modules: ['meeting_rooms'] },
 ];
 
 const MODULE_NAMES: Record<ModuleKey, string> = {
   devices: 'Devices & sync', self_service: 'Employee self-service portal', geofences: 'Web check-in & geofencing', leave: 'Leave management',
   manager_workspace: 'Manager workspace', payroll: 'Payroll', report_schedules: 'Scheduled reports', finance_integration: 'Flowza Finance integration',
   shift_requests: 'Shift change & swap requests', advanced_scheduling: 'Round-the-clock scheduling', attendance_policies: 'Global attendance policies',
+  meeting_rooms: 'Meeting rooms & access',
 };
 
 /** The modules a path (relative to `/orgs/:orgId/`) needs. */

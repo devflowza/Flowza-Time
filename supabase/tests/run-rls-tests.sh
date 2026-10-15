@@ -24,6 +24,8 @@ psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_approv
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_enterprise.sql"
 # location hierarchy (20261010000100): levels, the tree, place references — self-contained, every block rolls back
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_locations.sql"
+# time away, meeting rooms and the manager team scope (20261015000100–300): self-contained, every block rolls back
+psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_time_away_meetings.sql"
 # security gate (HR portal Prompt 10): the data API login (PostgREST / pg_graphql) reads and writes nothing
 psql -U authenticator -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_data_api.sql"
 # security gate: catalogue-driven invariants and the generated cross-tenant probes (last: they read every suite's fixtures)
