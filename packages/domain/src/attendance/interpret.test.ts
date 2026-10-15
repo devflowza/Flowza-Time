@@ -91,6 +91,16 @@ describe('interpretPunches DIRECTIONAL', () => {
     const r = interpretPunches(events, 'DIRECTIONAL', MUSCAT);
     expect(roles(r)).toEqual(['IN', 'OUT']);
   });
+
+  it('exposes a break still open when the punches end (stepped out, never back) without measuring it; null otherwise', () => {
+    const open = interpretPunches([punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '10:00', 'BREAK_START'), punch(DATE, '10:30', 'BREAK_END'), punch(DATE, '12:00', 'BREAK_START')], 'DIRECTIONAL', MUSCAT);
+    expect(open.openBreak?.toMillis()).toBe(t('12:00').toMillis());
+    expect(open).toMatchObject({ missingOut: true, lastOut: null, measuredBreakMinutes: 30 });
+    expect(open.breakSpans.map((b) => [b.start.toFormat('HH:mm'), b.end.toFormat('HH:mm')])).toEqual([['10:00', '10:30']]);
+    expect(interpretPunches([punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '12:00', 'BREAK_START'), punch(DATE, '12:30', 'BREAK_END')], 'DIRECTIONAL', MUSCAT).openBreak).toBeNull();
+    expect(interpretPunches(['08:00', '12:00', '13:00'].map((h) => punch(DATE, h)), 'PAIRED', MUSCAT).openBreak).toBeNull();
+    expect(interpretPunches([], 'FIRST_LAST', MUSCAT).openBreak).toBeNull();
+  });
 });
 
 describe('collapseDuplicates', () => {

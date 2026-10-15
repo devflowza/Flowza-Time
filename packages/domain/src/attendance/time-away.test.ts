@@ -3,7 +3,7 @@ import { DEFAULT_POLICY_SECTIONS, type AttendancePolicySections, type Attendance
 import { calculateDailyRecord } from './calculate.js';
 import { awayIntervalsOf, breakAllowanceMinutes, classifyTimeAway, timeAwayActive, timeAwayInactiveReason, type EngineTimeAway } from './time-away.js';
 import { parseInstant } from './window.js';
-import { DATE, MUSCAT, at, fixedShift, input, punch, resetIds, rules } from './testing.js';
+import { DATE, MUSCAT, at, fixedShift, flexibleShift, input, punch, resetIds, rules } from './testing.js';
 
 /** The policy of the brief: an 08:00–14:00 office day, time away measured on a two-way or entry-only terminal. */
 const SHIFT = fixedShift({ id: 'shift-office', code: 'OFF', name: 'Office 08:00–14:00', startTime: '08:00', endTime: '14:00' });
@@ -168,5 +168,134 @@ describe('time away — 08:00–14:00 office day (calculateDailyRecord)', () => 
   it('is deterministic: the same inputs give the same record', () => {
     const make = () => { resetIds(); return calculateDailyRecord(input({ shift: SHIFT, rules: awayRules(), now: AFTER_WINDOW, timeAway: [window('w', 'PERSONAL', '10:00', '11:00')], events: [punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '10:00', 'PUNCH_OUT'), punch(DATE, '11:30', 'PUNCH_IN'), punch(DATE, '14:00', 'PUNCH_OUT')] })); };
     expect(JSON.stringify(make())).toBe(JSON.stringify(make()));
+  });
+});
+
+describe('time away — a non-working day still in progress (review C1)', () => {
+  beforeEach(resetIds);
+  const FRIDAY = '2026-03-13'; // a weekly off of the fixtures (weeklyOffDays [5, 6])
+
+  it('weekly off, PAIRED, back on site and not checked out yet: the open tail is neither deducted nor reported', () => {
+    const r = calculateDailyRecord(input({ attendanceDate: FRIDAY, shift: SHIFT, rules: awayRules({}, { punchInterpretation: 'PAIRED' }), now: at(FRIDAY, '12:30'), events: [punch(FRIDAY, '08:00'), punch(FRIDAY, '10:00'), punch(FRIDAY, '12:00')] }));
+    expect(r).toMatchObject({ status: 'WEEKLY_OFF', workedMinutes: 120, lastOutAt: at(FRIDAY, '10:00'), awayMinutes: 0, unapprovedAwayMinutes: 0 });
+    expect(r.flags).not.toContain('TIME_AWAY');
+    expect(r.flags).not.toContain('UNAPPROVED_AWAY');
+    expect(awayStep(r)?.values?.['intervals']).toEqual([]);
+  });
+
+  it('holiday, DIRECTIONAL, IN 08:00 / OUT 12:00 / IN 13:00 at 13:30: 240 worked, as with the policy off', () => {
+    const holiday = { id: 'hol-1', name: 'National Day', isHalfDay: false };
+    const events = () => [punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '12:00', 'PUNCH_OUT'), punch(DATE, '13:00', 'PUNCH_IN')];
+    const on = calculateDailyRecord(input({ holiday, shift: SHIFT, rules: awayRules(), now: at(DATE, '13:30'), events: events() }));
+    const off = calculateDailyRecord(input({ holiday, shift: SHIFT, rules: rules({ punchInterpretation: 'DIRECTIONAL' }), now: at(DATE, '13:30'), events: events() }));
+    expect(off).toMatchObject({ status: 'HOLIDAY', workedMinutes: 240 });
+    expect(on).toMatchObject({ status: 'HOLIDAY', workedMinutes: 240, awayMinutes: 0, unapprovedAwayMinutes: 0 });
+    expect(on.flags).not.toContain('UNAPPROVED_AWAY');
+  });
+
+  it('a working day in the same state stays PENDING and still reports the open tail (unchanged)', () => {
+    const r = calculateDailyRecord(input({ shift: SHIFT, rules: awayRules({}, { punchInterpretation: 'PAIRED' }), now: at(DATE, '12:30'), events: [punch(DATE, '08:00'), punch(DATE, '10:00'), punch(DATE, '12:00')] }));
+    expect(r).toMatchObject({ status: 'PENDING', workedMinutes: 0, awayMinutes: 120, unapprovedAwayMinutes: 120 });
+    expect(r.flags).toContain('UNAPPROVED_AWAY');
+  });
+});
+
+describe('time away — the shift\'s unpaid break stays a floor (review C2)', () => {
+  beforeEach(resetIds);
+  const LUNCH = fixedShift({ id: 'shift-lunch', code: 'LUN', name: 'Office 08:00–17:00', startTime: '08:00', endTime: '17:00', breaks: [{ minutes: 60, paid: false }] });
+  const officialDay = () => [punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '10:00', 'PUNCH_OUT'), punch(DATE, '12:00', 'PUNCH_IN'), punch(DATE, '17:00', 'PUNCH_OUT')];
+  const plainDay = () => [punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '17:00', 'PUNCH_OUT')];
+  const official = [window('req-official', 'OFFICIAL', '10:00', '12:00')];
+
+  it('FIXED with a 60-min unpaid lunch: an approved official 10:00–12:00 earns what a plain day earns', () => {
+    const plain = calculateDailyRecord(input({ shift: LUNCH, rules: awayRules(), now: AFTER_WINDOW, events: plainDay() }));
+    const r = calculateDailyRecord(input({ shift: LUNCH, rules: awayRules(), now: AFTER_WINDOW, timeAway: official, events: officialDay() }));
+    expect(plain).toMatchObject({ workedMinutes: 480, breakMinutes: 60 });
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 480, breakMinutes: 60, officialDutyMinutes: 120, overtimeMinutes: 0 });
+    expect(r.trace.steps.find((s) => s.step === 'breaks')?.values).toMatchObject({ source: 'TIME_AWAY', unpaidMinutes: 60, measuredUnpaidMinutes: 0, floorMinutes: 60 });
+  });
+
+  it('FLEXIBLE 480 required + 60 unpaid: neither an official window nor a short gap turns the lunch into overtime', () => {
+    const flex = flexibleShift({ breaks: [{ minutes: 60, paid: false }] });
+    const plain = calculateDailyRecord(input({ shift: flex, rules: awayRules(), events: plainDay() }));
+    const off = calculateDailyRecord(input({ shift: flex, rules: awayRules(), timeAway: official, events: officialDay() }));
+    const short = calculateDailyRecord(input({ shift: flex, rules: awayRules(), events: [punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '09:30', 'PUNCH_OUT'), punch(DATE, '09:32', 'PUNCH_IN'), punch(DATE, '17:00', 'PUNCH_OUT')] }));
+    expect(plain).toMatchObject({ workedMinutes: 480, overtimeMinutes: 0 });
+    expect(off).toMatchObject({ workedMinutes: 480, overtimeMinutes: 0, officialDutyMinutes: 120 });
+    expect(short).toMatchObject({ workedMinutes: 480, overtimeMinutes: 0, awayMinutes: 2 });
+  });
+
+  it('an approved 1 h personal permission costs its hour on top of the lunch (excused for the status)', () => {
+    const r = calculateDailyRecord(input({
+      shift: LUNCH, rules: awayRules(), now: AFTER_WINDOW, timeAway: [window('req-personal', 'PERSONAL', '15:00', '16:00')],
+      events: [punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '15:00', 'PUNCH_OUT'), punch(DATE, '16:00', 'PUNCH_IN'), punch(DATE, '17:00', 'PUNCH_OUT')],
+    }));
+    expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 420, breakMinutes: 60, permissionMinutes: 60 });
+    expect(r.trace.steps.find((s) => s.step === 'timeAway.status')?.values).toMatchObject({ workedMinutes: 420, excusedMinutes: 60 });
+  });
+
+  it('a punched lunch shorter than the shift\'s break still deducts the shift\'s break once, never twice', () => {
+    const r = calculateDailyRecord(input({ shift: LUNCH, rules: awayRules(), now: AFTER_WINDOW, events: [punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '12:00', 'PUNCH_OUT'), punch(DATE, '12:30', 'PUNCH_IN'), punch(DATE, '17:00', 'PUNCH_OUT')] }));
+    expect(r).toMatchObject({ workedMinutes: 480, breakMinutes: 60, awayMinutes: 30, unapprovedAwayMinutes: 0 });
+  });
+
+  it('a scheduled lunch range already inside deducted time away is not deducted again', () => {
+    const range = { ...LUNCH, breaks: [{ start: '12:00', end: '13:00', paid: false }] };
+    const away = () => [punch(DATE, '08:00', 'PUNCH_IN'), punch(DATE, '11:00', 'PUNCH_OUT'), punch(DATE, '14:00', 'PUNCH_IN'), punch(DATE, '17:00', 'PUNCH_OUT')];
+    // 11:00–14:00 on approved permission: 08–11 + 14–17 worked, the lunch hour lies inside the permission
+    const permission = calculateDailyRecord(input({ shift: range, rules: awayRules(), now: AFTER_WINDOW, timeAway: [window('req-personal', 'PERSONAL', '11:00', '14:00')], events: away() }));
+    expect(permission).toMatchObject({ workedMinutes: 360, breakMinutes: 0, permissionMinutes: 180 });
+    // unapproved: the first hour is the break allowance, the lunch range lies inside the unapproved rest
+    const unapproved = calculateDailyRecord(input({ shift: range, rules: awayRules(), now: AFTER_WINDOW, events: away() }));
+    expect(unapproved).toMatchObject({ workedMinutes: 360, breakMinutes: 60, unapprovedAwayMinutes: 120 });
+    // official duty around the lunch range counts as worked: the lunch is deducted like on a plain day
+    const offDuty = calculateDailyRecord(input({ shift: range, rules: awayRules(), now: AFTER_WINDOW, timeAway: official, events: officialDay() }));
+    expect(offDuty).toMatchObject({ workedMinutes: 480, breakMinutes: 60, officialDutyMinutes: 120 });
+  });
+});
+
+describe('time away — a step-out never closed under ASSUME_SHIFT_END (review D1)', () => {
+  beforeEach(resetIds);
+  const assumeEnd = (timeAway: Partial<AttendancePolicySections['timeAway']> = {}) => awayRules(timeAway, { missingPunchBehavior: 'ASSUME_SHIFT_END' });
+  const stepOut = (time: string) => punch(DATE, time, 'BREAK_START', MUSCAT, { source: 'MOBILE', deviceId: 'self-service', payload: { channel: 'web' } });
+  const neverBack = () => [punch(DATE, '08:00', 'PUNCH_IN', MUSCAT, { deviceId: 'entry-terminal' }), stepOut('12:00')];
+
+  it('the time from the step-out to the assumed check-out is unapproved time away, not worked time', () => {
+    const r = calculateDailyRecord(input({ shift: SHIFT, rules: assumeEnd(), now: AFTER_WINDOW, events: neverBack() }));
+    expect(r).toMatchObject({ status: 'PRESENT', firstInAt: at(DATE, '08:00'), lastOutAt: null, workedMinutes: 240, awayMinutes: 120, unapprovedAwayMinutes: 120 });
+    expect(r.flags).toEqual(expect.arrayContaining(['MISSING_OUT', 'TIME_AWAY', 'UNAPPROVED_AWAY', 'UNDER_HOURS']));
+    // the one `timeAway` step the API reads back carries the interval
+    expect(r.trace.steps.filter((s) => s.step === 'timeAway')).toHaveLength(1);
+    expect(awayStep(r)?.values?.['intervals']).toEqual([{ kind: 'UNAPPROVED', startAt: at(DATE, '12:00'), endAt: at(DATE, '14:00'), minutes: 120, requestId: null }]);
+    expect(r.trace.steps.find((s) => s.step === 'timeAway.openBreak')?.values).toMatchObject({ openBreakAt: at(DATE, '12:00'), assumedOut: at(DATE, '14:00'), minutes: 120 });
+  });
+
+  it('an approved window over the step-out still counts as permission / official duty', () => {
+    const personal = calculateDailyRecord(input({ shift: SHIFT, rules: assumeEnd(), now: AFTER_WINDOW, timeAway: [window('req-personal', 'PERSONAL', '12:00', '14:00')], events: neverBack() }));
+    expect(personal).toMatchObject({ status: 'PRESENT', workedMinutes: 240, permissionMinutes: 120, unapprovedAwayMinutes: 0 });
+    expect(personal.flags).not.toContain('UNDER_HOURS');
+    resetIds();
+    const official = calculateDailyRecord(input({ shift: SHIFT, rules: assumeEnd(), now: AFTER_WINDOW, timeAway: [window('req-official', 'OFFICIAL', '12:00', '14:00')], events: neverBack() }));
+    expect(official).toMatchObject({ status: 'PRESENT', workedMinutes: 360, officialDutyMinutes: 120, unapprovedAwayMinutes: 0 });
+  });
+
+  it('a closed step-out earlier in the day is classified with the open one', () => {
+    const r = calculateDailyRecord(input({ shift: SHIFT, rules: assumeEnd(), now: AFTER_WINDOW, events: [punch(DATE, '08:00', 'PUNCH_IN'), stepOut('10:00'), punch(DATE, '10:30', 'PUNCH_IN'), stepOut('12:00')] }));
+    expect(r).toMatchObject({ workedMinutes: 210, awayMinutes: 150, unapprovedAwayMinutes: 150 });
+  });
+
+  it('a step-out at or after the assumed check-out changes nothing', () => {
+    const r = calculateDailyRecord(input({ shift: SHIFT, rules: assumeEnd(), now: AFTER_WINDOW, events: [punch(DATE, '08:00', 'PUNCH_IN'), stepOut('14:30')] }));
+    expect(r).toMatchObject({ workedMinutes: 360, awayMinutes: 0 });
+    expect(r.trace.steps.find((s) => s.step === 'timeAway.openBreak')).toBeUndefined();
+  });
+
+  it('FLAG_ONLY and the policy off behave as before', () => {
+    const flagOnly = calculateDailyRecord(input({ shift: SHIFT, rules: awayRules(), now: AFTER_WINDOW, events: neverBack() }));
+    expect(flagOnly).toMatchObject({ status: 'MISSING_PUNCH', workedMinutes: 0, awayMinutes: 0 });
+    resetIds();
+    const off = calculateDailyRecord(input({ shift: SHIFT, rules: rules({ punchInterpretation: 'DIRECTIONAL', missingPunchBehavior: 'ASSUME_SHIFT_END', minFullDayMinutes: 330, halfDayThresholdMinutes: 180 }), now: AFTER_WINDOW, events: neverBack() }));
+    expect(off).toMatchObject({ status: 'PRESENT', workedMinutes: 360, awayMinutes: 0 });
+    expect(awayStep(off)).toBeUndefined();
   });
 });

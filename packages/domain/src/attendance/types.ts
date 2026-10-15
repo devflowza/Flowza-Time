@@ -201,5 +201,8 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * between the first IN and the last OUT is classified against the approved time-away windows (official / permission / break /
  * unapproved; time-away.ts). Approved official duty stays worked time (policy), permission and unapproved time are deducted;
  * permission does not make the day short (policy). Flags TIME_AWAY / UNAPPROVED_AWAY. Nothing changes with the policy off.
+ * The shift's unpaid break stays a floor (only a measured break uses it up); the gap before a stretch not checked out yet is
+ * reported on a PENDING working day only and never deducted; under ASSUME_SHIFT_END a step-out never closed is time away up
+ * to the assumed check-out.
  */
 export const ENGINE_VERSION = 'attendance-engine/1.5.0';

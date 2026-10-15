@@ -32,6 +32,11 @@ export interface Interpretation {
   measuredBreakMinutes: number;
   /** The explicit BREAK_START → BREAK_END spans (DIRECTIONAL), closed ones only — inside the segments they interrupt. */
   breakSpans: Array<{ start: DateTime; end: DateTime }>;
+  /**
+   * The start of a break still open when the punches end (DIRECTIONAL: stepped out, never came back); null otherwise. Not a
+   * measured break: only the time-away engine reads it, for a day judged with ASSUME_SHIFT_END (calculate.ts).
+   */
+  openBreak: DateTime | null;
   /** True when the interpretation produced any measured gap information (PAIRED/DIRECTIONAL with ≥ 2 segments or BREAK_* events). */
   hasMeasuredBreaks: boolean;
 }
@@ -265,6 +270,8 @@ function finish(mode: PunchInterpretation, punches: InterpretedPunch[], segments
   let breakMinutes = 0;
   for (const b of breaks) if (b.end) breakMinutes += Math.max(0, b.end.diff(b.start, 'minutes').minutes);
   const breakSpans = breaks.filter((b): b is { start: DateTime; end: DateTime } => b.end !== null);
+  // only the last break can still be open: a new one starts only once the previous one closed
+  const openBreak = breaks.find((b) => b.end === null)?.start ?? null;
   const hasMeasuredBreaks = closed.length > 1 || breakSpans.length > 0;
   return {
     mode,
@@ -277,12 +284,13 @@ function finish(mode: PunchInterpretation, punches: InterpretedPunch[], segments
     segments,
     measuredBreakMinutes: Math.round(gapMinutes + breakMinutes),
     breakSpans,
+    openBreak,
     hasMeasuredBreaks,
   };
 }
 
 function empty(mode: PunchInterpretation): Interpretation {
-  return { mode, effectiveMode: mode, punches: [], firstIn: null, lastOut: null, missingIn: false, missingOut: false, segments: [], measuredBreakMinutes: 0, breakSpans: [], hasMeasuredBreaks: false };
+  return { mode, effectiveMode: mode, punches: [], firstIn: null, lastOut: null, missingIn: false, missingOut: false, segments: [], measuredBreakMinutes: 0, breakSpans: [], openBreak: null, hasMeasuredBreaks: false };
 }
 
 /* ------------------------------------------------------------------------------------------------ */
@@ -308,6 +316,18 @@ export function scheduledBreakMinutes(breaks: readonly ShiftBreak[]): { paid: nu
     else unpaid += minutes;
   }
   return { paid, unpaid };
+}
+
+/**
+ * Where a scheduled `{start,end}` break falls on `attendanceDate` for a worked span that starts at `firstIn`: a range that
+ * ends at or before its start runs past midnight, and a cross-midnight shift may schedule it after midnight (the range moves
+ * forward a day when it falls before the IN).
+ */
+export function placeScheduledBreak(b: { start: string; end: string }, attendanceDate: string, zone: string, crossesMidnight: boolean, firstIn: DateTime): { start: DateTime; end: DateTime } {
+  const start = localInstant(attendanceDate, b.start, zone);
+  let end = localInstant(attendanceDate, b.end, zone);
+  if (end <= start) end = localInstant(attendanceDate, b.end, zone, 1);
+  return crossesMidnight && end <= firstIn ? { start: start.plus({ days: 1 }), end: end.plus({ days: 1 }) } : { start, end };
 }
 
 function rangeMinutes(start: string, end: string): number {
@@ -355,11 +375,7 @@ export function computeBreaks(params: {
       minutes = b.minutes;
       notes.push(`${b.paid ? 'paid' : 'unpaid'} fixed ${minutes} min`);
     } else {
-      const start = localInstant(params.attendanceDate, b.start, params.zone);
-      let end = localInstant(params.attendanceDate, b.end, params.zone);
-      if (end <= start) end = localInstant(params.attendanceDate, b.end, params.zone, 1);
-      // Cross-midnight shifts may schedule the break after midnight: shift the range forward when it falls before the IN.
-      const [rs, re] = params.crossesMidnight && end <= firstIn ? [start.plus({ days: 1 }), end.plus({ days: 1 })] : [start, end];
+      const { start: rs, end: re } = placeScheduledBreak(b, params.attendanceDate, params.zone, params.crossesMidnight, firstIn);
       const overlapStart = rs > firstIn ? rs : firstIn;
       const overlapEnd = re < lastOut ? re : lastOut;
       minutes = overlapEnd > overlapStart ? Math.round(overlapEnd.diff(overlapStart, 'minutes').minutes) : 0;
