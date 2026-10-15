@@ -19,8 +19,8 @@
 --  4. Meeting rooms (Enterprise module `meeting_rooms`): `meeting_rooms` (a place of the location tree with a capacity and an
 --     optional restriction to departments / employees), `meetings` + `meeting_invitees`, and `access_events` — the room
 --     entries the normaliser records from ACCESS terminals (append-only). Meeting attendance (who came, when, late, absent,
---     walk-ins) is derived from them at read time.
---  5. Permissions `meeting.view`, `meeting.manage`, `meeting.rooms`.
+--     walk-ins) is derived from them at read time. Invitations follow their meeting in RLS (its branch scope included).
+--  5. Permissions `meeting.view`, `meeting.manage`, `meeting.rooms` (none on the team-scoped built-in Manager role).
 set lock_timeout = '5s';
 set statement_timeout = '120s';
 set client_min_messages = warning;
@@ -128,15 +128,21 @@ insert into public.permissions (key, category, description, sort_order) values
   ('meeting.rooms',  'meetings', 'Configure meeting rooms and read the room access log', 142)
 on conflict (key) do update set category = excluded.category, description = excluded.description, sort_order = excluded.sort_order;
 
--- owner, org admin, HR admin, attendance admin: everything; branch manager and line manager: meetings; HR user, auditor: read
+-- owner, org admin, HR admin, attendance admin: everything; branch manager: meetings (in their branches); HR user, auditor: read.
+-- The built-in Manager role (…0009) gets NO meeting key: it is team-scoped (its direct reports, not the directory — 20260928000150)
+-- while the meeting policies are organisation / branch wide, so meeting.view would show it every meeting with its attendees and
+-- meeting.manage would let it book and cancel any room of every branch. Employees read their own invitations without a key;
+-- an organisation that wants its managers to book rooms gives them a custom role (like report.export, docs/time-away.md §6).
 insert into public.role_permissions (role_id, permission_key)
 select r.id::uuid, k from (values
   ('10000000-0000-0000-0000-000000000001'), ('10000000-0000-0000-0000-000000000002'), ('10000000-0000-0000-0000-000000000003'), ('10000000-0000-0000-0000-000000000006')
 ) as r(id), unnest(array['meeting.view', 'meeting.manage', 'meeting.rooms']) as k
 on conflict do nothing;
 insert into public.role_permissions (role_id, permission_key)
-select r.id::uuid, k from (values ('10000000-0000-0000-0000-000000000005'), ('10000000-0000-0000-0000-000000000009')) as r(id), unnest(array['meeting.view', 'meeting.manage']) as k
+select '10000000-0000-0000-0000-000000000005'::uuid, k from unnest(array['meeting.view', 'meeting.manage']) as k
 on conflict do nothing;
+-- a database that applied an earlier draft of this migration loses the Manager role's meeting keys (cf. 20260928000150)
+delete from public.role_permissions where role_id = '10000000-0000-0000-0000-000000000009' and permission_key in ('meeting.view', 'meeting.manage', 'meeting.rooms');
 insert into public.role_permissions (role_id, permission_key)
 select r.id::uuid, 'meeting.view' from (values ('10000000-0000-0000-0000-000000000004'), ('10000000-0000-0000-0000-000000000010')) as r(id)
 on conflict do nothing;
@@ -230,8 +236,41 @@ create table if not exists public.meeting_invitees (
 );
 create index if not exists meeting_invitees_employee_idx on public.meeting_invitees (organization_id, employee_id);
 create index if not exists meeting_invitees_meeting_fk_idx on public.meeting_invitees (organization_id, meeting_id);
--- invitations: meeting.view holders, and every invitee reads their own
+-- invitations follow their meeting (the table has no branch column; like approval_steps / geofence_assignments): the generated
+-- policies (grants, forced RLS, the tenant-key trigger and the restrictive no-data-api policy stay) are replaced by ones scoped
+-- through the parent row — read with meeting.view where the meeting itself is readable under the caller's RLS (meetings carries
+-- the branch scope), or one's own invitation; written with meeting.manage, and only for a meeting the caller can read inside
+-- their branches, so a branch-scoped holder never reads, adds, moves or drops an invitation of another branch's meeting
 call app.apply_tenant_policies('public.meeting_invitees', 'meeting.view', 'meeting.manage', null, 'employee_id');
+drop policy if exists meeting_invitees_select on public.meeting_invitees;
+create policy meeting_invitees_select on public.meeting_invitees for select to authenticated, flowza_system using (
+  (organization_id = any ((select app.org_ids_with_permission('meeting.view'))::uuid[])
+   and exists (select 1 from public.meetings m where m.id = meeting_invitees.meeting_id and m.organization_id = meeting_invitees.organization_id))
+  or employee_id = any ((select app.own_employee_ids())::uuid[])
+);
+drop policy if exists meeting_invitees_insert on public.meeting_invitees;
+drop policy if exists meeting_invitees_update on public.meeting_invitees;
+drop policy if exists meeting_invitees_delete on public.meeting_invitees;
+create policy meeting_invitees_insert on public.meeting_invitees for insert to authenticated, flowza_system with check (
+  organization_id = any ((select app.org_ids_with_permission('meeting.manage'))::uuid[])
+  and exists (select 1 from public.meetings m where m.id = meeting_invitees.meeting_id and m.organization_id = meeting_invitees.organization_id
+              and (m.organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or m.branch_id = any ((select app.allowed_branch_ids())::uuid[])))
+);
+-- update: both the row as it is and the row as it becomes (an invitation is never moved onto another branch's meeting)
+create policy meeting_invitees_update on public.meeting_invitees for update to authenticated, flowza_system using (
+  organization_id = any ((select app.org_ids_with_permission('meeting.manage'))::uuid[])
+  and exists (select 1 from public.meetings m where m.id = meeting_invitees.meeting_id and m.organization_id = meeting_invitees.organization_id
+              and (m.organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or m.branch_id = any ((select app.allowed_branch_ids())::uuid[])))
+) with check (
+  organization_id = any ((select app.org_ids_with_permission('meeting.manage'))::uuid[])
+  and exists (select 1 from public.meetings m where m.id = meeting_invitees.meeting_id and m.organization_id = meeting_invitees.organization_id
+              and (m.organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or m.branch_id = any ((select app.allowed_branch_ids())::uuid[])))
+);
+create policy meeting_invitees_delete on public.meeting_invitees for delete to authenticated, flowza_system using (
+  organization_id = any ((select app.org_ids_with_permission('meeting.manage'))::uuid[])
+  and exists (select 1 from public.meetings m where m.id = meeting_invitees.meeting_id and m.organization_id = meeting_invitees.organization_id
+              and (m.organization_id = any ((select app.unrestricted_org_ids())::uuid[]) or m.branch_id = any ((select app.allowed_branch_ids())::uuid[])))
+);
 
 -- ---------------------------------------------------------------------------------------------------------------------------
 -- 6. Room access events (append-only; written by the normaliser from ACCESS terminals)
@@ -299,4 +338,26 @@ begin
       raise exception '% must be written by the system context only', v_table;
     end if;
   end loop;
+  if exists (select 1 from public.role_permissions where role_id = '10000000-0000-0000-0000-000000000009' and permission_key like 'meeting.%') then
+    raise exception 'the built-in Manager role (team-scoped) must hold no meeting key';
+  end if;
+  -- every invitation policy goes through the parent meeting; the read keeps the invitee's own row, the writes need meeting.manage
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'meeting_invitees' and policyname = 'meeting_invitees_select'
+                 and qual like '%meetings m%' and qual like '%meeting.view%' and qual like '%own_employee_ids%') then
+    raise exception 'meeting_invitees read policy must follow the meeting (or the own invitation)';
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'meeting_invitees' and policyname = 'meeting_invitees_insert'
+                 and with_check like '%meetings m%' and with_check like '%meeting.manage%' and with_check like '%allowed_branch_ids%')
+     or not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'meeting_invitees' and policyname = 'meeting_invitees_update'
+                    and qual like '%meetings m%' and qual like '%meeting.manage%' and with_check like '%meetings m%' and with_check like '%allowed_branch_ids%')
+     or not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'meeting_invitees' and policyname = 'meeting_invitees_delete'
+                    and qual like '%meetings m%' and qual like '%meeting.manage%' and qual like '%allowed_branch_ids%') then
+    raise exception 'meeting_invitees write policies must follow the meeting inside the caller''s branches';
+  end if;
+  if (select count(*) from pg_policies where schemaname = 'public' and tablename = 'meeting_invitees' and permissive = 'PERMISSIVE') <> 4 then
+    raise exception 'meeting_invitees carries a permissive policy besides its four meeting-scoped ones';
+  end if;
+  if not exists (select 1 from pg_policies where schemaname = 'public' and tablename = 'meeting_invitees' and policyname = 'meeting_invitees_no_data_api' and permissive = 'RESTRICTIVE') then
+    raise exception 'meeting_invitees lost its no-data-api denial';
+  end if;
 end $$;
