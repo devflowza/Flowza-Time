@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { ATTENDANCE_EVENT_TYPES, ATTENDANCE_FLAGS, ATTENDANCE_STATUSES, CORRECTION_TYPES, MISSING_PUNCH_BEHAVIORS, PUNCH_INTERPRETATIONS, ROUNDING_MODES } from './enums.js';
+import { ATTENDANCE_EVENT_TYPES, ATTENDANCE_FLAGS, ATTENDANCE_STATUSES, AWAY_INTERVAL_KINDS, CORRECTION_TYPES, MISSING_PUNCH_BEHAVIORS, PUNCH_INTERPRETATIONS, ROUNDING_MODES } from './enums.js';
 import { isoDateSchema, isoDateTimeSchema, timeSchema, uuidSchema } from './common.js';
 
 export const ramadanModeSchema = z.object({
@@ -31,6 +31,9 @@ const otRate = z.number().min(1).max(5).multipleOf(0.05);
  *   points                        → the attendance points & discipline report
  *   regularisation                → the self-service regularisation endpoint (monthly limit, how far back)
  *   countryPack                   → provenance of a policy created from a country rule pack (compliance check)
+ *   timeAway                      → engine 1.5.0: measured time away between the first IN and the last OUT, classified
+ *                                   against approved time-away windows; the portal's step-out / back endpoints and the
+ *                                   time-away request limits (docs/time-away.md)
  * A PATCH replaces the policy object as a whole (the editor always sends every section).
  */
 export const attendancePolicySectionsSchema = z.object({
@@ -78,6 +81,33 @@ export const attendancePolicySectionsSchema = z.object({
     maxPerMonth: z.number().int().min(1).max(31).nullable().default(null),
     /** A regularisation may concern a day at most this many days back. Null = no limit. */
     backdateDays: z.number().int().min(1).max(365).nullable().default(null),
+  }).prefault({}),
+  /**
+   * Time away inside the working day (engine 1.5.0, docs/time-away.md). Every gap between the first check-in and the last
+   * check-out — an OUT → IN pair, or a break-out → back — is classified: inside an approved OFFICIAL window → official duty,
+   * inside an approved PERSONAL window → permission, otherwise the shift's break allowance first and the rest unapproved.
+   * Needs a punch interpretation that keeps the punches in between (PAIRED or DIRECTIONAL): FIRST_LAST ignores them.
+   */
+  timeAway: z.object({
+    enabled: z.boolean().default(false),
+    /** A gap shorter than this is not time away (a step outside the reader's reach): it stays worked time. */
+    ignoreUnderMinutes: z.number().int().min(0).max(60).default(5),
+    /** Coming back up to this many minutes after an approved window ends still counts as inside it. */
+    returnGraceMinutes: z.number().int().min(0).max(120).default(10),
+    /** Approved official duty is worked time (paid); off = it is excused but not paid. */
+    officialCountsAsWorked: z.boolean().default(true),
+    /** Approved personal permission does not make the day a half day / under hours (the minutes stay unpaid). */
+    permissionExcusesShortfall: z.boolean().default(true),
+    /** Personal permission allowed per calendar month, in minutes (requests beyond it are refused). Null = no limit. */
+    personalMonthlyQuotaMinutes: z.number().int().min(0).max(10080).nullable().default(240),
+    /** Longest single personal permission, in minutes. Null = no limit. */
+    personalMaxMinutes: z.number().int().min(15).max(960).nullable().default(120),
+    /** Unapproved away time beyond this many minutes in a day flags UNAPPROVED_AWAY. */
+    flagUnapprovedAfterMinutes: z.number().int().min(0).max(480).default(15),
+    /** Employees may step out from the portal: a break-out punch plus a time-away request for the expected window. */
+    stepOutFromPortal: z.boolean().default(true),
+    /** How a return is recorded: a terminal punch only (proof of presence), or also the portal's "I'm back". */
+    returnBy: z.enum(['device', 'device_or_portal']).default('device_or_portal'),
   }).prefault({}),
 });
 export type AttendancePolicySections = z.infer<typeof attendancePolicySectionsSchema>;
@@ -175,6 +205,11 @@ export const attendanceDailyRecordDtoSchema = z.object({
   lopDays: z.number().default(0),
   /** True when the day carries an unrevoked UNEXCUSED mark. */
   unexcused: z.boolean().default(false),
+  /** Engine 1.5.0 (time away): measured away minutes and their classification. Optional so older fixtures keep compiling. */
+  awayMinutes: z.number().int().optional(),
+  officialDutyMinutes: z.number().int().optional(),
+  permissionMinutes: z.number().int().optional(),
+  unapprovedAwayMinutes: z.number().int().optional(),
 });
 export type AttendanceDailyRecordDto = z.infer<typeof attendanceDailyRecordDtoSchema>;
 
@@ -244,6 +279,28 @@ export const attendanceActivityPunchSchema = z.object({
 export type AttendanceActivityPunchDto = z.infer<typeof attendanceActivityPunchSchema>;
 
 /**
+ * One classified away interval of a day (engine 1.5.0, from the trace step `timeAway`): BREAK = inside the shift's break
+ * allowance, OFFICIAL / PERMISSION = inside an approved time-away window of that kind, UNAPPROVED = the rest, SHORT = a gap
+ * under the policy's tolerance (counted as worked).
+ */
+export const attendanceAwayIntervalSchema = z.object({
+  kind: z.enum(AWAY_INTERVAL_KINDS),
+  startAt: isoDateTimeSchema,
+  endAt: isoDateTimeSchema,
+  minutes: z.number().int(),
+  requestId: uuidSchema.nullable(),
+});
+export type AttendanceAwayIntervalDto = z.infer<typeof attendanceAwayIntervalSchema>;
+/** The away figures of a day / month / period (all zero when the policy does not measure time away). */
+export const attendanceAwayFiguresSchema = z.object({
+  awayMinutes: z.number().int(),
+  officialDutyMinutes: z.number().int(),
+  permissionMinutes: z.number().int(),
+  unapprovedAwayMinutes: z.number().int(),
+});
+export type AttendanceAwayFiguresDto = z.infer<typeof attendanceAwayFiguresSchema>;
+
+/**
  * One recorded day. `officeMinutes` is the engine's worked minutes (the productive time) and `fieldMinutes` is the rest
  * of the span between the first and the last punch, so the two always add up to `spanMinutes`.
  */
@@ -269,6 +326,9 @@ export const attendanceActivityDaySchema = z.object({
   flags: z.array(z.string()),
   segments: z.array(attendanceActivitySegmentSchema),
   punches: z.array(attendanceActivityPunchSchema),
+  /** Engine 1.5.0: the classified away intervals and their totals (optional so older fixtures keep compiling). */
+  away: attendanceAwayFiguresSchema.optional(),
+  awayIntervals: z.array(attendanceAwayIntervalSchema).optional(),
 });
 export type AttendanceActivityDayDto = z.infer<typeof attendanceActivityDaySchema>;
 
@@ -284,6 +344,7 @@ export const attendanceActivityMonthSchema = z.object({
   officeMinutes: z.number().int(),
   fieldMinutes: z.number().int(),
   overtimeMinutes: z.number().int(),
+  away: attendanceAwayFiguresSchema.optional(),
 });
 export type AttendanceActivityMonthDto = z.infer<typeof attendanceActivityMonthSchema>;
 
@@ -309,6 +370,7 @@ export const attendanceActivityTotalsSchema = z.object({
   earlyDepartureMinutes: z.number().int(),
   /** Office minutes per day that recorded any, so a period with days off is not averaged down. */
   averageOfficeMinutes: z.number().int(),
+  away: attendanceAwayFiguresSchema.optional(),
 });
 export type AttendanceActivityTotalsDto = z.infer<typeof attendanceActivityTotalsSchema>;
 

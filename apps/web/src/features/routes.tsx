@@ -20,6 +20,8 @@ import { attendanceReviewRoutes } from './attendance-review/routes';
 import { attendanceAdminRoutes } from './attendance-admin/routes';
 import { policiesRoutes } from './policies/routes';
 import { schedulingRoutes } from './scheduling/routes';
+import { meetingsRoutes } from './meetings/routes';
+import { timeAwayRoutes } from './time-away/routes';
 
 /** Every feature exports its RouteObject[] from features/<name>/routes.tsx (lazy pages). */
 export const featureRoutes: RouteObject[] = [
@@ -31,4 +33,8 @@ export const featureRoutes: RouteObject[] = [
   ...policiesRoutes,
   // Enterprise round-the-clock scheduling (module advanced_scheduling): /deployments, /attendance/muster
   ...schedulingRoutes,
+  // Enterprise meeting rooms & access (module meeting_rooms): /meetings
+  ...meetingsRoutes,
+  // time away during working hours, the HR report: /attendance/time-away
+  ...timeAwayRoutes,
 ];

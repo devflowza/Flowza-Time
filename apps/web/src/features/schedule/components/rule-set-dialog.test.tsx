@@ -125,6 +125,58 @@ describe('RuleSetDialog — the attendance policy editor (Enterprise attendance_
   });
 });
 
+describe('RuleSetDialog — time away inside the working day (core, docs/time-away.md)', () => {
+  beforeEach(() => { resetApiMock(); grantAll(); mockGet({}); apiMock.post.mockResolvedValue({ data: { id: 'rs1', recalculationJobId: null } }); });
+  afterEach(() => { testState.disabledModules = new Set(); });
+
+  const pickInterpretation = async (name: string) => {
+    fireEvent.keyDown(screen.getByRole('combobox', { name: /^Interpretation/ }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name }));
+  };
+
+  it('without the module: the Time away section is there, refuses First / last, and the request carries the policy with the Enterprise defaults', async () => {
+    testState.disabledModules = new Set(['attendance_policies']);
+    renderWithProviders(<RuleSetDialog open onOpenChange={vi.fn()} ruleSet={null} />);
+    expect(screen.getByRole('tab', { name: 'Time away' })).toBeInTheDocument();
+    expect(screen.getByRole('switch', { name: 'Measure time away' })).not.toBeChecked();
+    expect(screen.getByLabelText(/Personal permission per month/)).toHaveValue(240);
+    expect(screen.getByLabelText(/Longest single permission/)).toHaveValue(120);
+    fireEvent.click(screen.getByRole('switch', { name: 'Measure time away' }));
+    // the default interpretation keeps only the first and the last punch: said in the section, and refused on save
+    expect(await screen.findByTestId('time-away-needs-pairs')).toHaveTextContent(/Paired or Directional/);
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Head office' } });
+    fireEvent.click(screen.getByRole('button', { name: /Create|Save/ }));
+    expect(await screen.findByText(/Time away needs the punches between the first check-in and the last check-out/, { selector: '[role="alert"]#rs-interp-error' })).toBeInTheDocument();
+    expect(apiMock.post).not.toHaveBeenCalled();
+    // the save opened the Attendance section, where the interpretation is chosen
+    expect(screen.getByRole('tab', { name: /^Attendance/ })).toHaveAttribute('aria-selected', 'true');
+
+    await pickInterpretation('Paired');
+    fireEvent.change(screen.getByLabelText(/Personal permission per month/), { target: { value: '' } });
+    fireEvent.click(screen.getByRole('switch', { name: "Step out from the portal" }));
+    fireEvent.click(screen.getByRole('button', { name: /Create|Save/ }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
+    const [, body] = apiMock.post.mock.calls[0] as [string, Record<string, unknown>];
+    expect(body).toMatchObject({ name: 'Head office', punchInterpretation: 'PAIRED', policy: { ...DEFAULT_POLICY_SECTIONS, timeAway: { ...DEFAULT_POLICY_SECTIONS.timeAway, enabled: true, personalMonthlyQuotaMinutes: null, stepOutFromPortal: false } } });
+    for (const key of ['countryCode', 'departmentId', 'employeeGroupId', 'shiftId', 'locationId']) expect(body).not.toHaveProperty(key);
+  });
+
+  it('editing a stored policy written before time away existed: the section starts from its defaults', async () => {
+    apiMock.patch.mockResolvedValue({ data: { id: 'rs9', recalculationJobId: null } });
+    const { timeAway: _omit, ...older } = structuredClone(DEFAULT_POLICY_SECTIONS);
+    const stored = { ...DEFAULT_ATTENDANCE_RULES, id: 'rs9', name: 'Old', description: '', branchId: null, countryCode: null, departmentId: null, employeeGroupId: null, shiftId: null, locationId: null, effectiveFrom: '2026-01-01', effectiveTo: null, version: 1, specificity: 0, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z', punchInterpretation: 'DIRECTIONAL', policy: older } as never;
+    renderWithProviders(<RuleSetDialog open onOpenChange={vi.fn()} ruleSet={stored} />);
+    expect(screen.getByLabelText(/Ignore gaps under/)).toHaveValue(5);
+    fireEvent.click(screen.getByRole('switch', { name: 'Measure time away' }));
+    fireEvent.keyDown(screen.getByRole('combobox', { name: /Return recorded by/ }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Terminal check-in only' }));
+    fireEvent.click(screen.getByRole('button', { name: /Save/ }));
+    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledTimes(1));
+    const [, body] = apiMock.patch.mock.calls[0] as [string, Record<string, unknown>];
+    expect(body).toMatchObject({ punchInterpretation: 'DIRECTIONAL', policy: { timeAway: { enabled: true, returnBy: 'device', ignoreUnderMinutes: 5 } } });
+  });
+});
+
 describe('RuleSetDialog — the policy location (Enterprise, docs/locations.md §3)', () => {
   const storedPolicy = (scope: Record<string, unknown>) => ({
     ...DEFAULT_ATTENDANCE_RULES, id: 'rs9', name: 'Site policy', description: '', branchId: null, countryCode: null, departmentId: null, employeeGroupId: null, shiftId: null, locationId: null,

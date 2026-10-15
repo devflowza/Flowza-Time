@@ -1,0 +1,41 @@
+{
+  "nav": { "timeAway": "الخروج أثناء الدوام" },
+  "title": "الخروج أثناء الدوام",
+  "subtitle": "الوقت الذي قضاه الموظفون خارج مقر العمل أثناء ساعات الدوام، لكل شهر: مهمة رسمية، واستئذان شخصي، وغياب غير معتمد.",
+  "month": "الشهر",
+  "previousMonth": "الشهر السابق",
+  "nextMonth": "الشهر التالي",
+  "thisMonth": "هذا الشهر",
+  "kinds": { "OFFICIAL": "مهمة رسمية", "PERSONAL": "استئذان شخصي" },
+  "statuses": { "pending": "قيد الانتظار", "approved": "معتمد", "rejected": "مرفوض", "cancelled": "ملغى" },
+  "sources": { "request": "مخطط مسبقًا", "step_out": "خروج فوري" },
+  "totals": { "away": "وقت الخروج", "official": "مهمة رسمية", "permission": "استئذان", "unapproved": "غير معتمد", "flagged": "موظفون لديهم وقت غير معتمد", "pending": "طلبات قيد الانتظار" },
+  "legend": { "official": "مهمة رسمية", "permission": "استئذان", "unapproved": "غير معتمد", "other": "أخرى" },
+  "summary": {
+    "title": "إجماليات الشهر",
+    "hint": "من أيام الحضور المحتسبة لهذا الشهر. اختر صفًا لعرض طلبات ذلك الموظف.",
+    "columns": { "employee": "الموظف", "days": "أيام الخروج", "away": "إجمالي الخروج", "official": "مهمة رسمية", "permission": "استئذان", "unapproved": "غير معتمد", "unapprovedDays": "أيام عليها ملاحظة", "pending": "قيد الانتظار", "breakdown": "التوزيع" },
+    "empty": "لا يوجد خروج أثناء الدوام هذا الشهر",
+    "emptyHint": "لم يخرج أحد خارج أوقات الاستراحة في هذا الشهر، أو لم تُحتسب أيامه بعد.",
+    "card": "أيام الخروج: {{days}} · الخروج {{away}} · رسمي {{official}} · استئذان {{permission}}",
+    "cardUnapproved": "غير معتمد {{duration}} · أيام عليها ملاحظة: {{days}}",
+    "breakdownLabel": "مهمة رسمية {{official}}، استئذان {{permission}}، غير معتمد {{unapproved}}، أخرى {{other}}",
+    "showRequests": "عرض طلبات {{name}}"
+  },
+  "requests": {
+    "title": "الطلبات",
+    "hint": "فترات الخروج المخططة وعمليات الخروج الفوري التي قدّمها الموظفون لأيام هذا الشهر.",
+    "columns": { "employee": "الموظف", "date": "التاريخ", "kind": "النوع", "window": "الفترة", "returned": "وقت العودة", "minutes": "المدة", "reason": "السبب", "status": "الحالة", "decidedBy": "صاحب القرار" },
+    "status": "الحالة",
+    "kind": "النوع",
+    "allStatuses": "كل الحالات",
+    "allKinds": "كل الأنواع",
+    "forEmployee": "طلبات {{name}}",
+    "showAll": "عرض الجميع",
+    "empty": "لا توجد طلبات",
+    "emptyHint": "لا يوجد طلب خروج يطابق عوامل التصفية هذه.",
+    "notBack": "لم يعد بعد",
+    "destination": "إلى: {{destination}}",
+    "card": "{{date}} · {{from}} – {{to}} · {{duration}}"
+  }
+}

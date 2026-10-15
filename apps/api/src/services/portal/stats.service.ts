@@ -68,8 +68,11 @@ export async function portalOverviewExtras(deps: ApiDeps, actor: Actor, orgId: s
         const now = new Date();
         const policy = settings.selfService;
         const since = new Date(now.getTime() - 20 * 3_600_000);
-        const punches = await t.selectFrom('attendanceRawTransactions').select(['punchedAt', 'direction']).where('organizationId', '=', orgId).where('employeeId', '=', employeeId).where('punchedAt', '>=', since)
-          .orderBy('punchedAt', 'desc').limit(50).execute();
+        // a meeting-room reader's entries (punch role ACCESS) are room access, not attendance punches
+        const punches = await t.selectFrom('attendanceRawTransactions as rt').leftJoin('devices as d', 'd.id', 'rt.deviceId').select(['rt.punchedAt', 'rt.direction'])
+          .where('rt.organizationId', '=', orgId).where('rt.employeeId', '=', employeeId).where('rt.punchedAt', '>=', since)
+          .where((eb) => eb.or([eb('d.punchRole', 'is', null), eb('d.punchRole', '!=', 'ACCESS')]))
+          .orderBy('rt.punchedAt', 'desc').limit(50).execute();
         const today = localInstant(now, emp.timezone).date;
         const last = punches[0];
         const lastDirection = last && (last.direction === 'in' || last.direction === 'out') ? last.direction : null;

@@ -81,7 +81,7 @@ describe('attendance reads', () => {
     const year = await h.request('GET', `${base()}/attendance/activity?employeeId=${f.e1}&range=year&anchor=${FIELD_DAY}`, { token: f.hrAdmin });
     expect([year.body.data.from, year.body.data.to]).toEqual(['2026-01-01', '2026-12-31']);
     expect(year.body.data.days).toEqual([]);
-    expect(year.body.data.months).toEqual([{ month: '2026-08', recordedDays: 2, presentDays: 2, absentDays: 0, leaveDays: 0, lateDays: 1, scheduledMinutes: 480, officeMinutes: 840, fieldMinutes: 180, overtimeMinutes: 0 }]);
+    expect(year.body.data.months).toEqual([{ month: '2026-08', recordedDays: 2, presentDays: 2, absentDays: 0, leaveDays: 0, lateDays: 1, scheduledMinutes: 480, officeMinutes: 840, fieldMinutes: 180, overtimeMinutes: 0, away: { awayMinutes: 0, officialDutyMinutes: 0, permissionMinutes: 0, unapprovedAwayMinutes: 0 } }]);
 
     const own = await h.request('GET', `${base()}/attendance/activity?employeeId=${f.e1}&range=week&anchor=${FIELD_DAY}`, { token: f.employeeUser });
     expect(own.status).toBe(200);

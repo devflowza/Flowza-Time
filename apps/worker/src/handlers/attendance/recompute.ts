@@ -35,6 +35,7 @@ interface Comparable {
   branchId: string; departmentId: string | null; shiftId: string | null; shiftAssignmentId: string | null; ruleSetId: string | null; timezone: string;
   expectedStartAt: string | null; expectedEndAt: string | null; scheduledMinutes: number; firstInAt: string | null; lastOutAt: string | null;
   workedMinutes: number; breakMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; overtimeMinutes: number; overtimeCategory: string | null;
+  awayMinutes: number; officialDutyMinutes: number; permissionMinutes: number; unapprovedAwayMinutes: number;
   status: AttendanceStatus; flags: string[]; punchCount: number; hasCorrection: boolean; engineVersion: string;
 }
 const ts = (v: Date | string | null): string | null => (v === null ? null : (v instanceof Date ? v : new Date(v)).toISOString());
@@ -79,6 +80,7 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
     branchId: loaded.branchId, departmentId: loaded.departmentId, shiftId: result.shiftId, shiftAssignmentId: result.shiftAssignmentId, ruleSetId: result.ruleSetId, timezone: result.timezone,
     expectedStartAt: ts(result.expectedStartAt), expectedEndAt: ts(result.expectedEndAt), scheduledMinutes: result.scheduledMinutes, firstInAt: ts(result.firstInAt), lastOutAt: ts(result.lastOutAt),
     workedMinutes: result.workedMinutes, breakMinutes: result.breakMinutes, lateMinutes: result.lateMinutes, earlyDepartureMinutes: result.earlyDepartureMinutes, overtimeMinutes: result.overtimeMinutes, overtimeCategory: result.overtimeCategory,
+    awayMinutes: result.awayMinutes, officialDutyMinutes: result.officialDutyMinutes, permissionMinutes: result.permissionMinutes, unapprovedAwayMinutes: result.unapprovedAwayMinutes,
     status, flags, punchCount: result.punchCount, hasCorrection, engineVersion: result.trace.engineVersion,
   };
   const columns = {
@@ -86,6 +88,7 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
     expectedStartAt: result.expectedStartAt ? new Date(result.expectedStartAt) : null, expectedEndAt: result.expectedEndAt ? new Date(result.expectedEndAt) : null, scheduledMinutes: next.scheduledMinutes,
     firstInAt: result.firstInAt ? new Date(result.firstInAt) : null, lastOutAt: result.lastOutAt ? new Date(result.lastOutAt) : null,
     workedMinutes: next.workedMinutes, breakMinutes: next.breakMinutes, lateMinutes: next.lateMinutes, earlyDepartureMinutes: next.earlyDepartureMinutes, overtimeMinutes: next.overtimeMinutes, overtimeCategory: next.overtimeCategory,
+    awayMinutes: next.awayMinutes, officialDutyMinutes: next.officialDutyMinutes, permissionMinutes: next.permissionMinutes, unapprovedAwayMinutes: next.unapprovedAwayMinutes,
     status: next.status, flags: next.flags, punchCount: next.punchCount, hasCorrection: next.hasCorrection, engineVersion: next.engineVersion, trace: JSON.stringify(result.trace), computedAt: opts.now,
   };
   const eventPayload = { employeeId, date, status: next.status, flags: next.flags, branchId: next.branchId };
@@ -100,6 +103,7 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
     branchId: existing.branchId, departmentId: existing.departmentId, shiftId: existing.shiftId, shiftAssignmentId: existing.shiftAssignmentId, ruleSetId: existing.ruleSetId, timezone: existing.timezone,
     expectedStartAt: ts(existing.expectedStartAt), expectedEndAt: ts(existing.expectedEndAt), scheduledMinutes: existing.scheduledMinutes, firstInAt: ts(existing.firstInAt), lastOutAt: ts(existing.lastOutAt),
     workedMinutes: existing.workedMinutes, breakMinutes: existing.breakMinutes, lateMinutes: existing.lateMinutes, earlyDepartureMinutes: existing.earlyDepartureMinutes, overtimeMinutes: existing.overtimeMinutes, overtimeCategory: existing.overtimeCategory,
+    awayMinutes: existing.awayMinutes, officialDutyMinutes: existing.officialDutyMinutes, permissionMinutes: existing.permissionMinutes, unapprovedAwayMinutes: existing.unapprovedAwayMinutes,
     status: existing.status, flags: existing.flags, punchCount: existing.punchCount, hasCorrection: existing.hasCorrection, engineVersion: existing.engineVersion,
   };
   if (JSON.stringify(previous) === JSON.stringify(next)) return { outcome: 'unchanged', recordId: existing.id, version: existing.calculationVersion, status: existing.status, branchId: existing.branchId };

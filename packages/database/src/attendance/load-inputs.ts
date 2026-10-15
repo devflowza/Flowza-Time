@@ -2,7 +2,7 @@ import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import { resolveAttendanceSettings, shiftBreakSchema, type AttendanceSettings, type ShiftBreak } from '@flowza/contracts';
 import { addDays, errors, isValidTimezone, localDateTime } from '@flowza/shared';
-import { composeDoubleShift, type DailyCalculationInput, type EngineDayMark, type EngineEvent, type EngineHoliday, type EngineLeave, type EnginePunchPayload, type EngineShift, type PolicyScope } from '@flowza/domain';
+import { composeDoubleShift, type DailyCalculationInput, type EngineDayMark, type EngineEvent, type EngineHoliday, type EngineLeave, type EnginePunchPayload, type EngineShift, type EngineTimeAway, type PolicyScope } from '@flowza/domain';
 import type { Trx } from '../context.js';
 import { activeMarksOn } from './day-marks.js';
 import { additionalShiftOn, loadAdditionalShiftAssignments, resolvePolicyFor } from './policy.js';
@@ -30,6 +30,7 @@ function isoDate(v: Date | string): string {
   return DateTime.fromJSDate(v).toISODate() ?? v.toISOString().slice(0, 10);
 }
 const asDate = (date: string) => sql<Date>`${date}::date`;
+const toIso = (v: Date | string): string => (v instanceof Date ? v : new Date(v)).toISOString();
 /** The organisation's effective attendance settings (`organization_settings.attendance`, defaults filled in; never throws). */
 async function loadAttendanceSettings(trx: Trx, organizationId: string): Promise<AttendanceSettings> {
   const row = await trx.selectFrom('organizationSettings').select('attendance').where('organizationId', '=', organizationId).executeTakeFirst();
@@ -201,6 +202,14 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   // Active day marks (reviewed verdicts) for the date — folded in by the engine as flags / lopDays.
   const dayMarks: EngineDayMark[] = (await activeMarksOn(trx, organizationId, employeeId, date)).map((m) => ({ id: m.id, kind: m.kind, payEffectDays: m.payEffectDays, source: m.source }));
 
+  // Approved time-away windows overlapping the event window (engine 1.5.0, docs/time-away.md): the engine classifies the day's
+  // measured away time against them when the policy measures time away; only APPROVED windows ever count.
+  const timeAway: EngineTimeAway[] = (await trx.selectFrom('timeAwayRequests').select(['id', 'kind', 'startsAt', 'endsAt'])
+    .where('organizationId', '=', organizationId).where('employeeId', '=', employeeId).where('status', '=', 'approved')
+    .where('startsAt', '<', windowEnd).where('endsAt', '>', windowStart)
+    .orderBy('startsAt', 'asc').orderBy('id', 'asc').execute())
+    .map((w) => ({ id: w.id, kind: w.kind, startsAt: toIso(w.startsAt), endsAt: toIso(w.endsAt) }));
+
   const input: DailyCalculationInput = {
     employeeId,
     attendanceDate: date,
@@ -216,6 +225,7 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
     employment: { joiningDate: isoDate(employee.joiningDate), exitDate: employee.exitDate === null ? null : isoDate(employee.exitDate), status: today.status },
     ramadanEligible: asObject(employee.customFields)['ramadanEligible'] === true,
     dayMarks,
+    timeAway,
     settings: { nonWorkingDay: settings.nonWorkingDay },
     now: now.toISOString(),
     adjacentShifts: { previous: dayShift(addDays(date, -1), effectiveShiftId(resolvedPrev)), next: dayShift(addDays(date, 1), effectiveShiftId(resolvedNext)) },

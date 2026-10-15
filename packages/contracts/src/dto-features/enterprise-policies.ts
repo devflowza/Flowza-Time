@@ -36,9 +36,27 @@ export function policySectionsEqual(a: unknown, b: unknown): boolean {
   return JSON.stringify(policySectionsOf(a)) === JSON.stringify(policySectionsOf(b));
 }
 
-/** True when the sections are the contract defaults — what an organisation without attendance_policies may store. */
+/** True when the sections are the contract defaults. */
 export function isDefaultPolicySections(sections: unknown): boolean {
   return policySectionsEqual(sections, DEFAULT_POLICY_SECTIONS);
+}
+
+/**
+ * Policy sections every plan may set (docs/time-away.md): time away inside the working day is core attendance, not an
+ * Enterprise policy feature. Every other section needs the attendance_policies module.
+ */
+export const CORE_POLICY_SECTION_KEYS = ['timeAway'] as const;
+const enterprisePart = (sections: unknown): Record<string, unknown> => {
+  const all = policySectionsOf(sections) as unknown as Record<string, unknown>;
+  return Object.fromEntries(Object.entries(all).filter(([k]) => !(CORE_POLICY_SECTION_KEYS as readonly string[]).includes(k)));
+};
+/** The Enterprise sections (all but the core ones) are the contract defaults — what an organisation without attendance_policies may store. */
+export function isDefaultEnterpriseSections(sections: unknown): boolean {
+  return JSON.stringify(enterprisePart(sections)) === JSON.stringify(enterprisePart(DEFAULT_POLICY_SECTIONS));
+}
+/** Same Enterprise sections once defaults are filled in (the core sections are ignored). */
+export function enterpriseSectionsEqual(a: unknown, b: unknown): boolean {
+  return JSON.stringify(enterprisePart(a)) === JSON.stringify(enterprisePart(b));
 }
 
 // ----- employee groups ------------------------------------------------------------------------------------------------------

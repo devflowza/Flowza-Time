@@ -136,13 +136,14 @@
     "title": "Activity history", "subtitle": "Where the day went: hours inside, hours in the field.",
     "range": { "label": "Period", "day": "Day", "week": "Week", "month": "Month", "year": "Year" },
     "nav": { "previous": "Previous period", "next": "Next period", "today": "Today" },
-    "legend": { "office": "In office", "field": "Field / away", "scheduled": "Scheduled {{hours}}" },
+    "legend": { "office": "In office", "field": "Field / away", "scheduled": "Scheduled {{hours}}", "onSite": "On site", "official": "Official duty", "permission": "Permission", "break": "Break", "unapproved": "Unapproved" },
     "stats": {
       "productive": "Productive hours", "productiveHint": "{{average}} on an average working day", "field": "Field / away", "fieldHint": "{{percent}}% of the time between first and last punch",
       "overtime": "Overtime", "overtimeHint": "of {{scheduled}} scheduled", "attendance": "Present days", "presentOf": "{{present}} / {{total}}", "lateHint": "{{count}} late days \u00b7 {{minutes}}"
     },
     "chart": {
       "title": "Hours per day", "hint": "Green is time in the office, blue is time away between the first and the last punch. The dashed line is the scheduled day.",
+      "hintAway": "Green is time on site. The time away between the first and the last punch is split the way it was classified: official duty, personal permission, break or unapproved. The dashed line is the scheduled day.",
       "span": "First to last punch", "target": "Scheduled", "empty": "No attendance recorded in this period", "emptyHint": "Records appear once punches are processed. Try another period."
     },
     "timeline": { "title": "Day heartbeat", "hint": "Every day on the same clock: green while inside, blue while out of the office.", "noRecord": "No record", "open": "still in" },
@@ -154,6 +155,14 @@
     "status": {
       "PRESENT": "Present", "ABSENT": "Absent", "LEAVE": "Leave", "HOLIDAY": "Holiday", "WEEKLY_OFF": "Weekly off", "HALF_DAY": "Half day",
       "MISSING_PUNCH": "Missing punch", "PENDING": "Pending", "NOT_JOINED": "Not joined", "EXITED": "Exited"
+    },
+    "away": {
+      "title": "Time away", "column": "Time away", "unapprovedPart": "{{time}} unapproved",
+      "kinds": { "OFFICIAL": "Official duty", "PERMISSION": "Permission", "BREAK": "Break", "UNAPPROVED": "Unapproved", "SHORT": "Short step out" },
+      "stats": {
+        "away": "Time away", "awayHint": "{{percent}}% of the time between first and last punch", "official": "Official duty", "officialHint": "Inside approved official-duty windows",
+        "permission": "Personal permission", "permissionHint": "Inside approved permission windows (unpaid)", "unapproved": "Unapproved time away", "unapprovedHint": "Away beyond the breaks without an approved request"
+      }
     }
   },
   "documents": {

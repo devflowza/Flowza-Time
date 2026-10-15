@@ -19,8 +19,11 @@ export type TeamDayStatus = (typeof TEAM_DAY_STATUSES)[number];
 export const LIVE_PUNCH_STATES = ['IN', 'OUT', 'NONE'] as const;
 export type LivePunchState = (typeof LIVE_PUNCH_STATES)[number];
 
-/** Primary (`manager_employee_id`) or secondary (`secondary_manager_employee_id`) line manager of the report. */
-export const TEAM_RELATIONS = ['primary', 'secondary'] as const;
+/**
+ * Primary (`manager_employee_id`) or secondary (`secondary_manager_employee_id`) line manager of the report, or `indirect`: a
+ * report further down the reporting line (organisation team scope `hierarchy`, migration 20261015000300).
+ */
+export const TEAM_RELATIONS = ['primary', 'secondary', 'indirect'] as const;
 export type TeamRelation = (typeof TEAM_RELATIONS)[number];
 
 const MAX_RANGE_DAYS = 62;
@@ -43,6 +46,8 @@ export interface TeamMemberTodayDto {
   branchId: string;
   branchName: string | null;
   relation: TeamRelation;
+  /** The report's own line manager (shown for an `indirect` report: "through …"). */
+  managerName?: string | null;
   /** The report's day (branch zone, else the organisation's). */
   date: string;
   timezone: string;

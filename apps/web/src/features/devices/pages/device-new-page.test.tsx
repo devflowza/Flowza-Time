@@ -251,6 +251,35 @@ describe('DeviceNewPage', () => {
     expect(body.config).toMatchObject({ serialNumber: 'ZK-99887766' });
   });
 
+  it('asks what a punch on the terminal means and sends the punch role (docs/time-away.md)', async () => {
+    apiMock.post.mockResolvedValue({ data: { device: { id: 'd9', name: 'Main gate' }, pushToken: null, webhookUrl: null, credentialsStored: [], credentialsError: null, testConnectionJobId: null } });
+    renderPage();
+    await pickZkteco();
+    next();
+
+    fireEvent.change(await screen.findByLabelText(/^Code/), { target: { value: 'GATE-1' } });
+    fireEvent.change(screen.getByLabelText(/^Name/), { target: { value: 'Main gate' } });
+    fireEvent.click(screen.getByRole('combobox', { name: /Branch/ }));
+    fireEvent.click((await screen.findByText('Muscat HQ')).closest('[cmdk-item]') ?? screen.getByText('Muscat HQ'));
+    await waitFor(() => expect(screen.getByRole('combobox', { name: /Branch/ })).toHaveTextContent('Muscat HQ'));
+    // a two-way terminal by default, with what that means under the field
+    const role = screen.getByRole('combobox', { name: /Punch role/ });
+    expect(role).toHaveTextContent('In / out (two-way terminal)');
+    expect(screen.getByText(/reports the direction of each punch/)).toBeInTheDocument();
+    fireEvent.keyDown(role, { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Check-in only' }));
+    expect(await screen.findByText('Entry-only terminal: every punch on it is an arrival.')).toBeInTheDocument();
+    next();
+
+    fireEvent.change(await screen.findByLabelText(/^Host/), { target: { value: 'https://gate.example.test' } });
+    next();
+    expect(await screen.findByText('Check-in only')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /Register device/ }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalled());
+    const [, body] = apiMock.post.mock.calls[0] as [string, { punchRole?: string }];
+    expect(body.punchRole).toBe('CHECK_IN');
+  });
+
   it('re-validates the details step on the way out, so the rail cannot carry a stale answer to review', async () => {
     renderPage();
     await pickZkteco();

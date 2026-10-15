@@ -8,6 +8,7 @@ vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/
 import { grantAll, mockGet, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
 import { ActivityTab } from './activity-tab';
 import { buildTimeline, datesOf, minuteOfDay, targetMinutes, tickLabel } from './activity-model';
+import { awayBreakdown, hasAwayData } from './away-model';
 
 const EMP = 'e1';
 const TZ = 'Asia/Muscat'; // UTC+4, no DST
@@ -154,5 +155,73 @@ describe('ActivityTab', () => {
     renderWithProviders(<ActivityTab employeeId={EMP} />);
     expect(await screen.findByText('No attendance recorded in this period')).toBeInTheDocument();
     expect(screen.queryByText('Details')).not.toBeInTheDocument();
+  });
+});
+
+describe('time away in the activity view (engine 1.5.0)', () => {
+  beforeEach(() => { resetApiMock(); grantAll(); testState.orgId = 'org-1'; testState.timezone = TZ; });
+
+  // 08:00–17:00 Muscat: an hour of official duty, 30 min of permission, 20 min of break, 25 min unapproved and a 3-minute short gap
+  const awayDay = (over: Partial<AttendanceActivityDayDto> = {}) => day({
+    away: { awayMinutes: 138, officialDutyMinutes: 60, permissionMinutes: 30, unapprovedAwayMinutes: 25 },
+    awayIntervals: [
+      { kind: 'OFFICIAL', startAt: '2026-09-01T05:00:00.000Z', endAt: '2026-09-01T06:00:00.000Z', minutes: 60, requestId: 'ta1' },
+      { kind: 'PERMISSION', startAt: '2026-09-01T07:00:00.000Z', endAt: '2026-09-01T07:30:00.000Z', minutes: 30, requestId: 'ta2' },
+      { kind: 'BREAK', startAt: '2026-09-01T08:00:00.000Z', endAt: '2026-09-01T08:20:00.000Z', minutes: 20, requestId: null },
+      { kind: 'UNAPPROVED', startAt: '2026-09-01T08:20:00.000Z', endAt: '2026-09-01T08:45:00.000Z', minutes: 25, requestId: null },
+      { kind: 'SHORT', startAt: '2026-09-01T10:00:00.000Z', endAt: '2026-09-01T10:03:00.000Z', minutes: 3, requestId: null },
+    ],
+    ...over,
+  });
+  const awayTotals = { ...activity().totals, away: { awayMinutes: 138, officialDutyMinutes: 60, permissionMinutes: 30, unapprovedAwayMinutes: 25 } };
+
+  it('splits the span into on site and the classified away kinds; a short gap stays on site', () => {
+    const d = awayDay();
+    expect(awayBreakdown(d.spanMinutes, d.away, d.awayIntervals)).toEqual({ onSite: 405, official: 60, permission: 30, break: 20, unapproved: 25 });
+    // the year range has no intervals: the short gap falls in the break share
+    expect(awayBreakdown(540, d.away)).toEqual({ onSite: 402, official: 60, permission: 30, break: 23, unapproved: 25 });
+    expect(awayBreakdown(540, { awayMinutes: 0, officialDutyMinutes: 0, permissionMinutes: 0, unapprovedAwayMinutes: 0 })).toEqual({ onSite: 540, official: 0, permission: 0, break: 0, unapproved: 0 });
+    expect(hasAwayData(activity())).toBe(false);
+    expect(hasAwayData(activity({ days: [awayDay()], totals: awayTotals }))).toBe(true);
+  });
+
+  it('charts on site / official / permission / break / unapproved, adds the away totals and an away column', async () => {
+    mockGet({ '/orgs/org-1/attendance/activity': { data: activity({ days: [awayDay()], totals: awayTotals }) } });
+    renderWithProviders(<ActivityTab employeeId={EMP} />);
+    expect(await screen.findByText('30 Aug – 05 Sep 2026')).toBeInTheDocument();
+    for (const label of ['On site', 'Official duty', 'Permission', 'Break', 'Unapproved']) expect(screen.getAllByText(label).length).toBeGreaterThan(0);
+    expect(screen.queryByText('In office', { selector: 'li' })).toBeNull();
+    const stats = within(screen.getByTestId('away-stats'));
+    expect(stats.getByText('Time away').closest('div')?.parentElement).toHaveTextContent('2h 18m');
+    expect(stats.getByText('Unapproved time away').closest('div')?.parentElement).toHaveTextContent('25m');
+    const total = screen.getByText('Total').closest('tr')!;
+    expect(within(total).getByText('2h 18m')).toBeInTheDocument();
+    expect(within(total).getByText('25m unapproved')).toBeInTheDocument();
+  });
+
+  it('lists a single day\'s classified intervals with their kinds and times', async () => {
+    mockGet({ '/orgs/org-1/attendance/activity': (query: Record<string, unknown> | undefined) => ({
+      data: query?.range === 'day' ? activity({ range: 'day', from: '2026-09-01', to: '2026-09-01', days: [awayDay()], totals: awayTotals }) : activity(),
+    }) });
+    renderWithProviders(<ActivityTab employeeId={EMP} />);
+    await screen.findByText('30 Aug – 05 Sep 2026');
+    fireEvent.keyDown(screen.getByLabelText('Period'), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Day' }));
+    const log = within((await screen.findByRole('heading', { name: 'Time away' })).closest('section')!);
+    const rows = log.getAllByTestId('away-interval');
+    expect(rows).toHaveLength(5);
+    expect(rows[0]).toHaveTextContent('Official duty');
+    expect(rows[0]).toHaveTextContent('09:00 – 10:00');
+    expect(rows[3]).toHaveTextContent('Unapproved');
+    expect(rows[4]).toHaveTextContent('Short step out');
+  });
+
+  it('keeps the office / field view when nothing was measured', async () => {
+    mockGet({ '/orgs/org-1/attendance/activity': { data: activity({ days: [day({ away: { awayMinutes: 0, officialDutyMinutes: 0, permissionMinutes: 0, unapprovedAwayMinutes: 0 }, awayIntervals: [] })] }) } });
+    renderWithProviders(<ActivityTab employeeId={EMP} />);
+    expect(await screen.findByText('30 Aug – 05 Sep 2026')).toBeInTheDocument();
+    expect(screen.queryByTestId('away-stats')).toBeNull();
+    expect(screen.queryByText('On site')).toBeNull();
+    expect(screen.getAllByText('In office').length).toBeGreaterThan(0);
   });
 });

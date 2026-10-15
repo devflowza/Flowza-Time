@@ -81,7 +81,10 @@ export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 export const ATTENDANCE_FLAGS = ['LATE', 'EARLY_DEPARTURE', 'OVERTIME', 'MISSING_IN', 'MISSING_OUT', 'MANUAL_CORRECTION', 'OUT_OF_WINDOW', 'WORKED_ON_HOLIDAY', 'WORKED_ON_WEEKLY_OFF', 'HALF_DAY_LEAVE', 'DUPLICATE_PUNCHES_COLLAPSED', 'RAMADAN_HOURS', 'CROSS_MIDNIGHT', 'NO_SHIFT', 'UNDER_HOURS',
   'UNEXCUSED', 'EXCUSED', 'LOP', 'PAY_EFFECT_HALF', 'PAY_EFFECT_FULL', 'OUTSIDE_GEOFENCE', 'SELF_SERVICE_PUNCH', 'NON_WORKING_DAY_WORK',
   // engine 1.4.0 (Enterprise): arrival beyond the policy's very-late threshold; a day worked on two shifts (double shift)
-  'VERY_LATE', 'DOUBLE_SHIFT'] as const;
+  'VERY_LATE', 'DOUBLE_SHIFT',
+  // engine 1.5.0 (time away, docs/time-away.md): time away beyond the breaks (official duty / permission / unapproved), and
+  // unapproved away time beyond the policy's tolerance
+  'TIME_AWAY', 'UNAPPROVED_AWAY'] as const;
 export type AttendanceFlag = (typeof ATTENDANCE_FLAGS)[number];
 
 /** Kinds of `attendance_day_marks` rows: a reviewed verdict on one employee-day (HR portal Prompt 3). */
@@ -143,7 +146,9 @@ export type CorrectionType = (typeof CORRECTION_TYPES)[number];
 export const CORRECTION_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'APPLIED'] as const;
 export type CorrectionStatus = (typeof CORRECTION_STATUSES)[number];
 
-export const APPROVAL_ENTITIES = ['ATTENDANCE_CORRECTION', 'OVERTIME', 'MISSING_PUNCH', 'SHIFT_CHANGE', 'MANUAL_ATTENDANCE', 'LEAVE', 'ATTENDANCE_NOTE', 'SHIFT_SWAP', 'COMP_OFF', 'REGULARISATION', 'OVERTIME_CLAIM'] as const;
+export const APPROVAL_ENTITIES = ['ATTENDANCE_CORRECTION', 'OVERTIME', 'MISSING_PUNCH', 'SHIFT_CHANGE', 'MANUAL_ATTENDANCE', 'LEAVE', 'ATTENDANCE_NOTE', 'SHIFT_SWAP', 'COMP_OFF', 'REGULARISATION', 'OVERTIME_CLAIM',
+  // time away during working hours (migration 20261015000100, docs/time-away.md)
+  'TIME_AWAY'] as const;
 export type ApprovalEntity = (typeof APPROVAL_ENTITIES)[number];
 
 /** Status of a request, a step or an actor row. Requests never carry SKIPPED (a step/actor that never got to decide). */
@@ -255,3 +260,24 @@ export const SELF_PUNCH_CHANNELS = ['web', 'mobile'] as const;
 export type SelfPunchChannel = (typeof SELF_PUNCH_CHANNELS)[number];
 export const SELF_PUNCH_DIRECTIONS = ['in', 'out'] as const;
 export type SelfPunchDirection = (typeof SELF_PUNCH_DIRECTIONS)[number];
+
+/**
+ * What a terminal's punches mean (`devices.punch_role`, docs/time-away.md): AUTO = the direction the terminal reports;
+ * CHECK_IN = entry-only terminal (every punch is an arrival); CHECK_OUT = exit-only terminal; ACCESS = door / meeting-room
+ * reader (room access, never attendance).
+ */
+export const DEVICE_PUNCH_ROLES = ['AUTO', 'CHECK_IN', 'CHECK_OUT', 'ACCESS'] as const;
+export type DevicePunchRole = (typeof DEVICE_PUNCH_ROLES)[number];
+/** Time away inside the working day: OFFICIAL duty (may count as worked) or PERSONAL permission (excused, unpaid, quota). */
+export const TIME_AWAY_KINDS = ['OFFICIAL', 'PERSONAL'] as const;
+export type TimeAwayKind = (typeof TIME_AWAY_KINDS)[number];
+export const TIME_AWAY_STATUSES = ['pending', 'approved', 'rejected', 'cancelled'] as const;
+export type TimeAwayStatus = (typeof TIME_AWAY_STATUSES)[number];
+/** How a time-away request was filed: ahead of time (`request`) or when stepping out from the portal (`step_out`). */
+export const TIME_AWAY_SOURCES = ['request', 'step_out'] as const;
+export type TimeAwaySource = (typeof TIME_AWAY_SOURCES)[number];
+/** How the engine classified one measured away interval (or part of one). */
+export const AWAY_INTERVAL_KINDS = ['BREAK', 'OFFICIAL', 'PERMISSION', 'UNAPPROVED', 'SHORT'] as const;
+export type AwayIntervalKind = (typeof AWAY_INTERVAL_KINDS)[number];
+export const MEETING_STATUSES = ['scheduled', 'cancelled'] as const;
+export type MeetingStatus = (typeof MEETING_STATUSES)[number];

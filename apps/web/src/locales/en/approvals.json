@@ -68,7 +68,8 @@
     "SHIFT_SWAP": "Shift swap",
     "COMP_OFF": "Compensatory off",
     "REGULARISATION": "Regularisation",
-    "OVERTIME_CLAIM": "Overtime claim"
+    "OVERTIME_CLAIM": "Overtime claim",
+    "TIME_AWAY": "Time away"
   },
   "status": {
     "PENDING": "Pending",
@@ -122,7 +123,22 @@
     "halfDay": "Half day",
     "noDetails": "No details available",
     "reason": "Reason: {{reason}}",
-    "setStatus": "Set the day to"
+    "setStatus": "Set the day to",
+    "timeAway": {
+      "kinds": {
+        "OFFICIAL": "Official duty",
+        "PERSONAL": "Personal permission"
+      },
+      "source": {
+        "request": "Planned",
+        "step_out": "Stepped out"
+      },
+      "returnedAt": "Back at {{time}}",
+      "notBack": "Not back yet",
+      "destination": "Destination: {{destination}}",
+      "quota": "{{used}} of {{quota}} personal permission used this month, this request included",
+      "quotaNoLimit": "{{used}} of personal permission used this month, this request included (no monthly limit)"
+    }
   },
   "decision": {
     "approveTitle": "Approve request",

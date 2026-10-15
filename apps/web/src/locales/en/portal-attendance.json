@@ -26,7 +26,9 @@
     "direction": {
       "in": "In",
       "out": "Out",
-      "unknown": "Punch"
+      "unknown": "Punch",
+      "break_out": "Stepped out",
+      "break_in": "Back"
     },
     "workZone": "your work zone",
     "locating": "Finding your location…",
@@ -258,7 +260,8 @@
       "reasons": "Reasons",
       "regularisations": "Regularisations",
       "swaps": "Shift swaps",
-      "selfies": "Selfie check-ins"
+      "selfies": "Selfie check-ins",
+      "time-away": "Time away"
     },
     "columns": {
       "date": "Day",
@@ -392,6 +395,120 @@
       "absent_days_other": "{{value}} days absent without leave.",
       "missing_checkouts_one": "You forgot to check out on {{value}} day.",
       "missing_checkouts_other": "You forgot to check out on {{value}} days."
+    }
+  },
+  "timeAway": {
+    "title": "Time away",
+    "seeRequests": "My time-away requests",
+    "kinds": {
+      "OFFICIAL": "Official duty",
+      "PERSONAL": "Personal permission"
+    },
+    "kindHints": {
+      "OFFICIAL": "A client visit, a ministry or a bank on company business. Counts as worked time.",
+      "OFFICIAL_UNPAID": "A client visit, a ministry or a bank on company business. Excused, but not counted as worked time.",
+      "PERSONAL": "A personal errand. Excused once approved, but unpaid."
+    },
+    "kindLabel": "Type",
+    "quotaLeft": "{{left}} of {{quota}} left this month",
+    "quotaNone": "No monthly limit",
+    "maxPerRequest": "At most {{max}} at a time",
+    "intervalKinds": {
+      "OFFICIAL": "Official duty",
+      "PERMISSION": "Permission",
+      "BREAK": "Break",
+      "UNAPPROVED": "Unapproved",
+      "SHORT": "Short step out"
+    },
+    "status": {
+      "pending": "Pending",
+      "approved": "Approved",
+      "rejected": "Rejected",
+      "cancelled": "Withdrawn"
+    },
+    "source": {
+      "request": "Planned",
+      "step_out": "Stepped out"
+    },
+    "stepOut": "Step out",
+    "stepOutTitle": "Step out",
+    "stepOutHint": "Records that you leave the site now and asks your manager to approve the time away. When you are back, check in on the terminal.",
+    "stepOutHintPortal": "Records that you leave the site now and asks your manager to approve the time away. When you are back, check in on the terminal or tap “I'm back”.",
+    "expectedBack": "Expected back ({{zone}})",
+    "expectedBackHint": "Between 5 minutes and 12 hours from now.",
+    "expectedBackInvalid": "Choose a time between 5 minutes and 12 hours from now.",
+    "reason": "Reason",
+    "reasonHint": "What the time away is for. Your manager reads it.",
+    "reasonTooShort": "Write at least 3 characters.",
+    "destination": "Destination",
+    "destinationPlaceholder": "e.g. Ministry of Labour, Al Khuwair",
+    "submitStepOut": "Step out now",
+    "steppedOut": "You stepped out at {{time}}. Expected back at {{back}}.",
+    "awayNow": "You stepped out at {{since}} for {{kind}}",
+    "expectedBackAt": "Expected back at {{time}}",
+    "overdue": "{{duration}} past your expected return",
+    "back": "I'm back",
+    "backDone": "Welcome back. Your return was recorded at {{time}}.",
+    "backOnDevice": "Check in on the terminal when you are back.",
+    "checkInFirst": "Check in first: you can step out while you are on site.",
+    "stepOutDisabled": "Your attendance policy does not allow stepping out from the portal. Ask your manager to record the time away.",
+    "measured": "Measured today",
+    "measuredHint": "As classified when your day was last calculated.",
+    "noIntervals": "No time away measured today.",
+    "todayRequests": "Today's requests",
+    "totals": {
+      "away": "Away",
+      "official": "Official duty",
+      "permission": "Permission",
+      "unapproved": "Unapproved"
+    },
+    "inactive": {
+      "DISABLED": "Time away is not measured under your attendance policy.",
+      "FIRST_LAST_INTERPRETATION": "Your attendance policy keeps only your first and last punch of the day, so time away cannot be measured. Ask HR to switch the policy to paired or directional punches."
+    },
+    "errors": {
+      "TIME_AWAY_DISABLED": "Time away is not enabled in your attendance policy.",
+      "TIME_AWAY_NOT_MEASURABLE": "Your attendance policy keeps only your first and last punch, so time away cannot be measured. Ask HR to switch to paired or directional punches.",
+      "STEP_OUT_DISABLED": "Your attendance policy does not allow stepping out from the portal. Ask your manager to record the time away.",
+      "ALREADY_AWAY": "You have already stepped out. Check in when you are back.",
+      "NOT_ON_SITE": "Check in first: you can only step out while you are on site.",
+      "NOT_AWAY": "You have not stepped out.",
+      "RETURN_ON_DEVICE": "Check in on the terminal when you are back: your attendance policy records the return on site only.",
+      "TIME_AWAY_QUOTA": "Not enough personal permission left this month: {{used}} of {{quota}} is already used or waiting.",
+      "TIME_AWAY_TOO_LONG": "Personal permission is at most {{max}} at a time.",
+      "TIME_AWAY_TOO_OLD": "Time away can be requested at most 7 days back."
+    },
+    "request": "Request time away",
+    "requestTitle": "Request time away",
+    "requestHint": "Plan a window of your working day. Your manager is asked to approve it, and the time away is measured from your punches.",
+    "date": "Day",
+    "from": "From ({{zone}})",
+    "to": "To ({{zone}})",
+    "dateRequired": "Choose the day.",
+    "timesRequired": "Enter both times.",
+    "windowTooLong": "A window is at most 16 hours.",
+    "personalTooLong": "Personal permission is at most {{max}} at a time.",
+    "quotaExceeded": "Only {{left}} of personal permission left this month.",
+    "duration": "Duration: {{duration}}",
+    "submit": "Send for approval",
+    "submitted": "Request sent for approval",
+    "withdraw": "Withdraw",
+    "withdrawTitle": "Withdraw this request?",
+    "withdrawHint": "The approvers are told. The time away is measured as usual from your punches.",
+    "withdrawn": "Request withdrawn",
+    "empty": "No time-away requests",
+    "emptyHint": "Plan official duty or a personal permission ahead, or step out from the check-in page.",
+    "columns": {
+      "window": "Window",
+      "kind": "Type",
+      "minutes": "Duration"
+    },
+    "returnedAt": "Back at {{time}}",
+    "notBack": "Not back yet",
+    "home": {
+      "title": "Time away today",
+      "link": "Check in / out",
+      "awaySince": "Stepped out since {{time}}"
     }
   }
 }

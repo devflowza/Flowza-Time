@@ -9,6 +9,18 @@ import { EmploymentStatusBadge } from '@/features/employees/components/employee-
 import { TEAM_NS } from '../i18n';
 
 /**
+ * How a report reaches the caller: as their manager, their secondary manager, or further down the reporting line (an
+ * organisation whose team scope is the whole hierarchy) — then through the report's own manager.
+ */
+function RelationBadge({ e, employeeId }: { e: EmployeeDto; employeeId: string | null }) {
+  const { t } = useTranslation(TEAM_NS);
+  if (e.managerEmployeeId === employeeId) return <Badge variant="info">{t('relation.primary')}</Badge>;
+  // an API that does not send the secondary manager lists direct reports only: anyone else is a secondary report
+  if (e.secondaryManagerEmployeeId === undefined || e.secondaryManagerEmployeeId === employeeId) return <Badge variant="neutral">{t('relation.secondary')}</Badge>;
+  return <Badge variant="neutral" dir="auto">{e.managerName ? t('relation.indirectVia', { managerName: e.managerName }) : t('relation.indirect')}</Badge>;
+}
+
+/**
  * The direct reports as a directory (employee.view_team, or the organisation-wide employee.view): what the Today tab shows to
  * a manager whose role cannot read the team's attendance. Without either key the list stays hidden and says why.
  */
@@ -36,7 +48,7 @@ export function MembersDirectory() {
                   <TableCell>{e.designationName ?? '—'}</TableCell>
                   <TableCell>{e.departmentName ?? '—'}</TableCell>
                   <TableCell>{e.branchName ?? '—'}</TableCell>
-                  <TableCell><Badge variant={e.managerEmployeeId === employeeId ? 'info' : 'neutral'}>{e.managerEmployeeId === employeeId ? t('relation.primary') : t('relation.secondary')}</Badge></TableCell>
+                  <TableCell><RelationBadge e={e} employeeId={employeeId} /></TableCell>
                   <TableCell><EmploymentStatusBadge status={e.employmentStatus} /></TableCell>
                 </TableRow>
               ))}

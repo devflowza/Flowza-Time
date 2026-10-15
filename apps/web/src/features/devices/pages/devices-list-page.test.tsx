@@ -30,7 +30,7 @@ describe('DevicesListPage', () => {
     resetApiMock(); grantAll();
     mockGet({
       // one page of the list — the header counts must NOT be derived from it
-      '/orgs/org-1/devices': page([device('d1', 'Gate A', 'online')], 340),
+      '/orgs/org-1/devices': page([device('d1', 'Gate A', 'online'), { ...device('d2', 'Boardroom reader', 'online'), punchRole: 'ACCESS' }, { ...device('d3', 'Exit turnstile', 'online'), punchRole: 'CHECK_OUT' }], 340),
       // server-side fleet summary (branch-scoped): 340 devices in total, far beyond a page
       '/orgs/org-1/devices/summary': { data: { total: 340, byConnectionStatus: { online: 300, offline: 20, error: 5, degraded: 3, vendor_degraded: 2, unknown: 10 }, byStatus: { active: 340 }, staleHeartbeats: 4 } },
       '/orgs/org-1/devices/pending': { data: [] },
@@ -52,5 +52,14 @@ describe('DevicesListPage', () => {
     expect(card('Unknown')).toHaveTextContent('10');
     expect(card('Unknown')).toHaveTextContent('4 active devices without a heartbeat');
     expect(screen.getByText('340 devices')).toBeInTheDocument();
+  });
+
+  it('marks the terminals that are not two-way with their punch role', async () => {
+    renderWithProviders(<DevicesListPage />, { route: '/devices', path: '/devices' });
+    expect((await screen.findAllByText('Boardroom reader')).length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Access reader').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Check-out only').length).toBeGreaterThan(0);
+    // the ordinary two-way terminal carries no badge in the list
+    expect(screen.queryByText('IN/OUT')).not.toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
 import type { z } from 'zod';
-import { isDefaultPolicySections, policySectionsEqual, policySectionsOf, type AttendancePolicySections, type AttendanceRuleSetInput, type HolidayInput, type ShiftAssignmentInput, type ShiftInput, type ShiftPatternInput, type holidayCalendarInputSchema } from '@flowza/contracts';
+import { enterpriseSectionsEqual, isDefaultEnterpriseSections, policySectionsOf, type AttendancePolicySections, type AttendanceRuleSetInput, type HolidayInput, type ShiftAssignmentInput, type ShiftInput, type ShiftPatternInput, type holidayCalendarInputSchema } from '@flowza/contracts';
 import { resolvePolicyFor, type Trx } from '@flowza/database';
 import { policySpecificity, resolveShift, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
@@ -514,6 +514,17 @@ async function policyLocationBranch(trx: Trx, grant: MembershipGrant, orgId: str
   requireBranchAccess(grant, node.branchId);
   return node.branchId;
 }
+/**
+ * Time away (docs/time-away.md) is measured from the punches between the first check-in and the last check-out, which a
+ * FIRST_LAST policy ignores: such a policy cannot switch it on (the engine would silently measure nothing).
+ */
+function assertTimeAwayMeasurable(policy: unknown, mode: AttendanceRuleSetInput['punchInterpretation'] | undefined): void {
+  if (policy === undefined || mode === undefined) return;
+  if (policySectionsOf(policy).timeAway.enabled && mode === 'FIRST_LAST') {
+    throw errors.validation('Time away needs punches between the first check-in and the last check-out: choose paired or directional punch interpretation.', { reason: 'TIME_AWAY_NEEDS_PAIRS', issues: [{ path: 'punchInterpretation', message: 'FIRST_LAST cannot measure time away' }] });
+  }
+}
+
 export async function createRuleSet(deps: ApiDeps, actor: Actor, orgId: string, input: AttendanceRuleSetInput): Promise<RuleSetDto & { recalculationJobId: string | null }> {
   const grant = requirePermission(actor.principal, orgId, 'attendance.manage_rules');
   // a policy for a location takes its branch from the location (policyLocationBranch, inside the transaction)
@@ -522,8 +533,9 @@ export async function createRuleSet(deps: ApiDeps, actor: Actor, orgId: string, 
     if (!grant.allBranches && !input.branchId) throw errors.forbidden('Branch-scoped users cannot change the organisation-wide rule set.');
   }
   if (input.effectiveTo && input.effectiveTo <= input.effectiveFrom) throw errors.validation('effectiveTo must be after effectiveFrom.', { issues: [{ path: 'effectiveTo', message: 'Invalid range' }] });
+  assertTimeAwayMeasurable(input.policy, input.punchInterpretation);
   // a scope beyond the branch, or policy sections other than the defaults, are the Enterprise attendance policies
-  if (ENTERPRISE_SCOPE_KEYS.some((k) => !!input[k]) || (input.policy !== undefined && !isDefaultPolicySections(input.policy))) requireModuleFor(actor.disabledModules, orgId, 'attendance_policies');
+  if (ENTERPRISE_SCOPE_KEYS.some((k) => !!input[k]) || (input.policy !== undefined && !isDefaultEnterpriseSections(input.policy))) requireModuleFor(actor.disabledModules, orgId, 'attendance_policies');
   return runUser(deps.db, actor, async (trx) => {
     const scoped: AttendanceRuleSetInput = input.locationId ? { ...input, branchId: await policyLocationBranch(trx, grant, orgId, input.locationId, input.branchId ?? null) } : input;
     if (scoped.branchId && !(await trx.selectFrom('branches').select('id').where('organizationId', '=', orgId).where('id', '=', scoped.branchId).executeTakeFirst())) throw errors.validation('Branch not found.', { issues: [{ path: 'branchId', message: 'Unknown branch' }] });
@@ -548,7 +560,8 @@ export async function updateRuleSet(deps: ApiDeps, actor: Actor, orgId: string, 
       if (input[key] !== undefined && (input[key] ?? null) !== b[key]) throw errors.validation(`The scope of a policy (${key}) cannot change; create a new policy instead.`, { issues: [{ path: key, message: 'Immutable' }] });
     }
     // the policy sections replace the stored ones as a whole; new non-default sections are the Enterprise module's
-    if (input.policy !== undefined && !isDefaultPolicySections(input.policy) && !policySectionsEqual(input.policy, b.policy)) requireModuleFor(actor.disabledModules, orgId, 'attendance_policies');
+    if (input.policy !== undefined && !isDefaultEnterpriseSections(input.policy) && !enterpriseSectionsEqual(input.policy, b.policy)) requireModuleFor(actor.disabledModules, orgId, 'attendance_policies');
+    if (input.policy !== undefined || input.punchInterpretation !== undefined) assertTimeAwayMeasurable(input.policy ?? b.policy, input.punchInterpretation ?? (b.punchInterpretation as AttendanceRuleSetInput['punchInterpretation']));
     const values = ruleSetValues(input);
     for (const key of SCOPE_KEYS) delete values[key];
     if (Object.keys(values).length) await trx.updateTable('attendanceRuleSets').set({ ...values, version: sql`version + 1` } as never).where('id', '=', id).execute();

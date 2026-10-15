@@ -68,7 +68,8 @@
     "SHIFT_SWAP": "تبادل ورديات",
     "COMP_OFF": "إجازة تعويضية",
     "REGULARISATION": "تسوية",
-    "OVERTIME_CLAIM": "مطالبة عمل إضافي"
+    "OVERTIME_CLAIM": "مطالبة عمل إضافي",
+    "TIME_AWAY": "الخروج أثناء الدوام"
   },
   "status": {
     "PENDING": "قيد الانتظار",
@@ -126,7 +127,22 @@
     "halfDay": "نصف يوم",
     "noDetails": "لا توجد تفاصيل",
     "reason": "السبب: {{reason}}",
-    "setStatus": "تعيين حالة اليوم إلى"
+    "setStatus": "تعيين حالة اليوم إلى",
+    "timeAway": {
+      "kinds": {
+        "OFFICIAL": "مهمة رسمية",
+        "PERSONAL": "استئذان شخصي"
+      },
+      "source": {
+        "request": "مخطَّط",
+        "step_out": "خروج فوري"
+      },
+      "returnedAt": "عاد الساعة {{time}}",
+      "notBack": "لم يعد بعد",
+      "destination": "الوجهة: {{destination}}",
+      "quota": "استُخدم {{used}} من {{quota}} من الاستئذان الشخصي هذا الشهر، شاملًا هذا الطلب",
+      "quotaNoLimit": "استُخدم {{used}} من الاستئذان الشخصي هذا الشهر، شاملًا هذا الطلب (بلا حد شهري)"
+    }
   },
   "decision": {
     "approveTitle": "الموافقة على الطلب",

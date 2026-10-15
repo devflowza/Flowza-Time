@@ -11,7 +11,7 @@
   "notManager": "You have no direct reports",
   "notManagerHint": "This page opens for members whose employee record is the manager or secondary manager of other employees.",
   "columns": { "name": "Name", "designation": "Designation", "department": "Department", "branch": "Branch", "relation": "Reports to you as" },
-  "relation": { "primary": "Manager", "secondary": "Secondary manager" },
+  "relation": { "primary": "Manager", "secondary": "Secondary manager", "indirect": "Indirect report", "indirectVia": "Indirect · via {{managerName}}" },
   "tabs": { "today": "Today", "attendance": "Attendance", "leave": "Leave", "approvals": "Approvals", "delegation": "Delegation" },
   "refresh": "Refresh",
   "updated": "Updated {{when}}",

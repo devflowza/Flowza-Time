@@ -96,10 +96,12 @@ async function loadGrants(trx: Trx, orgId: string, employeeId: string): Promise<
 
 type RawPunchRow = { id: string; punchedAt: Date; direction: string; source: string; rawPayload: unknown; processingStatus: string; deviceName: string | null; providerKey: string };
 
+/** The employee's recent attendance punches: a meeting-room reader's entries (punch role ACCESS) are room access, not punches. */
 async function recentRawPunches(trx: Trx, orgId: string, employeeId: string, since: Date): Promise<RawPunchRow[]> {
   return withSystemScope(trx, orgId, async (t) => (await t.selectFrom('attendanceRawTransactions as rt').leftJoin('devices as d', 'd.id', 'rt.deviceId')
     .select(['rt.id', 'rt.punchedAt', 'rt.direction', 'rt.source', 'rt.rawPayload', 'rt.processingStatus', 'd.name as deviceName', 'rt.providerKey'])
     .where('rt.organizationId', '=', orgId).where('rt.employeeId', '=', employeeId).where('rt.punchedAt', '>=', since)
+    .where((eb) => eb.or([eb('d.punchRole', 'is', null), eb('d.punchRole', '!=', 'ACCESS')]))
     .orderBy('rt.punchedAt', 'desc').orderBy('rt.id', 'desc').limit(60).execute()).map((r) => ({ ...r, id: String(r.id) })) as RawPunchRow[]);
 }
 

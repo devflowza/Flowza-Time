@@ -34,7 +34,7 @@ export const en: LocaleTemplates = {
   },
   entities: {
     ATTENDANCE_CORRECTION: 'Attendance correction', LEAVE: 'Leave request', OVERTIME: 'Overtime', MISSING_PUNCH: 'Missing punch', SHIFT_CHANGE: 'Shift change',
-    MANUAL_ATTENDANCE: 'Manual attendance', ATTENDANCE_NOTE: 'Attendance reason', SHIFT_SWAP: 'Shift swap', COMP_OFF: 'Comp-off', REGULARISATION: 'Regularisation', OVERTIME_CLAIM: 'Overtime claim',
+    MANUAL_ATTENDANCE: 'Manual attendance', ATTENDANCE_NOTE: 'Attendance reason', SHIFT_SWAP: 'Shift swap', COMP_OFF: 'Comp-off', REGULARISATION: 'Regularisation', OVERTIME_CLAIM: 'Overtime claim', TIME_AWAY: 'Time away',
   },
   reportTypes: {
     daily_attendance: 'Daily attendance', monthly_attendance: 'Monthly attendance', employee_attendance: 'Employee attendance', branch_attendance: 'Branch attendance',

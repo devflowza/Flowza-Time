@@ -93,7 +93,9 @@ afterAll(async () => { await api?.close(); });
 
 const key = (r: Route) => `${r.method} ${r.path.replace('/api/v1', '')}`;
 
-describe('route authorisation matrix (every /orgs/:orgId route)', () => {
+// each case walks EVERY organisation route (~360 and growing): a per-case budget well above the 5 s default, so the matrix
+// does not turn flaky as routes are added or on a loaded runner
+describe('route authorisation matrix (every /orgs/:orgId route)', { timeout: 60_000 }, () => {
   it('enumerates the organisation routes of the app', () => {
     expect(routes.length).toBeGreaterThan(250);
   });

@@ -17,6 +17,7 @@ import { registerStructureRoutes } from './structure.js';
 import { registerLocationRoutes } from './locations.js';
 import { registerFeatureRoutes } from './features/index.js';
 import { registerPortalAttendanceRoutes } from './portal-attendance.js';
+import { registerMeetingRoutes } from './meetings.js';
 
 /**
  * Registers all /api/v1 route modules. Each module exports `register<Name>Routes(v1, deps)` and lives in its own file
@@ -42,4 +43,5 @@ export function registerV1Routes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   registerPlatformRoutes(v1, deps);
   registerFeatureRoutes(v1, deps);
   registerPortalAttendanceRoutes(v1, deps);
+  registerMeetingRoutes(v1, deps);
 }

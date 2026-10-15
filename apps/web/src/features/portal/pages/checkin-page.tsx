@@ -20,6 +20,7 @@ import { VerdictChip } from '../components/attendance-badges';
 import { LocationProblem, VerdictBanner } from '../components/verdict-banner';
 import { SelfieDialog } from '../components/selfie-dialog';
 import { SectionTitle } from '../components/parts';
+import { TimeAwayCard } from '../components/time-away-card';
 import { DeploymentBanner } from '@/features/scheduling/components/deployment-banner';
 
 /** The server's clock, ticking locally from the offset measured when the status was read (display only; the API stamps punches). */
@@ -33,6 +34,9 @@ function useServerClock(serverTime: string | undefined, receivedAt: number, time
 
 const refusalOf = (e: unknown): { reason: SelfPunchRefusal | string; message: string } | null =>
   e instanceof ApiError && typeof e.details?.['reason'] === 'string' ? { reason: e.details['reason'], message: e.message } : null;
+
+/** Directions a punch of today is named by (a portal step-out is a break-out, "I'm back" a break-in); the rest is "Punch". */
+const NAMED_DIRECTIONS: ReadonlySet<string> = new Set(['in', 'out', 'break_out', 'break_in']);
 
 /** A fix less precise than this is worth a warning before punching (Finance B-31): the zone check may not be able to place it. */
 const ACCURACY_WARNING_M = 50;
@@ -239,7 +243,7 @@ export default function CheckInPage() {
               <ul className="divide-y" data-testid="today-punches">
                 {s.punches.map((p) => (
                   <li key={p.id} className="flex items-center justify-between gap-2 py-2">
-                    <span className="flex items-center gap-2 text-sm"><span className="font-semibold tnum" dir="ltr">{fmtTime(p.punchedAt, tz)}</span><Badge variant="outline">{t(`checkin.direction.${p.direction === 'in' || p.direction === 'out' ? p.direction : 'unknown'}`)}</Badge></span>
+                    <span className="flex items-center gap-2 text-sm"><span className="font-semibold tnum" dir="ltr">{fmtTime(p.punchedAt, tz)}</span><Badge variant="outline">{t(`checkin.direction.${NAMED_DIRECTIONS.has(p.direction) ? p.direction : 'unknown'}`)}</Badge></span>
                     <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><VerdictChip verdict={p.verdict} />{p.source === 'SELF_SERVICE' ? t('checkin.viaPortal') : p.deviceName ?? t('checkin.viaTerminal')}</span>
                   </li>
                 ))}
@@ -248,6 +252,9 @@ export default function CheckInPage() {
           </CardContent>
         </Card>
       </div>
+
+      {/* time away inside the working day (docs/time-away.md): step out, "I'm back", today's classified away time */}
+      <TimeAwayCard nowMs={clock.toMillis()} />
 
       {offline.items.length > 0 ? (
         <Card className="border-amber-200 dark:border-amber-900" data-testid="offline-queue">

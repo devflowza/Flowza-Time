@@ -56,7 +56,8 @@ export function MemberCard({ m, canOpenProfile, onOpenRecord, onPending }: { m: 
         </span>
         {m.leave ? <Badge variant="info"><LeaveTypeDot color={m.leave.color} />{m.leave.isHalfDay ? t('today.halfDay', { type: m.leave.leaveTypeName }) : m.leave.leaveTypeName}{m.leave.isHalfDay && m.leave.halfDayPart ? ` · ${tl(`halfDayParts.${m.leave.halfDayPart}`, { defaultValue: m.leave.halfDayPart })}` : ''}</Badge> : null}
         {m.lateMinutes > 0 ? <Badge variant="warning">{t('today.lateBy', { time: fmtMinutes(m.lateMinutes) })}</Badge> : null}
-        {m.relation === 'secondary' ? <Badge variant="neutral">{t('relation.secondary')}</Badge> : null}
+        {m.relation === 'secondary' ? <Badge variant="neutral">{t('relation.secondary')}</Badge>
+          : m.relation === 'indirect' ? <Badge variant="neutral" data-testid="relation-indirect" dir="auto">{m.managerName ? t('relation.indirectVia', { managerName: m.managerName }) : t('relation.indirect')}</Badge> : null}
         <FlagChips flags={m.flags.filter((f) => f !== 'LATE')} max={2} size="xs" />
       </div>
       <div className="mt-auto flex items-center justify-between gap-2">

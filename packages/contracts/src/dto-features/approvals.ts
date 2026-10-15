@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { APPROVAL_DECISIONS, APPROVAL_ENTITIES, APPROVAL_ESCALATION_TARGETS, APPROVAL_INBOX_SCOPES, APPROVAL_REQUEST_STATUSES, APPROVAL_STEP_MODES, APPROVER_TYPES, RECORD_STATUSES, type ApprovalEntity, type ApprovalEscalationTarget, type ApprovalRequestStatus, type ApprovalStatus, type ApprovalStepMode, type ApproverType, type ShiftChangeKind, type ShiftChangeStatus } from '../enums.js';
+import { APPROVAL_DECISIONS, APPROVAL_ENTITIES, APPROVAL_ESCALATION_TARGETS, APPROVAL_INBOX_SCOPES, APPROVAL_REQUEST_STATUSES, APPROVAL_STEP_MODES, APPROVER_TYPES, RECORD_STATUSES, type ApprovalEntity, type ApprovalEscalationTarget, type ApprovalRequestStatus, type ApprovalStatus, type ApprovalStepMode, type ApproverType, type ShiftChangeKind, type ShiftChangeStatus, type TimeAwayKind, type TimeAwaySource, type TimeAwayStatus } from '../enums.js';
 import { PERMISSIONS } from '../permissions.js';
 import { booleanQuerySchema, isoDateSchema, paginationQuerySchema, uuidSchema } from '../common.js';
 import { updateSchemaOf } from './devices.js';
@@ -257,6 +257,8 @@ export type ApprovalContextDto =
   | { kind: 'SHIFT_SWAP'; summary: string | null; swap: { id: string; swapDate: string; requesterName: string | null; targetName: string | null; requesterShiftName: string | null; targetShiftName: string | null; reason: string; status: string } }
   // Enterprise (shift_requests): a shift change (CHANGE: work another shift) or an additional shift (ADDITIONAL: a double shift) over a range
   | { kind: 'SHIFT_CHANGE'; summary: string | null; change: { id: string; kind: ShiftChangeKind; fromDate: string; toDate: string; employeeName: string | null; requestedShiftName: string | null; currentShiftName: string | null; reason: string; status: ShiftChangeStatus } }
+  // time away inside the working day (docs/time-away.md): the window, its kind and — for a step-out — when the employee came back
+  | { kind: 'TIME_AWAY'; summary: string | null; timeAway: { id: string; attendanceDate: string; kind: TimeAwayKind; source: TimeAwaySource; startsAt: string; endsAt: string; returnedAt: string | null; minutes: number; reason: string; destination: string | null; status: TimeAwayStatus; timezone: string | null; personalUsedMinutes: number | null; personalMonthlyQuotaMinutes: number | null } }
   | { kind: 'GENERIC'; entityType: ApprovalEntity; summary: string | null }
   // leave v2 (Prompt 7): a comp-off credit request — the worked day, its type, the minutes and the days it earns
   | { kind: 'COMP_OFF'; compOff: { id: string; workedOn: string; workedOnType: string; workedMinutes: number; recordedMinutes: number | null; daysEarned: number; location: string; summary: string; status: string } };

@@ -1,0 +1,41 @@
+{
+  "nav": { "timeAway": "Time away" },
+  "title": "Time away",
+  "subtitle": "Time employees spent away from the site during working hours, per month: official duty, personal permission and unapproved absence.",
+  "month": "Month",
+  "previousMonth": "Previous month",
+  "nextMonth": "Next month",
+  "thisMonth": "This month",
+  "kinds": { "OFFICIAL": "Official duty", "PERSONAL": "Personal permission" },
+  "statuses": { "pending": "Pending", "approved": "Approved", "rejected": "Rejected", "cancelled": "Cancelled" },
+  "sources": { "request": "Planned", "step_out": "Stepped out" },
+  "totals": { "away": "Time away", "official": "Official duty", "permission": "Permission", "unapproved": "Unapproved", "flagged": "Employees with unapproved time", "pending": "Pending requests" },
+  "legend": { "official": "Official duty", "permission": "Permission", "unapproved": "Unapproved", "other": "Other" },
+  "summary": {
+    "title": "Monthly totals",
+    "hint": "From the calculated attendance days of the month. Select a row to see that employee's requests.",
+    "columns": { "employee": "Employee", "days": "Days away", "away": "Away total", "official": "Official duty", "permission": "Permission", "unapproved": "Unapproved", "unapprovedDays": "Days flagged", "pending": "Pending", "breakdown": "Breakdown" },
+    "empty": "No time away this month",
+    "emptyHint": "Nobody was away beyond their breaks in this month, or its days are not calculated yet.",
+    "card": "Days away: {{days}} · away {{away}} · official {{official}} · permission {{permission}}",
+    "cardUnapproved": "Unapproved {{duration}} · days flagged: {{days}}",
+    "breakdownLabel": "Official duty {{official}}, permission {{permission}}, unapproved {{unapproved}}, other {{other}}",
+    "showRequests": "Show the requests of {{name}}"
+  },
+  "requests": {
+    "title": "Requests",
+    "hint": "Planned windows and step-outs filed by employees for days of this month.",
+    "columns": { "employee": "Employee", "date": "Date", "kind": "Type", "window": "Window", "returned": "Back at", "minutes": "Duration", "reason": "Reason", "status": "Status", "decidedBy": "Decided by" },
+    "status": "Status",
+    "kind": "Type",
+    "allStatuses": "All statuses",
+    "allKinds": "All types",
+    "forEmployee": "Requests of {{name}}",
+    "showAll": "Show everyone",
+    "empty": "No requests",
+    "emptyHint": "No time-away request matches these filters.",
+    "notBack": "Not back yet",
+    "destination": "To: {{destination}}",
+    "card": "{{date}} · {{from}} – {{to}} · {{duration}}"
+  }
+}

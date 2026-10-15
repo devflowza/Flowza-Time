@@ -25,7 +25,7 @@ type PageView = InboxView | 'requests';
 const VIEWS: readonly PageView[] = ['pending', 'history', 'requests'];
 const SCOPES: readonly ApprovalInboxScope[] = ['mine', 'team', 'all'];
 /** Entity types with a live document behind them today; the others appear only once a request of theirs exists. */
-const FILTER_TYPES: readonly ApprovalEntity[] = ['ATTENDANCE_CORRECTION', 'LEAVE'];
+const FILTER_TYPES: readonly ApprovalEntity[] = ['ATTENDANCE_CORRECTION', 'LEAVE', 'TIME_AWAY'];
 
 function Chip({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return <button type="button" onClick={onClick} aria-pressed={active} className={cn('h-8 rounded-full border px-3 text-xs font-medium transition-colors', active ? 'border-primary bg-primary text-primary-foreground' : 'bg-card hover:bg-muted')}>{children}</button>;

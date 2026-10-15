@@ -14,6 +14,7 @@ import { fmtDays } from '../model';
 import { ApplyLeaveDialog } from '../components/apply-leave-dialog';
 import { BalanceRow, LeaveStatusBadge, SectionTitle, TypeDot } from '../components/parts';
 import { HomePunchCard, PendingSelfItems } from '../components/home-attendance';
+import { TimeAwayToday } from '../components/time-away-card';
 import { TeamUpcomingLeave } from '@/features/leave/components/team-upcoming-leave';
 
 function TodayCard() {
@@ -98,6 +99,8 @@ export default function PortalHomePage() {
       <HomePunchCard overview={d} />
 
       <TodayCard />
+      {/* time away inside the working day, when the employee's policy measures it */}
+      <TimeAwayToday />
 
       <section aria-label={t('home.thisMonth')}>
         <h2 className="mb-2 text-sm font-semibold">{t('home.thisMonth')} <span className="font-normal text-muted-foreground">· {d ? fmtDate(`${d.month.month}-01`, 'MMMM yyyy') : ''}</span></h2>

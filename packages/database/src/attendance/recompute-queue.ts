@@ -11,7 +11,7 @@ import type { RecordHistoryReason } from '../generated/db.js';
  */
 
 /** Reasons a recompute job may carry (mirrors `public.record_history_reason`). */
-export const RECOMPUTE_REASONS = ['NEW_EVENT', 'CORRECTION', 'RULE_CHANGE', 'SHIFT_CHANGE', 'HOLIDAY_CHANGE', 'LEAVE_CHANGE', 'RECALCULATION', 'MANUAL_OVERRIDE', 'UNLOCK'] as const satisfies readonly RecordHistoryReason[];
+export const RECOMPUTE_REASONS = ['NEW_EVENT', 'CORRECTION', 'RULE_CHANGE', 'SHIFT_CHANGE', 'HOLIDAY_CHANGE', 'LEAVE_CHANGE', 'RECALCULATION', 'MANUAL_OVERRIDE', 'UNLOCK', 'TIME_AWAY'] as const satisfies readonly RecordHistoryReason[];
 export const recomputeReasonSchema = z.enum(RECOMPUTE_REASONS);
 export type RecomputeReason = z.infer<typeof recomputeReasonSchema>;
 
@@ -29,7 +29,7 @@ export type RecomputePayload = z.infer<typeof recomputePayloadSchema>;
  * Reasons whose recompute must run now. They get their own dedupe key so a debounced NEW_EVENT job that is already
  * pending (with a later `runAt` and the wrong reason) cannot absorb them — both jobs are idempotent, the later one is a no-op.
  */
-export const IMMEDIATE_RECOMPUTE_REASONS: ReadonlySet<RecomputeReason> = new Set<RecomputeReason>(['CORRECTION', 'MANUAL_OVERRIDE', 'UNLOCK']);
+export const IMMEDIATE_RECOMPUTE_REASONS: ReadonlySet<RecomputeReason> = new Set<RecomputeReason>(['CORRECTION', 'MANUAL_OVERRIDE', 'UNLOCK', 'TIME_AWAY']);
 export const recomputeDedupeKey = (employeeId: string, date: string, immediate = false): string => `recompute:${employeeId}:${date}${immediate ? ':immediate' : ''}`;
 
 export interface EnqueueRecomputeInput {

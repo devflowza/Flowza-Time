@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { CONNECTION_STATUSES, DEVICE_STATUSES, INTEGRATION_TYPES, PROVIDER_STATUSES, PUNCH_DIRECTIONS, RAW_SOURCES, VERIFICATION_METHODS, VERIFICATION_STATUSES } from './enums.js';
+import { CONNECTION_STATUSES, DEVICE_PUNCH_ROLES, DEVICE_STATUSES, INTEGRATION_TYPES, PROVIDER_STATUSES, PUNCH_DIRECTIONS, RAW_SOURCES, VERIFICATION_METHODS, VERIFICATION_STATUSES } from './enums.js';
 import { codeSchema, isoDateTimeSchema, jsonObjectSchema, timezoneSchema, uuidSchema } from './common.js';
 
 /** Capability matrix exposed by providers/models/devices (§12). Unknown keys default to false. */
@@ -84,6 +84,11 @@ export const createDeviceSchema = z.object({
   branchId: uuidSchema,
   /** Where the terminal is installed: a place (site, floor, zone…) of its branch (docs/locations.md); null clears it. */
   locationId: uuidSchema.nullable().optional(),
+  /**
+   * What its punches mean (docs/time-away.md): AUTO = the direction the terminal reports; CHECK_IN = entry-only terminal;
+   * CHECK_OUT = exit-only terminal; ACCESS = door / meeting-room reader (room access, never attendance). Default AUTO.
+   */
+  punchRole: z.enum(DEVICE_PUNCH_ROLES).optional(),
   providerKey: z.string().min(1).max(64),
   modelId: uuidSchema.optional(),
   manufacturer: z.string().trim().min(1).max(80),
@@ -119,6 +124,8 @@ export const deviceDtoSchema = z.object({
   locationId: uuidSchema.nullable().optional(),
   /** That place's path below the branch, e.g. "Site A › Floor 2 › Zone C". */
   locationName: z.string().nullable().optional(),
+  /** What the terminal's punches mean (AUTO / CHECK_IN / CHECK_OUT / ACCESS); optional so older fixtures keep compiling. */
+  punchRole: z.enum(DEVICE_PUNCH_ROLES).optional(),
   code: z.string(),
   name: z.string(),
   providerKey: z.string(),

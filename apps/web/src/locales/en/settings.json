@@ -165,6 +165,16 @@
       "hint": "Targets behind the employee's own attendance statistics.",
       "target": "Attendance target (%)",
       "fullDayHours": "Full day (hours)"
+    },
+    "team": {
+      "title": "Manager team scope",
+      "hint": "Who a line manager's team is. It applies everywhere a manager sees a team: My team, approvals of the team, team leave and team reports.",
+      "scope": "A manager's team",
+      "scopeHint": "With the whole reporting line, a manager also sees the reports of their reports, up to 5 levels down.",
+      "options": {
+        "direct": "Direct reports",
+        "hierarchy": "Whole reporting hierarchy (up to 5 levels)"
+      }
     }
   },
   "sync": {

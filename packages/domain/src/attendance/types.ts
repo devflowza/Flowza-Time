@@ -1,4 +1,5 @@
 import type { AttendanceEventType, AttendanceFlag, AttendanceRules, AttendanceStatus, ShiftBreak, ShiftType, VerificationMethod } from '@flowza/contracts';
+import type { EngineTimeAway } from './time-away.js';
 
 /** Inputs to the pure attendance engine (§G). All timestamps are UTC ISO strings; dates are YYYY-MM-DD. */
 export interface EngineShift {
@@ -105,6 +106,11 @@ export interface DailyCalculationInput {
   dayMarks?: EngineDayMark[];
   /** Organisation policy switches; absent = the contract defaults (non-working-day work is recorded). */
   settings?: EngineAttendanceSettings;
+  /**
+   * Engine 1.5.0: the employee's APPROVED time-away windows overlapping the day (official duty / personal permission). The
+   * policy's `timeAway` section decides whether away time is measured at all; absent = no approved window.
+   */
+  timeAway?: EngineTimeAway[];
   now?: string;                    // UTC ISO; used to decide whether a missing OUT is "still working"
   /**
    * Shifts of the previous / next attendance date, used to build the neighbouring punch windows for
@@ -143,6 +149,14 @@ export interface DailyCalculationResult {
   earlyDepartureMinutes: number;
   overtimeMinutes: number;
   overtimeCategory: 'REGULAR' | 'WEEKLY_OFF' | 'HOLIDAY' | null;
+  /**
+   * Engine 1.5.0 (time away, all 0 unless the policy measures it): every measured away minute between the first IN and the
+   * last OUT, and the parts inside an approved official / personal window and with no approval beyond the breaks.
+   */
+  awayMinutes: number;
+  officialDutyMinutes: number;
+  permissionMinutes: number;
+  unapprovedAwayMinutes: number;
   status: AttendanceStatus;
   flags: AttendanceFlag[];
   /** Loss-of-pay days (0 / 0.5 / 1) from an LOP mark; 0 when the day is excused or the pay effect was charged to leave. */
@@ -183,5 +197,9 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * instead of PRESENT with 0 worked minutes.
  * 1.4.0 — Enterprise: VERY_LATE when the arrival is more than the policy's `late.veryLateAfterMinutes` after the scheduled start;
  * DOUBLE_SHIFT for a composite day of two shifts (composeDoubleShift). Nothing changes for a day without either.
+ * 1.5.0 — Time away (docs/time-away.md): with the policy's `timeAway` on and a PAIRED / DIRECTIONAL interpretation, every gap
+ * between the first IN and the last OUT is classified against the approved time-away windows (official / permission / break /
+ * unapproved; time-away.ts). Approved official duty stays worked time (policy), permission and unapproved time are deducted;
+ * permission does not make the day short (policy). Flags TIME_AWAY / UNAPPROVED_AWAY. Nothing changes with the policy off.
  */
-export const ENGINE_VERSION = 'attendance-engine/1.4.0';
+export const ENGINE_VERSION = 'attendance-engine/1.5.0';

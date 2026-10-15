@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { ArrowLeftRight, CalendarOff, Clock, FileQuestion, MessageSquareText, Repeat } from 'lucide-react';
+import { ArrowLeftRight, CalendarOff, Clock, DoorOpen, FileQuestion, MessageSquareText, Repeat } from 'lucide-react';
 import type { ApprovalContextDto, ApprovalEntity, ApprovalRequestDto, ApprovalRequestStatus, ApprovalStepDto } from '@flowza/contracts';
 import { Badge } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -9,7 +9,7 @@ import { CorrectionSummary } from '@/features/attendance/components/record-dialo
 import { modeText } from '../labels';
 import { AR_NS } from '@/features/attendance-review/i18n';
 import { AttendanceStatusBadge, FlagChips } from '@/features/attendance/components/badges';
-import { fmtTime } from '@/lib/format';
+import { fmtMinutes, fmtTime } from '@/lib/format';
 import { CompOffApprovalContext } from '@/features/leave/components/comp-off-context';
 import { ShiftChangeApprovalContext } from '@/features/shift-requests/components/approval-context';
 
@@ -22,7 +22,7 @@ export function RequestStatusBadge({ status }: { status: ApprovalRequestStatus |
 
 export function EntityIcon({ entityType, className }: { entityType: ApprovalEntity; className?: string }) {
   const Icon = entityType === 'LEAVE' || entityType === 'COMP_OFF' ? CalendarOff : entityType === 'ATTENDANCE_CORRECTION' || entityType === 'MISSING_PUNCH' || entityType === 'REGULARISATION' ? Clock
-    : entityType === 'ATTENDANCE_NOTE' ? MessageSquareText : entityType === 'SHIFT_SWAP' ? ArrowLeftRight : entityType === 'SHIFT_CHANGE' ? Repeat : FileQuestion;
+    : entityType === 'ATTENDANCE_NOTE' ? MessageSquareText : entityType === 'SHIFT_SWAP' ? ArrowLeftRight : entityType === 'SHIFT_CHANGE' ? Repeat : entityType === 'TIME_AWAY' ? DoorOpen : FileQuestion;
   const tone = entityType === 'LEAVE' || entityType === 'COMP_OFF' ? 'bg-chart-leave/12 text-chart-leave' : 'bg-chart-late/12 text-chart-late';
   return <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-lg', tone, className)} aria-hidden><Icon className="size-4" /></span>;
 }
@@ -74,7 +74,44 @@ export function ApprovalContext({ context, timezone, compact = false }: { contex
   if (context.kind === 'COMP_OFF') return <CompOffApprovalContext c={context.compOff} compact={compact} />;
   // Enterprise (shift_requests): a shift change or an additional (double) shift over a range
   if (context.kind === 'SHIFT_CHANGE') return <ShiftChangeApprovalContext context={context} compact={compact} />;
+  // time away inside the working day (docs/time-away.md): a planned window or a step-out
+  if (context.kind === 'TIME_AWAY') return <TimeAwayContext context={context} timezone={timezone} compact={compact} />;
   return <p className="text-sm text-muted-foreground">{context.summary ?? t('context.noDetails')}</p>;
+}
+
+type TimeAwayApprovalContext = Extract<ApprovalContextDto, { kind: 'TIME_AWAY' }>;
+
+/**
+ * A time-away request for the approver: the kind, the day and the window in the employee's zone, its length, whether it was
+ * planned or filed when stepping out (and when the employee came back), the reason and destination, and — for personal
+ * permission — how much of the month's quota is used with this request.
+ */
+function TimeAwayContext({ context, timezone, compact }: { context: TimeAwayApprovalContext; timezone: string; compact: boolean }) {
+  const { t } = useTranslation('approvals');
+  const a = context.timeAway;
+  const tz = a.timezone ?? timezone;
+  const clip = cn('text-xs text-muted-foreground', compact && 'max-w-[260px] truncate');
+  const used = a.personalUsedMinutes;
+  const quota = a.personalMonthlyQuotaMinutes;
+  return (
+    <div className="min-w-0 space-y-1 text-sm" data-testid="context-time-away">
+      <p className="flex flex-wrap items-center gap-2">
+        <span className="tnum">{fmtDate(a.attendanceDate)}</span>
+        <Badge variant={a.kind === 'OFFICIAL' ? 'info' : 'secondary'}>{t(`context.timeAway.kinds.${a.kind}`)}</Badge>
+        <span className="text-xs tnum" dir="ltr">{fmtTime(a.startsAt, tz)} – {fmtTime(a.endsAt, tz)}</span>
+        <Badge variant="outline" className="tnum">{fmtMinutes(a.minutes)}</Badge>
+        <Badge variant="neutral">{t(`context.timeAway.source.${a.source}`)}</Badge>
+      </p>
+      {a.source === 'step_out' ? <p className="text-xs tnum">{a.returnedAt ? t('context.timeAway.returnedAt', { time: fmtTime(a.returnedAt, tz) }) : t('context.timeAway.notBack')}</p> : null}
+      {a.kind === 'PERSONAL' && used !== null ? (
+        <p className={cn('text-xs tnum', quota !== null && used > quota ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground')} data-testid="context-time-away-quota">
+          {quota !== null ? t('context.timeAway.quota', { used: fmtMinutes(used), quota: fmtMinutes(quota) }) : t('context.timeAway.quotaNoLimit', { used: fmtMinutes(used) })}
+        </p>
+      ) : null}
+      <p className={clip} title={a.reason} dir="auto">{compact ? a.reason : t('context.reason', { reason: a.reason })}</p>
+      {a.destination ? <p className={clip} title={a.destination} dir="auto">{t('context.timeAway.destination', { destination: a.destination })}</p> : null}
+    </div>
+  );
 }
 
 type PortalContext = Extract<ApprovalContextDto, { kind: 'ATTENDANCE_NOTE' | 'REGULARISATION' | 'SHIFT_SWAP' }>;
