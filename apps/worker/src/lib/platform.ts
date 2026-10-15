@@ -3,6 +3,7 @@ import { Resend } from 'resend';
 import { AppError, type Logger } from '@flowza/shared';
 import type { WorkerConfig } from '../config.js';
 import type { Mailer, RealtimePublisher, StorageWriter } from '../deps.js';
+import { createSesMailer, sesSettings } from './ses.js';
 
 const STORAGE_UNCONFIGURED = 'Report storage is not configured on this worker: set SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY (go-live §3).';
 
@@ -68,6 +69,22 @@ const PERMANENT_EMAIL_ERRORS: ReadonlySet<string> = new Set([
 ]);
 
 export function createMailer(config: WorkerConfig, log: Logger): Mailer {
+  if (config.EMAIL_PROVIDER === 'ses') {
+    const ses = sesSettings(config);
+    if ('problem' in ses) {
+      // Unlike Resend below, never a console fallback: asking for SES and quietly not sending marks every invitation
+      // "sent". Each send fails at once with the reason, which Users & roles → Invitations and the e-mail log show and
+      // whose Retry works once the variables are set.
+      log.error({ event: 'email_provider_unconfigured', provider: 'ses', reason: ses.problem });
+      return {
+        async send() {
+          throw new AppError('PROVIDER_ERROR', `email send failed: ${ses.problem}`, { retryable: false, details: { mailer: 'ses', reason: 'unconfigured' } });
+        },
+      };
+    }
+    log.info({ event: 'email_provider', provider: 'ses', region: ses.settings.region, from: ses.settings.from, configurationSet: ses.settings.configurationSet ?? null });
+    return createSesMailer(ses.settings);
+  }
   if (config.EMAIL_PROVIDER === 'resend' && config.RESEND_API_KEY) {
     const resend = new Resend(config.RESEND_API_KEY);
     return {

@@ -37,8 +37,16 @@ const schema = z.object({
    * Production keeps the default: https and a public host, validated on save and on every call.
    */
   FLOWZA_ALLOW_PRIVATE_EGRESS: booleanFromEnv.default(false),
-  EMAIL_PROVIDER: z.enum(['console', 'resend']).default('console'),
+  EMAIL_PROVIDER: z.enum(['console', 'resend', 'ses']).default('console'),
   RESEND_API_KEY: z.string().optional(),
+  /**
+   * Amazon SES (EMAIL_PROVIDER=ses, lib/ses.ts): an IAM key allowed ses:SendEmail on the sending identity and the
+   * configuration set only, and the region the identity is verified in. EMAIL_FROM must be on that identity.
+   */
+  SES_ACCESS_KEY_ID: z.string().optional(),
+  SES_SECRET_ACCESS_KEY: z.string().optional(),
+  SES_REGION: z.string().optional(),
+  SES_CONFIGURATION_SET: z.string().optional(),
   EMAIL_FROM: z.string().default('FlowZa Time <no-reply@flowza.example>'),
   API_PUBLIC_URL: z.string().default('http://localhost:4000'),
   WEB_PUBLIC_URL: z.string().default('http://localhost:5173'),

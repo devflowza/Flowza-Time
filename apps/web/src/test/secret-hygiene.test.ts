@@ -76,7 +76,7 @@ describe('secret hygiene', () => {
     for (const f of webFiles.filter((file) => file !== SELF)) {
       // an env file's comments may name what must never go in it; its assignments may not
       const text = /(^|\/)\.env[^/]*$/.test(f) ? read(f).split(/\r?\n/).filter((l) => !/^\s*#/.test(l)).join('\n') : read(f);
-      for (const needle of ['SUPABASE_SERVICE_ROLE_KEY', 'service_role', 'sb_secret_', 'FLOWZA_CREDENTIALS_MASTER_KEYS', 'DATABASE_URL', 'RESEND_API_KEY', 'FLOWZA_DEVICE_PUSH_SECRET', 'SUPABASE_JWT_SECRET']) {
+      for (const needle of ['SUPABASE_SERVICE_ROLE_KEY', 'service_role', 'sb_secret_', 'FLOWZA_CREDENTIALS_MASTER_KEYS', 'DATABASE_URL', 'RESEND_API_KEY', 'SES_SECRET_ACCESS_KEY', 'FLOWZA_DEVICE_PUSH_SECRET', 'SUPABASE_JWT_SECRET']) {
         if (text.includes(needle)) bad.push(`${f}: ${needle}`);
       }
       if (/-----BEGIN [A-Z ]*PRIVATE KEY-----/.test(text)) bad.push(`${f}: private key`);
