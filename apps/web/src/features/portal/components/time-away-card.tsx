@@ -16,14 +16,19 @@ import { TimeAwayStatusBadge } from './attendance-badges';
 import { SectionTitle } from './parts';
 import { StepOutDialog } from './time-away-dialogs';
 
-/** The open step-out: since when, for what, the expected return (overdue once passed) and how the return is recorded. */
+/**
+ * The open step-out: since when, for what, the expected return (overdue once passed) and how the return is recorded. Mounted
+ * per step-out (keyed by its request), so "I'm back" carries one idempotency key for it: a retry after a lost response
+ * replays the recorded return instead of being refused as "not stepped out".
+ */
 function AwayBanner({ s, away, nowMs }: { s: TimeAwayStatusDto; away: NonNullable<TimeAwayStatusDto['away']>; nowMs: number }) {
   const { t } = useTranslation(PA_NS);
   const { back } = useTimeAwayMutations();
   const toastError = useTimeAwayErrorToast();
+  const [backKey] = useState(() => crypto.randomUUID());
   const tz = s.timezone;
   const overdue = minutesBetween(away.expectedBackAt, nowMs);
-  const comeBack = () => back.mutate(crypto.randomUUID(), {
+  const comeBack = () => back.mutate(backKey, {
     onSuccess: (r) => toast.success(t('timeAway.backDone', { time: fmtTime(r.returnedAt ?? new Date(nowMs).toISOString(), tz) })),
     onError: toastError,
   });
@@ -73,7 +78,7 @@ export function TimeAwayCard({ nowMs }: { nowMs: number }) {
           </p>
         ) : null}
 
-        {s.away ? <AwayBanner s={s} away={s.away} nowMs={nowMs} />
+        {s.away ? <AwayBanner key={s.away.requestId} s={s} away={s.away} nowMs={nowMs} />
           : s.canStepOut ? (
             <div className="flex flex-wrap items-center gap-3">
               <Button size="lg" variant="outline" className="w-full sm:w-auto" onClick={() => setStepOutOpen(true)} data-testid="time-away-step-out"><DoorOpen /> {t('timeAway.stepOut')}</Button>

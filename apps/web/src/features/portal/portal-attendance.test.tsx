@@ -166,6 +166,33 @@ describe('CheckInPage', () => {
     expect(screen.queryByRole('button', { name: /with a selfie/ })).not.toBeInTheDocument();
   });
 
+  it('after a step-out or "I\'m back" the day stays open: the line names the break punch and the button checks out', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    const punchOf = (id: string, punchedAt: string, direction: string) => ({ id, punchedAt, direction, source: 'SELF_SERVICE' as const, channel: 'web' as const, verdict: 'allowed' as const, deviceName: null, processingStatus: 'processed' });
+    const checkIn = punchOf('p1', '2026-09-27T04:00:00Z', 'in');
+    // stepped out at 11:00 Muscat: the API reads the break-out as an open day (lastDirection 'in'); getPunchStatus lists
+    // today's punches newest first, so the line must pick the latest punch by time, not the array's last entry
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ lastDirection: 'in', canCheckIn: false, canCheckOut: true, punches: [punchOf('p2', '2026-09-27T07:00:00Z', 'break_out'), checkIn] }) } });
+    const { unmount } = renderWithProviders(<CheckInPage />);
+    expect(await screen.findByTestId('punch-state')).toHaveTextContent('Stepped out at 11:00');
+    expect(screen.getByTestId('punch-button')).toHaveTextContent('Check out');
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`/orgs/${ORG}/me/punch/preview`, expect.objectContaining({ direction: 'out' })));
+    unmount();
+    // back at 11:40 ("I'm back"): still checked in, the next punch is the check-out (newest first, as the API sends it)
+    const back = [punchOf('p3', '2026-09-27T07:40:00Z', 'break_in'), punchOf('p2', '2026-09-27T07:00:00Z', 'break_out'), checkIn];
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ lastDirection: 'in', canCheckIn: false, canCheckOut: true, punches: back }) } });
+    const second = renderWithProviders(<CheckInPage />);
+    expect(await screen.findByTestId('punch-state')).toHaveTextContent('Back at 11:40');
+    expect(screen.getByTestId('punch-button')).toHaveTextContent('Check out');
+    expect(within(screen.getByTestId('today-punches')).getByText('Back')).toBeInTheDocument();
+    second.unmount();
+    // the same day listed oldest first (the e2e mock backend's order) reads the same
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ lastDirection: 'in', canCheckIn: false, canCheckOut: true, punches: [...back].reverse() }) } });
+    renderWithProviders(<CheckInPage />);
+    expect(await screen.findByTestId('punch-state')).toHaveTextContent('Back at 11:40');
+  });
+
   it('hides the check-out time before the first check-in and on an API that does not send it', async () => {
     mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
     mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ lastDirection: 'in', today: { status: 'PENDING', flags: [], firstInAt: '2026-09-27T04:00:00Z', lastOutAt: null, workedMinutes: 0 } }) } });

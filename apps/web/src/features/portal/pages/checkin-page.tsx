@@ -41,6 +41,12 @@ const NAMED_DIRECTIONS: ReadonlySet<string> = new Set(['in', 'out', 'break_out',
 /** A fix less precise than this is worth a warning before punching (Finance B-31): the zone check may not be able to place it. */
 const ACCURACY_WARNING_M = 50;
 
+/**
+ * The state line names the latest punch. A step-out and "I'm back" keep the working day open — the API reads both as
+ * `lastDirection: 'in'`, so the button offers Check out — but the line says what happened: stepped out, back; else in / out.
+ */
+const STATE_KEYS: Readonly<Record<string, string>> = { out: 'checkin.checkedOutAt', break_out: 'checkin.steppedOutAt', break_in: 'checkin.backAt' };
+
 function nextDirection(status: SelfPunchStatusDto | undefined, queued: ReadonlyArray<{ direction: SelfPunchDirection }>): SelfPunchDirection {
   const last = queued.length ? queued[queued.length - 1]!.direction : status?.lastDirection ?? null;
   return last === 'in' ? 'out' : 'in';
@@ -168,7 +174,8 @@ export default function CheckInPage() {
   const refusals = previewResult?.refusals ?? [];
   const blocked = hardBlockers.length > 0 || refusals.length > 0;
   const near = fix && s && s.fences.length ? nearestFence(fix, s.fences) : null;
-  const lastPunch = s?.punches.length ? s.punches[s.punches.length - 1] : null;
+  // the latest punch by time: the API lists today's punches newest first, the e2e mock backend oldest first
+  const lastPunch = s?.punches.length ? s.punches.reduce((a, b) => (Date.parse(b.punchedAt) > Date.parse(a.punchedAt) ? b : a)) : null;
   const punchWindow = direction === 'in' ? s?.policy.checkInWindow : s?.policy.checkOutWindow;
   // the shift line names today's shift (resolved live), so the record's NO_SHIFT chip would only repeat it — or contradict it
   // while the record waits for its recalculation after a shift change
@@ -191,7 +198,7 @@ export default function CheckInPage() {
             </div>
             <div className="text-end text-sm">
               {status.isLoading ? <Skeleton className="h-5 w-40" /> : lastPunch ? (
-                <p data-testid="punch-state">{t(lastPunch.direction === 'out' ? 'checkin.checkedOutAt' : 'checkin.checkedInAt', { time: fmtTime(lastPunch.punchedAt, tz) })}</p>
+                <p data-testid="punch-state">{t(STATE_KEYS[lastPunch.direction] ?? 'checkin.checkedInAt', { time: fmtTime(lastPunch.punchedAt, tz) })}</p>
               ) : <p data-testid="punch-state" className="text-muted-foreground">{t('checkin.notYet')}</p>}
               {s?.today ? <span className="mt-1 inline-flex flex-wrap items-center justify-end gap-1.5"><AttendanceStatusBadge status={s.today.status} /><FlagChips flags={dayFlags} max={2} size="xs" /></span> : null}
               <CheckOutFrom status={s} clock={clock} />

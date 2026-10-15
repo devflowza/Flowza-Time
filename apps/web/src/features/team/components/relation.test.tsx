@@ -6,7 +6,7 @@ vi.mock('@/features/me/use-me', async () => (await import('@/features/employees/
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import { grantAll, mockGet, page, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
+import { apiMock, grantAll, mockGet, page, renderWithProviders, resetApiMock, testState } from '@/features/employees/test-utils';
 import { registerNamespace } from '@/lib/i18n-namespace';
 import enAtt from '@/locales/en/attendance.json';
 import arAtt from '@/locales/ar/attendance.json';
@@ -43,15 +43,21 @@ describe('team relation badges', () => {
 
   it('the directory: manager, secondary manager, or indirect through the report\'s manager', async () => {
     const base = { branchId: 'b1', branchName: 'Muscat', departmentName: 'IT', designationName: 'Engineer', employmentStatus: 'active' };
+    // GET /employees?teamOf=<own employee> answers with the team under the organisation's scope (API team-hierarchy.test.ts):
+    // the reporting line under 'hierarchy', each row with its own manager's name from the list itself
     mockGet({ '/orgs/org-1/employees': page([
-      { ...base, id: 'e5', displayName: 'Salma', employeeNumber: 'E005', managerEmployeeId: 'e4', secondaryManagerEmployeeId: null, managerName: 'Me' },
-      { ...base, id: 'e6', displayName: 'Yousuf', employeeNumber: 'E006', managerEmployeeId: 'e9', secondaryManagerEmployeeId: 'e4', managerName: 'Huda' },
-      { ...base, id: 'e7', displayName: 'Aisha', employeeNumber: 'E007', managerEmployeeId: 'e5', secondaryManagerEmployeeId: null, managerName: 'Salma' },
+      { ...base, id: 'e5', displayName: 'Salma', employeeNumber: 'E005', managerEmployeeId: 'e4', secondaryManagerEmployeeId: null, managerName: 'Me', secondaryManagerName: null },
+      { ...base, id: 'e6', displayName: 'Yousuf', employeeNumber: 'E006', managerEmployeeId: 'e9', secondaryManagerEmployeeId: 'e4', managerName: 'Huda', secondaryManagerName: 'Me' },
+      { ...base, id: 'e7', displayName: 'Aisha', employeeNumber: 'E007', managerEmployeeId: 'e5', secondaryManagerEmployeeId: null, managerName: 'Salma', secondaryManagerName: null },
+      // no primary manager: the reporting line walks through the secondary one, who is named
+      { ...base, id: 'e8', displayName: 'Badr', employeeNumber: 'E008', managerEmployeeId: null, secondaryManagerEmployeeId: 'e5', managerName: null, secondaryManagerName: 'Salma' },
     ]) });
     renderWithProviders(<MembersDirectory />);
     const rowOf = async (name: string) => (await screen.findByRole('link', { name })).closest('tr')!;
     expect(await rowOf('Salma')).toHaveTextContent('Manager');
+    expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/employees', expect.objectContaining({ teamOf: 'e4' }));
     expect(await rowOf('Yousuf')).toHaveTextContent('Secondary manager');
     expect(await rowOf('Aisha')).toHaveTextContent('Indirect · via Salma');
+    expect(await rowOf('Badr')).toHaveTextContent('Indirect · via Salma');
   });
 });

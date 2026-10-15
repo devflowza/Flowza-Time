@@ -13,6 +13,8 @@
     "checkOut": "Check out",
     "checkedInAt": "Checked in at {{time}}",
     "checkedOutAt": "Checked out at {{time}}",
+    "steppedOutAt": "Stepped out at {{time}}",
+    "backAt": "Back at {{time}}",
     "checkOutFrom": "You can check out from {{time}}",
     "checkOutFromHint": "{{duration}} after your check-in",
     "remaining": "{{duration}} to go",

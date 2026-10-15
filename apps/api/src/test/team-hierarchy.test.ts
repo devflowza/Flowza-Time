@@ -57,6 +57,23 @@ describe('manager team scope', () => {
     expect(members.some((m) => m.employeeId === e24)).toBe(false);
   });
 
+  it('hierarchy: GET /employees?teamOf=<self> lists the reporting line with each row\'s own manager; another employee keeps the direct-report rule', async () => {
+    await setScope('hierarchy');
+    const ids = (rows: Array<{ id: string }>) => rows.map((r) => r.id).sort();
+    const mine = await h.request('GET', `${base()}/employees?teamOf=${e20}&pageSize=100`, { token: head });
+    expect(mine.status).toBe(200);
+    expect(ids(mine.body.data)).toEqual([e21, e22, e23].sort()); // the leaver e24 never counts, as in teamSize
+    const by = new Map((mine.body.data as Array<{ id: string; managerEmployeeId: string | null; managerName: string | null }>).map((r) => [r.id, r]));
+    expect(by.get(e21)).toMatchObject({ managerEmployeeId: e20 });
+    expect(by.get(e22)).toMatchObject({ managerEmployeeId: e21, managerName: expect.stringContaining('21') });
+    expect(by.get(e23)).toMatchObject({ managerEmployeeId: e22, managerName: expect.stringContaining('22') });
+    // teamOf a report: that employee's direct reports only (e23 is two levels below e21), within what the caller may read
+    expect(ids((await h.request('GET', `${base()}/employees?teamOf=${e21}&pageSize=100`, { token: head })).body.data)).toEqual([e22]);
+    await setScope('direct');
+    expect(ids((await h.request('GET', `${base()}/employees?teamOf=${e20}&pageSize=100`, { token: head })).body.data)).toEqual([e21]);
+    await setScope('hierarchy');
+  });
+
   it('RLS agrees with the API: the team predicate reaches the indirect report\'s rows', async () => {
     await h.admin.insertInto('attendanceDailyRecords').values({ organizationId: f.orgId, employeeId: e23, attendanceDate: sql<Date>`${D}::date`, branchId: f.branchB, timezone: 'Asia/Muscat', engineVersion: 'test', status: 'PRESENT', flags: [], workedMinutes: 480, trace: JSON.stringify({ punches: [] }) } as never).execute();
     const r = await h.request('GET', `${base()}/team/attendance?from=${D}&to=${D}`, { token: head });

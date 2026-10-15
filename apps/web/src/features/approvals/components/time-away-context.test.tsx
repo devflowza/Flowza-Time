@@ -60,6 +60,19 @@ describe('ApprovalContext — time away (docs/time-away.md)', () => {
     expect(screen.getByTestId('context-time-away-quota')).toHaveTextContent('45m of personal permission used this month, this request included (no monthly limit)');
   });
 
+  it('a rejected or withdrawn request is not in the month\'s figure (pending + approved only): the plain wording, no "this request included"', () => {
+    const { unmount } = renderWithProviders(<ApprovalContext context={context({ status: 'rejected', personalUsedMinutes: 60 })} timezone="Asia/Muscat" />);
+    expect(screen.getByTestId('context-time-away-quota')).toHaveTextContent(/^1h 00m of 4h 00m used this month$/);
+    unmount();
+    renderWithProviders(<ApprovalContext context={context({ status: 'cancelled', personalUsedMinutes: 45, personalMonthlyQuotaMinutes: null })} timezone="Asia/Muscat" />);
+    expect(screen.getByTestId('context-time-away-quota')).toHaveTextContent(/^45m of personal permission used this month \(no monthly limit\)$/);
+  });
+
+  it('an approved request is in the month\'s figure', () => {
+    renderWithProviders(<ApprovalContext context={context({ status: 'approved' })} timezone="Asia/Muscat" />);
+    expect(screen.getByTestId('context-time-away-quota')).toHaveTextContent('2h 30m of 4h 00m personal permission used this month, this request included');
+  });
+
   it('has its own icon and entity label', () => {
     const { container } = renderWithProviders(<EntityIcon entityType="TIME_AWAY" />);
     expect(container.querySelector('svg')).not.toBeNull();

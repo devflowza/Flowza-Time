@@ -137,7 +137,9 @@
       "notBack": "Not back yet",
       "destination": "Destination: {{destination}}",
       "quota": "{{used}} of {{quota}} personal permission used this month, this request included",
-      "quotaNoLimit": "{{used}} of personal permission used this month, this request included (no monthly limit)"
+      "quotaNoLimit": "{{used}} of personal permission used this month, this request included (no monthly limit)",
+      "quotaMonth": "{{used}} of {{quota}} used this month",
+      "quotaMonthNoLimit": "{{used}} of personal permission used this month (no monthly limit)"
     }
   },
   "decision": {

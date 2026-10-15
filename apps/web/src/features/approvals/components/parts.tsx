@@ -84,7 +84,8 @@ type TimeAwayApprovalContext = Extract<ApprovalContextDto, { kind: 'TIME_AWAY' }
 /**
  * A time-away request for the approver: the kind, the day and the window in the employee's zone, its length, whether it was
  * planned or filed when stepping out (and when the employee came back), the reason and destination, and — for personal
- * permission — how much of the month's quota is used with this request.
+ * permission — how much of the month's quota is used. The API counts pending and approved requests only, so "this request
+ * included" is said of those; a rejected or withdrawn request reads as the plain month's figure.
  */
 function TimeAwayContext({ context, timezone, compact }: { context: TimeAwayApprovalContext; timezone: string; compact: boolean }) {
   const { t } = useTranslation('approvals');
@@ -93,6 +94,7 @@ function TimeAwayContext({ context, timezone, compact }: { context: TimeAwayAppr
   const clip = cn('text-xs text-muted-foreground', compact && 'max-w-[260px] truncate');
   const used = a.personalUsedMinutes;
   const quota = a.personalMonthlyQuotaMinutes;
+  const counted = a.status === 'pending' || a.status === 'approved';
   return (
     <div className="min-w-0 space-y-1 text-sm" data-testid="context-time-away">
       <p className="flex flex-wrap items-center gap-2">
@@ -105,7 +107,7 @@ function TimeAwayContext({ context, timezone, compact }: { context: TimeAwayAppr
       {a.source === 'step_out' ? <p className="text-xs tnum">{a.returnedAt ? t('context.timeAway.returnedAt', { time: fmtTime(a.returnedAt, tz) }) : t('context.timeAway.notBack')}</p> : null}
       {a.kind === 'PERSONAL' && used !== null ? (
         <p className={cn('text-xs tnum', quota !== null && used > quota ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground')} data-testid="context-time-away-quota">
-          {quota !== null ? t('context.timeAway.quota', { used: fmtMinutes(used), quota: fmtMinutes(quota) }) : t('context.timeAway.quotaNoLimit', { used: fmtMinutes(used) })}
+          {quota !== null ? t(counted ? 'context.timeAway.quota' : 'context.timeAway.quotaMonth', { used: fmtMinutes(used), quota: fmtMinutes(quota) }) : t(counted ? 'context.timeAway.quotaNoLimit' : 'context.timeAway.quotaMonthNoLimit', { used: fmtMinutes(used) })}
         </p>
       ) : null}
       <p className={clip} title={a.reason} dir="auto">{compact ? a.reason : t('context.reason', { reason: a.reason })}</p>

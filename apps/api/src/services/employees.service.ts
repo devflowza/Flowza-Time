@@ -119,7 +119,14 @@ export async function listEmployees(deps: ApiDeps, actor: Actor, orgId: string, 
     if (q.employmentStatus) base = base.where('e.employmentStatus', '=', q.employmentStatus);
     if (q.employmentType) base = base.where('e.employmentType', '=', q.employmentType);
     if (q.managerEmployeeId) base = base.where('e.managerEmployeeId', '=', q.managerEmployeeId);
-    if (q.teamOf) { const id = q.teamOf; base = base.where((eb) => eb.or([eb('e.managerEmployeeId', '=', id), eb('e.secondaryManagerEmployeeId', '=', id)])); }
+    // teamOf: the employee's direct reports (primary or secondary manager). For the caller's own employee it is also their team
+    // as the organisation's scope defines it (app._team_of → grant.teamEmployeeIds: the reporting line under 'hierarchy') — the
+    // set behind /me teamSize and the RLS team predicate, so My team's directory and its header agree.
+    if (q.teamOf) {
+      const id = q.teamOf;
+      const team = id === grant.employeeId ? grant.teamEmployeeIds.filter((t) => t !== id) : [];
+      base = base.where((eb) => eb.or([eb('e.managerEmployeeId', '=', id), eb('e.secondaryManagerEmployeeId', '=', id), ...(team.length ? [eb('e.id', 'in', team)] : [])]));
+    }
     if (q.unlinked) {
       const linked = await linkedEmployeeIds(trx, orgId);
       if (linked.length) base = base.where('e.id', 'not in', linked);

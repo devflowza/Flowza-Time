@@ -13,6 +13,8 @@
     "checkOut": "تسجيل الخروج",
     "checkedInAt": "سُجّل دخولك الساعة {{time}}",
     "checkedOutAt": "سُجّل خروجك الساعة {{time}}",
+    "steppedOutAt": "خرجت مؤقتًا الساعة {{time}}",
+    "backAt": "عدت الساعة {{time}}",
     "checkOutFrom": "يمكنك تسجيل الخروج ابتداءً من {{time}}",
     "checkOutFromHint": "{{duration}} بعد تسجيل دخولك",
     "remaining": "متبقٍ {{duration}}",

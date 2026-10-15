@@ -10,19 +10,23 @@ import { TEAM_NS } from '../i18n';
 
 /**
  * How a report reaches the caller: as their manager, their secondary manager, or further down the reporting line (an
- * organisation whose team scope is the whole hierarchy) — then through the report's own manager.
+ * organisation whose team scope is the whole hierarchy) — then through the report's own manager: the primary one, or the
+ * secondary one the reporting line walks through when the report has no primary manager (app._team_of).
  */
 function RelationBadge({ e, employeeId }: { e: EmployeeDto; employeeId: string | null }) {
   const { t } = useTranslation(TEAM_NS);
   if (e.managerEmployeeId === employeeId) return <Badge variant="info">{t('relation.primary')}</Badge>;
   // an API that does not send the secondary manager lists direct reports only: anyone else is a secondary report
   if (e.secondaryManagerEmployeeId === undefined || e.secondaryManagerEmployeeId === employeeId) return <Badge variant="neutral">{t('relation.secondary')}</Badge>;
-  return <Badge variant="neutral" dir="auto">{e.managerName ? t('relation.indirectVia', { managerName: e.managerName }) : t('relation.indirect')}</Badge>;
+  const via = e.managerEmployeeId ? e.managerName : e.secondaryManagerName;
+  return <Badge variant="neutral" dir="auto">{via ? t('relation.indirectVia', { managerName: via }) : t('relation.indirect')}</Badge>;
 }
 
 /**
- * The direct reports as a directory (employee.view_team, or the organisation-wide employee.view): what the Today tab shows to
- * a manager whose role cannot read the team's attendance. Without either key the list stays hidden and says why.
+ * The team as a directory (employee.view_team, or the organisation-wide employee.view): what the Today tab shows to a manager
+ * whose role cannot read the team's attendance. `teamOf` = the caller's own employee follows the organisation's team scope
+ * (the direct reports, or the reporting line under 'hierarchy' — the header's count). Without either key the list stays
+ * hidden and says why.
  */
 export function MembersDirectory() {
   const { t } = useTranslation(TEAM_NS);

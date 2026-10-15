@@ -129,6 +129,29 @@ describe('TimeAwayCard (check-in page)', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledWith(`/orgs/${ORG}/me/time-away/back`, { channel: 'web', idempotencyKey: expect.any(String) }));
   });
 
+  it('"I\'m back" keeps one idempotency key per step-out, so a retry after a lost response replays; a failure refreshes the status', async () => {
+    mockGet({ [STATUS_PATH]: { data: status({
+      onSite: false, canStepOut: false, canComeBack: true,
+      away: { requestId: 'ta2', kind: 'PERSONAL', since: '2026-10-15T04:30:00Z', expectedBackAt: '2026-10-15T06:00:00Z', reason: 'Bank', destination: null, status: 'approved' },
+    }) } });
+    apiMock.post.mockRejectedValueOnce(new ApiError(0, 'NETWORK_ERROR', 'offline')).mockResolvedValueOnce({ data: request({ id: 'ta2', returnedAt: '2026-10-15T05:12:00Z' }) });
+    vi.spyOn(toast, 'error');
+    const statusReads = () => apiMock.get.mock.calls.filter(([path]) => path === STATUS_PATH).length;
+    renderWithProviders(<TimeAwayCard nowMs={NOW} />);
+    const button = await screen.findByTestId('time-away-back');
+    const before = statusReads();
+    fireEvent.click(button);
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
+    // the failed attempt re-reads the status instead of leaving the banner up until the next minute's refetch
+    await waitFor(() => expect(statusReads()).toBeGreaterThan(before));
+    await waitFor(() => expect(screen.getByTestId('time-away-back')).toBeEnabled());
+    fireEvent.click(screen.getByTestId('time-away-back'));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(2));
+    const keyOf = (i: number) => (apiMock.post.mock.calls[i]![1] as { idempotencyKey: string }).idempotencyKey;
+    expect(keyOf(0)).toEqual(expect.any(String));
+    expect(keyOf(1)).toBe(keyOf(0));
+  });
+
   it('a return recorded on the terminal only: no "I\'m back", the hint instead', async () => {
     mockGet({ [STATUS_PATH]: { data: status({
       policy: policy({ returnBy: 'device' }), onSite: false, canStepOut: false, canComeBack: false,
