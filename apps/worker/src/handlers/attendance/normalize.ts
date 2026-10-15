@@ -136,7 +136,8 @@ export async function loadLastComputedAt(trx: Trx, organizationId: string, days:
 /**
  * One batch of the normaliser (§E.4, docs/attendance-engine.md "Worker integration contract"): resolves the employee for
  * each pending raw punch, attaches the branch effective on the local date of the punch, inserts the event and enqueues
- * throttled recomputes (`recomputeRunAt`). Rows that cannot be resolved become `unmatched` (visible in reconciliation); `held` and
+ * throttled recomputes (`recomputeRunAt`). Rows that cannot be resolved become `unmatched` (visible in reconciliation) — except an
+ * ACCESS reader's, which are room entries whoever swiped (`access_events.employee_id` null for an unknown card); `held` and
  * `quarantined` rows are never touched here.
  */
 export async function normalizeBatch(trx: Trx, organizationId: string, now: Date, queue: JobContext['deps']['queue']): Promise<NormalizeBatchResult> {
@@ -214,8 +215,9 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
 
   // 2. Build events + touched (employee, local date) pairs.
   const eventRows: Array<{ organizationId: string; employeeId: string; branchId: string; deviceId: string; rawTransactionId: string; source: EventSource; eventType: AttendanceEventType; punchedAt: Date; verificationMethod: VerificationMethod }> = [];
-  const normalized: Array<{ id: string; employeeId: string }> = [];
-  const accessRows: Array<{ organizationId: string; branchId: string; deviceId: string; locationId: string | null; roomId: string | null; employeeId: string; deviceEmployeeId: string; occurredAt: Date; direction: PunchDirection; rawTransactionId: string }> = [];
+  // employeeId null = an ACCESS reader entry by a card that matched no live employee (still processed, see below)
+  const normalized: Array<{ id: string; employeeId: string | null }> = [];
+  const accessRows: Array<{ organizationId: string; branchId: string; deviceId: string; locationId: string | null; roomId: string | null; employeeId: string | null; deviceEmployeeId: string; occurredAt: Date; direction: PunchDirection; rawTransactionId: string }> = [];
   const unmatched: string[] = [];
   const touched = new Map<string, { employeeId: string; date: string }>();
   const touch = (employeeId: string, date: string): void => { touched.set(`${employeeId}|${date}`, { employeeId, date }); };
@@ -223,15 +225,18 @@ export async function normalizeBatch(trx: Trx, organizationId: string, now: Date
   for (const r of rows) {
     const employeeId = resolveEmployee(r);
     const employee = employeeId ? employeeMap.get(employeeId) : undefined;
-    if (!employeeId || !employee) { unmatched.push(r.id); continue; }
     const device = deviceMap.get(r.deviceId);
-    const punchedAtAccess = r.punchedAt instanceof Date ? r.punchedAt : new Date(r.punchedAt);
     if (device?.punchRole === 'ACCESS' && r.source !== 'SELF_SERVICE') {
-      // a room entry: recorded for meeting attendance / the access log, the raw row is processed, no attendance event
-      accessRows.push({ organizationId, branchId: device.branchId, deviceId: r.deviceId, locationId: device.locationId, roomId: device.locationId ? roomByLocation.get(device.locationId) ?? null : null, employeeId, deviceEmployeeId: r.deviceEmployeeId, occurredAt: punchedAtAccess, direction: r.direction, rawTransactionId: r.id });
-      normalized.push({ id: r.id, employeeId });
+      // a room entry: recorded for meeting attendance / the access log, the raw row is processed, no attendance event. Checked
+      // before the unmatched rule: a card that matches no live employee (visitor, unknown PIN, ex-employee) is still an entry —
+      // employee null, reported unauthorised by the access log — never an unmatched attendance punch (review C11)
+      const accessEmployeeId = employeeId && employee ? employeeId : null;
+      const occurredAt = r.punchedAt instanceof Date ? r.punchedAt : new Date(r.punchedAt);
+      accessRows.push({ organizationId, branchId: device.branchId, deviceId: r.deviceId, locationId: device.locationId, roomId: device.locationId ? roomByLocation.get(device.locationId) ?? null : null, employeeId: accessEmployeeId, deviceEmployeeId: r.deviceEmployeeId, occurredAt, direction: r.direction, rawTransactionId: r.id });
+      normalized.push({ id: r.id, employeeId: accessEmployeeId });
       continue;
     }
+    if (!employeeId || !employee) { unmatched.push(r.id); continue; }
     const fallbackTz = branchTz.get(employee.branchId) ?? 'UTC';
     const deviceTz = device && isValidTimezone(device.timezone) ? device.timezone : fallbackTz;
     const punchedAt = r.punchedAt instanceof Date ? r.punchedAt : new Date(r.punchedAt);
