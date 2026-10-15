@@ -18,7 +18,7 @@ import { enqueueNormalize, ingestRawTransactions } from '../features/ingest.js';
 import { dv } from '../features/sql-helpers.js';
 import { isPeriodLocked, isWorking, loadEmployeeCtx, localDate, localInstant, lockEmployee, portalSelf, type EmployeeCtx } from './common.js';
 import { seatSecondaryManager } from './line-manager.js';
-import { loadTimeAway, personalMinutesInMonth, TIME_AWAY_COLUMNS, timeAwayDtos, timeAwayPolicyFor, type TimeAwayRow } from './time-away-effects.js';
+import { KIND_LABEL, loadTimeAway, personalMinutesInMonth, TIME_AWAY_COLUMNS, timeAwayDtos, timeAwayPolicyFor, type TimeAwayRow } from './time-away-effects.js';
 
 /**
  * Time away inside the working day (docs/time-away.md) — the employee side and the HR / manager lists.
@@ -26,9 +26,11 @@ import { loadTimeAway, personalMinutesInMonth, TIME_AWAY_COLUMNS, timeAwayDtos, 
  *   - Plan a window (`POST /me/time-away`): OFFICIAL duty or PERSONAL permission on one working day, decided through the
  *     approval engine (TIME_AWAY; the line manager with the secondary standing in, or a workflow).
  *   - Step out (`POST /me/time-away/step-out`): for a site with an entry-only terminal (no exit reader) — records a BREAK-OUT
- *     punch on the organisation's self-service device NOW (server clock) and files the window [now, expected return]. The
- *     return is the next check-in on a terminal, or the portal's "I'm back" (`POST /me/time-away/back`, a BREAK-IN punch) when
- *     the policy's `returnBy` allows it.
+ *     punch on the organisation's self-service device NOW (server clock) and files the window [now, expected return]; when the
+ *     employee's own live window (planned ahead) covers now, the punch is linked to it instead (same kind, no second request).
+ *     The return is the next check-in on a terminal, or the portal's "I'm back" (`POST /me/time-away/back`, a BREAK-IN punch)
+ *     when the policy's `returnBy` allows it; a step-out window then ends at the return, so the rest of it never blocks the
+ *     next step-out (trimmed by "I'm back", or by the next step-out / request after a terminal return).
  *   - The engine measures the actual away time from the punches and classifies it against the APPROVED windows only.
  *
  * Limits (the attendance policy of the day, `policy.timeAway`): the feature on, a punch interpretation that keeps the punches
@@ -77,13 +79,69 @@ async function recentPunches(trx: Trx, orgId: string, employeeId: string, now: D
     .map((r) => ({ id: String(r.id), punchedAt: r.punchedAt, direction: String(r.direction), punchRole: r.punchRole ?? null, source: String(r.source) })));
 }
 
-/** The open step-out of the employee: a live step-out window whose break-out punch is still the latest punch. */
+/**
+ * The open step-out of the employee: a live window whose break-out punch is still the latest punch (a step-out window, or the
+ * employee's planned window the break-out was linked to).
+ */
 async function openStepOut(trx: Trx, orgId: string, employeeId: string, punches: readonly PunchFact[]): Promise<TimeAwayRow | null> {
   const { state, last } = placementOf(punches);
   if (state !== 'away' || !last) return null;
   const row = await withSystemScope(trx, orgId, (t) => t.selectFrom('timeAwayRequests').select(TIME_AWAY_COLUMNS).where('organizationId', '=', orgId).where('employeeId', '=', employeeId)
-    .where('source', '=', 'step_out').where('stepOutRawId', '=', last.id).where('status', 'in', ['pending', 'approved']).executeTakeFirst());
+    .where('stepOutRawId', '=', last.id).where('status', 'in', ['pending', 'approved']).executeTakeFirst());
   return (row as TimeAwayRow | undefined) ?? null;
+}
+
+/** The employee's live (pending / approved) window covering `at` — live windows never overlap, so at most one. System scope. */
+async function liveWindowAt(trx: Trx, orgId: string, employeeId: string, at: Date): Promise<TimeAwayRow | null> {
+  const row = await withSystemScope(trx, orgId, (t) => t.selectFrom('timeAwayRequests').select(TIME_AWAY_COLUMNS).where('organizationId', '=', orgId).where('employeeId', '=', employeeId)
+    .where('status', 'in', ['pending', 'approved']).where('startsAt', '<=', at).where('endsAt', '>', at).executeTakeFirst());
+  return (row as TimeAwayRow | undefined) ?? null;
+}
+
+/** An arrival in `placementOf`'s terms (entry-only terminal, IN, BREAK-IN, or a direction-less punch toggling back in). */
+const isArrival = (p: PunchFact): boolean => {
+  if (p.punchRole === 'ACCESS') return false;
+  const dir = p.punchRole === 'CHECK_IN' ? 'in' : p.punchRole === 'CHECK_OUT' ? 'out' : p.direction;
+  return dir !== 'out' && dir !== 'break_out';
+};
+
+/**
+ * A step-out window ends when the employee is back: "I'm back" (its `returnedAt`) or the first arrival after its break-out (a
+ * terminal check-in). The window is trimmed to that return — never past its own end, never to nothing — and the return noted,
+ * so the rest of it no longer blocks (or counts against the quota as) another window. Inside the caller's transaction.
+ */
+async function endStepOutAt(trx: Trx, actor: Actor, orgId: string, row: TimeAwayRow, returnedAt: Date, channel: string): Promise<void> {
+  const endsAt = new Date(Math.min(row.endsAt.getTime(), Math.max(returnedAt.getTime(), row.startsAt.getTime() + 1)));
+  const returned = row.returnedAt ?? (returnedAt.getTime() >= row.startsAt.getTime() ? returnedAt : endsAt);
+  await systemStep(trx, orgId, (t) => t.updateTable('timeAwayRequests').set({ endsAt, returnedAt: returned }).where('organizationId', '=', orgId).where('id', '=', row.id).where('status', 'in', ['pending', 'approved']).execute());
+  await audit(trx, actor, orgId, 'attendance.time_away_returned', 'time_away_request', { entityId: row.id, branchId: row.branchId, oldValue: { endsAt: row.endsAt.toISOString() }, newValue: { returnedAt: returned.toISOString(), endsAt: endsAt.toISOString(), channel } });
+}
+
+/**
+ * The step-out window covering `now` that the employee already came back from (they are not away under it): ended at the
+ * return, so it never blocks a later step-out or window. A terminal return is found among the recent punches; none found
+ * (the break-out was quarantined) → the employee is back by now.
+ */
+async function endReturnedStepOut(trx: Trx, actor: Actor, orgId: string, employeeId: string, punches: readonly PunchFact[], now: Date): Promise<void> {
+  const row = await liveWindowAt(trx, orgId, employeeId, now);
+  if (!row || row.source !== 'step_out') return;
+  const { state, last } = placementOf(punches);
+  if (state === 'away' && last && row.stepOutRawId === last.id) return;
+  if (await isPeriodLocked(trx, orgId, row.branchId, isoDate(row.attendanceDate))) return;
+  const arrival = punches.find((p) => p.id !== row.stepOutRawId && p.punchedAt.getTime() >= row.startsAt.getTime() && isArrival(p));
+  const back = row.returnedAt ?? arrival?.punchedAt ?? now;
+  // never past now (a terminal clock a few seconds ahead): the window must stop covering now
+  await endStepOutAt(trx, actor, orgId, row, back.getTime() > now.getTime() ? now : back, row.returnedAt ? 'portal' : arrival ? 'device' : 'unknown');
+}
+
+/**
+ * Every path that files or changes an employee's windows (plan, step out, come back) takes the same two locks in one order —
+ * self-punch (shared with check-in / check-out), then time-away — so the overlap and the personal quota checks always see the
+ * other path's commit and the order can never deadlock.
+ */
+async function lockTimeAway(trx: Trx, employeeId: string): Promise<void> {
+  await lockEmployee(trx, 'self-punch', employeeId);
+  await lockEmployee(trx, 'time-away', employeeId);
 }
 
 const policyError = (inactive: 'DISABLED' | 'FIRST_LAST_INTERPRETATION') => new AppError('FORBIDDEN', inactive === 'DISABLED'
@@ -106,7 +164,7 @@ async function checkPersonalLimits(trx: Trx, orgId: string, emp: EmployeeCtx, da
 async function assertNoOverlap(trx: Trx, orgId: string, employeeId: string, startsAt: Date, endsAt: Date): Promise<void> {
   const clash = await withSystemScope(trx, orgId, (t) => t.selectFrom('timeAwayRequests').select('id').where('organizationId', '=', orgId).where('employeeId', '=', employeeId)
     .where('status', 'in', ['pending', 'approved']).where('startsAt', '<', endsAt).where('endsAt', '>', startsAt).executeTakeFirst());
-  if (clash) throw errors.conflict('This window overlaps another time-away request.', { timeAwayId: clash.id });
+  if (clash) throw errors.conflict('This window overlaps another time-away request.', { reason: 'TIME_AWAY_OVERLAP', timeAwayId: clash.id });
 }
 
 /** Insert the row, route it through the approval engine, seat the secondary manager, audit. Inside the caller's transaction. */
@@ -141,11 +199,16 @@ async function writeSelfPunch(deps: ApiDeps, trx: Trx, actor: Actor, orgId: stri
   });
 }
 
-/** A replayed self-service key: the raw row it already wrote (same key → same result, the offline queue may resend). */
-async function replayOf(trx: Trx, orgId: string, employeeId: string, key: string, now: Date): Promise<string | null> {
-  const row = await withSystemScope(trx, orgId, (t) => t.selectFrom('attendanceRawTransactions').select('id').where('organizationId', '=', orgId).where('providerKey', '=', SELF_SERVICE_PROVIDER_KEY)
+/**
+ * A replayed self-service key: the raw row it already wrote (same key → same result, the offline queue may resend) and the
+ * window it was written for (`timeAwayRequestId` in its payload — set by a linked break-out and by every "I'm back").
+ */
+async function replayOf(trx: Trx, orgId: string, employeeId: string, key: string, now: Date): Promise<{ rawId: string; timeAwayRequestId: string | null } | null> {
+  const row = await withSystemScope(trx, orgId, (t) => t.selectFrom('attendanceRawTransactions').select(['id', 'rawPayload']).where('organizationId', '=', orgId).where('providerKey', '=', SELF_SERVICE_PROVIDER_KEY)
     .where('providerTransactionId', '=', `self:${employeeId}:${key}`).where('punchedAt', '>=', new Date(now.getTime() - REPLAY_WINDOW_MS)).executeTakeFirst());
-  return row ? String(row.id) : null;
+  if (!row) return null;
+  const payload = row.rawPayload as { timeAwayRequestId?: unknown } | null;
+  return { rawId: String(row.id), timeAwayRequestId: payload && typeof payload === 'object' && typeof payload.timeAwayRequestId === 'string' ? payload.timeAwayRequestId : null };
 }
 
 /** Today's classified away intervals from the last computed record (trace step `timeAway`). */
@@ -165,8 +228,10 @@ export async function getTimeAwayStatus(deps: ApiDeps, actor: Actor, orgId: stri
     const branchId = (await withSystemScope(trx, orgId, (t) => effectiveBranchOn(t, orgId, emp.id, today))) ?? emp.branchId;
     const { policy, inactive } = await timeAwayPolicyFor(trx, orgId, emp, today, branchId);
     const punches = await recentPunches(trx, orgId, emp.id, now);
-    const { state } = placementOf(punches);
+    const { state, last } = placementOf(punches);
     const open = await openStepOut(trx, orgId, emp.id, punches);
+    // as stepOut: a live window covering now never blocks (linked, or ended at the return); a locked period does
+    const locked = await isPeriodLocked(trx, orgId, branchId, today);
     const [mine, used, intervals] = await Promise.all([
       withSystemScope(trx, orgId, (t) => t.selectFrom('timeAwayRequests').select(TIME_AWAY_COLUMNS).where('organizationId', '=', orgId).where('employeeId', '=', emp.id).where('attendanceDate', '=', dv(today)).orderBy('startsAt', 'asc').execute()),
       personalMinutesInMonth(trx, orgId, emp.id, today),
@@ -176,9 +241,10 @@ export async function getTimeAwayStatus(deps: ApiDeps, actor: Actor, orgId: stri
     return {
       date: today, timezone: emp.timezone, serverTime: now.toISOString(),
       policy: { enabled: policy.enabled, stepOutFromPortal: policy.stepOutFromPortal, returnBy: policy.returnBy, officialCountsAsWorked: policy.officialCountsAsWorked, personalMonthlyQuotaMinutes: policy.personalMonthlyQuotaMinutes, personalMaxMinutes: policy.personalMaxMinutes, personalUsedMinutes: used, inactiveReason: inactive },
-      away: open ? { requestId: open.id, kind: open.kind, since: open.startsAt.toISOString(), expectedBackAt: open.endsAt.toISOString(), reason: open.reason, destination: open.destination, status: open.status } : null,
+      // since: the break-out itself (a planned window the step-out was linked to may have started earlier)
+      away: open ? { requestId: open.id, kind: open.kind, since: (last?.punchedAt ?? open.startsAt).toISOString(), expectedBackAt: open.endsAt.toISOString(), reason: open.reason, destination: open.destination, status: open.status } : null,
       onSite: state === 'in',
-      canStepOut: working && inactive === null && policy.stepOutFromPortal && state === 'in' && hasPermission(self.grant, 'attendance.checkin'),
+      canStepOut: working && !locked && inactive === null && policy.stepOutFromPortal && state === 'in' && hasPermission(self.grant, 'attendance.checkin'),
       canComeBack: working && open !== null && policy.returnBy === 'device_or_portal' && hasPermission(self.grant, 'attendance.checkin'),
       intervals,
       requests: await timeAwayDtos(trx, orgId, mine as TimeAwayRow[]),
@@ -200,7 +266,7 @@ export async function listMyTimeAway(deps: ApiDeps, actor: Actor, orgId: string,
 export async function requestTimeAway(deps: ApiDeps, actor: Actor, orgId: string, input: TimeAwayRequestInput): Promise<TimeAwayRequestDto> {
   const self = portalSelf(actor, orgId, ...SELF_KEYS);
   return runUser(deps.db, actor, async (trx) => {
-    await lockEmployee(trx, 'time-away', self.employeeId);
+    await lockTimeAway(trx, self.employeeId);
     const emp = await loadEmployeeCtx(trx, orgId, self.employeeId);
     const now = new Date();
     const today = localInstant(now, emp.timezone).date;
@@ -216,6 +282,8 @@ export async function requestTimeAway(deps: ApiDeps, actor: Actor, orgId: string
     const { policy, inactive } = await timeAwayPolicyFor(trx, orgId, emp, date, branchId);
     if (inactive) throw policyError(inactive);
     const minutes = Math.round((endsAt.getTime() - startsAt.getTime()) / 60_000);
+    // the rest of a step-out the employee came back from (terminal return) no longer blocks or counts
+    await endReturnedStepOut(trx, actor, orgId, emp.id, await recentPunches(trx, orgId, emp.id, now), now);
     if (input.kind === 'PERSONAL') await checkPersonalLimits(trx, orgId, emp, date, minutes, policy);
     await assertNoOverlap(trx, orgId, emp.id, startsAt, endsAt);
     const row = await fileRequest(deps, trx, actor, orgId, emp, { branchId, attendanceDate: date, kind: input.kind, source: 'request', startsAt, endsAt, reason: input.reason, destination: input.destination ?? null, stepOutRawId: null });
@@ -226,13 +294,15 @@ export async function requestTimeAway(deps: ApiDeps, actor: Actor, orgId: string
 export async function stepOut(deps: ApiDeps, actor: Actor, orgId: string, input: TimeAwayStepOutInput): Promise<TimeAwayRequestDto> {
   const self = portalSelf(actor, orgId, 'attendance.checkin');
   return runUser(deps.db, actor, async (trx) => {
-    // one self-service punch of an employee at a time (the same lock as check-in / check-out)
-    await lockEmployee(trx, 'self-punch', self.employeeId);
+    // one self-service punch of an employee at a time (the same lock as check-in / check-out), then the windows' lock
+    await lockTimeAway(trx, self.employeeId);
     const now = new Date();
     const replayed = await replayOf(trx, orgId, self.employeeId, input.idempotencyKey, now);
     if (replayed) {
-      const row = await withSystemScope(trx, orgId, (t) => t.selectFrom('timeAwayRequests').select(TIME_AWAY_COLUMNS).where('organizationId', '=', orgId).where('stepOutRawId', '=', replayed).executeTakeFirst());
-      if (row) return (await timeAwayDtos(trx, orgId, [row as TimeAwayRow]))[0]!;
+      // the window filed for that break-out, or the planned one it was linked to (a later step-out under it re-links stepOutRawId)
+      const row = (await withSystemScope(trx, orgId, (t) => t.selectFrom('timeAwayRequests').select(TIME_AWAY_COLUMNS).where('organizationId', '=', orgId).where('stepOutRawId', '=', replayed.rawId).executeTakeFirst())) as TimeAwayRow | undefined
+        ?? (replayed.timeAwayRequestId ? await withSystemScope(trx, orgId, (t) => loadTimeAway(t, orgId, replayed.timeAwayRequestId!)) : undefined);
+      if (row && row.employeeId === self.employeeId) return (await timeAwayDtos(trx, orgId, [row]))[0]!;
       throw errors.conflict('This punch was already recorded.', { reason: 'DUPLICATE_PUNCH' });
     }
     const emp = await loadEmployeeCtx(trx, orgId, self.employeeId);
@@ -243,13 +313,28 @@ export async function stepOut(deps: ApiDeps, actor: Actor, orgId: string, input:
     const { policy, inactive } = await timeAwayPolicyFor(trx, orgId, emp, today, branchId);
     if (inactive) throw policyError(inactive);
     if (!policy.stepOutFromPortal) throw new AppError('FORBIDDEN', 'Your attendance policy does not allow stepping out from the portal; ask your manager to record the time away.', { details: { reason: 'STEP_OUT_DISABLED' } });
-    const { state } = placementOf(await recentPunches(trx, orgId, emp.id, now));
+    const punches = await recentPunches(trx, orgId, emp.id, now);
+    const { state } = placementOf(punches);
     if (state === 'away') throw errors.conflict('You have already stepped out. Check in when you are back.', { reason: 'ALREADY_AWAY' });
     if (state !== 'in') throw errors.invalidState('Check in first: you can only step out while you are on site.', { reason: 'NOT_ON_SITE' });
     const expectedBackAt = new Date(input.expectedBackAt);
     const minutes = Math.round((expectedBackAt.getTime() - now.getTime()) / 60_000);
     if (minutes < 5) throw errors.validation('Expected return must be at least 5 minutes from now.', { issues: [{ path: 'expectedBackAt', message: 'Too soon' }] });
     if (minutes > 12 * 60) throw errors.validation('Expected return must be within 12 hours.', { issues: [{ path: 'expectedBackAt', message: 'Too late' }] });
+    // the rest of an earlier step-out the employee came back from ends at that return (it never blocks this one)
+    await endReturnedStepOut(trx, actor, orgId, emp.id, punches, now);
+    // the employee's own live window covers now (planned ahead): the break-out records its actual start — no second request
+    const covering = await liveWindowAt(trx, orgId, emp.id, now);
+    if (covering && covering.source === 'request') {
+      if (covering.kind !== input.kind) {
+        throw errors.conflict(`Your ${KIND_LABEL[covering.kind]} window covers now: step out under it, or withdraw it first.`, { reason: 'TIME_AWAY_KIND_MISMATCH', timeAwayId: covering.id, kind: covering.kind });
+      }
+      const linkedRawId = await writeSelfPunch(deps, trx, actor, orgId, emp, now, { direction: 'break_out', channel: input.channel, idempotencyKey: input.idempotencyKey, payload: { kind: input.kind, expectedBackAt: expectedBackAt.toISOString(), timeAwayRequestId: covering.id } });
+      // the latest break-out under the window is its open step-out ("I'm back" / the status card find it), the return not yet known
+      await systemStep(trx, orgId, (t) => t.updateTable('timeAwayRequests').set({ stepOutRawId: linkedRawId, returnedAt: null }).where('organizationId', '=', orgId).where('id', '=', covering.id).where('status', 'in', ['pending', 'approved']).execute());
+      await audit(trx, actor, orgId, 'attendance.time_away_stepped_out', 'time_away_request', { entityId: covering.id, branchId: covering.branchId, newValue: { kind: covering.kind, steppedOutAt: now.toISOString(), expectedBackAt: expectedBackAt.toISOString(), linked: true, channel: input.channel } });
+      return (await timeAwayDtos(trx, orgId, [(await withSystemScope(trx, orgId, (t) => loadTimeAway(t, orgId, covering.id)))!]))[0]!;
+    }
     if (input.kind === 'PERSONAL') await checkPersonalLimits(trx, orgId, emp, today, minutes, policy);
     await assertNoOverlap(trx, orgId, emp.id, now, expectedBackAt);
     const rawId = await writeSelfPunch(deps, trx, actor, orgId, emp, now, { direction: 'break_out', channel: input.channel, idempotencyKey: input.idempotencyKey, payload: { kind: input.kind, expectedBackAt: expectedBackAt.toISOString() } });
@@ -261,12 +346,17 @@ export async function stepOut(deps: ApiDeps, actor: Actor, orgId: string, input:
 export async function comeBack(deps: ApiDeps, actor: Actor, orgId: string, input: TimeAwayBackInput): Promise<TimeAwayRequestDto> {
   const self = portalSelf(actor, orgId, 'attendance.checkin');
   return runUser(deps.db, actor, async (trx) => {
-    await lockEmployee(trx, 'self-punch', self.employeeId);
+    await lockTimeAway(trx, self.employeeId);
     const now = new Date();
     const emp = await loadEmployeeCtx(trx, orgId, self.employeeId);
-    if (await replayOf(trx, orgId, emp.id, input.idempotencyKey, now)) {
-      const last = await withSystemScope(trx, orgId, (t) => t.selectFrom('timeAwayRequests').select(TIME_AWAY_COLUMNS).where('organizationId', '=', orgId).where('employeeId', '=', emp.id).where('source', '=', 'step_out').orderBy('startsAt', 'desc').executeTakeFirst());
-      if (last) return (await timeAwayDtos(trx, orgId, [last as TimeAwayRow]))[0]!;
+    const replayed = await replayOf(trx, orgId, emp.id, input.idempotencyKey, now);
+    if (replayed) {
+      // the window this return closed (a step-out window, or a planned one the break-out was linked to); an older row without
+      // the id in its payload falls back to the latest step-out window
+      const recorded = replayed.timeAwayRequestId ? await withSystemScope(trx, orgId, (t) => loadTimeAway(t, orgId, replayed.timeAwayRequestId!)) : undefined;
+      const last = recorded && recorded.employeeId === emp.id ? recorded
+        : (await withSystemScope(trx, orgId, (t) => t.selectFrom('timeAwayRequests').select(TIME_AWAY_COLUMNS).where('organizationId', '=', orgId).where('employeeId', '=', emp.id).where('source', '=', 'step_out').orderBy('startsAt', 'desc').executeTakeFirst())) as TimeAwayRow | undefined;
+      if (last) return (await timeAwayDtos(trx, orgId, [last]))[0]!;
     }
     const open = await openStepOut(trx, orgId, emp.id, await recentPunches(trx, orgId, emp.id, now));
     if (!open) throw errors.invalidState('You have not stepped out.', { reason: 'NOT_AWAY' });
@@ -274,8 +364,14 @@ export async function comeBack(deps: ApiDeps, actor: Actor, orgId: string, input
     const { policy } = await timeAwayPolicyFor(trx, orgId, emp, date, open.branchId ?? emp.branchId);
     if (policy.returnBy !== 'device_or_portal') throw new AppError('FORBIDDEN', 'Check in on the terminal when you are back: your attendance policy records the return on site only.', { details: { reason: 'RETURN_ON_DEVICE' } });
     await writeSelfPunch(deps, trx, actor, orgId, emp, now, { direction: 'break_in', channel: input.channel, idempotencyKey: input.idempotencyKey, payload: { timeAwayRequestId: open.id } });
-    await systemStep(trx, orgId, (t) => t.updateTable('timeAwayRequests').set({ returnedAt: now }).where('id', '=', open.id).where('returnedAt', 'is', null).execute());
-    await audit(trx, actor, orgId, 'attendance.time_away_returned', 'time_away_request', { entityId: open.id, branchId: open.branchId, newValue: { returnedAt: now.toISOString(), channel: input.channel } });
+    if (open.source === 'step_out') {
+      // a step-out window ends at the return: the rest of it never blocks the next step-out or counts against the quota
+      await endStepOutAt(trx, actor, orgId, open, now, input.channel);
+    } else {
+      // a planned window stays as planned (the employee may step out under it again); the return is noted
+      await systemStep(trx, orgId, (t) => t.updateTable('timeAwayRequests').set({ returnedAt: now }).where('id', '=', open.id).where('returnedAt', 'is', null).execute());
+      await audit(trx, actor, orgId, 'attendance.time_away_returned', 'time_away_request', { entityId: open.id, branchId: open.branchId, newValue: { returnedAt: now.toISOString(), channel: input.channel } });
+    }
     return (await timeAwayDtos(trx, orgId, [(await withSystemScope(trx, orgId, (t) => loadTimeAway(t, orgId, open.id)))!]))[0]!;
   });
 }
@@ -318,6 +414,12 @@ export async function listTimeAway(deps: ApiDeps, actor: Actor, orgId: string, q
     if (q.kind) base = base.where('kind', '=', q.kind);
     if (q.employeeId) base = base.where('employeeId', '=', q.employeeId);
     if (q.branchId) base = base.where('branchId', '=', q.branchId);
+    if (q.departmentId) {
+      // the employees of the department (system scope: the department filter needs no employee.view; RLS still scopes the rows)
+      const deptId = q.departmentId;
+      const members = await withSystemScope(trx, orgId, (t) => t.selectFrom('employees').select('id').where('organizationId', '=', orgId).where('departmentId', '=', deptId).execute());
+      base = base.where('employeeId', 'in', members.length ? members.map((m) => m.id) : [NIL]);
+    }
     const total = Number((await base.select((eb) => eb.fn.countAll<string>().as('n')).executeTakeFirst())?.n ?? 0);
     const rows = await base.select(TIME_AWAY_COLUMNS).orderBy('startsAt', 'desc').orderBy('id', 'asc').limit(q.pageSize).offset((q.page - 1) * q.pageSize).execute();
     return { data: await timeAwayDtos(trx, orgId, rows as TimeAwayRow[], { withEmployee: true }), total };

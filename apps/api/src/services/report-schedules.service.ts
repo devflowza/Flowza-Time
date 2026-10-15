@@ -273,6 +273,11 @@ export async function updateSchedule(deps: ApiDeps, actor: Actor, orgId: string,
     // the stored schedule inside a branch-scoped caller's branches (before the change) …
     const row = await loadScheduleForChange(trx, orgId, id, grant);
     const before = inputOf(row);
+    // runDay means something else per cadence (day of month / weekday / weekday mask): a stored one is never carried into a
+    // new cadence, where it would pass validation as run days nobody chose (weekly 4 = Thursday → daily mask 4 = Tuesday)
+    if (patch.cadence !== undefined && patch.cadence !== before.cadence && patch.runDay === undefined) {
+      throw errors.validation('Changing the frequency requires runDay.', { issues: [{ path: 'runDay', message: 'Required when the cadence changes' }] });
+    }
     const parsed = createReportScheduleSchema.safeParse({ ...before, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
     if (!parsed.success) throw errors.validation('Invalid schedule.', { issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
     const next = parsed.data;

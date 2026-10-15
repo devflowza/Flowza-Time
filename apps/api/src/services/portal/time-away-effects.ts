@@ -86,11 +86,24 @@ export async function personalMinutesInMonth(trx: Trx, orgId: string, employeeId
   });
 }
 
-/** The (employee, date) records an approved / withdrawn window touches: its attendance date, and the next one when it crosses midnight. */
+/**
+ * The local dates whose records an approved / withdrawn window may touch: every date from the day before its start through the
+ * day of its end. The engine reads approved windows by time overlap with a day's punch window (blueprint §G.3), so a 02:00
+ * window belongs to the night shift that started the evening before, like the normaliser's reach (previous / next date). A
+ * recompute of a day the window does not touch ends as 'unchanged'.
+ */
+export function timeAwayRecomputeDates(row: Pick<TimeAwayRow, 'attendanceDate' | 'startsAt' | 'endsAt'>, tz: string): string[] {
+  const startDate = DateTime.fromJSDate(row.startsAt).setZone(tz).toISODate() ?? isoDate(row.attendanceDate);
+  const endDate = DateTime.fromJSDate(row.endsAt).setZone(tz).toISODate() ?? startDate;
+  const first = [addDays(startDate, -1), isoDate(row.attendanceDate)].sort()[0]!;
+  const last = [endDate, isoDate(row.attendanceDate)].sort().at(-1)!;
+  const out: string[] = [];
+  for (let d = first; d <= last && out.length < 7; d = addDays(d, 1)) out.push(d);
+  return out;
+}
+
 async function recomputeDays(deps: ApiDeps, t: Trx, ctx: Pick<HookContext, 'orgId' | 'actor'>, row: TimeAwayRow, tz: string): Promise<void> {
-  const date = isoDate(row.attendanceDate);
-  const endDate = DateTime.fromJSDate(row.endsAt).setZone(tz).toISODate() ?? date;
-  for (const d of endDate > date ? [date, addDays(date, 1)] : [date]) {
+  for (const d of timeAwayRecomputeDates(row, tz)) {
     await enqueueRecompute(deps.queue, { organizationId: ctx.orgId, employeeId: row.employeeId, date: d, reason: 'TIME_AWAY', triggeredBy: ctx.actor.userId, correlationId: ctx.actor.requestId }, t);
   }
 }

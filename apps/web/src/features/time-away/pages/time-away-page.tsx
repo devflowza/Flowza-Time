@@ -39,13 +39,18 @@ export default function TimeAwayPage() {
   const branchId = f['branchId'] || undefined;
   const departmentId = f['departmentId'] || undefined;
   const summary = useTimeAwaySummary({ month, branchId, departmentId });
+  // the requests waiting, counted by the requests endpoint: the totals rows only hold employees with measured away time, so a
+  // window planned ahead (or a step-out on a day not calculated yet) would never reach the card
+  const { from, to } = monthRange(month);
+  const pending = useTimeAwayRequests({ from, to, status: 'pending', branchId, departmentId, page: 1, pageSize: 1 });
   const branches = useBranchOptions();
   const departments = useDepartmentOptions(branchId);
   const rows = summary.data;
   const totals = useMemo(() => (rows ?? []).reduce(
-    (acc, r) => ({ away: acc.away + r.awayMinutes, official: acc.official + r.officialDutyMinutes, permission: acc.permission + r.permissionMinutes, unapproved: acc.unapproved + r.unapprovedAwayMinutes, flagged: acc.flagged + (r.unapprovedAwayMinutes > 0 ? 1 : 0), pending: acc.pending + r.pendingRequests }),
-    { away: 0, official: 0, permission: 0, unapproved: 0, flagged: 0, pending: 0 },
+    (acc, r) => ({ away: acc.away + r.awayMinutes, official: acc.official + r.officialDutyMinutes, permission: acc.permission + r.permissionMinutes, unapproved: acc.unapproved + r.unapprovedAwayMinutes, flagged: acc.flagged + (r.unapprovedAwayMinutes > 0 ? 1 : 0) }),
+    { away: 0, official: 0, permission: 0, unapproved: 0, flagged: 0 },
   ), [rows]);
+  const pendingTotal = pending.data?.meta.total ?? 0;
   const setMonth = (m: string) => table.update({ filters: { month: m === currentMonth ? '' : m } });
   const hasFilters = !!branchId || !!departmentId;
   const loading = summary.isLoading;
@@ -72,12 +77,12 @@ export default function TimeAwayPage() {
         <StatCard label={t('totals.permission')} value={fmtMinutes(totals.permission)} tone="warning" loading={loading} />
         <StatCard label={t('totals.unapproved')} value={fmtMinutes(totals.unapproved)} tone={totals.unapproved > 0 ? 'danger' : 'default'} loading={loading} />
         <StatCard label={t('totals.flagged')} value={fmtNumber(totals.flagged)} tone={totals.flagged > 0 ? 'danger' : 'default'} loading={loading} />
-        <StatCard label={t('totals.pending')} value={fmtNumber(totals.pending)} tone={totals.pending > 0 ? 'warning' : 'default'} loading={loading} />
+        <StatCard label={t('totals.pending')} value={fmtNumber(pendingTotal)} tone={pendingTotal > 0 ? 'warning' : 'default'} loading={pending.isLoading} />
       </div>
 
       <SummarySection key={`${month}|${branchId ?? ''}|${departmentId ?? ''}`} rows={rows} query={summary} onSelect={(r) => table.setFilter('employeeId', r.employeeId)} selectedId={f['employeeId']} />
 
-      <RequestsSection month={month} branchId={branchId} rows={rows} table={table} />
+      <RequestsSection month={month} branchId={branchId} departmentId={departmentId} rows={rows} table={table} />
     </div>
   );
 }
@@ -136,8 +141,8 @@ function SummarySection({ rows, query, onSelect, selectedId }: { rows: TimeAwayS
   );
 }
 
-/** The requests of the month (server-paged), filterable by status and type, or narrowed to one employee from the totals. */
-function RequestsSection({ month, branchId, rows, table }: { month: string; branchId: string | undefined; rows: TimeAwaySummaryRowDto[] | undefined; table: ReturnType<typeof useServerTable> }) {
+/** The requests of the month (server-paged) under the page's branch / department, filterable by status and type, or narrowed to one employee from the totals. */
+function RequestsSection({ month, branchId, departmentId, rows, table }: { month: string; branchId: string | undefined; departmentId: string | undefined; rows: TimeAwaySummaryRowDto[] | undefined; table: ReturnType<typeof useServerTable> }) {
   const { t } = useTranslation(TIME_AWAY_NS);
   const tz = useOrgTimezone();
   const branches = useBranchOptions();
@@ -148,7 +153,7 @@ function RequestsSection({ month, branchId, rows, table }: { month: string; bran
   const employeeId = f['employeeId'] || undefined;
   const pageSize = Math.min(table.state.pageSize, 200);
   const { from, to } = monthRange(month);
-  const q = useTimeAwayRequests({ from, to, status, kind, employeeId, branchId, page: table.state.page, pageSize });
+  const q = useTimeAwayRequests({ from, to, status, kind, employeeId, branchId, departmentId, page: table.state.page, pageSize });
   const employeeName = employeeId ? rows?.find((r) => r.employeeId === employeeId)?.employeeName ?? q.data?.data.find((r) => r.employeeId === employeeId)?.employeeName ?? null : null;
   const today = todayIso(tz);
 

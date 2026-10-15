@@ -24,7 +24,7 @@ export function useTimeAwaySummary(query: TimeAwaySummaryQuery) {
 }
 
 export interface TimeAwayListQuery {
-  from: string; to: string; status?: TimeAwayStatus | undefined; kind?: TimeAwayKind | undefined; employeeId?: string | undefined; branchId?: string | undefined; page: number; pageSize: number;
+  from: string; to: string; status?: TimeAwayStatus | undefined; kind?: TimeAwayKind | undefined; employeeId?: string | undefined; branchId?: string | undefined; departmentId?: string | undefined; page: number; pageSize: number;
 }
 export function useTimeAwayRequests(query: TimeAwayListQuery) {
   const orgId = useOrgId();

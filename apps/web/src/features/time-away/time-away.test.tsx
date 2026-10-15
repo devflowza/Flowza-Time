@@ -87,6 +87,32 @@ describe('time away — the HR report (docs/time-away.md)', () => {
     expect(listCalls().at(-1)?.[1]).toMatchObject({ from: '2026-08-01', to: '2026-08-31' });
   });
 
+  it('counts every pending request of the month — also those of employees with no away time yet (no totals row)', async () => {
+    // the summary knows one pending request (Aisha); two windows planned ahead by employees with no away time have no row
+    mockGet({
+      '/orgs/org-1/time-away/summary': { data: SUMMARY },
+      '/orgs/org-1/time-away': (q: Record<string, unknown> | undefined) => (q?.['status'] === 'pending' && q['pageSize'] === 1 ? page(REQUESTS.slice(1), 3) : page(REQUESTS)),
+      '/orgs/org-1/branches': page([]),
+      '/orgs/org-1/departments': page([]),
+    });
+    renderWithProviders(<TimeAwayPage />, { route: '/attendance/time-away?month=2026-09' });
+    await screen.findByTestId(`unapproved-${E1}`);
+    const card = within(screen.getByTestId('time-away-totals')).getByText('Pending requests');
+    await waitFor(() => expect(card.nextElementSibling).toHaveTextContent('3'));
+    expect(listCalls().find(([, q]) => q['status'] === 'pending' && q['pageSize'] === 1)?.[1]).toMatchObject({ from: '2026-09-01', to: '2026-09-30', page: 1 });
+  });
+
+  it('the department filter narrows the requests and their pending count as it narrows the totals', async () => {
+    const D1 = 'd1000000-0000-4000-8000-000000000001';
+    renderWithProviders(<TimeAwayPage />, { route: `/attendance/time-away?month=2026-09&departmentId=${D1}` });
+    await screen.findByTestId(`unapproved-${E1}`);
+    expect(summaryCalls()[0]?.[1]).toMatchObject({ month: '2026-09', departmentId: D1 });
+    await waitFor(() => expect(listCalls().length).toBeGreaterThanOrEqual(2));
+    // the requests table and the pending card's count both carry the department
+    for (const [, q] of listCalls()) expect(q).toMatchObject({ departmentId: D1, from: '2026-09-01' });
+    expect(listCalls().some(([, q]) => q['status'] === undefined)).toBe(true);
+  });
+
   it('says so when nobody was away', async () => {
     mockGet({ '/orgs/org-1/time-away/summary': { data: [] }, '/orgs/org-1/time-away': page([]), '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]) });
     renderWithProviders(<TimeAwayPage />, { route: '/attendance/time-away?month=2026-09' });

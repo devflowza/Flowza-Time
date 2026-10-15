@@ -53,6 +53,8 @@ export const timeAwayListQuerySchema = z.object({
   kind: z.enum(TIME_AWAY_KINDS).optional(),
   employeeId: uuidSchema.optional(),
   branchId: uuidSchema.optional(),
+  /** The employees of this department (as the monthly totals' department filter). */
+  departmentId: uuidSchema.optional(),
   scope: z.enum(['all', 'team']).default('all'),
   page: z.coerce.number().int().min(1).default(1),
   pageSize: z.coerce.number().int().min(1).max(200).default(50),
