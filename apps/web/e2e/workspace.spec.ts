@@ -30,7 +30,8 @@ test.describe('authenticated workspace', () => {
     await page.goto('/');
     await expect(page.locator('html')).toHaveAttribute('data-theme', 'midnight');
     await expect(page.getByRole('heading', { level: 1, name: 'Dashboard' })).toBeVisible();
-    await expect(page.getByText('Attendance rate')).toBeVisible();
+    // the KPI tile (the department and month-to-date widgets carry an attendance rate too)
+    await expect(page.getByText('Attendance rate').first()).toBeVisible();
     await expect(page.getByText('Awaiting your approval')).toHaveCount(0); // the executive layout has no side rail
     // the style reaches the sidebar through the CSS variables, not through per-component colours
     const sidebar = page.getByRole('complementary', { name: 'Primary' });

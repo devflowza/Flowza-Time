@@ -513,6 +513,8 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
     ] },
     [`/orgs/${ORG_ID}/dashboard/month-to-date`]: (url: URL) => { const to = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10); return { data: { from: `${to.slice(0, 7)}-01`, to, workingDays: 4800, presentDays: 4512, absentDays: 288, lateDays: 196, lateMinutes: 4310, earlyDepartureDays: 41, missingPunchDays: 37, leaveDays: 120, shortfallMinutes: 7350, overtimeMinutes: 2210, attendanceRate: 94, avgWorkedMinutes: 468 } }; },
     [`/orgs/${ORG_ID}/holidays`]: { data: [] },
+    // short leave (2026-10-19): the portal card on /my/leave — no type configured, nothing requested this month
+    [`/orgs/${ORG_ID}/me/time-off`]: (url: URL) => ({ data: { month: url.searchParams.get('month') ?? new Date().toISOString().slice(0, 7), types: [], usage: [], requests: [], allowances: [] } }),
     // approval engine v2: the dashboard's queue card (scope mine, pending) and the approver's delegations banner
     [`/orgs/${ORG_ID}/approvals`]: page_([]),
     [`/orgs/${ORG_ID}/approval-delegations`]: { data: [] },
