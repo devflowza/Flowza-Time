@@ -5,13 +5,15 @@ import type { z } from 'zod';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, Info, Lock, Trash2 } from 'lucide-react';
-import { roleInputSchema, updateRoleSchema, type Permission, type RoleDto, type RoleInput, type UpdateRoleInput } from '@flowza/contracts';
+import { ROLE_TEMPLATES, roleInputSchema, updateRoleSchema, type Permission, type RoleDto, type RoleInput, type RoleTemplateKey, type UpdateRoleInput } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, ConfirmDialog, EmptyState, ErrorState, FormField, Input, Skeleton, Textarea } from '@/components/ui';
 import { toast, toastError } from '@/lib/toast';
 import { useActiveMembership, useCan } from '@/features/me/use-me';
 import { usePermissions, useRoleMutations, useRoles } from '../api';
 import { PermissionMatrix } from '../components/permission-matrix';
+import { RoleTemplatePicker } from '../components/role-templates';
+import { templatePermissions } from '../role-template-permissions';
 
 type CreateValues = z.input<typeof roleInputSchema>;
 type UpdateValues = z.input<typeof updateRoleSchema>;
@@ -51,8 +53,20 @@ function CreateRole() {
   const { create } = useRoleMutations();
   const grantable = new Set(me?.permissions ?? []);
   const [keyTouched, setKeyTouched] = useState(false);
+  const [template, setTemplate] = useState<RoleTemplateKey | null>(null);
+  const [skipped, setSkipped] = useState(0);
   const form = useForm<CreateValues, unknown, RoleInput>({ resolver: zodResolver(roleInputSchema), defaultValues: { key: '', name: '', description: '', permissions: [] } });
-  const { register, control, setValue, formState: { errors, isSubmitting } } = form;
+  const { register, control, setValue, getValues, formState: { errors, isSubmitting } } = form;
+  // a template pre-fills the matrix with the keys the creator may grant; an empty name / untouched key take the template's
+  const applyTemplate = (key: RoleTemplateKey | null) => {
+    setTemplate(key);
+    if (!key) { setSkipped(0); setValue('permissions', [], { shouldDirty: true }); return; }
+    const picked = templatePermissions(key, grantable, new Set((perms.data ?? []).map((p) => p.key)));
+    setSkipped(picked.skipped);
+    setValue('permissions', picked.permissions, { shouldDirty: true, shouldValidate: !!errors.permissions });
+    if (!getValues('name')) setValue('name', t(`roles.templates.${key}.name`), { shouldDirty: true });
+    if (!keyTouched) setValue('key', ROLE_TEMPLATES[key].roleKey, { shouldDirty: true });
+  };
   const onSubmit = form.handleSubmit(async (values) => {
     try { const r = await create.mutateAsync({ ...values, description: values.description || undefined }); toast.success(t('roles.created', { name: r.name })); navigate(`/users/roles/${r.id}`); } catch (e) { toastError(e); }
   });
@@ -71,6 +85,8 @@ function CreateRole() {
             <Textarea id="role-desc" maxLength={300} {...register('description')} />
           </FormField>
         </CardContent></Card>
+        <RoleTemplatePicker value={template} onPick={applyTemplate} />
+        {template && skipped > 0 ? <p role="status" className="text-sm text-amber-700 dark:text-amber-300">{t('roles.templates.skipped', { count: skipped })}</p> : null}
         <GrantHint />
         {errors.permissions ? <p role="alert" className="text-sm text-destructive">{t('roles.permissionsRequired')}</p> : null}
         <Controller control={control} name="permissions" render={({ field }) => <PermissionMatrix permissions={perms.data ?? []} value={field.value ?? []} onChange={(next: Permission[]) => field.onChange(next)} grantable={grantable} />} />
