@@ -1,5 +1,5 @@
 import type { Context, Hono } from 'hono';
-import { importJobListQuerySchema, importJobRowsQuerySchema, importUploadSchema } from '@flowza/contracts';
+import { IMPORT_KINDS, importJobListQuerySchema, importJobRowsQuerySchema, importUploadSchema, type ImportKind } from '@flowza/contracts';
 import { errors } from '@flowza/shared';
 import type { AppEnv } from '../../middleware/request-context.js';
 import type { ApiDeps } from '../../deps.js';
@@ -12,8 +12,8 @@ import * as imports from '../../services/imports.service.js';
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 
-/** Accepts multipart/form-data (field `file`, optional `options` JSON) or JSON { fileName, contentBase64, options }. */
-async function readUpload(c: Context<AppEnv>): Promise<{ fileName: string; content: string; options: { updateExisting?: boolean; autoAssignDeviceUserId?: boolean } }> {
+/** Accepts multipart/form-data (field `file`, optional `options` JSON and `kind`) or JSON { fileName, contentBase64, options, kind }. CSV or .xlsx. */
+async function readUpload(c: Context<AppEnv>): Promise<{ fileName: string; bytes: Buffer; options: { updateExisting?: boolean; autoAssignDeviceUserId?: boolean }; kind: ImportKind }> {
   const ctx = c;
   const contentType = ctx.req.header('content-type') ?? '';
   if (contentType.startsWith('multipart/form-data')) {
@@ -23,21 +23,24 @@ async function readUpload(c: Context<AppEnv>): Promise<{ fileName: string; conte
     if (file.size > MAX_UPLOAD_BYTES) throw errors.validation('File too large (max 20 MB).');
     const rawOptions = typeof form['options'] === 'string' ? JSON.parse(form['options'] as string) : {};
     const options = importUploadSchema.shape.options.parse(rawOptions);
-    return { fileName: file.name || 'import.csv', content: await file.text(), options };
+    const kind = importUploadSchema.shape.kind.parse(typeof form['kind'] === 'string' ? form['kind'] : undefined);
+    return { fileName: file.name || 'import.csv', bytes: Buffer.from(await file.arrayBuffer()), options, kind };
   }
   const body = importUploadSchema.parse(await ctx.req.json().catch(() => ({})));
   const buf = Buffer.from(body.contentBase64, 'base64');
   if (buf.byteLength > MAX_UPLOAD_BYTES) throw errors.validation('File too large (max 20 MB).');
-  return { fileName: body.fileName, content: buf.toString('utf8'), options: body.options };
+  return { fileName: body.fileName, bytes: buf, options: body.options, kind: body.kind };
 }
 
 export function registerImportRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   const idem = idempotency();
   v1.get('/orgs/:orgId/employees/imports/template', (c) => {
     requirePermission(actorOf(c, deps).principal, param(c, 'orgId'), 'employee.import');
+    // ?kind=ORG_UNITS → the organisational-unit template; anything else → employees (the historical default)
+    const kind: ImportKind = (IMPORT_KINDS as readonly string[]).includes(c.req.query('kind') ?? '') ? c.req.query('kind') as ImportKind : 'EMPLOYEES';
     c.header('content-type', 'text/csv; charset=utf-8');
-    c.header('content-disposition', 'attachment; filename="employees-import-template.csv"');
-    return c.body(imports.templateCsv());
+    c.header('content-disposition', `attachment; filename="${kind === 'ORG_UNITS' ? 'org-units' : 'employees'}-import-template.csv"`);
+    return c.body(imports.templateCsv(kind));
   });
   v1.get('/orgs/:orgId/employees/imports', async (c) => {
     const q = query(c, importJobListQuerySchema);

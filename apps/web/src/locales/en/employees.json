@@ -172,8 +172,11 @@
   "import": {
     "title": "Import employees", "subtitle": "Upload a CSV, review validation results, then confirm. Nothing is written until you confirm.", "steps": "Import steps",
     "step": { "template": "Template", "upload": "Upload", "review": "Review", "done": "Done" },
+    "kindLabel": "What are you importing?", "kinds": { "EMPLOYEES": "Employees", "ORG_UNITS": "Organisational units" },
+    "kindHints": { "ORG_UNITS": "Departments by code: a known code is updated, a new one created. Parents are named by their code (in the organisation or in the same file) and linked after every unit exists; a parent that would make a loop is refused." },
+    "orgUnit": { "code": "Code", "parentCode": "Parent", "upsertHint": "Units are matched by code: existing ones are updated, new ones created. Archived departments are never changed by an import." },
     "templateHint": "Download the CSV template with the exact column headers. Codes (branch, department, designation) must match existing records.",
-    "downloadTemplate": "Download template", "uploadHint": "CSV only (UTF-8, comma/semicolon/tab). Up to 5,000 rows and 20 MB.", "chooseFile": "Choose a CSV file or drop it here", "fileRules": ".csv · max 20 MB · 5,000 rows",
+    "downloadTemplate": "Download template", "uploadHint": "CSV (UTF-8, comma/semicolon/tab) or an Excel workbook (.xlsx — the first sheet is read). Up to 5,000 rows and 20 MB.", "chooseFile": "Choose a CSV or Excel file or drop it here", "fileRules": ".csv · .xlsx · max 20 MB · 5,000 rows",
     "updateExisting": "Update existing employees", "updateExistingHint": "Rows matching an existing employee number update that record instead of being reported as duplicates.",
     "autoAssign": "Auto-assign device user ids", "autoAssignHint": "Rows without a device user id get the next free numeric id.",
     "validate": "Upload and validate", "totalRows": "Rows", "validRows": "Valid", "errorRows": "With errors", "invalidOnly": "Show only rows with errors", "errors": "Errors", "noRows": "No rows to show", "rowValid": "Valid",

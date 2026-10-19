@@ -16,6 +16,7 @@ import { registerV1Routes } from './routes/v1/index.js';
 import { registerPublicInvitationRoutes } from './routes/v1/members.js';
 import { registerInboundRoutes } from './routes/inbound/index.js';
 import { registerEmailWebhookRoutes } from './routes/inbound/email-webhooks.js';
+import { HRMS_INBOUND_LIMITS, registerHrmsInboundRoutes } from './routes/v1/features/hrms.js';
 import { edgeGate } from './middleware/edge-gate.js';
 import { securityHeaders } from './middleware/security-headers.js';
 
@@ -24,6 +25,9 @@ export const INBOUND_PREFIXES = ['/device-push', '/webhooks'] as const;
 
 /** `details.reason` of the router's own 404 (no route matched), as opposed to a NOT_FOUND raised for a missing record. */
 export const ROUTE_NOT_FOUND = 'ROUTE_NOT_FOUND';
+
+/** HR system batches per API key and per client IP (docs/integrations/hrms.md §2): a batch carries up to 500 records. */
+export { HRMS_INBOUND_LIMITS };
 
 /** Invitation previews per client IP: enough for a person opening their link, far too few to guess tokens. */
 export const INVITATION_VALIDATE_LIMIT = { windowMs: 60_000, max: 20 } as const;
@@ -69,6 +73,15 @@ export function createApp(deps: ApiDeps) {
   pub.use('/invitations/validate', rateLimit({ name: 'invitation-validate', windowMs: INVITATION_VALIDATE_LIMIT.windowMs, max: INVITATION_VALIDATE_LIMIT.max, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
   registerPublicInvitationRoutes(pub, deps);
   app.route('/api/v1', pub);
+
+  // HR system inbound (HRMS batches, docs/integrations/hrms.md): an organisation API key instead of a user session. Its own
+  // router, mounted before the authenticated one (whose middlewares therefore never see these paths), behind the edge gate and
+  // the per-IP limiter; the routes add the per-key limit once the key is authenticated.
+  const hrmsInbound = new Hono<AppEnv>();
+  hrmsInbound.use('/inbound/hrms/*', edge);
+  hrmsInbound.use('/inbound/hrms/*', rateLimit({ name: 'hrms-ip', ...HRMS_INBOUND_LIMITS.perIp, keyFn: (c) => clientIp(c, deps.config) ?? 'unknown' }));
+  registerHrmsInboundRoutes(hrmsInbound, deps);
+  app.route('/api/v1', hrmsInbound);
 
   // Authenticated API
   const v1 = new Hono<AppEnv>();

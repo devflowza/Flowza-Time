@@ -247,7 +247,7 @@ describe('imports', () => {
     const res = await api.request('GET', `/orgs/${F.orgA}/employees/imports/template`, { user: F.ownerA });
     expect(res.status).toBe(200);
     expect(res.headers.get('content-type')).toContain('text/csv');
-    expect(res.text.split('\n')[0]).toBe('employeeNumber,firstName,middleName,lastName,displayName,gender,dateOfBirth,nationalityCode,email,phone,joiningDate,employmentStatus,employmentType,branchCode,departmentCode,designationCode,managerEmployeeNumber,deviceUserId,cardNumber');
+    expect(res.text.split('\n')[0]).toBe('employeeNumber,firstName,middleName,lastName,displayName,gender,dateOfBirth,nationalityCode,email,phone,joiningDate,employmentStatus,employmentType,branchCode,departmentCode,designationCode,managerEmployeeNumber,deviceUserId,cardNumber,displayNameAr,civilId,exitDate');
   });
 
   it('validates rows (unknown branch code, duplicate employee number, in-file manager) and stores the job', async () => {

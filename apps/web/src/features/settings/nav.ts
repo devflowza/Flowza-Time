@@ -1,7 +1,7 @@
-import { Bell, Building2, CalendarOff, CheckSquare, Clock, CreditCard, FileText, Globe2, LayoutDashboard, Plug, RefreshCw, ShieldCheck, type LucideIcon } from 'lucide-react';
+import { Bell, Building2, CalendarOff, CheckSquare, Clock, CreditCard, FileText, Globe2, LayoutDashboard, Network, Plug, RefreshCw, ShieldCheck, type LucideIcon } from 'lucide-react';
 import type { ModuleKey, Permission } from '@flowza/contracts';
 
-export const SETTINGS_SECTIONS = ['general', 'dashboard', 'regional', 'attendance', 'sync', 'integrations', 'reports', 'notifications', 'security', 'subscription', 'leave', 'approvals'] as const;
+export const SETTINGS_SECTIONS = ['general', 'dashboard', 'regional', 'attendance', 'sync', 'integrations', 'hrms', 'reports', 'notifications', 'security', 'subscription', 'leave', 'approvals'] as const;
 export type SettingsSectionKey = (typeof SETTINGS_SECTIONS)[number];
 /**
  * `permission`: sections beyond `organization.view` (the layout hides the entry; the route guards it again). `module`: sections
@@ -9,7 +9,10 @@ export type SettingsSectionKey = (typeof SETTINGS_SECTIONS)[number];
  */
 export const SETTINGS_NAV: { key: SettingsSectionKey; icon: LucideIcon; permission?: Permission; module?: ModuleKey }[] = [
   { key: 'general', icon: Building2 }, { key: 'dashboard', icon: LayoutDashboard }, { key: 'regional', icon: Globe2 }, { key: 'attendance', icon: Clock }, { key: 'sync', icon: RefreshCw, module: 'devices' },
-  { key: 'integrations', icon: Plug, permission: 'integration.manage', module: 'finance_integration' }, { key: 'reports', icon: FileText },
+  { key: 'integrations', icon: Plug, permission: 'integration.manage', module: 'finance_integration' },
+  // HR system feed (Mawred Plus or any HRMS; docs/integrations/hrms.md): API keys and field mapping — not tied to a module
+  { key: 'hrms', icon: Network, permission: 'integration.manage' },
+  { key: 'reports', icon: FileText },
   { key: 'notifications', icon: Bell }, { key: 'security', icon: ShieldCheck }, { key: 'subscription', icon: CreditCard },
   // leave v2 (HR portal Prompt 7): comp-off expiry
   { key: 'leave', icon: CalendarOff, module: 'leave' },

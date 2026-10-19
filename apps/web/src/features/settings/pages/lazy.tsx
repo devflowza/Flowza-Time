@@ -8,6 +8,7 @@ export const RegionalSection = lazyPage(() => import('../sections/regional-secti
 export const AttendanceSection = lazyPage(() => import('../sections/attendance-section'));
 export const SyncSection = lazyPage(() => import('../sections/sync-section'));
 export const IntegrationsSection = lazyPage(() => import('../sections/integrations-section'));
+export const HrmsSection = lazyPage(() => import('../sections/hrms-section'));
 export const ReportsSection = lazyPage(() => import('../sections/reports-section'));
 export const NotificationsSection = lazyPage(() => import('../sections/notifications-section'));
 export const SecuritySection = lazyPage(() => import('../sections/security-section'));

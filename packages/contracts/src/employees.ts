@@ -178,6 +178,21 @@ export const employeeImportRowSchema = createEmployeeSchema.omit({ branchId: tru
   departmentCode: codeSchema.optional(),
   designationCode: codeSchema.optional(),
   managerEmployeeNumber: codeSchema.optional(),
+  /** Oman civil ID: stored as the employee's `civil_id` identity document (sensitive: needs employee.view_sensitive to import). */
+  civilId: z.string().trim().min(1).max(64).optional(),
+  /** Last working day; with a terminated / resigned status it is the date the employment ends. */
+  exitDate: isoDateSchema.optional(),
 });
 export type EmployeeImportRow = z.infer<typeof employeeImportRowSchema>;
-export const EMPLOYEE_IMPORT_COLUMNS = ['employeeNumber', 'firstName', 'middleName', 'lastName', 'displayName', 'gender', 'dateOfBirth', 'nationalityCode', 'email', 'phone', 'joiningDate', 'employmentStatus', 'employmentType', 'branchCode', 'departmentCode', 'designationCode', 'managerEmployeeNumber', 'deviceUserId', 'cardNumber'] as const;
+/**
+ * A row that updates an EXISTING employee (matched by employee number): every column optional — an empty cell (or a field the
+ * HR system did not send) leaves the stored value unchanged; no creation default is applied.
+ */
+export const employeeImportUpdateRowSchema = employeeImportRowSchema.omit({ gender: true, employmentStatus: true, employmentType: true }).partial().extend({
+  employeeNumber: codeSchema,
+  gender: z.enum(GENDERS).optional(),
+  employmentStatus: z.enum(EMPLOYMENT_STATUSES).optional(),
+  employmentType: z.enum(EMPLOYMENT_TYPES).optional(),
+});
+export type EmployeeImportUpdateRow = z.infer<typeof employeeImportUpdateRowSchema>;
+export const EMPLOYEE_IMPORT_COLUMNS = ['employeeNumber', 'firstName', 'middleName', 'lastName', 'displayName', 'gender', 'dateOfBirth', 'nationalityCode', 'email', 'phone', 'joiningDate', 'employmentStatus', 'employmentType', 'branchCode', 'departmentCode', 'designationCode', 'managerEmployeeNumber', 'deviceUserId', 'cardNumber', 'displayNameAr', 'civilId', 'exitDate'] as const;

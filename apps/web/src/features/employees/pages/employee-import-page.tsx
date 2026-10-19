@@ -3,7 +3,7 @@ import type { ColumnDef } from '@tanstack/react-table';
 import { Link, useNavigate, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { ArrowLeft, CheckCircle2, Download, FileUp, ListChecks, Upload, XCircle } from 'lucide-react';
-import { EMPLOYEE_IMPORT_COLUMNS, type ImportJobRowDto } from '@flowza/contracts';
+import { EMPLOYEE_IMPORT_COLUMNS, ORG_UNIT_IMPORT_COLUMNS, type ImportJobRowDto, type ImportKind } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, Checkbox, ConfirmDialog, ErrorState, Label, Skeleton, StatCard } from '@/components/ui';
@@ -11,12 +11,16 @@ import { useServerTable } from '@/hooks/use-server-table';
 import { fmtNumber } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
-import { useOrgId } from '@/features/me/use-me';
+import { useCan, useOrgId } from '@/features/me/use-me';
 import { downloadImportTemplate, fileToBase64, useImportJob, useImportMutations, useUserLimit } from '../api';
 import { UserLimitBanner } from '../components/user-limit-banner';
 import { toastJobQueued } from '../job-toast';
 
 const STEPS = ['template', 'upload', 'review', 'done'] as const;
+/** What the import page can import: employees, or organisational units (departments by code; needs department.manage). */
+const KINDS: readonly ImportKind[] = ['EMPLOYEES', 'ORG_UNITS'];
+/** CSV, or an Excel workbook (.xlsx: its first sheet is read by the server). */
+const ACCEPT = '.csv,text/csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 
 export default function EmployeeImportPage() {
   const { t } = useTranslation('employees');
@@ -36,15 +40,20 @@ export default function EmployeeImportPage() {
   const [queuedJobId, setQueuedJobId] = useState<string | null>(null);
   const fileInput = useRef<HTMLInputElement>(null);
   const userLimit = useUserLimit();
+  const can = useCan();
+  const kinds = KINDS.filter((k) => k === 'EMPLOYEES' || can('department.manage'));
+  const [kind, setKind] = useState<ImportKind>('EMPLOYEES');
 
   const detail = job.data?.data;
+  // the review shows the columns of what was uploaded (an org-unit import stays one after a reload of ?importId=)
+  const shownKind: ImportKind = detail?.type === 'ORG_UNITS' ? 'ORG_UNITS' : detail ? 'EMPLOYEES' : kind;
   const step: (typeof STEPS)[number] = queuedJobId || (detail && detail.status !== 'VALIDATED') ? 'done' : importId ? 'review' : 'upload';
 
   const onUpload = async () => {
     if (!file) return;
     try {
       const contentBase64 = await fileToBase64(file);
-      const created = await upload.mutateAsync({ fileName: file.name, contentBase64, options });
+      const created = await upload.mutateAsync({ fileName: file.name, contentBase64, options, kind });
       setParams({ importId: created.id });
     } catch (e) { toastError(e); }
   };
@@ -54,13 +63,19 @@ export default function EmployeeImportPage() {
   const columns = useMemo<ColumnDef<ImportJobRowDto, unknown>[]>(() => [
     { id: 'rowNo', header: '#', cell: ({ row }) => <span className="tnum text-xs text-muted-foreground">{row.original.rowNo}</span>, size: 48 },
     { id: 'status', header: tc('common.status'), cell: ({ row }) => row.original.status === 'valid' ? <Badge variant="success" dot>{t('import.rowValid')}</Badge> : <Badge variant="danger" dot>{t(`import.rowStatus.${row.original.status}`)}</Badge> },
-    { id: 'employeeNumber', header: t('fields.employeeNumber'), cell: ({ row }) => <span className="font-mono text-xs" dir="ltr">{String(row.original.data['employeeNumber'] ?? '')}</span> },
-    { id: 'name', header: tc('common.name'), cell: ({ row }) => `${String(row.original.data['firstName'] ?? '')} ${String(row.original.data['lastName'] ?? '')}`.trim() || '—' },
+    ...(shownKind === 'ORG_UNITS' ? [
+      { id: 'code', header: t('import.orgUnit.code'), cell: ({ row }) => <span className="font-mono text-xs" dir="ltr">{String(row.original.data['code'] ?? '')}</span> },
+      { id: 'unitName', header: tc('common.name'), cell: ({ row }) => String(row.original.data['name'] ?? '') || '—' },
+      { id: 'parentCode', header: t('import.orgUnit.parentCode'), cell: ({ row }) => <span className="font-mono text-xs" dir="ltr">{String(row.original.data['parentCode'] ?? '') || '—'}</span> },
+    ] satisfies ColumnDef<ImportJobRowDto, unknown>[] : [
+      { id: 'employeeNumber', header: t('fields.employeeNumber'), cell: ({ row }) => <span className="font-mono text-xs" dir="ltr">{String(row.original.data['employeeNumber'] ?? '')}</span> },
+      { id: 'name', header: tc('common.name'), cell: ({ row }) => `${String(row.original.data['firstName'] ?? '')} ${String(row.original.data['lastName'] ?? '')}`.trim() || '—' },
+    ] satisfies ColumnDef<ImportJobRowDto, unknown>[]),
     { id: 'branchCode', header: tc('common.branch'), cell: ({ row }) => <span className="font-mono text-xs" dir="ltr">{String(row.original.data['branchCode'] ?? '')}</span> },
     { id: 'errors', header: t('import.errors'), cell: ({ row }) => row.original.errors.length === 0 ? <span className="text-xs text-muted-foreground">—</span> : (
       <ul className="space-y-0.5 text-xs text-destructive">{row.original.errors.map((e, i) => <li key={i}>{e.field ? <span className="font-mono">{e.field}: </span> : null}{e.message}</li>)}</ul>
     ) },
-  ], [t, tc]);
+  ], [t, tc, shownKind]);
 
   return (
     <div className="page-container">
@@ -77,10 +92,18 @@ export default function EmployeeImportPage() {
       {step === 'upload' ? (
         <div className="grid gap-4 lg:grid-cols-2">
           <Card>
-            <CardHeader><CardTitle>{t('import.step.template')}</CardTitle><CardDescription>{t('import.templateHint')}</CardDescription></CardHeader>
+            <CardHeader><CardTitle>{t('import.step.template')}</CardTitle><CardDescription>{t(kind === 'ORG_UNITS' ? 'import.kindHints.ORG_UNITS' : 'import.templateHint')}</CardDescription></CardHeader>
             <CardContent className="space-y-3">
-              <Button variant="outline" loading={downloading} onClick={async () => { setDownloading(true); try { await downloadImportTemplate(orgId); } catch (e) { toastError(e); } finally { setDownloading(false); } }}><Download /> {t('import.downloadTemplate')}</Button>
-              <div className="flex flex-wrap gap-1" dir="ltr">{EMPLOYEE_IMPORT_COLUMNS.map((c) => <Badge key={c} variant="outline" className="font-mono text-[10px]">{c}</Badge>)}</div>
+              {kinds.length > 1 ? (
+                <div role="radiogroup" aria-label={t('import.kindLabel')} className="inline-flex rounded-md border p-0.5">
+                  {kinds.map((k) => (
+                    <button key={k} type="button" role="radio" aria-checked={kind === k} onClick={() => { setKind(k); setFile(null); }}
+                      className={cn('rounded px-3 py-1.5 text-sm transition-colors', kind === k ? 'bg-primary text-primary-foreground' : 'hover:bg-accent')}>{t(`import.kinds.${k}`)}</button>
+                  ))}
+                </div>
+              ) : null}
+              <div><Button variant="outline" loading={downloading} onClick={async () => { setDownloading(true); try { await downloadImportTemplate(orgId, kind); } catch (e) { toastError(e); } finally { setDownloading(false); } }}><Download /> {t('import.downloadTemplate')}</Button></div>
+              <div className="flex flex-wrap gap-1" dir="ltr">{(kind === 'ORG_UNITS' ? ORG_UNIT_IMPORT_COLUMNS : EMPLOYEE_IMPORT_COLUMNS).map((c) => <Badge key={c} variant="outline" className="font-mono text-[10px]">{c}</Badge>)}</div>
             </CardContent>
           </Card>
           <Card>
@@ -89,14 +112,14 @@ export default function EmployeeImportPage() {
               <div className={cn('flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed p-6 text-center', file && 'border-primary bg-accent/40')}
                 onDragOver={(e) => e.preventDefault()} onDrop={(e) => { e.preventDefault(); const f = e.dataTransfer.files[0]; if (f) setFile(f); }}>
                 <FileUp className="size-6 text-muted-foreground" aria-hidden />
-                <input ref={fileInput} id="import-file" type="file" accept=".csv,text/csv" className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
+                <input ref={fileInput} id="import-file" type="file" accept={ACCEPT} className="sr-only" onChange={(e) => setFile(e.target.files?.[0] ?? null)} />
                 <Label htmlFor="import-file" className="cursor-pointer text-primary underline-offset-4 hover:underline">{file ? file.name : t('import.chooseFile')}</Label>
                 <p className="text-xs text-muted-foreground">{t('import.fileRules')}</p>
               </div>
-              <div className="space-y-2">
+              {kind === 'EMPLOYEES' ? <div className="space-y-2">
                 <label className="flex items-start gap-2 text-sm"><Checkbox checked={options.updateExisting} onCheckedChange={(v) => setOptions((o) => ({ ...o, updateExisting: !!v }))} className="mt-0.5" /><span>{t('import.updateExisting')}<span className="block text-xs text-muted-foreground">{t('import.updateExistingHint')}</span></span></label>
                 <label className="flex items-start gap-2 text-sm"><Checkbox checked={options.autoAssignDeviceUserId} onCheckedChange={(v) => setOptions((o) => ({ ...o, autoAssignDeviceUserId: !!v }))} className="mt-0.5" /><span>{t('import.autoAssign')}<span className="block text-xs text-muted-foreground">{t('import.autoAssignHint')}</span></span></label>
-              </div>
+              </div> : <p className="text-xs text-muted-foreground">{t('import.orgUnit.upsertHint')}</p>}
               <Button disabled={!file} loading={upload.isPending} onClick={onUpload}><Upload /> {t('import.validate')}</Button>
             </CardContent>
           </Card>
