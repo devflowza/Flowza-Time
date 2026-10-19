@@ -118,12 +118,12 @@ describe('invitations (HR portal Prompt 5 review)', () => {
 
 describe('approval routing settings (organization_settings.approvals)', () => {
   it('defaults to the line manager, the secondary manager as a backup, the next manager up and HR for the top', () => {
-    expect(DEFAULT_APPROVAL_SETTINGS).toEqual({ defaultRouting: 'line_manager', secondaryManager: 'backup', managerUnavailable: 'next_level_manager', topLevel: 'hr_admins', topLevelUserId: null });
+    expect(DEFAULT_APPROVAL_SETTINGS).toEqual({ defaultRouting: 'line_manager', secondaryManager: 'backup', managerUnavailable: 'next_level_manager', topLevel: 'hr_admins', topLevelUserId: null, handOverWhenAway: true });
     expect(organizationSettingsSchema.parse({ approvals: {} }).approvals).toEqual(DEFAULT_APPROVAL_SETTINGS);
     expect(resolveApprovalSettings(null)).toEqual(DEFAULT_APPROVAL_SETTINGS);
   });
   it('round-trips a full document, and a malformed stored key falls back alone', () => {
-    const full = approvalSettingsSchema.parse({ defaultRouting: 'permission_holders', secondaryManager: 'alongside', managerUnavailable: 'hr_admins', topLevel: 'named_user', topLevelUserId: '11111111-1111-4111-8111-111111111111' });
+    const full = approvalSettingsSchema.parse({ defaultRouting: 'permission_holders', secondaryManager: 'alongside', managerUnavailable: 'hr_admins', topLevel: 'named_user', topLevelUserId: '11111111-1111-4111-8111-111111111111', handOverWhenAway: false });
     expect(organizationSettingsSchema.shape.approvals.parse(full)).toEqual(full);
     expect(resolveApprovalSettings({ ...full, defaultRouting: 'everyone' })).toEqual({ ...full, defaultRouting: 'line_manager' });
     expect(organizationSettingsSchema.shape.approvals.safeParse({ topLevel: 'ceo' }).success).toBe(false);

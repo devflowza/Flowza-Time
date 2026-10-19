@@ -385,6 +385,8 @@
     "topLevelUserHint": "When this person is the requester, the HR admins decide instead.",
     "selectUser": "Choose a member",
     "topLevelUserRequired": "Choose the approver.",
-    "ladder": "When nobody above can decide, a request always ends with the HR admins, then the organisation admins, then the owner — it is never left without an approver."
+    "ladder": "When nobody above can decide, a request always ends with the HR admins, then the organisation admins, then the owner — it is never left without an approver.",
+    "handOverWhenAway": "Hand pending requests over when the manager goes on leave",
+    "handOverWhenAwayHint": "A request already waiting for a manager who is on approved leave today is also sent to their backup (the secondary manager, else as chosen above). The manager keeps it too."
   }
 }

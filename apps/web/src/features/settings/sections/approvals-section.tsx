@@ -10,7 +10,7 @@ import { toast, toastError } from '@/lib/toast';
 import { useCan } from '@/features/me/use-me';
 import { useMembers } from '@/features/users/api';
 import { useSettingsGroup, useSettingsMutations } from '../api';
-import { SectionError, SectionSkeleton, SettingsSection } from '../components/settings-section';
+import { SectionError, SectionSkeleton, SettingsSection, SwitchRow } from '../components/settings-section';
 
 /** The whole group is edited (every key filled with its default); the API stores it through `approvalSettingsSchema.partial()`. */
 const schema = approvalSettingsSchema.refine((v) => v.topLevel !== 'named_user' || !!v.topLevelUserId, { path: ['topLevelUserId'], message: 'routing.topLevelUserRequired' });
@@ -20,7 +20,8 @@ type Output = z.output<typeof schema>;
 /**
  * /settings/approvals — how requests are routed when no approval workflow applies (`organization_settings.approvals`): the
  * default approver of leave, comp-off and corrections (line manager or permission holders), the secondary manager as a
- * backup or alongside the line manager, the fallback when no manager can act, and the top of the organisation.
+ * backup or alongside the line manager, the fallback when no manager can act, the top of the organisation, and whether a
+ * request already waiting for a manager who goes on leave is handed to their backup.
  */
 export default function ApprovalsSection() {
   const q = useSettingsGroup('approvals');
@@ -74,6 +75,7 @@ export function ApprovalSettingsForm({ initial }: { initial: OrganizationSetting
           </FormField>
         ) : null}
       </div>
+      <Controller control={control} name="handOverWhenAway" render={({ field }) => <SwitchRow id="apr-handover" label={t('routing.handOverWhenAway')} hint={t('routing.handOverWhenAwayHint')} checked={!!field.value} onCheckedChange={field.onChange} disabled={readOnly} />} />
       <p className="text-xs text-muted-foreground">{t('routing.ladder')}</p>
     </SettingsSection>
   );

@@ -254,6 +254,8 @@ export function resolveLeaveSettings(raw: unknown): LeaveSettings {
  *  - `topLevel`: a request about somebody with no manager at all (the top of the organisation) goes to the HR admins
  *    (then the organisation admins, then the owner — default), to one NAMED approver (`topLevelUserId`, e.g. the Director
  *    General), or is APPROVED AUTOMATICALLY (only where no workflow applies; recorded on the request's timeline).
+ *  - `handOverWhenAway`: a request already waiting for a manager who goes on approved leave afterwards is handed to the
+ *    backup (the secondary manager, else per `managerUnavailable`) by the hourly approvals sweep — the manager keeps the seat.
  * The stored group is `approvalSettingsSchema.partial()`; read it through `resolveApprovalSettings`.
  */
 export const APPROVAL_DEFAULT_ROUTINGS = ['line_manager', 'permission_holders'] as const;
@@ -267,6 +269,7 @@ export const approvalSettingsSchema = z.object({
   topLevel: z.enum(APPROVAL_TOP_LEVEL_MODES).default('hr_admins'),
   /** The named approver of `topLevel = named_user` (an active member; the API refuses anybody else). */
   topLevelUserId: uuidSchema.nullable().default(null),
+  handOverWhenAway: z.boolean().default(true),
 });
 export type ApprovalSettings = z.output<typeof approvalSettingsSchema>;
 export const DEFAULT_APPROVAL_SETTINGS: ApprovalSettings = approvalSettingsSchema.parse({});

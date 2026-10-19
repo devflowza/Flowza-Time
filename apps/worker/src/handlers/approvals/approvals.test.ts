@@ -61,7 +61,7 @@ describe('approvals.reminders', () => {
   it('reminds once, 24 hours after a level became current; no digest before 08:00 local; escalates NEXT_STEP when due', async () => {
     clock = at(25); // 07:00 Muscat on 2 Sept
     const r = await runApprovalReminders(h.deps, ORG);
-    expect(r).toEqual({ escalated: 1, reminded: 1, digests: 0 });
+    expect(r).toEqual({ escalated: 1, reminded: 1, digests: 0, handedOver: 0 });
     const reminders = await events('approval.reminder');
     expect(reminders).toHaveLength(1);
     expect(reminders[0]!.aggregateId).toBe(req1);
@@ -75,7 +75,7 @@ describe('approvals.reminders', () => {
     expect(userIdsOf(escalated[0]!.payload)).toEqual([U.b]);
     expect(escalated[0]!.payload).toMatchObject({ target: 'NEXT_STEP' });
     // a second run in the same hour changes nothing
-    expect(await runApprovalReminders(h.deps, ORG)).toEqual({ escalated: 0, reminded: 0, digests: 0 });
+    expect(await runApprovalReminders(h.deps, ORG)).toEqual({ escalated: 0, reminded: 0, digests: 0, handedOver: 0 });
   });
 
   it('sends one digest per approver at 08:00 local, once per day', async () => {
@@ -230,5 +230,67 @@ describe('approvals.reminders', () => {
     expect(actors).toEqual([{ userId: X.approver, resolutionPath: 'primary' }, { userId: X.hrOther, resolutionPath: 'escalated' }]);
     const timeline = await a.selectFrom('approvalRequestEvents').select(['kind', 'detail']).where('requestId', '=', req).orderBy('id').execute();
     expect(timeline.find((t) => t.kind === 'escalated')?.detail).toMatchObject({ target: 'HR_ADMIN', added: [X.hrOther] });
+  });
+  it('absence hand-over: a manager who went on leave after the submit hands the level to the secondary manager, once', async () => {
+    const a = h.tdb.adminDb;
+    const ORG5 = '0f300000-0000-0000-0000-000000000000'; const BR5 = '0f300000-0000-0000-0000-00000000000b';
+    const E = { subject: '0f300000-0000-0000-0000-0000000000e1', mgr: '0f300000-0000-0000-0000-0000000000e2', backup: '0f300000-0000-0000-0000-0000000000e3', grand: '0f300000-0000-0000-0000-0000000000e4' };
+    const Y = { owner: 'f3000000-0000-0000-0000-000000000001', subject: 'f3000000-0000-0000-0000-000000000002', mgr: 'f3000000-0000-0000-0000-000000000003', backup: 'f3000000-0000-0000-0000-000000000004', grand: 'f3000000-0000-0000-0000-000000000005', hr: 'f3000000-0000-0000-0000-000000000006' };
+    await sql`insert into auth.users (id, email) values ${sql.join(Object.values(Y).map((id) => sql`(${id}::uuid, ${`${id}@t.local`})`))}`.execute(a);
+    await a.insertInto('userProfiles').values(Object.entries(Y).map(([k, id]) => ({ id, email: `${id}@t.local`, fullName: k }))).execute();
+    await a.insertInto('organizations').values({ id: ORG5, companyCode: 'APR5', legalName: 'E', displayName: 'E', timezone: 'Asia/Muscat' }).execute();
+    await a.insertInto('organizationSettings').values({ organizationId: ORG5 }).onConflict((oc) => oc.doNothing()).execute();
+    await a.insertInto('branches').values({ id: BR5, organizationId: ORG5, code: 'HQ', name: 'HQ' }).execute();
+    const emp = (id: string, n: string, managerEmployeeId: string | null) => ({ id, organizationId: ORG5, branchId: BR5, employeeNumber: n, firstName: n, lastName: 'X', displayName: n, joiningDate: '2024-01-01', deviceUserId: n.slice(-2), managerEmployeeId });
+    await a.insertInto('employees').values([emp(E.grand, 'G51', null), emp(E.mgr, 'M52', E.grand), emp(E.backup, 'B53', E.grand), emp(E.subject, 'S54', E.mgr)]).execute();
+    await a.updateTable('employees').set({ secondaryManagerEmployeeId: E.backup }).where('id', '=', E.subject).execute();
+    const MGR = '10000000-0000-0000-0000-000000000009';
+    await a.insertInto('orgMemberships').values([
+      { organizationId: ORG5, userId: Y.owner, roleId: '10000000-0000-0000-0000-000000000001', status: 'active', allBranches: true },
+      { organizationId: ORG5, userId: Y.hr, roleId: '10000000-0000-0000-0000-000000000003', status: 'active', allBranches: true },
+      { organizationId: ORG5, userId: Y.subject, roleId: '10000000-0000-0000-0000-000000000008', status: 'active', allBranches: true, employeeId: E.subject },
+      { organizationId: ORG5, userId: Y.mgr, roleId: MGR, status: 'active', allBranches: true, employeeId: E.mgr },
+      { organizationId: ORG5, userId: Y.backup, roleId: MGR, status: 'active', allBranches: true, employeeId: E.backup },
+      { organizationId: ORG5, userId: Y.grand, roleId: MGR, status: 'active', allBranches: true, employeeId: E.grand },
+    ]).execute();
+    const today = (await sql<{ d: string }>`select app.org_today(${ORG5}::uuid)::text as d`.execute(a)).rows[0]!.d;
+    const lt = (await a.insertInto('leaveTypes').values({ organizationId: ORG5, code: 'AL', name: 'Annual' }).returning('id').executeTakeFirstOrThrow()).id;
+    let n = 0;
+    const pendingNote = async () => {
+      n += 1;
+      const req = (await a.insertInto('approvalRequests').values({ organizationId: ORG5, entityType: 'ATTENDANCE_NOTE', entityId: `0f300000-0000-0000-0000-0000000001${String(n).padStart(2, '0')}`, branchId: BR5, employeeId: E.subject, subjectUserId: Y.subject, requestedBy: Y.subject, currentStep: 1, status: 'PENDING', createdAt: at(90) }).returning('id').executeTakeFirstOrThrow()).id;
+      const step = (await a.insertInto('approvalSteps').values({ organizationId: ORG5, requestId: req, stepNo: 1, approverType: 'MANAGER', approverUserId: Y.mgr, mode: 'ANY', requiredCount: 1, status: 'PENDING', activatedAt: at(90), resolutionPath: 'primary' }).returning('id').executeTakeFirstOrThrow()).id;
+      await a.insertInto('approvalStepActors').values({ organizationId: ORG5, stepId: step, userId: Y.mgr, resolutionPath: 'primary' }).execute();
+      return { req, step };
+    };
+    const actorsOf = (step: string) => a.selectFrom('approvalStepActors').select(['userId', 'resolutionPath']).where('stepId', '=', step).orderBy('userId').execute();
+    clock = at(91);
+    // the manager is at work: nothing happens
+    const first = await pendingNote();
+    expect((await runApprovalReminders(h.deps, ORG5)).handedOver).toBe(0);
+    expect(await actorsOf(first.step)).toEqual([{ userId: Y.mgr, resolutionPath: 'primary' }]);
+    // the manager goes on leave today: the secondary manager joins the level, is told, and only once
+    await a.insertInto('leaveRecords').values({ organizationId: ORG5, employeeId: E.mgr, branchId: BR5, leaveTypeId: lt, startDate: today, endDate: today, status: 'APPROVED', days: 1 }).execute();
+    expect((await runApprovalReminders(h.deps, ORG5)).handedOver).toBe(1);
+    expect(await actorsOf(first.step)).toEqual([{ userId: Y.mgr, resolutionPath: 'primary' }, { userId: Y.backup, resolutionPath: 'escalated' }]);
+    const timeline = await a.selectFrom('approvalRequestEvents').select(['kind', 'detail']).where('requestId', '=', first.req).execute();
+    expect(timeline.find((t) => t.kind === 'absence_handover')?.detail).toMatchObject({ stepNo: 1, absent: [Y.mgr], target: 'secondary', added: [Y.backup] });
+    const told = (await events('approval.escalated')).filter((e) => e.aggregateId === first.req);
+    expect(told.map((e) => [userIdsOf(e.payload), (e.payload as Record<string, unknown>)['kind']])).toEqual([[[Y.backup], 'absence']]);
+    expect((await runApprovalReminders(h.deps, ORG5)).handedOver).toBe(0);
+    // the secondary manager on leave too: the next manager up (the manager's manager) — or HR with managerUnavailable = hr_admins
+    await a.insertInto('leaveRecords').values({ organizationId: ORG5, employeeId: E.backup, branchId: BR5, leaveTypeId: lt, startDate: today, endDate: today, status: 'APPROVED', days: 1 }).execute();
+    const second = await pendingNote();
+    await runApprovalReminders(h.deps, ORG5);
+    expect(await actorsOf(second.step)).toEqual([{ userId: Y.mgr, resolutionPath: 'primary' }, { userId: Y.grand, resolutionPath: 'escalated' }]);
+    await a.updateTable('organizationSettings').set({ approvals: JSON.stringify({ managerUnavailable: 'hr_admins' }) }).where('organizationId', '=', ORG5).execute();
+    const third = await pendingNote();
+    await runApprovalReminders(h.deps, ORG5);
+    expect(await actorsOf(third.step)).toEqual([{ userId: Y.mgr, resolutionPath: 'primary' }, { userId: Y.hr, resolutionPath: 'escalated' }]);
+    // switched off: the level stays with the manager
+    await a.updateTable('organizationSettings').set({ approvals: JSON.stringify({ handOverWhenAway: false }) }).where('organizationId', '=', ORG5).execute();
+    const fourth = await pendingNote();
+    expect((await runApprovalReminders(h.deps, ORG5)).handedOver).toBe(0);
+    expect(await actorsOf(fourth.step)).toEqual([{ userId: Y.mgr, resolutionPath: 'primary' }]);
   });
 });

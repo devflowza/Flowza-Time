@@ -35,6 +35,7 @@ describe('Settings → Approvals', () => {
     expect(screen.getByLabelText(/When neither manager can act/)).toHaveTextContent('The next manager up the reporting line');
     expect(screen.getByLabelText(/Requests from the top of the organisation/)).toHaveTextContent('HR admins');
     expect(screen.queryByLabelText(/^Approver/)).not.toBeInTheDocument();
+    expect(screen.getByLabelText(/Hand pending requests over/)).toBeChecked();
   });
 
   it('saves a named top-level approver, and refuses the choice without one', async () => {
@@ -48,7 +49,7 @@ describe('Settings → Approvals', () => {
     fireEvent.click(screen.getByLabelText(/^Approver/));
     fireEvent.click((await screen.findByText('Director General')).closest('[cmdk-item]') ?? screen.getByText('Director General'));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/approvals', { defaultRouting: 'line_manager', secondaryManager: 'backup', managerUnavailable: 'next_level_manager', topLevel: 'named_user', topLevelUserId: 'd0000000-0000-4000-8000-000000000001' }));
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/approvals', { defaultRouting: 'line_manager', secondaryManager: 'backup', managerUnavailable: 'next_level_manager', topLevel: 'named_user', topLevelUserId: 'd0000000-0000-4000-8000-000000000001', handOverWhenAway: true }));
   });
 
   it('keeps HR routing and the secondary manager alongside when chosen; drops a stale named approver', async () => {
@@ -57,8 +58,9 @@ describe('Settings → Approvals', () => {
     renderWithProviders(<ApprovalsSection />);
     await pick(/without a workflow go to/, 'Everybody who holds the approve permission (HR)');
     await pick(/^Secondary manager/, 'Decides alongside the line manager on every request');
+    fireEvent.click(screen.getByLabelText(/Hand pending requests over/));
     fireEvent.click(screen.getByRole('button', { name: 'Save' }));
-    await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/approvals', { defaultRouting: 'permission_holders', secondaryManager: 'alongside', managerUnavailable: 'next_level_manager', topLevel: 'hr_admins', topLevelUserId: null }));
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/approvals', { defaultRouting: 'permission_holders', secondaryManager: 'alongside', managerUnavailable: 'next_level_manager', topLevel: 'hr_admins', topLevelUserId: null, handOverWhenAway: false }));
   });
 
   it('is read-only without organization.manage', async () => {

@@ -65,6 +65,7 @@ export const ar: LocaleTemplates = {
     'approval.reminder#reminder': {},
     'approval.reminder#digest': { title: 'بانتظارك: {{approvalsCount}}', body: ['{{countsList}}'], bodyFallback: 'ملخصك اليومي للطلبات التي تنتظر قرارك.', subject: 'ملخص الموافقات: {{approvalsCount}} بانتظارك', cta: 'فتح الموافقات' },
     'approval.escalated': { title: 'صُعِّد إليك: {{item}}', body: ['لم يُتخذ قرار في {{level}} في الوقت المحدد وأصبح بانتظارك أيضًا', '{{details}}'], subject: 'صُعِّد إليك: {{item}}', cta: 'مراجعة الطلب' },
+    'approval.escalated#absence': { title: 'بانتظارك: {{item}}', body: ['المعتمد في إجازة اليوم، لذا أصبح {{level}} بانتظارك أيضًا', '{{details}}'], subject: 'المعتمد في إجازة — بانتظارك: {{item}}' },
     'approval.decided': { title: 'صدر قرار بشأن: {{item}}', body: ['تعليق: {{comment}}', '{{details}}'], bodyFallback: 'افتح الطلب لمعرفة من اتخذ القرار ومتى.', cta: 'عرض الطلب' },
     'approval.decided#APPROVED': { title: 'تمت الموافقة: {{item}}', subject: 'تمت الموافقة: {{item}}' },
     'approval.decided#REJECTED': { title: 'تم الرفض: {{item}}', subject: 'تم الرفض: {{item}}' },

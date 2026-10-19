@@ -65,6 +65,7 @@ export const en: LocaleTemplates = {
     'approval.reminder#reminder': {},
     'approval.reminder#digest': { title: '{{approvalsCount}} waiting for you', body: ['{{countsList}}'], bodyFallback: 'Your daily summary of the approvals waiting for your decision.', subject: 'Your approvals digest: {{approvalsCount}} waiting', cta: 'Open approvals' },
     'approval.escalated': { title: 'Escalated to you: {{item}}', body: ['{{level}} was not decided in time and now waits for you too', '{{details}}'], subject: 'Escalated to you: {{item}}', cta: 'Review the request' },
+    'approval.escalated#absence': { title: 'Waiting for you: {{item}}', body: ['The approver is on leave today, so {{level}} now waits for you too', '{{details}}'], subject: 'Approver on leave — waiting for you: {{item}}' },
     'approval.decided': { title: '{{item}}: a decision was made', body: ['Comment: {{comment}}', '{{details}}'], bodyFallback: 'Open the request to see who decided and when.', cta: 'View the request' },
     'approval.decided#APPROVED': { title: '{{item}} was approved', subject: 'Approved: {{item}}' },
     'approval.decided#REJECTED': { title: '{{item}} was rejected', subject: 'Rejected: {{item}}' },

@@ -176,9 +176,10 @@ const ENTRIES: readonly NotificationCatalogueEntry[] = [
     deepLink: (p) => (p['kind'] === 'digest' ? '/approvals' : approvalLink(p)),
   }),
   entry({
-    type: 'approval.escalated', category: 'APPROVAL', recipients: 'payload.userIds — the escalation target added to an overdue level (next level, HR admins or owners)',
+    type: 'approval.escalated', category: 'APPROVAL', recipients: 'payload.userIds — the escalation target added to an overdue level (next level, HR admins or owners), or the backup of a manager who went on leave (`kind: absence`)',
     inAppAlways: true, orgSetting: 'approvalPending', oneClick: true,
-    vars: { ...APPROVAL_VARS, dueAt: 'datetime' }, route: approvalRoute, deepLink: approvalLink,
+    vars: { ...APPROVAL_VARS, dueAt: 'datetime', kind: 'code' }, variants: { absence: {} }, variant: (p) => (p['kind'] === 'absence' ? 'absence' : null),
+    route: approvalRoute, deepLink: approvalLink,
   }),
   entry({
     type: 'approval.decided', category: 'APPROVAL', recipients: 'payload.userIds — the requester and the person concerned (not the decider; not the subject when the entity hook tells them itself)',

@@ -53,6 +53,7 @@ const VARIANT_INPUT: Record<string, { payload?: Record<string, unknown>; audienc
   'approval.pending#reassigned': { payload: { reassigned: true } },
   'approval.reminder#reminder': { payload: { kind: 'reminder' } },
   'approval.reminder#digest': { payload: { kind: 'digest' } },
+  'approval.escalated#absence': { payload: { kind: 'absence' } },
   'approval.decided#APPROVED': { payload: { decision: 'APPROVED' } },
   'approval.decided#REJECTED': { payload: { decision: 'REJECTED' } },
   'approval.decided#CANCELLED': { payload: { decision: 'CANCELLED' } },

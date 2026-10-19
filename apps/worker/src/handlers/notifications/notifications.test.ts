@@ -750,9 +750,9 @@ describe('8-P2-1 a pending question pauses the reminder and the escalation', () 
     await a().insertInto('approvalRequestEvents').values({ organizationId: Q.org, requestId: req, kind: 'info_requested', actorUserId: U.approver, at: H(1), detail: JSON.stringify({ stepNo: 1, comment: 'Which project?' }) }).execute();
     // past due and a day old — but the request waits for the requester's answer
     clock = H(30); // 06:00 Muscat on 21 Sept
-    expect(await runApprovalReminders(h.deps, Q.org)).toEqual({ escalated: 0, reminded: 0, digests: 0 });
+    expect(await runApprovalReminders(h.deps, Q.org)).toEqual({ escalated: 0, reminded: 0, digests: 0, handedOver: 0 });
     clock = H(37); // 13:00 Muscat: the digest hour passed — nothing waits for an approver
-    expect(await runApprovalReminders(h.deps, Q.org)).toEqual({ escalated: 0, reminded: 0, digests: 0 });
+    expect(await runApprovalReminders(h.deps, Q.org)).toEqual({ escalated: 0, reminded: 0, digests: 0, handedOver: 0 });
     // the answer (what answerInfo writes: the marker cleared, the timeline entry, the escalation deadline re-armed from it)
     const A = H(40);
     await a().updateTable('approvalRequests').set({ infoRequestedAt: null }).where('id', '=', req).execute();
