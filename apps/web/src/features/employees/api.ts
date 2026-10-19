@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import type { BulkEmployeeAction, CreateEmployeeInput, DeleteEmployeeInput, EmployeeDeviceStateDto, EmployeeDto, EmploymentHistoryDto, IdentityDocumentDto, ImportJobDto, ImportJobRowDto, ImportUploadInput, JobAccepted, UpdateEmployeeInput, UserLimitDto } from '@flowza/contracts';
+import type { BulkEmployeeAction, CreateEmployeeInput, DeleteEmployeeInput, EmployeeDeviceStateDto, EmployeeDto, EmploymentHistoryDto, IdentityDocumentDto, ImportJobDto, ImportJobRowDto, ImportKind, ImportUploadInput, JobAccepted, UpdateEmployeeInput, UserLimitDto } from '@flowza/contracts';
 import type { z } from 'zod';
 import type { identityDocumentInputSchema } from '@flowza/contracts';
 import type { ComboboxOption } from '@/components/forms';
@@ -119,21 +119,21 @@ export function useImportMutations() {
   const qc = useQueryClient();
   const invalidate = () => qc.invalidateQueries({ queryKey: qk.entity(orgId, 'employee-imports') });
   const upload = useMutation({ mutationFn: async (input: ImportUploadInput) => (await api.post<Envelope<ImportJobDto>>(`/orgs/${orgId}/employees/imports`, input, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: invalidate });
-  const confirm = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<JobAccepted>>(`/orgs/${orgId}/employees/imports/${id}/confirm`, undefined, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: qk.entity(orgId, ENTITY) }); void qc.invalidateQueries({ queryKey: qk.entity(orgId, ORG_CHART_ENTITY) }); } });
+  const confirm = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<JobAccepted>>(`/orgs/${orgId}/employees/imports/${id}/confirm`, undefined, { idempotencyKey: crypto.randomUUID() })).data, onSuccess: () => { invalidate(); void qc.invalidateQueries({ queryKey: qk.entity(orgId, ENTITY) }); void qc.invalidateQueries({ queryKey: qk.entity(orgId, ORG_CHART_ENTITY) }); void qc.invalidateQueries({ queryKey: qk.entity(orgId, 'departments') }); } });
   const cancel = useMutation({ mutationFn: async (id: string) => (await api.post<Envelope<ImportJobDto>>(`/orgs/${orgId}/employees/imports/${id}/cancel`)).data, onSuccess: invalidate });
   return { upload, confirm, cancel };
 }
 
 /** The template is served as text/csv behind auth, so it is fetched with the bearer token and saved as a Blob. */
-export async function downloadImportTemplate(orgId: string): Promise<void> {
+export async function downloadImportTemplate(orgId: string, kind: ImportKind = 'EMPLOYEES'): Promise<void> {
   const { data } = await supabase.auth.getSession();
   const token = data.session?.access_token;
-  const res = await fetch(`${env.apiUrl}/api/v1/orgs/${orgId}/employees/imports/template`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
+  const res = await fetch(`${env.apiUrl}/api/v1/orgs/${orgId}/employees/imports/template${kind === 'EMPLOYEES' ? '' : `?kind=${kind}`}`, { headers: token ? { Authorization: `Bearer ${token}` } : {} });
   if (!res.ok) throw new Error(`Template download failed (${res.status})`);
   const blob = await res.blob();
   const url = URL.createObjectURL(blob);
   const a = document.createElement('a');
-  a.href = url; a.download = 'employees-import-template.csv'; a.rel = 'noopener';
+  a.href = url; a.download = kind === 'ORG_UNITS' ? 'org-units-import-template.csv' : 'employees-import-template.csv'; a.rel = 'noopener';
   document.body.appendChild(a); a.click(); a.remove();
   setTimeout(() => URL.revokeObjectURL(url), 1000);
 }

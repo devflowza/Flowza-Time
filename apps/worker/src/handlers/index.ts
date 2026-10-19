@@ -8,6 +8,7 @@ import { registerApprovalHandlers } from './approvals/index.js';
 import { registerLeaveHandlers } from './leave/index.js';
 import { registerMemberHandlers } from './members/index.js';
 import { registerSchedulingHandlers } from './scheduling/index.js';
+import { registerImportHandlers } from './imports/index.js';
 
 /**
  * Registers every job handler. Handler modules live in ./<area>/ and export `register<Area>Handlers(registry)`:
@@ -21,6 +22,7 @@ import { registerSchedulingHandlers } from './scheduling/index.js';
  *   members (SEND_INVITATION_EMAIL: e-mails an invitation with a token minted at send time, hash only)
  *   scheduling (BRANCH_DEPLOYMENT_CLEANUP: the daily deployment sweep — takes an employee off a host branch's terminals once a
  *               temporary deployment is over or cancelled, and enrols them there on its first day)
+ *   imports (EXECUTE_IMPORT: applies a confirmed employee / org-unit import or an HR system batch — docs/integrations/hrms.md)
  */
 export function buildHandlerRegistry(): HandlerRegistry {
   const registry = new HandlerRegistry();
@@ -33,5 +35,6 @@ export function buildHandlerRegistry(): HandlerRegistry {
   registerLeaveHandlers(registry);
   registerMemberHandlers(registry);
   registerSchedulingHandlers(registry);
+  registerImportHandlers(registry);
   return registry;
 }
