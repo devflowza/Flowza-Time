@@ -7,6 +7,7 @@ import type { Trx } from '../context.js';
 import { activeMarksOn } from './day-marks.js';
 import { additionalShiftOn, loadAdditionalShiftAssignments, resolvePolicyFor } from './policy.js';
 import { loadEmployeeWorkingCalendars } from './working-calendar.js';
+import { loadTimeOffInputs } from './time-off.js';
 
 /*
  * The pure engine's input for one (employee, date), loaded from the database. Moved here from the worker
@@ -201,6 +202,9 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   // Active day marks (reviewed verdicts) for the date — folded in by the engine as flags / lopDays.
   const dayMarks: EngineDayMark[] = (await activeMarksOn(trx, organizationId, employeeId, date)).map((m) => ({ id: m.id, kind: m.kind, payEffectDays: m.payEffectDays, source: m.source }));
 
+  // Short leave (engine 1.5.0): approved windows around the date and the reduced hours in force on it.
+  const { timeOff, hourAllowances } = await loadTimeOffInputs(trx, organizationId, employeeId, date, timezone);
+
   const input: DailyCalculationInput = {
     employeeId,
     attendanceDate: date,
@@ -219,6 +223,8 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
     settings: { nonWorkingDay: settings.nonWorkingDay },
     now: now.toISOString(),
     adjacentShifts: { previous: dayShift(addDays(date, -1), effectiveShiftId(resolvedPrev)), next: dayShift(addDays(date, 1), effectiveShiftId(resolvedNext)) },
+    ...(timeOff.length ? { timeOff } : {}),
+    ...(hourAllowances.length ? { hourAllowances } : {}),
   };
   return { input, branchId: today.branchId, departmentId: today.departmentId, timezone, eventSources, leave: leave ? { id: leave.id, isPaid: leave.isPaid } : null, settings, policyScope: policy.scope, additionalShiftId };
 }

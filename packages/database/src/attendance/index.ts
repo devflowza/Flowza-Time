@@ -13,3 +13,4 @@ export { historyRowOn, loadEmployeeWorkingCalendars, type CalendarBranch, type D
 export * from './self-service-device.js';
 // The monthly summary figures, shared by the API's summary page / month strip and the worker's monthly_summary report (Prompt 6a review).
 export * from './summary.js';
+export { loadTimeOffInputs, localWindowInstant } from './time-off.js';

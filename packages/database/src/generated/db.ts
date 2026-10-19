@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "ATTENDANCE_NOTE" | "COMP_OFF" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "OVERTIME_CLAIM" | "REGULARISATION" | "SHIFT_CHANGE" | "SHIFT_SWAP";
+export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "ATTENDANCE_NOTE" | "COMP_OFF" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "OVERTIME_CLAIM" | "REGULARISATION" | "SHIFT_CHANGE" | "SHIFT_SWAP" | "SHORT_LEAVE";
 
 export type ApprovalStatus = "APPROVED" | "CANCELLED" | "INVALIDATED" | "PENDING" | "REJECTED" | "SKIPPED";
 
@@ -388,10 +388,18 @@ export interface AttendanceDailyRecords {
   calculationVersion: Generated<number>;
   computedAt: Generated<Timestamp>;
   createdAt: Generated<Timestamp>;
+  /**
+   * Minutes of an approved official assignment / remote work credited to worked_minutes (part of it, engine 1.5.0).
+   */
+  creditedMinutes: Generated<number>;
   departmentId: string | null;
   earlyDepartureMinutes: Generated<number>;
   employeeId: string;
   engineVersion: string;
+  /**
+   * Scheduled minutes not worked that an approved (non-work) short leave covered (engine 1.5.0).
+   */
+  excusedMinutes: Generated<number>;
   expectedEndAt: Timestamp | null;
   expectedStartAt: Timestamp | null;
   firstInAt: Timestamp | null;
@@ -401,6 +409,10 @@ export interface AttendanceDailyRecords {
   lastOutAt: Timestamp | null;
   lateMinutes: Generated<number>;
   lockedAt: Timestamp | null;
+  /**
+   * Out-of-office minutes inside the scheduled hours no approved short leave covers, beyond the rule set allowance (engine 1.5.0).
+   */
+  lostMinutes: Generated<number>;
   organizationId: string;
   overtimeCategory: string | null;
   overtimeMinutes: Generated<number>;
@@ -634,6 +646,10 @@ export interface AttendanceRuleSets {
   missingPunchBehavior: Generated<MissingPunchBehavior>;
   name: string;
   organizationId: string;
+  /**
+   * Out-of-office minutes per day inside the scheduled hours tolerated before they count as lost time (engine 1.5.0; PAIRED / DIRECTIONAL punching).
+   */
+  outOfOfficeAllowanceMinutes: Generated<number>;
   overtimeEnabled: Generated<boolean>;
   overtimeMaxMinutesPerDay: number | null;
   overtimeMinBlockMinutes: Generated<number>;
@@ -1106,6 +1122,23 @@ export interface EmployeeGroups {
   organizationId: string;
   status: Generated<RecordStatus>;
   updatedAt: Generated<Timestamp>;
+}
+
+export interface EmployeeHourAllowances {
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  employeeId: string;
+  id: Generated<string>;
+  kind: string;
+  minutesPerDay: number;
+  notes: string | null;
+  organizationId: string;
+  position: Generated<string>;
+  reference: string | null;
+  updatedAt: Generated<Timestamp>;
+  validFrom: Timestamp;
+  validTo: Timestamp | null;
 }
 
 export interface EmployeeIdentityDocuments {
@@ -2234,6 +2267,53 @@ export interface Teams {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface TimeOffRequests {
+  approvalRequestId: string | null;
+  branchId: string | null;
+  cancelledAt: Timestamp | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  decidedAt: Timestamp | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  employeeId: string;
+  endTime: string;
+  id: Generated<string>;
+  minutes: number;
+  organizationId: string;
+  reason: string;
+  requestDate: Timestamp;
+  startTime: string;
+  status: Generated<string>;
+  timeOffTypeId: string;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface TimeOffTypes {
+  applicableGender: Generated<string>;
+  category: string;
+  code: string;
+  /**
+   * The approved window counts as worked time (credited to the daily record) — official assignments and remote work.
+   */
+  countsAsWork: Generated<boolean>;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  id: Generated<string>;
+  maxMinutesPerRequest: number | null;
+  monthlyQuotaCount: number | null;
+  monthlyQuotaMinutes: number | null;
+  name: string;
+  nameAr: string | null;
+  organizationId: string;
+  portalVisible: Generated<boolean>;
+  requiresApproval: Generated<boolean>;
+  status: Generated<RecordStatus>;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface UsageQuotas {
   count: Generated<number>;
   metric: string;
@@ -2314,6 +2394,7 @@ export interface DB {
   employeeBranchDeployments: EmployeeBranchDeployments;
   employeeGroupMemberships: EmployeeGroupMemberships;
   employeeGroups: EmployeeGroups;
+  employeeHourAllowances: EmployeeHourAllowances;
   employeeIdentityDocuments: EmployeeIdentityDocuments;
   employeeProviderIdentities: EmployeeProviderIdentities;
   employees: Employees;
@@ -2381,6 +2462,8 @@ export interface DB {
   syncLogs: SyncLogs;
   teamMembers: TeamMembers;
   teams: Teams;
+  timeOffRequests: TimeOffRequests;
+  timeOffTypes: TimeOffTypes;
   usageQuotas: UsageQuotas;
   usageRecords: UsageRecords;
   userProfiles: UserProfiles;
