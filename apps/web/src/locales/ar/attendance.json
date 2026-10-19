@@ -7,7 +7,7 @@
     "LATE": "تأخير", "EARLY_DEPARTURE": "خروج مبكر", "OVERTIME": "عمل إضافي", "MISSING_IN": "دخول مفقود", "MISSING_OUT": "خروج مفقود", "MANUAL_CORRECTION": "مُصحَّح", "OUT_OF_WINDOW": "خارج النافذة",
     "WORKED_ON_HOLIDAY": "عمل في عطلة", "WORKED_ON_WEEKLY_OFF": "عمل في الراحة الأسبوعية", "HALF_DAY_LEAVE": "إجازة نصف يوم", "DUPLICATE_PUNCHES_COLLAPSED": "بصمات مكررة مدمجة", "RAMADAN_HOURS": "ساعات رمضان", "CROSS_MIDNIGHT": "عبر منتصف الليل", "NO_SHIFT": "بدون وردية", "UNDER_HOURS": "ساعات أقل",
     "UNEXCUSED": "غير مبرر", "EXCUSED": "مبرر", "LOP": "خصم من الراتب", "PAY_EFFECT_HALF": "أثر مالي نصف يوم", "PAY_EFFECT_FULL": "أثر مالي يوم كامل", "OUTSIDE_GEOFENCE": "خارج النطاق الجغرافي", "SELF_SERVICE_PUNCH": "بصمة ذاتية", "NON_WORKING_DAY_WORK": "عمل في يوم غير عمل",
-    "SPECIAL_HOURS": "ساعات معتمدة"
+    "SPECIAL_HOURS": "ساعات معتمدة", "SHORT_LEAVE": "استئذان", "OFFICIAL_ASSIGNMENT": "مهمة رسمية", "REMOTE_WORK": "عمل عن بعد", "REDUCED_HOURS": "ساعات مخفضة", "LOST_TIME": "وقت ضائع"
   },
   "correctionStatus": { "PENDING": "قيد الانتظار", "APPROVED": "معتمد", "APPLIED": "مطبَّق", "REJECTED": "مرفوض", "CANCELLED": "ملغى" },
   "correctionType": { "ADD_PUNCH": "إضافة بصمة", "EDIT_PUNCH": "تعديل بصمة", "REMOVE_PUNCH": "إزالة بصمة", "SET_STATUS": "تعيين الحالة" },
@@ -16,7 +16,7 @@
   "eventType": { "PUNCH": "بصمة", "PUNCH_IN": "دخول", "PUNCH_OUT": "خروج", "BREAK_START": "بداية الاستراحة", "BREAK_END": "نهاية الاستراحة" },
   "eventSource": { "DEVICE": "جهاز", "MANUAL": "يدوي", "CORRECTION": "تصحيح", "IMPORT": "استيراد", "MOBILE": "جوال" },
   "overtimeCategory": { "REGULAR": "عادي", "WEEKLY_OFF": "راحة أسبوعية", "HOLIDAY": "عطلة" },
-  "columns": { "employee": "الموظف", "shift": "الوردية", "firstIn": "أول دخول", "lastOut": "آخر خروج", "worked": "ساعات العمل", "late": "تأخير", "early": "خروج مبكر", "overtime": "إضافي", "flags": "العلامات" },
+  "columns": { "employee": "الموظف", "shift": "الوردية", "firstIn": "أول دخول", "lastOut": "آخر خروج", "worked": "ساعات العمل", "late": "تأخير", "early": "خروج مبكر", "overtime": "إضافي", "flags": "العلامات", "lost": "وقت ضائع" },
   "filters": { "allStatuses": "كل الحالات", "anyFlag": "أي علامة" },
   "daily": { "previousDay": "اليوم السابق", "nextDay": "اليوم التالي", "searchPlaceholder": "ابحث بالاسم أو الرقم…", "empty": "لا توجد سجلات حضور لهذا اليوم", "emptyHint": "تظهر السجلات بعد معالجة البصمات للتاريخ المحدد. يُعتبر الموظفون بدون بصمات غائبين بعد انتهاء الوردية." },
   "monthly": {
@@ -25,7 +25,7 @@
     "pageTotals": "مجاميع الصفحة ({{count}})", "legendMissing": "دخول/خروج مفقود", "empty": "لا يوجد موظفون لهذا الشهر", "emptyHint": "يظهر هنا الموظفون النشطون خلال الشهر مع خلية لكل يوم.", "employeeCount": "{{count}} موظف"
   },
   "record": {
-    "title": "سجل الحضور", "subtitle": "تفاصيل الحساب ليوم واحد لموظف واحد.", "shift": "الوردية", "noShift": "بدون وردية", "break": "استراحة {{value}}", "scheduled": "المقرر", "punches": "البصمات", "version": "الإصدار",
+    "title": "سجل الحضور", "subtitle": "تفاصيل الحساب ليوم واحد لموظف واحد.", "shift": "الوردية", "noShift": "بدون وردية", "break": "استراحة {{value}}", "scheduled": "المقرر", "credited": "محتسب (مهمة / عن بعد)", "excused": "معذور (استئذان)", "punches": "البصمات", "version": "الإصدار",
     "tabs": { "trace": "مسار الحساب", "events": "الأحداث ({{count}})", "history": "السجل التاريخي ({{count}})", "corrections": "التصحيحات ({{count}})" },
     "noEvents": "لا توجد أحداث", "noEventsHint": "لم تُسجَّل بصمات حول هذا التاريخ.", "eventTime": "الوقت", "eventType": "النوع", "source": "المصدر", "device": "الجهاز", "verification": "التحقق", "attributed": "مُنسَب", "viaCorrection": "عبر تصحيح", "voided": "ملغى", "yes": "نعم", "otherDay": "يوم آخر",
     "noHistory": "لا توجد إصدارات سابقة", "noHistoryHint": "تُحفظ لقطة عند كل إعادة حساب للسجل.", "recomputed": "أُعيد حسابه", "triggeredBy": "بواسطة {{by}}",

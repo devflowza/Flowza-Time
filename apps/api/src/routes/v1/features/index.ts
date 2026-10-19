@@ -17,6 +17,7 @@ import { registerAttendanceAdminRoutes } from './attendance-admin.js';
 import { registerRosterRoutes } from './roster.js';
 import { registerPolicyRoutes } from './policies.js';
 import { registerSchedulingRoutes } from './scheduling.js';
+import { registerShortLeaveRoutes } from './short-leave.js';
 
 /**
  * Feature modules: devices (+ groups, pending), sync, attendance (+ corrections, recalculation, period locks, day marks),
@@ -42,4 +43,6 @@ export function registerFeatureRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   registerPolicyRoutes(v1, deps);
   // Enterprise round-the-clock scheduling (module advanced_scheduling): templates, coverage, double shifts, branch deployments
   registerSchedulingRoutes(v1, deps);
+  // short leave (hourly permissions, official assignment, remote work) and reduced hours — migration 20261019000310
+  registerShortLeaveRoutes(v1, deps);
 }

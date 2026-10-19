@@ -39,6 +39,8 @@ interface Comparable {
   expectedStartAt: string | null; expectedEndAt: string | null; scheduledMinutes: number; firstInAt: string | null; lastOutAt: string | null;
   workedMinutes: number; breakMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; overtimeMinutes: number; overtimeCategory: string | null;
   status: AttendanceStatus; flags: string[]; punchCount: number; hasCorrection: boolean; engineVersion: string;
+  /** Short leave figures (engine 1.5.0). */
+  excusedMinutes: number; creditedMinutes: number; lostMinutes: number;
 }
 const ts = (v: Date | string | null): string | null => (v === null ? null : (v instanceof Date ? v : new Date(v)).toISOString());
 
@@ -83,6 +85,7 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
     expectedStartAt: ts(result.expectedStartAt), expectedEndAt: ts(result.expectedEndAt), scheduledMinutes: result.scheduledMinutes, firstInAt: ts(result.firstInAt), lastOutAt: ts(result.lastOutAt),
     workedMinutes: result.workedMinutes, breakMinutes: result.breakMinutes, lateMinutes: result.lateMinutes, earlyDepartureMinutes: result.earlyDepartureMinutes, overtimeMinutes: result.overtimeMinutes, overtimeCategory: result.overtimeCategory,
     status, flags, punchCount: result.punchCount, hasCorrection, engineVersion: result.trace.engineVersion,
+    excusedMinutes: result.excusedMinutes ?? 0, creditedMinutes: result.creditedMinutes ?? 0, lostMinutes: result.lostMinutes ?? 0,
   };
   const columns = {
     branchId: next.branchId, departmentId: next.departmentId, shiftId: next.shiftId, shiftAssignmentId: next.shiftAssignmentId, ruleSetId: next.ruleSetId, timezone: next.timezone,
@@ -90,6 +93,7 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
     firstInAt: result.firstInAt ? new Date(result.firstInAt) : null, lastOutAt: result.lastOutAt ? new Date(result.lastOutAt) : null,
     workedMinutes: next.workedMinutes, breakMinutes: next.breakMinutes, lateMinutes: next.lateMinutes, earlyDepartureMinutes: next.earlyDepartureMinutes, overtimeMinutes: next.overtimeMinutes, overtimeCategory: next.overtimeCategory,
     status: next.status, flags: next.flags, punchCount: next.punchCount, hasCorrection: next.hasCorrection, engineVersion: next.engineVersion, trace: JSON.stringify(result.trace), computedAt: opts.now,
+    excusedMinutes: next.excusedMinutes, creditedMinutes: next.creditedMinutes, lostMinutes: next.lostMinutes,
   };
   const eventPayload = { employeeId, date, status: next.status, flags: next.flags, branchId: next.branchId };
 
@@ -105,6 +109,7 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
     expectedStartAt: ts(existing.expectedStartAt), expectedEndAt: ts(existing.expectedEndAt), scheduledMinutes: existing.scheduledMinutes, firstInAt: ts(existing.firstInAt), lastOutAt: ts(existing.lastOutAt),
     workedMinutes: existing.workedMinutes, breakMinutes: existing.breakMinutes, lateMinutes: existing.lateMinutes, earlyDepartureMinutes: existing.earlyDepartureMinutes, overtimeMinutes: existing.overtimeMinutes, overtimeCategory: existing.overtimeCategory,
     status: existing.status, flags: existing.flags, punchCount: existing.punchCount, hasCorrection: existing.hasCorrection, engineVersion: existing.engineVersion,
+    excusedMinutes: existing.excusedMinutes, creditedMinutes: existing.creditedMinutes, lostMinutes: existing.lostMinutes,
   };
   if (JSON.stringify(previous) === JSON.stringify(next)) return { outcome: 'unchanged', recordId: existing.id, version: existing.calculationVersion, status: existing.status, branchId: existing.branchId };
 

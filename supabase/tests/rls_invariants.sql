@@ -93,7 +93,9 @@ insert into p10_rpc_only values
   -- modules, plans & billing (20260929000600): written by the system context after requirePlatformAdmin only
   ('organization_modules'), ('billing_invoices'), ('billing_payments'),
   -- e-mail activity log (20260930000500): written only by the SECURITY DEFINER triggers / provider-event function
-  ('email_messages'), ('email_events');
+  ('email_messages'), ('email_events'),
+  -- short leave (20261019000310): requests are filed and decided by the API's system step only
+  ('time_off_requests');
 grant select on p10_tenant, p10_rpc_only, p10_allow, p10_seen to public;
 grant insert on p10_seen to public;
 set client_min_messages = notice;
@@ -399,6 +401,14 @@ insert into public.billing_invoices (id, organization_id, invoice_number, curren
   values ('0a000000-0000-0000-0000-0000000008b1', '0a000000-0000-0000-0000-000000000000', 'PROBE-2026-00001', 'OMR', 100, 5, 5, 105);
 insert into public.billing_payments (organization_id, invoice_id, amount, currency, method)
   values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000008b1', 50, 'OMR', 'bank_transfer');
+-- (short leave, 20261019000310: a window's minutes must match its times and a reduced-hours row needs 15..240 minutes a day —
+-- written by hand)
+insert into public.time_off_types (id, organization_id, code, name, category)
+  values ('0a000000-0000-0000-0000-0000000008c1', '0a000000-0000-0000-0000-000000000000', 'PROBE', 'Probe permission', 'PERSONAL');
+insert into public.time_off_requests (organization_id, employee_id, branch_id, time_off_type_id, request_date, start_time, end_time, minutes, reason)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', '0a000000-0000-0000-0000-0000000008c1', '2026-11-02', '08:00', '09:00', 60, 'Probe');
+insert into public.employee_hour_allowances (organization_id, employee_id, branch_id, kind, minutes_per_day, position, valid_from)
+  values ('0a000000-0000-0000-0000-000000000000', '0a000000-0000-0000-0000-0000000000e1', '0a000000-0000-0000-0000-00000000000b', 'DISABILITY', 60, 'END', '2026-01-01');
 create temp table p10_synth_a on commit drop as select * from pg_temp.synthesize('0a000000-0000-0000-0000-000000000000', null, array[]::text[]);
 do $$
 declare r record;

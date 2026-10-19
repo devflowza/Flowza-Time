@@ -39,6 +39,9 @@ export const monthlySummary: ReportDefinition = {
     const rows = await attendanceSummaryRows(trx, ctx.organizationId, { from, to, asOf }, scope, null);
     const totals = await attendanceSummaryTotals(trx, ctx.organizationId, { from, to, asOf }, scope);
     const gaps = totals.totals.notCalculatedDays > 0;
+    // short leave (engine 1.5.0): lost hours and short leave hours appear when the period has any (an organisation without
+    // short leave keeps its layout)
+    const shortLeave = totals.totals.lostMinutes > 0 || totals.totals.shortLeaveMinutes > 0;
     const branchIds = [...new Set(rows.map((r) => r.branchId))];
     const branches = branchIds.length
       ? new Map((await trx.selectFrom('branches').select(['id', 'name', 'nameAr']).where('organizationId', '=', ctx.organizationId).where('id', 'in', branchIds).execute()).map((b) => [b.id, (ctx.locale === 'ar' && b.nameAr) || b.name]))
@@ -50,6 +53,7 @@ export const monthlySummary: ReportDefinition = {
       days(f.presentDays, bold), days(f.lateDays, bold), days(f.halfDays, bold), days(f.leaveDays, bold), days(f.absentDays, bold), days(f.missingPunchDays, bold),
       days(f.holidayDays, bold), days(f.weeklyOffDays, bold), days(f.daysWorked, bold), hours(f.workedMinutes, bold), hours(f.overtimeMinutes, bold), hours(f.averageWorkedMinutes, bold),
       days(f.lopDays, bold || f.lopDays > 0), days(f.unexcusedDays, bold),
+      ...(shortLeave ? [hours(f.shortLeaveMinutes, bold), hours(f.lostMinutes, bold || f.lostMinutes > 0)] : []),
       ...(gaps ? [days(f.notCalculatedDays, true)] : []),
     ];
     const data: ReportRow[] = rows.map((r) => ({ cells: [
@@ -69,6 +73,7 @@ export const monthlySummary: ReportDefinition = {
       c('missing', ctx.t('col.missedPunch')), c('holiday', ctx.t('col.holidays')), c('weeklyOff', ctx.t('col.weeklyOffs')), c('daysWorked', ctx.t('col.daysWorked')),
       h('worked', ctx.t('col.workedHours')), h('overtime', ctx.t('col.overtimeHours')), h('average', ctx.t('col.avgHoursPerDay')),
       c('lop', ctx.t('col.lopDays')), c('unexcused', ctx.t('col.unexcusedDays')),
+      ...(shortLeave ? [h('shortLeave', ctx.t('col.shortLeaveHours')), h('lost', ctx.t('col.lostHours'))] : []),
       ...(gaps ? [c('notCalculated', ctx.t('col.notCalculated'))] : []),
       { key: 'source', label: ctx.t('col.source'), width: 7 },
     ];

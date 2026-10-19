@@ -68,7 +68,8 @@
     "SHIFT_SWAP": "Shift swap",
     "COMP_OFF": "Compensatory off",
     "REGULARISATION": "Regularisation",
-    "OVERTIME_CLAIM": "Overtime claim"
+    "OVERTIME_CLAIM": "Overtime claim",
+    "SHORT_LEAVE": "Short leave"
   },
   "status": {
     "PENDING": "Pending",
@@ -278,7 +279,7 @@
     "isDefault": "Active routing",
     "isDefaultHint": "New requests in its scope use this workflow.",
     "minUnits": "From (units)",
-    "minUnitsHint": "Tier: applies from this size up (leave days, overtime minutes). Empty = any size.",
+    "minUnitsHint": "Tier: applies from this size up (leave days, overtime or short leave minutes). Empty = any size.",
     "appliesTo": "Only for",
     "appliesBranches": "Branches",
     "appliesDepartments": "Departments",

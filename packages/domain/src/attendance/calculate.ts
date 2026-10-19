@@ -5,6 +5,7 @@ import { attributeEvents, sortEvents } from './attribute.js';
 import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
 import { carryOvernightCheckOuts, openCheckIn, overnightMaxSpanMinutes } from './overnight.js';
 import { roundMinutes, roundPunches } from './rounding.js';
+import { applyTimeOff } from './time-off.js';
 import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EnginePunchPayload, type EngineShift, type TraceStep } from './types.js';
 import { assertTimezone, computePunchWindow, localInstant, parseInstant, toUtcIso, type PunchWindow } from './window.js';
 
@@ -135,7 +136,8 @@ const local = (dt: DateTime): string => dt.toISO({ suppressMilliseconds: true, i
  * change the computed status, so a record stays reproducible from raw + corrections + marks.
  */
 export function calculateDailyRecord(input: DailyCalculationInput): DailyCalculationResult {
-  return applyDayMarks(calculateCore(input), input.dayMarks ?? []);
+  // short leave / reduced hours / lost time (engine 1.5.0) adjust the computed day before the reviewed marks are folded in
+  return applyDayMarks(applyTimeOff(calculateCore(input), input), input.dayMarks ?? []);
 }
 
 function calculateCore(input: DailyCalculationInput): DailyCalculationResult {

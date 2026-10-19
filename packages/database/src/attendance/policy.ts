@@ -85,6 +85,7 @@ export function toAttendanceRules(row: RuleSetRow): AttendanceRules {
     punchInterpretation: row.punchInterpretation, duplicatePunchWindowSeconds: row.duplicatePunchWindowSeconds, missingPunchBehavior: row.missingPunchBehavior, autoAbsentWithoutPunches: row.autoAbsentWithoutPunches,
     weeklyOffWorkCountsAsOvertime: row.weeklyOffWorkCountsAsOvertime, holidayWorkCountsAsOvertime: row.holidayWorkCountsAsOvertime, ramadanMode: normaliseRamadanMode(row.ramadanMode),
     graceMode: row.graceMode === 'tolerance' ? 'tolerance' : 'deduct', specialPeriods: specialPeriodsOf(row.specialPeriods),
+    outOfOfficeAllowanceMinutes: row.outOfOfficeAllowanceMinutes,
     // a stored section that no longer validates (a rule tightened after it was saved) falls back section by section to the
     // defaults instead of failing every recompute, check-in and regularisation of the employees on the policy
     policy: policySectionsOf(row.policy),

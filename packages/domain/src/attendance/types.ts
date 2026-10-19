@@ -84,6 +84,35 @@ export interface EngineDayMark {
   source: 'SWEEP' | 'NOTE_REVIEW' | 'HR' | 'SYSTEM';
 }
 
+/**
+ * An APPROVED short leave window touching the date (engine 1.5.0, time-off.ts): an hourly permission, an official assignment,
+ * remote work… `start` / `end` are UTC instants of the local window of `date` (the employee's branch timezone). Lateness and
+ * early departure inside a window are excused; a `countsAsWork` window not overlapping punched time is credited to the worked
+ * minutes; out-of-office time no window covers is lost time.
+ */
+export interface EngineTimeOff {
+  id: string;
+  /** The local date the window was asked for (YYYY-MM-DD). */
+  date: string;
+  start: string;
+  end: string;
+  countsAsWork: boolean;
+  typeCode: string;
+  category: 'PERSONAL' | 'OFFICIAL' | 'REMOTE' | 'NURSING' | 'DISABILITY' | 'OTHER';
+}
+
+/**
+ * Recurring reduced hours in force on the date (engine 1.5.0): the nursing hour, reduced hours for persons with disabilities.
+ * On a working day the scheduled minutes shrink by `minutesPerDay`; START moves the expected start later, END the expected end
+ * earlier, EITHER forgives lateness first, then early departure.
+ */
+export interface EngineHourAllowance {
+  id: string;
+  kind: 'NURSING' | 'DISABILITY' | 'OTHER';
+  minutesPerDay: number;
+  position: 'START' | 'END' | 'EITHER';
+}
+
 /** The organisation-level policy switches the engine reads (`organization_settings.attendance`, HR portal Prompt 3). */
 export interface EngineAttendanceSettings {
   /** Work on a weekly off / holiday: `record` keeps the minutes (status unchanged), `overtime` also counts them as overtime, `ignore` zeroes them. */
@@ -118,6 +147,10 @@ export interface DailyCalculationInput {
    * attribution (§G.3). `undefined` = same shift as `shift`; `null` = no shift on that day.
    */
   adjacentShifts?: { previous?: EngineShift | null; next?: EngineShift | null };
+  /** Approved short leave windows of the date and its neighbours (engine 1.5.0); absent = none. */
+  timeOff?: EngineTimeOff[];
+  /** Reduced daily hours in force on the date (engine 1.5.0); absent = none. */
+  hourAllowances?: EngineHourAllowance[];
 }
 
 export interface TraceStep { step: string; detail: string; values?: Record<string, unknown> }
@@ -157,6 +190,15 @@ export interface DailyCalculationResult {
   /** The day carries an active UNEXCUSED mark. */
   unexcused: boolean;
   punchCount: number;
+  /**
+   * Short leave figures (engine 1.5.0, time-off.ts) — always set by `calculateDailyRecord`, optional for results built by hand:
+   * scheduled minutes not worked that an approved non-work short leave covered; minutes of an approved work-like window
+   * credited to `workedMinutes` (part of it); out-of-office minutes inside the schedule no approved window covers, beyond the
+   * rule set's allowance.
+   */
+  excusedMinutes?: number;
+  creditedMinutes?: number;
+  lostMinutes?: number;
   eventIds: string[];              // events attributed to this date (for has_correction etc.)
   trace: CalculationTrace;
 }
@@ -197,5 +239,9 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * or `tolerance` — within the grace nothing, beyond it every minute from the scheduled time; a flexible check-out keeps its 1.3.0
  * tolerance in both); approved working-hours periods (`specialPeriods`: other start / end / scheduled minutes for a date range,
  * flag SPECIAL_HOURS, taking precedence over Ramadan hours). With a band of 0, the `deduct` mode and no period nothing changes.
+ * Also 1.5.0 — short leave (time-off.ts): approved short leave windows excuse lateness / early departure, work-like windows (official
+ * assignment, remote work) are credited to the worked minutes, reduced hours (nursing, disability) shrink the schedule, and
+ * out-of-office time inside the schedule no window covers is lost time beyond the rule set's allowance (PAIRED / DIRECTIONAL).
+ * Flags SHORT_LEAVE, OFFICIAL_ASSIGNMENT, REMOTE_WORK, REDUCED_HOURS, LOST_TIME. A day without any keeps its figures.
  */
 export const ENGINE_VERSION = 'attendance-engine/1.5.0';

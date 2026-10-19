@@ -86,6 +86,8 @@ const en = {
   'col.lop': 'LOP',
   'col.missingPunch': 'MP',
   'col.notCalculated': 'Not calc.',
+  'col.shortLeaveHours': 'Short leave hours',
+  'col.lostHours': 'Lost hours',
   // monthly_summary (HR portal Prompt 6a review): the attendance summary page's columns, spelled out
   'col.employeeNo': 'Employee No.',
   'col.employee': 'Employee',
@@ -246,6 +248,8 @@ const ar: Record<ReportLabelKey, string> = {
   'col.lop': 'خصم',
   'col.missingPunch': 'ب/ناقصة',
   'col.notCalculated': 'غير محسوب',
+  'col.shortLeaveHours': 'ساعات الاستئذان',
+  'col.lostHours': 'الساعات الضائعة',
   'col.employeeNo': 'رقم الموظف',
   'col.employee': 'الموظف',
   'col.present': 'حضور',

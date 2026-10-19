@@ -15,3 +15,4 @@ export * from './self-service-device.js';
 export * from './summary.js';
 // The automatic attendance notices' job types and ledger kinds (late / early / absence / missing check-in / appreciation).
 export * from './alerts.js';
+export { loadTimeOffInputs, localWindowInstant } from './time-off.js';

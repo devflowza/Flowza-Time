@@ -9,6 +9,7 @@ import { regularisationHook } from './regularisations.js';
 import { shiftSwapHook } from './shift-swaps.js';
 import { shiftChangeHook } from './shift-changes.js';
 import { compOffHook } from './comp-off.js';
+import { shortLeaveHook } from './short-leave.js';
 
 /** What the engine hands an entity hook when a request reaches a terminal state. Runs inside the engine's system step. */
 export interface HookContext {
@@ -107,6 +108,7 @@ export const entityHooks: Partial<Record<ApprovalEntity, EntityHook>> = {
   SHIFT_SWAP: shiftSwapHook,
   SHIFT_CHANGE: shiftChangeHook,
   COMP_OFF: compOffHook,
+  SHORT_LEAVE: shortLeaveHook,
 };
 
 /** Fallback for entity types without a registered hook: decisions still need a permission — the attendance one, like every other request. */

@@ -61,14 +61,14 @@
       "overtimeEnabled": "Overtime enabled", "overtimeStartAfterMinutes": "OT starts after (min)", "overtimeMinBlockMinutes": "Minimum OT block (min)", "overtimeRoundingMinutes": "OT rounding", "overtimeMaxMinutesPerDay": "Max OT per day (min)",
       "countEarlyInAsOvertime": "Early arrival counts as OT", "overtimeRequiresScheduledHours": "OT only beyond the scheduled hours", "weeklyOffWorkCountsAsOvertime": "Weekly-off work is OT", "holidayWorkCountsAsOvertime": "Holiday work is OT",
       "punchRoundingMinutes": "Punch rounding", "punchRoundingMode": "Punch rounding mode", "workedRoundingMinutes": "Worked-time rounding", "workedRoundingMode": "Worked-time rounding mode",
-      "punchInterpretation": "Interpretation", "duplicatePunchWindowSeconds": "Duplicate window (s)", "missingPunchBehavior": "Behaviour", "autoAbsentWithoutPunches": "Auto-absent without punches",
+      "punchInterpretation": "Interpretation", "duplicatePunchWindowSeconds": "Duplicate window (s)", "outOfOfficeAllowanceMinutes": "Out-of-office allowance (min)", "missingPunchBehavior": "Behaviour", "autoAbsentWithoutPunches": "Auto-absent without punches",
       "ramadanEnabled": "Enable Ramadan hours", "ramadanMinutes": "Scheduled minutes", "ramadanAppliesTo": "Applies to", "graceMode": "Grace margin"
     },
     "hints": {
       "lateThresholdMinutes": "Lateness beyond this is flagged (0 = any).", "minFullDayMinutes": "Worked minutes needed for a full day.", "halfDayThresholdMinutes": "Below full day but at least this = half day.",
       "overtimeEnabled": "Turn off to never compute overtime.", "overtimeStartAfterMinutes": "Minutes past the shift end before OT counts.", "overtimeMinBlockMinutes": "OT below this is discarded.", "overtimeMaxMinutesPerDay": "Empty = no cap.",
       "countEarlyInAsOvertime": "Minutes before the shift start count as OT.", "overtimeRequiresScheduledHours": "On: a late arrival who makes up the time after the shift end earns no OT. Off: every minute worked after the shift end is OT.", "weeklyOffWorkCountsAsOvertime": "All worked minutes on a weekly off day are OT.", "holidayWorkCountsAsOvertime": "All worked minutes on a holiday are OT.",
-      "punchInterpretation": "FIRST_LAST: first punch IN, last OUT. PAIRED: alternate IN/OUT. DIRECTIONAL: trust the device direction.", "duplicatePunchWindowSeconds": "Punches closer than this are collapsed.",
+      "punchInterpretation": "FIRST_LAST: first punch IN, last OUT. PAIRED: alternate IN/OUT. DIRECTIONAL: trust the device direction.", "duplicatePunchWindowSeconds": "Punches closer than this are collapsed.", "outOfOfficeAllowanceMinutes": "Time out of the office during working hours, not covered by an approved short leave, tolerated per day before it counts as lost time (e.g. 20). Needs PAIRED or DIRECTIONAL punching.",
       "autoAbsentWithoutPunches": "Mark employees with no punches absent after the shift ends.", "ramadanMinutes": "Scheduled minutes per day during Ramadan (60–600).",
       "graceMode": "Deduct: 10 min grace, 15 min late → 5 min late. Tolerance: within the grace nothing counts; beyond it every minute from the scheduled time counts (15 min late → 15). The same for leaving early. On flexible shifts a check-out short of the required hours is always forgiven within the grace."
     },

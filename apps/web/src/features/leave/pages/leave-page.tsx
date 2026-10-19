@@ -29,9 +29,13 @@ import { LeaveStatusBadge, LeaveTypeDot } from '../components/leave-status';
 import { BalancesTab } from './balances-tab';
 import { AllocationsTab } from './allocations-tab';
 import { LeaveCalendarTab } from './calendar-tab';
+import { ShortLeaveRequestsTab } from '../short-leave/components/requests-tab';
+import { TimeOffTypesTab } from '../short-leave/components/types-tab';
+import { SL_NS } from '../short-leave/i18n';
 
 const ALL = '__all__';
-const TABS = ['records', 'calendar', 'balances', 'allocations', 'types'] as const;
+// short leave (20261019000310): the requests and the permission types sit next to leave
+const TABS = ['records', 'calendar', 'balances', 'allocations', 'types', 'shortLeave', 'shortLeaveTypes'] as const;
 type Tab = (typeof TABS)[number];
 
 type Decision = { record: LeaveRecordDto; status: 'APPROVED' | 'REJECTED' };
@@ -273,18 +277,21 @@ function TypesTab() {
 /** /leave?tab=records|calendar|balances|allocations|types */
 export default function LeavePage() {
   const { t } = useTranslation('leave');
+  const { t: ts } = useTranslation(SL_NS);
   const [params, setParams] = useSearchParams();
   const tab: Tab = (TABS as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'records';
   return (
     <div className="page-container">
       <PageHeader title={t('title')} description={t('subtitle')} />
       <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
-        <TabsList aria-label={t('title')} className="max-w-full overflow-x-auto">{TABS.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`tabs.${tb}`)}</TabsTrigger>)}</TabsList>
+        <TabsList aria-label={t('title')} className="max-w-full overflow-x-auto">{TABS.map((tb) => <TabsTrigger key={tb} value={tb}>{tb === 'shortLeave' ? ts('tabs.requests') : tb === 'shortLeaveTypes' ? ts('tabs.types') : t(`tabs.${tb}`)}</TabsTrigger>)}</TabsList>
         <TabsContent value="records">{tab === 'records' ? <RecordsTab /> : null}</TabsContent>
         <TabsContent value="calendar">{tab === 'calendar' ? <LeaveCalendarTab /> : null}</TabsContent>
         <TabsContent value="balances">{tab === 'balances' ? <BalancesTab /> : null}</TabsContent>
         <TabsContent value="allocations">{tab === 'allocations' ? <AllocationsTab /> : null}</TabsContent>
         <TabsContent value="types">{tab === 'types' ? <TypesTab /> : null}</TabsContent>
+        <TabsContent value="shortLeave">{tab === 'shortLeave' ? <ShortLeaveRequestsTab /> : null}</TabsContent>
+        <TabsContent value="shortLeaveTypes">{tab === 'shortLeaveTypes' ? <TimeOffTypesTab /> : null}</TabsContent>
       </Tabs>
     </div>
   );

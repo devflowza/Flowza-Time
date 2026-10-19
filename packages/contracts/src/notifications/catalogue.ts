@@ -611,6 +611,7 @@ export function approvalContextFacts(context: ApprovalContextDto | null | undefi
     case 'SHIFT_SWAP': return { ...none, date: R.date(context.swap.swapDate) };
     case 'SHIFT_CHANGE': return { ...none, date: R.date(context.change.fromDate), endDate: R.date(context.change.toDate) };
     case 'COMP_OFF': return { ...none, date: R.date(context.compOff.workedOn) };
+    case 'SHORT_LEAVE': return { ...none, date: R.date(context.shortLeave.date), leaveTypeName: R.text(context.shortLeave.typeName) };
     default: return none;
   }
 }

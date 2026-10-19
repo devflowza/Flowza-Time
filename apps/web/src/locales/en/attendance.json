@@ -7,7 +7,7 @@
     "LATE": "Late", "EARLY_DEPARTURE": "Early departure", "OVERTIME": "Overtime", "MISSING_IN": "Missing IN", "MISSING_OUT": "Missing OUT", "MANUAL_CORRECTION": "Corrected", "OUT_OF_WINDOW": "Out of window",
     "WORKED_ON_HOLIDAY": "Worked on holiday", "WORKED_ON_WEEKLY_OFF": "Worked on weekly off", "HALF_DAY_LEAVE": "Half-day leave", "DUPLICATE_PUNCHES_COLLAPSED": "Duplicates collapsed", "RAMADAN_HOURS": "Ramadan hours", "CROSS_MIDNIGHT": "Cross-midnight", "NO_SHIFT": "No shift", "UNDER_HOURS": "Under hours",
     "UNEXCUSED": "Unexcused", "EXCUSED": "Excused", "LOP": "Loss of pay", "PAY_EFFECT_HALF": "Pay effect ½ day", "PAY_EFFECT_FULL": "Pay effect 1 day", "OUTSIDE_GEOFENCE": "Outside geofence", "SELF_SERVICE_PUNCH": "Self-service punch", "NON_WORKING_DAY_WORK": "Worked on a non-working day",
-    "SPECIAL_HOURS": "Approved hours"
+    "SPECIAL_HOURS": "Approved hours", "SHORT_LEAVE": "Short leave", "OFFICIAL_ASSIGNMENT": "Official assignment", "REMOTE_WORK": "Remote work", "REDUCED_HOURS": "Reduced hours", "LOST_TIME": "Lost time"
   },
   "correctionStatus": { "PENDING": "Pending", "APPROVED": "Approved", "APPLIED": "Applied", "REJECTED": "Rejected", "CANCELLED": "Cancelled" },
   "correctionType": { "ADD_PUNCH": "Add punch", "EDIT_PUNCH": "Edit punch", "REMOVE_PUNCH": "Remove punch", "SET_STATUS": "Set status" },
@@ -16,7 +16,7 @@
   "eventType": { "PUNCH": "Punch", "PUNCH_IN": "Punch in", "PUNCH_OUT": "Punch out", "BREAK_START": "Break start", "BREAK_END": "Break end" },
   "eventSource": { "DEVICE": "Device", "MANUAL": "Manual", "CORRECTION": "Correction", "IMPORT": "Import", "MOBILE": "Mobile" },
   "overtimeCategory": { "REGULAR": "Regular", "WEEKLY_OFF": "Weekly off", "HOLIDAY": "Holiday" },
-  "columns": { "employee": "Employee", "shift": "Shift", "firstIn": "First in", "lastOut": "Last out", "worked": "Worked", "late": "Late", "early": "Early out", "overtime": "OT", "flags": "Flags" },
+  "columns": { "employee": "Employee", "shift": "Shift", "firstIn": "First in", "lastOut": "Last out", "worked": "Worked", "late": "Late", "early": "Early out", "overtime": "OT", "flags": "Flags", "lost": "Lost" },
   "filters": { "allStatuses": "All statuses", "anyFlag": "Any flag" },
   "daily": { "previousDay": "Previous day", "nextDay": "Next day", "searchPlaceholder": "Search name or number…", "empty": "No attendance records for this day", "emptyHint": "Records appear once punches are processed for the selected date. Employees without punches are marked absent after the shift ends." },
   "monthly": {
@@ -25,7 +25,7 @@
     "pageTotals": "Page totals ({{count}})", "legendMissing": "Missing IN/OUT", "empty": "No employees for this month", "emptyHint": "Employees active during the month appear here with one cell per day.", "employeeCount": "{{count}} employees"
   },
   "record": {
-    "title": "Attendance record", "subtitle": "Calculation details for one employee-day.", "shift": "Shift", "noShift": "No shift", "break": "Break {{value}}", "scheduled": "Scheduled", "punches": "Punches", "version": "Version",
+    "title": "Attendance record", "subtitle": "Calculation details for one employee-day.", "shift": "Shift", "noShift": "No shift", "break": "Break {{value}}", "scheduled": "Scheduled", "credited": "Credited (official / remote)", "excused": "Excused (short leave)", "punches": "Punches", "version": "Version",
     "tabs": { "trace": "Calculation trace", "events": "Events ({{count}})", "history": "History ({{count}})", "corrections": "Corrections ({{count}})" },
     "noEvents": "No events", "noEventsHint": "No punches were recorded around this date.", "eventTime": "Time", "eventType": "Type", "source": "Source", "device": "Device", "verification": "Verification", "attributed": "Attributed", "viaCorrection": "via correction", "voided": "Voided", "yes": "Yes", "otherDay": "Other day",
     "noHistory": "No previous versions", "noHistoryHint": "A snapshot is stored every time the record is recomputed.", "recomputed": "Recomputed", "triggeredBy": "by {{by}}",
