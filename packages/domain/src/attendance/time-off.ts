@@ -23,9 +23,10 @@ import { computePunchWindow, localInstant, type PunchWindow } from './window.js'
  *     early departure are re-measured: the expected start advances through a window that covers it (and the grace applies
  *     after it), the expected end retreats through one that covers it, and late / early minutes inside any window are dropped.
  *     LATE / VERY_LATE / EARLY_DEPARTURE follow the new figures.
- *  5. Status, when anything above applied (never on a half-day leave / holiday): the worked (with credit) plus excused minutes
- *     against the rule set's thresholds scaled to the reduced schedule — a punched day is PRESENT or HALF_DAY (UNDER_HOURS
- *     follows); an absent day becomes PRESENT / HALF_DAY only when the approved windows reach the thresholds.
+ *  5. Status, when anything above applied (never on a half-day leave / holiday): a punched day compares the worked (with
+ *     credit) plus excused minutes with the rule set's thresholds scaled to the reduced schedule — PRESENT or HALF_DAY
+ *     (UNDER_HOURS follows); a day nobody attended becomes PRESENT / HALF_DAY only when the CREDITED minutes reach the
+ *     thresholds (remote work covering the shift) — an approved personal permission never turns an absence into presence.
  *  6. Lost time: in PAIRED / DIRECTIONAL punching, the out-of-office gaps between punched work segments inside the scheduled
  *     span, minus approved windows, scheduled break ranges, `{minutes}` break allowances and the rule set's
  *     `outOfOfficeAllowanceMinutes` (`lostMinutes`, flag LOST_TIME). FIRST_LAST ignores mid-day punches: nothing is lost.
@@ -142,8 +143,10 @@ export function applyTimeOff(result: DailyCalculationResult, input: DailyCalcula
         status = effective < halfDayThreshold ? 'HALF_DAY' : 'PRESENT';
         if (effective < minFullDay) flags.add('UNDER_HOURS'); else flags.delete('UNDER_HOURS');
       } else if (absentDay) {
-        if (effective >= minFullDay && effective > 0) status = 'PRESENT';
-        else if (effective >= halfDayThreshold && effective > 0) { status = 'HALF_DAY'; flags.add('UNDER_HOURS'); }
+        // nobody attended: only time credited as work (official assignment, remote work) makes the day present — an approved
+        // personal permission excuses its minutes but never turns an absence into presence
+        if (creditedMinutes >= minFullDay && creditedMinutes > 0) status = 'PRESENT';
+        else if (creditedMinutes >= halfDayThreshold && creditedMinutes > 0) { status = 'HALF_DAY'; flags.add('UNDER_HOURS'); }
       }
       if (status !== result.status || flags.has('UNDER_HOURS') !== result.flags.includes('UNDER_HOURS')) {
         steps.push({ step: 'timeOff.status', detail: `${workedMinutes} worked (incl. ${creditedMinutes} credited) + ${excusedMinutes} excused = ${effective} min vs full day ${minFullDay} / half day ${halfDayThreshold}${ratio !== 1 ? ` (× ${Math.round(ratio * 1000) / 1000})` : ''} → ${status}`, values: { status, previousStatus: result.status, effectiveMinutes: effective, minFullDayMinutes: minFullDay, halfDayThresholdMinutes: halfDayThreshold } });

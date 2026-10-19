@@ -72,6 +72,9 @@ describe('short leave windows (engine 1.5.0)', () => {
     // a short permission alone does not turn an absence into presence
     const permission = calculateDailyRecord(input({ events: [], timeOff: [win('09:00', '10:00')] }));
     expect(permission).toMatchObject({ status: 'ABSENT', excusedMinutes: 60 });
+    // …nor does a permission covering the whole shift: the absence is excused, not attended
+    const wholeDay = calculateDailyRecord(input({ events: [], timeOff: [win('09:00', '17:00')] }));
+    expect(wholeDay).toMatchObject({ status: 'ABSENT', excusedMinutes: 480, workedMinutes: 0 });
   });
 
   it('credits nothing while the punched hours are unknown (missing punch)', () => {
