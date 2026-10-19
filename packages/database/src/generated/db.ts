@@ -1699,6 +1699,9 @@ export interface Organizations {
 }
 
 export interface OrganizationSettings {
+  /**
+   * Approval routing: default routing without a workflow (line manager / permission holders), secondary manager as backup or alongside, fallback when no manager can act, top-of-organisation requests (approvalSettingsSchema in @flowza/contracts).
+   */
   approvals: Generated<Json>;
   attendance: Generated<Json>;
   dashboard: Generated<Json>;
