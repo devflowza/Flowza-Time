@@ -24,6 +24,8 @@ export const MODULE_ROUTE_RULES: ReadonlyArray<{ pattern: RegExp; modules: reado
   { pattern: /^leave-(types|records|balances|allocations|calendar)(\/|$)/, modules: ['leave'] },
   { pattern: /^me\/(leave|comp-off)(\/|$)/, modules: ['leave'] },
   { pattern: /^(me\/)?team\/leave(\/|$)/, modules: ['leave'] },
+  // short leave (20261019000310) is part of leave management; the reduced hours on the employee profile stay core (attendance)
+  { pattern: /^(time-off-types|time-off-requests|me\/time-off)(\/|$)/, modules: ['leave'] },
   // the manager workspace; team/pending-counts stays core — it is THE "waiting for you" figure of the approvals badge
   { pattern: /^team\/(summary|attendance|leave)(\/|$)/, modules: ['manager_workspace'] },
   { pattern: /^me\/team(\/|$)/, modules: ['manager_workspace'] },
