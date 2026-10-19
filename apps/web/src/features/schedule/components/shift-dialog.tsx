@@ -11,16 +11,16 @@ import { blankToUndefined, toOptionalNumber } from '@/features/organization/form
 import { useShiftMutations } from '../api';
 import type { ShiftDto } from '../types';
 import { BreaksEditor } from './breaks-editor';
-import { dayBoundaryGuide, flexibleGuide, joinMinutes, SAMPLE_NIGHT, splitMinutes } from '../flexible-guide';
+import { dayBoundaryGuide, flexibleGuide, flexStartGuide, joinMinutes, SAMPLE_NIGHT, splitMinutes } from '../flexible-guide';
 
 type FormValues = z.input<typeof shiftInputSchema>;
 const COLORS = ['#0f6e56', '#175cd3', '#b54708', '#7a2e9d', '#b42318', '#0e7490', '#4d7c0f', '#475467'];
 
 function toDefaults(s: ShiftDto | null): FormValues {
-  if (!s) return { code: '', name: '', type: 'FIXED', startTime: '09:00', endTime: '17:00', dayBoundary: DEFAULT_SHIFT_DAY_BOUNDARY, breaks: [], punchInWindowBeforeMinutes: DEFAULT_PUNCH_IN_WINDOW_MINUTES, punchOutWindowAfterMinutes: DEFAULT_PUNCH_OUT_WINDOW_MINUTES, graceInMinutes: null, graceOutMinutes: null, color: COLORS[0], status: 'active' };
+  if (!s) return { code: '', name: '', type: 'FIXED', startTime: '09:00', endTime: '17:00', dayBoundary: DEFAULT_SHIFT_DAY_BOUNDARY, breaks: [], punchInWindowBeforeMinutes: DEFAULT_PUNCH_IN_WINDOW_MINUTES, punchOutWindowAfterMinutes: DEFAULT_PUNCH_OUT_WINDOW_MINUTES, graceInMinutes: null, graceOutMinutes: null, flexStartMinutes: 0, color: COLORS[0], status: 'active' };
   return {
     code: s.code, name: s.name, nameAr: s.nameAr ?? undefined, type: s.type as FormValues['type'], startTime: s.startTime ?? undefined, endTime: s.endTime ?? undefined, requiredMinutes: s.requiredMinutes ?? undefined, coreStart: s.coreStart ?? undefined, coreEnd: s.coreEnd ?? undefined,
-    dayBoundary: s.dayBoundary, breaks: s.breaks ?? [], punchInWindowBeforeMinutes: s.punchInWindowBeforeMinutes, punchOutWindowAfterMinutes: s.punchOutWindowAfterMinutes, graceInMinutes: s.graceInMinutes, graceOutMinutes: s.graceOutMinutes, color: s.color ?? undefined, status: s.status as FormValues['status'],
+    dayBoundary: s.dayBoundary, breaks: s.breaks ?? [], punchInWindowBeforeMinutes: s.punchInWindowBeforeMinutes, punchOutWindowAfterMinutes: s.punchOutWindowAfterMinutes, graceInMinutes: s.graceInMinutes, graceOutMinutes: s.graceOutMinutes, flexStartMinutes: s.flexStartMinutes ?? 0, color: s.color ?? undefined, status: s.status as FormValues['status'],
   };
 }
 
@@ -70,7 +70,10 @@ function RequiredTimeInput({ value, onChange, invalid }: { value: unknown; onCha
   );
 }
 
-/** Shift editor (shiftInputSchema): FIXED start/end vs FLEXIBLE required time + day boundary + opt-in core hours; breaks, punch windows, grace overrides, colour. */
+/**
+ * Shift editor (shiftInputSchema): FIXED start/end + opt-in flexible start band vs FLEXIBLE required time + day boundary + opt-in
+ * core hours; breaks, punch windows, grace overrides, colour.
+ */
 export function ShiftDialog({ open, onOpenChange, shift }: { open: boolean; onOpenChange: (o: boolean) => void; shift: ShiftDto | null }) {
   const { t } = useTranslation('schedule');
   const { t: tc } = useTranslation();
@@ -93,19 +96,24 @@ export function ShiftDialog({ open, onOpenChange, shift }: { open: boolean; onOp
   const [graceInOn, toggleGraceIn] = useBlockSwitch(setValue, getValues, 'graceInMinutes', shift?.graceInMinutes != null, null, DEFAULT_ATTENDANCE_RULES.graceInMinutes);
   const [graceOutOn, toggleGraceOut] = useBlockSwitch(setValue, getValues, 'graceOutMinutes', shift?.graceOutMinutes != null, null, DEFAULT_ATTENDANCE_RULES.graceOutMinutes);
   const [colorOn, toggleColor] = useBlockSwitch(setValue, getValues, 'color', shift ? !!shift.color : true, undefined, COLORS[0]);
+  // Flexible start (FIXED, engine 1.5.0): off = 0, a plain fixed shift; on starts from a one-hour band.
+  const [flexStartOn, toggleFlexStart] = useBlockSwitch(setValue, getValues, 'flexStartMinutes', (shift?.flexStartMinutes ?? 0) > 0, 0, 60);
+  const flexStart = flexStartGuide(useWatch({ control, name: 'startTime' }), useWatch({ control, name: 'endTime' }), useWatch({ control, name: 'flexStartMinutes' }));
   const onSubmit = form.handleSubmit(async (values) => {
     if (type === 'FLEXIBLE' && coreOn && (!values.coreStart || !values.coreEnd)) {
       setError(values.coreStart ? 'coreEnd' : 'coreStart', { message: t('shifts.coreBothNeeded') });
       return;
     }
-    const needsMinutes = (on: boolean, v: unknown, field: 'graceInMinutes' | 'graceOutMinutes') => { if (!on || (v !== null && v !== undefined)) return false; setError(field, { message: t('shifts.minutesNeeded') }); return true; };
+    // a grace of 0 is a value; a flexible start of 0 is the block switched off (`zeroIsOff`)
+    const needsMinutes = (on: boolean, v: unknown, field: 'graceInMinutes' | 'graceOutMinutes' | 'flexStartMinutes', zeroIsOff = false) => { if (!on || (v !== null && v !== undefined && !(zeroIsOff && v === 0))) return false; setError(field, { message: t('shifts.minutesNeeded') }); return true; };
+    if (type === 'FIXED' && needsMinutes(flexStartOn, values.flexStartMinutes, 'flexStartMinutes', true)) return;
     if (needsMinutes(graceInOn, values.graceInMinutes, 'graceInMinutes') || needsMinutes(graceOutOn, values.graceOutMinutes, 'graceOutMinutes')) return;
     try {
       // `color: null` (not omitted) so a switched-off colour is cleared on PATCH, like the core hours.
       const shared = { ...values, color: colorOn ? values.color ?? null : null };
       const input: ShiftInput = type === 'FIXED'
         ? { ...shared, requiredMinutes: undefined, coreStart: null, coreEnd: null }
-        : { ...shared, startTime: undefined, endTime: undefined, ...(coreOn ? {} : { coreStart: null, coreEnd: null }) };
+        : { ...shared, startTime: undefined, endTime: undefined, flexStartMinutes: 0, ...(coreOn ? {} : { coreStart: null, coreEnd: null }) };
       if (shift) { await update.mutateAsync({ id: shift.id, input }); toast.success(t('shifts.updated')); }
       else { await create.mutateAsync(input); toast.success(t('shifts.created')); }
       onOpenChange(false);
@@ -134,9 +142,16 @@ export function ShiftDialog({ open, onOpenChange, shift }: { open: boolean; onOp
           <section className="space-y-3">
             <h4 className="text-sm font-semibold">{t('shifts.timing')}</h4>
             {type === 'FIXED' ? (
-              <div className="grid gap-4 sm:grid-cols-2">
-                <FormField label={t('shifts.startTime')} htmlFor="sh-start" required error={errors.startTime?.message}><Input id="sh-start" type="time" dir="ltr" className="tnum" {...register('startTime', { setValueAs: blankToUndefined })} aria-invalid={!!errors.startTime} /></FormField>
-                <FormField label={t('shifts.endTime')} htmlFor="sh-end" required error={errors.endTime?.message} hint={t('shifts.endTimeHint')}><Input id="sh-end" type="time" dir="ltr" className="tnum" {...register('endTime', { setValueAs: blankToUndefined })} aria-invalid={!!errors.endTime} /></FormField>
+              <div className="space-y-4">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <FormField label={t('shifts.startTime')} htmlFor="sh-start" required error={errors.startTime?.message}><Input id="sh-start" type="time" dir="ltr" className="tnum" {...register('startTime', { setValueAs: blankToUndefined })} aria-invalid={!!errors.startTime} /></FormField>
+                  <FormField label={t('shifts.endTime')} htmlFor="sh-end" required error={errors.endTime?.message} hint={t('shifts.endTimeHint')}><Input id="sh-end" type="time" dir="ltr" className="tnum" {...register('endTime', { setValueAs: blankToUndefined })} aria-invalid={!!errors.endTime} /></FormField>
+                </div>
+                <OptionalBlock title={t('shifts.flexStartTitle')} hint={flexStartOn ? t('shifts.flexStartHint') : t('shifts.flexStartOffHint')} on={flexStartOn} onChange={toggleFlexStart} testId="flex-start-block">
+                  <FormField label={t('shifts.flexStartMinutes')} htmlFor="sh-flexstart" error={errors.flexStartMinutes?.message} hint={flexStart ? t('shifts.flexStartExample', flexStart) : undefined}>
+                    <Input id="sh-flexstart" type="number" min={1} max={240} dir="ltr" className="w-36 tnum" {...register('flexStartMinutes', { setValueAs: toOptionalNumber })} aria-invalid={!!errors.flexStartMinutes} />
+                  </FormField>
+                </OptionalBlock>
               </div>
             ) : (
               <div className="space-y-4">

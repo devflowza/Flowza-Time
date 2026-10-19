@@ -6,7 +6,8 @@
   "flags": {
     "LATE": "Late", "EARLY_DEPARTURE": "Early departure", "OVERTIME": "Overtime", "MISSING_IN": "Missing IN", "MISSING_OUT": "Missing OUT", "MANUAL_CORRECTION": "Corrected", "OUT_OF_WINDOW": "Out of window",
     "WORKED_ON_HOLIDAY": "Worked on holiday", "WORKED_ON_WEEKLY_OFF": "Worked on weekly off", "HALF_DAY_LEAVE": "Half-day leave", "DUPLICATE_PUNCHES_COLLAPSED": "Duplicates collapsed", "RAMADAN_HOURS": "Ramadan hours", "CROSS_MIDNIGHT": "Cross-midnight", "NO_SHIFT": "No shift", "UNDER_HOURS": "Under hours",
-    "UNEXCUSED": "Unexcused", "EXCUSED": "Excused", "LOP": "Loss of pay", "PAY_EFFECT_HALF": "Pay effect ½ day", "PAY_EFFECT_FULL": "Pay effect 1 day", "OUTSIDE_GEOFENCE": "Outside geofence", "SELF_SERVICE_PUNCH": "Self-service punch", "NON_WORKING_DAY_WORK": "Worked on a non-working day"
+    "UNEXCUSED": "Unexcused", "EXCUSED": "Excused", "LOP": "Loss of pay", "PAY_EFFECT_HALF": "Pay effect ½ day", "PAY_EFFECT_FULL": "Pay effect 1 day", "OUTSIDE_GEOFENCE": "Outside geofence", "SELF_SERVICE_PUNCH": "Self-service punch", "NON_WORKING_DAY_WORK": "Worked on a non-working day",
+    "SPECIAL_HOURS": "Approved hours"
   },
   "correctionStatus": { "PENDING": "Pending", "APPROVED": "Approved", "APPLIED": "Applied", "REJECTED": "Rejected", "CANCELLED": "Cancelled" },
   "correctionType": { "ADD_PUNCH": "Add punch", "EDIT_PUNCH": "Edit punch", "REMOVE_PUNCH": "Remove punch", "SET_STATUS": "Set status" },

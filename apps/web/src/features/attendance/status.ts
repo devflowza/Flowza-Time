@@ -32,6 +32,8 @@ export const FLAG_TONE: Record<string, Tone> = {
   // policy parity (HR portal Prompt 3): reviewed verdicts from day marks, pay effects, self-service punch facts
   UNEXCUSED: 'danger', EXCUSED: 'success', LOP: 'danger', PAY_EFFECT_HALF: 'warning', PAY_EFFECT_FULL: 'warning',
   OUTSIDE_GEOFENCE: 'warning', SELF_SERVICE_PUNCH: 'secondary', NON_WORKING_DAY_WORK: 'info',
+  // engine 1.5.0: the day ran on approved working hours (a rule set's special period)
+  SPECIAL_HOURS: 'secondary',
 };
 
 /** Day-mark kinds (HR portal Prompt 3) → badge tone. */
