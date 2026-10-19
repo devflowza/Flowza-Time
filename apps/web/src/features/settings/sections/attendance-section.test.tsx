@@ -76,6 +76,38 @@ describe('AttendanceSection (policy parity)', () => {
     expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/attendance', { ...current, selfService: { ...current.selfService, regularisation: false } });
   });
 
+  it('the excuse deadline is optional (empty = none, 1–60 days) and the hint names the grace actually in force', async () => {
+    apiMock.put.mockImplementation(async (_path: string, value: unknown) => ({ data: value }));
+    renderWithProviders(<AttendanceSection />);
+    const deadline = await screen.findByLabelText(/Deadline to give a reason/);
+    expect(deadline).toHaveValue(null);
+    // the day close waits for the larger of the two graces (2 and 3 by default)
+    expect(screen.getByTestId('att-effective-grace')).toHaveTextContent('The day close marks an unexplained day after 3 days — the larger of the day-close grace (2) and the explanation grace (3).');
+    fireEvent.change(screen.getByLabelText(/Day-close grace/), { target: { value: '5' } });
+    expect(screen.getByTestId('att-effective-grace')).toHaveTextContent('after 5 days — the larger of the day-close grace (5) and the explanation grace (3)');
+    fireEvent.change(screen.getByLabelText(/Day-close grace/), { target: { value: '2' } });
+    fireEvent.change(deadline, { target: { value: '61' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(deadline).toHaveAttribute('aria-invalid', 'true'));
+    expect(apiMock.put).not.toHaveBeenCalled();
+    fireEvent.change(deadline, { target: { value: '4' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1));
+    expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/attendance', { ...current, unexcused: { ...current.unexcused, excuseDeadlineDays: 4 } });
+  });
+
+  it('clearing the excuse deadline saves "no deadline" (null), not a stale number', async () => {
+    mockGet({ '/orgs/org-1/settings/attendance': { data: { ...current, unexcused: { ...current.unexcused, excuseDeadlineDays: 7 } } }, '/orgs/org-1/shifts': page([]) });
+    apiMock.put.mockImplementation(async (_path: string, value: unknown) => ({ data: value }));
+    renderWithProviders(<AttendanceSection />);
+    const deadline = await screen.findByLabelText(/Deadline to give a reason/);
+    expect(deadline).toHaveValue(7);
+    fireEvent.change(deadline, { target: { value: '' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1));
+    expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/attendance', { ...current, unexcused: { ...current.unexcused, excuseDeadlineDays: null } });
+  });
+
   it('rejects an invalid address in the IP allow-list', async () => {
     renderWithProviders(<AttendanceSection />);
     const ips = await screen.findByLabelText(/IP allow-list/);

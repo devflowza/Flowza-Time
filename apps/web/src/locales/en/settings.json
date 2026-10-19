@@ -152,7 +152,11 @@
       "priority": "Charge leave in this order",
       "priorityHint": "Leave type codes, comma-separated. Then the paid leave type with the most balance left.",
       "exclude": "Never charge",
-      "excludeHint": "Leave type codes, comma-separated (sick, maternity, paternity and Hajj by default)."
+      "excludeHint": "Leave type codes, comma-separated (sick, maternity, paternity and Hajj by default).",
+      "excuseDeadline": "Deadline to give a reason (days)",
+      "excuseDeadlineHint": "1–60 days after the day; empty = no deadline. After it, employees can no longer give a reason in the portal (HR still can). The absence notice states it.",
+      "effectiveGrace_one": "The day close marks an unexplained day after {{count}} day — the larger of the day-close grace ({{dayClose}}) and the explanation grace ({{explanation}}).",
+      "effectiveGrace_other": "The day close marks an unexplained day after {{count}} days — the larger of the day-close grace ({{dayClose}}) and the explanation grace ({{explanation}})."
     },
     "notes": {
       "title": "Attendance notes",
@@ -297,7 +301,80 @@
     "reportReadyHint": "A requested report finished generating or failed.",
     "reportScheduledDelivery": "Shared and scheduled reports",
     "reportScheduledDeliveryHint": "A report shared with a member or delivered by a schedule.",
-    "readOnly": "Only members allowed to manage notifications can change these switches."
+    "readOnly": "Only members allowed to manage notifications can change these switches.",
+    "alerts": {
+      "title": "Attendance alerts",
+      "hint": "Automatic notices sent once per employee and day — to the employee and, where chosen, their direct manager. Only employees with a login are told, about today and yesterday only (never a recalculated past day); each person can still switch off their own attendance e-mails.",
+      "notifyEmployee": "Tell the employee",
+      "notifyManager": "Tell their direct manager",
+      "late": {
+        "title": "Late arrivals",
+        "hint": "Sent as soon as a check-in makes the day late.",
+        "enabled": "Late arrival alerts",
+        "minMinutes": "From (minutes late)",
+        "minMinutesHint": "1–600 minutes late, counted after the shift's grace period."
+      },
+      "early": {
+        "title": "Early departures",
+        "hint": "Sent once the day is judged and its scheduled end has passed, so a break check-out is never reported.",
+        "enabled": "Early departure alerts",
+        "minMinutes": "From (minutes early)",
+        "minMinutesHint": "1–600 minutes before the scheduled end."
+      },
+      "absence": {
+        "title": "Absences",
+        "hint": "Sent when a working day is judged absent (no check-in once the day's window closed). The notice states the deadline to give a reason when one is set under Settings → Attendance, and what may be deducted when automatic deduction is on.",
+        "enabled": "Absence notices",
+        "reminder": "Reminder before the deadline",
+        "reminderHint": "One reminder the day before the deadline, from 09:00, for absences still unexplained. Only when a deadline is set."
+      },
+      "missingCheckIn": {
+        "title": "Missing check-in",
+        "hint": "Reminds an employee who has not checked in after the expected start of their shift — never on leave, a holiday or a weekly off.",
+        "enabled": "Missing check-in reminder",
+        "notifyManager": "Also tell their direct manager",
+        "minutes": "Remind after (minutes)",
+        "minutesHint": "15–240 minutes after the expected shift start."
+      },
+      "appreciation": {
+        "title": "Weekly appreciation",
+        "hint": "A thank-you message once a week to employees with a good attendance record over the last seven days.",
+        "enabled": "Weekly thank-you messages",
+        "weekday": "Day",
+        "hour": "Time",
+        "hourHint": "Organisation time.",
+        "minWorkedDays": "Minimum days worked",
+        "minWorkedDaysHint": "1–7 days worked in the last seven days.",
+        "criteria": "Not sent to employees who had",
+        "criteriaHint": "Leave, holidays and weekly offs neither count nor disqualify.",
+        "noLate": "A late arrival",
+        "noEarlyDeparture": "An early departure",
+        "noAbsence": "An absence",
+        "noMissingPunch": "A missing check-in or check-out",
+        "noUnexcused": "An unexcused day",
+        "messageEn": "Message in English",
+        "messageAr": "Message in Arabic",
+        "messageHint": "Up to 500 characters. Each employee receives the message in their own language.",
+        "preview": "Preview",
+        "previewTitleEn": "Thank you for a great week!",
+        "previewTitleAr": "شكرًا لك على أسبوع رائع!",
+        "previewEmpty": "(no message)",
+        "sendNow": "Send now for last week",
+        "sendNowHint": "Reviews the last seven days now. Nobody is thanked twice for the same week.",
+        "sendNowUnsaved": "Save your changes first.",
+        "sendNowOff": "Switch weekly thank-you messages on and save first.",
+        "sendNowQueued": "Thank-you messages are being sent.",
+        "weekdays": {
+          "0": "Sunday",
+          "1": "Monday",
+          "2": "Tuesday",
+          "3": "Wednesday",
+          "4": "Thursday",
+          "5": "Friday",
+          "6": "Saturday"
+        }
+      }
+    }
   },
   "security": {
     "title": "Security policy",
