@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { attendanceRuleSetInputSchema, holidayCalendarInputSchema, holidayCalendarUpdateSchema, holidayInputSchema, holidayListQuerySchema, holidayUpdateSchema, leaveRecordInputSchema, leaveRecordListQuerySchema, leaveTypeInputSchema, leaveTypeUpdateSchema, ruleSetListQuerySchema, ruleSetUpdateSchema, shiftAssignmentInputSchema, shiftAssignmentListQuerySchema, shiftAssignmentUpdateSchema, shiftInputSchema, shiftListQuerySchema, shiftPatternInputSchema, shiftResolveQuerySchema, shiftUpdateSchema, updateLeaveRecordSchema } from '@flowza/contracts';
+import { attendanceRuleSetInputSchema, holidayCalendarInputSchema, holidayCalendarUpdateSchema, holidayCopyYearSchema, holidayInputSchema, holidayListQuerySchema, holidayUpdateSchema, leaveRecordInputSchema, leaveRecordListQuerySchema, leaveTypeInputSchema, leaveTypeUpdateSchema, ruleSetListQuerySchema, ruleSetUpdateSchema, shiftAssignmentInputSchema, shiftAssignmentListQuerySchema, shiftAssignmentUpdateSchema, shiftInputSchema, shiftListQuerySchema, shiftPatternInputSchema, shiftResolveQuerySchema, shiftUpdateSchema, updateLeaveRecordSchema } from '@flowza/contracts';
 import type { AppEnv } from '../../../middleware/request-context.js';
 import type { ApiDeps } from '../../../deps.js';
 import { created, noContent, ok, paginated } from '../../../lib/http.js';
@@ -31,11 +31,13 @@ export function registerScheduleRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.get('/orgs/:orgId/holiday-calendars', async (c) => ok(c, await s.listCalendars(deps, actorOf(c, deps), param(c, 'orgId'))));
   v1.post('/orgs/:orgId/holiday-calendars', async (c) => created(c, await s.createCalendar(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, holidayCalendarInputSchema))));
   v1.patch('/orgs/:orgId/holiday-calendars/:id', async (c) => ok(c, await s.updateCalendar(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, holidayCalendarUpdateSchema))));
-  v1.delete('/orgs/:orgId/holiday-calendars/:id', async (c) => { await s.deleteCalendar(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id')); return noContent(c); });
+  // 200 with `{ recalculationJobId }`: deleting the default calendar recomputes the past days of the branches that followed it
+  v1.delete('/orgs/:orgId/holiday-calendars/:id', async (c) => ok(c, await s.deleteCalendar(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
+  v1.post('/orgs/:orgId/holiday-calendars/:id/copy-year', async (c) => ok(c, await s.copyHolidayYear(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, holidayCopyYearSchema))));
   v1.get('/orgs/:orgId/holidays', async (c) => ok(c, await s.listHolidays(deps, actorOf(c, deps), param(c, 'orgId'), query(c, holidayListQuerySchema))));
   v1.post('/orgs/:orgId/holidays', async (c) => created(c, await s.createHoliday(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, holidayInputSchema))));
   v1.patch('/orgs/:orgId/holidays/:id', async (c) => ok(c, await s.updateHoliday(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'), await body(c, holidayUpdateSchema))));
-  v1.delete('/orgs/:orgId/holidays/:id', async (c) => { await s.deleteHoliday(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id')); return noContent(c); });
+  v1.delete('/orgs/:orgId/holidays/:id', async (c) => ok(c, await s.deleteHoliday(deps, actorOf(c, deps), param(c, 'orgId'), param(c, 'id'))));
   // leave
   v1.get('/orgs/:orgId/leave-types', async (c) => ok(c, await s.listLeaveTypes(deps, actorOf(c, deps), param(c, 'orgId'))));
   v1.post('/orgs/:orgId/leave-types', async (c) => created(c, await s.createLeaveType(deps, actorOf(c, deps), param(c, 'orgId'), await body(c, leaveTypeInputSchema))));

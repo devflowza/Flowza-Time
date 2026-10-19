@@ -64,7 +64,7 @@ describe('organisation-wide resources vs branch-scoped managers', () => {
     expect((await h.request('PATCH', `${base()}/holidays/${org.body.data.id}`, { token: scopedAdmin, body: { name: 'renamed' } })).status).toBe(403);
     expect((await h.request('DELETE', `${base()}/holidays/${org.body.data.id}`, { token: scopedAdmin })).status).toBe(403);
     expect((await h.admin.selectFrom('holidays').select('name').where('id', '=', org.body.data.id).executeTakeFirstOrThrow()).name).toBe('National day');
-    expect((await h.request('DELETE', `${base()}/holidays/${org.body.data.id}`, { token: f.owner })).status).toBe(204);
+    expect((await h.request('DELETE', `${base()}/holidays/${org.body.data.id}`, { token: f.owner })).status).toBe(200); // 200 + { recalculationJobId } since the working-hours policies
   });
 
   it('reports: a branch-scoped report.manage holder cannot read or download organisation-wide reports of others', async () => {

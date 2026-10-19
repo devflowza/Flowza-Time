@@ -1,9 +1,9 @@
 import { sql } from 'kysely';
 import type { z } from 'zod';
-import { isDefaultPolicySections, policySectionsEqual, policySectionsOf, type AttendancePolicySections, type AttendanceRuleSetInput, type HolidayInput, type ShiftAssignmentInput, type ShiftInput, type ShiftPatternInput, type holidayCalendarInputSchema } from '@flowza/contracts';
-import { resolvePolicyFor, type Trx } from '@flowza/database';
+import { isDefaultPolicySections, policySectionsEqual, policySectionsOf, type AttendancePolicySections, type AttendanceRuleSetInput, type HolidayCopyYearInput, type HolidayInput, type ShiftAssignmentInput, type ShiftInput, type ShiftPatternInput, type holidayCalendarInputSchema } from '@flowza/contracts';
+import { copyCalendarYear, resolvePolicyFor, type Trx } from '@flowza/database';
 import { policySpecificity, resolveShift, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
-import { errors } from '@flowza/shared';
+import { addDays, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
 import { type Actor, audit, diffObjects, runUser, withSystemScope } from '../../lib/service.js';
@@ -26,15 +26,16 @@ export async function recalcIfPast(deps: ApiDeps, trx: Trx, actor: Actor, orgId:
 
 // ----- shifts ------------------------------------------------------------------------------------------------------------------
 
-export interface ShiftDto { id: string; code: string; name: string; nameAr: string | null; type: string; startTime: string | null; endTime: string | null; requiredMinutes: number | null; coreStart: string | null; coreEnd: string | null; dayBoundary: string; breaks: unknown[]; punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number; graceInMinutes: number | null; graceOutMinutes: number | null; color: string | null; status: string; crossesMidnight: boolean | null; assignmentCount?: number; createdAt: string; updatedAt: string }
+export interface ShiftDto { id: string; code: string; name: string; nameAr: string | null; type: string; startTime: string | null; endTime: string | null; requiredMinutes: number | null; coreStart: string | null; coreEnd: string | null; dayBoundary: string; breaks: unknown[]; punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number; graceInMinutes: number | null; graceOutMinutes: number | null; flexStartMinutes: number; color: string | null; status: string; crossesMidnight: boolean | null; assignmentCount?: number; createdAt: string; updatedAt: string }
 const hhmm = (v: string | null) => (v === null ? null : v.slice(0, 5));
-function toShiftDto(s: { id: string; code: string; name: string; nameAr: string | null; type: string; startTime: string | null; endTime: string | null; requiredMinutes: number | null; coreStart: string | null; coreEnd: string | null; dayBoundary: string; breaks: unknown; punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number; graceInMinutes: number | null; graceOutMinutes: number | null; color: string | null; status: string; crossesMidnight: boolean | null; createdAt: Date; updatedAt: Date }, assignmentCount?: number): ShiftDto {
-  return { id: s.id, code: s.code, name: s.name, nameAr: s.nameAr, type: s.type, startTime: hhmm(s.startTime), endTime: hhmm(s.endTime), requiredMinutes: s.requiredMinutes, coreStart: hhmm(s.coreStart), coreEnd: hhmm(s.coreEnd), dayBoundary: hhmm(s.dayBoundary) ?? '00:00', breaks: jsonArray(s.breaks), punchInWindowBeforeMinutes: s.punchInWindowBeforeMinutes, punchOutWindowAfterMinutes: s.punchOutWindowAfterMinutes, graceInMinutes: s.graceInMinutes, graceOutMinutes: s.graceOutMinutes, color: s.color, status: s.status, crossesMidnight: s.crossesMidnight, ...(assignmentCount !== undefined ? { assignmentCount } : {}), createdAt: isoDateTime(s.createdAt), updatedAt: isoDateTime(s.updatedAt) };
+function toShiftDto(s: { id: string; code: string; name: string; nameAr: string | null; type: string; startTime: string | null; endTime: string | null; requiredMinutes: number | null; coreStart: string | null; coreEnd: string | null; dayBoundary: string; breaks: unknown; punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number; graceInMinutes: number | null; graceOutMinutes: number | null; flexStartMinutes: number; color: string | null; status: string; crossesMidnight: boolean | null; createdAt: Date; updatedAt: Date }, assignmentCount?: number): ShiftDto {
+  return { id: s.id, code: s.code, name: s.name, nameAr: s.nameAr, type: s.type, startTime: hhmm(s.startTime), endTime: hhmm(s.endTime), requiredMinutes: s.requiredMinutes, coreStart: hhmm(s.coreStart), coreEnd: hhmm(s.coreEnd), dayBoundary: hhmm(s.dayBoundary) ?? '00:00', breaks: jsonArray(s.breaks), punchInWindowBeforeMinutes: s.punchInWindowBeforeMinutes, punchOutWindowAfterMinutes: s.punchOutWindowAfterMinutes, graceInMinutes: s.graceInMinutes, graceOutMinutes: s.graceOutMinutes, flexStartMinutes: s.flexStartMinutes, color: s.color, status: s.status, crossesMidnight: s.crossesMidnight, ...(assignmentCount !== undefined ? { assignmentCount } : {}), createdAt: isoDateTime(s.createdAt), updatedAt: isoDateTime(s.updatedAt) };
 }
 function shiftValues(input: Partial<ShiftInput>): Record<string, unknown> {
   const v: Record<string, unknown> = {};
   for (const [k, val] of Object.entries(input)) if (val !== undefined) v[k] = k === 'breaks' ? JSON.stringify(val) : val;
-  if (input.type === 'FLEXIBLE') { v.startTime = input.startTime ?? null; v.endTime = input.endTime ?? null; }
+  // a flexible start band belongs to FIXED shifts (the table refuses it on a flexible one); never left behind
+  if (input.type === 'FLEXIBLE') { v.startTime = input.startTime ?? null; v.endTime = input.endTime ?? null; v.flexStartMinutes = 0; }
   if (input.type === 'FIXED') { v.coreStart = null; v.coreEnd = null; } // core hours belong to FLEXIBLE shifts; never left behind
   return v;
 }
@@ -78,11 +79,12 @@ export async function updateShift(deps: ApiDeps, actor: Actor, orgId: string, id
     if (merged.type === 'FIXED' && (!merged.startTime || !merged.endTime)) throw errors.validation('Fixed shifts need start and end time.', { issues: [{ path: 'startTime', message: 'Required for FIXED shifts' }] });
     if (merged.type === 'FLEXIBLE' && merged.requiredMinutes === null) throw errors.validation('Flexible shifts need required minutes.', { issues: [{ path: 'requiredMinutes', message: 'Required for FLEXIBLE shifts' }] });
     const values = shiftValues(input);
+    if (merged.type === 'FLEXIBLE' && 'flexStartMinutes' in values) values.flexStartMinutes = 0;
     if (Object.keys(values).length) await trx.updateTable('shifts').set(values as never).where('id', '=', id).execute();
     const after = await loadShift(trx, orgId, id);
     const diff = diffObjects(toShiftDto(before) as unknown as Record<string, unknown>, toShiftDto(after) as unknown as Record<string, unknown>);
     await audit(trx, actor, orgId, 'shift.updated', 'shift', { entityId: id, ...diff });
-    const timingChanged = ['startTime', 'endTime', 'requiredMinutes', 'breaks', 'dayBoundary', 'punchInWindowBeforeMinutes', 'punchOutWindowAfterMinutes', 'graceInMinutes', 'graceOutMinutes', 'type', 'coreStart', 'coreEnd'].some((k) => k in diff.newValue);
+    const timingChanged = ['startTime', 'endTime', 'requiredMinutes', 'breaks', 'dayBoundary', 'punchInWindowBeforeMinutes', 'punchOutWindowAfterMinutes', 'graceInMinutes', 'graceOutMinutes', 'flexStartMinutes', 'type', 'coreStart', 'coreEnd'].some((k) => k in diff.newValue);
     if (timingChanged) {
       const earliest = await trx.selectFrom('shiftAssignments').select((eb) => eb.fn.min('effectiveFrom').as('from')).where('organizationId', '=', orgId).where('shiftId', '=', id).executeTakeFirst();
       if (earliest?.from) await recalcIfPast(deps, trx, actor, orgId, isoDate(earliest.from as Date), null, { reason: `shift ${after.code} changed` });
@@ -286,11 +288,60 @@ export async function resolveEmployeeShift(deps: ApiDeps, actor: Actor, orgId: s
 /**
  * `branchCount` = branches whose calendar this is. A calendar applies to a branch when it is that branch's calendar, or — for a
  * branch with none — when it is the organisation's default; a calendar that is neither the default nor any branch's applies to nobody.
+ * `autoRollover`: next year's recurring holidays are created from 1 December (worker `holidays.rollover`).
  */
-export interface HolidayCalendarDto { id: string; name: string; countryCode: string | null; isDefault: boolean; holidayCount?: number; branchCount?: number; createdAt: string; updatedAt: string }
-const toCalendarDto = (c: { id: string; name: string; countryCode: string | null; isDefault: boolean; createdAt: Date; updatedAt: Date }, holidayCount?: number, branchCount?: number): HolidayCalendarDto => ({ id: c.id, name: c.name, countryCode: c.countryCode, isDefault: c.isDefault, ...(holidayCount !== undefined ? { holidayCount } : {}), ...(branchCount !== undefined ? { branchCount } : {}), createdAt: isoDateTime(c.createdAt), updatedAt: isoDateTime(c.updatedAt) });
-export interface HolidayDto { id: string; calendarId: string; name: string; nameAr: string | null; date: string; endDate: string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; createdAt: string }
-const toHolidayDto = (h: { id: string; calendarId: string; name: string; nameAr: string | null; date: Date | string; endDate: Date | string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; createdAt: Date }): HolidayDto => ({ id: h.id, calendarId: h.calendarId, name: h.name, nameAr: h.nameAr, date: isoDate(h.date), endDate: isoDateOrNull(h.endDate), isHalfDay: h.isHalfDay, type: h.type, branchIds: h.branchIds, isTentative: h.isTentative, createdAt: isoDateTime(h.createdAt) });
+export interface HolidayCalendarDto { id: string; name: string; countryCode: string | null; isDefault: boolean; autoRollover: boolean; holidayCount?: number; branchCount?: number; createdAt: string; updatedAt: string }
+const toCalendarDto = (c: { id: string; name: string; countryCode: string | null; isDefault: boolean; autoRollover: boolean; createdAt: Date; updatedAt: Date }, holidayCount?: number, branchCount?: number): HolidayCalendarDto => ({ id: c.id, name: c.name, countryCode: c.countryCode, isDefault: c.isDefault, autoRollover: c.autoRollover, ...(holidayCount !== undefined ? { holidayCount } : {}), ...(branchCount !== undefined ? { branchCount } : {}), createdAt: isoDateTime(c.createdAt), updatedAt: isoDateTime(c.updatedAt) });
+export interface HolidayDto { id: string; calendarId: string; name: string; nameAr: string | null; date: string; endDate: string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; recursYearly: boolean; createdAt: string }
+const toHolidayDto = (h: { id: string; calendarId: string; name: string; nameAr: string | null; date: Date | string; endDate: Date | string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; recursYearly: boolean; createdAt: Date }): HolidayDto => ({ id: h.id, calendarId: h.calendarId, name: h.name, nameAr: h.nameAr, date: isoDate(h.date), endDate: isoDateOrNull(h.endDate), isHalfDay: h.isHalfDay, type: h.type, branchIds: h.branchIds, isTentative: h.isTentative, recursYearly: h.recursYearly, createdAt: isoDateTime(h.createdAt) });
+type RecalcRef = { requestId: string; jobId: string } | null;
+
+type DateRange = { from: string; to: string };
+/** Inclusive date ranges merged where they overlap or touch, in date order. */
+export function mergeDateRanges(ranges: readonly DateRange[]): DateRange[] {
+  const out: DateRange[] = [];
+  for (const r of [...ranges].sort((a, b) => a.from.localeCompare(b.from) || a.to.localeCompare(b.to))) {
+    const last = out[out.length - 1];
+    if (last && r.from <= addDays(last.to, 1)) { if (r.to > last.to) last.to = r.to; } else out.push({ ...r });
+  }
+  return out;
+}
+
+/**
+ * WHICH calendar applies to branches changed — a branch picked another calendar, the default calendar changed, the default was
+ * deleted: the past days of every holiday of the calendars that stopped or started applying are recomputed for those branches
+ * (`branchIds` null = organisation-wide), one request per run of consecutive holiday dates and branch, up to today (future
+ * days compute when they arrive, like recalcIfPast). Holidays are read as the system: the change is the caller's, the
+ * holidays it affects are not necessarily visible to them. Returns the first request.
+ */
+export async function recalcCalendarSwitch(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, change: { calendarIds: ReadonlyArray<string | null>; branchIds: readonly string[] | null }, reason: string): Promise<RecalcRef> {
+  const calendarIds = [...new Set(change.calendarIds.filter((c): c is string => !!c))];
+  if (calendarIds.length === 0 || (change.branchIds !== null && change.branchIds.length === 0)) return null;
+  const today = await orgToday(trx, orgId);
+  const rows = await withSystemScope(trx, orgId, (t) => t.selectFrom('holidays').select(['date', 'endDate', 'branchIds']).where('organizationId', '=', orgId).where('calendarId', 'in', calendarIds).where('date', '<=', dv(today)).execute());
+  let first: RecalcRef = null;
+  for (const branchId of change.branchIds ?? [null]) {
+    const ranges = rows.filter((h) => branchId === null || !h.branchIds || h.branchIds.length === 0 || h.branchIds.includes(branchId))
+      .map((h) => ({ from: isoDate(h.date), to: minDate(isoDateOrNull(h.endDate) ?? isoDate(h.date), today) }));
+    for (const r of mergeDateRanges(ranges)) {
+      const res = await enqueueRecalculation(deps, trx, actor, orgId, { fromDate: r.from, toDate: r.to, branchId, reason });
+      if (res && !first) first = { requestId: res.requestId, jobId: res.jobId };
+    }
+  }
+  return first;
+}
+
+/** The organisation's default calendar id (null = none), read as the system. */
+export async function defaultCalendarId(trx: Trx, orgId: string): Promise<string | null> {
+  return (await withSystemScope(trx, orgId, (t) => t.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('isDefault', '=', true).executeTakeFirst()))?.id ?? null;
+}
+/** The branches that follow the default calendar (none of their own); null = every branch does (one organisation-wide request). */
+async function defaultCalendarBranches(trx: Trx, orgId: string): Promise<string[] | null> {
+  const rows = await withSystemScope(trx, orgId, (t) => t.selectFrom('branches').select(['id', 'holidayCalendarId']).where('organizationId', '=', orgId).execute());
+  if (rows.length === 0) return [];
+  const following = rows.filter((b) => b.holidayCalendarId === null).map((b) => b.id);
+  return following.length === rows.length ? null : following;
+}
 
 export async function listCalendars(deps: ApiDeps, actor: Actor, orgId: string): Promise<HolidayCalendarDto[]> {
   requirePermission(actor.principal, orgId, 'holiday.view');
@@ -304,42 +355,57 @@ export async function listCalendars(deps: ApiDeps, actor: Actor, orgId: string):
     return rows.map((r) => toCalendarDto(r, by.get(r.id) ?? 0, branches.get(r.id) ?? 0));
   });
 }
-export async function createCalendar(deps: ApiDeps, actor: Actor, orgId: string, input: HolidayCalendarInput): Promise<HolidayCalendarDto> {
+export async function createCalendar(deps: ApiDeps, actor: Actor, orgId: string, input: HolidayCalendarInput): Promise<HolidayCalendarDto & { recalculationJobId: string | null }> {
   requirePermission(actor.principal, orgId, 'holiday.manage');
   return runUser(deps.db, actor, async (trx) => {
     // the organisation's first calendar is its default whatever the switch said: otherwise its holidays would apply to nobody until
     // somebody found the switch (the default is the calendar of every branch that has none of its own)
-    const hasDefault = !!(await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('isDefault', '=', true).executeTakeFirst());
-    const isDefault = input.isDefault || !hasDefault;
+    const previousDefault = await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('isDefault', '=', true).executeTakeFirst();
+    const isDefault = input.isDefault || !previousDefault;
     if (input.isDefault) await trx.updateTable('holidayCalendars').set({ isDefault: false }).where('organizationId', '=', orgId).where('isDefault', '=', true).execute();
-    const row = await trx.insertInto('holidayCalendars').values({ organizationId: orgId, name: input.name, countryCode: input.countryCode ?? null, isDefault }).returningAll().executeTakeFirstOrThrow();
+    const row = await trx.insertInto('holidayCalendars').values({ organizationId: orgId, name: input.name, countryCode: input.countryCode ?? null, isDefault, autoRollover: input.autoRollover }).returningAll().executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'holiday_calendar.created', 'holiday_calendar', { entityId: row.id, newValue: { ...input, isDefault } });
-    return toCalendarDto(row, 0);
+    // a new (empty) default replaces the old one for every branch without a calendar: the old default's past holidays stop applying
+    const recalc = input.isDefault && previousDefault
+      ? await recalcCalendarSwitch(deps, trx, actor, orgId, { calendarIds: [previousDefault.id], branchIds: await defaultCalendarBranches(trx, orgId) }, `holiday calendar ${input.name} became the default`)
+      : null;
+    return { ...toCalendarDto(row, 0), recalculationJobId: recalc?.jobId ?? null };
   });
 }
-export async function updateCalendar(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<HolidayCalendarInput>): Promise<HolidayCalendarDto> {
+export async function updateCalendar(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<HolidayCalendarInput>): Promise<HolidayCalendarDto & { recalculationJobId: string | null }> {
   requirePermission(actor.principal, orgId, 'holiday.manage');
   return runUser(deps.db, actor, async (trx) => {
     const before = await trx.selectFrom('holidayCalendars').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!before) throw errors.notFound('Holiday calendar', id);
+    const previousDefault = await defaultCalendarId(trx, orgId);
     if (input.isDefault) await trx.updateTable('holidayCalendars').set({ isDefault: false }).where('organizationId', '=', orgId).where('isDefault', '=', true).where('id', '!=', id).execute();
     const patch: Record<string, unknown> = {}; for (const [k, v] of Object.entries(input)) if (v !== undefined) patch[k] = v;
     if (Object.keys(patch).length) await trx.updateTable('holidayCalendars').set(patch as never).where('id', '=', id).execute();
     const after = await trx.selectFrom('holidayCalendars').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'holiday_calendar.updated', 'holiday_calendar', { entityId: id, oldValue: toCalendarDto(before), newValue: toCalendarDto(after) });
-    return toCalendarDto(after);
+    // the default switched (made the default, or no longer the default): the branches without a calendar of their own now follow
+    // another calendar — the past holidays of both are recomputed for them
+    const currentDefault = await defaultCalendarId(trx, orgId);
+    const recalc = currentDefault !== previousDefault
+      ? await recalcCalendarSwitch(deps, trx, actor, orgId, { calendarIds: [previousDefault, currentDefault], branchIds: await defaultCalendarBranches(trx, orgId) }, `default holiday calendar changed (${after.name})`)
+      : null;
+    return { ...toCalendarDto(after), recalculationJobId: recalc?.jobId ?? null };
   });
 }
-export async function deleteCalendar(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
+export async function deleteCalendar(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<{ recalculationJobId: string | null }> {
   requirePermission(actor.principal, orgId, 'holiday.manage');
   return runUser(deps.db, actor, async (trx) => {
     const c = await trx.selectFrom('holidayCalendars').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
     if (!c) throw errors.notFound('Holiday calendar', id);
     const used = toCount((await trx.selectFrom('branches').select((eb) => eb.fn.countAll().as('n')).where('organizationId', '=', orgId).where('holidayCalendarId', '=', id).executeTakeFirst())?.n);
     if (used > 0) throw errors.invalidState('The calendar is assigned to branches.', { branches: used });
+    // the default calendar's holidays applied to every branch without a calendar of its own: their past days lose them (read
+    // before the holidays go; an unused non-default calendar applied to nobody, so nothing changes)
+    const recalc = c.isDefault ? await recalcCalendarSwitch(deps, trx, actor, orgId, { calendarIds: [id], branchIds: await defaultCalendarBranches(trx, orgId) }, `default holiday calendar ${c.name} deleted`) : null;
     await trx.deleteFrom('holidays').where('calendarId', '=', id).execute();
     await trx.deleteFrom('holidayCalendars').where('id', '=', id).execute();
-    await audit(trx, actor, orgId, 'holiday_calendar.deleted', 'holiday_calendar', { entityId: id, oldValue: { name: c.name } });
+    await audit(trx, actor, orgId, 'holiday_calendar.deleted', 'holiday_calendar', { entityId: id, oldValue: { name: c.name, isDefault: c.isDefault } });
+    return { recalculationJobId: recalc?.jobId ?? null };
   });
 }
 export async function listHolidays(deps: ApiDeps, actor: Actor, orgId: string, q: { calendarId?: string; year?: number; from?: string; to?: string }): Promise<HolidayDto[]> {
@@ -363,10 +429,12 @@ function requireHolidayScope(grant: MembershipGrant, branchIds: string[] | null 
   if (!branchIds || branchIds.length === 0) throw errors.forbidden('Branch-scoped users can only manage holidays restricted to their branches.');
   for (const b of branchIds) requireBranchAccess(grant, b);
 }
-async function holidayRecalc(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, h: { date: string; endDate: string | null; branchIds: string[] | null }, reason: string) {
+async function holidayRecalc(deps: ApiDeps, trx: Trx, actor: Actor, orgId: string, h: { date: string; endDate: string | null; branchIds: string[] | null }, reason: string): Promise<RecalcRef> {
   // holidays may apply to several branches; recompute per branch (or organisation-wide when unrestricted)
-  if (h.branchIds && h.branchIds.length) { for (const b of h.branchIds) await recalcIfPast(deps, trx, actor, orgId, h.date, h.endDate, { branchId: b, reason }); }
-  else await recalcIfPast(deps, trx, actor, orgId, h.date, h.endDate, { reason });
+  if (!h.branchIds || h.branchIds.length === 0) return recalcIfPast(deps, trx, actor, orgId, h.date, h.endDate, { reason });
+  let first: RecalcRef = null;
+  for (const b of h.branchIds) { const r = await recalcIfPast(deps, trx, actor, orgId, h.date, h.endDate, { branchId: b, reason }); first ??= r; }
+  return first;
 }
 /**
  * "Mark a holiday" without choosing a calendar: the organisation's default calendar — the calendar of every branch without one of
@@ -382,20 +450,20 @@ async function defaultCalendarFor(trx: Trx, actor: Actor, orgId: string): Promis
   return row.id;
 }
 
-export async function createHoliday(deps: ApiDeps, actor: Actor, orgId: string, input: HolidayInput): Promise<HolidayDto> {
+export async function createHoliday(deps: ApiDeps, actor: Actor, orgId: string, input: HolidayInput): Promise<HolidayDto & { recalculationJobId: string | null }> {
   const grant = requirePermission(actor.principal, orgId, 'holiday.manage');
   requireHolidayScope(grant, input.branchIds ?? null);
   if (input.endDate && input.endDate < input.date) throw errors.validation('endDate must be on/after date.', { issues: [{ path: 'endDate', message: 'Before date' }] });
   return runUser(deps.db, actor, async (trx) => {
     const calendarId = input.calendarId ?? (await defaultCalendarFor(trx, actor, orgId));
     if (!(await trx.selectFrom('holidayCalendars').select('id').where('organizationId', '=', orgId).where('id', '=', calendarId).executeTakeFirst())) throw errors.validation('Holiday calendar not found.', { issues: [{ path: 'calendarId', message: 'Unknown calendar' }] });
-    const row = await trx.insertInto('holidays').values({ organizationId: orgId, calendarId, name: input.name, nameAr: input.nameAr ?? null, date: input.date, endDate: input.endDate ?? null, isHalfDay: input.isHalfDay, type: input.type, branchIds: input.branchIds ?? null, isTentative: input.isTentative }).returningAll().executeTakeFirstOrThrow();
+    const row = await trx.insertInto('holidays').values({ organizationId: orgId, calendarId, name: input.name, nameAr: input.nameAr ?? null, date: input.date, endDate: input.endDate ?? null, isHalfDay: input.isHalfDay, type: input.type, branchIds: input.branchIds ?? null, isTentative: input.isTentative, recursYearly: input.recursYearly }).returningAll().executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'holiday.created', 'holiday', { entityId: row.id, newValue: { ...input, calendarId } });
-    await holidayRecalc(deps, trx, actor, orgId, { date: input.date, endDate: input.endDate ?? null, branchIds: input.branchIds ?? null }, `holiday ${input.name} added`);
-    return toHolidayDto(row);
+    const recalc = await holidayRecalc(deps, trx, actor, orgId, { date: input.date, endDate: input.endDate ?? null, branchIds: input.branchIds ?? null }, `holiday ${input.name} added`);
+    return { ...toHolidayDto(row), recalculationJobId: recalc?.jobId ?? null };
   });
 }
-export async function updateHoliday(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<HolidayInput>): Promise<HolidayDto> {
+export async function updateHoliday(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: Partial<HolidayInput>): Promise<HolidayDto & { recalculationJobId: string | null }> {
   const grant = requirePermission(actor.principal, orgId, 'holiday.manage');
   if (input.branchIds !== undefined) requireHolidayScope(grant, input.branchIds);
   return runUser(deps.db, actor, async (trx) => {
@@ -407,11 +475,11 @@ export async function updateHoliday(deps: ApiDeps, actor: Actor, orgId: string, 
     const after = await trx.selectFrom('holidays').selectAll().where('id', '=', id).executeTakeFirstOrThrow();
     await audit(trx, actor, orgId, 'holiday.updated', 'holiday', { entityId: id, oldValue: toHolidayDto(before), newValue: toHolidayDto(after) });
     const b = toHolidayDto(before); const a = toHolidayDto(after);
-    await holidayRecalc(deps, trx, actor, orgId, { date: minDate(b.date, a.date), endDate: [b.endDate ?? b.date, a.endDate ?? a.date].sort().pop() ?? null, branchIds: b.branchIds && a.branchIds ? [...new Set([...b.branchIds, ...a.branchIds])] : null }, `holiday ${after.name} changed`);
-    return a;
+    const recalc = await holidayRecalc(deps, trx, actor, orgId, { date: minDate(b.date, a.date), endDate: [b.endDate ?? b.date, a.endDate ?? a.date].sort().pop() ?? null, branchIds: b.branchIds && a.branchIds ? [...new Set([...b.branchIds, ...a.branchIds])] : null }, `holiday ${after.name} changed`);
+    return { ...a, recalculationJobId: recalc?.jobId ?? null };
   });
 }
-export async function deleteHoliday(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<void> {
+export async function deleteHoliday(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<{ recalculationJobId: string | null }> {
   const grant = requirePermission(actor.principal, orgId, 'holiday.manage');
   return runUser(deps.db, actor, async (trx) => {
     const h = await trx.selectFrom('holidays').selectAll().where('organizationId', '=', orgId).where('id', '=', id).executeTakeFirst();
@@ -419,7 +487,37 @@ export async function deleteHoliday(deps: ApiDeps, actor: Actor, orgId: string, 
     requireHolidayScope(grant, h.branchIds);
     await trx.deleteFrom('holidays').where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'holiday.deleted', 'holiday', { entityId: id, oldValue: toHolidayDto(h) });
-    await holidayRecalc(deps, trx, actor, orgId, { date: isoDate(h.date), endDate: isoDateOrNull(h.endDate), branchIds: h.branchIds }, `holiday ${h.name} removed`);
+    const recalc = await holidayRecalc(deps, trx, actor, orgId, { date: isoDate(h.date), endDate: isoDateOrNull(h.endDate), branchIds: h.branchIds }, `holiday ${h.name} removed`);
+    return { recalculationJobId: recalc?.jobId ?? null };
+  });
+}
+
+export interface HolidayYearCopyDto {
+  calendarId: string; fromYear: number; toYear: number;
+  created: HolidayDto[];
+  /** NOT_RECURRING: left out (moves every year; copy with `includeNonRecurring`). ALREADY_THERE: the target year has it. */
+  skipped: Array<{ sourceId: string; name: string; date: string; reason: 'NOT_RECURRING' | 'ALREADY_THERE' }>;
+  recalculationJobId: string | null;
+}
+/**
+ * "Copy to year" (holidayCopyYearSchema): the holidays of `fromYear` in the calendar to `toYear` (default the next year) —
+ * recurring ones on the same day and month, the others with `includeNonRecurring` as tentative placeholders; dates the target year
+ * already has are skipped (packages/database copyCalendarYear, the rollover's copy). A calendar year concerns every branch the
+ * calendar serves, so like an organisation-wide holiday it needs every branch. Past dates copied (a year in the past) recompute.
+ */
+export async function copyHolidayYear(deps: ApiDeps, actor: Actor, orgId: string, calendarId: string, input: HolidayCopyYearInput): Promise<HolidayYearCopyDto> {
+  const grant = requirePermission(actor.principal, orgId, 'holiday.manage');
+  if (!grant.allBranches) throw errors.forbidden('Copying a calendar year needs access to every branch.');
+  const toYear = input.toYear ?? input.fromYear + 1;
+  return runUser(deps.db, actor, async (trx) => {
+    const cal = await trx.selectFrom('holidayCalendars').select(['id', 'name']).where('organizationId', '=', orgId).where('id', '=', calendarId).executeTakeFirst();
+    if (!cal) throw errors.notFound('Holiday calendar', calendarId);
+    const res = await copyCalendarYear(trx, { organizationId: orgId, calendarId, fromYear: input.fromYear, toYear, includeNonRecurring: input.includeNonRecurring });
+    const created = res.created.map(toHolidayDto);
+    await audit(trx, actor, orgId, 'holiday_calendar.year_copied', 'holiday_calendar', { entityId: calendarId, newValue: { fromYear: input.fromYear, toYear, includeNonRecurring: input.includeNonRecurring, created: created.map((h) => ({ id: h.id, name: h.name, date: h.date })), skipped: res.skipped } });
+    let first: RecalcRef = null;
+    for (const h of created) { const r = await holidayRecalc(deps, trx, actor, orgId, h, `holidays of ${input.fromYear} copied to ${toYear} (${cal.name})`); first ??= r; }
+    return { calendarId, fromYear: input.fromYear, toYear, created, skipped: res.skipped, recalculationJobId: first?.jobId ?? null };
   });
 }
 
@@ -444,7 +542,7 @@ export interface RuleSetDto extends Record<string, unknown> {
   specificity: number;
   version: number; createdAt: string; updatedAt: string;
 }
-const RULE_KEYS = ['graceInMinutes', 'graceOutMinutes', 'lateThresholdMinutes', 'earlyDepartureThresholdMinutes', 'minFullDayMinutes', 'halfDayThresholdMinutes', 'overtimeEnabled', 'overtimeStartAfterMinutes', 'overtimeMinBlockMinutes', 'overtimeRoundingMinutes', 'overtimeMaxMinutesPerDay', 'countEarlyInAsOvertime', 'overtimeRequiresScheduledHours', 'punchRoundingMinutes', 'punchRoundingMode', 'workedRoundingMinutes', 'workedRoundingMode', 'punchInterpretation', 'duplicatePunchWindowSeconds', 'missingPunchBehavior', 'autoAbsentWithoutPunches', 'weeklyOffWorkCountsAsOvertime', 'holidayWorkCountsAsOvertime', 'ramadanMode'] as const;
+const RULE_KEYS = ['graceInMinutes', 'graceOutMinutes', 'graceMode', 'lateThresholdMinutes', 'earlyDepartureThresholdMinutes', 'minFullDayMinutes', 'halfDayThresholdMinutes', 'overtimeEnabled', 'overtimeStartAfterMinutes', 'overtimeMinBlockMinutes', 'overtimeRoundingMinutes', 'overtimeMaxMinutesPerDay', 'countEarlyInAsOvertime', 'overtimeRequiresScheduledHours', 'punchRoundingMinutes', 'punchRoundingMode', 'workedRoundingMinutes', 'workedRoundingMode', 'punchInterpretation', 'duplicatePunchWindowSeconds', 'missingPunchBehavior', 'autoAbsentWithoutPunches', 'weeklyOffWorkCountsAsOvertime', 'holidayWorkCountsAsOvertime', 'ramadanMode', 'specialPeriods'] as const;
 /** The scope dimensions beyond the branch: Enterprise (attendance_policies). Every scope dimension is immutable once created. */
 const ENTERPRISE_SCOPE_KEYS = ['countryCode', 'departmentId', 'employeeGroupId', 'shiftId', 'locationId'] as const;
 const SCOPE_KEYS = ['branchId', ...ENTERPRISE_SCOPE_KEYS] as const;
@@ -456,7 +554,7 @@ function toRuleSetDto(r: RuleSetRow): RuleSetDto {
     effectiveFrom: isoDate(r.effectiveFrom), effectiveTo: isoDateOrNull(r.effectiveTo), policy: policySectionsOf(r.policy), specificity: 0, version: r.version, createdAt: isoDateTime(r.createdAt), updatedAt: isoDateTime(r.updatedAt),
   };
   out.specificity = policySpecificity({ ...out, id: out.id });
-  for (const k of RULE_KEYS) out[k] = k === 'ramadanMode' ? jsonObject(r[k]) : r[k];
+  for (const k of RULE_KEYS) out[k] = k === 'ramadanMode' ? jsonObject(r[k]) : k === 'specialPeriods' ? jsonArray(r[k]) : r[k];
   return out;
 }
 export async function listRuleSets(deps: ApiDeps, actor: Actor, orgId: string, q: { branchId?: string; countryCode?: string; departmentId?: string; employeeGroupId?: string; shiftId?: string; locationId?: string; activeOn?: string; includeExpired: boolean }): Promise<RuleSetDto[]> {
@@ -482,7 +580,7 @@ export async function listRuleSets(deps: ApiDeps, actor: Actor, orgId: string, q
 }
 function ruleSetValues(input: Partial<AttendanceRuleSetInput>): Record<string, unknown> {
   const v: Record<string, unknown> = {};
-  for (const [k, val] of Object.entries(input)) if (val !== undefined) v[k] = k === 'ramadanMode' || k === 'policy' ? JSON.stringify(val) : val;
+  for (const [k, val] of Object.entries(input)) if (val !== undefined) v[k] = k === 'ramadanMode' || k === 'policy' || k === 'specialPeriods' ? JSON.stringify(val) : val;
   return v;
 }
 /** The department, employee group and shift a policy names must be the organisation's own. */
