@@ -128,6 +128,9 @@ function sampleString(s: Json): string {
   if (typeof s['pattern'] === 'string') {
     let re: RegExp | null = null;
     try { re = new RegExp(s['pattern'] as string); } catch { re = null; }
+    // a local time (`HH:mm`) follows the sample's clock like a `time` format, so "end after start" rules hold
+    const time = `${String(8 + (clock % 14)).padStart(2, '0')}:00`;
+    if (re?.test('08:00') && re.test(time) && fits(time)) { clock += 1; return time; }
     const hit = re ? STRING_CANDIDATES.find((c) => re!.test(c) && fits(c)) : undefined;
     if (hit) return hit;
   }
