@@ -6,7 +6,8 @@
   "flags": {
     "LATE": "تأخير", "EARLY_DEPARTURE": "خروج مبكر", "OVERTIME": "عمل إضافي", "MISSING_IN": "دخول مفقود", "MISSING_OUT": "خروج مفقود", "MANUAL_CORRECTION": "مُصحَّح", "OUT_OF_WINDOW": "خارج النافذة",
     "WORKED_ON_HOLIDAY": "عمل في عطلة", "WORKED_ON_WEEKLY_OFF": "عمل في الراحة الأسبوعية", "HALF_DAY_LEAVE": "إجازة نصف يوم", "DUPLICATE_PUNCHES_COLLAPSED": "بصمات مكررة مدمجة", "RAMADAN_HOURS": "ساعات رمضان", "CROSS_MIDNIGHT": "عبر منتصف الليل", "NO_SHIFT": "بدون وردية", "UNDER_HOURS": "ساعات أقل",
-    "UNEXCUSED": "غير مبرر", "EXCUSED": "مبرر", "LOP": "خصم من الراتب", "PAY_EFFECT_HALF": "أثر مالي نصف يوم", "PAY_EFFECT_FULL": "أثر مالي يوم كامل", "OUTSIDE_GEOFENCE": "خارج النطاق الجغرافي", "SELF_SERVICE_PUNCH": "بصمة ذاتية", "NON_WORKING_DAY_WORK": "عمل في يوم غير عمل"
+    "UNEXCUSED": "غير مبرر", "EXCUSED": "مبرر", "LOP": "خصم من الراتب", "PAY_EFFECT_HALF": "أثر مالي نصف يوم", "PAY_EFFECT_FULL": "أثر مالي يوم كامل", "OUTSIDE_GEOFENCE": "خارج النطاق الجغرافي", "SELF_SERVICE_PUNCH": "بصمة ذاتية", "NON_WORKING_DAY_WORK": "عمل في يوم غير عمل",
+    "SPECIAL_HOURS": "ساعات معتمدة"
   },
   "correctionStatus": { "PENDING": "قيد الانتظار", "APPROVED": "معتمد", "APPLIED": "مطبَّق", "REJECTED": "مرفوض", "CANCELLED": "ملغى" },
   "correctionType": { "ADD_PUNCH": "إضافة بصمة", "EDIT_PUNCH": "تعديل بصمة", "REMOVE_PUNCH": "إزالة بصمة", "SET_STATUS": "تعيين الحالة" },

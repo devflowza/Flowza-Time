@@ -1,28 +1,37 @@
 import { useMemo, useState } from 'react';
 import { useTranslation } from 'react-i18next';
-import { useSearchParams } from 'react-router';
-import { AlertTriangle, CalendarOff, CalendarPlus, Pencil, Plus, Star, Trash2 } from 'lucide-react';
+import { useNavigate, useSearchParams } from 'react-router';
+import { AlertTriangle, CalendarOff, CalendarPlus, Copy, Pencil, Plus, Repeat, Star, Trash2 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, CardHeader, CardTitle, ConfirmDialog, EmptyState, ErrorState, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@/components/ui';
 import { fmtDate, todayIso } from '@/lib/format';
-import { toast, toastError } from '@/lib/toast';
+import { toastError } from '@/lib/toast';
 import { cn } from '@/lib/utils';
-import { useCan, useOrgTimezone } from '@/features/me/use-me';
+import { useActiveMembership, useCan, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { RowActions } from '@/features/organization/components/row-actions';
 import { useHolidayCalendars, useHolidayMutations, useHolidays } from '../api';
 import type { HolidayCalendarDto, HolidayDto } from '../types';
-import { CalendarDialog, HolidayDialog } from '../components/holiday-dialogs';
+import { CalendarDialog, CopyYearDialog, HolidayDialog } from '../components/holiday-dialogs';
+import { toastHolidaySaved } from '../holiday-toast';
 
 const TYPE_TONE: Record<string, 'info' | 'secondary' | 'success' | 'warning'> = { PUBLIC: 'info', RELIGIOUS: 'success', COMPANY: 'secondary', REGIONAL: 'warning' };
 
-/** /holidays?calendarId=&year= — calendars on the left, the selected calendar's holidays grouped by month on the right. */
+/**
+ * /holidays?calendarId=&year= — calendars on the left, the selected calendar's holidays grouped by month on the right. "Copy to
+ * <next year>" repeats the year's recurring holidays (members with every branch: the copy concerns every branch the calendar
+ * serves); every change that recalculates past days says so in its toast.
+ */
 export default function HolidaysPage() {
   const { t } = useTranslation('schedule');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
   const can = useCan();
   const canManage = can('holiday.manage');
+  const navigate = useNavigate();
+  const allBranches = useActiveMembership()?.allBranches ?? true;
+  const recalcLabels = { description: t('holidays.recalcQueued'), view: t('holidays.viewRecalc') };
+  const calendarRecalcLabels = { description: t('holidays.calendarRecalcQueued'), view: t('holidays.viewRecalc') };
   const branches = useBranchOptions();
   const [params, setParams] = useSearchParams();
   const thisYear = Number(todayIso(tz).slice(0, 4));
@@ -36,13 +45,15 @@ export default function HolidaysPage() {
   const [holDialog, setHolDialog] = useState<{ open: boolean; holiday: HolidayDto | null; calendarId: string | null }>({ open: false, holiday: null, calendarId: null });
   const [deletingCal, setDeletingCal] = useState<HolidayCalendarDto | null>(null);
   const [deletingHol, setDeletingHol] = useState<HolidayDto | null>(null);
+  const [copyOpen, setCopyOpen] = useState(false);
   const setParam = (k: string, v: string) => setParams((p) => { const n = new URLSearchParams(p); n.set(k, v); return n; });
   const groups = useMemo(() => {
     const map = new Map<string, HolidayDto[]>();
     for (const h of holidays.data ?? []) { const k = h.date.slice(0, 7); map.set(k, [...(map.get(k) ?? []), h]); }
     return [...map.entries()].sort(([a], [b]) => a.localeCompare(b));
   }, [holidays.data]);
-  const years = [thisYear + 1, thisYear, thisYear - 1];
+  // the year on screen is always offered (a copy to a later year opens it)
+  const years = [...new Set([year, thisYear + 1, thisYear, thisYear - 1])].sort((a, b) => b - a);
   const selected = calendars.data?.find((c) => c.id === calendarId) ?? null;
   const today = todayIso(tz);
 
@@ -78,13 +89,14 @@ export default function HolidaysPage() {
               <SelectContent>{years.map((y) => <SelectItem key={y} value={String(y)}>{y}</SelectItem>)}</SelectContent>
             </Select>
             {selected ? <p className="text-sm text-muted-foreground">{selected.name}</p> : null}
-            {canManage && calendarId ? <Button size="sm" className="ms-auto" onClick={() => setHolDialog({ open: true, holiday: null, calendarId })}><Plus /> {t('holidays.add')}</Button> : null}
+            {canManage && allBranches && selected ? <Button size="sm" variant="outline" className="ms-auto" onClick={() => setCopyOpen(true)}><Copy /> {t('holidays.copyYear', { year: year + 1 })}</Button> : null}
+            {canManage && calendarId ? <Button size="sm" className={cn(!(allBranches && selected) && 'ms-auto')} onClick={() => setHolDialog({ open: true, holiday: null, calendarId })}><Plus /> {t('holidays.add')}</Button> : null}
           </div>
           {selected && !selected.isDefault && selected.branchCount === 0 ? (
             <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-300 bg-amber-50 px-3 py-2 text-sm text-amber-900 dark:border-amber-700 dark:bg-amber-950/40 dark:text-amber-200" role="status" data-testid="calendar-unused">
               <AlertTriangle className="size-4 shrink-0" aria-hidden />
               <p className="min-w-0 flex-1">{t('holidays.appliesToNobody')}</p>
-              {canManage ? <Button size="sm" variant="outline" loading={updateCalendar.isPending} onClick={() => updateCalendar.mutate({ id: selected.id, input: { isDefault: true } }, { onSuccess: () => toast.success(t('holidays.madeDefault')), onError: toastError })}><Star /> {t('holidays.makeDefault')}</Button> : null}
+              {canManage ? <Button size="sm" variant="outline" loading={updateCalendar.isPending} onClick={() => updateCalendar.mutate({ id: selected.id, input: { isDefault: true } }, { onSuccess: (res) => toastHolidaySaved(t('holidays.madeDefault'), res.recalculationJobId, navigate, calendarRecalcLabels), onError: toastError })}><Star /> {t('holidays.makeDefault')}</Button> : null}
             </div>
           ) : null}
           {!calendarId ? <EmptyState icon={CalendarOff} title={t('holidays.selectCalendar')} />
@@ -101,7 +113,7 @@ export default function HolidaysPage() {
                         <div key={h.id} className={cn('flex items-center gap-3 px-5 py-2.5', h.date < today && 'text-muted-foreground')}>
                           <div className="w-14 shrink-0 text-center"><p className="text-lg font-semibold leading-none tnum">{h.date.slice(8, 10)}</p><p className="text-[10px] uppercase text-muted-foreground">{fmtDate(h.date, 'ccc')}</p></div>
                           <div className="min-w-0 flex-1">
-                            <p className="flex flex-wrap items-center gap-2 text-sm font-medium"><span className="truncate">{h.name}</span>{h.nameAr ? <span className="text-xs font-normal text-muted-foreground" dir="rtl">{h.nameAr}</span> : null}{h.isTentative ? <Badge variant="warning">{t('holidays.tentative')}</Badge> : null}{h.isHalfDay ? <Badge variant="outline">{t('holidays.halfDay')}</Badge> : null}</p>
+                            <p className="flex flex-wrap items-center gap-2 text-sm font-medium"><span className="truncate">{h.name}</span>{h.nameAr ? <span className="text-xs font-normal text-muted-foreground" dir="rtl">{h.nameAr}</span> : null}{h.isTentative ? <Badge variant="warning">{t('holidays.tentative')}</Badge> : null}{h.recursYearly ? <Badge variant="secondary" className="gap-1"><Repeat className="size-3" aria-hidden />{t('holidays.recurringBadge')}</Badge> : null}{h.isHalfDay ? <Badge variant="outline">{t('holidays.halfDay')}</Badge> : null}</p>
                             <p className="text-xs text-muted-foreground">{h.endDate && h.endDate !== h.date ? <span className="tnum">{fmtDate(h.date)} → {fmtDate(h.endDate)} · </span> : null}<Badge variant={TYPE_TONE[h.type] ?? 'secondary'} className="me-1">{t(`holidays.types.${h.type}`, { defaultValue: h.type })}</Badge>{h.branchIds && h.branchIds.length ? h.branchIds.map((b) => branches.byId.get(b)?.name ?? b.slice(0, 8)).join(', ') : t('holidays.allBranches')}</p>
                           </div>
                           {canManage ? <RowActions actions={[{ key: 'edit', label: tc('common.edit'), icon: <Pencil />, onSelect: () => setHolDialog({ open: true, holiday: h, calendarId: h.calendarId }) }, { key: 'delete', label: tc('common.delete'), icon: <Trash2 />, destructive: true, onSelect: () => setDeletingHol(h) }]} /> : null}
@@ -118,9 +130,10 @@ export default function HolidaysPage() {
       <HolidayDialog key={`${holDialog.open}-${holDialog.holiday?.id ?? 'new'}-${holDialog.calendarId ?? 'default'}`} open={holDialog.open} onOpenChange={(o) => setHolDialog((d) => ({ ...d, open: o }))} calendarId={holDialog.calendarId} holiday={holDialog.holiday}
         onCreated={(h) => { if (h.calendarId !== calendarId || h.date.slice(0, 4) !== String(year)) setParams((p) => { const n = new URLSearchParams(p); n.set('calendarId', h.calendarId); n.set('year', h.date.slice(0, 4)); return n; }); }} />
       <ConfirmDialog open={!!deletingCal} onOpenChange={(o) => !o && setDeletingCal(null)} title={t('holidays.deleteCalendarTitle', { name: deletingCal?.name ?? '' })} description={t('holidays.deleteCalendarHint')} confirmLabel={tc('common.delete')} destructive loading={removeCalendar.isPending}
-        onConfirm={() => { if (!deletingCal) return; removeCalendar.mutate(deletingCal.id, { onSuccess: () => { toast.success(t('holidays.calendarDeleted')); setDeletingCal(null); if (deletingCal.id === calendarId) setParams((p) => { const n = new URLSearchParams(p); n.delete('calendarId'); return n; }); }, onError: toastError }); }} />
+        onConfirm={() => { if (!deletingCal) return; removeCalendar.mutate(deletingCal.id, { onSuccess: (res) => { toastHolidaySaved(t('holidays.calendarDeleted'), res.recalculationJobId, navigate, calendarRecalcLabels); setDeletingCal(null); if (deletingCal.id === calendarId) setParams((p) => { const n = new URLSearchParams(p); n.delete('calendarId'); return n; }); }, onError: toastError }); }} />
       <ConfirmDialog open={!!deletingHol} onOpenChange={(o) => !o && setDeletingHol(null)} title={t('holidays.deleteTitle', { name: deletingHol?.name ?? '' })} description={t('holidays.deleteHint')} confirmLabel={tc('common.delete')} destructive loading={removeHoliday.isPending}
-        onConfirm={() => { if (!deletingHol) return; removeHoliday.mutate(deletingHol.id, { onSuccess: () => { toast.success(t('holidays.deleted')); setDeletingHol(null); }, onError: toastError }); }} />
+        onConfirm={() => { if (!deletingHol) return; removeHoliday.mutate(deletingHol.id, { onSuccess: (res) => { toastHolidaySaved(t('holidays.deleted'), res.recalculationJobId, navigate, recalcLabels); setDeletingHol(null); }, onError: toastError }); }} />
+      {selected ? <CopyYearDialog key={`${copyOpen}-${selected.id}-${year}`} open={copyOpen} onOpenChange={setCopyOpen} calendar={selected} fromYear={year} onCopied={(toYear) => setParam('year', String(toYear))} /> : null}
     </div>
   );
 }

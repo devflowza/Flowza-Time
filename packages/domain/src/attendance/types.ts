@@ -18,6 +18,11 @@ export interface EngineShift {
   graceInMinutes: number | null;  // overrides rule set when set
   graceOutMinutes: number | null;
   /**
+   * FIXED only (engine 1.5.0): a flexible start band of this many minutes after the start — the employee may start anywhere in
+   * it without being late and the expected end moves with the start. Absent / 0 = a plain fixed shift.
+   */
+  flexStartMinutes?: number;
+  /**
    * A double shift (engine 1.4.0, composeDoubleShift): the shifts this composite day is made of, in time order. Absent for an
    * ordinary shift. The engine flags DOUBLE_SHIFT; the schedule itself is the composite's start / end / breaks.
    */
@@ -101,6 +106,8 @@ export interface DailyCalculationInput {
   employment: { joiningDate: string; exitDate: string | null; status: 'active' | 'on_leave' | 'suspended' | 'terminated' | 'resigned' };
   /** Employee is subject to Ramadan hours (rules.ramadanMode decides). */
   ramadanEligible?: boolean;
+  /** Employee is flagged for approved working-hours periods limited to flagged employees (rules.specialPeriods, engine 1.5.0). */
+  specialHoursEligible?: boolean;
   /** Active day marks for the date (see EngineDayMark); absent = none. */
   dayMarks?: EngineDayMark[];
   /** Organisation policy switches; absent = the contract defaults (non-working-day work is recorded). */
@@ -185,5 +192,10 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * DOUBLE_SHIFT for a composite day of two shifts (composeDoubleShift). Nothing changes for a day without either.
  * 1.5.0 — Work on a weekly off / full holiday at any hour: a punch on that calendar day that no punch window claims (the off
  * day keeps its shift's window) is attributed to the off day instead of being dropped as out of window. Working days unchanged.
+ * Also 1.5.0 — working-hours policies: a FIXED shift's flexible start band (`flexStartMinutes`: start anywhere in the band, the
+ * expected end moves with the start, late counts from the band's end); the rule set's grace mode (`graceMode`: `deduct` as before,
+ * or `tolerance` — within the grace nothing, beyond it every minute from the scheduled time; a flexible check-out keeps its 1.3.0
+ * tolerance in both); approved working-hours periods (`specialPeriods`: other start / end / scheduled minutes for a date range,
+ * flag SPECIAL_HOURS, taking precedence over Ramadan hours). With a band of 0, the `deduct` mode and no period nothing changes.
  */
 export const ENGINE_VERSION = 'attendance-engine/1.5.0';

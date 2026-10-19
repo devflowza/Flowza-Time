@@ -19,7 +19,8 @@
     "graceIn": "Grace in (min)", "graceOut": "Grace out (min)", "graceHint": "Replaces the rule set's grace for this shift.", "graceOffHint": "Off: the attendance rule set's grace applies.", "graceInTitle": "Custom grace in", "graceOutTitle": "Custom grace out", "minutesNeeded": "Enter the minutes, or switch this off.",
     "punchInTitle": "Custom punch-in window", "punchInOffHint": "Off: punches are accepted from {{minutes}} min before the shift (platform default).", "punchOutTitle": "Custom punch-out window", "punchOutOffHint": "Off: punches are accepted until {{minutes}} min after the shift (platform default).",
     "breaksOnHint": "Paid breaks count as worked time; unpaid breaks are taken off it.", "breaksOffHint": "Off: no breaks — the whole span counts as worked time.", "colorOnHint": "Shown next to the shift on the roster and in lists.", "colorOffHint": "Off: the shift uses the neutral colour.", "colorCode": "Colour code",
-    "color": "Colour", "hours": "Hours", "crossesMidnight": "Ends the next day", "required": "{{value}} required", "assignments": "Assignments"
+    "color": "Colour", "hours": "Hours", "crossesMidnight": "Ends the next day", "required": "{{value}} required", "assignments": "Assignments",
+    "flexStartTitle": "Flexible start", "flexStartHint": "People may start any time in the band without being late; the expected end moves with the start, so the day keeps its length. Lateness counts from the end of the band.", "flexStartOffHint": "Off: lateness counts from the start time.", "flexStartMinutes": "Start up to (min after the start time)", "flexStartExample": "Start between {{from}} and {{until}}; starting at {{until}} → expected end {{out}}."
   },
   "patterns": {
     "hint": "Rotational patterns repeat a cycle of shifts and off days from an anchor date (e.g. 4 days on / 2 off).", "add": "Add pattern", "edit": "Edit pattern", "dialogHint": "Pick a shift or Off for every day of the cycle. Day 1 falls on the anchor date.",
@@ -52,7 +53,8 @@
       "rounding": "Rounding", "roundingHint": "Round individual punches and/or the worked total.",
       "punches": "Punch interpretation", "punchesHint": "How raw punches are paired into IN/OUT and de-duplicated.",
       "missing": "Missing punch", "missingHint": "What happens when only one punch exists for the day.",
-      "ramadan": "Ramadan", "ramadanHint": "Reduced scheduled hours for a date range."
+      "ramadan": "Ramadan", "ramadanHint": "Reduced scheduled hours for a date range. Approved working hours take precedence on the days both cover.",
+      "specialHours": "Approved working hours", "specialHoursHint": "Working hours set by a circular or decision for a date range (summer hours, national events…). On those days they replace the shift hours and take precedence over Ramadan hours; the day is marked “Approved hours”."
     },
     "fields": {
       "graceInMinutes": "Grace in (min)", "graceOutMinutes": "Grace out (min)", "lateThresholdMinutes": "Late threshold (min)", "earlyDepartureThresholdMinutes": "Early departure threshold (min)", "minFullDayMinutes": "Full day (min)", "halfDayThresholdMinutes": "Half day (min)",
@@ -60,14 +62,23 @@
       "countEarlyInAsOvertime": "Early arrival counts as OT", "overtimeRequiresScheduledHours": "OT only beyond the scheduled hours", "weeklyOffWorkCountsAsOvertime": "Weekly-off work is OT", "holidayWorkCountsAsOvertime": "Holiday work is OT",
       "punchRoundingMinutes": "Punch rounding", "punchRoundingMode": "Punch rounding mode", "workedRoundingMinutes": "Worked-time rounding", "workedRoundingMode": "Worked-time rounding mode",
       "punchInterpretation": "Interpretation", "duplicatePunchWindowSeconds": "Duplicate window (s)", "missingPunchBehavior": "Behaviour", "autoAbsentWithoutPunches": "Auto-absent without punches",
-      "ramadanEnabled": "Enable Ramadan hours", "ramadanMinutes": "Scheduled minutes", "ramadanAppliesTo": "Applies to"
+      "ramadanEnabled": "Enable Ramadan hours", "ramadanMinutes": "Scheduled minutes", "ramadanAppliesTo": "Applies to", "graceMode": "Grace margin"
     },
     "hints": {
       "lateThresholdMinutes": "Lateness beyond this is flagged (0 = any).", "minFullDayMinutes": "Worked minutes needed for a full day.", "halfDayThresholdMinutes": "Below full day but at least this = half day.",
       "overtimeEnabled": "Turn off to never compute overtime.", "overtimeStartAfterMinutes": "Minutes past the shift end before OT counts.", "overtimeMinBlockMinutes": "OT below this is discarded.", "overtimeMaxMinutesPerDay": "Empty = no cap.",
       "countEarlyInAsOvertime": "Minutes before the shift start count as OT.", "overtimeRequiresScheduledHours": "On: a late arrival who makes up the time after the shift end earns no OT. Off: every minute worked after the shift end is OT.", "weeklyOffWorkCountsAsOvertime": "All worked minutes on a weekly off day are OT.", "holidayWorkCountsAsOvertime": "All worked minutes on a holiday are OT.",
       "punchInterpretation": "FIRST_LAST: first punch IN, last OUT. PAIRED: alternate IN/OUT. DIRECTIONAL: trust the device direction.", "duplicatePunchWindowSeconds": "Punches closer than this are collapsed.",
-      "autoAbsentWithoutPunches": "Mark employees with no punches absent after the shift ends.", "ramadanMinutes": "Scheduled minutes per day during Ramadan (60–600)."
+      "autoAbsentWithoutPunches": "Mark employees with no punches absent after the shift ends.", "ramadanMinutes": "Scheduled minutes per day during Ramadan (60–600).",
+      "graceMode": "Deduct: 10 min grace, 15 min late → 5 min late. Tolerance: within the grace nothing counts; beyond it every minute from the scheduled time counts (15 min late → 15). The same for leaving early. On flexible shifts a check-out short of the required hours is always forgiven within the grace."
+    },
+    "graceModes": { "deduct": "Deduct the grace", "tolerance": "Tolerance (on time within the grace)" },
+    "special": {
+      "add": "Add period", "remove": "Remove period {{n}}", "period": "Period {{n}}", "empty": "No approved periods: the shift hours apply every day.", "badge": "Approved hours ({{count}})",
+      "name": "Name", "reference": "Circular / reference", "from": "First day", "to": "Last day", "startTime": "Start time", "endTime": "End time", "scheduledMinutes": "Scheduled minutes", "appliesTo": "Applies to",
+      "timesHint": "Leave a time empty to keep the shift's own. An end at or before the start is the next day.", "minutesHint": "Minutes to work, 60–900. Without an end time the day ends at start + minutes + unpaid breaks. Flexible shifts: their required minutes.",
+      "flaggedHint": "Flagged employees: those with the custom field specialHoursEligible set.", "audiences": { "all": "All employees", "flagged_employees": "Flagged employees only" },
+      "toBeforeFrom": "The last day cannot be before the first day.", "hoursOrMinutes": "Set the start or end time, the scheduled minutes, or both.", "endIsStart": "The end must differ from the start.", "overlap": "This period overlaps another one.", "tooMany": "At most {{max}} periods."
     },
     "roundingModes": { "NONE": "None", "NEAREST": "Nearest", "UP": "Up", "DOWN": "Down" },
     "interpretations": { "FIRST_LAST": "First / last", "PAIRED": "Paired", "DIRECTIONAL": "Directional" },
@@ -81,7 +92,12 @@
     "add": "Add holiday", "edit": "Edit holiday", "dialogHint": "Past holidays trigger a recalculation of the affected branches.", "created": "Holiday created", "updated": "Holiday updated", "deleted": "Holiday deleted", "deleteTitle": "Delete “{{name}}”?", "deleteHint": "Affected attendance days are recalculated.",
     "empty": "No holidays in {{year}}", "emptyHint": "Add public, religious, company or regional holidays for this calendar.", "endDate": "End date", "endDateHint": "For multi-day holidays.", "type": "Type",
     "types": { "PUBLIC": "Public", "RELIGIOUS": "Religious", "COMPANY": "Company", "REGIONAL": "Regional" }, "halfDay": "Half day", "tentative": "Tentative", "tentativeHint": "(date to be confirmed, e.g. moon sighting)",
-    "allBranches": "All branches", "branchScopeHint": "Turn off to limit this holiday to selected branches.", "addBranch": "Add branch…", "mark": "Mark a holiday", "markDate": "Mark as holiday", "calendar": "Calendar", "newDefaultCalendar": "No calendar yet — a default calendar will be created and applied to every branch without its own.", "defaultCalendarNote": "Added to the default calendar: it applies to every branch without a calendar of its own.", "appliesToNobody": "This calendar applies to nobody: it is not the default and no branch uses it, so its holidays change no attendance. Make it the default, or pick it for a branch under Organisation → Branches.", "makeDefault": "Make default", "madeDefault": "Now the default calendar", "usedBy": "{{count}} branch(es)", "recalcQueued": "Attendance on these days is being recalculated.", "noCalendarsMarkHint": "Mark a holiday to start — a default calendar is created for you. Add more calendars only if branches follow different holidays."
+    "allBranches": "All branches", "branchScopeHint": "Turn off to limit this holiday to selected branches.", "addBranch": "Add branch…", "mark": "Mark a holiday", "markDate": "Mark as holiday", "calendar": "Calendar", "newDefaultCalendar": "No calendar yet — a default calendar will be created and applied to every branch without its own.", "defaultCalendarNote": "Added to the default calendar: it applies to every branch without a calendar of its own.", "appliesToNobody": "This calendar applies to nobody: it is not the default and no branch uses it, so its holidays change no attendance. Make it the default, or pick it for a branch under Organisation → Branches.", "makeDefault": "Make default", "madeDefault": "Now the default calendar", "usedBy": "{{count}} branch(es)", "recalcQueued": "Attendance on these days is being recalculated.", "noCalendarsMarkHint": "Mark a holiday to start — a default calendar is created for you. Add more calendars only if branches follow different holidays.",
+    "calendarRecalcQueued": "Past holidays of the branches that follow this calendar are being recalculated.", "viewRecalc": "View",
+    "recurring": "Every year", "recurringHint": "(same date every year, e.g. National Day — copied to next year)", "recurringBadge": "Yearly",
+    "autoRollover": "Create next year's recurring holidays", "autoRolloverHint": "From 1 December, every recurring holiday is added to next year once (one you delete there is not added again).",
+    "copyYear": "Copy to {{year}}", "copyTitle": "Copy {{from}} holidays to {{to}}", "copyHint": "Holidays that repeat every year are copied on the same date. Holidays {{to}} already has are skipped.", "copyNonRecurring": "Also copy the other holidays", "copyNonRecurringHint": "Moon-sighted holidays (Eid…) move every year: they are copied on the same date and marked tentative, for you to correct.", "copy": "Copy to {{year}}",
+    "copied": "{{count}} holiday(s) copied to {{year}}", "copiedNone": "Nothing to copy: {{year}} already has these holidays.", "copySkipped": "{{count}} already there"
   },
   "policyEditor": {
     "add": "Add attendance policy",
@@ -105,6 +121,7 @@
       "overtime": "Overtime",
       "discipline": "Discipline",
       "regularisation": "Regularisation",
+      "approvedHours": "Approved hours",
       "ramadan": "Ramadan"
     },
     "sections": {

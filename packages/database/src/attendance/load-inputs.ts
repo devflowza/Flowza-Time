@@ -79,7 +79,8 @@ export interface LoadedDailyInputs {
 /** `time` columns arrive as `HH:mm:ss`; the engine speaks `HH:mm`. */
 const hhmm = (t: string | null): string | null => (t === null ? null : t.slice(0, 5));
 
-export function toEngineShift(row: { id: string; code: string; name: string; type: 'FIXED' | 'FLEXIBLE'; startTime: string | null; endTime: string | null; requiredMinutes: number | null; coreStart: string | null; coreEnd: string | null; dayBoundary: string; breaks: unknown; punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number; graceInMinutes: number | null; graceOutMinutes: number | null }): EngineShift {
+/** `flexStartMinutes` is optional: callers that only compose double shifts (which carry no band) need not select it. */
+export function toEngineShift(row: { id: string; code: string; name: string; type: 'FIXED' | 'FLEXIBLE'; startTime: string | null; endTime: string | null; requiredMinutes: number | null; coreStart: string | null; coreEnd: string | null; dayBoundary: string; breaks: unknown; punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number; graceInMinutes: number | null; graceOutMinutes: number | null; flexStartMinutes?: number | null }): EngineShift {
   const breaks: ShiftBreak[] = [];
   for (const b of asArray(row.breaks)) {
     const parsed = shiftBreakSchema.safeParse(b);
@@ -91,6 +92,7 @@ export function toEngineShift(row: { id: string; code: string; name: string; typ
     coreStart: hhmm(row.coreStart), coreEnd: hhmm(row.coreEnd), dayBoundary: hhmm(row.dayBoundary) ?? '00:00', breaks,
     punchInWindowBeforeMinutes: row.punchInWindowBeforeMinutes, punchOutWindowAfterMinutes: row.punchOutWindowAfterMinutes,
     graceInMinutes: row.graceInMinutes, graceOutMinutes: row.graceOutMinutes,
+    ...(row.type === 'FIXED' && row.flexStartMinutes ? { flexStartMinutes: row.flexStartMinutes } : {}),
   };
 }
 
@@ -140,7 +142,7 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
   const additionalOn = (d: string): string | null => additionalShiftOn(additional, d)?.shiftId ?? null;
   const shiftIds = [...new Set([effectiveShiftId(resolved), effectiveShiftId(resolvedPrev), effectiveShiftId(resolvedNext), additionalOn(addDays(date, -1)), additionalOn(date), additionalOn(addDays(date, 1))].filter((s): s is string => s !== null))];
   const shiftRows = shiftIds.length
-    ? await trx.selectFrom('shifts').select(['id', 'code', 'name', 'type', 'startTime', 'endTime', 'requiredMinutes', 'coreStart', 'coreEnd', 'dayBoundary', 'breaks', 'punchInWindowBeforeMinutes', 'punchOutWindowAfterMinutes', 'graceInMinutes', 'graceOutMinutes'])
+    ? await trx.selectFrom('shifts').select(['id', 'code', 'name', 'type', 'startTime', 'endTime', 'requiredMinutes', 'coreStart', 'coreEnd', 'dayBoundary', 'breaks', 'punchInWindowBeforeMinutes', 'punchOutWindowAfterMinutes', 'graceInMinutes', 'graceOutMinutes', 'flexStartMinutes'])
       .where('organizationId', '=', organizationId).where('id', 'in', shiftIds).execute()
     : [];
   const shifts = new Map(shiftRows.map((s) => [s.id, toEngineShift(s)]));
@@ -215,6 +217,8 @@ export async function loadDailyInputs(trx: Trx, organizationId: string, employee
     events,
     employment: { joiningDate: isoDate(employee.joiningDate), exitDate: employee.exitDate === null ? null : isoDate(employee.exitDate), status: today.status },
     ramadanEligible: asObject(employee.customFields)['ramadanEligible'] === true,
+    // approved working-hours periods limited to flagged employees (engine 1.5.0): the custom field `specialHoursEligible`
+    specialHoursEligible: asObject(employee.customFields)['specialHoursEligible'] === true,
     dayMarks,
     settings: { nonWorkingDay: settings.nonWorkingDay },
     now: now.toISOString(),

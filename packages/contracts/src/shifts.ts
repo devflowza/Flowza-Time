@@ -26,6 +26,13 @@ export const shiftInputSchema = z.object({
   punchOutWindowAfterMinutes: z.number().int().min(0).max(720).default(DEFAULT_PUNCH_OUT_WINDOW_MINUTES),
   graceInMinutes: z.number().int().min(0).max(240).nullable().optional(),
   graceOutMinutes: z.number().int().min(0).max(240).nullable().optional(),
+  /**
+   * FIXED only — a flexible start band (engine 1.5.0): the employee may start any time from the shift start to this many
+   * minutes after it without being late, and the expected end moves by the same amount (07:00–14:00 with 120: arrive 08:30 →
+   * expected end 15:30). Late counts from the end of the band (plus the grace). 0 = a plain fixed shift; a FLEXIBLE shift
+   * always stores 0.
+   */
+  flexStartMinutes: z.number().int().min(0).max(240).default(0),
   /** `null` clears the colour on PATCH (the shift is shown in the neutral colour). */
   color: z.string().regex(/^#[0-9a-fA-F]{6}$/).nullable().optional(),
   status: z.enum(RECORD_STATUSES).default('active'),
@@ -77,6 +84,11 @@ export const holidayInputSchema = z.object({
   type: z.enum(HOLIDAY_TYPES).default('PUBLIC'),
   branchIds: z.array(uuidSchema).max(200).nullable().optional(),
   isTentative: z.boolean().default(false),
+  /**
+   * Falls on the same Gregorian date every year (National Day, New Year…): "Copy to next year" and the automatic rollover
+   * (the calendar's `autoRollover`) repeat it. Moon-sighted holidays (Eid…) move every year and are not recurring.
+   */
+  recursYearly: z.boolean().default(false),
 });
 export type HolidayInput = z.infer<typeof holidayInputSchema>;
 
@@ -84,7 +96,25 @@ export const holidayCalendarInputSchema = z.object({
   name: z.string().trim().min(1).max(120),
   countryCode: z.string().length(2).optional(),
   isDefault: z.boolean().default(false),
+  /**
+   * From 1 December (organisation time) next year's recurring holidays are created in this calendar, once a year, unless they
+   * are already there. Off: only "Copy to next year" creates them.
+   */
+  autoRollover: z.boolean().default(true),
 });
+
+/**
+ * "Copy to year": the holidays of `fromYear` in one calendar to `toYear` (default the next year). Recurring holidays keep their
+ * day and month; with `includeNonRecurring` the others are copied too, on the same day and month but marked tentative (their
+ * date moves, e.g. moon-sighted holidays — confirm it). A holiday is skipped when the target year already has one on that date
+ * for the same branches.
+ */
+export const holidayCopyYearSchema = z.object({
+  fromYear: z.number().int().min(2000).max(2099),
+  toYear: z.number().int().min(2000).max(2100).optional(),
+  includeNonRecurring: z.boolean().default(false),
+}).refine((v) => v.toYear === undefined || v.toYear !== v.fromYear, { message: 'Pick another year to copy to', path: ['toYear'] });
+export type HolidayCopyYearInput = z.infer<typeof holidayCopyYearSchema>;
 
 export const leaveTypeInputSchema = z.object({
   code: codeSchema,

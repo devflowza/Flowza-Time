@@ -1,33 +1,40 @@
-import { useMemo } from 'react';
+import { useMemo, useState } from 'react';
 import { Controller, useForm, useWatch } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router';
 import type { z } from 'zod';
 import { HOLIDAY_TYPES, holidayCalendarInputSchema, holidayInputSchema, type HolidayInput } from '@flowza/contracts';
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Label, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { todayIso } from '@/lib/format';
-import { toast, toastError } from '@/lib/toast';
+import { toastError } from '@/lib/toast';
 import { useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions } from '@/features/organization/lookups';
 import { blankToUndefined } from '@/features/organization/form-utils';
 import { useHolidayCalendars, useHolidayMutations, type HolidayCalendarInput } from '../api';
+import { toastHolidaySaved } from '../holiday-toast';
 import type { HolidayCalendarDto, HolidayDto } from '../types';
 
 type CalendarValues = z.input<typeof holidayCalendarInputSchema>;
 type HolidayValues = z.input<typeof holidayInputSchema>;
 
-/** `first` = the organisation has no calendar yet: the new one starts as the default (the API makes the first calendar the default anyway). */
+/**
+ * `first` = the organisation has no calendar yet: the new one starts as the default (the API makes the first calendar the default
+ * anyway). `autoRollover` creates next year's recurring holidays from 1 December. Switching the default recalculates the past
+ * days of the branches that follow it (the toast says so).
+ */
 export function CalendarDialog({ open, onOpenChange, calendar, first = false }: { open: boolean; onOpenChange: (o: boolean) => void; calendar: HolidayCalendarDto | null; first?: boolean }) {
   const { t } = useTranslation('schedule');
   const { t: tc } = useTranslation();
+  const navigate = useNavigate();
   const { createCalendar, updateCalendar } = useHolidayMutations();
-  const form = useForm<CalendarValues, unknown, HolidayCalendarInput>({ resolver: zodResolver(holidayCalendarInputSchema), defaultValues: calendar ? { name: calendar.name, countryCode: calendar.countryCode ?? undefined, isDefault: calendar.isDefault } : { name: '', countryCode: 'OM', isDefault: first } });
+  const form = useForm<CalendarValues, unknown, HolidayCalendarInput>({ resolver: zodResolver(holidayCalendarInputSchema), defaultValues: calendar ? { name: calendar.name, countryCode: calendar.countryCode ?? undefined, isDefault: calendar.isDefault, autoRollover: calendar.autoRollover ?? true } : { name: '', countryCode: 'OM', isDefault: first, autoRollover: true } });
   const { register, control, formState: { errors, isSubmitting } } = form;
   const onSubmit = form.handleSubmit(async (v) => {
     try {
-      if (calendar) { await updateCalendar.mutateAsync({ id: calendar.id, input: v }); toast.success(t('holidays.calendarUpdated')); }
-      else { await createCalendar.mutateAsync(v); toast.success(t('holidays.calendarCreated')); }
+      const res = calendar ? await updateCalendar.mutateAsync({ id: calendar.id, input: v }) : await createCalendar.mutateAsync(v);
+      toastHolidaySaved(calendar ? t('holidays.calendarUpdated') : t('holidays.calendarCreated'), res.recalculationJobId, navigate, { description: t('holidays.calendarRecalcQueued'), view: t('holidays.viewRecalc') });
       onOpenChange(false);
     } catch (e) { toastError(e); }
   });
@@ -40,6 +47,9 @@ export function CalendarDialog({ open, onOpenChange, calendar, first = false }: 
           <FormField label={t('holidays.countryCode')} htmlFor="cal-country" optional hint={t('holidays.countryCodeHint')} error={errors.countryCode?.message}><Input id="cal-country" dir="ltr" maxLength={2} className="uppercase sm:w-32" {...register('countryCode', { setValueAs: blankToUndefined })} aria-invalid={!!errors.countryCode} /></FormField>
           <Controller control={control} name="isDefault" render={({ field }) => (
             <div className="flex items-center justify-between gap-4 rounded-md border p-3"><div><Label htmlFor="cal-default">{t('holidays.isDefault')}</Label><p className="text-xs text-muted-foreground">{t('holidays.isDefaultHint')}</p></div><Switch id="cal-default" checked={!!field.value} onCheckedChange={field.onChange} /></div>
+          )} />
+          <Controller control={control} name="autoRollover" render={({ field }) => (
+            <div className="flex items-center justify-between gap-4 rounded-md border p-3"><div><Label htmlFor="cal-rollover">{t('holidays.autoRollover')}</Label><p className="text-xs text-muted-foreground">{t('holidays.autoRolloverHint')}</p></div><Switch id="cal-rollover" checked={field.value !== false} onCheckedChange={field.onChange} /></div>
           )} />
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{tc('common.cancel')}</Button>
@@ -55,13 +65,15 @@ export function CalendarDialog({ open, onOpenChange, calendar, first = false }: 
  * Add / edit a holiday (holidayInputSchema): date or range, half day, type, tentative flag and optional branch scope.
  * `calendarId` null = "mark a holiday" from anywhere (the attendance day view, an empty Holidays page): the organisation's calendars
  * are offered with the default preselected, and with none the API creates the default calendar on the spot — marking a holiday
- * never needs a calendar set up first. `presetDate` opens the form on that day. `onCreated` hears about a new holiday.
+ * never needs a calendar set up first. `presetDate` opens the form on that day. `onCreated` hears about a new holiday. A holiday
+ * on a fixed date every year is marked recurring (copied to the next year by "Copy to year" and the December rollover).
  */
 export function HolidayDialog({ open, onOpenChange, calendarId, holiday, presetDate, onCreated }: { open: boolean; onOpenChange: (o: boolean) => void; calendarId: string | null; holiday: HolidayDto | null; presetDate?: string; onCreated?: (h: HolidayDto) => void }) {
   const { t } = useTranslation('schedule');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
   const branches = useBranchOptions();
+  const navigate = useNavigate();
   const { createHoliday, updateHoliday } = useHolidayMutations();
   const calendars = useHolidayCalendars(open && !holiday && calendarId === null);
   const pickCalendar = !holiday && calendarId === null;
@@ -73,20 +85,23 @@ export function HolidayDialog({ open, onOpenChange, calendarId, holiday, presetD
   }), [t]);
   const form = useForm<HolidayValues, unknown, HolidayInput>({
     resolver: zodResolver(schema),
-    defaultValues: holiday ? { calendarId: holiday.calendarId, name: holiday.name, nameAr: holiday.nameAr ?? undefined, date: holiday.date, endDate: holiday.endDate, isHalfDay: holiday.isHalfDay, type: holiday.type as HolidayValues['type'], branchIds: holiday.branchIds, isTentative: holiday.isTentative }
-      : { calendarId: calendarId ?? undefined, name: '', date: presetDate ?? todayIso(tz), endDate: null, isHalfDay: false, type: 'PUBLIC', branchIds: null, isTentative: false },
+    defaultValues: holiday ? { calendarId: holiday.calendarId, name: holiday.name, nameAr: holiday.nameAr ?? undefined, date: holiday.date, endDate: holiday.endDate, isHalfDay: holiday.isHalfDay, type: holiday.type as HolidayValues['type'], branchIds: holiday.branchIds, isTentative: holiday.isTentative, recursYearly: holiday.recursYearly ?? false }
+      : { calendarId: calendarId ?? undefined, name: '', date: presetDate ?? todayIso(tz), endDate: null, isHalfDay: false, type: 'PUBLIC', branchIds: null, isTentative: false, recursYearly: false },
   });
   const { register, control, setValue, formState: { errors, isSubmitting } } = form;
   const branchIds = useWatch({ control, name: 'branchIds' });
   const allBranches = branchIds === null || branchIds === undefined;
   const onSubmit = form.handleSubmit(async (v) => {
     try {
-      if (holiday) { await updateHoliday.mutateAsync({ id: holiday.id, input: v }); toast.success(t('holidays.updated')); }
-      else {
+      const labels = { description: t('holidays.recalcQueued'), view: t('holidays.viewRecalc') };
+      if (holiday) {
+        const updated = await updateHoliday.mutateAsync({ id: holiday.id, input: v });
+        toastHolidaySaved(t('holidays.updated'), updated.recalculationJobId, navigate, labels);
+      } else {
         // no calendar picked → the API adds it to the default calendar (created when there is none)
         const input = { ...v, calendarId: v.calendarId ?? (pickCalendar ? defaultCalendarId : undefined) };
         const created = await createHoliday.mutateAsync(input);
-        toast.success(t('holidays.created'), input.date <= todayIso(tz) ? { description: t('holidays.recalcQueued') } : undefined);
+        toastHolidaySaved(t('holidays.created'), created.recalculationJobId, navigate, labels);
         onCreated?.(created);
       }
       onOpenChange(false);
@@ -122,6 +137,7 @@ export function HolidayDialog({ open, onOpenChange, calendarId, holiday, presetD
             <div className="space-y-2 sm:pt-6">
               <Controller control={control} name="isHalfDay" render={({ field }) => <label className="flex items-center gap-2 text-sm"><Switch checked={!!field.value} onCheckedChange={field.onChange} aria-label={t('holidays.halfDay')} /> {t('holidays.halfDay')}</label>} />
               <Controller control={control} name="isTentative" render={({ field }) => <label className="flex items-center gap-2 text-sm"><Switch checked={!!field.value} onCheckedChange={field.onChange} aria-label={t('holidays.tentative')} /> {t('holidays.tentative')} <span className="text-xs text-muted-foreground">{t('holidays.tentativeHint')}</span></label>} />
+              <Controller control={control} name="recursYearly" render={({ field }) => <label className="flex items-center gap-2 text-sm"><Switch checked={!!field.value} onCheckedChange={field.onChange} aria-label={t('holidays.recurring')} /> {t('holidays.recurring')} <span className="text-xs text-muted-foreground">{t('holidays.recurringHint')}</span></label>} />
             </div>
           </div>
           <div className="space-y-2 rounded-md border p-3">
@@ -144,6 +160,45 @@ export function HolidayDialog({ open, onOpenChange, calendarId, holiday, presetD
             <Button type="submit" loading={isSubmitting}>{holiday ? tc('common.save') : tc('common.create')}</Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * "Copy to year": the calendar's holidays of `fromYear` to the next year (POST /holiday-calendars/:id/copy-year). Recurring
+ * holidays keep their date; the others only when asked, as tentative placeholders (moon-sighted holidays move every year).
+ * Dates the next year already has are skipped. `onCopied` hears the target year (the page shows it).
+ */
+export function CopyYearDialog({ open, onOpenChange, calendar, fromYear, onCopied }: { open: boolean; onOpenChange: (o: boolean) => void; calendar: HolidayCalendarDto; fromYear: number; onCopied?: (toYear: number) => void }) {
+  const { t } = useTranslation('schedule');
+  const { t: tc } = useTranslation();
+  const navigate = useNavigate();
+  const { copyYear } = useHolidayMutations();
+  const [includeNonRecurring, setIncludeNonRecurring] = useState(false);
+  const toYear = fromYear + 1;
+  const onCopy = () => copyYear.mutate({ calendarId: calendar.id, input: { fromYear, toYear, includeNonRecurring } }, {
+    onSuccess: (res) => {
+      const skipped = res.skipped.filter((x) => x.reason === 'ALREADY_THERE').length;
+      const title = res.created.length > 0 ? t('holidays.copied', { count: res.created.length, year: res.toYear }) : t('holidays.copiedNone', { year: res.toYear });
+      toastHolidaySaved(skipped > 0 && res.created.length > 0 ? `${title} · ${t('holidays.copySkipped', { count: skipped })}` : title, res.recalculationJobId, navigate, { description: t('holidays.recalcQueued'), view: t('holidays.viewRecalc') });
+      onCopied?.(res.toYear);
+      onOpenChange(false);
+    },
+    onError: toastError,
+  });
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent size="sm">
+        <DialogHeader><DialogTitle>{t('holidays.copyTitle', { from: fromYear, to: toYear, name: calendar.name })}</DialogTitle><DialogDescription>{t('holidays.copyHint', { to: toYear })}</DialogDescription></DialogHeader>
+        <div className="flex items-center justify-between gap-4 rounded-md border p-3">
+          <div><Label htmlFor="copy-nonrecurring">{t('holidays.copyNonRecurring')}</Label><p className="text-xs text-muted-foreground">{t('holidays.copyNonRecurringHint')}</p></div>
+          <Switch id="copy-nonrecurring" checked={includeNonRecurring} onCheckedChange={setIncludeNonRecurring} />
+        </div>
+        <DialogFooter>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>{tc('common.cancel')}</Button>
+          <Button type="button" loading={copyYear.isPending} onClick={onCopy}>{t('holidays.copy', { year: toYear })}</Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );

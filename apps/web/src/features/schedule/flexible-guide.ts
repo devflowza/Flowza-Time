@@ -48,6 +48,19 @@ export function dayBoundaryGuide(boundary: string | undefined | null): { boundar
   return { boundary: clock(b), last: clock((b + 1439) % 1440), lastDay: b === 0 ? 'mon' : 'tue', inDay, outDay, split: inDay !== outDay };
 }
 
+/**
+ * A fixed shift's flexible start band in the author's own numbers (mirrors the engine 1.5.0, @flowza/domain `buildSchedule`):
+ * the employee may start between the shift start and start + band and the expected end moves with the start — so the latest
+ * start leaves at the shift end + band. Null until the times and a band > 0 are known.
+ */
+export function flexStartGuide(startTime: string | undefined | null, endTime: string | undefined | null, band: unknown): { from: string; until: string; out: string } | null {
+  const s = toMin(startTime); const e = toMin(endTime);
+  const f = typeof band === 'number' && Number.isFinite(band) && band > 0 ? Math.round(band) : null;
+  if (s === null || e === null || f === null) return null;
+  const clock = (m: number) => { const x = ((m % 1440) + 1440) % 1440; return `${String(Math.floor(x / 60)).padStart(2, '0')}:${String(x % 60).padStart(2, '0')}`; };
+  return { from: clock(s), until: clock(s + f), out: clock(e + f) };
+}
+
 /** Required minutes ⇄ the hours + minutes the form shows; blank both ways = nothing entered yet. */
 export function splitMinutes(total: unknown): { hours: string; minutes: string } {
   return typeof total === 'number' && Number.isFinite(total) && total >= 0 ? { hours: String(Math.floor(total / 60)), minutes: String(Math.round(total % 60)) } : { hours: '', minutes: '' };

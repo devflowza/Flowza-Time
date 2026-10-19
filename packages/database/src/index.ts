@@ -17,3 +17,5 @@ export * from './employees/effective-branch.js';
 // Temporary branch deployments (Enterprise): the access removal shared by the worker's sweep and the API's cancel.
 export * from './scheduling/deployments.js';
 export * from './locations/index.js';
+// Holiday calendars: "Copy to next year" (API) and the yearly rollover (worker) share one copy.
+export * from './holidays/copy-year.js';

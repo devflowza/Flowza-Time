@@ -3,6 +3,8 @@ import type { AttendanceRuleSetInput, ShiftBreak } from '@flowza/contracts';
 export interface ShiftDto {
   id: string; code: string; name: string; nameAr: string | null; type: string; startTime: string | null; endTime: string | null; requiredMinutes: number | null; coreStart: string | null; coreEnd: string | null; dayBoundary: string; breaks: ShiftBreak[];
   punchInWindowBeforeMinutes: number; punchOutWindowAfterMinutes: number; graceInMinutes: number | null; graceOutMinutes: number | null; color: string | null; status: string; crossesMidnight: boolean | null; assignmentCount?: number; createdAt: string; updatedAt: string;
+  /** FIXED only: the flexible start band (minutes after the start; 0 = off). Absent from an older API. */
+  flexStartMinutes?: number;
 }
 export type PatternEntry = { day: number; shiftId: string } | { day: number; off: true };
 export interface ShiftPatternDto { id: string; code: string; name: string; cycleLengthDays: number; sequence: PatternEntry[]; anchorDate: string; status: string; createdAt: string; updatedAt: string }
@@ -19,7 +21,17 @@ export interface ShiftResolution {
  * (no `branchId`) or a place (with `branchId` = the place's branch).
  */
 export type RuleSetDto = AttendanceRuleSetInput & { id: string; version: number; specificity?: number; createdAt: string; updatedAt: string };
-/** `branchCount` = branches that picked this calendar (absent from an older API); the default also applies to branches without one. */
-export interface HolidayCalendarDto { id: string; name: string; countryCode: string | null; isDefault: boolean; holidayCount?: number; branchCount?: number; createdAt: string; updatedAt: string }
-export interface HolidayDto { id: string; calendarId: string; name: string; nameAr: string | null; date: string; endDate: string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; createdAt: string }
+/**
+ * `branchCount` = branches that picked this calendar (absent from an older API); the default also applies to branches without one.
+ * `autoRollover`: next year's recurring holidays are created from 1 December.
+ */
+export interface HolidayCalendarDto { id: string; name: string; countryCode: string | null; isDefault: boolean; autoRollover?: boolean; holidayCount?: number; branchCount?: number; createdAt: string; updatedAt: string }
+/** `recursYearly`: the same Gregorian date every year (copied to the next year by "Copy to year" and the rollover). */
+export interface HolidayDto { id: string; calendarId: string; name: string; nameAr: string | null; date: string; endDate: string | null; isHalfDay: boolean; type: string; branchIds: string[] | null; isTentative: boolean; recursYearly?: boolean; createdAt: string }
 export type WithRecalc<T> = T & { recalculationJobId: string | null };
+/** POST /holiday-calendars/:id/copy-year: the holidays created in `toYear` and the ones left out (and why). */
+export interface HolidayYearCopyDto {
+  calendarId: string; fromYear: number; toYear: number; created: HolidayDto[];
+  skipped: Array<{ sourceId: string; name: string; date: string; reason: 'NOT_RECURRING' | 'ALREADY_THERE' }>;
+  recalculationJobId: string | null;
+}

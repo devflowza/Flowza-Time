@@ -5,7 +5,7 @@ import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import type { z } from 'zod';
 import { AlertTriangle, Info, Plus, Trash2 } from 'lucide-react';
-import { COUNTRY_PACK_CODES, COUNTRY_RULE_PACKS, DEFAULT_POLICY_SECTIONS, DISCIPLINE_ACTIONS, MISSING_PUNCH_BEHAVIORS, PUNCH_INTERPRETATIONS, ROUNDING_MODES, attendanceRuleSetInputSchema, countryRulePack, DEFAULT_ATTENDANCE_RULES, policyDefaultsFromPack, type AttendanceRuleSetInput, type ComplianceWarningDto, type CountryPackCode } from '@flowza/contracts';
+import { COUNTRY_PACK_CODES, COUNTRY_RULE_PACKS, DEFAULT_POLICY_SECTIONS, DISCIPLINE_ACTIONS, GRACE_MODES, MAX_SPECIAL_PERIODS, MISSING_PUNCH_BEHAVIORS, PUNCH_INTERPRETATIONS, ROUNDING_MODES, SPECIAL_PERIOD_AUDIENCES, attendanceRuleSetInputSchema, countryRulePack, DEFAULT_ATTENDANCE_RULES, policyDefaultsFromPack, type AttendanceRuleSetInput, type ComplianceWarningDto, type CountryPackCode } from '@flowza/contracts';
 import { Badge, Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Switch, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { Combobox, type ComboboxOption } from '@/components/forms';
 import { todayIso } from '@/lib/format';
@@ -14,7 +14,7 @@ import { cn } from '@/lib/utils';
 import { useDebounced } from '@/hooks/use-debounced';
 import { useActiveMembership, useModuleEnabled, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
-import { blankToUndefined, toNumber } from '@/features/organization/form-utils';
+import { blankToUndefined, toNumber, toOptionalNumber } from '@/features/organization/form-utils';
 import { toastJobQueued } from '@/features/employees/job-toast';
 import { useEmployeeGroupOptions, usePolicyCompliance } from '@/features/policies/api';
 import { LocationPicker } from '@/features/locations/components/location-picker';
@@ -35,15 +35,15 @@ const ENTERPRISE_SCOPE_KEYS = ['countryCode', 'departmentId', 'employeeGroupId',
  * The sections of the attendance policy editor, in order. `discipline` and `regularisation` exist only with the Enterprise
  * module attendance_policies; without it they — and the Enterprise fields of the other sections — are hidden, not disabled.
  */
-const SECTIONS = ['general', 'late', 'attendance', 'overtime', 'discipline', 'regularisation', 'ramadan'] as const;
+const SECTIONS = ['general', 'late', 'attendance', 'overtime', 'discipline', 'regularisation', 'approvedHours', 'ramadan'] as const;
 type SectionKey = (typeof SECTIONS)[number];
 const ENTERPRISE_SECTIONS: ReadonlySet<SectionKey> = new Set(['discipline', 'regularisation']);
 const FIELD_SECTIONS: Record<string, SectionKey> = {
   name: 'general', description: 'general', branchId: 'general', locationId: 'general', countryCode: 'general', departmentId: 'general', employeeGroupId: 'general', shiftId: 'general', effectiveFrom: 'general', effectiveTo: 'general',
-  graceInMinutes: 'late', graceOutMinutes: 'late', lateThresholdMinutes: 'late', earlyDepartureThresholdMinutes: 'late', punchRoundingMinutes: 'late', punchRoundingMode: 'late', workedRoundingMinutes: 'late', workedRoundingMode: 'late',
+  graceInMinutes: 'late', graceOutMinutes: 'late', graceMode: 'late', lateThresholdMinutes: 'late', earlyDepartureThresholdMinutes: 'late', punchRoundingMinutes: 'late', punchRoundingMode: 'late', workedRoundingMinutes: 'late', workedRoundingMode: 'late',
   minFullDayMinutes: 'attendance', halfDayThresholdMinutes: 'attendance', punchInterpretation: 'attendance', duplicatePunchWindowSeconds: 'attendance', missingPunchBehavior: 'attendance', autoAbsentWithoutPunches: 'attendance',
   overtimeEnabled: 'overtime', overtimeStartAfterMinutes: 'overtime', overtimeMinBlockMinutes: 'overtime', overtimeRoundingMinutes: 'overtime', overtimeMaxMinutesPerDay: 'overtime', countEarlyInAsOvertime: 'overtime', overtimeRequiresScheduledHours: 'overtime', weeklyOffWorkCountsAsOvertime: 'overtime', holidayWorkCountsAsOvertime: 'overtime',
-  ramadanMode: 'ramadan', 'policy.countryPack': 'general', 'policy.late': 'late', 'policy.methods': 'attendance', 'policy.overtime': 'overtime', 'policy.points': 'discipline', 'policy.regularisation': 'regularisation',
+  ramadanMode: 'ramadan', specialPeriods: 'approvedHours', 'policy.countryPack': 'general', 'policy.late': 'late', 'policy.methods': 'attendance', 'policy.overtime': 'overtime', 'policy.points': 'discipline', 'policy.regularisation': 'regularisation',
 };
 /** The section a field path belongs to (`policy.overtime.rates.regular` → overtime). */
 function sectionOfField(path: string): SectionKey {
@@ -71,7 +71,7 @@ function toDefaults(r: RuleSetDto | null, today: string, pack: CountryPackCode |
     return { ...blank, ...d, name: p.name, policy: { ...blank.policy, countryPack: d.policy.countryPack, overtime: { ...DEFAULT_POLICY_SECTIONS.overtime, ...d.policy.overtime } } };
   }
   const { id: _id, version: _v, createdAt: _c, updatedAt: _u, specificity: _s, ...rules } = r;
-  return { ...DEFAULT_ATTENDANCE_RULES, ...rules, description: rules.description ?? '', policy: rules.policy ?? structuredClone(DEFAULT_POLICY_SECTIONS), ramadanMode: { ...DEFAULT_ATTENDANCE_RULES.ramadanMode, ...(rules.ramadanMode ?? {}) } };
+  return { ...DEFAULT_ATTENDANCE_RULES, ...rules, description: rules.description ?? '', policy: rules.policy ?? structuredClone(DEFAULT_POLICY_SECTIONS), ramadanMode: { ...DEFAULT_ATTENDANCE_RULES.ramadanMode, ...(rules.ramadanMode ?? {}) }, graceMode: rules.graceMode ?? 'deduct', specialPeriods: rules.specialPeriods ?? [] };
 }
 
 const nullableNumber = (v: unknown): unknown => (v === '' || v === null || v === undefined ? null : Number(v));
@@ -172,6 +172,59 @@ function EscalationEditor({ control, register, errors }: { control: Control<Form
   );
 }
 
+/** The contract's own refinements of a period (code `custom`), by field, shown in the user's language. */
+const PERIOD_RULE_KEYS: Record<string, string> = { to: 'rules.special.toBeforeFrom', scheduledMinutes: 'rules.special.hoursOrMinutes', endTime: 'rules.special.endIsStart', from: 'rules.special.overlap' };
+
+/**
+ * Approved / seasonal working hours ("circulars", engine 1.5.0): one card per period — name, circular reference, dates, the
+ * hours and / or the minutes to work, who it applies to. At most MAX_SPECIAL_PERIODS; two periods may not overlap (the
+ * contract says which one, under its first day).
+ */
+function SpecialPeriodsEditor({ control, register, errors, today }: { control: Control<FormValues>; register: UseFormRegister<FormValues>; errors: FieldErrors<FormValues>; today: string }) {
+  const { t } = useTranslation('schedule');
+  const { fields, append, remove } = useFieldArray({ control, name: 'specialPeriods' });
+  const err = (i: number, key: string): string | undefined => {
+    const e = get(errors, `specialPeriods.${i}.${key}`) as { message?: string; type?: string } | undefined;
+    if (!e) return undefined;
+    const ruleKey = PERIOD_RULE_KEYS[key];
+    return e.type === 'custom' && ruleKey ? t(ruleKey) : e.message;
+  };
+  const listError = get(errors, 'specialPeriods') as { message?: string; root?: { message?: string } } | undefined;
+  const id = (i: number, key: string) => `rs-sp-${i}-${key}`;
+  return (
+    <div className="space-y-3">
+      {fields.length === 0 ? <p className="text-xs text-muted-foreground">{t('rules.special.empty')}</p> : (
+        <ol className="space-y-3">
+          {fields.map((f, i) => (
+            <li key={f.id} className="space-y-3 rounded-md border p-3" data-testid="special-period">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-sm font-medium">{t('rules.special.period', { n: i + 1 })}</span>
+                <Button type="button" variant="ghost" size="icon" aria-label={t('rules.special.remove', { n: i + 1 })} onClick={() => remove(i)}><Trash2 /></Button>
+              </div>
+              <div className="grid gap-3 sm:grid-cols-2">
+                <FormField label={t('rules.special.name')} htmlFor={id(i, 'name')} required error={err(i, 'name')}><Input id={id(i, 'name')} maxLength={120} {...register(`specialPeriods.${i}.name` as const)} aria-invalid={!!err(i, 'name')} /></FormField>
+                <FormField label={t('rules.special.reference')} htmlFor={id(i, 'reference')} optional error={err(i, 'reference')}><Input id={id(i, 'reference')} maxLength={120} {...register(`specialPeriods.${i}.reference` as const, { setValueAs: blankToUndefined })} /></FormField>
+                <FormField label={t('rules.special.from')} htmlFor={id(i, 'from')} required error={err(i, 'from')}><Input id={id(i, 'from')} type="date" dir="ltr" {...register(`specialPeriods.${i}.from` as const)} aria-invalid={!!err(i, 'from')} /></FormField>
+                <FormField label={t('rules.special.to')} htmlFor={id(i, 'to')} required error={err(i, 'to')}><Input id={id(i, 'to')} type="date" dir="ltr" {...register(`specialPeriods.${i}.to` as const)} aria-invalid={!!err(i, 'to')} /></FormField>
+                <FormField label={t('rules.special.startTime')} htmlFor={id(i, 'startTime')} optional error={err(i, 'startTime')}><Input id={id(i, 'startTime')} type="time" dir="ltr" className="tnum" {...register(`specialPeriods.${i}.startTime` as const, { setValueAs: blankToUndefined })} /></FormField>
+                <FormField label={t('rules.special.endTime')} htmlFor={id(i, 'endTime')} optional hint={t('rules.special.timesHint')} error={err(i, 'endTime')}><Input id={id(i, 'endTime')} type="time" dir="ltr" className="tnum" {...register(`specialPeriods.${i}.endTime` as const, { setValueAs: blankToUndefined })} aria-invalid={!!err(i, 'endTime')} /></FormField>
+                <FormField label={t('rules.special.scheduledMinutes')} htmlFor={id(i, 'scheduledMinutes')} optional hint={t('rules.special.minutesHint')} error={err(i, 'scheduledMinutes')}><Input id={id(i, 'scheduledMinutes')} type="number" min={60} max={900} dir="ltr" className="tnum" {...register(`specialPeriods.${i}.scheduledMinutes` as const, { setValueAs: toOptionalNumber })} aria-invalid={!!err(i, 'scheduledMinutes')} /></FormField>
+                <FormField label={t('rules.special.appliesTo')} htmlFor={id(i, 'appliesTo')} hint={t('rules.special.flaggedHint')}>
+                  <Controller control={control} name={`specialPeriods.${i}.appliesTo` as const} render={({ field }) => (
+                    <Select value={field.value ?? 'all'} onValueChange={field.onChange}><SelectTrigger id={id(i, 'appliesTo')}><SelectValue /></SelectTrigger><SelectContent>{SPECIAL_PERIOD_AUDIENCES.map((a) => <SelectItem key={a} value={a}>{t(`rules.special.audiences.${a}`)}</SelectItem>)}</SelectContent></Select>
+                  )} />
+                </FormField>
+              </div>
+            </li>
+          ))}
+        </ol>
+      )}
+      {listError?.message || listError?.root?.message ? <p className="text-xs text-destructive" role="alert">{t('rules.special.tooMany', { max: MAX_SPECIAL_PERIODS })}</p> : null}
+      <Button type="button" size="sm" variant="outline" disabled={fields.length >= MAX_SPECIAL_PERIODS} onClick={() => append({ name: '', from: today, to: today, appliesTo: 'all' })}><Plus /> {t('rules.special.add')}</Button>
+    </div>
+  );
+}
+
 /** The nodes a member scoped to some branches may name: their branches and the places in them. */
 const BRANCH_SCOPED_ROLES = ['branch', 'place'] as const;
 
@@ -196,7 +249,8 @@ function PolicyLocationField({ control, setScope, tree, editing, error }: { cont
 
 /**
  * The attendance POLICY editor (attendanceRuleSetInputSchema): an effective-dated rule set with its scope and sections —
- * General, Late & early, Attendance, Overtime, Discipline, Regularisation, Ramadan. The Enterprise parts (scope beyond the
+ * General, Late & early (with the grace mode), Attendance, Overtime, Discipline, Regularisation, Approved hours (special periods),
+ * Ramadan. The Enterprise parts (scope beyond the
  * branch, country packs and compliance, very / repeated late, check-in methods, weekly overtime and rates, points, limits)
  * appear only with the module attendance_policies; without it the request never carries non-default sections or extra scope.
  * With the module, an organisation that has group or place levels names the policy's branch through a Location field instead
@@ -403,6 +457,11 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
               <Section title={t('policyEditor.sections.grace')} hint={t('rules.sections.graceHint')}>
                 <div className="grid gap-3 sm:grid-cols-2">
                   {rn('graceInMinutes', 'graceInMinutes', { max: 240 })}{rn('graceOutMinutes', 'graceOutMinutes', { max: 240 })}
+                  <FormField label={t('rules.fields.graceMode')} htmlFor="rs-graceMode" hint={t('rules.hints.graceMode')} error={errors.graceMode?.message} className="sm:col-span-2">
+                    <Controller control={control} name="graceMode" render={({ field }) => (
+                      <Select value={field.value ?? 'deduct'} onValueChange={field.onChange}><SelectTrigger id="rs-graceMode"><SelectValue /></SelectTrigger><SelectContent>{GRACE_MODES.map((m) => <SelectItem key={m} value={m}>{t(`rules.graceModes.${m}`)}</SelectItem>)}</SelectContent></Select>
+                    )} />
+                  </FormField>
                   {rn('lateThresholdMinutes', 'lateThresholdMinutes', { max: 480, hint: true })}{rn('earlyDepartureThresholdMinutes', 'earlyDepartureThresholdMinutes', { max: 480 })}
                 </div>
               </Section>
@@ -504,6 +563,12 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
                 </Section>
               </TabsContent>
             ) : null}
+
+            <TabsContent value="approvedHours" forceMount className="space-y-4 data-[state=inactive]:hidden">
+              <Section title={t('rules.sections.specialHours')} hint={t('rules.sections.specialHoursHint')}>
+                <SpecialPeriodsEditor control={control} register={register} errors={errors} today={todayIso(tz)} />
+              </Section>
+            </TabsContent>
 
             <TabsContent value="ramadan" forceMount className="space-y-4 data-[state=inactive]:hidden">
               <Section title={t('rules.sections.ramadan')} hint={t('rules.sections.ramadanHint')}>

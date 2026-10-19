@@ -17,7 +17,7 @@ Records inside a locked period are skipped and listed in the recalculation summa
 ## Public API (`@flowza/domain`)
 | Function | Purpose |
 |---|---|
-| `computePunchWindow(shift, date, tz)` | FIXED: `[start − punchInWindowBefore, end + punchOutWindowAfter)`, end on D+1 when `endTime <= startTime`; FLEXIBLE: `[dayBoundary(D), dayBoundary(D+1))`; no shift: local calendar day |
+| `computePunchWindow(shift, date, tz)` | FIXED: `[start − punchInWindowBefore, end + flexStartMinutes + punchOutWindowAfter)` (engine 1.5.0: a flexible start band moves the end up to the band later), end on D+1 when `endTime <= startTime`; FLEXIBLE: `[dayBoundary(D), dayBoundary(D+1))`; no shift: local calendar day |
 | `attributeEvents(events, windows)` | Deterministic attribution when neighbouring windows overlap: nearest scheduled start wins, ties → earlier date, no-shift windows never beat a real shift; voided/out-of-window recorded |
 | `carryOvernightCheckOuts(attribution, windows, shiftOf)` | FLEXIBLE shifts (engine 1.3.0): the next day's leading check-out that closes a day's open check-in moves back to that day (`OVERNIGHT_CHECK_OUT`), within `overnightMaxSpanMinutes(shift)` = required + unpaid breaks + 4 h (≤ 20 h) |
 | `collapseDuplicates`, `interpretPunches`, `computeBreaks` | Duplicate collapsing (keep first within `duplicatePunchWindowSeconds`), FIRST_LAST / PAIRED / DIRECTIONAL interpretation, MISSING_IN/MISSING_OUT, measured vs fixed vs scheduled breaks (paid allowance credited back) |
@@ -77,9 +77,27 @@ Records inside a locked period are skipped and listed in the recalculation summa
 6b. Engine 1.4.0 (Enterprise): `VERY_LATE` when a late arrival is more than the policy's `late.veryLateAfterMinutes` after the
    SCHEDULED start (not after the grace: "after 09:00" on an 08:00 shift is 60); `DOUBLE_SHIFT` on a composite day of two
    shifts (an `additional_shift_assignments` row folded in by the loader). Nothing changes for a day without either.
+6c. Engine 1.5.0 (working-hours policies; migration `20261019000200`):
+   - **Flexible start band** (`shifts.flex_start_minutes`, FIXED only, 0–240): the expected start is the (rounded) check-in
+     clamped to `[start, start + band]` and the expected end moves by the same amount, so the day keeps its length (07:00–14:00
+     with 120: in at 08:30 → expected 08:30–15:30, not late). Before the band the day starts at the band start (early-in), after
+     it at the band end — late counts from there (+ grace per the mode). Trace step `schedule.flexStart`. A double shift stores
+     no band.
+   - **Grace mode** (`attendance_rule_sets.grace_mode`): `deduct` (default, as before: late = minutes after the expected start −
+     grace) or `tolerance` (within the grace 0, beyond it every minute from the expected start; the same for early departure on
+     a FIXED shift and for a flexible shift's core-start arrival). A FLEXIBLE check-out keeps its 1.3.0 tolerance rule in both
+     modes (the trace step carries `graceMode` and `ruleSetGraceMode`).
+   - **Approved working hours** (`attendance_rule_sets.special_periods`, ≤ 20, no overlap — contracts `specialPeriodsSchema`):
+     on a date inside a period (and for flagged employees only when `appliesTo = flagged_employees`, custom field
+     `specialHoursEligible`) a FIXED shift takes the period's `startTime` / `endTime` (a start alone keeps the length; an end at
+     or before the start is the next day) and/or its `scheduledMinutes` (without an end: start + minutes + unpaid breaks); a
+     FLEXIBLE shift takes `scheduledMinutes` as its required minutes (a period with clock times only does not apply to it).
+     Flag `SPECIAL_HOURS`, trace step `specialHours`. **A period takes precedence over Ramadan hours** on the dates both cover
+     (step `ramadan` says it was superseded). The punch windows stay the shift's own; half days halve the period's hours; a
+     flexible start band follows the period's start.
 7. Flags (canonical order): `LATE, EARLY_DEPARTURE, OVERTIME, MISSING_IN, MISSING_OUT, MANUAL_CORRECTION, OUT_OF_WINDOW,
    WORKED_ON_HOLIDAY, WORKED_ON_WEEKLY_OFF, HALF_DAY_LEAVE, DUPLICATE_PUNCHES_COLLAPSED, RAMADAN_HOURS, CROSS_MIDNIGHT,
-   NO_SHIFT, UNDER_HOURS, …, VERY_LATE, DOUBLE_SHIFT`.
+   NO_SHIFT, UNDER_HOURS, …, VERY_LATE, DOUBLE_SHIFT, SPECIAL_HOURS`.
 
 ## Known design choices (from the adversarial review)
 - Punch rounding is applied to the punch instants **before** late/early evaluation (09:08 with NEAREST-15 → 09:15 → 5 min late
