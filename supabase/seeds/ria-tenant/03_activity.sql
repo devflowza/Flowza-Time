@@ -81,10 +81,10 @@ end $$;
 do $$
 declare
   org uuid := '1fa2602c-06d4-4341-86ba-2bc971d83563';
-  admin_id uuid := (select id from auth.users where lower(email) = 'ria.admin@flowza.ai');
-  hr_id uuid := (select id from auth.users where lower(email) = 'ria.hr@flowza.ai');
-  mgr_id uuid := (select id from auth.users where lower(email) = 'ria.manager@flowza.ai');
-  emp_id uuid := (select id from auth.users where lower(email) = 'ria.employee@flowza.ai');
+  admin_id uuid := (select id from auth.users where lower(email) = 'ria.admin@flowza.com');
+  hr_id uuid := (select id from auth.users where lower(email) = 'ria.hr@flowza.com');
+  mgr_id uuid := (select id from auth.users where lower(email) = 'ria.manager@flowza.com');
+  emp_id uuid := (select id from auth.users where lower(email) = 'ria.employee@flowza.com');
   dev uuid := pg_temp.sid('device:HQ-01');
   tz text := 'Asia/Muscat';
   d_from date := '2026-09-01';

@@ -1,10 +1,10 @@
 -- FlowZa Time · RIA test tenant seed · step 2/3: structure, four logins, five employees, approval workflows
 --
 -- Logins (one per role; the password is NOT in this file — the repository is public):
---   ria.admin@flowza.ai     Organisation Owner   Mazin Al Lawati, Director General (RIA-001)
---   ria.hr@flowza.ai        HR Admin             Shaima Al Hosni, HR Manager (RIA-002)
---   ria.manager@flowza.ai   Line Manager         Khalid Al Rashdi, Head of Research Programmes (RIA-003) — manages RIA-004 and RIA-005
---   ria.employee@flowza.ai  Employee             Reem Al Shukaili, Research Scientist (RIA-004)
+--   ria.admin@flowza.com     Organisation Owner   Mazin Al Lawati, Director General (RIA-001)
+--   ria.hr@flowza.com        HR Admin             Shaima Al Hosni, HR Manager (RIA-002)
+--   ria.manager@flowza.com   Line Manager         Khalid Al Rashdi, Head of Research Programmes (RIA-003) — manages RIA-004 and RIA-005
+--   ria.employee@flowza.com  Employee             Reem Al Shukaili, Research Scientist (RIA-004)
 -- plus Vikram Nair, Data Scientist (RIA-005), an employee without a login.
 --
 -- Password: set it in the same session before this file runs, e.g. as the first statement in the SQL editor
@@ -66,6 +66,25 @@ begin
   return v_id;
 end $$;
 
+-- the first run (19 Oct 2026) created the logins on @flowza.ai: move such a login to its new address, keeping its id,
+-- password and memberships (no-op once moved, or when the new address is already taken)
+create or replace function pg_temp.move_login(p_old text, p_new text) returns void language plpgsql as $$
+declare
+  v_id uuid := (select id from auth.users where lower(email) = lower(p_old) limit 1);
+begin
+  if v_id is null or exists (select 1 from auth.users where lower(email) = lower(p_new)) then return; end if;
+  update auth.users set email = lower(p_new), raw_user_meta_data = coalesce(raw_user_meta_data, '{}'::jsonb) || jsonb_build_object('email', lower(p_new)), updated_at = now()
+  where id = v_id;
+  if to_regclass('auth.identities') is not null then
+    execute 'update auth.identities set identity_data = identity_data || jsonb_build_object(''email'', $2::text), updated_at = now() where user_id = $1 and provider = ''email'''
+      using v_id, lower(p_new);
+  end if;
+  update public.user_profiles set email = lower(p_new), updated_at = now() where id = v_id;
+  insert into audit.logs (organization_id, actor_type, actor_label, action, entity_type, entity_id, old_value, new_value, reason)
+  values ('1fa2602c-06d4-4341-86ba-2bc971d83563', 'SYSTEM', 'Test tenant seed (supabase/seeds/ria-tenant), requested by prem@flowza.ai', 'user.email_changed', 'user', v_id::text,
+          jsonb_build_object('email', lower(p_old)), jsonb_build_object('email', lower(p_new)), 'Test logins moved to the flowza.com domain');
+end $$;
+
 do $$
 declare
   org uuid := '1fa2602c-06d4-4341-86ba-2bc971d83563';
@@ -82,10 +101,11 @@ begin
   ---------------------------------------------------------------------------------------------------------------------
   -- 1. Logins
   ---------------------------------------------------------------------------------------------------------------------
-  admin_id := pg_temp.login('ria.admin@flowza.ai',    'Mazin Al Lawati',  pw);
-  hr_id    := pg_temp.login('ria.hr@flowza.ai',       'Shaima Al Hosni',  pw);
-  mgr_id   := pg_temp.login('ria.manager@flowza.ai',  'Khalid Al Rashdi', pw);
-  emp_id   := pg_temp.login('ria.employee@flowza.ai', 'Reem Al Shukaili', pw);
+  perform pg_temp.move_login('ria.' || r || '@flowza.ai', 'ria.' || r || '@flowza.com') from unnest(array['admin', 'hr', 'manager', 'employee']) as r;
+  admin_id := pg_temp.login('ria.admin@flowza.com',    'Mazin Al Lawati',  pw);
+  hr_id    := pg_temp.login('ria.hr@flowza.com',       'Shaima Al Hosni',  pw);
+  mgr_id   := pg_temp.login('ria.manager@flowza.com',  'Khalid Al Rashdi', pw);
+  emp_id   := pg_temp.login('ria.employee@flowza.com', 'Reem Al Shukaili', pw);
 
   ---------------------------------------------------------------------------------------------------------------------
   -- 2. Departments, designations, the government-hours shift (organisation default from 1 Aug)
@@ -147,17 +167,17 @@ begin
     employment_status, employment_type, branch_id, department_id, designation_id, manager_employee_id, user_id, device_user_id, card_number, fingerprint_enrolled, face_enrolled, weekly_off_days, custom_fields, created_by, created_at)
   select pg_temp.sid('emp:' || v.num), org, v.num, v.first, v.middle, v.last, v.first || ' ' || v.last, v.name_ar, v.gender::public.gender, v.dob::date, v.nat, v.email, v.phone, v.joining::date,
     'active', 'full_time', hq, pg_temp.sid('dept:' || v.dept), pg_temp.sid('desig:' || v.desig), case when v.mgr is null then null else pg_temp.sid('emp:' || v.mgr) end,
-    case v.email when 'ria.admin@flowza.ai' then admin_id when 'ria.hr@flowza.ai' then hr_id when 'ria.manager@flowza.ai' then mgr_id when 'ria.employee@flowza.ai' then emp_id end,
+    case v.email when 'ria.admin@flowza.com' then admin_id when 'ria.hr@flowza.com' then hr_id when 'ria.manager@flowza.com' then mgr_id when 'ria.employee@flowza.com' then emp_id end,
     v.pin, v.card, true, true, null,
     jsonb_build_object('ramadanEligible', v.ramadan, 'bloodGroup', v.blood, 'maritalStatus', v.marital, 'grade', v.grade,
                        'emergencyContact', jsonb_build_object('name', v.ec_name, 'phone', v.ec_phone, 'relation', v.ec_rel)),
     hr_id, t0
   from (values
     -- num, first, middle, last, name_ar, gender, dob, nat, email, phone, joining, dept, desig, manager, pin, card, ramadan, blood, marital, grade, ec_name, ec_phone, ec_rel
-    ('RIA-001', 'Mazin',  'Ali',    'Al Lawati',   'مازن بن علي اللواتي',      'male',   '1975-03-14', 'OM', 'ria.admin@flowza.ai',     '+968 9901 4101', '2019-02-03', 'DGO', 'DG',  null,      '101', '0300000101', true,  'A+',  'married', 'E1', 'Huda Al Lawati',  '+968 9901 4201', 'spouse'),
-    ('RIA-002', 'Shaima', 'Said',   'Al Hosni',    'شيماء بنت سعيد الحوسنية',  'female', '1986-07-22', 'OM', 'ria.hr@flowza.ai',        '+968 9902 4102', '2020-05-10', 'HRA', 'HRM', 'RIA-001', '102', '0300000102', true,  'O+',  'married', 'M1', 'Said Al Hosni',   '+968 9902 4202', 'father'),
-    ('RIA-003', 'Khalid', 'Nasser', 'Al Rashdi',   'خالد بن ناصر الراشدي',     'male',   '1981-11-05', 'OM', 'ria.manager@flowza.ai',   '+968 9903 4103', '2020-09-13', 'RND', 'HRP', 'RIA-001', '103', '0300000103', true,  'B+',  'married', 'M1', 'Muna Al Rashdi',  '+968 9903 4203', 'spouse'),
-    ('RIA-004', 'Reem',   'Hamed',  'Al Shukaili', 'ريم بنت حمد الشكيلية',     'female', '1994-02-18', 'OM', 'ria.employee@flowza.ai',  '+968 9904 4104', '2023-01-15', 'RND', 'RS',  'RIA-003', '104', '0300000104', true,  'A-',  'single',  'S3', 'Hamed Al Shukaili', '+968 9904 4204', 'father'),
+    ('RIA-001', 'Mazin',  'Ali',    'Al Lawati',   'مازن بن علي اللواتي',      'male',   '1975-03-14', 'OM', 'ria.admin@flowza.com',     '+968 9901 4101', '2019-02-03', 'DGO', 'DG',  null,      '101', '0300000101', true,  'A+',  'married', 'E1', 'Huda Al Lawati',  '+968 9901 4201', 'spouse'),
+    ('RIA-002', 'Shaima', 'Said',   'Al Hosni',    'شيماء بنت سعيد الحوسنية',  'female', '1986-07-22', 'OM', 'ria.hr@flowza.com',        '+968 9902 4102', '2020-05-10', 'HRA', 'HRM', 'RIA-001', '102', '0300000102', true,  'O+',  'married', 'M1', 'Said Al Hosni',   '+968 9902 4202', 'father'),
+    ('RIA-003', 'Khalid', 'Nasser', 'Al Rashdi',   'خالد بن ناصر الراشدي',     'male',   '1981-11-05', 'OM', 'ria.manager@flowza.com',   '+968 9903 4103', '2020-09-13', 'RND', 'HRP', 'RIA-001', '103', '0300000103', true,  'B+',  'married', 'M1', 'Muna Al Rashdi',  '+968 9903 4203', 'spouse'),
+    ('RIA-004', 'Reem',   'Hamed',  'Al Shukaili', 'ريم بنت حمد الشكيلية',     'female', '1994-02-18', 'OM', 'ria.employee@flowza.com',  '+968 9904 4104', '2023-01-15', 'RND', 'RS',  'RIA-003', '104', '0300000104', true,  'A-',  'single',  'S3', 'Hamed Al Shukaili', '+968 9904 4204', 'father'),
     ('RIA-005', 'Vikram', 'Suresh', 'Nair',        'فيكرام سوريش ناير',        'male',   '1991-09-30', 'IN', 'vikram.nair@example.com', '+968 9905 4105', '2025-03-02', 'RND', 'DS',  'RIA-003', '105', '0300000105', false, 'AB+', 'married', 'S3', 'Anjali Nair',     '+91 98470 41105', 'spouse')
   ) as v(num, first, middle, last, name_ar, gender, dob, nat, email, phone, joining, dept, desig, mgr, pin, card, ramadan, blood, marital, grade, ec_name, ec_phone, ec_rel)
   on conflict (organization_id, employee_number) do update set first_name = excluded.first_name, middle_name = excluded.middle_name, last_name = excluded.last_name, display_name = excluded.display_name,

@@ -8,10 +8,10 @@ flag on, one login per role, five employees and seven weeks of attendance histor
 
 | Login | Role | Person |
 |---|---|---|
-| ria.admin@flowza.ai | Organisation Owner (the tenant admin; superset of Organisation Admin) | Mazin Al Lawati, Director General (RIA-001) |
-| ria.hr@flowza.ai | HR Admin | Shaima Al Hosni, HR Manager (RIA-002) |
-| ria.manager@flowza.ai | Line Manager (team = direct reports) | Khalid Al Rashdi, Head of Research Programmes (RIA-003) |
-| ria.employee@flowza.ai | Employee (self-service portal `/my`) | Reem Al Shukaili, Research Scientist (RIA-004), reports to Khalid |
+| ria.admin@flowza.com | Organisation Owner (the tenant admin; superset of Organisation Admin) | Mazin Al Lawati, Director General (RIA-001) |
+| ria.hr@flowza.com | HR Admin | Shaima Al Hosni, HR Manager (RIA-002) |
+| ria.manager@flowza.com | Line Manager (team = direct reports) | Khalid Al Rashdi, Head of Research Programmes (RIA-003) |
+| ria.employee@flowza.com | Employee (self-service portal `/my`) | Reem Al Shukaili, Research Scientist (RIA-004), reports to Khalid |
 
 The fifth employee, Vikram Nair (Data Scientist, RIA-005), has no login and also reports to Khalid.
 
@@ -56,6 +56,8 @@ psql "$DATABASE_URL_ADMIN" -v ON_ERROR_STOP=1 -f supabase/seeds/ria-tenant/03_ac
 - A **bcrypt hash** (`$2a$…`, e.g. `select extensions.crypt('<password>', extensions.gen_salt('bf', 10))` on a local
   database) is accepted in place of the password: a multi-statement script that contains DDL can be written to the server's
   statement log whole, and the hash keeps the plain password out of it.
+- The first run (19 Oct 2026) created the logins on `@flowza.ai`; step 2 moves such a login to its `@flowza.com` address
+  (same user id, password and memberships, audited as `user.email_changed`).
 - Without the setting, step 2 keeps the passwords of logins that already exist (and refuses to create a missing one), so
   re-running it never resets a password by accident; with it, all four are reset.
 - Every step is idempotent (uuid v5 ids in the tenant namespace, upserts, `on conflict do nothing` on append-only tables).
