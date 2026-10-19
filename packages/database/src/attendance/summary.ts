@@ -55,6 +55,12 @@ export interface AttendanceSummaryDbFigures {
   unexcusedDays: number; pendingDays: number; recordCount: number;
   /** Days of employment in the period, before `asOf`, without a calculated record (never recalculated) — shown, not dropped. */
   notCalculatedDays: number;
+  /**
+   * Short leave (engine 1.5.0, live records only): out-of-office minutes no approved short leave covered beyond the allowance,
+   * and the minutes approved short leave took (excused + credited official assignment / remote work).
+   */
+  lostMinutes: number;
+  shortLeaveMinutes: number;
 }
 export interface AttendanceSummaryDbRow extends AttendanceSummaryDbFigures {
   employeeId: string; employeeNumber: string; employeeName: string; branchId: string; departmentId: string | null; finalizedAt: Date | null;
@@ -125,7 +131,9 @@ function ctes(organizationId: string, period: AttendanceSummaryPeriod, s: Attend
         coalesce(sum(greatest(r.overtime_minutes, 0)), 0)::bigint as overtime_minutes,
         coalesce(sum(case when 'LOP' = any(r.flags) then (case when 'PAY_EFFECT_FULL' = any(r.flags) then 1 when 'PAY_EFFECT_HALF' = any(r.flags) then 0.5 else 0 end) else 0 end), 0)::numeric as lop_days,
         (count(*) filter (where 'UNEXCUSED' = any(r.flags)))::int as unexcused_days,
-        (count(*) filter (where r.status = 'PENDING'))::int as pending_days
+        (count(*) filter (where r.status = 'PENDING'))::int as pending_days,
+        coalesce(sum(greatest(r.lost_minutes, 0)), 0)::bigint as lost_minutes,
+        coalesce(sum(greatest(r.excused_minutes, 0) + greatest(r.credited_minutes, 0)), 0)::bigint as short_leave_minutes
       from public.attendance_daily_records r
       join emp on emp.id = r.employee_id
       where r.organization_id = ${organizationId}::uuid and r.attendance_date between ${period.from}::date and ${period.to}::date
@@ -154,9 +162,10 @@ const FIGURES = sql`
   coalesce(fin.worked_minutes, rec.worked_minutes, 0) as "workedMinutes", coalesce(fin.overtime_minutes, rec.overtime_minutes, 0) as "overtimeMinutes",
   coalesce(fin.lop_days, rec.lop_days, 0) as "lopDays", coalesce(fin.unexcused_days, rec.unexcused_days, 0) as "unexcusedDays",
   coalesce(rec.pending_days, 0) as "pendingDays", coalesce(rec.record_count, 0) as "recordCount",
-  greatest(0, coalesce(expd.expected_days, 0) - coalesce(rec.calculated_days, 0)) as "notCalculatedDays"`;
+  greatest(0, coalesce(expd.expected_days, 0) - coalesce(rec.calculated_days, 0)) as "notCalculatedDays",
+  coalesce(rec.lost_minutes, 0) as "lostMinutes", coalesce(rec.short_leave_minutes, 0) as "shortLeaveMinutes"`;
 
-const FIGURE_KEYS = ['presentDays', 'lateDays', 'halfDays', 'leaveDays', 'absentDays', 'missingPunchDays', 'holidayDays', 'weeklyOffDays', 'daysWorked', 'workedMinutes', 'overtimeMinutes', 'lopDays', 'unexcusedDays', 'pendingDays', 'recordCount', 'notCalculatedDays'] as const;
+const FIGURE_KEYS = ['presentDays', 'lateDays', 'halfDays', 'leaveDays', 'absentDays', 'missingPunchDays', 'holidayDays', 'weeklyOffDays', 'daysWorked', 'workedMinutes', 'overtimeMinutes', 'lopDays', 'unexcusedDays', 'pendingDays', 'recordCount', 'notCalculatedDays', 'lostMinutes', 'shortLeaveMinutes'] as const;
 
 function figuresOf(r: Record<string, unknown>): AttendanceSummaryDbFigures {
   const out = Object.fromEntries(FIGURE_KEYS.map((k) => [k, num(r[k])])) as Record<(typeof FIGURE_KEYS)[number], number>;
