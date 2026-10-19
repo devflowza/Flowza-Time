@@ -81,7 +81,9 @@ export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 export const ATTENDANCE_FLAGS = ['LATE', 'EARLY_DEPARTURE', 'OVERTIME', 'MISSING_IN', 'MISSING_OUT', 'MANUAL_CORRECTION', 'OUT_OF_WINDOW', 'WORKED_ON_HOLIDAY', 'WORKED_ON_WEEKLY_OFF', 'HALF_DAY_LEAVE', 'DUPLICATE_PUNCHES_COLLAPSED', 'RAMADAN_HOURS', 'CROSS_MIDNIGHT', 'NO_SHIFT', 'UNDER_HOURS',
   'UNEXCUSED', 'EXCUSED', 'LOP', 'PAY_EFFECT_HALF', 'PAY_EFFECT_FULL', 'OUTSIDE_GEOFENCE', 'SELF_SERVICE_PUNCH', 'NON_WORKING_DAY_WORK',
   // engine 1.4.0 (Enterprise): arrival beyond the policy's very-late threshold; a day worked on two shifts (double shift)
-  'VERY_LATE', 'DOUBLE_SHIFT'] as const;
+  'VERY_LATE', 'DOUBLE_SHIFT',
+  // engine 1.5.0: the day ran on approved special working hours (a rule set's `specialPeriods`, e.g. a summer-hours circular)
+  'SPECIAL_HOURS'] as const;
 export type AttendanceFlag = (typeof ATTENDANCE_FLAGS)[number];
 
 /** Kinds of `attendance_day_marks` rows: a reviewed verdict on one employee-day (HR portal Prompt 3). */

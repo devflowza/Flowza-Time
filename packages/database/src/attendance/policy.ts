@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, policySectionsOf, type AttendanceRules } from '@flowza/contracts';
+import { attendanceRuleSetInputSchema, DEFAULT_ATTENDANCE_RULES, MAX_SPECIAL_PERIODS, policySectionsOf, specialHoursPeriodSchema, type AttendanceRules, type SpecialHoursPeriod } from '@flowza/contracts';
 import { errors } from '@flowza/shared';
 import { explainPolicyResolution, resolvePolicy, type EngineRuleSet, type PolicyScope } from '@flowza/domain';
 import type { Trx } from '../context.js';
@@ -17,6 +17,10 @@ function asObject(v: unknown): Record<string, unknown> {
   if (typeof v === 'string') { try { return asObject(JSON.parse(v)); } catch { return {}; } }
   return v && typeof v === 'object' && !Array.isArray(v) ? (v as Record<string, unknown>) : {};
 }
+function asArray(v: unknown): unknown[] {
+  if (typeof v === 'string') { try { return asArray(JSON.parse(v)); } catch { return []; } }
+  return Array.isArray(v) ? v : [];
+}
 function isoDate(v: Date | string): string {
   if (typeof v === 'string') return v.slice(0, 10);
   return DateTime.fromJSDate(v).toISODate() ?? v.toISOString().slice(0, 10);
@@ -32,6 +36,23 @@ export function normaliseRamadanMode(raw: unknown): Record<string, unknown> {
   if (typeof scheduled === 'number') out['scheduledMinutes'] = scheduled;
   if (typeof o['from'] === 'string') out['from'] = o['from'].slice(0, 10);
   if (typeof o['to'] === 'string') out['to'] = o['to'].slice(0, 10);
+  return out;
+}
+
+/**
+ * Stored approved working-hours periods (`special_periods`, engine 1.5.0), read defensively like the policy sections: every
+ * period that still validates is kept, one overlapping an earlier kept one is dropped — a stored list the contract would refuse
+ * today never fails the recompute of everyone on the policy.
+ */
+export function specialPeriodsOf(raw: unknown): SpecialHoursPeriod[] {
+  const out: SpecialHoursPeriod[] = [];
+  for (const item of asArray(raw).slice(0, MAX_SPECIAL_PERIODS)) {
+    const parsed = specialHoursPeriodSchema.safeParse(item);
+    if (!parsed.success) continue;
+    const p = parsed.data;
+    if (out.some((k) => p.from <= k.to && k.from <= p.to)) continue;
+    out.push(p);
+  }
   return out;
 }
 
@@ -63,6 +84,7 @@ export function toAttendanceRules(row: RuleSetRow): AttendanceRules {
     punchRoundingMinutes: row.punchRoundingMinutes, punchRoundingMode: row.punchRoundingMode, workedRoundingMinutes: row.workedRoundingMinutes, workedRoundingMode: row.workedRoundingMode,
     punchInterpretation: row.punchInterpretation, duplicatePunchWindowSeconds: row.duplicatePunchWindowSeconds, missingPunchBehavior: row.missingPunchBehavior, autoAbsentWithoutPunches: row.autoAbsentWithoutPunches,
     weeklyOffWorkCountsAsOvertime: row.weeklyOffWorkCountsAsOvertime, holidayWorkCountsAsOvertime: row.holidayWorkCountsAsOvertime, ramadanMode: normaliseRamadanMode(row.ramadanMode),
+    graceMode: row.graceMode === 'tolerance' ? 'tolerance' : 'deduct', specialPeriods: specialPeriodsOf(row.specialPeriods),
     // a stored section that no longer validates (a rule tightened after it was saved) falls back section by section to the
     // defaults instead of failing every recompute, check-in and regularisation of the employees on the policy
     policy: policySectionsOf(row.policy),

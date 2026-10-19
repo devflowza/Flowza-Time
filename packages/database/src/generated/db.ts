@@ -624,6 +624,10 @@ export interface AttendanceRuleSets {
   employeeGroupId: string | null;
   extra: Generated<Json>;
   graceInMinutes: Generated<number>;
+  /**
+   * deduct: the grace is taken off a late arrival / early departure (default). tolerance: within the grace nothing counts, beyond it every minute from the scheduled time (engine 1.5.0).
+   */
+  graceMode: Generated<string>;
   graceOutMinutes: Generated<number>;
   halfDayThresholdMinutes: Generated<number>;
   holidayWorkCountsAsOvertime: Generated<boolean>;
@@ -655,6 +659,10 @@ export interface AttendanceRuleSets {
    * Policy scope: days worked on this shift. Null = any.
    */
   shiftId: string | null;
+  /**
+   * Approved / seasonal working hours ("circulars"): [{name, reference?, from, to, startTime?, endTime?, scheduledMinutes?, appliesTo}] — @flowza/contracts specialPeriodsSchema; precedence over ramadan_mode.
+   */
+  specialPeriods: Generated<Json>;
   updatedAt: Generated<Timestamp>;
   version: Generated<number>;
   weeklyOffWorkCountsAsOvertime: Generated<boolean>;
@@ -1289,6 +1297,10 @@ export interface Geofences {
 }
 
 export interface HolidayCalendars {
+  /**
+   * From 1 December (organisation time) next year's occurrence of every recurring holiday is created in this calendar, once per holiday (worker task holidays.rollover).
+   */
+  autoRollover: Generated<boolean>;
   countryCode: string | null;
   createdAt: Generated<Timestamp>;
   id: Generated<string>;
@@ -1310,6 +1322,14 @@ export interface Holidays {
   name: string;
   nameAr: string | null;
   organizationId: string;
+  /**
+   * Same Gregorian date every year (National Day…): copied by "Copy to next year" and the yearly rollover. Moon-sighted holidays are not recurring.
+   */
+  recursYearly: Generated<boolean>;
+  /**
+   * When the next year's occurrence of this recurring holiday was created (or found) by the rollover or "Copy to next year" — the rollover's ledger.
+   */
+  rolledOverAt: Timestamp | null;
   type: Generated<HolidayType>;
 }
 
@@ -2062,6 +2082,10 @@ export interface Shifts {
    */
   dayBoundary: Generated<string>;
   endTime: string | null;
+  /**
+   * FIXED only: flexible start band in minutes after the start — start anywhere in it without being late; the expected end moves with the start (engine 1.5.0). 0 = off.
+   */
+  flexStartMinutes: Generated<number>;
   graceInMinutes: number | null;
   graceOutMinutes: number | null;
   id: Generated<string>;

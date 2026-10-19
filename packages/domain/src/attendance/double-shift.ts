@@ -63,6 +63,8 @@ export function composeDoubleShift(primary: EngineShift, additional: EngineShift
       punchOutWindowAfterMinutes: second.punchOutWindowAfterMinutes,
       graceInMinutes: first.graceInMinutes,
       graceOutMinutes: second.graceOutMinutes,
+      // a flexible start band would move the second shift's end with the first one's start: a double shift keeps its clock
+      flexStartMinutes: 0,
       segments: [
         { shiftId: first.id, code: first.code, startTime: toHhmm(firstSpan.start), endTime: toHhmm(firstSpan.end) },
         { shiftId: second.id, code: second.code, startTime: toHhmm(secondSpan.start), endTime: toHhmm(secondSpan.end) },
