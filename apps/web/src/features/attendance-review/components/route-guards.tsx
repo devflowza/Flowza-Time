@@ -1,7 +1,5 @@
 import { Suspense } from 'react';
-import { useTranslation } from 'react-i18next';
-import { ShieldOff } from 'lucide-react';
-import { EmptyState, Skeleton } from '@/components/ui';
+import { PermissionDeniedPage, Skeleton } from '@/components/ui';
 import { useReviewAccess } from '../api';
 import { lazyPage } from '@/lib/lazy-page';
 
@@ -12,8 +10,7 @@ function PageFallback() { return <div className="page-container space-y-4"><Skel
 
 /** Guard by a predicate (any of several keys, or line-manager status) — RequirePermission requires all of its keys. */
 function Guard({ allowed, children }: { allowed: boolean; children: React.ReactNode }) {
-  const { t } = useTranslation();
-  if (!allowed) return <div className="page-container"><EmptyState icon={ShieldOff} title={t('common.permissionDenied')} /></div>;
+  if (!allowed) return <PermissionDeniedPage />;
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
 }
 

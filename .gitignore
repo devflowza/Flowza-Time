@@ -22,3 +22,5 @@ apps/web/dist-e2e/
 apps/web/playwright/.cache/
 # end-to-end matrix output (results JSON, server logs, UI-walk screenshots): local artefacts, never committed
 scripts/e2e-hosted/results/
+# role walk output (results JSON): local artefacts, never committed
+scripts/role-walk/results/

@@ -37,7 +37,10 @@ export default function ShiftsPage() {
   const can = useCan();
   const requestsOn = useModuleEnabled('shift_requests') && can('attendance.view');
   const advanced = useModuleEnabled('advanced_scheduling');
-  const tabs: readonly Tab[] = [...BASE_TABS, ...(requestsOn ? REQUEST_TABS : []), ...(advanced ? SCHEDULING_TABS : [])];
+  // a tab whose data the role's keys do not read is not offered (it would only show a refusal): rule sets and their employee
+  // groups are attendance.view, the round-the-clock generator previews and creates through shift.manage
+  const offered = (tb: Tab) => (tb !== 'rules' || can('attendance.view')) && (tb !== 'round-the-clock' || can('shift.manage'));
+  const tabs: readonly Tab[] = [...BASE_TABS, ...(requestsOn ? REQUEST_TABS : []), ...(advanced ? SCHEDULING_TABS : [])].filter(offered);
   const [params, setParams] = useSearchParams();
   const tab: Tab = (tabs as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'shifts';
   const label = (tb: Tab): string => (tb === 'roster' ? ta('roster.tab') : tb === 'requests' ? tr('hr.tab') : isSchedulingTab(tb) ? ts(SCHEDULING_LABELS[tb]) : t(`tabs.${tb}`));

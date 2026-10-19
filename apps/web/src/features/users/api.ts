@@ -4,14 +4,16 @@ import type { z } from 'zod';
 import type { updateMemberSchema } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
-import { meQueryKey, useOrgId } from '@/features/me/use-me';
+import { meQueryKey, useCan, useOrgId } from '@/features/me/use-me';
 
 export type UpdateMemberInput = z.output<typeof updateMemberSchema>;
 export type ListQuery = Record<string, string | number | boolean | undefined>;
 
+/** Members of the organisation (user.view): also the people pickers of other pages, which offer nobody without the key. */
 export function useMembers(query: ListQuery) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, 'members', query), queryFn: () => api.get<PageEnvelope<MemberDto>>(`/orgs/${orgId}/members`, query), placeholderData: keepPreviousData });
+  const can = useCan();
+  return useQuery({ queryKey: qk.list(orgId, 'members', query), queryFn: () => api.get<PageEnvelope<MemberDto>>(`/orgs/${orgId}/members`, query), placeholderData: keepPreviousData, enabled: can('user.view') });
 }
 /**
  * The e-mail status to show AND to poll on — one derivation for both, so the dialog can never spin on a status it does not

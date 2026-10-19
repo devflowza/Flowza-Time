@@ -1,10 +1,8 @@
 import { Navigate, Outlet, useLocation } from 'react-router';
 import type { ModuleKey, Permission } from '@flowza/contracts';
-import { useTranslation } from 'react-i18next';
 import { useAuth } from '@/features/auth/auth-provider';
 import { useCan, useEmployeeId, useModulesEnabled } from '@/features/me/use-me';
-import { EmptyState } from '@/components/ui';
-import { PackageX, ShieldOff } from 'lucide-react';
+import { ModuleDisabled, PermissionDeniedPage } from '@/components/ui';
 
 export function RequireAuth() {
   const { session, loading } = useAuth();
@@ -21,12 +19,11 @@ export function RequireAuth() {
  * the API and RLS decide which records each key reveals). Default: every permission is required.
  */
 export function RequirePermission({ permissions, children, selfServiceTo, any = false }: { permissions: Permission[]; children: React.ReactNode; selfServiceTo?: string; any?: boolean }) {
-  const { t } = useTranslation();
   const can = useCan();
   const employeeId = useEmployeeId();
   const allowed = any ? permissions.some((p) => can(p)) : can(...permissions);
   if (!allowed && selfServiceTo && employeeId) return <Navigate to={selfServiceTo} replace />;
-  if (!allowed) return <div className="page-container"><EmptyState icon={ShieldOff} title={t('common.permissionDenied')} /></div>;
+  if (!allowed) return <PermissionDeniedPage />;
   return <>{children}</>;
 }
 
@@ -35,11 +32,7 @@ export function RequirePermission({ permissions, children, selfServiceTo, any = 
  * page explains it instead of rendering screens whose every request the API would refuse with MODULE_DISABLED.
  */
 export function RequireModule({ modules, children }: { modules: ModuleKey[]; children: React.ReactNode }) {
-  const { t } = useTranslation();
   const enabled = useModulesEnabled();
-  if (!enabled(...modules)) {
-    const names = modules.map((m) => t(`modules.${m}.name`)).join(', ');
-    return <div className="page-container"><EmptyState icon={PackageX} title={t('modules.disabledTitle', { names })} description={t('modules.disabledHint')} /></div>;
-  }
+  if (!enabled(...modules)) return <div className="page-container"><ModuleDisabled modules={modules} /></div>;
   return <>{children}</>;
 }

@@ -2,18 +2,26 @@ import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tansta
 import type { BranchDto, DepartmentDto, DesignationDto, TeamDto } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
-import { useOrgId } from '@/features/me/use-me';
+import { useCan, useOrgId } from '@/features/me/use-me';
 
 export type StructureEntity = 'branches' | 'departments' | 'designations' | 'teams';
 export type ListQuery = Record<string, string | number | boolean | undefined>;
 
+/**
+ * The key each structure list needs (apps/api structure.service): branches are branch.view, the rest department.view.
+ * Lists double as filter and picker options on many pages; without the key there is nothing to offer, so no request is made
+ * (a line manager's roster or summary would otherwise fire a refused lookup on every visit).
+ */
+const READ_KEY = { branches: 'branch.view', departments: 'department.view', designations: 'department.view', teams: 'department.view' } as const;
+
 export function useStructureList<T>(entity: StructureEntity, query: ListQuery, enabled = true) {
   const orgId = useOrgId();
+  const can = useCan();
   return useQuery({
     queryKey: qk.list(orgId, entity, query),
     queryFn: () => api.get<PageEnvelope<T>>(`/orgs/${orgId}/${entity}`, query),
     placeholderData: keepPreviousData,
-    enabled,
+    enabled: enabled && can(READ_KEY[entity]),
   });
 }
 export const useBranches = (q: ListQuery, enabled = true) => useStructureList<BranchDto>('branches', q, enabled);

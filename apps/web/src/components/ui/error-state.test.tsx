@@ -20,6 +20,35 @@ describe('ErrorState', () => {
     expect(onRetry).toHaveBeenCalledOnce();
   });
 
+  it('shows a permission the role does not carry as "permission denied", without the API\'s wording, a retry or a request id', () => {
+    const onRetry = vi.fn();
+    render(<ErrorState error={new ApiError(403, 'FORBIDDEN', 'Missing permission: attendance.view_own.', 'req_DVG')} onRetry={onRetry} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Permission denied');
+    expect(screen.getByRole('status')).toHaveTextContent('You do not have permission to view this information.');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(document.body).not.toHaveTextContent('Missing permission');
+    expect(document.body).not.toHaveTextContent('req_DVG');
+    expect(document.body).not.toHaveTextContent(/contact support/i);
+    // the answer will not change on a retry
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
+  it('shows a module the organisation does not have as the module state, not as an error', () => {
+    render(<ErrorState error={new ApiError(403, 'FEATURE_DISABLED', 'Module off.', 'req_M', { reason: 'MODULE_DISABLED', module: 'leave' })} onRetry={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Leave management is not part of your subscription');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(document.body).not.toHaveTextContent('req_M');
+  });
+
+  it('shows a record that is gone or outside the member\'s scope as "not found", without a retry or a request id', () => {
+    render(<ErrorState error={new ApiError(404, 'NOT_FOUND', 'Device not found.', 'req_404')} onRetry={vi.fn()} />);
+    expect(screen.getByRole('status')).toHaveTextContent('Not found');
+    expect(screen.getByRole('status')).toHaveTextContent('outside what you have access to');
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect(document.body).not.toHaveTextContent('req_404');
+    expect(screen.queryByRole('button', { name: 'Retry' })).toBeNull();
+  });
+
   it('keeps real failures as an alert with the request id', () => {
     render(<ErrorState error={new ApiError(500, 'INTERNAL', 'Something broke.', 'req_9')} />);
     expect(screen.getByRole('alert')).toHaveTextContent('Something broke.');

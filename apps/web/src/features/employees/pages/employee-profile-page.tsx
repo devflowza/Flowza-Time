@@ -58,7 +58,7 @@ export default function EmployeeProfilePage() {
       case 'activity': return can('attendance.view');
       case 'history': return can('employee.view') || isOwn;
       case 'devices': return devicesOn && (can('device.view') || isOwn);
-      case 'attendance': return can('attendance.view') || isOwn;
+      case 'attendance': return can('attendance.view') || (isOwn && can('attendance.view_own'));
       default: return true;
     }
   });
@@ -103,7 +103,7 @@ export default function EmployeeProfilePage() {
             </div>
             <Tabs value={tab} onValueChange={(v) => setParams({ tab: v })}>
               <TabsList className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb} className={tb === 'danger' ? 'data-[state=active]:text-destructive' : undefined}>{t(`profile.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
-              <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} />{!isOwn && !e.deletedAt ? <AttendanceGrantsCard employeeId={e.id} /> : null}{!isOwn && selfServiceOn ? <PortalAccessCard employeeId={e.id} employeeName={e.displayName} /> : null}</TabsContent>
+              <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} />{!isOwn && !e.deletedAt ? <AttendanceGrantsCard employeeId={e.id} directReport={!!ownEmployeeId && (e.managerEmployeeId === ownEmployeeId || e.secondaryManagerEmployeeId === ownEmployeeId)} /> : null}{!isOwn && selfServiceOn ? <PortalAccessCard employeeId={e.id} employeeName={e.displayName} /> : null}</TabsContent>
               <TabsContent value="history">{tab === 'history' ? <HistoryTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="devices">{tab === 'devices' ? <DevicesTab employeeId={e.id} employee={{ name: e.displayName, number: e.employeeNumber, deviceUserId: e.deviceUserId }} /> : null}</TabsContent>
               <TabsContent value="attendance">{tab === 'attendance' ? <AttendanceTab employeeId={e.id} /> : null}</TabsContent>
