@@ -158,7 +158,8 @@ describe('report schedules — CRUD and permissions', () => {
       [{ cadence: 'weekly', runDay: 1, periodRule: 'previous_month' }, 400],
       [{ periodRule: 'custom', customFromDay: 1, customToDay: 28 }, 400],
       [{ reportType: 'monthly_attendance', periodRule: 'custom', customFromDay: 26, customToDay: 25 }, 400],
-      [{ reportType: 'daily_attendance' }, 400],
+      // the Daily Report is schedulable since the daily cadence (20261019000500), but a daily run covers yesterday, never a month
+      [{ reportType: 'daily_attendance', cadence: 'daily', runDay: 0, periodRule: 'previous_month' }, 400],
       [{ runDay: 29 }, 400],
       [{ reportType: 'employee_attendance' }, 400], // needs employeeIds
       [{ reportType: 'leave_report', filters: { leaveTypeCode: 'NOPE' } }, 400],

@@ -1,11 +1,11 @@
 import { sql } from 'kysely';
-import type { DashboardBranchRow, DashboardSummary, DashboardTrendPoint } from '@flowza/contracts';
+import type { DashboardBranchRow, DashboardDepartmentRow, DashboardMonthToDate, DashboardSummary, DashboardTrendPoint } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import { errors, eachDate } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { branchFilter, requirePermission } from '../lib/authorize.js';
 import { locationScope, type LocationScope } from '../lib/location-scope.js';
-import { type Actor, runUser } from '../lib/service.js';
+import { type Actor, runUser, withSystemScope } from '../lib/service.js';
 import { toCount } from '../lib/pagination.js';
 
 const MAX_TREND_DAYS = 92;
@@ -165,5 +165,100 @@ export async function branches(deps: ApiDeps, actor: Actor, orgId: string, q: { 
       // offline includes degraded, error, vendor_degraded and unknown — anything that is not online
       return { branchId: b.id, branchCode: String(b.code), branchName: b.name, employees: toCount(b.employees), present: toCount(b.present), absent: toCount(b.absent), late: toCount(b.late), onLeave: toCount(b.onLeave), missingPunch: toCount(b.missingPunch), devicesOnline: online, devicesOffline: toCount(b.total) - online };
     });
+  });
+}
+
+// ---- statistics and indicators (customer requirement 2026-10-19) ----------------------------------------------------------------
+
+/** One decimal percentage, or null when there is nothing to divide by. */
+const rate = (part: number, whole: number): number | null => (whole > 0 ? Math.round((part / whole) * 1000) / 10 : null);
+
+/** The caller's attendance scope as SQL: branches (an explicit branch, their branch scope, a location's) and a place's employees. */
+function scopeSql(orgId: string, loc: LocationScope) {
+  const branches = loc.branchIds ? sql`and r.branch_id = any(${loc.branchIds}::uuid[])` : sql``;
+  const places = loc.placeIds ? sql`and r.employee_id in (select pe.id from public.employees pe where pe.organization_id = ${orgId} and pe.work_location_id = any(${loc.placeIds}::uuid[]))` : sql``;
+  return sql`${branches} ${places}`;
+}
+
+/** The day the widgets describe: the requested date, else today in the organisation's zone. */
+const dayCte = (orgId: string, date: string | undefined) => sql`select coalesce(${date ?? null}::date, (now() at time zone (select o.timezone from public.organizations o where o.id = ${orgId}))::date) as d`;
+
+/**
+ * GET /dashboard/departments — the day's attendance per department (Statistics: "attendance, absence and lateness statistics"),
+ * read under the caller's RLS with their branch scope (and an optional branch / location filter), exactly as the summary counts.
+ * A record counts under the department it was calculated in (the record's own department that day). Attendance rate = present ÷
+ * the employees expected to work (present, half day, absent, missing punch; leave, weekly offs and holidays are not expected).
+ * Department names are read in the organisation's system scope: a dashboard viewer without department.view still sees the label.
+ */
+export async function departments(deps: ApiDeps, actor: Actor, orgId: string, q: { date?: string | undefined; branchId?: string | undefined; locationId?: string | undefined }): Promise<DashboardDepartmentRow[]> {
+  const grant = requirePermission(actor.principal, orgId, 'dashboard.view');
+  const scope = branchFilter(grant, q.branchId);
+  return runUser(deps.db, actor, async (trx) => {
+    const loc = await locationScope(trx, orgId, q.locationId, scope);
+    const { rows } = await sql<{ departmentId: string | null; employees: string; present: string; expected: string; absent: string; late: string; onLeave: string; missingPunch: string }>`
+      with day as (${dayCte(orgId, q.date)})
+      select r.department_id as "departmentId",
+             count(*) as employees,
+             count(*) filter (where r.status in ('PRESENT', 'HALF_DAY') or (r.status = 'PENDING' and r.first_in_at is not null)) as present,
+             count(*) filter (where r.status in ('PRESENT', 'HALF_DAY', 'ABSENT', 'MISSING_PUNCH') or (r.status = 'PENDING' and r.first_in_at is not null)) as expected,
+             count(*) filter (where r.status = 'ABSENT') as absent,
+             count(*) filter (where 'LATE' = any(r.flags)) as late,
+             count(*) filter (where r.status = 'LEAVE') as "onLeave",
+             count(*) filter (where r.flags && array['MISSING_IN', 'MISSING_OUT']::text[]) as "missingPunch"
+      from public.attendance_daily_records r, day
+      where r.organization_id = ${orgId} and r.attendance_date = day.d and r.status not in ('EXITED', 'NOT_JOINED') ${scopeSql(orgId, loc)}
+      group by r.department_id`.execute(trx);
+    const ids = rows.map((r) => r.departmentId).filter((id): id is string => id !== null);
+    const names = ids.length
+      ? new Map((await withSystemScope(trx, orgId, (t) => t.selectFrom('departments').select(['id', 'name']).where('organizationId', '=', orgId).where('id', 'in', ids).execute())).map((d) => [d.id, d.name]))
+      : new Map<string, string>();
+    return rows.map((r): DashboardDepartmentRow => ({
+      departmentId: r.departmentId, departmentName: r.departmentId ? names.get(r.departmentId) ?? null : null, employees: toCount(r.employees), present: toCount(r.present), absent: toCount(r.absent),
+      late: toCount(r.late), onLeave: toCount(r.onLeave), missingPunch: toCount(r.missingPunch), attendanceRate: rate(toCount(r.present), toCount(r.expected)),
+    })).sort((a, b) => (a.departmentName === null ? 1 : 0) - (b.departmentName === null ? 1 : 0) || (a.departmentName ?? '').localeCompare(b.departmentName ?? ''));
+  });
+}
+
+/**
+ * GET /dashboard/month-to-date — the month's indicators from the 1st to the chosen day (inclusive): attendance rate over the
+ * working days the engine judged (present ÷ present + half day + absent + missing punch), late days and minutes, absences, early
+ * departures, missing punches, leave days, short hours (the reports' UT, same rule as `shortfallMinutes`), overtime and the
+ * average worked time per worked day. Same scope and RLS as the summary; days not judged yet (PENDING) count nowhere.
+ */
+export async function monthToDate(deps: ApiDeps, actor: Actor, orgId: string, q: { date?: string | undefined; branchId?: string | undefined; locationId?: string | undefined }): Promise<DashboardMonthToDate> {
+  const grant = requirePermission(actor.principal, orgId, 'dashboard.view');
+  const scope = branchFilter(grant, q.branchId);
+  return runUser(deps.db, actor, async (trx) => {
+    const loc = await locationScope(trx, orgId, q.locationId, scope);
+    const row = (await sql<{ from: string; to: string; workingDays: string; presentDays: string; absentDays: string; lateDays: string; lateMinutes: string; earlyDepartureDays: string; missingPunchDays: string; leaveDays: string; shortfallMinutes: string; overtimeMinutes: string; workedDays: string; workedMinutes: string }>`
+      with day as (${dayCte(orgId, q.date)}),
+      span as (select date_trunc('month', day.d)::date as f, day.d as t from day)
+      select to_char(span.f, 'YYYY-MM-DD') as "from", to_char(span.t, 'YYYY-MM-DD') as "to",
+             count(r.id) filter (where r.status in ('PRESENT', 'HALF_DAY', 'ABSENT', 'MISSING_PUNCH')) as "workingDays",
+             count(r.id) filter (where r.status in ('PRESENT', 'HALF_DAY')) as "presentDays",
+             count(r.id) filter (where r.status = 'ABSENT') as "absentDays",
+             count(r.id) filter (where 'LATE' = any(r.flags)) as "lateDays",
+             coalesce(sum(r.late_minutes) filter (where 'LATE' = any(r.flags)), 0) as "lateMinutes",
+             count(r.id) filter (where 'EARLY_DEPARTURE' = any(r.flags)) as "earlyDepartureDays",
+             count(r.id) filter (where r.status = 'MISSING_PUNCH' or r.flags && array['MISSING_IN', 'MISSING_OUT']::text[]) as "missingPunchDays",
+             count(r.id) filter (where r.status = 'LEAVE') as "leaveDays",
+             -- the reports' UT (packages/domain reports/derive.ts deriveHours): base − worked on a worked day with a base
+             coalesce(sum(greatest(0, r.scheduled_minutes - greatest(0, r.worked_minutes))) filter (where r.scheduled_minutes > 0 and (
+               r.status in ('PRESENT', 'HALF_DAY', 'MISSING_PUNCH')
+               or (r.status in ('WEEKLY_OFF', 'HOLIDAY') and r.flags && array['WORKED_ON_WEEKLY_OFF', 'WORKED_ON_HOLIDAY']::text[])
+               or (r.status = 'LEAVE' and r.worked_minutes > 0))), 0) as "shortfallMinutes",
+             coalesce(sum(greatest(0, r.overtime_minutes)), 0) as "overtimeMinutes",
+             count(r.id) filter (where r.status in ('PRESENT', 'HALF_DAY') and r.worked_minutes > 0) as "workedDays",
+             coalesce(sum(r.worked_minutes) filter (where r.status in ('PRESENT', 'HALF_DAY') and r.worked_minutes > 0), 0) as "workedMinutes"
+      from span
+      left join public.attendance_daily_records r on r.organization_id = ${orgId} and r.attendance_date between span.f and span.t ${scopeSql(orgId, loc)}
+      group by span.f, span.t`.execute(trx)).rows[0];
+    if (!row) throw errors.notFound('Organisation not found.');
+    const workingDays = toCount(row.workingDays); const presentDays = toCount(row.presentDays); const workedDays = toCount(row.workedDays);
+    return {
+      from: row.from, to: row.to, workingDays, presentDays, absentDays: toCount(row.absentDays), lateDays: toCount(row.lateDays), lateMinutes: toCount(row.lateMinutes),
+      earlyDepartureDays: toCount(row.earlyDepartureDays), missingPunchDays: toCount(row.missingPunchDays), leaveDays: toCount(row.leaveDays), shortfallMinutes: toCount(row.shortfallMinutes),
+      overtimeMinutes: toCount(row.overtimeMinutes), attendanceRate: rate(presentDays, workingDays), avgWorkedMinutes: workedDays > 0 ? Math.round(toCount(row.workedMinutes) / workedDays) : null,
+    };
   });
 }

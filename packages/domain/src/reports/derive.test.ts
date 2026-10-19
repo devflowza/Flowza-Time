@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deriveHours, pairPunches, shiftHoursVerdict } from './derive.js';
+import { deriveHours, irregularitiesOf, pairPunches, shiftHoursVerdict, shortfallMinutes, type HoursInput } from './derive.js';
 
 const base = { status: 'PRESENT', flags: [] as string[], firstInAt: '2017-11-01T03:30:00Z', lastOutAt: '2017-11-01T14:30:00Z', workedMinutes: 600, scheduledMinutes: 540, overtimeMinutes: 60, overtimeCategory: 'REGULAR' as string | null };
 
@@ -62,5 +62,32 @@ describe('pairPunches', () => {
   });
   it('records an OUT without an IN as an OUT-only row', () => {
     expect(pairPunches([{ punchedAt: '2017-11-01T02:42:00Z', role: 'OUT' }])).toEqual([{ inAt: null, outAt: '2017-11-01T02:42:00Z' }]);
+  });
+});
+
+describe('shortfallMinutes / irregularitiesOf', () => {
+  const day = (over: Partial<HoursInput> = {}): HoursInput => ({ status: 'PRESENT', flags: [], firstInAt: '2026-10-18T04:00:00Z', lastOutAt: '2026-10-18T12:00:00Z', workedMinutes: 480, scheduledMinutes: 480, overtimeMinutes: 0, overtimeCategory: null, ...over });
+  it('is the base not worked on a worked day, the reports\' UT; 0 on every other kind of day', () => {
+    expect(shortfallMinutes(day())).toBe(0);
+    expect(shortfallMinutes(day({ workedMinutes: 405 }))).toBe(75);
+    expect(shortfallMinutes(day({ workedMinutes: 600, overtimeMinutes: 120 }))).toBe(0);
+    expect(shortfallMinutes(day({ status: 'ABSENT', workedMinutes: 0 }))).toBe(0);
+    expect(shortfallMinutes(day({ status: 'LEAVE', workedMinutes: 0 }))).toBe(0);
+    expect(shortfallMinutes(day({ status: 'PENDING', workedMinutes: 0 }))).toBe(0);
+    expect(shortfallMinutes(day({ status: 'WEEKLY_OFF', scheduledMinutes: 0, workedMinutes: 0 }))).toBe(0);
+    // a single punch is short by the whole base until corrected, as the Daily Report prints it
+    expect(shortfallMinutes(day({ status: 'MISSING_PUNCH', flags: ['MISSING_OUT'], lastOutAt: null, workedMinutes: 0 }))).toBe(480);
+    expect(shortfallMinutes(day({ workedMinutes: 405 }))).toBe(deriveHours(day({ workedMinutes: 405 })).ut);
+  });
+  it('lists what was irregular in the report\'s order, and nothing for a regular or not-yet-judged day', () => {
+    expect(irregularitiesOf(day())).toEqual([]);
+    expect(irregularitiesOf(day({ flags: ['LATE', 'EARLY_DEPARTURE'], workedMinutes: 420 }))).toEqual(['LATE', 'EARLY_DEPARTURE', 'UNDER_HOURS']);
+    expect(irregularitiesOf(day({ flags: ['VERY_LATE'] }))).toEqual(['LATE']);
+    expect(irregularitiesOf(day({ status: 'ABSENT', flags: ['UNEXCUSED'], workedMinutes: 0 }))).toEqual(['ABSENT', 'UNEXCUSED']);
+    // a missing punch is not also short hours: its hours are unknown
+    expect(irregularitiesOf(day({ flags: ['MISSING_OUT'], lastOutAt: null, workedMinutes: 0 }))).toEqual(['MISSING_OUT']);
+    expect(irregularitiesOf(day({ status: 'HALF_DAY', flags: ['UNDER_HOURS'], workedMinutes: 200 }))).toEqual(['UNDER_HOURS']);
+    expect(irregularitiesOf(day({ status: 'PENDING', flags: ['LATE'] }))).toEqual([]);
+    expect(irregularitiesOf(day({ status: 'EXITED' }))).toEqual([]);
   });
 });

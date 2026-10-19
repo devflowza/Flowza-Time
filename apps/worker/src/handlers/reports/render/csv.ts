@@ -1,6 +1,6 @@
 import Papa from 'papaparse';
 import type { ReportDocument } from '../model.js';
-import { flatten } from './flatten.js';
+import { flatten, flattenSheets } from './flatten.js';
 
 /**
  * Cells that a spreadsheet would evaluate (`=`, `+`, `-`, `@`, tab, CR) are prefixed with an apostrophe so an
@@ -15,7 +15,13 @@ export function escapeSpreadsheetText(v: string): string {
 export function renderCsv(doc: ReportDocument): Buffer {
   const flat = flatten(doc);
   const data: Array<Array<string | number>> = [flat.header.map(escapeSpreadsheetText)];
-  for (const r of flat.rows) data.push(r.values.map((v) => (v === null ? '' : typeof v === 'number' ? v : escapeSpreadsheetText(v))));
+  const cellOf = (v: string | number | null) => (v === null ? '' : typeof v === 'number' ? v : escapeSpreadsheetText(v));
+  for (const r of flat.rows) data.push(r.values.map(cellOf));
+  // a section kept apart (a summary per employee) follows after a blank line, under its name and its own header
+  for (const sheet of flattenSheets(doc)) {
+    data.push([], [escapeSpreadsheetText(sheet.name)], sheet.table.header.map(escapeSpreadsheetText));
+    for (const r of sheet.table.rows) data.push(r.values.map(cellOf));
+  }
   const text = Papa.unparse(data, { newline: '\r\n' });
   return Buffer.concat([Buffer.from([0xef, 0xbb, 0xbf]), Buffer.from(text, 'utf8')]);
 }

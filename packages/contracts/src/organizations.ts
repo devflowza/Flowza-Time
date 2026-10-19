@@ -311,6 +311,12 @@ export const organizationSettingsSchema = z.object({
     showQuote: z.boolean().default(true),
     /** Highlight card (headline + link to reports) next to the KPI tiles. */
     showHighlight: z.boolean().default(true),
+    /**
+     * Statistics widgets (migration 20261019000500): the day's attendance per department and the month-to-date indicators. No
+     * `.default()` on purpose — an absent value means "shown", and saving the group without them never rewrites them.
+     */
+    showDepartmentBreakdown: z.boolean(),
+    showMonthToDate: z.boolean(),
   }).partial().default({}),
   reports: z.object({
     /** How hour columns print: 9.45 = 9 h 45 min (the GCC payroll notation the sample reports use) or 9:45. */

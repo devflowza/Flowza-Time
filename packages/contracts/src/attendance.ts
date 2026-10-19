@@ -175,6 +175,11 @@ export const attendanceDailyRecordDtoSchema = z.object({
   lopDays: z.number().default(0),
   /** True when the day carries an unrevoked UNEXCUSED mark. */
   unexcused: z.boolean().default(false),
+  /**
+   * Shortfall ("Short"): scheduled − worked minutes when a worked day fell short of its shift's hours, 0 otherwise — the reports'
+   * UT, derived with the same rule (`shortfallMinutes`, @flowza/domain reports/derive.ts), never stored separately.
+   */
+  shortfallMinutes: z.number().int().default(0),
 });
 export type AttendanceDailyRecordDto = z.infer<typeof attendanceDailyRecordDtoSchema>;
 

@@ -4,6 +4,7 @@ import { dailyAttendance } from './daily.js';
 import { absenceReport, lateReport, leaveReport } from './day-lists.js';
 import { employeeAttendance } from './detail.js';
 import { employeeDirectory } from './employee-directory.js';
+import { irregularitiesReport } from './irregularities.js';
 import { missingPunchReport } from './missed-punch.js';
 import { monthlyAttendance } from './monthly.js';
 import { monthlyDetail } from './monthly-detail.js';
@@ -33,6 +34,7 @@ export const REPORT_DEFINITIONS: Partial<Record<ReportType, ReportDefinition>> =
   monthly_summary: monthlySummary,
   monthly_detail: monthlyDetail,
   monthly_timesheet: monthlyTimesheet,
+  irregularities_report: irregularitiesReport,
 };
 
 export type { ReportDefinition } from './types.js';

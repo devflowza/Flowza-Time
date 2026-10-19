@@ -3,8 +3,8 @@ import type { Trx } from '@flowza/database';
 import { DASH, deriveHours, eachDateInclusive, minutesBetweenInstants, pairPunches, type DerivedHours } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ReportContext } from '../context.js';
-import { codeInputOf, loadRecords, type DailyRecord } from '../data/records.js';
-import { groupByDepartment, loadRoster, sortByEmployeeNumber, type RosterEmployee } from '../data/roster.js';
+import { codeInputOf, loadRecords, matchesStatusFilter, type DailyRecord } from '../data/records.js';
+import { groupByDepartment, loadRoster, searchEmployeeIds, sortByEmployeeNumber, type RosterEmployee } from '../data/roster.js';
 import { cell, countRows, EMPTY_CELL, num, type CellTone, type ReportCell, type ReportColumn, type ReportDocument, type ReportRow, type ReportSection } from '../model.js';
 import type { ReportDefinition } from './types.js';
 
@@ -78,8 +78,12 @@ export const dailyAttendance: ReportDefinition = {
     const dates = eachDateInclusive(date, to);
     const range = dates.length > 1;
     // A record whose status is NOT_JOINED or EXITED belongs to someone who was not on the payroll that day (the engine
-    // writes one for every employee a range recalculation touches); the daily sheet lists only the day's staff.
-    const records = (await loadRecords(trx, ctx, { from: date, to })).filter((r) => r.status !== 'EXITED' && r.status !== 'NOT_JOINED');
+    // writes one for every employee a range recalculation touches); the daily sheet lists only the day's staff. The daily
+    // register's filters (an export of its current view) narrow it further: status, flag, shift and the name / number search.
+    const { status, flag, shiftId, search } = ctx.params;
+    const found = search ? await searchEmployeeIds(trx, ctx, search) : null;
+    const records = (await loadRecords(trx, ctx, { from: date, to })).filter((r) => r.status !== 'EXITED' && r.status !== 'NOT_JOINED'
+      && matchesStatusFilter(r, status) && (!flag || r.flags.includes(flag)) && (!shiftId || r.shiftId === shiftId) && (!found || found.has(r.employeeId)));
     const roster = await loadRoster(trx, ctx, { employeeIds: [...new Set(records.map((r) => r.employeeId))] });
     const byEmployee = new Map(roster.map((e) => [e.id, e]));
     type Item = { e: RosterEmployee; r: DailyRecord };

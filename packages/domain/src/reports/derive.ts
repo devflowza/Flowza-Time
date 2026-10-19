@@ -92,3 +92,40 @@ export function pairPunches(punches: readonly TracePunchLike[]): PunchPair[] {
   if (open) pairs.push(open);
   return pairs;
 }
+
+/**
+ * Shortfall ("Short", the reports' UT): base − worked minutes when a worked day fell short of its shift's hours, 0 on every other
+ * day (absence, leave, weekly off, holiday, a day not judged yet). The ONE rule the daily register, the record dialog, the portal,
+ * the dashboard and the reports use, so the figure cannot drift between them. A missing-punch day is short by its whole base until
+ * the punch is corrected, exactly as the Daily Report prints it.
+ */
+export function shortfallMinutes(r: HoursInput): number {
+  return deriveHours(r).ut ?? 0;
+}
+
+/**
+ * What makes an employee-day irregular (the "Irregular cases" report and its schedules): a late arrival, an early departure, an
+ * absence, a missing check-in / check-out, short hours (the engine's UNDER_HOURS, or a present day short of its base) or a day
+ * marked unexcused. In this order — the order the report prints them.
+ */
+export const IRREGULARITY_KINDS = ['LATE', 'EARLY_DEPARTURE', 'ABSENT', 'MISSING_IN', 'MISSING_OUT', 'UNDER_HOURS', 'UNEXCUSED'] as const;
+export type IrregularityKind = (typeof IRREGULARITY_KINDS)[number];
+
+/** Statuses the engine has not judged (or that are outside employment): never irregular. */
+const NOT_JUDGED = new Set(['PENDING', 'NOT_JOINED', 'EXITED']);
+
+export function irregularitiesOf(r: HoursInput): IrregularityKind[] {
+  if (NOT_JUDGED.has(r.status)) return [];
+  const out: IrregularityKind[] = [];
+  if (r.flags.includes('LATE') || r.flags.includes('VERY_LATE')) out.push('LATE');
+  if (r.flags.includes('EARLY_DEPARTURE')) out.push('EARLY_DEPARTURE');
+  if (r.status === 'ABSENT') out.push('ABSENT');
+  const missingIn = r.flags.includes('MISSING_IN');
+  const missingOut = r.flags.includes('MISSING_OUT');
+  if (missingIn) out.push('MISSING_IN');
+  if (missingOut) out.push('MISSING_OUT');
+  // a day with a missing punch has unknown hours: it is the missing punch, not short hours, until the punch is corrected
+  if (r.flags.includes('UNDER_HOURS') || (r.status === 'PRESENT' && !missingIn && !missingOut && shortfallMinutes(r) > 0)) out.push('UNDER_HOURS');
+  if (r.flags.includes('UNEXCUSED')) out.push('UNEXCUSED');
+  return out;
+}

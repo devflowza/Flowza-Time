@@ -115,3 +115,14 @@ describe('invitations (HR portal Prompt 5 review)', () => {
     expect(validateInvitationSchema.safeParse({}).success).toBe(false);
   });
 });
+
+describe('dashboard settings: the statistics widgets (migration 20261019000500)', () => {
+  const group = organizationSettingsSchema.shape.dashboard;
+  it('stores the two toggles when sent and never invents them when not (absent = shown)', () => {
+    expect(group.parse({ showDepartmentBreakdown: false, showMonthToDate: true })).toMatchObject({ showDepartmentBreakdown: false, showMonthToDate: true });
+    const saved = group.parse({ theme: 'midnight' });
+    expect('showDepartmentBreakdown' in saved).toBe(false);
+    expect('showMonthToDate' in saved).toBe(false);
+    expect(group.safeParse({ showMonthToDate: 'yes' }).success).toBe(false);
+  });
+});

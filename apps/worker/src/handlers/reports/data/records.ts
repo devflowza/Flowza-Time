@@ -100,6 +100,17 @@ function leaveOn(spans: LeaveSpan[] | undefined, date: string): RecordLeave | nu
   return s ? { code: s.code, name: s.name, isPaid: s.isPaid, treatAsPresent: s.treatAsPresent, isHalfDay: s.isHalfDay } : null;
 }
 
+/**
+ * The `status` parameter as the daily register applies it (HR request 2026-10-19: "search and report extraction with all search
+ * options"): `MISSING_PUNCH` is the MISSING_IN / MISSING_OUT flag (the engine sets the status by the rule set's
+ * missingPunchBehavior), any other value is the record's status. No status = every record.
+ */
+export function matchesStatusFilter(r: Pick<DailyRecord, 'status' | 'flags'>, status: string | null | undefined): boolean {
+  if (!status) return true;
+  if (status === 'MISSING_PUNCH') return r.status === 'MISSING_PUNCH' || r.flags.includes('MISSING_IN') || r.flags.includes('MISSING_OUT');
+  return r.status === status;
+}
+
 /** Code input for one record. */
 export function codeInputOf(r: DailyRecord) {
   return { status: r.status, flags: r.flags, leaveTypeCode: r.leave?.code ?? null, leaveTreatAsPresent: r.leave?.treatAsPresent ?? null, leaveIsPaid: r.leave?.isPaid ?? null };

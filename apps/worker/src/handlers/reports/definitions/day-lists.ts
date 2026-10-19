@@ -2,7 +2,7 @@ import type { Trx } from '@flowza/database';
 import { dayList } from '@flowza/domain';
 import { errors } from '@flowza/shared';
 import type { ReportContext } from '../context.js';
-import { codeInputOf, loadRecords, type DailyRecord } from '../data/records.js';
+import { codeInputOf, loadRecords, matchesStatusFilter, type DailyRecord } from '../data/records.js';
 import { groupByDepartment, loadRoster, sortByEmployeeNumber } from '../data/roster.js';
 import { cell, countRows, num, type ReportColumn, type ReportDocument, type ReportSection } from '../model.js';
 import type { ReportDefinition } from './types.js';
@@ -29,7 +29,8 @@ export function dayListReport(spec: DayListSpec): ReportDefinition {
       if (!from || !to) throw errors.validation('Missing report parameters.', { issues: [{ path: 'parameters.from', message: 'Required' }, { path: 'parameters.to', message: 'Required' }] });
       const records = await loadRecords(trx, ctx, { from, to });
       const hits = new Map<string, string[]>();
-      for (const r of records) if (spec.matches(ctx, r)) hits.set(r.employeeId, [...(hits.get(r.employeeId) ?? []), r.attendanceDate]);
+      // a `status` narrows what counts (late on present days only, …); it never adds days the list would not print
+      for (const r of records) if (spec.matches(ctx, r) && matchesStatusFilter(r, ctx.params.status)) hits.set(r.employeeId, [...(hits.get(r.employeeId) ?? []), r.attendanceDate]);
       const roster = await loadRoster(trx, ctx, { employeeIds: [...hits.keys()] });
       const groups = groupByDepartment(ctx, roster, (e) => e.departmentName);
       const sections: ReportSection[] = groups.map((g) => ({
