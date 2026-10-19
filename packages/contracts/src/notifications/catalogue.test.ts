@@ -1,16 +1,37 @@
 import { describe, expect, it } from 'vitest';
 import { DOMAIN_EVENT_TYPES } from '../sync.js';
-import { DEFAULT_NOTIFICATION_SETTINGS, notificationSettingsSchema, organizationSettingsSchema, resolveNotificationSettings } from '../organizations.js';
+import { APPRECIATION_DEFAULT_MESSAGE_AR, APPRECIATION_DEFAULT_MESSAGE_EN, DEFAULT_NOTIFICATION_SETTINGS, excuseDeadlineOf, notificationSettingsSchema, organizationSettingsSchema, resolveNotificationSettings } from '../organizations.js';
 import { updateNotificationPreferencesSchema } from '../dto/notifications.js';
 import {
-  approvalContextFacts, decideNotificationChannels, isConfigurablePreference, localDateOf, NON_NOTIFYING_EVENT_TYPES, NOTIFICATION_CATALOGUE, NOTIFICATION_ORG_SWITCHES, NOTIFICATION_ROUTE_KEYS, NOTIFICATION_TYPES, notificationData,
-  notificationDataKeys, notificationPreferenceCells, notificationTemplateKeys, resolveNotification, type NotificationContext,
+  approvalContextFacts, decideNotificationChannels, isConfigurablePreference, localDateOf, NON_NOTIFYING_EVENT_TYPES, NOTIFICATION_ALERT_SWITCHES, NOTIFICATION_CATALOGUE, NOTIFICATION_ORG_SWITCHES, NOTIFICATION_ROUTE_KEYS, NOTIFICATION_TYPES, notificationData,
+  notificationDataKeys, notificationPreferenceCells, notificationSwitchOn, notificationTemplateKeys, resolveNotification, type NotificationContext,
 } from './catalogue.js';
 
 const OTHER: NotificationContext = { audience: 'other', timezone: 'Asia/Muscat' };
 const SELF: NotificationContext = { audience: 'subject', timezone: 'Asia/Muscat' };
 const REQ = '11111111-1111-4111-8111-111111111111';
 const EMP = '22222222-2222-4222-8222-222222222222';
+/** The attendance alert keys of the notifications group: their defaults, and a document with every one of them changed. */
+const ALERT_DEFAULTS = {
+  lateArrivalAlert: { enabled: true, notifyEmployee: true, notifyManager: true, minMinutes: 1 },
+  earlyDepartureAlert: { enabled: true, notifyEmployee: true, notifyManager: true, minMinutes: 1 },
+  absenceAlert: { enabled: true, notifyEmployee: true, notifyManager: true },
+  absenceReminder: true, missingCheckInReminder: false, missingCheckInReminderMinutes: 30, missingCheckInNotifyManager: false,
+  appreciation: {
+    enabled: false, weekday: 4, hour: 14, minWorkedDays: 5, messageEn: APPRECIATION_DEFAULT_MESSAGE_EN, messageAr: APPRECIATION_DEFAULT_MESSAGE_AR,
+    criteria: { noLate: true, noEarlyDeparture: true, noAbsence: true, noMissingPunch: true, noUnexcused: true },
+  },
+};
+const ALERT_FULL = {
+  lateArrivalAlert: { enabled: false, notifyEmployee: false, notifyManager: true, minMinutes: 10 },
+  earlyDepartureAlert: { enabled: true, notifyEmployee: true, notifyManager: false, minMinutes: 15 },
+  absenceAlert: { enabled: true, notifyEmployee: false, notifyManager: true },
+  absenceReminder: false, missingCheckInReminder: true, missingCheckInReminderMinutes: 45, missingCheckInNotifyManager: true,
+  appreciation: {
+    enabled: true, weekday: 0, hour: 9, minWorkedDays: 4, messageEn: 'Well done!', messageAr: 'أحسنت!',
+    criteria: { noLate: false, noEarlyDeparture: true, noAbsence: false, noMissingPunch: true, noUnexcused: false },
+  },
+};
 
 describe('notification catalogue — completeness', () => {
   it('catalogues every domain event type that is not deliberately silent (a new event type forces a decision)', () => {
@@ -31,14 +52,16 @@ describe('notification catalogue — completeness', () => {
     for (const t of ['approval.pending', 'approval.reminder', 'approval.escalated', 'approval.decided', 'approval.info_requested', 'approval.info_answered', 'approval.reassigned', 'approval.bypassed',
       'attendance.unexcused_marked', 'attendance.note_submitted', 'attendance.note_decided', 'attendance.note_info_requested', 'attendance.selfie_submitted', 'attendance.selfie_decided', 'attendance.punch_flagged',
       'attendance.regularisation_decided', 'shift.swap_requested', 'shift.swap_decided', 'report.scheduled_delivery', 'leave.comment_added', 'leave.year_closed', 'leave.comp_off_expired',
-      'leave.info_requested', 'punch.missing_out', 'sync.finance.failed']) expect(NOTIFICATION_CATALOGUE[t], t).toBeTruthy();
+      'leave.info_requested', 'punch.missing_out', 'sync.finance.failed',
+      'attendance.late_arrival', 'attendance.early_departure', 'attendance.absence_recorded', 'attendance.absence_reminder', 'punch.missing_in', 'attendance.appreciation']) expect(NOTIFICATION_CATALOGUE[t], t).toBeTruthy();
   });
 
   it('every entry is well-formed: channels, org switch, variants, relative deep links', () => {
     for (const e of Object.values(NOTIFICATION_CATALOGUE)) {
       expect(e.defaultChannels.length, e.type).toBeGreaterThan(0);
-      if (e.orgSetting) expect(NOTIFICATION_ORG_SWITCHES as readonly string[], e.type).toContain(e.orgSetting);
-      for (const v of Object.values(e.variants)) if (v.orgSetting) expect(NOTIFICATION_ORG_SWITCHES as readonly string[], e.type).toContain(v.orgSetting);
+      const switches: readonly string[] = [...NOTIFICATION_ORG_SWITCHES, ...NOTIFICATION_ALERT_SWITCHES];
+      if (e.orgSetting) expect(switches, e.type).toContain(e.orgSetting);
+      for (const v of Object.values(e.variants)) if (v.orgSetting) expect(switches, e.type).toContain(v.orgSetting);
       for (const ctx of [OTHER, SELF]) {
         const link = e.deepLink({}, ctx);
         expect(link.startsWith('/'), `${e.type} ${link}`).toBe(true);
@@ -195,6 +218,7 @@ describe('organisation notification switches', () => {
     expect(DEFAULT_NOTIFICATION_SETTINGS).toEqual({
       deviceOffline: true, syncFailed: true, approvalPending: true, reportReady: true, dailyDigest: false,
       leaveUpdates: true, attendanceNotes: true, punchFlagged: true, missingPunchReminder: true, missingPunchReminderHours: 2, reportScheduledDelivery: true,
+      ...ALERT_DEFAULTS,
     });
     expect(organizationSettingsSchema.shape.notifications.parse({})).toEqual(DEFAULT_NOTIFICATION_SETTINGS);
   });
@@ -204,13 +228,83 @@ describe('organisation notification switches', () => {
     expect(resolveNotificationSettings(null)).toEqual(DEFAULT_NOTIFICATION_SETTINGS);
   });
   it('round-trips a full non-default document (no default re-applied)', () => {
-    const full = { deviceOffline: false, syncFailed: false, approvalPending: false, reportReady: false, dailyDigest: true, leaveUpdates: false, attendanceNotes: false, punchFlagged: false, missingPunchReminder: false, missingPunchReminderHours: 5, reportScheduledDelivery: false };
+    const full = { deviceOffline: false, syncFailed: false, approvalPending: false, reportReady: false, dailyDigest: true, leaveUpdates: false, attendanceNotes: false, punchFlagged: false, missingPunchReminder: false, missingPunchReminderHours: 5, reportScheduledDelivery: false, ...ALERT_FULL };
     expect(notificationSettingsSchema.parse(full)).toEqual(full);
     expect(organizationSettingsSchema.shape.notifications.parse(full)).toEqual(full);
   });
   it('the reminder delay is 1–12 hours', () => {
     expect(notificationSettingsSchema.safeParse({ missingPunchReminderHours: 0 }).success).toBe(false);
     expect(notificationSettingsSchema.safeParse({ missingPunchReminderHours: 13 }).success).toBe(false);
+  });
+});
+
+describe('attendance alert settings (lateness, absence, missing check-in, weekly appreciation)', () => {
+  const group = organizationSettingsSchema.shape.notifications;
+  it('a row saved before the alert groups existed resolves every group to its full defaults', () => {
+    const legacy = { deviceOffline: false, missingPunchReminderHours: 4 };
+    const parsed = group.parse(legacy);
+    expect(parsed).toEqual({ ...DEFAULT_NOTIFICATION_SETTINGS, ...legacy });
+    expect(parsed).toMatchObject(ALERT_DEFAULTS);
+    expect(resolveNotificationSettings(legacy)).toEqual({ ...DEFAULT_NOTIFICATION_SETTINGS, ...legacy });
+  });
+  it('one nested key on its own keeps its siblings at the defaults and never touches the other groups (the partial / PATCH trap)', () => {
+    const one = group.parse({ lateArrivalAlert: { notifyManager: false } });
+    expect(one.lateArrivalAlert).toEqual({ ...ALERT_DEFAULTS.lateArrivalAlert, notifyManager: false });
+    expect(one.earlyDepartureAlert).toEqual(ALERT_DEFAULTS.earlyDepartureAlert);
+    expect(one.appreciation).toEqual(ALERT_DEFAULTS.appreciation);
+    const criteria = group.parse({ appreciation: { enabled: true, criteria: { noLate: false } } });
+    expect(criteria.appreciation).toEqual({ ...ALERT_DEFAULTS.appreciation, enabled: true, criteria: { ...ALERT_DEFAULTS.appreciation.criteria, noLate: false } });
+    // a whole stored document parses back to itself: nothing a tenant chose is reset by a save of another field
+    const stored = group.parse({ ...DEFAULT_NOTIFICATION_SETTINGS, ...ALERT_FULL });
+    expect(stored).toEqual({ ...DEFAULT_NOTIFICATION_SETTINGS, ...ALERT_FULL });
+    expect(group.parse({ ...stored, missingCheckInReminderMinutes: 60 })).toEqual({ ...stored, missingCheckInReminderMinutes: 60 });
+  });
+  it('rejects out-of-range values instead of clamping them', () => {
+    for (const bad of [
+      { lateArrivalAlert: { minMinutes: 0 } }, { earlyDepartureAlert: { minMinutes: 601 } }, { missingCheckInReminderMinutes: 14 }, { missingCheckInReminderMinutes: 241 },
+      { appreciation: { weekday: 7 } }, { appreciation: { hour: 24 } }, { appreciation: { minWorkedDays: 0 } }, { appreciation: { minWorkedDays: 8 } },
+      { appreciation: { messageEn: 'x'.repeat(501) } }, { appreciation: { messageAr: '   ' } },
+    ]) expect(group.safeParse(bad).success, JSON.stringify(bad).slice(0, 80)).toBe(false);
+  });
+  it('a malformed group falls back to its own defaults and keeps the valid keys', () => {
+    const salvaged = resolveNotificationSettings({ appreciation: { weekday: 'thursday', enabled: true }, lateArrivalAlert: { enabled: false }, leaveUpdates: false });
+    expect(salvaged.appreciation).toEqual(ALERT_DEFAULTS.appreciation);
+    expect(salvaged.lateArrivalAlert.enabled).toBe(false);
+    expect(salvaged.leaveUpdates).toBe(false);
+  });
+  it('a group switch off suppresses the e-mail of its type (the in-app notice stays); a boolean switch the same way', () => {
+    const settings = resolveNotificationSettings({ lateArrivalAlert: { enabled: false }, missingCheckInReminder: false });
+    const late = decideNotificationChannels({ resolved: resolveNotification('attendance.late_arrival', { employeeId: EMP }, SELF)!, orgSettings: settings, preferences: {} });
+    expect(late).toEqual({ inApp: true, email: false, reasons: { email: 'org_switch' } });
+    const missing = decideNotificationChannels({ resolved: resolveNotification('punch.missing_in', { employeeId: EMP }, SELF)!, orgSettings: settings, preferences: {} });
+    expect(missing.email).toBe(false);
+    const early = decideNotificationChannels({ resolved: resolveNotification('attendance.early_departure', { employeeId: EMP }, SELF)!, orgSettings: settings, preferences: { EMAIL: false } });
+    expect(early).toEqual({ inApp: true, email: false, reasons: { email: 'preference' } });
+    expect(notificationSwitchOn(settings, 'lateArrivalAlert')).toBe(false);
+    expect(notificationSwitchOn(settings, 'earlyDepartureAlert')).toBe(true);
+    expect(notificationSwitchOn(settings, 'appreciation')).toBe(false); // off by default
+  });
+  it('the alerts follow the recipient: the employee\'s own day in the portal, the register for their manager', () => {
+    const p = { employeeId: EMP, attendanceDate: '2026-10-18' };
+    for (const type of ['attendance.late_arrival', 'attendance.early_departure', 'attendance.absence_recorded']) {
+      expect(resolveNotification(type, p, SELF)!.templateKey).toBe(`${type}#self`);
+      expect(resolveNotification(type, p, SELF)!.link).toBe('/my/attendance?date=2026-10-18');
+      expect(resolveNotification(type, p, OTHER)!.templateKey).toBe(`${type}#manager`);
+      expect(resolveNotification(type, p, OTHER)!.link).toBe(`/attendance?employeeId=${EMP}&date=2026-10-18`);
+    }
+    expect(resolveNotification('punch.missing_in', p, SELF)!.link).toBe('/my');
+    expect(resolveNotification('punch.missing_in', p, OTHER)!.link).toBe(`/attendance?employeeId=${EMP}&date=2026-10-18`);
+    expect(resolveNotification('attendance.absence_reminder', p, SELF)!.link).toBe('/my/attendance?date=2026-10-18');
+    expect(resolveNotification('attendance.appreciation', { employeeId: EMP, periodEnd: '2026-10-14' }, SELF)!.link).toBe('/my/attendance');
+    // the template variables the notice keeps are the catalogue's, nothing else of the payload
+    expect(notificationData(NOTIFICATION_CATALOGUE['attendance.appreciation']!, { message: 'Thanks', messageAr: 'شكرًا', workedDays: 5, userIds: [EMP], secret: 1 }, resolveNotification('attendance.appreciation', {}, SELF)!.route, { type: 'employee', id: EMP }))
+      .toEqual({ aggregateType: 'employee', aggregateId: EMP, entityType: 'EMPLOYEE', message: 'Thanks', messageAr: 'شكرًا', workedDays: 5 });
+  });
+  it('the excuse deadline is the attendance date plus the configured days (none without a setting)', () => {
+    expect(excuseDeadlineOf('2026-10-18', 3)).toBe('2026-10-21');
+    expect(excuseDeadlineOf('2026-12-30', 5)).toBe('2027-01-04');
+    expect(excuseDeadlineOf('2026-10-18', null)).toBeNull();
+    expect(excuseDeadlineOf('not-a-date', 3)).toBeNull();
   });
 });
 

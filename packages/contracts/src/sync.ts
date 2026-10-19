@@ -130,5 +130,9 @@ export const DOMAIN_EVENT_TYPES = [
   // (targeted via payload.userIds), and the missing check-out reminder (worker task attendance.missing-punch-reminder,
   // one per employee-day, targeted at the employee's own login)
   'leave.info_requested', 'punch.missing_out',
+  // Attendance alerts (customer requirements): a late arrival / early departure of today or yesterday, an absence and the
+  // reminder the day before its excuse deadline, a missing check-in after the shift start, and the weekly thank-you message —
+  // all targeted via payload.userIds (the employee's own login, plus the direct manager where the settings say so)
+  'attendance.late_arrival', 'attendance.early_departure', 'attendance.absence_recorded', 'attendance.absence_reminder', 'punch.missing_in', 'attendance.appreciation',
 ] as const;
 export type DomainEventType = (typeof DOMAIN_EVENT_TYPES)[number];
