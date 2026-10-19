@@ -49,6 +49,12 @@ export interface ReportSection {
   pageBreakBefore?: boolean;
   /** Keep the section on one page when it fits (Monthly Detail: one employee's month grid is never split). */
   keepTogether?: boolean;
+  /**
+   * A section with columns of its own that a spreadsheet keeps apart from the main table (the irregular cases report's summary
+   * per employee): XLSX puts it on a worksheet of this name, CSV below the main table after a blank line, under its own header.
+   * A printed page shows it in place, as any other section.
+   */
+  sheet?: string;
 }
 
 export interface LegendEntry { code: string; label: string }

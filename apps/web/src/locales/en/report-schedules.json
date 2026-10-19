@@ -11,18 +11,19 @@
     "period": "Period covered", "periodInvalid": "This period does not fit the report or the frequency.",
     "customFrom": "From day (previous month)", "customTo": "To day", "customInvalid": "The period runs from a day of the previous month to an earlier day (e.g. 26 → 25).",
     "filters": "Filters", "active": "Active", "when": "When", "nextRun": "Next run", "lastRun": "Last run", "never": "Not run yet",
-    "lastSummary": "{{queued}} sent · {{skipped}} skipped", "recipientCount": "{{users}} people · {{roles}} roles",
+    "lastSummary": "{{queued}} sent · {{skipped}} skipped", "recipientCount": "{{users}} people · {{roles}} roles", "recipientLineManagers": "each line manager",
     "pausedBadge": "Paused", "paused": "Schedule paused", "resumed": "Schedule resumed",
     "runNow": "Run now", "runQueued": "Run queued", "runQueuedHint": "Covering {{from}} → {{to}}.",
     "created": "Schedule created", "saved": "Schedule saved", "deleted": "Schedule deleted",
     "deleteTitle": "Delete this schedule?", "deleteHint": "“{{name}}” stops running. Reports already sent stay with their recipients."
   },
-  "cadence": { "monthly": "Monthly", "weekly": "Weekly", "monthlyOn": "Monthly on day {{day}} at {{time}}", "weeklyOn": "Every {{day}} at {{time}}" },
-  "period": { "previous_month": "Previous month", "month_to_date": "Month to date", "previous_week": "Previous week", "custom": "Custom cut-off", "customRange": "Day {{from}} → day {{to}}" },
+  "cadence": { "monthly": "Monthly", "weekly": "Weekly", "daily": "Daily", "monthlyOn": "Monthly on day {{day}} at {{time}}", "weeklyOn": "Every {{day}} at {{time}}", "dailyOn": "Every day at {{time}}" },
+  "period": { "previous_month": "Previous month", "month_to_date": "Month to date", "previous_week": "Previous week", "custom": "Custom cut-off", "previous_day": "Yesterday", "customRange": "Day {{from}} → day {{to}}" },
   "runStatus": { "success": "Sent", "partial": "Partly sent", "failed": "Failed", "skipped": "Nothing sent" },
   "recipients": {
     "label": "Recipients", "required": "Choose at least one recipient.", "managers": "Managers", "roles": "Roles", "people": "People",
     "addPerson": "Add a person…", "remove": "Remove {{name}}",
+    "lineManagers": "Each employee's line manager (their team only)", "lineManagersHint": "Every line manager receives a copy about their own direct reports — without needing export rights. Managers with no direct report in the report's filters are skipped.", "lineManagersCount": "{{count}} line managers today",
     "scopeNote": "Each recipient gets the report for the data they can access — a manager their team, a branch manager their branches. Employees without report access receive the report about themselves only; anybody else without access is skipped."
   },
   "channels": { "label": "Deliver by", "in_app": "In-app notification", "email": "Email", "required": "Choose at least one channel." },
@@ -40,7 +41,7 @@
   "scope": { "organization": "Whole organisation", "branches": "{{count}} branch(es)", "team": "Their team ({{count}})", "self": "Their own record" },
   "skip": {
     "missing_permission": "No access to this report ({{detail}})", "outside_scope": "The filters are outside their access", "no_branch_access": "No branch access", "outside_self": "The report is about other people (they can only receive their own)",
-    "no_team": "No team to report on", "report_type_unavailable": "Report not available", "recipient_cap": "Over the recipient limit"
+    "no_team": "No team to report on", "no_team_in_scope": "None of their direct reports is in this report", "report_type_not_for_team": "This report is not sent to line managers", "not_line_manager": "Not a line manager", "report_type_unavailable": "Report not available", "recipient_cap": "Over the recipient limit"
   },
   "download": { "noExport": "Downloading reports needs the export permission.", "locked": "Export not allowed" }
 }

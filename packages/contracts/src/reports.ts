@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { REPORT_FORMATS, REPORT_STATUSES, REPORT_TYPES } from './enums.js';
+import { ATTENDANCE_FLAGS, REPORT_FORMATS, REPORT_STATUSES, REPORT_TYPES } from './enums.js';
 import { codeSchema, isoDateSchema, isoDateTimeSchema, uuidSchema } from './common.js';
 
 /** monthly_attendance: the codes grid (the sample layout), or each day's IN/OUT pairs and hours per employee (the Daily Report's rows for a month). */
@@ -17,7 +17,13 @@ export const reportParametersSchema = z.object({
   employeeIds: z.array(uuidSchema).max(5000).optional(),
   shiftId: uuidSchema.optional(),
   deviceIds: z.array(uuidSchema).max(1000).optional(),
+  /**
+   * An attendance status (`PRESENT`, `ABSENT`, …; `MISSING_PUNCH` = the MISSING_IN / MISSING_OUT flag, as the daily register
+   * filters it). Honoured by the Daily, Detail, Late and Absence reports and the irregular cases report.
+   */
   status: z.string().trim().max(40).optional(),
+  /** daily_attendance: only the records carrying this engine flag (the daily register's flag filter). */
+  flag: z.enum(ATTENDANCE_FLAGS).optional(),
   sort: z.string().max(64).optional(),
   order: z.enum(['asc', 'desc']).optional(),
   locale: z.enum(['en', 'ar']).optional(),
@@ -27,7 +33,7 @@ export const reportParametersSchema = z.object({
   employmentStatus: z.enum(['active', 'inactive', 'all']).optional(),
   /** audit_report: attendance edits in the samples' layout, or the whole audit log. */
   scope: z.enum(['attendance', 'all']).optional(),
-  /** monthly_summary: the summary page's name / employee-number search (HR portal Prompt 6a review, defect 10). */
+  /** monthly_summary / daily_attendance: the page's name / employee-number search (HR portal Prompt 6a review, defect 10). */
   search: z.string().trim().max(100).optional(),
   /** monthly_attendance: `summary` (default) or `detailed`. */
   layout: z.enum(MONTHLY_ATTENDANCE_LAYOUTS).optional(),

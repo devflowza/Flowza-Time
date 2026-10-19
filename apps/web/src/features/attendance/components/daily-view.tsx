@@ -2,10 +2,11 @@ import { useEffect, useMemo, useState } from 'react';
 import type { ColumnDef, RowSelectionState } from '@tanstack/react-table';
 import { useTranslation } from 'react-i18next';
 import { DateTime } from 'luxon';
-import { CalendarCheck, CalendarPlus, ChevronLeft, ChevronRight, ListChecks, ListTree, X } from 'lucide-react';
-import { ATTENDANCE_FLAGS, ATTENDANCE_STATUSES } from '@flowza/contracts';
+import { useNavigate } from 'react-router';
+import { CalendarCheck, CalendarPlus, ChevronDown, ChevronLeft, ChevronRight, FileSpreadsheet, ListChecks, ListTree, X } from 'lucide-react';
+import { ATTENDANCE_FLAGS, ATTENDANCE_STATUSES, type AttendanceFlag, type AttendanceStatus, type DailyRegisterExportInput } from '@flowza/contracts';
 import { DataTable } from '@/components/data-table';
-import { Badge, Button, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StatCard } from '@/components/ui';
+import { Badge, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, StatCard } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { fmtDate, fmtMinutes, fmtNumber, fmtTime, todayIso } from '@/lib/format';
 import { cn } from '@/lib/utils';
@@ -16,7 +17,9 @@ import { useTabTable } from '@/features/organization/use-tab-table';
 import { useShiftOptions } from '@/features/schedule/api';
 import { HolidayDialog } from '@/features/schedule/components/holiday-dialogs';
 import { useDailyAttendance } from '../api';
-import { useManualStatuses } from '../workspace-api';
+import { useManualStatuses, useRegisterExport } from '../workspace-api';
+import { toastError } from '@/lib/toast';
+import { toastJobQueued } from '@/features/employees/job-toast';
 import { awaitsRecalculation, PENDING_EDIT_POLL_MS, pendingEditKey, usePendingEdits } from '../pending-edits';
 import type { DailyRecord } from '../types';
 import { AttendanceStatusBadge, FlagChips } from './badges';
@@ -28,6 +31,7 @@ import { useWorkspaceDialogs } from './workspace-dialogs';
 const ALL = '__all__';
 const STAT_KEYS = ['PRESENT', 'ABSENT', 'LEAVE', 'HALF_DAY', 'MISSING_PUNCH'] as const;
 const STAT_TONE: Record<(typeof STAT_KEYS)[number], 'success' | 'danger' | 'info' | 'warning'> = { PRESENT: 'success', ABSENT: 'danger', LEAVE: 'info', HALF_DAY: 'warning', MISSING_PUNCH: 'warning' };
+const EXPORT_FORMATS = ['xlsx', 'csv'] as const;
 
 export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (preset: CorrectionPreset) => void }) {
   const { t } = useTranslation('attendance');
@@ -58,7 +62,20 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
   const [recordId, setRecordId] = useState<string | null>(null);
   // "Mark as holiday" for the day on screen (holiday.manage): into the default calendar, created when there is none; the API
   // recalculates the day, so its records turn HOLIDAY once the worker has run
-  const canMarkHoliday = useCan()('holiday.manage');
+  const can = useCan();
+  const canMarkHoliday = can('holiday.manage');
+  // the register as filtered now, as a file (2026-10-19): a queued Daily Report — report.export with attendance.view, as the API
+  const canExport = can('report.export') && can('attendance.view');
+  const navigate = useNavigate();
+  const exportRegister = useRegisterExport();
+  const doExport = (format: (typeof EXPORT_FORMATS)[number]) => {
+    const input: DailyRegisterExportInput = {
+      date, format, ...(f['branchId'] ? { branchId: f['branchId'] } : {}), ...(f['departmentId'] ? { departmentId: f['departmentId'] } : {}), ...(f['shiftId'] ? { shiftId: f['shiftId'] } : {}),
+      ...(f['status'] ? { status: f['status'] as AttendanceStatus } : {}), ...(f['flag'] ? { flag: f['flag'] as AttendanceFlag } : {}), ...(f['search'] ? { search: f['search'] } : {}),
+    };
+    // a report request: the "Queued" toast opens Reports, never /sync/<queue job id> (AGENTS.md frontend pitfalls)
+    exportRegister.mutate(input, { onSuccess: (res) => toastJobQueued(res.reportId, navigate, t('daily.exportQueued', { count: res.rowCount }), { to: '/reports', actionLabel: t('daily.openReports') }), onError: toastError });
+  };
   const [markingHoliday, setMarkingHoliday] = useState(false);
   // HR workspace (Prompt 6a): Auto / Manual source per row, bulk "Set status", punch timeline, Add / Edit record
   const { canEdit, openEdit, openTimeline, dialogs } = useWorkspaceDialogs();
@@ -96,6 +113,8 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
     // short leave (engine 1.5.0): out-of-office time no approved short leave covers, beyond the policy's allowance
     { id: 'lost', header: t('columns.lost'), enableSorting: false, cell: ({ row }) => <span className={cn('tnum', (row.original.lostMinutes ?? 0) > 0 && 'text-amber-700 dark:text-amber-300')}>{row.original.lostMinutes ? fmtMinutes(row.original.lostMinutes) : '—'}</span> },
     { id: 'overtime', header: t('columns.overtime'), enableSorting: false, cell: ({ row }) => <span className={cn('tnum', row.original.overtimeMinutes > 0 && 'text-blue-700 dark:text-blue-300')}>{row.original.overtimeMinutes ? fmtMinutes(row.original.overtimeMinutes) : '—'}</span> },
+    // shortfall: the shift's hours not worked (the reports' UT), with the exact minutes on hover
+    { id: 'short', header: t('columns.short'), enableSorting: false, cell: ({ row }) => { const m = row.original.shortfallMinutes ?? 0; return m > 0 ? <span className="tnum text-amber-700 dark:text-amber-300" title={t('daily.shortHint', { minutes: m })} data-testid="shortfall">{fmtMinutes(m)}</span> : <span className="tnum">—</span>; } },
     { id: 'status', header: tc('common.status'), cell: ({ row }) => <span className="inline-flex flex-wrap items-center gap-1"><AttendanceStatusBadge status={row.original.status} />{awaiting.has(row.original.id) ? <Badge variant="outline" className="animate-pulse" title={tw('edit.updatingHint')} data-testid="row-updating">{tw('edit.updating')}</Badge> : null}{manual.isSuccess ? <StatusSourceChip source={manualKeys.has(`${row.original.employeeId}|${row.original.attendanceDate}`) ? 'MANUAL' : 'AUTO'} /> : null}</span> },
     { id: 'flags', header: t('columns.flags'), enableSorting: false, cell: ({ row }) => <FlagChips flags={row.original.flags} size="xs" /> },
     { id: 'actions', header: '', enableSorting: false, enableHiding: false, cell: ({ row }) => <Button variant="ghost" size="icon" className="size-7" aria-label={tw('timeline.open')} title={tw('timeline.open')} onClick={(e) => { e.stopPropagation(); openTimeline({ employeeId: row.original.employeeId, date: row.original.attendanceDate, employeeName: row.original.employeeName }); }}><ListTree /></Button> },
@@ -111,7 +130,17 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
         </div>
         <Button variant="outline" size="sm" onClick={() => setDate(todayIso(tz))} disabled={date === todayIso(tz)}><CalendarCheck /> {tc('common.today')}</Button>
         <p className="text-sm text-muted-foreground">{fmtDate(date, 'EEEE, dd MMMM yyyy')}</p>
-        {canMarkHoliday ? <Button variant="outline" size="sm" className="ms-auto" onClick={() => setMarkingHoliday(true)} data-testid="mark-holiday"><CalendarPlus /> {ts('holidays.markDate')}</Button> : null}
+        {canExport || canMarkHoliday ? <div className="ms-auto flex flex-wrap items-center gap-2">
+          {canExport ? (
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild><Button variant="outline" size="sm" loading={exportRegister.isPending} title={t('daily.exportHint')} data-testid="register-export"><FileSpreadsheet /> {t('daily.export')} <ChevronDown /></Button></DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {EXPORT_FORMATS.map((format) => <DropdownMenuItem key={format} onSelect={() => doExport(format)} data-testid={`register-export-${format}`}>{t(`daily.exportAs.${format}`)}</DropdownMenuItem>)}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          ) : null}
+          {canMarkHoliday ? <Button variant="outline" size="sm" onClick={() => setMarkingHoliday(true)} data-testid="mark-holiday"><CalendarPlus /> {ts('holidays.markDate')}</Button> : null}
+        </div> : null}
       </div>
       <HolidayDialog key={`${markingHoliday}-${date}`} open={markingHoliday} onOpenChange={setMarkingHoliday} calendarId={null} holiday={null} presetDate={date} />
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
@@ -150,7 +179,7 @@ export function DailyView({ onRequestCorrection }: { onRequestCorrection?: (pres
         }
         renderCard={(r) => (
           <div className="flex items-center gap-3">
-            <div className="min-w-0 flex-1"><p className="truncate font-medium">{r.employeeName}</p><p className="text-xs text-muted-foreground tnum">{fmtTime(r.firstInAt, r.timezone || tz)} – {fmtTime(r.lastOutAt, r.timezone || tz)} · {fmtMinutes(r.workedMinutes)}</p></div>
+            <div className="min-w-0 flex-1"><p className="truncate font-medium">{r.employeeName}</p><p className="text-xs text-muted-foreground tnum">{fmtTime(r.firstInAt, r.timezone || tz)} – {fmtTime(r.lastOutAt, r.timezone || tz)} · {fmtMinutes(r.workedMinutes)}{(r.shortfallMinutes ?? 0) > 0 ? <span className="text-amber-700 dark:text-amber-300"> · {t('columns.short')} {fmtMinutes(r.shortfallMinutes)}</span> : null}</p></div>
             <AttendanceStatusBadge status={r.status} />
           </div>
         )}

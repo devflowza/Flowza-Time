@@ -6,11 +6,11 @@ import { Ban, Download, Eye, Lock, RefreshCw, X } from 'lucide-react';
 import { REPORT_STATUSES } from '@flowza/contracts';
 import { PageHeader } from '@/components/layout/page-header';
 import { DataTable } from '@/components/data-table';
-import { Badge, Button, ConfirmDialog, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
+import { Badge, Button, ConfirmDialog, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui';
 import { useServerTable } from '@/hooks/use-server-table';
 import { fmtDate, fmtDateTime, fmtNumber } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
-import { useCan, useOrgTimezone, useModuleEnabled } from '@/features/me/use-me';
+import { useCan, useEmployeeId, useOrgTimezone, useModuleEnabled } from '@/features/me/use-me';
 import { JobStatusBadge } from '@/features/attendance/components/badges';
 import { openSignedUrl, useReportMutations, useReports, useReportTypes, type ReportDto } from '../api';
 import { ReportRequestPanel } from '../components/report-request-panel';
@@ -20,6 +20,8 @@ import { ReportViewerDialog, type ViewableReport } from '../components/report-vi
 import '../schedules-i18n';
 
 const ALL = '__all__';
+/** The marker the worker writes on a line manager's copy about their team (`TEAM_SCOPE_PARAMETER`, @flowza/domain). */
+const TEAM_MARKER = 'teamManagerEmployeeId';
 const fmtBytes = (n: number | null) => (n === null ? '—' : n < 1024 ? `${n} B` : n < 1024 * 1024 ? `${(n / 1024).toFixed(1)} KB` : `${(n / (1024 * 1024)).toFixed(1)} MB`);
 
 function paramsSummary(p: ReportDto['parameters'], t: (k: string, o?: Record<string, unknown>) => string): string {
@@ -39,7 +41,7 @@ export default function ReportsPage() {
   const tz = useOrgTimezone();
   const table = useServerTable();
   const f = table.state.filters;
-  const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize, status: f['status'], reportType: f['reportType'] }), [table.state.page, table.state.pageSize, f]);
+  const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize, status: f['status'], reportType: f['reportType'], from: f['from'], to: f['to'] }), [table.state.page, table.state.pageSize, f]);
   const q = useReports(query);
   const types = useReportTypes();
   const { cancel, download } = useReportMutations();
@@ -47,11 +49,17 @@ export default function ReportsPage() {
   // HR portal Prompt 6a: downloading IS exporting (report.export, enforced by the API); report.schedule adds Send now + schedules
   const can = useCan();
   const canExport = can('report.export');
+  // a line manager opens the copies about their own team that were sent to them without report.export (the API re-checks the
+  // team on every download); the marker is server-written, so it is only a hint for which buttons to show
+  const myEmployeeId = useEmployeeId();
+  const isTeamCopy = (r: Pick<ReportDto, 'parameters'>) => !!myEmployeeId && (r.parameters as Record<string, unknown>)[TEAM_MARKER] === myEmployeeId;
+  const canOpen = (r: Pick<ReportDto, 'parameters'>) => canExport || isTeamCopy(r);
+  const canOpenLinks = canExport || can('attendance.view_team');
   // schedules and sharing are the Scheduled reports module (migration 20260929000600)
   const schedulesOn = useModuleEnabled('report_schedules');
   const canSchedule = can('report.schedule') && schedulesOn;
   const [sharing, setSharing] = useState<ShareSpec | null>(null);
-  const hasFilters = !!f['status'] || !!f['reportType'];
+  const hasFilters = !!f['status'] || !!f['reportType'] || !!f['from'] || !!f['to'];
   const now = q.dataUpdatedAt || 0; // pure: re-evaluated on every refetch (the list polls while reports run)
   const isExpired = (r: ReportDto) => r.status === 'EXPIRED' || (!!r.expiresAt && new Date(r.expiresAt).getTime() < now);
   const doDownload = (r: Pick<ReportDto, 'id'>) => download.mutate({ id: r.id, disposition: 'attachment' }, { onSuccess: (res) => { openSignedUrl(res.url, res.fileName); toast.success(t('list.downloadStarted'), { description: t('list.linkExpires', { seconds: res.expiresInSeconds }) }); }, onError: toastError });
@@ -62,22 +70,22 @@ export default function ReportsPage() {
   const urlView = params.get('view');
   const pendingDownload = params.get('download');
   const [picked, setViewing] = useState<ViewableReport | null>(null);
-  const viewing = picked ?? (urlView && canExport ? { id: urlView } : null);
+  const viewing = picked ?? (urlView && canOpenLinks ? { id: urlView } : null);
   const dropParam = (key: 'view' | 'download') => setParams((prev) => { const n = new URLSearchParams(prev); n.delete(key); return n; }, { replace: true });
   const closeViewer = () => { setViewing(null); if (urlView) dropParam('view'); };
   const handled = useRef<string | null>(null);
   useEffect(() => {
-    const id = pendingDownload ?? (urlView && !canExport ? urlView : null);
+    const id = pendingDownload ?? (urlView && !canOpenLinks ? urlView : null);
     if (!id || handled.current === id) return;
     handled.current = id;
     dropParam(pendingDownload ? 'download' : 'view');
-    if (!canExport) { toast.error(t('reportSchedules:download.noExport')); return; }
+    if (!canOpenLinks) { toast.error(t('reportSchedules:download.noExport')); return; }
     doDownload({ id });
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [urlView, pendingDownload, canExport]);
+  }, [urlView, pendingDownload, canOpenLinks]);
 
   const columns = useMemo<ColumnDef<ReportDto, unknown>[]>(() => [
-    { id: 'type', header: t('list.type'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{t(`types.${row.original.reportType}.name`, { defaultValue: row.original.reportType })}</p><p className="text-xs text-muted-foreground tnum">{paramsSummary(row.original.parameters, t as unknown as (k: string, o?: Record<string, unknown>) => string)}</p></div> },
+    { id: 'type', header: t('list.type'), enableSorting: false, cell: ({ row }) => <div className="min-w-0"><p className="truncate font-medium">{t(`types.${row.original.reportType}.name`, { defaultValue: row.original.reportType })}{isTeamCopy(row.original) ? <Badge variant="outline" className="ms-1.5 align-middle text-[10px]">{t('list.teamCopy')}</Badge> : null}</p><p className="text-xs text-muted-foreground tnum">{paramsSummary(row.original.parameters, t as unknown as (k: string, o?: Record<string, unknown>) => string)}</p></div> },
     { id: 'format', header: t('request.format'), enableSorting: false, cell: ({ row }) => <Badge variant="outline" className="uppercase">{row.original.format}</Badge> },
     { id: 'status', header: tc('common.status'), enableSorting: false, cell: ({ row }) => <div className="flex flex-col gap-0.5">{isExpired(row.original) && row.original.status === 'COMPLETED' ? <JobStatusBadge status="EXPIRED" /> : <JobStatusBadge status={row.original.status} />}{row.original.error ? <span className="max-w-[220px] truncate text-[11px] text-destructive" title={row.original.error}>{row.original.error}</span> : null}</div> },
     { id: 'rows', header: t('list.rows'), enableSorting: false, cell: ({ row }) => <span className="text-xs tnum">{row.original.rowCount === null ? '—' : fmtNumber(row.original.rowCount)}{row.original.fileSizeBytes !== null ? <span className="text-muted-foreground"> · {fmtBytes(row.original.fileSizeBytes)}</span> : null}</span> },
@@ -87,7 +95,7 @@ export default function ReportsPage() {
       const r = row.original;
       return (
         <div className="flex justify-end gap-1" onClick={(e) => e.stopPropagation()}>
-          {r.status === 'COMPLETED' && !isExpired(r) ? (canExport
+          {r.status === 'COMPLETED' && !isExpired(r) ? (canOpen(r)
             ? <><Button size="sm" variant="outline" onClick={() => setViewing(r)}><Eye /> {t('list.view')}</Button><Button size="sm" onClick={() => doDownload(r)} loading={download.isPending && typeof download.variables === 'object' && download.variables.id === r.id}><Download /> {tc('common.download')}</Button></>
             : <span className="inline-flex items-center gap-1 text-xs text-muted-foreground" title={t('reportSchedules:download.noExport')}><Lock className="size-3" /> {t('reportSchedules:download.locked')}</span>) : null}
           {r.status === 'QUEUED' ? <Button size="sm" variant="ghost" onClick={() => setCancelling(r)}><Ban /> {t('list.cancel')}</Button> : null}
@@ -96,7 +104,7 @@ export default function ReportsPage() {
       );
     } },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [t, tc, tz, download.isPending, download.variables, canExport]);
+  ], [t, tc, tz, download.isPending, download.variables, canExport, myEmployeeId]);
 
   return (
     <div className="page-container space-y-5">
@@ -119,10 +127,12 @@ export default function ReportsPage() {
                 <SelectTrigger className="h-8 w-48" aria-label={t('list.type')}><SelectValue /></SelectTrigger>
                 <SelectContent><SelectItem value={ALL}>{t('list.allTypes')}</SelectItem>{(types.data ?? []).map((d) => <SelectItem key={d.key} value={d.key}>{t(`types.${d.key}.name`, { defaultValue: d.name })}</SelectItem>)}</SelectContent>
               </Select>
+              <Input type="date" dir="ltr" className="h-8 w-[150px]" value={f['from'] ?? ''} max={f['to'] || undefined} onChange={(e) => table.setFilter('from', e.target.value || undefined)} aria-label={t('list.requestedFrom')} title={t('list.requestedFrom')} data-testid="reports-from" />
+              <Input type="date" dir="ltr" className="h-8 w-[150px]" value={f['to'] ?? ''} min={f['from'] || undefined} onChange={(e) => table.setFilter('to', e.target.value || undefined)} aria-label={t('list.requestedTo')} title={t('list.requestedTo')} data-testid="reports-to" />
               {hasFilters ? <Button variant="ghost" size="sm" onClick={table.clearFilters}><X /> {tc('common.clearFilters')}</Button> : null}
             </>
           }
-          renderCard={(r) => <div className="space-y-1"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{t(`types.${r.reportType}.name`, { defaultValue: r.reportType })}</span><JobStatusBadge status={isExpired(r) && r.status === 'COMPLETED' ? 'EXPIRED' : r.status} /></div><p className="text-xs text-muted-foreground tnum">{fmtDateTime(r.createdAt, tz)}</p>{r.status === 'COMPLETED' && !isExpired(r) && canExport ? <div className="flex gap-1"><Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setViewing(r); }}><Eye /> {t('list.view')}</Button><Button size="sm" onClick={(e) => { e.stopPropagation(); doDownload(r); }}><Download /> {tc('common.download')}</Button></div> : null}</div>}
+          renderCard={(r) => <div className="space-y-1"><div className="flex items-center justify-between gap-2"><span className="truncate font-medium">{t(`types.${r.reportType}.name`, { defaultValue: r.reportType })}</span><JobStatusBadge status={isExpired(r) && r.status === 'COMPLETED' ? 'EXPIRED' : r.status} /></div><p className="text-xs text-muted-foreground tnum">{fmtDateTime(r.createdAt, tz)}</p>{r.status === 'COMPLETED' && !isExpired(r) && canOpen(r) ? <div className="flex gap-1"><Button size="sm" variant="outline" onClick={(e) => { e.stopPropagation(); setViewing(r); }}><Eye /> {t('list.view')}</Button><Button size="sm" onClick={(e) => { e.stopPropagation(); doDownload(r); }}><Download /> {tc('common.download')}</Button></div> : null}</div>}
         />
       </section>
       {sharing ? <ShareReportDialog spec={sharing} onClose={() => setSharing(null)} /> : null}

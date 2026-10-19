@@ -87,9 +87,11 @@
       "out": "خروج",
       "worked": "ساعات العمل",
       "late": "التأخير",
+      "short": "النقص",
       "overtime": "إضافي",
       "flags": "ملاحظات"
     },
+    "shortMobile": "نقص {{value}}",
     "emptyMonth": "لا يوجد حضور لهذا الشهر",
     "emptyMonthHint": "تظهر الأيام بعد معالجة بصمات الأجهزة.",
     "noRecord": "لا يوجد سجل",

@@ -78,3 +78,33 @@ describe('ReportsPage — report.export and schedules', () => {
     fetchSpy.mockRestore();
   });
 });
+
+describe('ReportsPage — a line manager\'s team copies and the requested-date search (2026-10-19)', () => {
+  let click: ReturnType<typeof vi.spyOn>;
+  beforeEach(() => { resetApiMock(); testState.orgId = 'org-1'; testState.timezone = 'Asia/Muscat'; testState.employeeId = 'emp-m'; click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {}); });
+  afterEach(() => { click.mockRestore(); testState.employeeId = null; });
+
+  it('opens the copy about their own team without report.export; anything else stays locked', async () => {
+    grant('report.view', 'attendance.view_team');
+    const team = { ...report, id: 'rep-team', reportType: 'irregularities_report', parameters: { from: '2026-10-18', to: '2026-10-18', employeeIds: ['e1'], teamManagerEmployeeId: 'emp-m' } };
+    const other = { ...report, id: 'rep-other', parameters: { from: '2026-10-18', to: '2026-10-18', employeeIds: ['e1'], teamManagerEmployeeId: 'emp-x' } };
+    routes({ '/orgs/org-1/reports': page([team, other]), '/orgs/org-1/reports/rep-team/download': { data: { url: 'https://storage.local/team', expiresInSeconds: 300, fileName: 'irregularities_report-2026-10-19.pdf' } } });
+    renderWithProviders(<ReportsPage />, { route: '/reports' });
+    const table = (await screen.findAllByRole('table'))[0]!;
+    const rows = await within(table).findAllByRole('row');
+    const mine = rows.find((r) => r.textContent?.includes('Your team'))!;
+    expect(rows.find((r) => r !== mine && r.textContent?.includes('Export not allowed'))).toBeDefined();
+    fireEvent.click(within(mine).getByRole('button', { name: /Download/ }));
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/reports/rep-team/download', { disposition: 'attachment' }));
+  });
+
+  it('searches My reports by the day they were requested', async () => {
+    grant('report.view', 'report.export');
+    routes();
+    renderWithProviders(<ReportsPage />, { route: '/reports' });
+    await screen.findAllByRole('table');
+    fireEvent.change(screen.getByTestId('reports-from'), { target: { value: '2026-10-01' } });
+    fireEvent.change(screen.getByTestId('reports-to'), { target: { value: '2026-10-19' } });
+    await waitFor(() => expect(apiMock.get).toHaveBeenCalledWith('/orgs/org-1/reports', expect.objectContaining({ from: '2026-10-01', to: '2026-10-19' })));
+  });
+});

@@ -33,7 +33,7 @@ describe('DashboardSection', () => {
     fireEvent.click(screen.getByRole('radio', { name: /Executive/ }));
     fireEvent.click(save);
     await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1));
-    expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/dashboard', { theme: 'midnight', layout: 'executive', trendDays: 14, showGreeting: true, showQuote: true, showHighlight: true });
+    expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/dashboard', { theme: 'midnight', layout: 'executive', trendDays: 14, showGreeting: true, showQuote: true, showHighlight: true, showDepartmentBreakdown: true, showMonthToDate: true });
 
     unmount();
     expect(useUiStore.getState().previewDashboardTheme).toBeNull();
@@ -65,5 +65,30 @@ describe('DashboardSection', () => {
     expect(useUiStore.getState().previewDashboardTheme).toBeNull();
     expect(screen.queryByRole('button', { name: 'Save' })).not.toBeInTheDocument();
     expect(screen.getByText(/Only administrators/)).toBeInTheDocument();
+  });
+});
+
+describe('DashboardSection — statistics widgets (2026-10-19)', () => {
+  beforeEach(() => { resetApiMock(); grantAll(); useUiStore.getState().setPreviewDashboardTheme(null); });
+
+  it('shows both widgets for a group saved before they existed, and saves them off with the rest of the group', async () => {
+    mockGet({ '/orgs/org-1/settings/dashboard': { data: saved } });
+    apiMock.put.mockResolvedValue({ data: { ...saved, showDepartmentBreakdown: false, showMonthToDate: true } });
+    renderWithProviders(<DashboardSection />);
+    const departments = await screen.findByRole('switch', { name: 'Attendance by department' });
+    const mtd = screen.getByRole('switch', { name: 'Month-to-date indicators' });
+    expect(departments).toBeChecked();
+    expect(mtd).toBeChecked();
+    fireEvent.click(departments);
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMock.put).toHaveBeenCalledTimes(1));
+    expect(apiMock.put).toHaveBeenCalledWith('/orgs/org-1/settings/dashboard', { ...saved, showDepartmentBreakdown: false, showMonthToDate: true });
+  });
+
+  it('keeps a stored choice', async () => {
+    mockGet({ '/orgs/org-1/settings/dashboard': { data: { ...saved, showMonthToDate: false } } });
+    renderWithProviders(<DashboardSection />);
+    expect(await screen.findByRole('switch', { name: 'Month-to-date indicators' })).not.toBeChecked();
+    expect(screen.getByRole('switch', { name: 'Attendance by department' })).toBeChecked();
   });
 });

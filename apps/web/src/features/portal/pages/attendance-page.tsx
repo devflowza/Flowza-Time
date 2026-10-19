@@ -38,7 +38,7 @@ function DailyLog({ days, onSelect }: { days: SelfDayDto[]; onSelect: (d: SelfDa
     <>
       <div className="hidden rounded-xl border bg-card shadow-card md:block">
         <Table>
-          <TableHeader><TableRow>{(['date', 'status', 'shift', 'in', 'out', 'worked', 'late', 'overtime', 'flags'] as const).map((c) => <TableHead key={c}>{t(`attendance.columns.${c}`)}</TableHead>)}</TableRow></TableHeader>
+          <TableHeader><TableRow>{(['date', 'status', 'shift', 'in', 'out', 'worked', 'late', 'short', 'overtime', 'flags'] as const).map((c) => <TableHead key={c}>{t(`attendance.columns.${c}`)}</TableHead>)}</TableRow></TableHeader>
           <TableBody>
             {rows.map((r) => (
               <TableRow key={r.id} className="cursor-pointer" onClick={() => onSelect(r)} tabIndex={0} onKeyDown={(e) => { if (e.key === 'Enter') onSelect(r); }}>
@@ -49,6 +49,8 @@ function DailyLog({ days, onSelect }: { days: SelfDayDto[]; onSelect: (d: SelfDa
                 <TableCell className="text-xs tnum" dir="ltr">{fmtTime(r.lastOutAt, r.timezone)}</TableCell>
                 <TableCell className="text-xs tnum">{fmtMinutes(r.workedMinutes)}</TableCell>
                 <TableCell className="text-xs tnum">{r.lateMinutes ? fmtMinutes(r.lateMinutes) : '—'}</TableCell>
+                {/* the shift's hours not worked that day (the reports' UT), as the register shows it */}
+                <TableCell className="text-xs tnum" data-testid="day-short">{(r.shortfallMinutes ?? 0) > 0 ? <span className="text-amber-700 dark:text-amber-300" title={`${r.shortfallMinutes} min`}>{fmtMinutes(r.shortfallMinutes)}</span> : '—'}</TableCell>
                 <TableCell className="text-xs tnum">{r.overtimeMinutes ? fmtMinutes(r.overtimeMinutes) : '—'}</TableCell>
                 <TableCell><FlagChips flags={r.flags} max={2} size="xs" /></TableCell>
               </TableRow>
@@ -61,7 +63,7 @@ function DailyLog({ days, onSelect }: { days: SelfDayDto[]; onSelect: (d: SelfDa
           <li key={r.id}>
             <button type="button" onClick={() => onSelect(r)} className="w-full rounded-lg border bg-card p-3 text-start shadow-card">
               <span className="flex items-center justify-between gap-2"><span className="font-medium tnum">{fmtDate(r.attendanceDate, 'EEE dd MMM')}</span><AttendanceStatusBadge status={r.status} /></span>
-              <span className="mt-1 block text-xs text-muted-foreground tnum"><span dir="ltr">{fmtTime(r.firstInAt, r.timezone)} – {fmtTime(r.lastOutAt, r.timezone)}</span> · {fmtMinutes(r.workedMinutes)}</span>
+              <span className="mt-1 block text-xs text-muted-foreground tnum"><span dir="ltr">{fmtTime(r.firstInAt, r.timezone)} – {fmtTime(r.lastOutAt, r.timezone)}</span> · {fmtMinutes(r.workedMinutes)}{(r.shortfallMinutes ?? 0) > 0 ? <span className="text-amber-700 dark:text-amber-300"> · {t('attendance.shortMobile', { value: fmtMinutes(r.shortfallMinutes) })}</span> : null}</span>
             </button>
           </li>
         ))}

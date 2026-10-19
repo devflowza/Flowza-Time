@@ -12,6 +12,7 @@ import { TraceView } from './trace-view';
 import { DayMarks } from './day-marks';
 import { StatusSourceChip } from './source-chip';
 import { isManualStatus } from '../workspace-utils';
+import { shortfallLabel } from '../shortfall';
 import type { RecordEditPreset } from './record-edit-dialog';
 import '../workspace-i18n';
 
@@ -34,6 +35,7 @@ function Summary({ r }: { r: RecordDetail }) {
       <Stat label={t('columns.lastOut')} value={fmtTime(r.lastOutAt, tz)} />
       <Stat label={t('columns.worked')} value={fmtMinutes(r.workedMinutes)} sub={r.breakMinutes ? t('record.break', { value: fmtMinutes(r.breakMinutes) }) : undefined} />
       <Stat label={t('record.scheduled')} value={fmtMinutes(r.scheduledMinutes)} />
+      <Stat label={t('record.shortfall')} value={shortfallLabel(t, r.shortfallMinutes) ?? t('record.shortfallNone')} className={(r.shortfallMinutes ?? 0) > 0 ? 'border-amber-300' : undefined} />
       <Stat label={t('columns.late')} value={fmtMinutes(r.lateMinutes)} className={r.lateMinutes > 0 ? 'border-amber-300' : undefined} />
       <Stat label={t('columns.early')} value={fmtMinutes(r.earlyDepartureMinutes)} className={r.earlyDepartureMinutes > 0 ? 'border-amber-300' : undefined} />
       <Stat label={t('columns.overtime')} value={fmtMinutes(r.overtimeMinutes)} sub={r.overtimeCategory ? t(`overtimeCategory.${r.overtimeCategory}`, { defaultValue: r.overtimeCategory }) : undefined} />

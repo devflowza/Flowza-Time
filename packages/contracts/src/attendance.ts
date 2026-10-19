@@ -252,6 +252,10 @@ export const attendanceDailyRecordDtoSchema = z.object({
   creditedMinutes: z.number().int().optional(),
   /** Out-of-office minutes inside the scheduled hours that no approved short leave covers, beyond the policy's allowance. */
   lostMinutes: z.number().int().optional(),
+   * Shortfall ("Short"): scheduled − worked minutes when a worked day fell short of its shift's hours, 0 otherwise — the reports'
+   * UT, derived with the same rule (`shortfallMinutes`, @flowza/domain reports/derive.ts), never stored separately.
+   */
+  shortfallMinutes: z.number().int().default(0),
 });
 export type AttendanceDailyRecordDto = z.infer<typeof attendanceDailyRecordDtoSchema>;
 

@@ -290,3 +290,86 @@ describe('each employee receives the report about themselves (Flowza Finance par
     expect(await h.tdb.adminDb.selectFrom('notificationDeliveries').select('channel').where('notificationId', '=', n.id).execute()).toEqual([{ channel: 'EMAIL' }]);
   });
 });
+
+describe('a daily schedule of irregular cases to every line manager (migration 20261019000500)', () => {
+  const E4 = '0c600000-0000-4000-a000-0000000000e4'; // branch B, manages E2
+  const MGR_B = 'c6000000-0000-4000-a000-0000000000b1'; // system Line Manager role (no report.export), linked to E4
+  const DAILY = '0c600000-0000-4000-a000-0000000000c2';
+  const RUN = '2026-10-19T03:30:00.000Z'; // 19 Oct 07:30 in Muscat
+  const DAY = '2026-10-18';
+  const fileOf = async (requestId: string) => {
+    const r = await h.tdb.adminDb.selectFrom('reportRequests').select(['filePath', 'rowCount']).where('id', '=', requestId).executeTakeFirstOrThrow();
+    return { rowCount: r.rowCount, text: h.files.get(`reports/${r.filePath}`)!.toString('utf8') };
+  };
+
+  beforeAll(async () => {
+    const a = h.tdb.adminDb;
+    await sql`insert into auth.users (id, email) values (${MGR_B}::uuid, 'mgr.b@rdel.local')`.execute(a);
+    await a.insertInto('userProfiles').values({ id: MGR_B, email: 'mgr.b@rdel.local', fullName: 'Manager B' }).execute();
+    await a.insertInto('employees').values({ id: E4, organizationId: ORG, employeeNumber: '4', firstName: '4', lastName: '.', displayName: 'Employee 4', joiningDate: '2024-01-01', branchId: BRANCH_B, deviceUserId: '4' }).execute();
+    await a.updateTable('employees').set({ managerEmployeeId: E4 }).where('id', '=', E2).execute();
+    await a.insertInto('orgMemberships').values({ organizationId: ORG, userId: MGR_B, roleId: SYSTEM_ROLE_IDS.manager, status: 'active', allBranches: true, employeeId: E4 }).execute();
+    const rec = (employeeId: string, branchId: string, values: Record<string, unknown>) => ({ organizationId: ORG, employeeId, attendanceDate: DAY, branchId, timezone: 'Asia/Muscat', scheduledMinutes: 480, engineVersion: 'test', trace: JSON.stringify({ punches: [] }), ...values });
+    await a.insertInto('attendanceDailyRecords').values([
+      rec(E1, BRANCH_A, { status: 'PRESENT', flags: ['LATE'], lateMinutes: 25, workedMinutes: 455, firstInAt: new Date('2026-10-18T04:25:00Z'), lastOutAt: new Date('2026-10-18T12:00:00Z'), punchCount: 2 }),
+      rec(E2, BRANCH_B, { status: 'ABSENT', flags: ['UNEXCUSED'], workedMinutes: 0, punchCount: 0 }),
+      rec(E3, BRANCH_A, { status: 'PRESENT', flags: [], workedMinutes: 480, firstInAt: new Date('2026-10-18T04:00:00Z'), lastOutAt: new Date('2026-10-18T12:00:00Z'), punchCount: 2 }),
+    ]).execute();
+    // E1 explained the late arrival; the reason waits for review
+    await a.insertInto('attendanceNotes').values({ organizationId: ORG, employeeId: E1, attendanceDate: DAY, branchId: BRANCH_A, category: 'late_reason', note: 'Traffic on the expressway', status: 'pending' }).execute();
+    await a.insertInto('reportSchedules').values({
+      id: DAILY, organizationId: ORG, name: 'Morning irregular cases', reportType: 'irregularities_report', format: 'csv', filters: JSON.stringify({}), cadence: 'daily', runDay: 0, runTime: '07:30',
+      periodRule: 'previous_day', recipients: JSON.stringify({ userIds: [OWNER], roleKeys: [], lineManagers: true }), channels: ['in_app', 'email'], isActive: true, nextRunAt: new Date(RUN), createdBy: OWNER,
+    }).execute();
+  });
+
+  it('the scheduler admits the morning run; each line manager gets their team, without report.export; the next run is tomorrow', async () => {
+    clock = new Date('2026-10-19T03:31:00Z');
+    await scheduleDueReports(h.deps);
+    // the morning run is admitted once, keyed on its occurrence (the monthly schedule above is due again too)
+    expect((await runJobs()).filter((j) => j.dedupeKey === `report-schedule:${DAILY}:${RUN}`)).toHaveLength(1);
+    const res = await runReportDeliveryHandler(ctx('RUN_REPORT_SCHEDULE', { organizationId: ORG, mode: 'schedule', scheduleId: DAILY, scheduledFor: RUN }));
+    expect(res).toMatchObject({ outcome: 'delivered', recipients: 3, queued: 3, skipped: 0, period: { from: DAY, to: DAY }, nextRunAt: '2026-10-20T03:30:00.000Z' });
+    const rows = await deliveries(`schedule:${DAILY}:${RUN}`);
+    const by = (u: string) => rows.find((r) => r.recipientUserId === u)!;
+    expect(by(OWNER)).toMatchObject({ status: 'queued', scope: { kind: 'ORGANIZATION' }, periodFrom: new Date(`${DAY}T00:00:00Z`) });
+    expect(by(LEAD)).toMatchObject({ status: 'queued', scope: { kind: 'TEAM', employeeCount: 1 } });
+    expect(by(MGR_B)).toMatchObject({ status: 'queued', scope: { kind: 'TEAM', employeeCount: 1 } });
+    const request = (u: string) => h.tdb.adminDb.selectFrom('reportRequests').select(['id', 'parameters', 'branchId']).where('id', '=', by(u).reportRequestId!).executeTakeFirstOrThrow();
+    expect((await request(OWNER)).parameters).toEqual({ from: DAY, to: DAY });
+    expect((await request(LEAD)).parameters).toEqual({ from: DAY, to: DAY, employeeIds: [E1], teamManagerEmployeeId: E3 });
+    expect(await request(MGR_B)).toMatchObject({ branchId: null, parameters: { from: DAY, to: DAY, employeeIds: [E2], teamManagerEmployeeId: E4 } });
+    expect(new Date((await h.tdb.adminDb.selectFrom('reportSchedules').select('nextRunAt').where('id', '=', DAILY).executeTakeFirstOrThrow()).nextRunAt!).toISOString()).toBe('2026-10-20T03:30:00.000Z');
+  });
+
+  it('the manager\'s file holds their direct report only; the organisation copy holds every irregular case with its reason', async () => {
+    const rows = await deliveries(`schedule:${DAILY}:${RUN}`);
+    const mgr = rows.find((r) => r.recipientUserId === MGR_B)!;
+    expect((await generateReportRequest(h.deps, h.deps.log, fakeJob('GENERATE_REPORT', {}, ORG), ORG, mgr.reportRequestId!)).status).toBe('COMPLETED');
+    const mine = await fileOf(mgr.reportRequestId!);
+    expect(mine.text).toContain('Employee 2');
+    expect(mine.text).not.toContain('Employee 1');
+    expect(mine.rowCount).toBe(2); // E2's absence + E2's summary line
+    const owner = rows.find((r) => r.recipientUserId === OWNER)!;
+    await generateReportRequest(h.deps, h.deps.log, fakeJob('GENERATE_REPORT', {}, ORG), ORG, owner.reportRequestId!);
+    const all = await fileOf(owner.reportRequestId!);
+    // 25 min late and so 25 min short of the 8 h base; the reason was given and waits for review
+    expect(all.text).toContain('N/A,18/10/2026,1,Employee 1,PR,08:25,16:00,"Late, Short hours",25,,25,Late reason,Pending');
+    expect(all.text).toContain('1,Employee 1,N/A,1,25,0,0,0,0,1,25,0,1');
+    expect(all.text).toMatch(/Employee 2,AB,,,"Absent, Unexcused",,,,No reason given,/);
+    expect(all.text).not.toContain('Employee 3'); // a regular day is not a case
+    expect(all.text).not.toContain('Traffic'); // the reason's text stays in the app
+    expect(all.text).toContain('Summary per employee');
+  });
+
+  it('a manager none of whose reports is in the chosen branch is skipped, not sent an empty report', async () => {
+    const res = await runReportDeliveryHandler(ctx('RUN_REPORT_SCHEDULE', {
+      organizationId: ORG, mode: 'send_now', runKey: 'send:branch-a-managers', requestedBy: OWNER,
+      spec: { reportType: 'irregularities_report', format: 'csv', parameters: { from: DAY, to: DAY, branchId: BRANCH_A }, recipients: { userIds: [], roleKeys: [], lineManagers: true }, channels: ['in_app'] },
+    }));
+    expect(res).toMatchObject({ outcome: 'delivered', recipients: 2, queued: 1, skipped: 1 });
+    const rows = await deliveries('send:branch-a-managers');
+    expect(rows.find((r) => r.recipientUserId === MGR_B)).toMatchObject({ status: 'skipped', skipReason: 'no_team_in_scope' });
+    expect(rows.find((r) => r.recipientUserId === LEAD)).toMatchObject({ status: 'queued', scope: { kind: 'TEAM' } });
+  });
+});

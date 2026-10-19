@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
+import ExcelJS from 'exceljs';
 import { defaultRegistry } from '@flowza/device-providers';
 import { attendanceSummaryRows, withContext, type AttendanceSummaryDbFigures, type AttendanceSummaryScope } from '@flowza/database';
 import { createHarness, fakeJob, type TestHarness } from '../../test/harness.js';
@@ -677,5 +678,75 @@ describe('HR portal Prompt 6a review — the summary report, the daily range, mo
     const summary = dataRows(await build({ month: MONTH, from: '2017-11-01', to: '2017-11-01', employeeIds: [E3], finalizedFigures: false }));
     expect(summary[0]!.cells[4]!.number).toBe(1); // FAISAL present on the 1st only; the late 2nd is outside the period
     expect(summary[0]!.cells[5]!.number).toBe(0);
+  });
+});
+
+describe('2026-10-19 · search options, the register export and the irregular cases report', () => {
+  const csvLines = (path: string) => fileText(path).replace(/^\uFEFF/, '').split('\r\n').filter(Boolean);
+  const generate = async (reportType: string, format: 'csv' | 'xlsx' | 'pdf', parameters: Record<string, unknown>) => {
+    const id = await request(reportType, format, parameters);
+    const res = await generateReportHandler(ctx('GENERATE_REPORT', { organizationId: ORG, reportRequestId: id }));
+    return { id, res, lines: format === 'csv' ? csvLines(`${ORG}/${id}.csv`) : [] };
+  };
+  const names = (lines: string[]) => lines.slice(1).map((l) => l.split(',')[2]);
+
+  it('the Daily Report honours the register filters: status (missing punch = the flag), flag, shift and the name / number search', async () => {
+    expect(names((await generate('daily_attendance', 'csv', { from: DATE, status: 'MISSING_PUNCH' })).lines)).toEqual(['ABDUL SATTHAR']);
+    expect(names((await generate('daily_attendance', 'csv', { from: DATE, status: 'ABSENT' })).lines)).toEqual(['Chrishantha Rohitha']);
+    expect(names((await generate('daily_attendance', 'csv', { from: DATE, flag: 'OVERTIME' })).lines)).toEqual(['SALEH AL AGHBARI', 'SALEH AL AGHBARI']);
+    expect(names((await generate('daily_attendance', 'csv', { from: DATE, search: 'faiS' })).lines)).toEqual(['FAISAL']);
+    expect(names((await generate('daily_attendance', 'csv', { from: DATE, search: '2192' })).lines)).toEqual(['Masoom']);
+    // LIKE wildcards are text, not patterns
+    expect((await generate('daily_attendance', 'csv', { from: DATE, search: '%' })).res).toMatchObject({ status: 'COMPLETED', rowCount: 0 });
+    expect((await generate('daily_attendance', 'csv', { from: DATE, shiftId: SHIFT })).res).toMatchObject({ rowCount: 6 });
+    expect((await generate('daily_attendance', 'csv', { from: DATE, shiftId: RULES })).res).toMatchObject({ rowCount: 0 });
+    // an XLSX of a filtered register keeps the formula escaping and the injected branch scope
+    const scoped = await generate('daily_attendance', 'xlsx', { from: DATE, status: 'ABSENT', branchScope: [BRANCH] });
+    expect(scoped.res).toMatchObject({ status: 'COMPLETED', rowCount: 0 }); // the absentee works in the other branch
+  });
+
+  it('the Detail, Absence and Late reports honour the status parameter', async () => {
+    const detail = await generate('employee_attendance', 'csv', { from: DATE, to: '2017-11-03', employeeIds: [E5], status: 'ABSENT' });
+    expect(detail.res).toMatchObject({ status: 'COMPLETED', rowCount: 1 }); // the absent day only, not the days without a record
+    const all = await generate('employee_attendance', 'csv', { from: DATE, to: '2017-11-03', employeeIds: [E5] });
+    expect(all.res.rowCount).toBe(3);
+    expect((await generate('absence_report', 'csv', { from: DATE, to: DATE, status: 'ABSENT' })).res.rowCount).toBe(1);
+    expect((await generate('absence_report', 'csv', { from: DATE, to: DATE, status: 'PRESENT' })).res.rowCount).toBe(0);
+    expect((await generate('late_report', 'csv', { from: DATE, to: DATE, status: 'LEAVE' })).res.rowCount).toBe(0);
+  });
+
+  it('irregular cases: one row per irregular employee-day by department, then a summary per employee', async () => {
+    const { res, lines } = await generate('irregularities_report', 'csv', { from: DATE, to: DATE });
+    expect(res).toMatchObject({ status: 'COMPLETED', rowCount: 6 }); // three cases + three summary lines
+    expect(lines[0]).toBe('Department,Date,Emp ID,Emp Name,Att Code,IN Time,OUT Time,Irregularity,Late (min),Early (min),Short (min),Reason,Reason status');
+    expect(lines.slice(1, 4)).toEqual([
+      // the single IN: a missing check-out, not "short hours" (its hours are unknown until corrected)
+      'ADMIN,11/01/2017,2010,ABDUL SATTHAR,MP,2:49 pm,,Missing check-out,,,,No reason given,',
+      // 8.30 worked of a 9.00 base: thirty minutes short
+      'EL BEIT,11/01/2017,2011,FAISAL,PR,8:39 am,6:09 pm,Short hours,,,30,No reason given,',
+      'N/A,11/01/2017,2328,Chrishantha Rohitha,AB,,,Absent,,,,No reason given,',
+    ]);
+    expect(lines[4]).toBe('Summary per employee');
+    expect(lines[5]).toBe('Emp ID,Emp Name,Department,Late days,Late (min),Early days,Early (min),Absent days,Missing punch,Short days,Short (min),Unexcused days,Cases');
+    expect(lines.slice(6)).toEqual(['2010,ABDUL SATTHAR,ADMIN,0,0,0,0,0,1,0,0,0,1', '2011,FAISAL,EL BEIT,0,0,0,0,0,0,1,30,0,1', '2328,Chrishantha Rohitha,N/A,0,0,0,0,1,0,0,0,0,1']);
+    // the leave day, the overtime day and the leaver are not cases
+    expect(lines.some((l) => l.includes('Masoom') || l.includes('SALEH') || l.includes('Left Already'))).toBe(false);
+  });
+
+  it('irregular cases: XLSX puts the summary on its own sheet; PDF prints it after the list, in Arabic too', async () => {
+    const x = await generate('irregularities_report', 'xlsx', { from: DATE, to: DATE, departmentId: DEPT_ELBEIT });
+    expect(x.res).toMatchObject({ status: 'COMPLETED', rowCount: 2 });
+    const wb = new ExcelJS.Workbook();
+    await wb.xlsx.load(h.files.get(`reports/${ORG}/${x.id}.xlsx`)! as unknown as ArrayBuffer);
+    expect(wb.worksheets.map((w) => w.name)).toEqual(['Irregular Cases Report', 'Summary per employee']);
+    expect(wb.worksheets[0]!.getRow(2).getCell(4).value).toBe('FAISAL');
+    expect(wb.worksheets[0]!.getRow(2).getCell(11).value).toBe(30); // typed minutes
+    expect(wb.worksheets[1]!.getRow(2).getCell(2).value).toBe('FAISAL');
+    const pdf = await generate('irregularities_report', 'pdf', { from: DATE, to: DATE, locale: 'ar' });
+    const html = fileText(`${ORG}/${pdf.id}.pdf`);
+    expect(html).toContain('<div class="title">تقرير الحالات غير المنتظمة</div>');
+    expect(html).toContain('ملخص لكل موظف');
+    expect(html).toContain('بصمة خروج ناقصة');
+    expect(html).toContain('dir="rtl"');
   });
 });

@@ -12,8 +12,11 @@ export interface DashboardSettings {
   showGreeting: boolean;
   showQuote: boolean;
   showHighlight: boolean;
+  /** Statistics widgets (2026-10-19): the day per department and the month-to-date indicators. Absent in the stored group = shown. */
+  showDepartmentBreakdown: boolean;
+  showMonthToDate: boolean;
 }
-export const DASHBOARD_DEFAULTS: DashboardSettings = { theme: 'emerald', layout: 'overview', trendDays: 14, showGreeting: true, showQuote: true, showHighlight: true };
+export const DASHBOARD_DEFAULTS: DashboardSettings = { theme: 'emerald', layout: 'overview', trendDays: 14, showGreeting: true, showQuote: true, showHighlight: true, showDepartmentBreakdown: true, showMonthToDate: true };
 
 /** Gallery order and icon per style; names and blurbs live in the `settings` namespace (`dashboard.themes.<key>`). */
 export const DASHBOARD_THEME_META: ReadonlyArray<{ key: DashboardTheme; icon: LucideIcon }> = [
@@ -42,6 +45,8 @@ export function resolveDashboardSettings(raw: Partial<OrganizationSettings['dash
     showGreeting: raw?.showGreeting ?? DASHBOARD_DEFAULTS.showGreeting,
     showQuote: raw?.showQuote ?? DASHBOARD_DEFAULTS.showQuote,
     showHighlight: raw?.showHighlight ?? DASHBOARD_DEFAULTS.showHighlight,
+    showDepartmentBreakdown: raw?.showDepartmentBreakdown ?? DASHBOARD_DEFAULTS.showDepartmentBreakdown,
+    showMonthToDate: raw?.showMonthToDate ?? DASHBOARD_DEFAULTS.showMonthToDate,
   };
 }
 

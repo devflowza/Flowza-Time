@@ -1,5 +1,6 @@
 import { deviceCapabilitiesSchema, lopDaysOf, type AttendanceDailyRecordDto, type DayMarkDto, type DeviceCommandDto, type DeviceDto, type DeviceGroupDto, type DeviceLogDto, type PendingDeviceDto, type ReportRequestDto, type SyncJobDto, type SyncJobItemDto } from '@flowza/contracts';
 import type { DayMarkRow } from '@flowza/database';
+import { shortfallMinutes } from '@flowza/domain';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
 
 export const DEVICE_COLUMNS = [
@@ -95,6 +96,8 @@ export function toDailyRecordDto(r: DailyRecordRow): AttendanceDailyRecordDto & 
     lopDays: lopDaysOf(flags), unexcused: flags.includes('UNEXCUSED'),
     // short leave (engine 1.5.0)
     excusedMinutes: r.excusedMinutes ?? 0, creditedMinutes: r.creditedMinutes ?? 0, lostMinutes: r.lostMinutes ?? 0,
+    // the reports' UT (2026-10-19 "show shortfall hours and the difference in minutes"): one rule, @flowza/domain reports/derive.ts
+    shortfallMinutes: shortfallMinutes({ status: r.status, flags, firstInAt: r.firstInAt, lastOutAt: r.lastOutAt, workedMinutes: r.workedMinutes, scheduledMinutes: r.scheduledMinutes, overtimeMinutes: r.overtimeMinutes, overtimeCategory: r.overtimeCategory }),
   };
 }
 

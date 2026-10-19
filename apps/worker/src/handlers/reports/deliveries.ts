@@ -1,8 +1,8 @@
 import { sql } from 'kysely';
 import { z } from 'zod';
-import { REPORT_DELIVERY_CHANNELS, REPORT_FORMATS, REPORT_RECIPIENT_MAX_RESOLVED, REPORT_TYPES, uuidSchema, type ReportFormat, type ReportPeriodRule, type ReportScheduleCadence, type ReportType } from '@flowza/contracts';
+import { REPORT_DELIVERY_CHANNELS, REPORT_FORMATS, REPORT_RECIPIENT_MAX_LINE_MANAGERS, REPORT_RECIPIENT_MAX_RESOLVED, REPORT_TYPES, uuidSchema, type ReportFormat, type ReportPeriodRule, type ReportScheduleCadence, type ReportType } from '@flowza/contracts';
 import { emitDomainEvent, withContext, writeAudit, type JobQueue, type Trx } from '@flowza/database';
-import { dueOccurrence, nextScheduleRun, periodParameters, schedulePeriod, scopeReportForRecipient, type RecipientGrant, type ReportPeriod } from '@flowza/domain';
+import { dueOccurrence, nextScheduleRun, periodParameters, schedulePeriod, scopeReportForRecipient, type RecipientGrant, type ReportPeriod, type TeamMemberPlacement } from '@flowza/domain';
 import { errors, event, isValidTimezone } from '@flowza/shared';
 import type { WorkerDeps } from '../../deps.js';
 import type { HandlerRegistry, JobContext } from '../types.js';
@@ -25,7 +25,7 @@ import { asObject, parsePayload } from '../attendance/common.js';
 
 export const REPORT_DELIVERY_JOB_TYPE = 'RUN_REPORT_SCHEDULE';
 
-const recipientsSchema = z.object({ userIds: z.array(uuidSchema).max(50).default([]), roleKeys: z.array(z.string().min(1).max(64)).max(10).default([]) });
+const recipientsSchema = z.object({ userIds: z.array(uuidSchema).max(50).default([]), roleKeys: z.array(z.string().min(1).max(64)).max(10).default([]), lineManagers: z.boolean().default(false) });
 const specSchema = z.object({
   reportType: z.enum(REPORT_TYPES),
   format: z.enum(REPORT_FORMATS),
@@ -52,18 +52,36 @@ interface RunSpec {
   reportType: ReportType;
   format: ReportFormat;
   parameters: Record<string, unknown>;
-  recipients: { userIds: string[]; roleKeys: string[] };
+  recipients: RunRecipients;
   channels: string[];
   period: ReportPeriod | null;
   sentBy: string | null;
 }
 
+/** `lineManagers` (migration 20261019000500): every line manager receives the copy about their own team. */
+interface RunRecipients { userIds: string[]; roleKeys: string[]; lineManagers?: boolean }
+
 const toStrings = (v: unknown): string[] => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
 
+/**
+ * Active members who are the PRIMARY manager of at least one active employee, their own record active too (the line managers
+ * `recipients.lineManagers` addresses at run time), in user order.
+ */
+async function lineManagerMembers(trx: Trx, organizationId: string): Promise<Array<{ id: string; userId: string; roleId: string; allBranches: boolean; employeeId: string | null }>> {
+  return (await sql<{ id: string; userId: string; roleId: string; allBranches: boolean; employeeId: string | null }>`
+    select m.id, m.user_id as "userId", m.role_id as "roleId", m.all_branches as "allBranches", m.employee_id as "employeeId"
+    from public.org_memberships m
+    join public.employees me on me.id = m.employee_id and me.organization_id = m.organization_id and me.deleted_at is null and me.employment_status not in ('terminated', 'resigned')
+    where m.organization_id = ${organizationId}::uuid and m.status = 'active'
+      and exists (select 1 from public.employees e where e.organization_id = m.organization_id and e.deleted_at is null
+                    and e.employment_status not in ('terminated', 'resigned') and e.manager_employee_id = m.employee_id)
+    order by m.user_id`.execute(trx)).rows;
+}
+
 /** The recipients' memberships, permissions, branch scopes and direct reports, loaded in bulk. */
-async function loadRecipientGrants(trx: Trx, organizationId: string, recipients: { userIds: string[]; roleKeys: string[] }): Promise<RecipientGrant[]> {
-  if (!recipients.userIds.length && !recipients.roleKeys.length) return [];
-  const members = await trx.selectFrom('orgMemberships as m').innerJoin('roles as r', 'r.id', 'm.roleId')
+async function loadRecipientGrants(trx: Trx, organizationId: string, recipients: RunRecipients): Promise<RecipientGrant[]> {
+  if (!recipients.userIds.length && !recipients.roleKeys.length && !recipients.lineManagers) return [];
+  const members = recipients.userIds.length || recipients.roleKeys.length ? await trx.selectFrom('orgMemberships as m').innerJoin('roles as r', 'r.id', 'm.roleId')
     .select(['m.id', 'm.userId', 'm.roleId', 'm.allBranches', 'm.employeeId'])
     .where('m.organizationId', '=', organizationId).where('m.status', '=', 'active')
     .where((eb) => eb.or([
@@ -71,8 +89,13 @@ async function loadRecipientGrants(trx: Trx, organizationId: string, recipients:
       ...(recipients.roleKeys.length ? [eb.and([eb('r.key', 'in', recipients.roleKeys), eb.or([eb('r.organizationId', 'is', null), eb('r.organizationId', '=', organizationId)])])] : []),
       sql<boolean>`false`,
     ]))
-    .orderBy('m.userId').execute();
-  const unique = [...new Map(members.map((m) => [m.userId, m])).values()];
+    .orderBy('m.userId').execute() : [];
+  const explicit = [...new Map(members.map((m) => [m.userId, m])).values()];
+  const explicitIds = new Set(explicit.map((m) => m.userId));
+  const managers = recipients.lineManagers ? await lineManagerMembers(trx, organizationId) : [];
+  const managerIds = new Set(managers.map((m) => m.userId));
+  // the people chosen by name or role first (their order decides the recipient cap), then the line managers not among them
+  const unique = [...explicit, ...managers.filter((m) => !explicitIds.has(m.userId))];
   if (!unique.length) return [];
   const roleIds = [...new Set(unique.map((m) => m.roleId))];
   const perms = await trx.selectFrom('rolePermissions').select(['roleId', 'permissionKey']).where('roleId', 'in', roleIds).execute();
@@ -84,15 +107,15 @@ async function loadRecipientGrants(trx: Trx, organizationId: string, recipients:
   for (const b of branches) branchesByMembership.set(b.membershipId, [...(branchesByMembership.get(b.membershipId) ?? []), b.branchId]);
   // direct reports (primary or secondary manager), leavers excluded, and only while the manager's own record is active — the
   // same rule as app.team_employee_ids() / the principal snapshot
-  const team = await sql<{ membershipId: string; employeeId: string }>`
-    select m.id as "membershipId", e.id as "employeeId"
+  const team = await sql<{ membershipId: string; employeeId: string; branchId: string; departmentId: string | null }>`
+    select m.id as "membershipId", e.id as "employeeId", e.branch_id as "branchId", e.department_id as "departmentId"
     from public.org_memberships m
     join public.employees me on me.id = m.employee_id and me.organization_id = m.organization_id and me.deleted_at is null and me.employment_status not in ('terminated', 'resigned')
     join public.employees e on e.organization_id = m.organization_id and e.deleted_at is null and e.employment_status not in ('terminated', 'resigned')
       and (e.manager_employee_id = m.employee_id or e.secondary_manager_employee_id = m.employee_id)
     where m.id = any(${unique.map((m) => m.id)}::uuid[])`.execute(trx);
-  const teamByMembership = new Map<string, string[]>();
-  for (const t of team.rows) teamByMembership.set(t.membershipId, [...(teamByMembership.get(t.membershipId) ?? []), t.employeeId]);
+  const teamByMembership = new Map<string, TeamMemberPlacement[]>();
+  for (const t of team.rows) teamByMembership.set(t.membershipId, [...(teamByMembership.get(t.membershipId) ?? []), { employeeId: t.employeeId, branchId: t.branchId, departmentId: t.departmentId }]);
   // the recipient's own employee record — what somebody without report access may still receive a copy about (self scope);
   // a leaver or a deleted record is nobody's self any more
   const ownIds = [...new Set(unique.map((m) => m.employeeId).filter((id): id is string => typeof id === 'string'))];
@@ -102,10 +125,12 @@ async function loadRecipientGrants(trx: Trx, organizationId: string, recipients:
     : new Map<string, { id: string; branchId: string; departmentId: string | null }>();
   return unique.map((m) => {
     const e = m.employeeId ? own.get(m.employeeId) : undefined;
+    const teamOf = teamByMembership.get(m.id) ?? [];
     return {
       userId: m.userId, permissions: permsByRole.get(m.roleId) ?? [], allBranches: m.allBranches,
-      branchIds: branchesByMembership.get(m.id) ?? [], teamEmployeeIds: teamByMembership.get(m.id) ?? [],
+      branchIds: branchesByMembership.get(m.id) ?? [], teamEmployeeIds: teamOf.map((t) => t.employeeId),
       self: e ? { employeeId: e.id, branchId: e.branchId, departmentId: e.departmentId } : null,
+      lineManager: managerIds.has(m.userId) ? { only: !explicitIds.has(m.userId), team: teamOf } : null,
     };
   });
 }
@@ -126,9 +151,13 @@ export async function deliverRun(trx: Trx, queue: JobQueue, run: RunSpec): Promi
     organizationId: run.organizationId, scheduleId: run.scheduleId, runKey: run.runKey, mode: run.mode, reportType: run.reportType, format: run.format,
     periodFrom: run.period?.from ?? null, periodTo: run.period?.to ?? null, sentBy: run.sentBy, channels: run.channels,
   };
-  for (const [index, grant] of grants.entries()) {
+  // the people chosen by name or role are capped at REPORT_RECIPIENT_MAX_RESOLVED, the line managers apart at their own cap
+  let named = 0;
+  let managers = 0;
+  for (const grant of grants) {
+    const overCap = grant.lineManager?.only ? (managers += 1) > REPORT_RECIPIENT_MAX_LINE_MANAGERS : (named += 1) > REPORT_RECIPIENT_MAX_RESOLVED;
     if (done.has(grant.userId)) { counts.alreadyDelivered += 1; continue; }
-    const decision = index >= REPORT_RECIPIENT_MAX_RESOLVED ? { ok: false as const, reason: 'recipient_cap' } : scopeReportForRecipient(grant, run.reportType, run.parameters, employeeBranches);
+    const decision = overCap ? { ok: false as const, reason: 'recipient_cap' } : scopeReportForRecipient(grant, run.reportType, run.parameters, employeeBranches);
     if (!decision.ok) {
       await trx.insertInto('reportDeliveries').values({ ...base, recipientUserId: grant.userId, status: 'skipped', skipReason: decision.reason.slice(0, 200) })
         .onConflict((oc) => oc.columns(['organizationId', 'runKey', 'recipientUserId']).doNothing()).execute();
@@ -227,7 +256,7 @@ export async function runReportDelivery(trx: Trx, deps: Pick<WorkerDeps, 'queue'
     try {
       counts = await deliverRun(trx, deps.queue, {
         organizationId: p.organizationId, mode: p.mode, scheduleId: s.id, runKey, reportType: s.reportType as ReportType, format: s.format, parameters,
-        recipients: { userIds: toStrings(recipients['userIds']), roleKeys: toStrings(recipients['roleKeys']) }, channels: s.channels, period, sentBy,
+        recipients: { userIds: toStrings(recipients['userIds']), roleKeys: toStrings(recipients['roleKeys']), lineManagers: recipients['lineManagers'] === true }, channels: s.channels, period, sentBy,
       });
       await sql`release savepoint report_delivery_run`.execute(trx);
     } catch (err) {

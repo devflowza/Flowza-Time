@@ -10,7 +10,7 @@ import { apiMock, grantAll, mockGet, page, renderWithProviders, resetApiMock, te
 import type { ReportDeliveryDto, ReportScheduleDto } from '@flowza/contracts';
 import { SchedulesPanel } from './schedules-panel';
 import { ShareReportDialog } from './share-report-dialog';
-import { allowedPeriodRules, skipReasonLabel } from '../schedule-utils';
+import { allowedPeriodRules, cadenceSummary, defaultRunDay, skipReasonLabel } from '../schedule-utils';
 
 const U1 = '11111111-1111-4111-8111-111111111111';
 const U2 = '22222222-2222-4222-8222-222222222222';
@@ -21,7 +21,7 @@ const types = [
 ];
 const schedule: ReportScheduleDto = {
   id: 's1', name: 'Monthly for managers', reportType: 'monthly_attendance', format: 'pdf', filters: {}, branchId: null, cadence: 'monthly', runDay: 1, runTime: '07:00:00', periodRule: 'previous_month',
-  customFromDay: null, customToDay: null, recipients: { userIds: [U1], roleKeys: ['hr_admin'] }, channels: ['in_app', 'email'], isActive: true, nextRunAt: '2026-10-01T03:00:00Z', lastRunAt: '2026-09-01T03:00:05Z',
+  customFromDay: null, customToDay: null, recipients: { userIds: [U1], roleKeys: ['hr_admin'], lineManagers: false }, channels: ['in_app', 'email'], isActive: true, nextRunAt: '2026-10-01T03:00:00Z', lastRunAt: '2026-09-01T03:00:05Z',
   lastStatus: 'partial', lastError: null, lastSummary: { period: { from: '2026-08-01', to: '2026-08-31' }, recipients: 3, queued: 2, skipped: 1, failed: 0 }, nextPeriod: { from: '2026-09-01', to: '2026-09-30' },
   timezone: 'Asia/Muscat', createdBy: U2, createdByName: 'Owner', createdAt: '2026-08-20T10:00:00Z', updatedAt: '2026-08-20T10:00:00Z',
 };
@@ -131,7 +131,78 @@ describe('ShareReportDialog', () => {
     await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
     const [path, body] = apiMock.post.mock.calls[0] as [string, Record<string, unknown>];
     expect(path).toBe('/orgs/org-1/reports/share');
-    expect(body).toEqual({ reportType: 'late_report', format: 'pdf', parameters: { from: '2026-09-01', to: '2026-09-26' }, recipients: { userIds: [U1], roleKeys: [] }, channels: ['in_app'], note: 'For your review' });
+    expect(body).toEqual({ reportType: 'late_report', format: 'pdf', parameters: { from: '2026-09-01', to: '2026-09-26' }, recipients: { userIds: [U1], roleKeys: [], lineManagers: false }, channels: ['in_app'], note: 'For your review' });
     await waitFor(() => expect(onClose).toHaveBeenCalled());
+  });
+});
+
+describe('daily schedules to each employee\'s line manager (2026-10-19)', () => {
+  const irregular = { key: 'irregularities_report', name: 'Irregular Cases Report', description: 'd', requiredParameters: ['from', 'to'], optionalParameters: ['branchId', 'departmentId', 'employeeIds', 'status'], permissions: ['report.view', 'attendance.view'], formats: ['csv', 'xlsx', 'pdf'], status: 'available', defaultFormat: 'pdf', allowed: true };
+  beforeEach(() => {
+    resetApiMock(); grantAll(); testState.orgId = 'org-1'; testState.timezone = 'Asia/Muscat';
+    mockGet({
+      '/orgs/org-1/report-schedules': page([{ ...schedule, id: 's3', name: 'Morning irregular cases', reportType: 'irregularities_report', cadence: 'daily', runDay: 0, runTime: '07:30:00', periodRule: 'previous_day', recipients: { userIds: [], roleKeys: [], lineManagers: true } }]),
+      '/orgs/org-1/report-deliveries': page([]),
+      '/orgs/org-1/report-recipients': { data: { ...recipients.data, lineManagers: 7 } }, '/report-types': { data: [...types, irregular] },
+      '/orgs/org-1/branches': page([]), '/orgs/org-1/departments': page([]), '/orgs/org-1/employees': page([]), '/orgs/org-1/leave-types': { data: [] },
+    });
+  });
+
+  it('the helpers know the daily cadence: yesterday or month to date, no run day', () => {
+    expect(allowedPeriodRules('daily', 'irregularities_report')).toEqual(['previous_day', 'month_to_date']);
+    expect(allowedPeriodRules('daily', 'monthly_summary')).toEqual(['month_to_date']);
+    expect(allowedPeriodRules('daily', 'weekly_attendance')).toEqual([]);
+    expect(defaultRunDay('daily', 6)).toBe(0);
+    expect(defaultRunDay('weekly', 6)).toBe(6);
+    const t = (k: string, o?: Record<string, unknown>) => (k === 'cadence.dailyOn' ? `daily ${String(o?.['time'])}` : k);
+    expect(cadenceSummary(t, { cadence: 'daily', runDay: 0, runTime: '07:30:00', periodRule: 'previous_day', customFromDay: null, customToDay: null })).toBe('daily 07:30 · period.previous_day');
+    const skip = (k: string, o?: Record<string, unknown>) => `${k}|${String(o?.['detail'] ?? '')}`;
+    expect(skipReasonLabel(skip, 'no_team_in_scope')).toBe('skip.no_team_in_scope|');
+  });
+
+  it('lists a daily schedule to the line managers', async () => {
+    renderWithProviders(<SchedulesPanel />);
+    const panel = await screen.findByTestId('schedules-panel');
+    const row = (await within(panel).findAllByText('Every day at 07:30 · Yesterday')).map((e) => e.closest('tr')).find(Boolean)!;
+    expect(row).toHaveTextContent('Morning irregular cases');
+    expect(row).toHaveTextContent('0 people · 0 roles · each line manager');
+  });
+
+  it('creates the morning report on yesterday\'s irregular cases for every line manager — no run day to pick', async () => {
+    apiMock.post.mockResolvedValue({ data: { ...schedule, id: 's4' } });
+    renderWithProviders(<SchedulesPanel />);
+    const panel = await screen.findByTestId('schedules-panel');
+    fireEvent.click(within(panel).getAllByRole('button', { name: /New schedule/ })[0]!);
+    const dialog = await screen.findByTestId('schedule-dialog');
+    fireEvent.change(within(dialog).getByLabelText(/^Name/), { target: { value: 'Morning irregular cases' } });
+    fireEvent.keyDown(within(dialog).getByRole('combobox', { name: 'Report type' }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Irregular Cases Report' }));
+    // the irregular cases report starts as a daily schedule on yesterday: no day of the month / week to choose
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Frequency' })).toHaveTextContent('Daily'));
+    expect(within(dialog).queryByRole('combobox', { name: 'Day of the month' })).not.toBeInTheDocument();
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Period covered' })).toHaveTextContent('Yesterday'));
+    const toggle = within(dialog).getByRole('switch', { name: /Each employee's line manager \(their team only\)/ });
+    expect(within(dialog).getByText(/7 line managers today/)).toBeInTheDocument();
+    fireEvent.click(toggle);
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Create schedule' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
+    const [path, body] = apiMock.post.mock.calls[0] as [string, Record<string, unknown>];
+    expect(path).toBe('/orgs/org-1/report-schedules');
+    expect(body).toMatchObject({ name: 'Morning irregular cases', reportType: 'irregularities_report', cadence: 'daily', runDay: 0, periodRule: 'previous_day', recipients: { userIds: [], roleKeys: [], lineManagers: true } });
+  });
+
+  it('a monthly schedule for the Director General can be switched to daily, and back', async () => {
+    renderWithProviders(<SchedulesPanel />);
+    const panel = await screen.findByTestId('schedules-panel');
+    fireEvent.click(within(panel).getAllByRole('button', { name: /New schedule/ })[0]!);
+    const dialog = await screen.findByTestId('schedule-dialog');
+    expect(within(dialog).getByRole('combobox', { name: 'Day of the month' })).toBeInTheDocument();
+    fireEvent.keyDown(within(dialog).getByRole('combobox', { name: 'Frequency' }), { key: 'ArrowDown' });
+    const options = await screen.findAllByRole('option');
+    expect(options.map((o) => o.textContent)).toEqual(['Daily', 'Weekly', 'Monthly']);
+    fireEvent.click(screen.getByRole('option', { name: 'Daily' }));
+    await waitFor(() => expect(within(dialog).queryByRole('combobox', { name: 'Day of the month' })).not.toBeInTheDocument());
+    // the monthly attendance report covers a whole month: a daily run offers month to date only
+    await waitFor(() => expect(within(dialog).getByRole('combobox', { name: 'Period covered' })).toHaveTextContent('Month to date'));
   });
 });
