@@ -19,7 +19,7 @@ import { EmployeeMultiSelect } from '@/features/attendance/components/employee-m
 import '../schedules-i18n';
 import { useReportTypes, type ReportTypeDef } from '../api';
 import { useScheduleMutations } from '../schedules-api';
-import { allowedPeriodRules } from '../schedule-utils';
+import { allowedPeriodRules, defaultRunDay } from '../schedule-utils';
 import { RecipientsPicker } from './recipients-picker';
 import { ChannelsField } from './share-report-dialog';
 
@@ -28,13 +28,17 @@ const PERIOD_PARAMS = new Set(['from', 'to', 'month']);
 const WEEKDAYS = [0, 1, 2, 3, 4, 5, 6];
 const MONTH_DAYS = Array.from({ length: 28 }, (_, i) => i + 1);
 
+/** The day-by-day reports start as the morning report on yesterday (2026-10-19); one-week layouts weekly; the rest monthly. */
+const DAILY_FIRST: ReadonlySet<string> = new Set(['daily_attendance', 'irregularities_report']);
+
 function defaultsFor(def: ReportTypeDef | undefined, firstDay: number): Partial<FormValues> {
   if (!def) return {};
   const week = WEEK_PARAMETER_REPORT_TYPES.includes(def.key);
-  const cadence: ReportScheduleCadence = week ? 'weekly' : 'monthly';
+  const cadence: ReportScheduleCadence = week ? 'weekly' : DAILY_FIRST.has(def.key) ? 'daily' : 'monthly';
   const format = def.defaultFormat && def.formats.includes(def.defaultFormat) ? def.defaultFormat : def.formats[0];
-  return { reportType: def.key, format, cadence, runDay: week ? firstDay : 1, periodRule: allowedPeriodRules(cadence, def.key)[0] ?? 'previous_month', customFromDay: null, customToDay: null };
+  return { reportType: def.key, format, cadence, runDay: defaultRunDay(cadence, firstDay), periodRule: allowedPeriodRules(cadence, def.key)[0] ?? 'previous_month', customFromDay: null, customToDay: null };
 }
+const CADENCES = ['daily', 'weekly', 'monthly'] as const;
 
 /**
  * Create / edit a report schedule (HR portal Prompt 6a): report type + filters, cadence (monthly on a day 1–28 or weekly on a
@@ -51,7 +55,7 @@ export function ScheduleDialog({ schedule, onClose }: { schedule: ReportSchedule
   const choices = useMemo(() => (types.data ?? []).filter((d) => SCHEDULABLE_REPORT_TYPES.includes(d.key) && d.allowed !== false), [types.data]);
   const initial: FormValues = schedule
     ? { name: schedule.name, reportType: schedule.reportType, format: schedule.format, filters: schedule.filters, cadence: schedule.cadence, runDay: schedule.runDay, runTime: schedule.runTime.slice(0, 5), periodRule: schedule.periodRule, customFromDay: schedule.customFromDay, customToDay: schedule.customToDay, recipients: schedule.recipients, channels: schedule.channels, isActive: schedule.isActive }
-    : { name: '', filters: {}, runTime: '07:00', recipients: { userIds: [], roleKeys: [] }, channels: ['in_app', 'email'], isActive: true, cadence: 'monthly', runDay: 1, periodRule: 'previous_month', reportType: 'monthly_attendance', format: 'pdf' };
+    : { name: '', filters: {}, runTime: '07:00', recipients: { userIds: [], roleKeys: [], lineManagers: false }, channels: ['in_app', 'email'], isActive: true, cadence: 'monthly', runDay: 1, periodRule: 'previous_month', reportType: 'monthly_attendance', format: 'pdf' };
   const form = useForm<FormValues, unknown, CreateReportScheduleInput>({ resolver: zodResolver(createReportScheduleSchema), defaultValues: initial });
   const { control, register, setValue, formState: { errors, isSubmitting } } = form;
   const reportType = useWatch({ control, name: 'reportType' }) as ReportType;
@@ -74,7 +78,7 @@ export function ScheduleDialog({ schedule, onClose }: { schedule: ReportSchedule
   };
   const onCadence = (c: ReportScheduleCadence) => {
     setValue('cadence', c);
-    setValue('runDay', c === 'weekly' ? firstDay : 1);
+    setValue('runDay', defaultRunDay(c, firstDay));
     const allowed = allowedPeriodRules(c, reportType);
     if (!allowed.includes(periodRule)) setValue('periodRule', allowed[0] ?? 'previous_month');
   };
@@ -117,23 +121,26 @@ export function ScheduleDialog({ schedule, onClose }: { schedule: ReportSchedule
             <FormField label={t('schedule.cadence')} htmlFor="sc-cadence" required>
               <Select value={cadence} onValueChange={(v) => onCadence(v as ReportScheduleCadence)}>
                 <SelectTrigger id="sc-cadence" aria-label={t('schedule.cadence')}><SelectValue /></SelectTrigger>
-                <SelectContent>{(['monthly', 'weekly'] as const).map((c) => <SelectItem key={c} value={c} disabled={allowedPeriodRules(c, reportType).length === 0}>{t(`cadence.${c}`)}</SelectItem>)}</SelectContent>
+                <SelectContent>{CADENCES.map((c) => <SelectItem key={c} value={c} disabled={allowedPeriodRules(c, reportType).length === 0}>{t(`cadence.${c}`)}</SelectItem>)}</SelectContent>
               </Select>
             </FormField>
-            <FormField label={cadence === 'weekly' ? t('schedule.runWeekday') : t('schedule.runDay')} htmlFor="sc-day" required error={errors.runDay ? t('schedule.runDayInvalid') : undefined}>
+            {/* a daily schedule runs every day: no run day to choose */}
+            {cadence === 'daily' ? null : <FormField label={cadence === 'weekly' ? t('schedule.runWeekday') : t('schedule.runDay')} htmlFor="sc-day" required error={errors.runDay ? t('schedule.runDayInvalid') : undefined}>
               <Controller control={control} name="runDay" render={({ field }) => (
-                <Select value={String(field.value ?? '')} onValueChange={(v) => field.onChange(Number(v))}>
+                <Select value={String(field.value ?? '')} onValueChange={(v) => { if (v !== '') field.onChange(Number(v)); }}>
                   <SelectTrigger id="sc-day" aria-label={cadence === 'weekly' ? t('schedule.runWeekday') : t('schedule.runDay')}><SelectValue /></SelectTrigger>
                   <SelectContent>{cadence === 'weekly'
                     ? WEEKDAYS.map((d) => <SelectItem key={d} value={String(d)}>{fmtDate(`2024-01-${String(7 + d).padStart(2, '0')}`, 'cccc')}</SelectItem>)
                     : MONTH_DAYS.map((d) => <SelectItem key={d} value={String(d)}>{d}</SelectItem>)}</SelectContent>
                 </Select>
               )} />
-            </FormField>
+            </FormField>}
             <FormField label={t('schedule.runTime')} htmlFor="sc-time" required hint={t('schedule.runTimeHint')} error={errors.runTime ? t('schedule.runTimeInvalid') : undefined}><Input id="sc-time" type="time" dir="ltr" {...register('runTime')} aria-invalid={!!errors.runTime} /></FormField>
             <FormField label={t('schedule.period')} htmlFor="sc-period" required error={errors.periodRule ? t('schedule.periodInvalid') : undefined}>
               <Controller control={control} name="periodRule" render={({ field }) => (
-                <Select value={field.value} onValueChange={field.onChange}>
+                // Radix reports '' when the value it was given is not among the options rendered yet (a report type or frequency
+                // change sets the rule and the list in the same tick): keep the rule, never clear it
+                <Select value={field.value} onValueChange={(v) => { if (v) field.onChange(v); }}>
                   <SelectTrigger id="sc-period" aria-label={t('schedule.period')}><SelectValue /></SelectTrigger>
                   <SelectContent>{rules.map((r) => <SelectItem key={r} value={r}>{t(`period.${r}`)}</SelectItem>)}</SelectContent>
                 </Select>
@@ -188,7 +195,7 @@ export function ScheduleDialog({ schedule, onClose }: { schedule: ReportSchedule
             </div>
           ) : null}
           <FormField label={t('recipients.label')} htmlFor="sc-recipients" required error={errors.recipients ? t('recipients.required') : undefined}>
-            <Controller control={control} name="recipients" render={({ field }) => <RecipientsPicker id="sc-recipients" value={{ userIds: field.value?.userIds ?? [], roleKeys: field.value?.roleKeys ?? [] }} onChange={field.onChange} invalid={!!errors.recipients} />} />
+            <Controller control={control} name="recipients" render={({ field }) => <RecipientsPicker id="sc-recipients" value={{ userIds: field.value?.userIds ?? [], roleKeys: field.value?.roleKeys ?? [], lineManagers: field.value?.lineManagers ?? false }} onChange={field.onChange} invalid={!!errors.recipients} />} />
           </FormField>
           <Controller control={control} name="channels" render={({ field }) => <ChannelsField value={field.value ?? []} onChange={field.onChange} error={errors.channels ? t('channels.required') : undefined} />} />
           <Controller control={control} name="isActive" render={({ field }) => <Label className="flex items-center gap-2 text-sm font-normal"><Switch checked={field.value ?? true} onCheckedChange={field.onChange} aria-label={t('schedule.active')} /> {t('schedule.active')}</Label>} />

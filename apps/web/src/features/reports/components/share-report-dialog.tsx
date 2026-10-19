@@ -42,16 +42,16 @@ export function ShareReportDialog({ spec, onClose }: { spec: ShareSpec; onClose:
   const { t } = useTranslation('reportSchedules');
   const { t: tc } = useTranslation();
   const { share } = useScheduleMutations();
-  const [recipients, setRecipients] = useState<RecipientsValue>({ userIds: [], roleKeys: [] });
+  const [recipients, setRecipients] = useState<RecipientsValue>({ userIds: [], roleKeys: [], lineManagers: false });
   const [channels, setChannels] = useState<ReportDeliveryChannel[]>(['in_app', 'email']);
   const [note, setNote] = useState('');
   const [touched, setTouched] = useState(false);
-  const noRecipients = recipients.userIds.length + recipients.roleKeys.length === 0;
+  const noRecipients = recipients.userIds.length + recipients.roleKeys.length === 0 && !recipients.lineManagers;
   const noChannel = channels.length === 0;
   const submit = () => {
     setTouched(true);
     if (noRecipients || noChannel) return;
-    share.mutate({ reportType: spec.reportType, format: spec.format, parameters: spec.parameters, recipients, channels, note: note.trim() || undefined }, {
+    share.mutate({ reportType: spec.reportType, format: spec.format, parameters: spec.parameters, recipients: { ...recipients, lineManagers: recipients.lineManagers ?? false }, channels, note: note.trim() || undefined }, {
       onSuccess: (res) => { toast.success(t('share.queued', { count: res.recipients }), { description: t('share.queuedHint') }); onClose(); },
       onError: toastError,
     });

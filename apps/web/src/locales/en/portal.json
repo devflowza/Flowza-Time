@@ -75,9 +75,11 @@
       "out": "Out",
       "worked": "Worked",
       "late": "Late",
+      "short": "Short",
       "overtime": "Overtime",
       "flags": "Flags"
     },
+    "shortMobile": "{{value}} short",
     "emptyMonth": "No attendance for this month",
     "emptyMonthHint": "Days appear once the terminal punches are processed.",
     "noRecord": "No record",

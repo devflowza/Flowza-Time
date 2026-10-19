@@ -77,6 +77,33 @@
     "empty": "لا توجد فروع بعد",
     "emptyHint": "أضف فرعاً من صفحة المنظمة ليظهر هنا."
   },
+  "departments": {
+    "title": "الحضور حسب القسم",
+    "subtitle": "نسبة الحضور والتأخير والغياب في كل قسم لهذا اليوم",
+    "department": "القسم",
+    "none": "بدون قسم",
+    "rate": "نسبة الحضور",
+    "present": "حاضر",
+    "late": "متأخر",
+    "absent": "غائب",
+    "empty": "لا توجد سجلات حضور لهذا اليوم",
+    "emptyHint": "تظهر الأقسام بعد احتساب سجلات اليوم."
+  },
+  "mtd": {
+    "title": "منذ بداية الشهر",
+    "subtitle": "{{from}} – {{to}}",
+    "attendanceRate": "نسبة الحضور (منذ بداية الشهر)",
+    "attendanceRateHint": "{{present}} من {{working}} يوم عمل",
+    "late": "حالات التأخير",
+    "lateHint": "مجموع التأخير {{minutes}}",
+    "absences": "الغياب",
+    "absencesHint": "{{count}} بصمة ناقصة",
+    "avgWorked": "متوسط ساعات العمل",
+    "avgWorkedHint": "لكل يوم عمل",
+    "shortfall": "الساعات الناقصة",
+    "shortfallHint": "{{count}} خروج مبكر",
+    "noData": "—"
+  },
   "approvals": {
     "title": "موافقات معلّقة",
     "viewAll": "عرض الكل",

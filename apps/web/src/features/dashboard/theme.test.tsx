@@ -30,8 +30,8 @@ describe('dashboard theme', () => {
   });
 
   it('falls back to the defaults for anything it does not recognise', () => {
-    expect(resolveDashboardSettings(undefined)).toEqual({ theme: 'emerald', layout: 'overview', trendDays: 14, showGreeting: true, showQuote: true, showHighlight: true });
-    expect(resolveDashboardSettings({ theme: 'neon' as never, layout: 'kanban' as never, trendDays: 9 as never, showQuote: false })).toEqual({ theme: 'emerald', layout: 'overview', trendDays: 14, showGreeting: true, showQuote: false, showHighlight: true });
+    expect(resolveDashboardSettings(undefined)).toEqual({ theme: 'emerald', layout: 'overview', trendDays: 14, showGreeting: true, showQuote: true, showHighlight: true, showDepartmentBreakdown: true, showMonthToDate: true });
+    expect(resolveDashboardSettings({ theme: 'neon' as never, layout: 'kanban' as never, trendDays: 9 as never, showQuote: false })).toEqual({ theme: 'emerald', layout: 'overview', trendDays: 14, showGreeting: true, showQuote: false, showHighlight: true, showDepartmentBreakdown: true, showMonthToDate: true });
     expect(resolveDashboardSettings({ theme: 'desert', layout: 'operations', trendDays: 30 })).toMatchObject({ theme: 'desert', layout: 'operations', trendDays: 30 });
   });
 
