@@ -145,6 +145,22 @@ begin
   values (pg_temp.sid('assign:org'), org, 'ORGANIZATION', org, null, pg_temp.sid('shift:GOV'), null, '2026-08-01', null, hr_id, t0)
   on conflict (id) do update set shift_id = excluded.shift_id, effective_from = excluded.effective_from, effective_to = excluded.effective_to;
 
+  -- the organisation's baseline policy: without one the engine counts every minute after 14:30 as overtime
+  insert into public.attendance_rule_sets (id, organization_id, name, description, branch_id, country_code, department_id, employee_group_id, shift_id, effective_from,
+    grace_in_minutes, grace_out_minutes, late_threshold_minutes, early_departure_threshold_minutes, min_full_day_minutes, half_day_threshold_minutes,
+    overtime_enabled, overtime_start_after_minutes, overtime_min_block_minutes, overtime_rounding_minutes, overtime_max_minutes_per_day, count_early_in_as_overtime,
+    punch_interpretation, duplicate_punch_window_seconds, missing_punch_behavior, auto_absent_without_punches, weekly_off_work_counts_as_overtime, holiday_work_counts_as_overtime,
+    ramadan_mode, policy, created_by, created_at)
+  values (pg_temp.sid('policy:company'), org, 'Company standard',
+          'Government hours: a full day is 6 h; overtime starts 30 min after 14:30, in blocks of 30 min rounded down to 15, at most 4 h a day; Ramadan 2027 hours (5 h) for eligible staff.',
+          null, null, null, null, null, '2026-08-01',
+          15, 5, 0, 0, 360, 210, true, 30, 30, 15, 240, false, 'FIRST_LAST', 60, 'FLAG_ONLY', true, true, true,
+          '{"enabled":true,"from":"2027-02-08","to":"2027-03-09","scheduledMinutes":300,"appliesTo":"flagged_employees"}'::jsonb, '{}'::jsonb, hr_id, t0)
+  on conflict (id) do update set name = excluded.name, description = excluded.description, grace_in_minutes = excluded.grace_in_minutes, grace_out_minutes = excluded.grace_out_minutes,
+    min_full_day_minutes = excluded.min_full_day_minutes, half_day_threshold_minutes = excluded.half_day_threshold_minutes, overtime_start_after_minutes = excluded.overtime_start_after_minutes,
+    overtime_min_block_minutes = excluded.overtime_min_block_minutes, overtime_rounding_minutes = excluded.overtime_rounding_minutes, overtime_max_minutes_per_day = excluded.overtime_max_minutes_per_day,
+    ramadan_mode = excluded.ramadan_mode, updated_at = now();
+
   ---------------------------------------------------------------------------------------------------------------------
   -- 3. A DEMO Hikvision terminal (push / HTTP Listening; no device behind it) that carries the generated punches of step 3
   ---------------------------------------------------------------------------------------------------------------------
