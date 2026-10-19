@@ -200,6 +200,7 @@ export interface ApiKeys {
   name: string;
   organizationId: string;
   revokedAt: Timestamp | null;
+  revokedBy: string | null;
   scopes: Generated<string[]>;
 }
 
@@ -1325,6 +1326,7 @@ export interface ImportJobRows {
 }
 
 export interface ImportJobs {
+  apiKeyId: string | null;
   confirmedAt: Timestamp | null;
   confirmedBy: string | null;
   createdAt: Generated<Timestamp>;
@@ -1332,12 +1334,16 @@ export interface ImportJobs {
   errorRows: Generated<number>;
   filePath: string;
   id: Generated<string>;
+  idempotencyKey: string | null;
   importedRows: Generated<number>;
   options: Generated<Json>;
   organizationId: string;
   originalFilename: string | null;
   queueJobId: Int8 | null;
+  reference: string | null;
+  requestHash: string | null;
   requestedBy: string | null;
+  source: Generated<string>;
   status: Generated<ImportStatus>;
   summary: Json | null;
   totalRows: Generated<number>;

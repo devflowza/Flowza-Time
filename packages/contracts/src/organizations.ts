@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { MEMBERSHIP_STATUSES, ORG_STATUSES, RECORD_STATUSES } from './enums.js';
 import { addressSchema, codeSchema, contactSchema, countryCodeSchema, currencyCodeSchema, emailSchema, isoDateTimeSchema, timeSchema, timezoneSchema, uuidSchema, weeklyOffDaysSchema } from './common.js';
 import { PERMISSIONS } from './permissions.js';
+import { hrmsIntegrationSettingsSchema } from './hrms.js';
 
 export const organizationDtoSchema = z.object({
   id: uuidSchema,
@@ -297,7 +298,10 @@ export const organizationSettingsSchema = z.object({
     allowedEmailDomains: z.array(z.string().min(3).max(253)).max(20).default([]),
     exportRequiresReason: z.boolean().default(false),
   }).partial().default({}),
-  integrations: z.object({}).partial().default({}),
+  integrations: z.object({
+    /** HR system feed (docs/integrations/hrms.md); written only by PUT /orgs/:orgId/integrations/hrms (integration.manage). */
+    hrms: hrmsIntegrationSettingsSchema.prefault({}),
+  }).partial().default({}),
   dashboard: z.object({
     /** Colour style of the app shell and the dashboard: sidebar, accents and chart palette. */
     theme: z.enum(DASHBOARD_THEMES).default('emerald'),

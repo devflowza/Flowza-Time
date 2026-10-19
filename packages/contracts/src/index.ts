@@ -10,6 +10,8 @@ export * from './organizations.js';
 export * from './sync.js';
 export * from './reports.js';
 export * from './integrations.js';
+export * from './hrms.js';
+export * from './role-templates.js';
 export * from './country-packs.js';
 export * from './dto/structure.js';
 export * from './dto/locations.js';
