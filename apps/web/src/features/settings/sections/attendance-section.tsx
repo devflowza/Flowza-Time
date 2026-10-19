@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { useForm, Controller } from 'react-hook-form';
+import { useForm, useWatch, Controller, type Control } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import type { z } from 'zod';
 import { useTranslation } from 'react-i18next';
@@ -11,7 +11,7 @@ import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { toast, toastError } from '@/lib/toast';
 import { useCan, useOrgId } from '@/features/me/use-me';
-import { toNumber } from '@/features/organization/form-utils';
+import { toNumber, toOptionalNumber } from '@/features/organization/form-utils';
 import { useSettingsGroup, useSettingsMutations } from '../api';
 import { SectionError, SectionSkeleton, SettingsSection, SwitchRow } from '../components/settings-section';
 
@@ -67,6 +67,21 @@ function TimeWindowInput({ id, value, onChange, disabled, invalid, startLabel, e
       <span aria-hidden className="text-muted-foreground">–</span>
       <Input id={`${id}-end`} type="time" dir="ltr" className="tnum" aria-label={endLabel} value={end} onChange={(ev) => commit(start, ev.target.value)} disabled={disabled} aria-invalid={invalid} />
     </div>
+  );
+}
+
+/**
+ * The day close judges a day after the LARGER of the day-close grace and the explanation grace (day-close.ts); both fields
+ * stay as they are, the hint says which one is in force.
+ */
+function EffectiveGrace({ control }: { control: Control<Values, unknown, Output> }) {
+  const { t } = useTranslation('settings');
+  const [dayClose, explanation] = useWatch({ control, name: ['missedPunch.dayCloseGraceDays', 'unexcused.graceDays'] });
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+  return (
+    <p className="self-end text-xs text-muted-foreground sm:col-span-2" data-testid="att-effective-grace">
+      {t('attendance.unexcused.effectiveGrace', { count: Math.max(n(dayClose), n(explanation)), dayClose: n(dayClose), explanation: n(explanation) })}
+    </p>
   );
 }
 
@@ -189,7 +204,11 @@ function AttendanceForm({ initial }: { initial: OrganizationSettings['attendance
           <FormField label={t('attendance.unexcused.graceDays')} htmlFor="att-ux-grace" hint={t('attendance.unexcused.graceDaysHint')} error={ux?.graceDays?.message}>
             <Input id="att-ux-grace" type="number" min={0} max={30} dir="ltr" className="tnum" {...register('unexcused.graceDays', { setValueAs: toNumber })} aria-invalid={!!ux?.graceDays} />
           </FormField>
-          <div aria-hidden className="hidden sm:block" />
+          <FormField label={t('attendance.unexcused.excuseDeadline')} htmlFor="att-ux-deadline" optional hint={t('attendance.unexcused.excuseDeadlineHint')} error={ux?.excuseDeadlineDays?.message}>
+            {/* empty = no deadline (null) */}
+            <Input id="att-ux-deadline" type="number" min={1} max={60} step={1} dir="ltr" className="tnum" {...register('unexcused.excuseDeadlineDays', { setValueAs: (v: unknown) => toOptionalNumber(v) ?? null })} aria-invalid={!!ux?.excuseDeadlineDays} />
+          </FormField>
+          <EffectiveGrace control={control} />
           {payEffectSelect('unexcused.payEffectAbsent', 'att-ux-absent', t('attendance.unexcused.payEffectAbsent'))}
           {payEffectSelect('unexcused.payEffectLate', 'att-ux-late', t('attendance.unexcused.payEffectLate'))}
           {payEffectSelect('unexcused.payEffectMissingPunch', 'att-ux-missing', t('attendance.unexcused.payEffectMissingPunch'))}

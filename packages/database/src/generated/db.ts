@@ -366,6 +366,15 @@ export interface AttendanceCorrections {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface AttendanceAlerts {
+  alertDate: Timestamp;
+  employeeId: string;
+  kind: string;
+  organizationId: string;
+  recipients: Generated<number>;
+  sentAt: Generated<Timestamp>;
+}
+
 export interface AttendanceDailyRecordHistory {
   attendanceDate: Timestamp;
   branchId: string | null;
@@ -2280,6 +2289,7 @@ export interface DB {
   approvalStepActors: ApprovalStepActors;
   approvalSteps: ApprovalSteps;
   approvalWorkflows: ApprovalWorkflows;
+  attendanceAlerts: AttendanceAlerts;
   attendanceCorrections: AttendanceCorrections;
   attendanceDailyRecordHistory: AttendanceDailyRecordHistory;
   attendanceDailyRecords: AttendanceDailyRecords;

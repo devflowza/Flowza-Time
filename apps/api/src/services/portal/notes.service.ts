@@ -1,4 +1,4 @@
-import type { ApprovalRequestStatus, AttendanceFlag, AttendanceNoteDto, AttendanceNoteReviewItemDto, AttendanceNotesQuery, NoteChargeDto, NoteReviewInput, NoteReviewResultDto, SelfNoteInput, SelfNoteUpdateInput } from '@flowza/contracts';
+import { excuseDeadlineOf, type ApprovalRequestStatus, type AttendanceFlag, type AttendanceNoteDto, type AttendanceNoteReviewItemDto, type AttendanceNotesQuery, type NoteChargeDto, type NoteReviewInput, type NoteReviewResultDto, type SelfNoteInput, type SelfNoteUpdateInput } from '@flowza/contracts';
 import { effectiveBranchOn, type Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { addDays, errors } from '@flowza/shared';
@@ -12,7 +12,7 @@ import { loadDelegationMap } from '../approvals/context.js';
 import { systemStep } from '../features/context.js';
 import { orgToday } from '../features/recalc.js';
 import { dv } from '../features/sql-helpers.js';
-import { emitToUsers, isPeriodLocked, isWorking, lineManagerUserIds, loadEmployeeCtx, localInstant, lockEmployee, portalSelf, reviewerRole } from './common.js';
+import { attendancePolicy, emitToUsers, isPeriodLocked, isWorking, lineManagerUserIds, loadEmployeeCtx, localInstant, lockEmployee, portalSelf, reviewerRole } from './common.js';
 import { pendingRequestOf, routedToUser, seatSecondaryManager } from './line-manager.js';
 import { applyNoteDecision, applyNoteInfoRequest, clearReviewableMarks, dayFacts, excusedCounts, loadNote, NOTE_COLUMNS, OPEN_NOTE_STATUSES, type NoteRow } from './note-effects.js';
 
@@ -114,6 +114,12 @@ export async function submitNote(deps: ApiDeps, actor: Actor, orgId: string, inp
     if (!isWorking(emp, today)) throw errors.forbidden('Your employment is not active.');
     if (input.date > addDays(today, NOTE_AHEAD_DAYS)) throw errors.validation(`A reason can be given at most ${NOTE_AHEAD_DAYS} days ahead.`, { issues: [{ path: 'date', message: 'Too far ahead' }] });
     if (input.date < emp.joiningDate) throw errors.validation('This date is before your joining date.', { issues: [{ path: 'date', message: 'Before joining date' }] });
+    // the organisation's excuse deadline (attendance.unexcused.excuseDeadlineDays): a NEW reason for a day past it is refused —
+    // HR can still record or excuse the day; an open reason can still be edited or answered (updateMyNote)
+    const deadline = excuseDeadlineOf(input.date, (await attendancePolicy(trx, orgId)).unexcused.excuseDeadlineDays);
+    if (deadline !== null && today > deadline) {
+      throw errors.unprocessable(`The deadline to give a reason for ${input.date} was ${deadline}. Ask HR to record it.`, { reason: 'EXCUSE_DEADLINE_PASSED', date: input.date, deadline });
+    }
     const branchId = (await withSystemScope(trx, orgId, (t) => effectiveBranchOn(t, orgId, emp.id, input.date))) ?? emp.branchId;
     if (await isPeriodLocked(trx, orgId, branchId, input.date)) throw errors.periodLocked('The attendance period of this date is locked.');
     const active = await withSystemScope(trx, orgId, (t) => t.selectFrom('attendanceNotes').select(['id', 'status']).where('organizationId', '=', orgId).where('employeeId', '=', emp.id).where('attendanceDate', '=', dv(input.date)).where('status', '!=', 'rejected').executeTakeFirst());

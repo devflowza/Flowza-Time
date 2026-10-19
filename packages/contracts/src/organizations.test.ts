@@ -74,6 +74,20 @@ describe('attendance settings', () => {
     expect(resolveAttendanceSettings({ selfService: { webCheckIn: true } }).selfService.regularisation).toBe(true);
   });
 
+  it('the excuse deadline is off by default, 1–60 days when set, and a one-key save leaves the rest of the group alone', () => {
+    expect(DEFAULT_ATTENDANCE_SETTINGS.unexcused.excuseDeadlineDays).toBeNull();
+    const group = organizationSettingsSchema.shape.attendance;
+    const set = group.parse({ unexcused: { excuseDeadlineDays: 5 } });
+    expect(set.unexcused).toEqual({ ...DEFAULT_ATTENDANCE_SETTINGS.unexcused, excuseDeadlineDays: 5 });
+    expect(set.missedPunch).toEqual(DEFAULT_ATTENDANCE_SETTINGS.missedPunch);
+    // a group saved with a deadline keeps it; null switches it off again
+    expect(group.parse({ ...set, unexcused: { ...set.unexcused, graceDays: 7 } }).unexcused.excuseDeadlineDays).toBe(5);
+    expect(group.parse({ unexcused: { excuseDeadlineDays: null } }).unexcused.excuseDeadlineDays).toBeNull();
+    for (const bad of [0, 61, 2.5, '3']) expect(group.safeParse({ unexcused: { excuseDeadlineDays: bad } }).success, String(bad)).toBe(false);
+    // a row saved before the key existed resolves it to "no deadline"
+    expect(resolveAttendanceSettings({ unexcused: { graceDays: 4 } }).unexcused.excuseDeadlineDays).toBeNull();
+  });
+
   it('rejects out-of-range values instead of clamping them', () => {
     const group = organizationSettingsSchema.shape.attendance;
     expect(group.safeParse({ missedPunch: { dayCloseGraceDays: 8 } }).success).toBe(false);

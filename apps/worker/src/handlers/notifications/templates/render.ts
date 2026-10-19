@@ -167,6 +167,19 @@ export function templateVars(type: string, data: Readonly<Record<string, unknown
   if (firstInAt) vars['firstInTime'] = fmtInstant(L, firstInAt, zone, L.formats.time);
   const expectedEndAt = str(get('expectedEndAt'));
   if (expectedEndAt) vars['endTime'] = fmtInstant(L, expectedEndAt, zone, L.formats.time);
+  // attendance alerts: the scheduled start, the check-out, the minutes late / early / since the start, the week reviewed and
+  // the organisation's thank-you text in the recipient's language (the other language when only that one exists)
+  const expectedStartAt = str(get('expectedStartAt'));
+  if (expectedStartAt) vars['startTime'] = fmtInstant(L, expectedStartAt, zone, L.formats.time);
+  const lastOutAt = str(get('lastOutAt'));
+  if (lastOutAt) vars['lastOutTime'] = fmtInstant(L, lastOutAt, zone, L.formats.time);
+  const minutes = num(get('minutes'));
+  if (minutes !== null && minutes > 0) vars['minutesPhrase'] = plural(L, L.plurals.minutes, Math.round(minutes));
+  const periodRange = range(L, str(get('periodStart')), str(get('periodEnd')));
+  if (periodRange) vars['periodRange'] = periodRange;
+  const appreciation = L.locale === 'ar' ? str(get('messageAr')) ?? str(get('message')) : str(get('message')) ?? str(get('messageAr'));
+  delete vars['message']; delete vars['messageAr'];
+  if (appreciation) vars['appreciationMessage'] = oneLine(appreciation);
 
   // leave
   const leaveRange = range(L, str(get('startDate')), str(get('endDate')));

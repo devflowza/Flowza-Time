@@ -160,7 +160,22 @@ export const attendanceUnexcusedSettingsSchema = z.object({
    * bereavement, adoption and compassionate leave. A leave type flagged `is_special` is never charged whatever this list says.
    */
   excludeLeaveTypeCodes: z.array(leaveTypeCodeSchema).max(50).default(['SL', 'ML', 'PTL', 'HJ', 'MARRIAGE', 'BEREAVEMENT', 'ADOPTION', 'COMPASSIONATE']),
+  /**
+   * Days after an attendance date during which the employee may still give a reason for it in the portal (1–60); null = no
+   * deadline. The deadline is `attendance date + excuseDeadlineDays` (inclusive, the employee's local date): the absence
+   * notice and its reminder state it, and a NEW reason for a day past it is refused (HR can still record or excuse the day).
+   * Independent of `graceDays` / the day-close grace, which decide when an unexplained day is marked.
+   */
+  excuseDeadlineDays: z.number().int().min(1).max(60).nullable().default(null),
 });
+
+/** The deadline (inclusive, `YYYY-MM-DD`) to give a reason for `attendanceDate`, or null when the organisation sets none. */
+export function excuseDeadlineOf(attendanceDate: string, excuseDeadlineDays: number | null | undefined): string | null {
+  if (excuseDeadlineDays === null || excuseDeadlineDays === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) return null;
+  const d = new Date(`${attendanceDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + excuseDeadlineDays);
+  return d.toISOString().slice(0, 10);
+}
 
 /** Whether the portal insists on a reason for a late / absent day (Prompt 4 reads it). */
 export const attendanceNotesSettingsSchema = z.object({
@@ -285,11 +300,57 @@ export function resolveApprovalSettings(raw: unknown): ApprovalSettings {
 }
 
 /**
+ * A late-arrival / early-departure alert (customer requirement "lateness and early departure notifications"): sent once per
+ * employee-day and kind, for today or yesterday only (never for a historical recalculation), to the employee and / or their
+ * direct (primary) manager, when the day's late / early minutes reach `minMinutes`.
+ */
+export const attendanceAlertSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  notifyEmployee: z.boolean().default(true),
+  notifyManager: z.boolean().default(true),
+  minMinutes: z.number().int().min(1).max(600).default(1),
+});
+/** The absence notice: a working day judged ABSENT (its window closed) is told to the employee and / or their manager once. */
+export const absenceAlertSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  notifyEmployee: z.boolean().default(true),
+  notifyManager: z.boolean().default(true),
+});
+/** What disqualifies an employee from the weekly thank-you message (each criterion on = such a day disqualifies). */
+export const appreciationCriteriaSchema = z.object({
+  noLate: z.boolean().default(true),
+  noEarlyDeparture: z.boolean().default(true),
+  noAbsence: z.boolean().default(true),
+  noMissingPunch: z.boolean().default(true),
+  noUnexcused: z.boolean().default(true),
+});
+export const APPRECIATION_DEFAULT_MESSAGE_EN = 'Thank you for your punctuality and commitment this week. Your dedication makes a real difference to the team!';
+export const APPRECIATION_DEFAULT_MESSAGE_AR = 'شكرًا لالتزامك وانضباطك في المواعيد هذا الأسبوع. تفانيك يصنع فرقًا حقيقيًا للفريق!';
+/**
+ * Weekly appreciation ("thank-you") messages: once a week, on `weekday` (0 = Sunday … 6 = Saturday) from `hour` (0–23,
+ * organisation time), the PREVIOUS seven days are reviewed and every employee with a login who worked at least
+ * `minWorkedDays` days and has none of the selected kinds of day receives the message in their language. Leave, holidays
+ * and weekly offs neither count nor disqualify. Off by default.
+ */
+export const appreciationSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  weekday: z.number().int().min(0).max(6).default(4),
+  hour: z.number().int().min(0).max(23).default(14),
+  criteria: appreciationCriteriaSchema.prefault({}),
+  minWorkedDays: z.number().int().min(1).max(7).default(5),
+  messageEn: z.string().trim().min(1).max(500).default(APPRECIATION_DEFAULT_MESSAGE_EN),
+  messageAr: z.string().trim().min(1).max(500).default(APPRECIATION_DEFAULT_MESSAGE_AR),
+});
+export type AppreciationSettings = z.output<typeof appreciationSettingsSchema>;
+
+/**
  * `organization_settings.notifications` — the organisation's switches (HR portal Prompt 8; written with
  * `notification.manage`). A switch governs the E-MAIL of the notification types it covers (the notification catalogue's
  * `orgSetting`): off ⇒ no e-mail for those types, the in-app notice is still written — the inbox is part of the product.
  * `missingPunchReminder` additionally switches the reminder itself on or off (it exists only to nudge), and
- * `missingPunchReminderHours` is how long after the shift end an open check-in is reminded. The stored group is
+ * `missingPunchReminderHours` is how long after the shift end an open check-in is reminded. The attendance alert keys
+ * (`lateArrivalAlert`, `earlyDepartureAlert`, `absenceAlert`, `absenceReminder`, `missingCheckIn*`, `appreciation`) switch the
+ * worker's automatic attendance notices on or off, say who hears them, and govern their e-mail the same way. The stored group is
  * `notificationSettingsSchema.partial()`; read it through `resolveNotificationSettings`.
  */
 export const notificationSettingsSchema = z.object({
@@ -305,6 +366,19 @@ export const notificationSettingsSchema = z.object({
   missingPunchReminder: z.boolean().default(true),
   missingPunchReminderHours: z.number().int().min(1).max(12).default(2),
   reportScheduledDelivery: z.boolean().default(true),
+  // ----- attendance alerts (customer requirements: lateness / early departure, absence handling, missing check-in, thanks) ---
+  // Nested groups use `.prefault({})` so a row saved before a group existed resolves to the group's full defaults.
+  lateArrivalAlert: attendanceAlertSettingsSchema.prefault({}),
+  earlyDepartureAlert: attendanceAlertSettingsSchema.prefault({}),
+  absenceAlert: absenceAlertSettingsSchema.prefault({}),
+  /** One reminder, the day before the excuse deadline (`attendance.unexcused.excuseDeadlineDays`), for absences still unexplained. */
+  absenceReminder: z.boolean().default(true),
+  /** Remind an employee who has not checked in `missingCheckInReminderMinutes` after the expected shift start (off by default). */
+  missingCheckInReminder: z.boolean().default(false),
+  missingCheckInReminderMinutes: z.number().int().min(15).max(240).default(30),
+  /** Also tell the employee's direct (primary) manager about the missing check-in. */
+  missingCheckInNotifyManager: z.boolean().default(false),
+  appreciation: appreciationSettingsSchema.prefault({}),
 });
 export type NotificationSettings = z.output<typeof notificationSettingsSchema>;
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = notificationSettingsSchema.parse({});
