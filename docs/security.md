@@ -221,6 +221,9 @@ server builds from the caller's own organisation and employee — never from the
   fast 2xx, processing in the worker.
 - Device push protocols: device identified by serial; unknown serials land in `pending_devices` (quarantine) until an
   admin claims them; strict parsing (`ProtocolError`), size limits and rate limiting (per IP and per serial).
+- HR system batches (`/api/v1/inbound/hrms/*`, `docs/integrations/hrms.md`): organisation API keys (256-bit secret, sha256 stored,
+  compared with `timingSafeEqual`, shown once, scoped, expiring, revocable, audited); the organisation comes from the key only;
+  own router before the authenticated API with the edge gate, per-IP and per-key limiters and a 5 MB body limit.
 
 ## Privacy
 
