@@ -341,6 +341,15 @@ export interface ApprovalWorkflows {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface AttendanceAlerts {
+  alertDate: Timestamp;
+  employeeId: string;
+  kind: string;
+  organizationId: string;
+  recipients: Generated<number>;
+  sentAt: Generated<Timestamp>;
+}
+
 export interface AttendanceCorrections {
   appliedAt: Timestamp | null;
   appliedBy: string | null;
@@ -365,15 +374,6 @@ export interface AttendanceCorrections {
   status: Generated<CorrectionStatus>;
   type: CorrectionType;
   updatedAt: Generated<Timestamp>;
-}
-
-export interface AttendanceAlerts {
-  alertDate: Timestamp;
-  employeeId: string;
-  kind: string;
-  organizationId: string;
-  recipients: Generated<number>;
-  sentAt: Generated<Timestamp>;
 }
 
 export interface AttendanceDailyRecordHistory {
@@ -1396,6 +1396,9 @@ export interface ImportJobs {
   errorRows: Generated<number>;
   filePath: string;
   id: Generated<string>;
+  /**
+   * Idempotency-Key of an HRMS batch: a retry with the same key and body is answered with this batch, a different body is refused (409).
+   */
   idempotencyKey: string | null;
   importedRows: Generated<number>;
   options: Generated<Json>;
@@ -1403,8 +1406,11 @@ export interface ImportJobs {
   originalFilename: string | null;
   queueJobId: Int8 | null;
   reference: string | null;
-  requestHash: string | null;
   requestedBy: string | null;
+  requestHash: string | null;
+  /**
+   * upload = the import page; hrms = a batch an HR system sent with an organisation API key (docs/integrations/hrms.md).
+   */
   source: Generated<string>;
   status: Generated<ImportStatus>;
   summary: Json | null;
