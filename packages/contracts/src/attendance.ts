@@ -132,6 +132,11 @@ export const attendanceRuleSetInputSchema = z.object({
   weeklyOffWorkCountsAsOvertime: z.boolean().default(true),
   holidayWorkCountsAsOvertime: z.boolean().default(true),
   ramadanMode: ramadanModeSchema.default({ enabled: false, appliesTo: 'all' }),
+  /**
+   * Short leave (engine 1.5.0): out-of-office time inside the scheduled hours that no approved short leave covers is "lost
+   * time"; the first this-many minutes of it per day are tolerated (0–120, e.g. 20). PAIRED / DIRECTIONAL punching only.
+   */
+  outOfOfficeAllowanceMinutes: z.number().int().min(0).max(120).default(0),
   /** `.default` (not `.prefault`) so a PATCH without `policy` keeps the stored one (updateSchemaOf strips top-level defaults). */
   policy: attendancePolicySectionsSchema.default(() => attendancePolicySectionsSchema.parse({})),
 });
@@ -175,6 +180,15 @@ export const attendanceDailyRecordDtoSchema = z.object({
   lopDays: z.number().default(0),
   /** True when the day carries an unrevoked UNEXCUSED mark. */
   unexcused: z.boolean().default(false),
+  /**
+   * Short leave (engine 1.5.0): scheduled minutes not worked that an approved (non-work) short leave covered. The three figures
+   * are always sent by the API (0 when nothing applies); optional in the type so records built before them keep compiling.
+   */
+  excusedMinutes: z.number().int().optional(),
+  /** Minutes of an approved official assignment / remote work credited to `workedMinutes` (part of it, not on top). */
+  creditedMinutes: z.number().int().optional(),
+  /** Out-of-office minutes inside the scheduled hours that no approved short leave covers, beyond the policy's allowance. */
+  lostMinutes: z.number().int().optional(),
 });
 export type AttendanceDailyRecordDto = z.infer<typeof attendanceDailyRecordDtoSchema>;
 
