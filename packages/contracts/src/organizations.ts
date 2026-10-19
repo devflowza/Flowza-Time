@@ -135,9 +135,13 @@ export const attendanceMissedPunchSettingsSchema = z.object({
   singlePunchSplitTime: timeSchema.default('12:00'),
 });
 
-/** Work on a weekly off / holiday: record it (status stays WEEKLY_OFF/HOLIDAY, minutes kept), ignore it (zero minutes), or count it as overtime. */
+/**
+ * Work on a weekly off / holiday: count it as overtime (default — customer review: hours worked on a weekly off are overtime,
+ * calculated and recorded automatically; the rule set's weekly-off / holiday overtime switches and daily cap still apply),
+ * record it (status stays WEEKLY_OFF/HOLIDAY, minutes kept, no overtime) or ignore it (zero minutes).
+ */
 export const attendanceNonWorkingDaySettingsSchema = z.object({
-  action: z.enum(['record', 'ignore', 'overtime']).default('record'),
+  action: z.enum(['record', 'ignore', 'overtime']).default('overtime'),
 });
 
 /** Unexcused days (absent / late / missing punch left unexplained after the grace period) and their pay effect. */
@@ -237,6 +241,47 @@ export function resolveLeaveSettings(raw: unknown): LeaveSettings {
 }
 
 /**
+ * `organization_settings.approvals` — who decides a request when no approval workflow applies to it, and who stands in for
+ * the line manager. Workflows (Approvals → Workflows) still win wherever one applies; these keys shape the default routing
+ * and the manager levels of every workflow alike.
+ *  - `defaultRouting`: leave, comp-off and attendance corrections without a workflow go to the requester's LINE MANAGER
+ *    (default — the reporting line, like attendance notes and regularisations), or to every holder of the approve permission
+ *    in reach of the employee (`permission_holders`: HR decides, the behaviour before this setting existed).
+ *  - `secondaryManager`: the secondary manager is a BACKUP who decides only when the primary manager cannot (on approved
+ *    leave, no login — default), or decides ALONGSIDE the primary manager on every request of the reporting line.
+ *  - `managerUnavailable`: when neither manager can act, the NEXT MANAGER UP the reporting line decides (default), or the
+ *    request goes straight to the HR admins.
+ *  - `topLevel`: a request about somebody with no manager at all (the top of the organisation) goes to the HR admins
+ *    (then the organisation admins, then the owner — default), to one NAMED approver (`topLevelUserId`, e.g. the Director
+ *    General), or is APPROVED AUTOMATICALLY (only where no workflow applies; recorded on the request's timeline).
+ * The stored group is `approvalSettingsSchema.partial()`; read it through `resolveApprovalSettings`.
+ */
+export const APPROVAL_DEFAULT_ROUTINGS = ['line_manager', 'permission_holders'] as const;
+export const APPROVAL_SECONDARY_MANAGER_MODES = ['backup', 'alongside'] as const;
+export const APPROVAL_MANAGER_UNAVAILABLE_MODES = ['next_level_manager', 'hr_admins'] as const;
+export const APPROVAL_TOP_LEVEL_MODES = ['hr_admins', 'named_user', 'auto_approve'] as const;
+export const approvalSettingsSchema = z.object({
+  defaultRouting: z.enum(APPROVAL_DEFAULT_ROUTINGS).default('line_manager'),
+  secondaryManager: z.enum(APPROVAL_SECONDARY_MANAGER_MODES).default('backup'),
+  managerUnavailable: z.enum(APPROVAL_MANAGER_UNAVAILABLE_MODES).default('next_level_manager'),
+  topLevel: z.enum(APPROVAL_TOP_LEVEL_MODES).default('hr_admins'),
+  /** The named approver of `topLevel = named_user` (an active member; the API refuses anybody else). */
+  topLevelUserId: uuidSchema.nullable().default(null),
+});
+export type ApprovalSettings = z.output<typeof approvalSettingsSchema>;
+export const DEFAULT_APPROVAL_SETTINGS: ApprovalSettings = approvalSettingsSchema.parse({});
+/** Effective approval routing settings from whatever the row holds; a malformed key falls back to its default (never throws). */
+export function resolveApprovalSettings(raw: unknown): ApprovalSettings {
+  const stored = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const kept: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(approvalSettingsSchema.shape)) {
+    const one = (schema as z.ZodType).safeParse(stored[key]);
+    if (one.success && one.data !== undefined) kept[key] = one.data;
+  }
+  return approvalSettingsSchema.parse(kept);
+}
+
+/**
  * `organization_settings.notifications` — the organisation's switches (HR portal Prompt 8; written with
  * `notification.manage`). A switch governs the E-MAIL of the notification types it covers (the notification catalogue's
  * `orgSetting`): off ⇒ no e-mail for those types, the in-app notice is still written — the inbox is part of the product.
@@ -321,9 +366,10 @@ export const organizationSettingsSchema = z.object({
     showLegend: z.boolean().default(true),
   }).partial().default({}),
   leave: leaveSettingsSchema.partial().default({}),
+  approvals: approvalSettingsSchema.partial().default({}),
 });
 export type OrganizationSettings = z.infer<typeof organizationSettingsSchema>;
-export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard', 'leave'] as const;
+export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard', 'leave', 'approvals'] as const;
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
 export const branchInputSchema = z.object({

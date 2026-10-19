@@ -8,7 +8,7 @@ import { hasPermission, requireMembership } from '../../lib/authorize.js';
 import { type Actor, audit, runUser } from '../../lib/service.js';
 import { jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
 import { systemStep } from '../features/context.js';
-import { buildResolutionContext, loadDelegationMap } from './context.js';
+import { buildResolutionContext, loadApprovalSettings, loadDelegationMap } from './context.js';
 import { approvePermissionFor, holdsApprovePermission, hookFor, managePermissionFor, viewPermissionFor, type HookContext } from './hooks/index.js';
 
 // ----- shapes ------------------------------------------------------------------------------------------------------------------
@@ -25,7 +25,9 @@ export interface SubmitInput {
   /**
    * Without a workflow: approve at once (the request row still exists — Finance parity), route to holders of a permission,
    * or (HR portal Prompt 4 — attendance notes, regularisations, swaps) route to the subject's line manager: one MANAGER level
-   * (primary → secondary → HR admins → owner, the domain resolver's fallback chain).
+   * (primary → secondary → [next manager up] → HR admins → org admins → owner, the domain resolver's fallback chain).
+   * `PERMISSION` follows the organisation's `approvals.defaultRouting`: the requester's line manager (the default — the
+   * customer's reporting line decides leave and corrections too) or the holders of the permission as named here.
    */
   noWorkflow: { kind: 'AUTO_APPROVE' } | { kind: 'PERMISSION'; permission: Permission } | { kind: 'MANAGER' };
   /**
@@ -489,17 +491,30 @@ export async function submit(deps: ApiDeps, trx: Trx, actor: Actor, orgId: strin
     const coSubjectUserIds = coSubjectEmployeeIds.length ? [...new Set((await t.selectFrom('orgMemberships').select('userId').where('organizationId', '=', orgId).where('employeeId', 'in', coSubjectEmployeeIds).execute()).map((m) => m.userId))].sort() : [];
     const parties = coSubjectEmployeeIds.length ? { coSubjectEmployeeIds, coSubjectUserIds } : {};
 
-    if (input.notRequired || (!row && input.noWorkflow.kind === 'AUTO_APPROVE')) {
+    // `byPolicy`: nobody decided — the item needs no approval, or the organisation approves requests of the top of the
+    // organisation automatically (approvals.topLevel) — so nobody is recorded as the decider
+    const approveNow = async (reason: string, byPolicy: boolean): Promise<SubmitResult> => {
       const now = new Date();
-      const req = await t.insertInto('approvalRequests').values({ ...base, ...parties, workflowId: input.notRequired ? null : base.workflowId, subjectUserId, currentStep: 1, status: 'APPROVED', completedAt: now, decidedBy: input.notRequired ? null : actor.userId }).returningAll().executeTakeFirstOrThrow();
-      await recordEvent(t, orgId, req.id, 'auto_approved', actor.userId, { reason: input.notRequired ? 'no approval required for this item' : 'no workflow configured for this entity type' });
-      await hookFor(input.entityType)?.onApproved(deps, t, { ...hookCtx(orgId, req, actor, null, true), notRequired: input.notRequired ?? false });
+      const req = await t.insertInto('approvalRequests').values({ ...base, ...parties, workflowId: input.notRequired ? null : base.workflowId, subjectUserId, currentStep: 1, status: 'APPROVED', completedAt: now, decidedBy: byPolicy ? null : actor.userId }).returningAll().executeTakeFirstOrThrow();
+      await recordEvent(t, orgId, req.id, 'auto_approved', actor.userId, { reason });
+      await hookFor(input.entityType)?.onApproved(deps, t, { ...hookCtx(orgId, req, actor, null, true), notRequired: byPolicy });
       return { requestId: req.id, status: 'APPROVED', autoApproved: true, stepCount: 0, firstStepActorIds: [] };
-    }
+    };
+    if (input.notRequired) return approveNow('no approval required for this item', true);
+    const policy = await loadApprovalSettings(t, orgId);
+    // without a workflow, a permission-routed request (leave, comp-off, corrections) goes to the requester's line manager
+    // unless the organisation keeps those with the holders of the permission (approvals.defaultRouting)
+    const fallback: SubmitInput['noWorkflow'] = input.noWorkflow.kind === 'PERMISSION' && policy.defaultRouting === 'line_manager' ? { kind: 'MANAGER' } : input.noWorkflow;
+    if (!row && fallback.kind === 'AUTO_APPROVE') return approveNow('no workflow configured for this entity type', false);
     const steps: ApprovalStepSpec[] = row ? parseWorkflowSteps(row.steps)
-      : input.noWorkflow.kind === 'MANAGER' ? [{ order: 1, approverType: 'MANAGER', mode: 'ANY' }]
-      : [{ order: 1, approverType: 'ROLE', permission: input.noWorkflow.kind === 'PERMISSION' ? input.noWorkflow.permission : 'attendance.approve', mode: 'ANY' }];
-    const ctx = await buildResolutionContext(t, orgId, { employeeId: input.employeeId, branchId: input.branchId, requestedBy: input.requestedBy, entityType: input.entityType, viewPermission: viewPermissionFor(input.entityType), today, coSubjectEmployeeIds, coSubjectUserIds });
+      : fallback.kind === 'MANAGER' ? [{ order: 1, approverType: 'MANAGER', mode: 'ANY' }]
+      : [{ order: 1, approverType: 'ROLE', permission: fallback.kind === 'PERMISSION' ? fallback.permission : 'attendance.approve', mode: 'ANY' }];
+    const ctx = await buildResolutionContext(t, orgId, { employeeId: input.employeeId, branchId: input.branchId, requestedBy: input.requestedBy, entityType: input.entityType, viewPermission: viewPermissionFor(input.entityType), today, coSubjectEmployeeIds, coSubjectUserIds, settings: policy });
+    // the top of the organisation (nobody above the subject): approved at once when the organisation says so — only on the
+    // default routing; a workflow's levels are the organisation's explicit word and are resolved as configured
+    if (!row && fallback.kind === 'MANAGER' && input.employeeId && ctx.chain.length === 0 && policy.topLevel === 'auto_approve') {
+      return approveNow('the requester has no manager: approved automatically (organisation policy)', true);
+    }
     const resolved = steps.map((spec) => ({ spec, res: resolveStepActors(spec, ctx) }));
     resolved.forEach(({ spec, res }, i) => {
       if (res.unresolved) throw errors.validation(`Approval workflow level ${i + 1} has no eligible approver (${res.reason ?? 'nobody resolved'}). Ask HR to check the reporting line or the workflow.`);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { attendanceSettingsSchema, DEFAULT_ATTENDANCE_SETTINGS, inviteMemberSchema, organizationSettingsSchema, resolveAttendanceSettings } from './organizations.js';
+import { approvalSettingsSchema, attendanceSettingsSchema, DEFAULT_APPROVAL_SETTINGS, DEFAULT_ATTENDANCE_SETTINGS, inviteMemberSchema, organizationSettingsSchema, resolveApprovalSettings, resolveAttendanceSettings } from './organizations.js';
 import { portalAccessInviteSchema, validateInvitationSchema } from './dto/members.js';
 
 /**
@@ -19,7 +19,7 @@ describe('attendance settings', () => {
       processingDelaySeconds: 30, payrollPeriod: 'calendar_month', payrollCutoffDay: 25, allowSelfServiceCorrections: false,
       selfService: { webCheckIn: false, mobileCheckIn: false, regularisation: true, requireGeofence: 'flag', allowSelfieCheckIn: false, ipAllowList: [], checkInWindow: null, checkOutWindow: null, outOfWindowAction: 'flag', duplicatePunchSeconds: 60 },
       missedPunch: { detectionEnabled: true, dayCloseGraceDays: 2, singlePunchSplitTime: '12:00' },
-      nonWorkingDay: { action: 'record' },
+      nonWorkingDay: { action: 'overtime' },
       unexcused: { autoDeductEnabled: false, graceDays: 3, payEffectAbsent: 1, payEffectLate: 0.5, payEffectMissingPunch: 0.5, leaveTypePriority: ['AL', 'CL'], excludeLeaveTypeCodes: ['SL', 'ML', 'PTL', 'HJ', 'MARRIAGE', 'BEREAVEMENT', 'ADOPTION', 'COMPASSIONATE'] },
       notes: { requireReasonForLate: false, requireReasonForAbsent: false },
       stats: { attendanceTargetPct: 90, fullDayHours: 8 },
@@ -40,7 +40,7 @@ describe('attendance settings', () => {
       defaultShiftId: null, processingDelaySeconds: 120, payrollPeriod: 'custom_cutoff', payrollCutoffDay: 21, allowSelfServiceCorrections: true,
       selfService: { webCheckIn: true, mobileCheckIn: true, requireGeofence: 'block', allowSelfieCheckIn: true, ipAllowList: ['10.0.0.0/8', '192.168.1.5', '2001:db8::/32'], checkInWindow: { start: '06:00', end: '12:00' }, checkOutWindow: { start: '12:00', end: '23:00' }, outOfWindowAction: 'reject', duplicatePunchSeconds: 120 },
       missedPunch: { detectionEnabled: false, dayCloseGraceDays: 5, singlePunchSplitTime: '13:30' },
-      nonWorkingDay: { action: 'overtime' },
+      nonWorkingDay: { action: 'record' },
       unexcused: { autoDeductEnabled: true, graceDays: 10, payEffectAbsent: 0.5, payEffectLate: 0, payEffectMissingPunch: 1, leaveTypePriority: ['cl', 'AL'], excludeLeaveTypeCodes: ['sl'] },
       notes: { requireReasonForLate: true, requireReasonForAbsent: true },
       stats: { attendanceTargetPct: 95, fullDayHours: 9 },
@@ -113,5 +113,19 @@ describe('invitations (HR portal Prompt 5 review)', () => {
     expect(validateInvitationSchema.safeParse({ token: 'short' }).success).toBe(true);
     expect(validateInvitationSchema.safeParse({ token: '' }).success).toBe(false);
     expect(validateInvitationSchema.safeParse({}).success).toBe(false);
+  });
+});
+
+describe('approval routing settings (organization_settings.approvals)', () => {
+  it('defaults to the line manager, the secondary manager as a backup, the next manager up and HR for the top', () => {
+    expect(DEFAULT_APPROVAL_SETTINGS).toEqual({ defaultRouting: 'line_manager', secondaryManager: 'backup', managerUnavailable: 'next_level_manager', topLevel: 'hr_admins', topLevelUserId: null });
+    expect(organizationSettingsSchema.parse({ approvals: {} }).approvals).toEqual(DEFAULT_APPROVAL_SETTINGS);
+    expect(resolveApprovalSettings(null)).toEqual(DEFAULT_APPROVAL_SETTINGS);
+  });
+  it('round-trips a full document, and a malformed stored key falls back alone', () => {
+    const full = approvalSettingsSchema.parse({ defaultRouting: 'permission_holders', secondaryManager: 'alongside', managerUnavailable: 'hr_admins', topLevel: 'named_user', topLevelUserId: '11111111-1111-4111-8111-111111111111' });
+    expect(organizationSettingsSchema.shape.approvals.parse(full)).toEqual(full);
+    expect(resolveApprovalSettings({ ...full, defaultRouting: 'everyone' })).toEqual({ ...full, defaultRouting: 'line_manager' });
+    expect(organizationSettingsSchema.shape.approvals.safeParse({ topLevel: 'ceo' }).success).toBe(false);
   });
 });

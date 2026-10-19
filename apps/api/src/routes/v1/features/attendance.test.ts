@@ -6,7 +6,7 @@ vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
 let h: ApiHarness; let f: OrgFixture; let device: string;
 const DAY = '2026-08-03';
 beforeAll(async () => {
-  h = await createApiHarness(`flowza_api_att_${process.pid}`); f = await seedOrg(h.admin, 'att');
+  h = await createApiHarness(`flowza_api_att_${process.pid}`); f = await seedOrg(h.admin, 'att', { approvalRouting: 'legacy' });
   device = await seedDevice(h.admin, f.orgId, f.branchA, { code: 'ATT-1' });
   for (const [emp, branch, status, flags] of [[f.e1, f.branchA, 'PRESENT', ['LATE']], [f.e3, f.branchA, 'ABSENT', []], [f.e2, f.branchB, 'PRESENT', []]] as const) {
     await h.admin.insertInto('attendanceDailyRecords').values({ organizationId: f.orgId, employeeId: emp, attendanceDate: DAY, branchId: branch, timezone: 'Asia/Muscat', engineVersion: 'test', status, flags: [...flags], workedMinutes: status === 'PRESENT' ? 480 : 0, lateMinutes: flags.includes('LATE') ? 12 : 0, trace: JSON.stringify({ punches: [] }) }).execute();

@@ -17,7 +17,7 @@ const DAY = '2026-09-01';
 const punch = (employeeId: string, reason = 'Forgot to punch out', at = '13:05') => ({ employeeId, attendanceDate: DAY, type: 'ADD_PUNCH', proposedPunchedAt: `${DAY}T${at}:00Z`, reason });
 
 beforeAll(async () => {
-  h = await createApiHarness(`flowza_api_team_${process.pid}`); f = await seedOrg(h.admin, 'team');
+  h = await createApiHarness(`flowza_api_team_${process.pid}`); f = await seedOrg(h.admin, 'team', { approvalRouting: 'legacy' });
   e4 = await seedEmployee(h.admin, f.orgId, f.branchA, 4);
   e5 = await seedEmployee(h.admin, f.orgId, f.branchA, 5, { managerEmployeeId: e4 });
   e6 = await seedEmployee(h.admin, f.orgId, f.branchB, 6);

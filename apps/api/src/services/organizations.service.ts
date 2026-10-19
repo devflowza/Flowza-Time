@@ -5,7 +5,7 @@ import type { Trx } from '@flowza/database';
 import { errors, isValidTimezone, newId } from '@flowza/shared';
 import type { ApiDeps } from '../deps.js';
 import { requireMembership, requirePermission } from '../lib/authorize.js';
-import { type Actor, runUser, runSystem, audit, diffObjects } from '../lib/service.js';
+import { type Actor, runUser, runSystem, audit, diffObjects, withSystemScope } from '../lib/service.js';
 import { loadSettings } from '../lib/settings.js';
 import { ORG_COLUMNS, toOrganizationDto, type OrgRow } from './organizations.mappers.js';
 import { enqueueRecalculation, orgToday } from './features/recalc.js';
@@ -153,8 +153,19 @@ export async function putSettingsGroup(deps: ApiDeps, actor: Actor, orgId: strin
   if (group === 'attendance' && !deps.config.EDGE_SHARED_SECRET && ((value as OrganizationSettings['attendance']).selfService?.ipAllowList.length ?? 0) > 0) {
     throw errors.validation('The IP allow-list needs the API to run behind the configured edge (EDGE_SHARED_SECRET); without it the client address cannot be trusted. Clear the list, or ask your administrator to configure the edge first.', { issues: [{ path: 'selfService.ipAllowList', message: 'Requires the edge secret (EDGE_SHARED_SECRET)' }] });
   }
+  if (group === 'approvals') {
+    const v = value as OrganizationSettings['approvals'];
+    if (v.topLevel === 'named_user' && !v.topLevelUserId) throw errors.validation('Choose the approver for requests from the top of the organisation.', { issues: [{ path: 'topLevelUserId', message: 'Required when topLevel is named_user' }] });
+  }
   return runUser(deps.db, actor, async (trx) => {
     const before = await loadSettings(trx, orgId);
+    if (group === 'approvals') {
+      // the named approver must be somebody who can hold a seat: an active member of this organisation
+      const userId = (value as OrganizationSettings['approvals']).topLevelUserId;
+      if (userId && !(await withSystemScope(trx, orgId, (t) => t.selectFrom('orgMemberships').select('id').where('organizationId', '=', orgId).where('userId', '=', userId).where('status', '=', 'active').executeTakeFirst()))) {
+        throw errors.validation('The top-level approver must be an active member of the organisation.', { issues: [{ path: 'topLevelUserId', message: 'Not an active member' }] });
+      }
+    }
     await trx.insertInto('organizationSettings')
       .values({ organizationId: orgId, [group]: JSON.stringify(value), updatedBy: actor.userId } as never)
       .onConflict((oc) => oc.column('organizationId').doUpdateSet({ [group]: JSON.stringify(value), updatedBy: actor.userId } as never))

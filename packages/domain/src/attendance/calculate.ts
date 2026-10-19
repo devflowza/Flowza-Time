@@ -1,7 +1,7 @@
 import type { DateTime } from 'luxon';
 import { ATTENDANCE_FLAGS, DEFAULT_ATTENDANCE_SETTINGS, type AttendanceFlag, type AttendanceRules, type AttendanceStatus } from '@flowza/contracts';
 import { addDays, dayOfWeek, minutesBetween } from '@flowza/shared';
-import { attributeEvents } from './attribute.js';
+import { attributeEvents, sortEvents } from './attribute.js';
 import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
 import { carryOvernightCheckOuts, openCheckIn, overnightMaxSpanMinutes } from './overnight.js';
 import { roundMinutes, roundPunches } from './rounding.js';
@@ -166,7 +166,7 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   // that day even after its day boundary (engine 1.3.0, overnight.ts).
   const shiftOn = new Map<string, EngineShift | null>([[addDays(date, -1), previousShift], [date, shift], [addDays(date, 1), nextShift]]);
   const { attribution, carries } = carryOvernightCheckOuts(attributeEvents(input.events, windows), windows, (d) => shiftOn.get(d) ?? null);
-  const attributed = attribution.byDate.get(date) ?? [];
+  let attributed = attribution.byDate.get(date) ?? [];
   const tracePunches = new Map<string, TracePunch>();
   /** Attribution decisions worth keeping next to the interpretation note (§G.6: every punch with its attribution). */
   const attributionNotes = new Map<string, string>();
@@ -200,6 +200,21 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
     rec.step('attribution.overnight', c.to === date
       ? `check-out after the day boundary closes the check-in of ${local(parseInstant(c.checkIn.punchedAt, zone))} (${c.spanMinutes} min): kept on ${date}`
       : `the first check-out of ${date} closes the open check-in of ${c.to}: attributed there`, { from: c.from, to: c.to, checkIn: c.checkIn.id, events: c.events.map((e) => e.id), spanMinutes: c.spanMinutes });
+  }
+  // 2a. Work on a weekly off / full holiday at any hour (engine 1.5.0, customer review): the off day keeps its shift's punch
+  // window, which need not cover hours worked outside the shift — so a punch on that calendar day that NO window claims belongs
+  // to the off day, exactly as a day without a shift takes the punches no shift window contains. A neighbouring day never
+  // claims such a punch (no window of its own contains it), so nothing is counted twice.
+  if (outOfWindowOnDate > 0 && isNonWorkingDay(input)) {
+    const claimed = attribution.decisions.filter((d) => d.reason === 'OUT_OF_WINDOW' && parseInstant(d.punchedAt, zone).toISODate() === date).map((d) => d.eventId);
+    const events = input.events.filter((e) => claimed.includes(e.id));
+    attributed = sortEvents([...attributed, ...events]);
+    for (const e of events) {
+      const entry = tracePunches.get(e.id);
+      if (entry) tracePunches.set(e.id, { ...entry, role: 'IGNORED', note: 'outside the shift window on a non-working day → kept on that day' });
+    }
+    rec.step('attribution.nonWorkingDay', `${events.length} punch(es) on non-working day ${date} outside the shift window: attributed to ${date}`, { events: events.map((e) => e.id) });
+    outOfWindowOnDate -= events.length;
   }
   if (outOfWindowOnDate > 0) {
     rec.flag('OUT_OF_WINDOW');
@@ -412,6 +427,11 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
 }
 
 /* ------------------------------------------------------------------------------------------------ */
+
+/** A weekly off or a full-day holiday: nothing is expected, work done is recorded (and may be overtime). */
+function isNonWorkingDay(input: DailyCalculationInput): boolean {
+  return (!!input.holiday && !input.holiday.isHalfDay) || input.weeklyOffDays.includes(dayOfWeek(input.attendanceDate));
+}
 
 function classifyDay(input: DailyCalculationInput, rec: Recorder): DayType {
   if (input.holiday && !input.holiday.isHalfDay) {

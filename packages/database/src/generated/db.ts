@@ -1699,6 +1699,7 @@ export interface Organizations {
 }
 
 export interface OrganizationSettings {
+  approvals: Generated<Json>;
   attendance: Generated<Json>;
   dashboard: Generated<Json>;
   general: Generated<Json>;

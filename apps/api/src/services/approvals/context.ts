@@ -1,10 +1,10 @@
-import type { ApprovalEntity } from '@flowza/contracts';
+import { resolveApprovalSettings, type ApprovalEntity, type ApprovalSettings } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import type { ApproverCandidate, ChainRung, ResolutionContext } from '@flowza/domain';
 import { enumArrayOrNull } from '../../lib/mappers.js';
 import { dv } from '../features/sql-helpers.js';
 
-const OWNER = 'owner'; const HR_ADMIN = 'hr_admin'; const BRANCH_MANAGER = 'branch_manager';
+const OWNER = 'owner'; const ORG_ADMIN = 'org_admin'; const HR_ADMIN = 'hr_admin'; const BRANCH_MANAGER = 'branch_manager';
 const MAX_CHAIN = 10;
 
 export interface OrgDirectory {
@@ -15,6 +15,8 @@ export interface OrgDirectory {
   roleKeyByUser: Map<string, string>;
   roleIdByUser: Map<string, string>;
   hrAdminUserIds: string[];
+  /** Members holding the `org_admin` role: the rung after the HR admins (optional on directories built before it existed). */
+  orgAdminUserIds?: string[];
   ownerUserIds: string[];
   permissionHolders: Map<string, Set<string>>;
   roleMembers: Map<string, Set<string>>;
@@ -34,13 +36,14 @@ export async function loadOrgDirectory(trx: Trx, orgId: string): Promise<OrgDire
   const permsByRole = new Map<string, string[]>();
   for (const p of perms) { const arr = permsByRole.get(p.roleId) ?? []; arr.push(p.permissionKey); permsByRole.set(p.roleId, arr); }
   const inactive = await trx.selectFrom('orgMemberships').select(['userId', 'employeeId', 'status']).where('organizationId', '=', orgId).where('status', '!=', 'active').where('employeeId', 'is not', null).orderBy('createdAt').orderBy('userId').execute();
-  const dir: OrgDirectory = { activeUserIds: new Set(), userByEmployee: new Map(), inactiveUserByEmployee: new Map(), roleKeyByUser: new Map(), roleIdByUser: new Map(), hrAdminUserIds: [], ownerUserIds: [], permissionHolders: new Map(), roleMembers: new Map(), branchManagers: [], branchScope: new Map() };
+  const dir: OrgDirectory = { activeUserIds: new Set(), userByEmployee: new Map(), inactiveUserByEmployee: new Map(), roleKeyByUser: new Map(), roleIdByUser: new Map(), hrAdminUserIds: [], orgAdminUserIds: [], ownerUserIds: [], permissionHolders: new Map(), roleMembers: new Map(), branchManagers: [], branchScope: new Map() };
   for (const m of inactive) if (m.employeeId && !dir.inactiveUserByEmployee!.has(m.employeeId)) dir.inactiveUserByEmployee!.set(m.employeeId, { userId: m.userId, status: m.status });
   for (const m of members) {
     dir.activeUserIds.add(m.userId);
     if (m.employeeId && !dir.userByEmployee.has(m.employeeId)) dir.userByEmployee.set(m.employeeId, m.userId);
     dir.roleKeyByUser.set(m.userId, m.roleKey); dir.roleIdByUser.set(m.userId, m.roleId);
     if (m.roleKey === HR_ADMIN) dir.hrAdminUserIds.push(m.userId);
+    if (m.roleKey === ORG_ADMIN) dir.orgAdminUserIds!.push(m.userId);
     if (m.roleKey === OWNER) dir.ownerUserIds.push(m.userId);
     const rm = dir.roleMembers.get(m.roleId) ?? new Set<string>(); rm.add(m.userId); dir.roleMembers.set(m.roleId, rm);
     for (const key of permsByRole.get(m.roleId) ?? []) { const set = dir.permissionHolders.get(key) ?? new Set<string>(); set.add(m.userId); dir.permissionHolders.set(key, set); }
@@ -72,6 +75,12 @@ export async function loadDelegationMap(trx: Trx, orgId: string, entityType: App
   return new Map([...out.entries()].map(([k, v]) => [k, v.delegate]));
 }
 
+/** The organisation's approval routing policy (`organization_settings.approvals`), defaults filled in. System scope. */
+export async function loadApprovalSettings(trx: Trx, orgId: string): Promise<ApprovalSettings> {
+  const row = await trx.selectFrom('organizationSettings').select('approvals').where('organizationId', '=', orgId).executeTakeFirst();
+  return resolveApprovalSettings(row?.approvals);
+}
+
 interface EmployeeLite { id: string; managerEmployeeId: string | null; secondaryManagerEmployeeId: string | null; departmentId: string | null; branchId: string; deletedAt: Date | null }
 
 /**
@@ -85,8 +94,9 @@ interface EmployeeLite { id: string; managerEmployeeId: string | null; secondary
  * Without it, a `manager` role holding attendance.approve would sit on every correction in the organisation instead of
  * only on their direct reports' ones.
  */
-export async function buildResolutionContext(trx: Trx, orgId: string, input: { employeeId: string | null; branchId: string | null; requestedBy: string | null; entityType: ApprovalEntity; viewPermission: string; today: string; /** Ignored: self-approval is not configurable (review P0-3). */ allowSelfApproval?: boolean; directory?: OrgDirectory; /** Other people the request is about and their logins (HR portal Prompt 4 review, P0-2): never seated. */ coSubjectEmployeeIds?: readonly string[]; coSubjectUserIds?: readonly string[] }): Promise<ResolutionContext> {
+export async function buildResolutionContext(trx: Trx, orgId: string, input: { employeeId: string | null; branchId: string | null; requestedBy: string | null; entityType: ApprovalEntity; viewPermission: string; today: string; /** Ignored: self-approval is not configurable (review P0-3). */ allowSelfApproval?: boolean; directory?: OrgDirectory; /** Other people the request is about and their logins (HR portal Prompt 4 review, P0-2): never seated. */ coSubjectEmployeeIds?: readonly string[]; coSubjectUserIds?: readonly string[]; /** The routing policy when the caller already read it. */ settings?: ApprovalSettings }): Promise<ResolutionContext> {
   const dir = input.directory ?? await loadOrgDirectory(trx, orgId);
+  const policy = input.settings ?? await loadApprovalSettings(trx, orgId);
   const delegations = await loadDelegationMap(trx, orgId, input.entityType, input.today);
   const employees = new Map<string, EmployeeLite>();
   const loadEmployees = async (ids: string[]) => {
@@ -145,10 +155,14 @@ export async function buildResolutionContext(trx: Trx, orgId: string, input: { e
     departmentHead: candidate(headEmployeeId),
     branchManagerUserIds,
     hrAdminUserIds: dir.hrAdminUserIds.filter(inBranch),
+    orgAdminUserIds: (dir.orgAdminUserIds ?? []).filter(inBranch),
     ownerUserIds: dir.ownerUserIds,
     activeUserIds: dir.activeUserIds,
     roleMemberUserIds: (roleId) => [...(dir.roleMembers.get(roleId) ?? [])].filter(inBranch),
     permissionHolderUserIds: (permission) => [...(dir.permissionHolders.get(permission) ?? [])].filter((u) => inBranch(u) && (viewers.has(u) || subjectManagers.has(u))),
     delegateOf: (userId) => delegations.get(userId) ?? null,
+    managerFallback: policy.managerUnavailable === 'next_level_manager' ? 'next_level' : 'hr',
+    // the named approver of the top of the organisation (an active member only — the resolver checks it again)
+    topLevelApproverUserIds: policy.topLevel === 'named_user' && policy.topLevelUserId && dir.activeUserIds.has(policy.topLevelUserId) ? [policy.topLevelUserId] : [],
   };
 }

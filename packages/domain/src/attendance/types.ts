@@ -183,5 +183,7 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * instead of PRESENT with 0 worked minutes.
  * 1.4.0 — Enterprise: VERY_LATE when the arrival is more than the policy's `late.veryLateAfterMinutes` after the scheduled start;
  * DOUBLE_SHIFT for a composite day of two shifts (composeDoubleShift). Nothing changes for a day without either.
+ * 1.5.0 — Work on a weekly off / full holiday at any hour: a punch on that calendar day that no punch window claims (the off
+ * day keeps its shift's window) is attributed to the off day instead of being dropped as out of window. Working days unchanged.
  */
-export const ENGINE_VERSION = 'attendance-engine/1.4.0';
+export const ENGINE_VERSION = 'attendance-engine/1.5.0';

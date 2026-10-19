@@ -13,7 +13,8 @@
     "subscription": "Subscription",
     "reports": "Reports",
     "dashboard": "Dashboard",
-    "leave": "Leave"
+    "leave": "Leave",
+    "approvals": "Approvals"
   },
   "orgStatus": {
     "trial": "Trial",

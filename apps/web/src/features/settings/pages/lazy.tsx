@@ -13,5 +13,6 @@ export const NotificationsSection = lazyPage(() => import('../sections/notificat
 export const SecuritySection = lazyPage(() => import('../sections/security-section'));
 export const SubscriptionSection = lazyPage(() => import('../sections/subscription-section'));
 export const LeaveSection = lazyPage(() => import('../sections/leave-section'));
+export const ApprovalsSection = lazyPage(() => import('../sections/approvals-section'));
 export function PageFallback() { return <div className="page-container space-y-4"><Skeleton className="h-8 w-64" /><Skeleton className="h-64 w-full" /></div>; }
 export function SectionFallback() { return <div className="space-y-3"><Skeleton className="h-6 w-48" /><Skeleton className="h-40 w-full" /></div>; }

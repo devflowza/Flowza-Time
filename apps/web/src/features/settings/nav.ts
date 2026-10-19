@@ -1,7 +1,7 @@
-import { Bell, Building2, CalendarOff, Clock, CreditCard, FileText, Globe2, LayoutDashboard, Plug, RefreshCw, ShieldCheck, type LucideIcon } from 'lucide-react';
+import { Bell, Building2, CalendarOff, CheckSquare, Clock, CreditCard, FileText, Globe2, LayoutDashboard, Plug, RefreshCw, ShieldCheck, type LucideIcon } from 'lucide-react';
 import type { ModuleKey, Permission } from '@flowza/contracts';
 
-export const SETTINGS_SECTIONS = ['general', 'dashboard', 'regional', 'attendance', 'sync', 'integrations', 'reports', 'notifications', 'security', 'subscription', 'leave'] as const;
+export const SETTINGS_SECTIONS = ['general', 'dashboard', 'regional', 'attendance', 'sync', 'integrations', 'reports', 'notifications', 'security', 'subscription', 'leave', 'approvals'] as const;
 export type SettingsSectionKey = (typeof SETTINGS_SECTIONS)[number];
 /**
  * `permission`: sections beyond `organization.view` (the layout hides the entry; the route guards it again). `module`: sections
@@ -13,4 +13,6 @@ export const SETTINGS_NAV: { key: SettingsSectionKey; icon: LucideIcon; permissi
   { key: 'notifications', icon: Bell }, { key: 'security', icon: ShieldCheck }, { key: 'subscription', icon: CreditCard },
   // leave v2 (HR portal Prompt 7): comp-off expiry
   { key: 'leave', icon: CalendarOff, module: 'leave' },
+  // approval routing without a workflow: line manager / permission holders, secondary manager, top of the organisation
+  { key: 'approvals', icon: CheckSquare },
 ];

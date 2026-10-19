@@ -17,7 +17,7 @@ const HR_ADMIN_ROLE = ROLE.hr_admin;
 
 beforeAll(async () => {
   h = await createApiHarness(`flowza_api_approvals_${process.pid}`);
-  f = await seedOrg(h.admin, 'appr');
+  f = await seedOrg(h.admin, 'appr', { approvalRouting: 'legacy' });
   e4 = await seedEmployee(h.admin, f.orgId, f.branchA, 4, { departmentId: f.departmentA });
   e5 = await seedEmployee(h.admin, f.orgId, f.branchA, 5, { managerEmployeeId: e4, departmentId: f.departmentA });
   e6 = await seedEmployee(h.admin, f.orgId, f.branchA, 6);

@@ -13,7 +13,8 @@
     "subscription": "الاشتراك",
     "reports": "التقارير",
     "dashboard": "لوحة التحكم",
-    "leave": "الإجازات"
+    "leave": "الإجازات",
+    "approvals": "الموافقات"
   },
   "orgStatus": {
     "trial": "تجريبي",

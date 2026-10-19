@@ -178,7 +178,7 @@ function AttendanceForm({ initial }: { initial: OrganizationSettings['attendance
       <Group title={t('attendance.nonWorkingDay.title')} hint={t('attendance.nonWorkingDay.hint')}>
         <FormField label={t('attendance.nonWorkingDay.action')} htmlFor="att-nwd" className="sm:max-w-md">
           <Controller control={control} name="nonWorkingDay.action" render={({ field }) => (
-            <Select value={field.value ?? 'record'} onValueChange={field.onChange} disabled={readOnly}><SelectTrigger id="att-nwd"><SelectValue /></SelectTrigger><SelectContent>{(['record', 'overtime', 'ignore'] as const).map((v) => <SelectItem key={v} value={v}>{t(`attendance.nonWorkingDay.options.${v}`)}</SelectItem>)}</SelectContent></Select>
+            <Select value={field.value ?? 'overtime'} onValueChange={field.onChange} disabled={readOnly}><SelectTrigger id="att-nwd"><SelectValue /></SelectTrigger><SelectContent>{(['overtime', 'record', 'ignore'] as const).map((v) => <SelectItem key={v} value={v}>{t(`attendance.nonWorkingDay.options.${v}`)}</SelectItem>)}</SelectContent></Select>
           )} />
         </FormField>
       </Group>
