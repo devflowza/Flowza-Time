@@ -37,6 +37,10 @@ function Summary({ r }: { r: RecordDetail }) {
       <Stat label={t('columns.late')} value={fmtMinutes(r.lateMinutes)} className={r.lateMinutes > 0 ? 'border-amber-300' : undefined} />
       <Stat label={t('columns.early')} value={fmtMinutes(r.earlyDepartureMinutes)} className={r.earlyDepartureMinutes > 0 ? 'border-amber-300' : undefined} />
       <Stat label={t('columns.overtime')} value={fmtMinutes(r.overtimeMinutes)} sub={r.overtimeCategory ? t(`overtimeCategory.${r.overtimeCategory}`, { defaultValue: r.overtimeCategory }) : undefined} />
+      {/* short leave (engine 1.5.0): shown when the day has any */}
+      {r.creditedMinutes ? <Stat label={t('record.credited')} value={fmtMinutes(r.creditedMinutes)} /> : null}
+      {r.excusedMinutes ? <Stat label={t('record.excused')} value={fmtMinutes(r.excusedMinutes)} /> : null}
+      {r.lostMinutes ? <Stat label={t('columns.lost')} value={fmtMinutes(r.lostMinutes)} className="border-amber-300" /> : null}
       <Stat label={t('record.punches')} value={r.punchCount} />
       <Stat label={t('record.version')} value={`v${r.calculationVersion}`} sub={fmtDateTime(r.computedAt, tz)} />
     </div>

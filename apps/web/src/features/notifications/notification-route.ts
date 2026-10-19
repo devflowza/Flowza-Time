@@ -54,7 +54,8 @@ const isoDate = (v: unknown): string | null => { const s = text(v); return s && 
 export function selfRouteFor(entityType: string | null): string {
   switch (entityType) {
     case 'LEAVE':
-    case 'COMP_OFF': return '/my/leave';
+    case 'COMP_OFF':
+    case 'SHORT_LEAVE': return '/my/leave';
     case 'ATTENDANCE_NOTE': return '/my/requests?tab=reasons';
     case 'REGULARISATION':
     case 'MISSING_PUNCH': return '/my/requests?tab=regularisations';

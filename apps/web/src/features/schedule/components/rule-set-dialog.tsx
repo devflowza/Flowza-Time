@@ -41,7 +41,7 @@ const ENTERPRISE_SECTIONS: ReadonlySet<SectionKey> = new Set(['discipline', 'reg
 const FIELD_SECTIONS: Record<string, SectionKey> = {
   name: 'general', description: 'general', branchId: 'general', locationId: 'general', countryCode: 'general', departmentId: 'general', employeeGroupId: 'general', shiftId: 'general', effectiveFrom: 'general', effectiveTo: 'general',
   graceInMinutes: 'late', graceOutMinutes: 'late', lateThresholdMinutes: 'late', earlyDepartureThresholdMinutes: 'late', punchRoundingMinutes: 'late', punchRoundingMode: 'late', workedRoundingMinutes: 'late', workedRoundingMode: 'late',
-  minFullDayMinutes: 'attendance', halfDayThresholdMinutes: 'attendance', punchInterpretation: 'attendance', duplicatePunchWindowSeconds: 'attendance', missingPunchBehavior: 'attendance', autoAbsentWithoutPunches: 'attendance',
+  minFullDayMinutes: 'attendance', halfDayThresholdMinutes: 'attendance', punchInterpretation: 'attendance', duplicatePunchWindowSeconds: 'attendance', outOfOfficeAllowanceMinutes: 'attendance', missingPunchBehavior: 'attendance', autoAbsentWithoutPunches: 'attendance',
   overtimeEnabled: 'overtime', overtimeStartAfterMinutes: 'overtime', overtimeMinBlockMinutes: 'overtime', overtimeRoundingMinutes: 'overtime', overtimeMaxMinutesPerDay: 'overtime', countEarlyInAsOvertime: 'overtime', overtimeRequiresScheduledHours: 'overtime', weeklyOffWorkCountsAsOvertime: 'overtime', holidayWorkCountsAsOvertime: 'overtime',
   ramadanMode: 'ramadan', 'policy.countryPack': 'general', 'policy.late': 'late', 'policy.methods': 'attendance', 'policy.overtime': 'overtime', 'policy.points': 'discipline', 'policy.regularisation': 'regularisation',
 };
@@ -432,6 +432,8 @@ export function RuleSetDialog({ open, onOpenChange, ruleSet, pack = null }: { op
                     )} />
                   </FormField>
                   {rn('duplicatePunchWindowSeconds', 'duplicatePunchWindowSeconds', { max: 3600, hint: true })}
+                  {/* short leave (engine 1.5.0): out-of-office time tolerated before it is lost time (PAIRED / DIRECTIONAL) */}
+                  {rn('outOfOfficeAllowanceMinutes', 'outOfOfficeAllowanceMinutes', { max: 120, hint: true })}
                 </div>
               </Section>
               {enterprise ? (

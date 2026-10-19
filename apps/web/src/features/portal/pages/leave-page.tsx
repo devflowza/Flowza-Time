@@ -16,6 +16,7 @@ import { ApplyLeaveDialog } from '../components/apply-leave-dialog';
 import { CompOffCard } from '../components/comp-off';
 import { LeaveConversationDialog, LeaveTotalsTiles, LeaveTypeBalanceCard, WithdrawLeaveDialog } from '../components/leave-parts';
 import { SectionTitle, TypeDot } from '../components/parts';
+import { SelfShortLeaveSection } from '@/features/leave/short-leave/components/self-section';
 
 function Dates({ r }: { r: SelfLeaveRecordDto }) {
   const { t } = useTranslation('leave');
@@ -177,6 +178,9 @@ export default function MyLeavePage() {
             </Card>
             {hasCompOff ? <CompOffCard canUse={!!data} onUse={() => setCompOffOpen(true)} onTimeline={setTimeline} /> : null}
           </div>
+
+          {/* short leave (hourly permissions, official assignment, remote work) — 20261019000310 */}
+          <SelfShortLeaveSection onTimeline={setTimeline} />
         </>
       )}
 
