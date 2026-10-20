@@ -15,6 +15,7 @@ import { ApplyLeaveDialog } from '../components/apply-leave-dialog';
 import { BalanceRow, LeaveStatusBadge, SectionTitle, TypeDot } from '../components/parts';
 import { HomePunchCard, PendingSelfItems } from '../components/home-attendance';
 import { TeamUpcomingLeave } from '@/features/leave/components/team-upcoming-leave';
+import { usePortalAccess } from '../access';
 
 function TodayCard() {
   const { t } = useTranslation('portal');
@@ -53,16 +54,20 @@ function TodayCard() {
   );
 }
 
-/** /my — the employee's home: today, this month, balances, upcoming leave, recent days and holidays. */
+/**
+ * /my — the employee's home: today, this month, balances, upcoming leave, recent days and holidays. Every member linked to an
+ * employee record opens it; the attendance and leave parts show only for the keys that read them (access.ts).
+ */
 export default function PortalHomePage() {
   const { t } = useTranslation('portal');
   const navigate = useNavigate();
   const user = useMe().data?.user;
   const membership = useActiveMembership();
+  const access = usePortalAccess();
   const overview = useSelfOverview();
   const profile = useSelfProfile();
   const year = Number((overview.data?.date ?? DateTime.now().toISODate()!).slice(0, 4));
-  const leave = useSelfLeave(year);
+  const leave = useSelfLeave(year, { enabled: access.leave });
   const [applyOpen, setApplyOpen] = useState(false);
   const ln = useLocalName();
   const d = overview.data;
@@ -82,24 +87,24 @@ export default function PortalHomePage() {
           <p className="mt-1 text-sm text-muted-foreground">{role || t('home.subtitle', { org: membership?.organization.displayName ?? '' })}</p>
         </div>
         <div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => void navigate('/my/attendance')}><CalendarCheck /> {t('home.viewAttendance')}</Button>
-          <Button onClick={() => setApplyOpen(true)} disabled={!leave.data}><CalendarPlus /> {t('home.applyLeave')}</Button>
+          {access.attendance ? <Button variant="outline" onClick={() => void navigate('/my/attendance')}><CalendarCheck /> {t('home.viewAttendance')}</Button> : null}
+          {access.requestLeave ? <Button onClick={() => setApplyOpen(true)} disabled={!leave.data}><CalendarPlus /> {t('home.applyLeave')}</Button> : null}
         </div>
       </div>
 
-      {d && (d.pendingLeave > 0 || d.pendingCorrections > 0) ? (
+      {d && ((access.leave && d.pendingLeave > 0) || (access.attendance && d.pendingCorrections > 0)) ? (
         <div className="flex flex-wrap gap-2">
-          {d.pendingLeave > 0 ? <Link to="/my/leave"><Badge variant="warning" dot>{t('home.pendingLeave', { count: d.pendingLeave })}</Badge></Link> : null}
-          {d.pendingCorrections > 0 ? <Link to="/my/attendance?tab=corrections"><Badge variant="warning" dot>{t('home.pendingCorrections', { count: d.pendingCorrections })}</Badge></Link> : null}
+          {access.leave && d.pendingLeave > 0 ? <Link to="/my/leave"><Badge variant="warning" dot>{t('home.pendingLeave', { count: d.pendingLeave })}</Badge></Link> : null}
+          {access.attendance && d.pendingCorrections > 0 ? <Link to="/my/attendance?tab=corrections"><Badge variant="warning" dot>{t('home.pendingCorrections', { count: d.pendingCorrections })}</Badge></Link> : null}
         </div>
       ) : null}
 
       <PendingSelfItems overview={d} />
       <HomePunchCard overview={d} />
 
-      <TodayCard />
+      {access.attendance ? <TodayCard /> : null}
 
-      <section aria-label={t('home.thisMonth')}>
+      {access.attendance ? <section aria-label={t('home.thisMonth')}>
         <h2 className="mb-2 text-sm font-semibold">{t('home.thisMonth')} <span className="font-normal text-muted-foreground">· {d ? fmtDate(`${d.month.month}-01`, 'MMMM yyyy') : ''}</span></h2>
         <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
           <StatCard label={t('home.attendanceRate')} value={m?.attendanceRate === null || m?.attendanceRate === undefined ? '—' : `${Math.round(m.attendanceRate * 100)}%`} hint={m ? t('home.attendanceRateHint', { present: m.attendedDays ?? m.present + m.halfDay * 0.5, working: m.workingDays }) : undefined} icon={TrendingUp} tone="success" loading={overview.isLoading} onClick={() => void navigate('/my/attendance')} />
@@ -107,19 +112,19 @@ export default function PortalHomePage() {
           <StatCard label={t('home.lateArrivals')} value={m?.late ?? '—'} hint={m && m.lateMinutes ? t('home.lateHint', { minutes: fmtMinutes(m.lateMinutes) }) : undefined} icon={AlarmClock} tone={m && m.late > 0 ? 'warning' : 'default'} loading={overview.isLoading} />
           <StatCard label={t('home.workedHours')} value={m ? fmtMinutes(m.workedMinutes) : '—'} icon={Clock} loading={overview.isLoading} />
           <StatCard label={t('home.overtime')} value={m ? fmtMinutes(m.overtimeMinutes) : '—'} icon={Hourglass} tone="info" loading={overview.isLoading} />
-          <StatCard label={t('home.leaveDays')} value={m ? m.leave : '—'} icon={Palmtree} loading={overview.isLoading} onClick={() => void navigate('/my/leave')} />
+          <StatCard label={t('home.leaveDays')} value={m ? m.leave : '—'} icon={Palmtree} loading={overview.isLoading} onClick={access.leave ? () => void navigate('/my/leave') : undefined} />
         </div>
-      </section>
+      </section> : null}
 
       <div className="grid gap-5 lg:grid-cols-3">
-        <Card>
+        {access.leave ? <Card>
           <SectionTitle title={t('home.balances', { year })} to="/my/leave" linkLabel={t('home.seeAll')} />
           <CardContent className="space-y-4">
             {overview.isLoading ? <Skeleton className="h-24 w-full" /> : d && d.balances.length ? d.balances.map((b) => <BalanceRow key={b.leaveTypeId} b={b} name={ln(b.name, b.nameAr)} color={b.color} />) : <p className="text-sm text-muted-foreground">{t('home.balancesEmpty')}</p>}
           </CardContent>
-        </Card>
+        </Card> : null}
 
-        <Card>
+        {access.leave ? <Card>
           <SectionTitle title={t('home.upcoming')} to="/my/leave" linkLabel={t('home.seeAll')} />
           <CardContent>
             {overview.isLoading ? <Skeleton className="h-24 w-full" /> : d && d.upcomingLeave.length ? (
@@ -134,9 +139,9 @@ export default function PortalHomePage() {
                   </li>
                 ))}
               </ul>
-            ) : <EmptyState icon={Palmtree} title={t('home.upcomingEmpty')} className="py-6" action={<Button size="sm" variant="outline" onClick={() => setApplyOpen(true)} disabled={!leave.data}>{t('home.applyLeave')}</Button>} />}
+            ) : <EmptyState icon={Palmtree} title={t('home.upcomingEmpty')} className="py-6" action={access.requestLeave ? <Button size="sm" variant="outline" onClick={() => setApplyOpen(true)} disabled={!leave.data}>{t('home.applyLeave')}</Button> : undefined} />}
           </CardContent>
-        </Card>
+        </Card> : null}
 
         <Card>
           <SectionTitle title={t('home.holidays')} />
@@ -158,7 +163,7 @@ export default function PortalHomePage() {
       {/* managers (leave.view_team): the team's upcoming leave */}
       <TeamUpcomingLeave />
 
-      <Card>
+      {access.attendance ? <Card>
         <SectionTitle title={t('home.recent')} to="/my/attendance?tab=log" linkLabel={t('home.seeAll')} />
         <CardContent>
           {overview.isLoading ? <Skeleton className="h-32 w-full" /> : d && d.recent.length ? (
@@ -176,9 +181,9 @@ export default function PortalHomePage() {
             </ul>
           ) : <EmptyState icon={ClipboardList} title={t('home.recentEmpty')} className="py-6" />}
         </CardContent>
-      </Card>
+      </Card> : null}
 
-      <ApplyLeaveDialog key={String(applyOpen)} open={applyOpen} onOpenChange={setApplyOpen} data={leave.data} />
+      {access.requestLeave ? <ApplyLeaveDialog key={String(applyOpen)} open={applyOpen} onOpenChange={setApplyOpen} data={leave.data} /> : null}
     </div>
   );
 }

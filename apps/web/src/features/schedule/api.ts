@@ -5,16 +5,18 @@ import type { AttendanceRuleSetInput, HolidayCopyYearInput, HolidayInput, ShiftA
 import type { ComboboxOption } from '@/components/forms';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
-import { useOrgId } from '@/features/me/use-me';
+import { useCan, useOrgId } from '@/features/me/use-me';
 import type { HolidayCalendarDto, HolidayDto, HolidayYearCopyDto, RuleSetDto, ShiftAssignmentDto, ShiftDto, ShiftPatternDto, ShiftResolution, WithRecalc } from './types';
 
 export type ListQuery = Record<string, string | number | boolean | undefined>;
 export type HolidayCalendarInput = z.infer<typeof holidayCalendarInputSchema>;
 
 // ---- shifts -----------------------------------------------------------------------------------------------------------
+/** Shifts (shift.view) — also the shift pickers and filters of other pages, which offer nothing without the key. */
 export function useShifts(query: ListQuery, enabled = true) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, 'shifts', query), queryFn: () => api.get<PageEnvelope<ShiftDto>>(`/orgs/${orgId}/shifts`, query), placeholderData: keepPreviousData, enabled });
+  const can = useCan();
+  return useQuery({ queryKey: qk.list(orgId, 'shifts', query), queryFn: () => api.get<PageEnvelope<ShiftDto>>(`/orgs/${orgId}/shifts`, query), placeholderData: keepPreviousData, enabled: enabled && can('shift.view') });
 }
 /** Active shifts as Combobox options (small list; one page of 200). */
 export function useShiftOptions(includeInactive = false) {

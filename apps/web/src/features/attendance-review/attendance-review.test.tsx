@@ -239,7 +239,7 @@ describe('AttendanceGrantsCard', () => {
     grant('attendance.approve');
     mockGet({ [`/orgs/${ORG}/employees/e1/attendance-grants`]: { data: { employeeId: 'e1', openAttendance: false, selfieRequired: false, grantedBy: null, grantedByName: null, grantedAt: null } } });
     apiMock.put.mockResolvedValue({ data: { employeeId: 'e1', openAttendance: true, selfieRequired: false, grantedBy: 'u1', grantedByName: 'Dev', grantedAt: '2026-09-27T05:00:00Z' } });
-    renderWithProviders(<AttendanceGrantsCard employeeId="e1" />);
+    renderWithProviders(<AttendanceGrantsCard employeeId="e1" directReport={false} />);
     fireEvent.click(await screen.findByRole('switch', { name: /Open attendance/ }));
     await waitFor(() => expect(apiMock.put).toHaveBeenCalledWith(`/orgs/${ORG}/employees/e1/attendance-grants`, { openAttendance: true, selfieRequired: false }));
     expect(await screen.findByText(/Last changed by Dev/)).toBeInTheDocument();
@@ -249,20 +249,33 @@ describe('AttendanceGrantsCard', () => {
     grant('attendance.approve');
     const dto = { employeeId: 'e1', openAttendance: false, selfieRequired: true, grantedBy: null, grantedByName: null, grantedAt: null };
     mockGet({ [`/orgs/${ORG}/employees/e1/attendance-grants`]: { data: { ...dto, selfieCheckInEnabled: false } } });
-    const { unmount } = renderWithProviders(<AttendanceGrantsCard employeeId="e1" />);
+    const { unmount } = renderWithProviders(<AttendanceGrantsCard employeeId="e1" directReport={false} />);
     expect(await screen.findByTestId('grants-selfie-off')).toHaveTextContent(/Selfie check-in is turned off for the organisation/);
     unmount();
     mockGet({ [`/orgs/${ORG}/employees/e1/attendance-grants`]: { data: { ...dto, selfieCheckInEnabled: true } } });
-    renderWithProviders(<AttendanceGrantsCard employeeId="e1" />);
+    renderWithProviders(<AttendanceGrantsCard employeeId="e1" directReport={false} />);
     await screen.findByRole('switch', { name: /Selfie required/ });
     expect(screen.queryByTestId('grants-selfie-off')).not.toBeInTheDocument();
   });
 
   it('renders nothing for someone who may not manage it', () => {
     grant('employee.view');
-    const { container } = renderWithProviders(<AttendanceGrantsCard employeeId="e1" />);
+    const { container } = renderWithProviders(<AttendanceGrantsCard employeeId="e1" directReport={false} />);
     expect(container.querySelector('[data-testid="attendance-grants"]')).toBeNull();
     expect(apiMock.get).not.toHaveBeenCalled();
+  });
+
+  it('is the line manager\'s for a direct report only: managing other people does not open somebody else\'s card', async () => {
+    grant('employee.view_team');
+    testState.teamSize = 3;
+    const { container, unmount } = renderWithProviders(<AttendanceGrantsCard employeeId="e1" directReport={false} />);
+    expect(container.querySelector('[data-testid="attendance-grants"]')).toBeNull();
+    expect(apiMock.get).not.toHaveBeenCalled();
+    unmount();
+    mockGet({ [`/orgs/${ORG}/employees/e1/attendance-grants`]: { data: { employeeId: 'e1', openAttendance: false, selfieRequired: false, grantedBy: null, grantedByName: null, grantedAt: null } } });
+    renderWithProviders(<AttendanceGrantsCard employeeId="e1" directReport />);
+    expect(await screen.findByRole('switch', { name: /Open attendance/ })).toBeInTheDocument();
+    testState.teamSize = 0;
   });
 });
 

@@ -9,7 +9,7 @@ import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { todayIso } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
-import { useOrgId, useOrgTimezone } from '@/features/me/use-me';
+import { useCan, useOrgId, useOrgTimezone } from '@/features/me/use-me';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { useEmployeeMutations } from '../api';
 import { toastJobQueued } from '../job-toast';
@@ -18,10 +18,11 @@ import { AssignManagerDialog } from './assign-manager-dialog';
 export type BulkKind = Exclude<BulkEmployeeAction['action'], 'export'> | 'export';
 
 interface ShiftRef { id: string; name: string; code: string }
-/** Shifts belong to the schedule module; the picker degrades gracefully when the endpoint is not deployed yet. */
+/** Shifts belong to the schedule module (shift.view); the picker degrades gracefully when the endpoint is not deployed yet. */
 function useShiftOptions() {
   const orgId = useOrgId();
-  const q = useQuery({ queryKey: qk.list(orgId, 'shifts', { pageSize: 200 }), queryFn: async () => { const r = await api.get<PageEnvelope<ShiftRef> | Envelope<ShiftRef[]>>(`/orgs/${orgId}/shifts`, { pageSize: 200, status: 'active' }); return Array.isArray(r.data) ? r.data : []; }, retry: false });
+  const can = useCan();
+  const q = useQuery({ queryKey: qk.list(orgId, 'shifts', { pageSize: 200 }), queryFn: async () => { const r = await api.get<PageEnvelope<ShiftRef> | Envelope<ShiftRef[]>>(`/orgs/${orgId}/shifts`, { pageSize: 200, status: 'active' }); return Array.isArray(r.data) ? r.data : []; }, retry: false, enabled: can('shift.view') });
   const options: ComboboxOption[] = (q.data ?? []).map((s) => ({ value: s.id, label: s.name, description: s.code }));
   return { ...q, options };
 }

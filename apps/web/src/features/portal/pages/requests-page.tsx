@@ -16,6 +16,7 @@ import { NoteStatusBadge, RegularisationStatusBadge, SelfieStatusBadge, VerdictC
 import { SwapsTable } from '../components/swaps-table';
 import { NoteDialog } from '../components/note-dialog';
 import { RegularisationDialog } from '../components/regularisation-dialog';
+import { usePortalAccess } from '../access';
 
 const TABS = ['reasons', 'regularisations', 'swaps', 'selfies'] as const;
 type Tab = (typeof TABS)[number];
@@ -31,6 +32,7 @@ function NoteOutcome({ n }: { n: AttendanceNoteDto }) {
 
 function ReasonsTab({ onEdit }: { onEdit: (n: AttendanceNoteDto) => void }) {
   const { t } = useTranslation(PA_NS);
+  const canAnswer = usePortalAccess().addNote;
   const q = useMyNotes();
   if (q.isError) return <ErrorState error={q.error} onRetry={() => void q.refetch()} />;
   if (q.isLoading) return <TableSkeleton cols={5} rows={3} />;
@@ -50,7 +52,7 @@ function ReasonsTab({ onEdit }: { onEdit: (n: AttendanceNoteDto) => void }) {
                 <TableCell><NoteStatusBadge status={n.status} /></TableCell>
                 <TableCell className="max-w-[240px] text-xs">{n.reviewedByName ? <span className="block">{t('notes.reviewedBy', { name: n.reviewedByName })}</span> : null}{n.reviewReason ? <span className="block truncate text-muted-foreground" title={n.reviewReason}>{n.reviewReason}</span> : null}<NoteOutcome n={n} /></TableCell>
                 <TableCell className="text-end">
-                  {n.status === 'info_requested' ? <Button size="sm" onClick={() => onEdit(n)}><MessageSquareText /> {t('notes.respond')}</Button>
+                  {!canAnswer ? null : n.status === 'info_requested' ? <Button size="sm" onClick={() => onEdit(n)}><MessageSquareText /> {t('notes.respond')}</Button>
                     : n.status === 'pending' ? <Button size="sm" variant="ghost" onClick={() => onEdit(n)}><Pencil /> {t('notes.edit')}</Button> : null}
                 </TableCell>
               </TableRow>
@@ -64,6 +66,7 @@ function ReasonsTab({ onEdit }: { onEdit: (n: AttendanceNoteDto) => void }) {
 
 function RegularisationsTab({ timezone }: { timezone: string }) {
   const { t } = useTranslation(PA_NS);
+  const canWithdraw = usePortalAccess().requestRegularisation;
   const q = useMyRegularisations();
   const { cancel } = useRegularisationMutations();
   const [withdrawing, setWithdrawing] = useState<RegularisationDto | null>(null);
@@ -87,7 +90,7 @@ function RegularisationsTab({ timezone }: { timezone: string }) {
                 </TableCell>
                 <TableCell><RegularisationStatusBadge status={r.status} />{r.status === 'pending' && r.approvalStepCount ? <span className="ms-1 text-xs text-muted-foreground tnum">{t('requests.level', { n: r.approvalCurrentStep ?? 1, count: r.approvalStepCount })}</span> : null}</TableCell>
                 <TableCell className="max-w-[240px] text-xs">{r.decidedByName ? <span className="block">{t('notes.reviewedBy', { name: r.decidedByName })}</span> : null}{r.decisionNote ? <span className="block truncate text-muted-foreground" title={r.decisionNote}>{r.decisionNote}</span> : null}{r.appliedAt ? <Badge variant="success" className="mt-1">{t('regularisation.applied')}</Badge> : null}</TableCell>
-                <TableCell className="text-end">{r.status === 'pending' ? <Button size="sm" variant="ghost" onClick={() => setWithdrawing(r)}><Undo2 /> {t('regularisation.withdraw')}</Button> : null}</TableCell>
+                <TableCell className="text-end">{r.status === 'pending' && canWithdraw ? <Button size="sm" variant="ghost" onClick={() => setWithdrawing(r)}><Undo2 /> {t('regularisation.withdraw')}</Button> : null}</TableCell>
               </TableRow>
             ))}
           </TableBody>
@@ -167,10 +170,13 @@ export default function MyRequestsPage() {
   const tz = useOrgTimezone();
   const today = todayIso(tz);
   const [params, setParams] = useSearchParams();
-  // shift swaps are an Enterprise feature (module shift_requests): without it the tab is not offered (no 403 from the page)
+  // shift swaps are an Enterprise feature (module shift_requests): without it the tab is not offered (no 403 from the page);
+  // likewise a tab whose list the role's keys do not read (access.ts) — the route opens when at least one tab remains
   const swapsOn = useModuleEnabled('shift_requests');
-  const tabs = TABS.filter((tb) => tb !== 'swaps' || swapsOn);
-  const tab: Tab = (tabs as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : 'reasons';
+  const access = usePortalAccess();
+  const offered: Record<Tab, boolean> = { reasons: access.notes, regularisations: access.regularisations, swaps: swapsOn && access.shift, selfies: access.checkin };
+  const tabs = TABS.filter((tb) => offered[tb]);
+  const tab: Tab = (tabs as readonly string[]).includes(params.get('tab') ?? '') ? (params.get('tab') as Tab) : (tabs[0] ?? 'reasons');
   const [editing, setEditing] = useState<AttendanceNoteDto | null>(null);
   const [newNote, setNewNote] = useState(false);
   const [newRegularisation, setNewRegularisation] = useState(false);
@@ -178,10 +184,10 @@ export default function MyRequestsPage() {
   return (
     <div className="page-container space-y-5">
       <PageHeader title={t('requests.title')} description={t('requests.subtitle')}
-        actions={<div className="flex flex-wrap gap-2">
-          <Button variant="outline" onClick={() => setNewNote(true)}><MessageSquareText /> {t('notes.add')}</Button>
-          <Button onClick={() => setNewRegularisation(true)}><Plus /> {t('regularisation.new')}</Button>
-        </div>} />
+        actions={access.addNote || access.requestRegularisation ? <div className="flex flex-wrap gap-2">
+          {access.addNote ? <Button variant="outline" onClick={() => setNewNote(true)}><MessageSquareText /> {t('notes.add')}</Button> : null}
+          {access.requestRegularisation ? <Button onClick={() => setNewRegularisation(true)}><Plus /> {t('regularisation.new')}</Button> : null}
+        </div> : undefined} />
       <Tabs value={tab} onValueChange={(v) => { const next = new URLSearchParams(params); next.set('tab', v); setParams(next, { replace: true }); }}>
         <TabsList aria-label={t('requests.title')} className="max-w-full overflow-x-auto">{tabs.map((tb) => <TabsTrigger key={tb} value={tb}>{t(`requests.tabs.${tb}`)}</TabsTrigger>)}</TabsList>
         <TabsContent value="reasons">{tab === 'reasons' ? <ReasonsTab onEdit={setEditing} /> : null}</TabsContent>

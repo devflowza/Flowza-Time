@@ -9,7 +9,7 @@ import { qk } from '@/lib/query-keys';
 import { supabase } from '@/lib/supabase';
 import { env } from '@/lib/env';
 import { useDebounced } from '@/hooks/use-debounced';
-import { useOrgId } from '@/features/me/use-me';
+import { useCan, useOrgId } from '@/features/me/use-me';
 
 export type EmployeeQuery = Record<string, string | number | boolean | undefined>;
 export type EmployeeDetail = EmployeeDto & { currentHistory: EmploymentHistoryDto | null };
@@ -38,9 +38,12 @@ export function employeeDetailQuery(orgId: string, id: string) {
   return { queryKey: qk.detail(orgId, ENTITY, id), queryFn: async () => (await api.get<Envelope<EmployeeDetail>>(`/orgs/${orgId}/employees/${idSegment(id)}`)).data };
 }
 
+/** The directory (employee.view, or employee.view_team for one's own record and direct reports) — also every employee picker. */
 export function useEmployees(query: EmployeeQuery, enabled = true) {
   const orgId = useOrgId();
-  return useQuery({ queryKey: qk.list(orgId, ENTITY, query), queryFn: () => api.get<PageEnvelope<EmployeeDto>>(`/orgs/${orgId}/employees`, query), placeholderData: keepPreviousData, enabled });
+  const can = useCan();
+  const readable = can('employee.view') || can('employee.view_team');
+  return useQuery({ queryKey: qk.list(orgId, ENTITY, query), queryFn: () => api.get<PageEnvelope<EmployeeDto>>(`/orgs/${orgId}/employees`, query), placeholderData: keepPreviousData, enabled: enabled && readable });
 }
 export function useEmployee(id: string | undefined) {
   const orgId = useOrgId();

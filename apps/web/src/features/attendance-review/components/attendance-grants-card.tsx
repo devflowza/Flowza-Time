@@ -3,21 +3,21 @@ import { Camera } from 'lucide-react';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle, Label, Skeleton, Switch } from '@/components/ui';
 import { fmtDateTime } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
-import { useActiveMembership, useCan, useOrgTimezone } from '@/features/me/use-me';
+import { useCan, useOrgTimezone } from '@/features/me/use-me';
 import { AR_NS } from '../i18n';
 import { useAttendanceGrants, usePutAttendanceGrants } from '../api';
 
 /**
  * Per-employee portal attendance switches on the employee profile (HR portal Prompt 4): open attendance (the employee may
  * check in anywhere with a selfie that a manager reviews) and "selfie required" (every portal punch needs one). Managed by
- * the employee's line manager or an attendance approver; the card renders nothing for anyone else (the API refuses them).
+ * the employee's line manager (`directReport`: the viewer is their primary or secondary manager) or an attendance approver —
+ * the API's rule; the card renders nothing for anyone else and does not ask.
  */
-export function AttendanceGrantsCard({ employeeId }: { employeeId: string }) {
+export function AttendanceGrantsCard({ employeeId, directReport }: { employeeId: string; directReport: boolean }) {
   const { t } = useTranslation(AR_NS);
   const can = useCan();
   const tz = useOrgTimezone();
-  const membership = useActiveMembership();
-  const mayManage = can('attendance.approve') || (membership?.isManager ?? false);
+  const mayManage = can('attendance.approve') || directReport;
   const q = useAttendanceGrants(employeeId, mayManage);
   const put = usePutAttendanceGrants(employeeId);
   if (!mayManage || q.isError) return null;

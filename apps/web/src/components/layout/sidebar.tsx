@@ -18,6 +18,7 @@ import attendanceReviewAr from '@/locales/ar/attendance-review.json';
 import attendanceAdminEn from '@/locales/en/attendance-admin.json';
 import attendanceAdminAr from '@/locales/ar/attendance-admin.json';
 import { usePendingCounts, useTeamAccess } from '@/features/team/api';
+import { usePortalAccess } from '@/features/portal/access';
 import '@/features/team/i18n';
 import '@/features/policies/i18n';
 import { Scale } from 'lucide-react';
@@ -83,20 +84,23 @@ export function Sidebar() {
   // KPI and widget — team/pending-counts.total), /me.approvals.actionable until the badge query has answered
   const team = useTeamAccess();
   const counts = usePendingCounts(team.pendingChip);
+  // self-service entries: the keys each page's endpoints admit (a page the role cannot use is not offered)
+  const portal = usePortalAccess();
   const approvalsBadge = counts.data?.total ?? approvalsSignal?.actionable ?? 0;
 
   const sections: NavSection[] = [
     { items: [{ to: '/', label: t('nav.dashboard'), icon: LayoutDashboard, permissions: ['dashboard.view'] }] },
-    // Self-service: every member linked to an employee record (the API scopes each call to that record).
+    // Self-service: every member linked to an employee record (the API scopes each call to that record); the overview and
+    // the profile need the link only, every other page the keys its endpoints admit (features/portal/access.ts).
     ...(employeeId ? [{ label: t('portal:nav.section'), items: [
       { to: '/my', label: t('portal:nav.home'), icon: House, modules: ['self_service'] },
-      { to: '/my/attendance', label: t('portal:nav.attendance'), icon: CalendarCheck, modules: ['self_service'] },
-      { to: '/my/leave', label: t('portal:nav.leave'), icon: Palmtree, modules: ['self_service', 'leave'] },
+      { to: '/my/attendance', label: t('portal:nav.attendance'), icon: CalendarCheck, modules: ['self_service'], visible: portal.attendance },
+      { to: '/my/leave', label: t('portal:nav.leave'), icon: Palmtree, modules: ['self_service', 'leave'], visible: portal.leave },
       { to: '/my/profile', label: t('portal:nav.profile'), icon: UserRound, modules: ['self_service'] },
-      { to: '/my/checkin', label: t('portal-attendance:nav.checkin'), icon: Fingerprint, modules: ['self_service', 'geofences'] },
-      { to: '/my/requests', label: t('portal-attendance:nav.requests'), icon: Inbox, modules: ['self_service'] },
-      { to: '/my/shift', label: t('portal-attendance:nav.shift'), icon: CalendarClock, modules: ['self_service'] },
-      { to: '/my/reports', label: t('portal:nav.reports'), icon: FileText, modules: ['self_service'] },
+      { to: '/my/checkin', label: t('portal-attendance:nav.checkin'), icon: Fingerprint, modules: ['self_service', 'geofences'], visible: portal.checkin },
+      { to: '/my/requests', label: t('portal-attendance:nav.requests'), icon: Inbox, modules: ['self_service'], visible: portal.requests },
+      { to: '/my/shift', label: t('portal-attendance:nav.shift'), icon: CalendarClock, modules: ['self_service'], visible: portal.shift },
+      { to: '/my/reports', label: t('portal:nav.reports'), icon: FileText, modules: ['self_service'], visible: portal.reports },
     ] as NavItem[] }] : []),
     ...(isManager || team.page ? [{ label: t('nav.sections.team'), items: [{ to: '/team', label: t('nav.team'), icon: ContactRound, modules: ['manager_workspace'] }] as NavItem[] }] : []),
     { label: t('nav.sections.workforce'), items: [

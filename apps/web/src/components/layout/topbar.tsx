@@ -4,7 +4,7 @@ import { useTranslation } from 'react-i18next';
 import { Link, useNavigate } from 'react-router';
 import { Avatar, Badge, Button, DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from '@/components/ui';
 import { useAuth } from '@/features/auth/auth-provider';
-import { useActiveMembership, useMe } from '@/features/me/use-me';
+import { useActiveMembership, useCan, useMe } from '@/features/me/use-me';
 import { useUiStore } from '@/stores/ui-store';
 import { LanguageSwitcher } from './language-switcher';
 import { useUnreadCount } from '@/features/notifications/use-notifications';
@@ -21,6 +21,7 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
   const [searchOpen, setSearchOpen] = useState(false);
   const { data: me } = useMe();
   const membership = useActiveMembership();
+  const can = useCan();
   const setActiveOrg = useUiStore((s) => s.setActiveOrg);
   const theme = useUiStore((s) => s.theme);
   const setTheme = useUiStore((s) => s.setTheme);
@@ -83,7 +84,8 @@ export function Topbar({ onOpenMobileNav }: { onOpenMobileNav: () => void }) {
               <p className="truncate text-xs">{me?.user.email}</p>
             </DropdownMenuLabel>
             <DropdownMenuSeparator />
-            <DropdownMenuItem onSelect={() => navigate('/settings/security')}>{t('nav.settings')}</DropdownMenuItem>
+            {/* the settings pages are organization.view (the profile's account button follows the same rule) */}
+            {can('organization.view') ? <DropdownMenuItem onSelect={() => navigate('/settings/security')}>{t('nav.settings')}</DropdownMenuItem> : null}
             {/* every member's own notification preferences (notifications review 8-P1-4) */}
             {membership ? <DropdownMenuItem onSelect={() => navigate('/account/notifications')}>{t('notifications.settingsLink')}</DropdownMenuItem> : null}
             <DropdownMenuSeparator />

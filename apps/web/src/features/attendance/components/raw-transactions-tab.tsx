@@ -23,7 +23,9 @@ const ALL = '__all__';
 interface DeviceRef { id: string; name: string; code: string }
 function useDeviceOptions(branchId?: string) {
   const orgId = useOrgId();
-  const enabled = useModuleEnabled('devices');
+  const can = useCan();
+  // the device filter needs device.view; the raw transactions themselves are attendance.view_raw
+  const enabled = useModuleEnabled('devices') && can('device.view');
   const q = useQuery({ queryKey: qk.list(orgId, 'devices', { pageSize: 200, branchId }), queryFn: () => api.get<PageEnvelope<DeviceRef>>(`/orgs/${orgId}/devices`, { pageSize: 200, branchId }), staleTime: 60_000, enabled });
   return { options: (q.data?.data ?? []).map((d) => ({ value: d.id, label: d.name, description: d.code })), isLoading: q.isLoading };
 }

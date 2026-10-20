@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('@/lib/supabase', async () => (await import('@/features/employees/test-mocks')).supabaseModule);
 vi.mock('@/lib/env', async () => (await import('@/features/employees/test-mocks')).envModule);
 
-import { ApiError, FEATURE_UNAVAILABLE, NETWORK_ERROR_STATUS, apiFetch, isFeatureUnavailableError, isMfaRequiredError, isNetworkError, networkFailureReason, shouldRetryQuery } from './api-client';
+import { ApiError, FEATURE_UNAVAILABLE, NETWORK_ERROR_STATUS, apiFetch, disabledModuleOf, isFeatureUnavailableError, isMfaRequiredError, isNetworkError, isPermissionDeniedError, isRecordNotFoundError, networkFailureReason, shouldRetryQuery } from './api-client';
 
 describe('shouldRetryQuery', () => {
   const network = new ApiError(NETWORK_ERROR_STATUS, 'NETWORK_ERROR', 'Could not reach the API');
@@ -36,6 +36,41 @@ describe('isMfaRequiredError', () => {
     expect(isMfaRequiredError(new ApiError(401, 'UNAUTHENTICATED', 'no', 'r1', { reason: 'MFA_REQUIRED' }))).toBe(false);
     expect(isMfaRequiredError(new Error('network'))).toBe(false);
     expect(isMfaRequiredError(null)).toBe(false);
+  });
+});
+
+describe('isPermissionDeniedError', () => {
+  it('matches the 403 FORBIDDEN of a missing permission or an out-of-scope record, never the MFA step-up', () => {
+    expect(isPermissionDeniedError(new ApiError(403, 'FORBIDDEN', 'Missing permission: attendance.view_own.', 'r1'))).toBe(true);
+    expect(isPermissionDeniedError(new ApiError(403, 'FORBIDDEN', 'This branch is outside your access scope.'))).toBe(true);
+    expect(isPermissionDeniedError(new ApiError(403, 'FORBIDDEN', 'MFA needed', 'r1', { reason: 'MFA_REQUIRED' }))).toBe(false);
+    // a policy answer with its own screen: a punch outside the geofence, regularisation switched off
+    expect(isPermissionDeniedError(new ApiError(403, 'FORBIDDEN', 'You are outside the allowed area.', 'r1', { reason: 'OUTSIDE_GEOFENCE' }))).toBe(false);
+    expect(isPermissionDeniedError(new ApiError(403, 'FORBIDDEN', 'Regularisation requests are turned off for this organisation.', 'r1', { reason: 'REGULARISATION_DISABLED' }))).toBe(false);
+    // an authorisation refusal that explains itself is still the role's
+    expect(isPermissionDeniedError(new ApiError(403, 'FORBIDDEN', 'You cannot set your own leave allocation; ask another HR user.', 'r1', { issues: [] }))).toBe(true);
+    // a module the organisation does not have is its own state (disabledModuleOf)
+    expect(isPermissionDeniedError(new ApiError(403, 'FEATURE_DISABLED', 'off', 'r1', { reason: 'MODULE_DISABLED', module: 'leave' }))).toBe(false);
+    expect(isPermissionDeniedError(new ApiError(401, 'UNAUTHENTICATED', 'no'))).toBe(false);
+    expect(isPermissionDeniedError(new ApiError(404, 'NOT_FOUND', 'gone'))).toBe(false);
+    expect(isPermissionDeniedError(new Error('Missing permission'))).toBe(false);
+  });
+});
+
+describe('isRecordNotFoundError', () => {
+  it('matches a record the API does not show, never the router\'s 404 of a path it does not serve', () => {
+    expect(isRecordNotFoundError(new ApiError(404, 'NOT_FOUND', 'Device not found.'))).toBe(true);
+    expect(isRecordNotFoundError(new ApiError(404, FEATURE_UNAVAILABLE, 'Not available yet'))).toBe(false);
+    expect(isRecordNotFoundError(new ApiError(403, 'FORBIDDEN', 'Missing permission: device.view.'))).toBe(false);
+  });
+});
+
+describe('disabledModuleOf', () => {
+  it('names the module of the API\'s MODULE_DISABLED answer, and nothing else', () => {
+    expect(disabledModuleOf(new ApiError(403, 'FEATURE_DISABLED', 'off', 'r1', { reason: 'MODULE_DISABLED', module: 'leave' }))).toBe('leave');
+    expect(disabledModuleOf(new ApiError(403, 'FEATURE_DISABLED', 'The feature "x" is not enabled for this organisation.', 'r1', { feature: 'x' }))).toBeNull();
+    expect(disabledModuleOf(new ApiError(403, 'FORBIDDEN', 'Missing permission: leave.view.'))).toBeNull();
+    expect(disabledModuleOf(null)).toBeNull();
   });
 });
 

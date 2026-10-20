@@ -1,6 +1,7 @@
 import { AlertTriangle, Hourglass } from 'lucide-react';
 import { useTranslation } from 'react-i18next';
-import { ApiError, isFeatureUnavailableError, isNetworkError, networkFailureReason } from '@/lib/api-client';
+import { ApiError, disabledModuleOf, isFeatureUnavailableError, isNetworkError, isPermissionDeniedError, isRecordNotFoundError, networkFailureReason } from '@/lib/api-client';
+import { ModuleDisabled, PermissionDenied, RecordNotFound } from './access-state';
 import { Button } from './button';
 
 const NETWORK_HINT_KEYS = {
@@ -29,6 +30,13 @@ export function ErrorState({ error, onRetry }: { error: unknown; onRetry?: () =>
       </div>
     );
   }
+  // The role does not reach this data (403 FORBIDDEN) or the organisation does not have the module: an answer about access,
+  // not a failure — no alarm colours, no retry (the answer will not change) and no request id to report.
+  if (isPermissionDeniedError(error)) return <div role="status"><PermissionDenied scope="section" /></div>;
+  const disabledModule = disabledModuleOf(error);
+  if (disabledModule) return <div role="status"><ModuleDisabled modules={[disabledModule]} /></div>;
+  // a record that is gone or outside the member's scope (RLS answers both with 404): no retry will bring it back
+  if (isRecordNotFoundError(error)) return <div role="status"><RecordNotFound /></div>;
   const requestId = error instanceof ApiError ? error.requestId : undefined;
   const message = error instanceof ApiError ? error.message : t('common.error');
   // Nothing reached the API, so there is no request id to quote — asking for one that is always "—" sends the reader
