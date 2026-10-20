@@ -24,6 +24,7 @@ import { NoteDialog } from '../components/note-dialog';
 import { NoteStatusBadge } from '../components/attendance-badges';
 import { SelfStats } from '../components/self-stats';
 import { activeNotesByDate, needsReason, reasonRequired, suggestedCategory } from '../notes-model';
+import { usePortalAccess } from '../access';
 
 // HR portal Prompt 4 adds the last-30-days table (with reasons) and the employee's own statistics
 const TABS = ['calendar', 'recent', 'log', 'stats', 'activity', 'corrections'] as const;
@@ -81,7 +82,9 @@ function Last30Days({ today, onSelect, onReason, rules }: { today: string; onSel
   const from = DateTime.fromISO(today).minus({ days: 29 }).toISODate() ?? today;
   const current = useSelfAttendance(today.slice(0, 7));
   const previous = useSelfAttendance(from.slice(0, 7));
-  const notes = useMyNotes({ from, to: today });
+  // the reasons column reads the employee's notes (attendance.note or attendance.view_own); giving one needs attendance.note
+  const access = usePortalAccess();
+  const notes = useMyNotes({ from, to: today }, access.notes);
   const byDate = useMemo(() => activeNotesByDate(notes.data ?? []), [notes.data]);
   const days = useMemo(() => {
     const all = new Map<string, SelfDayDto>();
@@ -95,7 +98,7 @@ function Last30Days({ today, onSelect, onReason, rules }: { today: string; onSel
     <div className="rounded-xl border bg-card shadow-card" data-testid="last-30-days">
       <div className="overflow-x-auto">
         <Table>
-          <TableHeader><TableRow>{(['date', 'status', 'in', 'out', 'worked', 'flags'] as const).map((c) => <TableHead key={c}>{t(`attendance.columns.${c}`)}</TableHead>)}<TableHead>{tpa('attendance.reasonColumn')}</TableHead></TableRow></TableHeader>
+          <TableHeader><TableRow>{(['date', 'status', 'in', 'out', 'worked', 'flags'] as const).map((c) => <TableHead key={c}>{t(`attendance.columns.${c}`)}</TableHead>)}{access.notes ? <TableHead>{tpa('attendance.reasonColumn')}</TableHead> : null}</TableRow></TableHeader>
           <TableBody>
             {days.map((r) => {
               const note = byDate.get(r.attendanceDate) ?? null;
@@ -109,19 +112,19 @@ function Last30Days({ today, onSelect, onReason, rules }: { today: string; onSel
                   <TableCell className="text-xs tnum" dir="ltr">{fmtTime(r.lastOutAt, r.timezone)}</TableCell>
                   <TableCell className="text-xs tnum">{fmtMinutes(r.workedMinutes)}</TableCell>
                   <TableCell><FlagChips flags={r.flags} max={2} size="xs" /></TableCell>
-                  <TableCell>
+                  {access.notes ? <TableCell>
                     {note ? (
                       <span className="flex flex-wrap items-center gap-1.5">
                         <NoteStatusBadge status={note.status} />
-                        {note.status === 'info_requested' || note.status === 'pending' ? <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onReason({ day: r, note })}>{note.status === 'info_requested' ? tpa('notes.respond') : tpa('notes.edit')}</Button> : null}
+                        {access.addNote && (note.status === 'info_requested' || note.status === 'pending') ? <Button size="sm" variant="ghost" className="h-7 px-2 text-xs" onClick={() => onReason({ day: r, note })}>{note.status === 'info_requested' ? tpa('notes.respond') : tpa('notes.edit')}</Button> : null}
                       </span>
                     ) : (
                       <span className="flex flex-wrap items-center gap-1.5">
                         {required ? <Badge variant="danger" data-testid="reason-required">{tpa('notes.required')}</Badge> : null}
-                        <Button size="sm" variant={asks ? 'outline' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => onReason({ day: r, note: null })}><MessageSquarePlus /> {asks ? tpa('notes.add') : tpa('notes.addShort')}</Button>
+                        {access.addNote ? <Button size="sm" variant={asks ? 'outline' : 'ghost'} className="h-7 px-2 text-xs" onClick={() => onReason({ day: r, note: null })}><MessageSquarePlus /> {asks ? tpa('notes.add') : tpa('notes.addShort')}</Button> : null}
                       </span>
                     )}
-                  </TableCell>
+                  </TableCell> : null}
                 </TableRow>
               );
             })}
@@ -189,7 +192,8 @@ export default function MyAttendancePage() {
   const [correction, setCorrection] = useState<{ date: string; timezone: string } | null>(null);
   const [reason, setReason] = useState<{ day: SelfDayDto; note: AttendanceNoteDto | null } | null>(null);
   const { t: tpa } = useTranslation(PA_NS);
-  const monthNotes = useMyNotes({ from: `${month}-01`, to: DateTime.fromISO(`${month}-01`).endOf('month').toISODate() ?? `${month}-28` }, tab === 'calendar');
+  const notesAccess = usePortalAccess().notes;
+  const monthNotes = useMyNotes({ from: `${month}-01`, to: DateTime.fromISO(`${month}-01`).endOf('month').toISODate() ?? `${month}-28` }, tab === 'calendar' && notesAccess);
   const totals = q.data?.totals;
   const set = (patch: Record<string, string | null>) => {
     const next = new URLSearchParams(params);

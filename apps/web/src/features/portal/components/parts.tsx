@@ -2,10 +2,11 @@ import { Link } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { UserX } from 'lucide-react';
 import type { SelfLeaveBalanceDto } from '@flowza/contracts';
-import { EmptyState } from '@/components/ui';
+import { EmptyState, PermissionDeniedPage } from '@/components/ui';
 import { cn } from '@/lib/utils';
 import { useEmployeeId } from '@/features/me/use-me';
 import { balanceShares, fmtDays } from '../model';
+import { usePortalAccess, type PortalPage } from '../access';
 
 // one colour per leave status everywhere (INFO_REQUESTED indigo): the leave feature owns the badge
 export { LeaveStatusBadge } from '@/features/leave/components/leave-status';
@@ -45,6 +46,13 @@ export function RequireEmployeeLink({ children }: { children: React.ReactNode })
   const { t: tc } = useTranslation();
   const employeeId = useEmployeeId();
   if (!employeeId) return <div className="page-container"><EmptyState icon={UserX} title={t('notLinked.title')} description={t('notLinked.hint')} action={<Link to="/" className="text-sm font-medium text-primary hover:underline">{tc('nav.dashboard')}</Link>} /></div>;
+  return <>{children}</>;
+}
+
+/** A portal page the role's keys do not open (usePortalAccess): "permission denied", like every other page, not a failed request. */
+export function RequirePortalAccess({ page, children }: { page: PortalPage | undefined; children: React.ReactNode }) {
+  const access = usePortalAccess();
+  if (page && !access[page]) return <PermissionDeniedPage />;
   return <>{children}</>;
 }
 

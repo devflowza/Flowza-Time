@@ -25,6 +25,31 @@ export function isMfaRequiredError(error: unknown): boolean {
   return error instanceof ApiError && error.status === 403 && error.details?.reason === 'MFA_REQUIRED';
 }
 
+/**
+ * True for the API's 403 FORBIDDEN: the caller's role does not carry the permission, or the record is outside their branch
+ * scope. That is an answer about access, not a failure — a retry gets the same answer and support has nothing to look up —
+ * so screens show "permission denied" instead of an error with a request id. A 403 that carries a `details.reason` is a
+ * policy answer with its own screen, not the role's: the MFA step-up, a punch outside the geofence, regularisation or selfie
+ * check-in switched off (apps/api services/portal).
+ */
+export function isPermissionDeniedError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 403 && error.code === 'FORBIDDEN' && typeof error.details?.reason !== 'string';
+}
+
+/**
+ * True for the API's 404 NOT_FOUND of a record: it does not exist, or row-level security hides it because it is outside the
+ * caller's scope (another branch, not a direct report). Never the router's 404 (FEATURE_UNAVAILABLE).
+ */
+export function isRecordNotFoundError(error: unknown): boolean {
+  return error instanceof ApiError && error.status === 404 && error.code === 'NOT_FOUND';
+}
+
+/** The module key of the API's 403 for a module the organisation does not have (FEATURE_DISABLED, `details.reason` MODULE_DISABLED). */
+export function disabledModuleOf(error: unknown): string | null {
+  if (!(error instanceof ApiError) || error.status !== 403 || error.details?.reason !== 'MODULE_DISABLED') return null;
+  return typeof error.details.module === 'string' ? error.details.module : null;
+}
+
 /** True when the API could not be reached at all, as opposed to answering with an error. */
 export function isNetworkError(error: unknown): boolean {
   return error instanceof ApiError && error.status === NETWORK_ERROR_STATUS;

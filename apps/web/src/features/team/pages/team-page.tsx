@@ -3,7 +3,7 @@ import { Link, useSearchParams } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { UsersRound } from 'lucide-react';
 import { PageHeader } from '@/components/layout/page-header';
-import { Badge, EmptyState, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
+import { Badge, EmptyState, PermissionDeniedPage, Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui';
 import { useActiveMembership } from '@/features/me/use-me';
 import { RecordDialog, type CorrectionPreset } from '@/features/attendance/components/record-dialog';
 import { CorrectionDialog } from '@/features/corrections/components/correction-dialog';
@@ -40,6 +40,8 @@ export default function TeamPage() {
   if (!access.hasReports) {
     return <div className="page-container"><EmptyState icon={UsersRound} title={t('notManager')} description={t('notManagerHint')} action={<Link to="/" className="text-sm font-medium text-primary hover:underline">{tc('nav.dashboard')}</Link>} /></div>;
   }
+  // a line manager whose role carries no key that reads the team (the menu does not offer the page): their approvals stay in /approvals
+  if (!access.page) return <PermissionDeniedPage />;
 
   const visible = TABS.filter((tb) => (tb === 'attendance' ? access.attendance : tb === 'leave' ? access.leave : tb === 'delegation' ? access.delegate : true));
   const requested = params.get('tab') ?? 'today';

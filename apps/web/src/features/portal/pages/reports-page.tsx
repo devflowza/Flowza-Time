@@ -31,7 +31,7 @@ export default function MyReportsPage() {
   const tz = useOrgTimezone();
   const orgId = useOrgId();
   const [page, setPage] = useState(1);
-  const [pageSize, setPageSize] = useState(20);
+  const [pageSize, setPageSize] = useState(25);
   const q = useMyReports({ page, pageSize });
   // ?view=<id> keeps the viewer open while it is in the URL; closing the viewer removes it
   const [params, setParams] = useSearchParams();

@@ -5,6 +5,7 @@ import type { SelfOverviewDto } from '@flowza/contracts';
 import { Badge, Button, Card } from '@/components/ui';
 import { fmtTime } from '@/lib/format';
 import { PA_NS } from '../attendance-i18n';
+import { usePortalAccess } from '../access';
 
 /**
  * The portal home's check-in strip (HR portal Prompt 4): today's punch state and a button to the check-in page. Rendered
@@ -33,17 +34,18 @@ export function HomePunchCard({ overview }: { overview: SelfOverviewDto | undefi
   );
 }
 
-/** Reasons, regularisations and swaps waiting on someone — each links to its tab of My requests. */
+/** Reasons, regularisations and swaps waiting on someone — each links to its tab of My requests, when the role opens it. */
 export function PendingSelfItems({ overview }: { overview: SelfOverviewDto | undefined }) {
   const { t } = useTranslation(PA_NS);
+  const access = usePortalAccess();
   if (!overview) return null;
   const items = [
-    { n: overview.reasonsRequired ?? 0, key: 'home.reasonsRequired', to: '/my/attendance?tab=recent', tone: 'danger' as const },
-    { n: overview.infoRequestedNotes ?? 0, key: 'home.infoRequested', to: '/my/requests?tab=reasons', tone: 'info' as const },
-    { n: overview.pendingNotes ?? 0, key: 'home.pendingNotes', to: '/my/requests?tab=reasons', tone: 'warning' as const },
-    { n: overview.pendingRegularisations ?? 0, key: 'home.pendingRegularisations', to: '/my/requests?tab=regularisations', tone: 'warning' as const },
-    { n: overview.pendingSwaps ?? 0, key: 'home.pendingSwaps', to: '/my/requests?tab=swaps', tone: 'warning' as const },
-  ].filter((i) => i.n > 0);
+    { n: overview.reasonsRequired ?? 0, key: 'home.reasonsRequired', to: '/my/attendance?tab=recent', tone: 'danger' as const, open: access.attendance && access.addNote },
+    { n: overview.infoRequestedNotes ?? 0, key: 'home.infoRequested', to: '/my/requests?tab=reasons', tone: 'info' as const, open: access.notes },
+    { n: overview.pendingNotes ?? 0, key: 'home.pendingNotes', to: '/my/requests?tab=reasons', tone: 'warning' as const, open: access.notes },
+    { n: overview.pendingRegularisations ?? 0, key: 'home.pendingRegularisations', to: '/my/requests?tab=regularisations', tone: 'warning' as const, open: access.regularisations },
+    { n: overview.pendingSwaps ?? 0, key: 'home.pendingSwaps', to: '/my/requests?tab=swaps', tone: 'warning' as const, open: access.shift },
+  ].filter((i) => i.n > 0 && i.open);
   if (items.length === 0) return null;
   return (
     <div className="flex flex-wrap gap-2" data-testid="home-pending">

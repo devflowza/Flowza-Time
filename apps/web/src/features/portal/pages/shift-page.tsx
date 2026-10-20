@@ -13,6 +13,7 @@ import { ShiftChangeDialog } from '@/features/shift-requests/components/shift-ch
 import { ShiftChangesTable } from '@/features/shift-requests/components/shift-changes-table';
 import { PA_NS } from '../attendance-i18n';
 import { useMyShift, useMySwaps } from '../attendance-api';
+import { usePortalAccess } from '../access';
 import { dayShiftText, swappableDays } from '../shift-format';
 import { SwapDialog } from '../components/swap-dialog';
 import { SectionTitle } from '../components/parts';
@@ -55,9 +56,11 @@ export default function MyShiftPage() {
   const { t: ts } = useTranslation(SR_NS);
   const requestsOn = useModuleEnabled('shift_requests');
   const doubleOn = useModuleEnabled('advanced_scheduling');
+  // the page opens with the shift keys (route guard); the change requests and the two actions have keys of their own
+  const access = usePortalAccess();
   const q = useMyShift();
   const swaps = useMySwaps(requestsOn);
-  const changes = useMyShiftChanges(requestsOn);
+  const changes = useMyShiftChanges(requestsOn && access.shiftChanges);
   const [swapOpen, setSwapOpen] = useState(false);
   const [changeOpen, setChangeOpen] = useState(false);
   const d = q.data;
@@ -68,10 +71,10 @@ export default function MyShiftPage() {
   return (
     <div className="page-container space-y-5">
       <PageHeader title={t('shift.title')} description={t('shift.subtitle')}
-        actions={requestsOn ? (
+        actions={requestsOn && (access.requestShiftChange || access.requestSwap) ? (
           <div className="flex flex-wrap gap-2">
-            <Button variant="outline" onClick={() => setChangeOpen(true)} disabled={!d}><Repeat /> {ts('request')}</Button>
-            <Button onClick={() => setSwapOpen(true)} disabled={!d || !canSwap}><ArrowLeftRight /> {t('shift.requestSwap')}</Button>
+            {access.requestShiftChange ? <Button variant="outline" onClick={() => setChangeOpen(true)} disabled={!d}><Repeat /> {ts('request')}</Button> : null}
+            {access.requestSwap ? <Button onClick={() => setSwapOpen(true)} disabled={!d || !canSwap}><ArrowLeftRight /> {t('shift.requestSwap')}</Button> : null}
           </div>
         ) : undefined} />
 
@@ -109,10 +112,12 @@ export default function MyShiftPage() {
 
       {requestsOn ? (
         <>
-          <section aria-label={ts('mine')} className="min-w-0 space-y-2">
-            <h2 className="text-sm font-semibold">{ts('mine')}</h2>
-            {changes.isLoading ? <Skeleton className="h-24 w-full" /> : changes.data && changes.data.length ? <ShiftChangesTable rows={changes.data} /> : <p className="text-sm text-muted-foreground">{ts('emptyHint')}</p>}
-          </section>
+          {access.shiftChanges ? (
+            <section aria-label={ts('mine')} className="min-w-0 space-y-2">
+              <h2 className="text-sm font-semibold">{ts('mine')}</h2>
+              {changes.isLoading ? <Skeleton className="h-24 w-full" /> : changes.data && changes.data.length ? <ShiftChangesTable rows={changes.data} /> : <p className="text-sm text-muted-foreground">{ts('emptyHint')}</p>}
+            </section>
+          ) : null}
           <section aria-label={t('shift.swaps')} className="min-w-0 space-y-2">
             <h2 className="text-sm font-semibold">{t('shift.swaps')}</h2>
             {swaps.isLoading ? <Skeleton className="h-24 w-full" /> : swaps.data && swaps.data.length ? <SwapsTable rows={swaps.data} /> : <p className="text-sm text-muted-foreground">{t('swap.emptyHint')}</p>}
@@ -120,8 +125,8 @@ export default function MyShiftPage() {
         </>
       ) : null}
 
-      {requestsOn && swapOpen && d ? <SwapDialog open onOpenChange={setSwapOpen} days={days} /> : null}
-      {requestsOn && changeOpen && d ? <ShiftChangeDialog open onOpenChange={setChangeOpen} today={d.date} additionalAllowed={doubleOn} /> : null}
+      {requestsOn && access.requestSwap && swapOpen && d ? <SwapDialog open onOpenChange={setSwapOpen} days={days} /> : null}
+      {requestsOn && access.requestShiftChange && changeOpen && d ? <ShiftChangeDialog open onOpenChange={setChangeOpen} today={d.date} additionalAllowed={doubleOn} /> : null}
     </div>
   );
 }

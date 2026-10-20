@@ -18,3 +18,4 @@ export * from './table';
 export * from './empty-state';
 export * from './error-state';
 export * from './stat-card';
+export * from './access-state';
