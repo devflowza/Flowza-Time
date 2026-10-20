@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { dayBoundaryGuide, flexibleGuide, joinMinutes, splitMinutes } from './flexible-guide';
+import { dayBoundaryGuide, flexibleGuide, flexStartGuide, joinMinutes, splitMinutes } from './flexible-guide';
+
+describe('flexStartGuide — a fixed shift\'s flexible start band', () => {
+  it('starts between the shift start and start + band; the latest start leaves at the end + band', () => {
+    expect(flexStartGuide('07:00', '14:00', 120)).toEqual({ from: '07:00', until: '09:00', out: '16:00' });
+    expect(flexStartGuide('22:00', '06:00', 90)).toEqual({ from: '22:00', until: '23:30', out: '07:30' });
+  });
+  it('says nothing without times or a band', () => {
+    expect(flexStartGuide('07:00', '14:00', 0)).toBeNull();
+    expect(flexStartGuide(undefined, '14:00', 60)).toBeNull();
+  });
+});
 
 describe('flexibleGuide — the flexible shift rule in the author\'s numbers', () => {
   it('shows the check-out as check-in + required minutes + unpaid breaks', () => {

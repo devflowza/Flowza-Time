@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, inclusiveDayCount, REPORT_TYPE_DEFINITIONS } from './dto-features/reports.js';
 import { unmatchedAssignBlockedReason } from './dto-features/hr-workspace.js';
-import { reportScheduleFiltersSchema } from './dto-features/report-schedules.js';
+import { createReportScheduleSchema, PERIOD_RULES_BY_CADENCE, reportRecipientsSchema, reportScheduleFiltersSchema, SCHEDULABLE_REPORT_TYPES } from './dto-features/report-schedules.js';
+import { dailyRegisterExportSchema } from './dto-features/attendance.js';
 import { createReportRequestSchema } from './reports.js';
 
 /**
@@ -57,5 +58,45 @@ describe('6a-D4 Assign on devices whose punches never use the device mapping', (
     expect(unmatchedAssignBlockedReason('mock')).toBeNull();
     expect(unmatchedAssignBlockedReason('zkteco_push')).toBeNull();
     expect(unmatchedAssignBlockedReason('')).toBeNull();
+  });
+});
+
+describe('daily schedules, line-manager recipients and the irregular cases report (migration 20261019000500)', () => {
+  const base = { name: 'Morning irregular cases', reportType: 'irregularities_report', format: 'xlsx', cadence: 'daily', runDay: 0, runTime: '07:30', periodRule: 'previous_day', recipients: { lineManagers: true } };
+  it('a daily schedule covers yesterday (or month to date) and has no run day', () => {
+    const ok = createReportScheduleSchema.safeParse(base);
+    expect(ok.success).toBe(true);
+    expect(ok.data?.recipients).toEqual({ userIds: [], roleKeys: [], lineManagers: true });
+    expect(createReportScheduleSchema.safeParse({ ...base, periodRule: 'month_to_date' }).success).toBe(true);
+    expect(createReportScheduleSchema.safeParse({ ...base, periodRule: 'previous_month' }).success).toBe(false);
+    expect(createReportScheduleSchema.safeParse({ ...base, runDay: 3 }).success).toBe(false);
+    // previous_day belongs to the daily cadence only
+    expect(createReportScheduleSchema.safeParse({ ...base, cadence: 'monthly', runDay: 1 }).success).toBe(false);
+    expect(PERIOD_RULES_BY_CADENCE.daily).toEqual(['previous_day', 'month_to_date']);
+  });
+  it('the Daily Report, the late / absence / missed punch reports and the irregular cases report can be scheduled', () => {
+    for (const t of ['daily_attendance', 'late_report', 'absence_report', 'missing_punch_report', 'irregularities_report'] as const) expect(SCHEDULABLE_REPORT_TYPES).toContain(t);
+    expect(createReportScheduleSchema.safeParse({ ...base, reportType: 'daily_attendance' }).success).toBe(true);
+    // a whole-month type cannot run on yesterday
+    expect(createReportScheduleSchema.safeParse({ ...base, reportType: 'monthly_summary' }).success).toBe(false);
+    const irregular = REPORT_TYPE_DEFINITIONS.find((d) => d.key === 'irregularities_report')!;
+    expect(irregular).toMatchObject({ status: 'available', requiredParameters: ['from', 'to'], optionalParameters: ['branchId', 'departmentId', 'employeeIds', 'status'], permissions: ['report.view', 'attendance.view'] });
+    // the reports that honour the status search offer it in the form
+    expect(REPORT_TYPE_DEFINITIONS.filter((d) => d.optionalParameters.includes('status')).map((d) => d.key).sort()).toEqual(['absence_report', 'daily_attendance', 'employee_attendance', 'irregularities_report', 'late_report']);
+  });
+  it('line managers alone are a recipient list; nothing at all is not', () => {
+    expect(reportRecipientsSchema.safeParse({ lineManagers: true }).success).toBe(true);
+    expect(reportRecipientsSchema.safeParse({ lineManagers: false }).success).toBe(false);
+    expect(reportRecipientsSchema.safeParse({}).success).toBe(false);
+  });
+  it('the server-written scope markers never come from a client: the parameters schema strips them', () => {
+    const parsed = createReportRequestSchema.parse({ reportType: 'late_report', parameters: { from: '2026-10-01', to: '2026-10-18', teamManagerEmployeeId: 'x', selfEmployeeId: 'y', status: 'ABSENT', flag: 'LATE' } });
+    expect(parsed.parameters).toEqual({ from: '2026-10-01', to: '2026-10-18', status: 'ABSENT', flag: 'LATE' });
+    expect(createReportRequestSchema.safeParse({ reportType: 'daily_attendance', parameters: { from: '2026-10-01', flag: 'NOPE' } }).success).toBe(false);
+  });
+  it('the register export takes the register filters and a spreadsheet format only', () => {
+    expect(dailyRegisterExportSchema.parse({ date: '2026-10-18' })).toEqual({ date: '2026-10-18', format: 'xlsx' });
+    expect(dailyRegisterExportSchema.safeParse({ date: '2026-10-18', format: 'pdf' }).success).toBe(false);
+    expect(dailyRegisterExportSchema.safeParse({ date: '2026-10-18', status: 'MISSING_PUNCH', flag: 'LATE', search: 'ali', format: 'csv' }).success).toBe(true);
   });
 });

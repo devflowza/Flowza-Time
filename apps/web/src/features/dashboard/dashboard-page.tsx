@@ -51,7 +51,7 @@ export default function DashboardPage() {
   const points = useMemo(() => toTrendPoints(trends.data ?? []), [trends.data]);
 
   const data: DashboardData = {
-    date, isToday,
+    date, isToday, locationId,
     summary: summary.data, summaryLoading: summary.isLoading,
     points, trendsLoading: trends.isLoading, trendsError: trends.isError ? trends.error : null, retryTrends: () => void trends.refetch(),
     range, setRange,

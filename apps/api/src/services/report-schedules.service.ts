@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { sql, type Selectable } from 'kysely';
 import {
-  createReportScheduleSchema, DAILY_REPORT_MAX_DAYS, REPORT_DELIVERY_QUEUE, dailyReportRangeTooLong, REPORT_RECIPIENT_MAX_RESOLVED, REPORT_SHARES_PER_HOUR, REPORT_TYPE_DEFINITIONS, SCHEDULABLE_REPORT_TYPES,
+  createReportScheduleSchema, DAILY_REPORT_MAX_DAYS, DAILY_SCHEDULE_RUN_DAY, REPORT_DELIVERY_QUEUE, dailyReportRangeTooLong, REPORT_RECIPIENT_MAX_RESOLVED, REPORT_SHARES_PER_HOUR, REPORT_TYPE_DEFINITIONS, SCHEDULABLE_REPORT_TYPES,
   type CreateReportScheduleInput, type ReportDeliveryChannel, type ReportDeliveryDto, type ReportDeliveryMode, type ReportDeliveryStatus, type ReportPeriodRule, type ReportRecipientOptionsDto,
   type ReportRecipients, type ReportRunNowResultDto, type ReportRunSummaryDto, type ReportScheduleCadence, type ReportScheduleDto, type ReportScheduleFilters, type ReportScheduleRunStatus,
   type ReportShareResultDto, type ReportType, type ReportTypeDefinition, type ShareReportInput, type UpdateReportScheduleInput,
@@ -115,8 +115,33 @@ function memberScopeSql(grant: MembershipGrant) {
 }
 
 /**
+ * The SQL predicate "this membership is a line manager": its employee record (active) is the PRIMARY manager of at least one
+ * active employee — the members `recipients.lineManagers` reaches (the worker resolves the same set at run time).
+ */
+const IS_LINE_MANAGER = sql<boolean>`(m.employee_id is not null
+  and exists (select 1 from public.employees me where me.id = m.employee_id and me.organization_id = m.organization_id and me.deleted_at is null and me.employment_status not in ('terminated', 'resigned'))
+  and exists (select 1 from public.employees e where e.organization_id = m.organization_id and e.deleted_at is null
+                and e.employment_status not in ('terminated', 'resigned') and e.manager_employee_id = m.employee_id))`;
+
+/** Active line managers of the organisation right now (members with a login whose employee record manages somebody). */
+async function lineManagerCount(trx: Trx, orgId: string): Promise<number> {
+  return withSystemScope(trx, orgId, async (t) => toCount((await sql<{ n: string }>`
+    select count(*) as n from public.org_memberships m where m.organization_id = ${orgId}::uuid and m.status = 'active' and ${IS_LINE_MANAGER}`.execute(t)).rows[0]?.n));
+}
+
+/** At least one recipient now: somebody chosen by name or role, or — for "each employee's line manager" — a line manager. */
+async function requireSomeRecipient(trx: Trx, orgId: string, recipients: ReportRecipients, explicit: string[]): Promise<void> {
+  if (explicit.length > 0 || (recipients.lineManagers && (await lineManagerCount(trx, orgId)) > 0)) return;
+  if (recipients.lineManagers && recipients.userIds.length + recipients.roleKeys.length === 0) {
+    throw errors.validation('Nobody in this organisation is a line manager yet: set the manager on the employee records, or choose the recipients by name or role.', { issues: [{ path: 'recipients.lineManagers', message: 'No line managers' }] });
+  }
+  throw errors.validation('None of the chosen recipients is an active member.', { issues: [{ path: 'recipients', message: 'No active recipients' }] });
+}
+
+/**
  * Active members the recipient list resolves to right now (explicit users + holders of the roles); unknown ids / roles refused,
- * and explicit users outside a branch-scoped author's member scope refused like unknown ones (the picker never showed them).
+ * and explicit users outside a branch-scoped author's member scope refused like unknown ones (the picker never showed them). Line
+ * managers (`recipients.lineManagers`) are resolved by the worker at every run and are not part of this list.
  */
 async function resolveRecipients(trx: Trx, orgId: string, recipients: ReportRecipients, grant?: MembershipGrant): Promise<string[]> {
   return withSystemScope(trx, orgId, async (t) => {
@@ -161,7 +186,7 @@ function toScheduleDto(s: ScheduleRow, timing: { timezone: string; firstDayOfWee
     id: s.id, name: s.name, reportType: s.reportType as ReportType, format: s.format, filters: jsonObject(s.filters) as ReportScheduleFilters, branchId: s.branchId,
     cadence: s.cadence as ReportScheduleCadence, runDay: s.runDay, runTime: String(s.runTime).slice(0, 5), periodRule: s.periodRule as ReportPeriodRule,
     customFromDay: s.customFromDay, customToDay: s.customToDay,
-    recipients: { userIds: Array.isArray(recipients['userIds']) ? (recipients['userIds'] as string[]) : [], roleKeys: Array.isArray(recipients['roleKeys']) ? (recipients['roleKeys'] as string[]) : [] },
+    recipients: { userIds: Array.isArray(recipients['userIds']) ? (recipients['userIds'] as string[]) : [], roleKeys: Array.isArray(recipients['roleKeys']) ? (recipients['roleKeys'] as string[]) : [], lineManagers: recipients['lineManagers'] === true },
     channels: s.channels as ReportDeliveryChannel[], isActive: s.isActive, nextRunAt: isoDateTimeOrNull(s.nextRunAt), lastRunAt: isoDateTimeOrNull(s.lastRunAt),
     lastStatus: (s.lastStatus as ReportScheduleRunStatus | null) ?? null, lastError: s.lastError, lastSummary: summary as ReportRunSummaryDto | null, nextPeriod, timezone: timing.timezone,
     createdBy: s.createdBy, createdByName: s.createdBy ? names.get(s.createdBy) ?? null : null, createdAt: isoDateTime(s.createdAt), updatedAt: isoDateTime(s.updatedAt),
@@ -234,9 +259,10 @@ export async function getSchedule(deps: ApiDeps, actor: Actor, orgId: string, id
 function scheduleColumns(input: CreateReportScheduleInput, filters: Record<string, unknown>, nextRunAt: Date | null) {
   return {
     name: input.name, reportType: input.reportType, format: input.format, filters: JSON.stringify(filters), branchId: typeof filters['branchId'] === 'string' ? (filters['branchId'] as string) : null,
-    cadence: input.cadence, runDay: input.runDay, runTime: input.runTime, periodRule: input.periodRule,
+    // a daily schedule has no run day (report_schedules_run_day_check: 0)
+    cadence: input.cadence, runDay: input.cadence === 'daily' ? DAILY_SCHEDULE_RUN_DAY : input.runDay, runTime: input.runTime, periodRule: input.periodRule,
     customFromDay: input.periodRule === 'custom' ? input.customFromDay ?? null : null, customToDay: input.periodRule === 'custom' ? input.customToDay ?? null : null,
-    recipients: JSON.stringify({ userIds: [...new Set(input.recipients.userIds)], roleKeys: [...new Set(input.recipients.roleKeys)] }), channels: input.channels, isActive: input.isActive,
+    recipients: JSON.stringify({ userIds: [...new Set(input.recipients.userIds)], roleKeys: [...new Set(input.recipients.roleKeys)], ...(input.recipients.lineManagers ? { lineManagers: true } : {}) }), channels: input.channels, isActive: input.isActive,
     nextRunAt,
   };
 }
@@ -247,7 +273,7 @@ export async function createSchedule(deps: ApiDeps, actor: Actor, orgId: string,
   return runUser(deps.db, actor, async (trx) => {
     const filters = await validateSpec(trx, orgId, grant, input.reportType, input.format, input.filters as Record<string, unknown>, { requireNonPeriod: true });
     const recipients = await resolveRecipients(trx, orgId, input.recipients, grant);
-    if (recipients.length === 0) throw errors.validation('None of the chosen recipients is an active member.', { issues: [{ path: 'recipients', message: 'No active recipients' }] });
+    await requireSomeRecipient(trx, orgId, input.recipients, recipients);
     const timing = await orgTiming(trx, orgId);
     const nextRunAt = input.isActive ? nextScheduleRun(timingOf(input, timing.timezone), new Date()) : null;
     // written by the service's system step after the checks above (authenticated holds no write privilege on the table)
@@ -262,7 +288,7 @@ function inputOf(row: ScheduleRow): CreateReportScheduleInput {
   return {
     name: row.name, reportType: row.reportType as ReportType, format: row.format, filters: jsonObject(row.filters) as ReportScheduleFilters, cadence: row.cadence as ReportScheduleCadence,
     runDay: row.runDay, runTime: String(row.runTime).slice(0, 5), periodRule: row.periodRule as ReportPeriodRule, customFromDay: row.customFromDay, customToDay: row.customToDay,
-    recipients: { userIds: Array.isArray(r['userIds']) ? (r['userIds'] as string[]) : [], roleKeys: Array.isArray(r['roleKeys']) ? (r['roleKeys'] as string[]) : [] },
+    recipients: { userIds: Array.isArray(r['userIds']) ? (r['userIds'] as string[]) : [], roleKeys: Array.isArray(r['roleKeys']) ? (r['roleKeys'] as string[]) : [], lineManagers: r['lineManagers'] === true },
     channels: row.channels as ReportDeliveryChannel[], isActive: row.isActive,
   };
 }
@@ -273,16 +299,20 @@ export async function updateSchedule(deps: ApiDeps, actor: Actor, orgId: string,
     // the stored schedule inside a branch-scoped caller's branches (before the change) …
     const row = await loadScheduleForChange(trx, orgId, id, grant);
     const before = inputOf(row);
-    const parsed = createReportScheduleSchema.safeParse({ ...before, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) });
+    const merged = { ...before, ...Object.fromEntries(Object.entries(patch).filter(([, v]) => v !== undefined)) } as CreateReportScheduleInput;
+    // switching to the daily cadence: the stored run day of a weekly / monthly schedule means nothing any more
+    if (merged.cadence === 'daily' && patch.runDay === undefined) merged.runDay = DAILY_SCHEDULE_RUN_DAY;
+    const parsed = createReportScheduleSchema.safeParse(merged);
     if (!parsed.success) throw errors.validation('Invalid schedule.', { issues: parsed.error.issues.map((i) => ({ path: i.path.join('.'), message: i.message })) });
     const next = parsed.data;
     if (!SCHEDULABLE_REPORT_TYPES.includes(next.reportType)) throw errors.validation('This report type cannot be scheduled.', { issues: [{ path: 'reportType', message: 'Not schedulable' }] });
     // … and the new specification inside the caller's scope too (after the change)
     const filters = await validateSpec(trx, orgId, grant, next.reportType, next.format, next.filters as Record<string, unknown>, { requireNonPeriod: true });
     const recipients = await resolveRecipients(trx, orgId, next.recipients, grant);
-    if (next.isActive && recipients.length === 0) throw errors.validation('None of the chosen recipients is an active member.', { issues: [{ path: 'recipients', message: 'No active recipients' }] });
+    if (next.isActive) await requireSomeRecipient(trx, orgId, next.recipients, recipients);
     const timing = await orgTiming(trx, orgId);
-    const timingChanged = before.cadence !== next.cadence || before.runDay !== next.runDay || before.runTime !== next.runTime;
+    const runDayOf = (s: CreateReportScheduleInput) => (s.cadence === 'daily' ? DAILY_SCHEDULE_RUN_DAY : s.runDay);
+    const timingChanged = before.cadence !== next.cadence || runDayOf(before) !== runDayOf(next) || before.runTime !== next.runTime;
     const nextRunAt = !next.isActive ? null : (timingChanged || !row.isActive || !row.nextRunAt) ? nextScheduleRun(timingOf(next, timing.timezone), new Date()) : row.nextRunAt;
     const saved = await systemStep(trx, orgId, async (t) => {
       await lockUnchanged(t, orgId, row);
@@ -332,7 +362,7 @@ export async function shareReport(deps: ApiDeps, actor: Actor, orgId: string, in
     const parameters = await validateSpec(trx, orgId, grant, input.reportType, input.format, { ...input.parameters }, { requireNonPeriod: false });
     delete parameters['branchScope']; delete parameters['branchIds'];
     const recipients = await resolveRecipients(trx, orgId, input.recipients, grant);
-    if (recipients.length === 0) throw errors.validation('None of the chosen recipients is an active member.', { issues: [{ path: 'recipients', message: 'No active recipients' }] });
+    await requireSomeRecipient(trx, orgId, input.recipients, recipients);
     if (recipients.length > REPORT_RECIPIENT_MAX_RESOLVED) throw errors.validation(`A report can be shared with at most ${REPORT_RECIPIENT_MAX_RESOLVED} people at once.`, { recipients: recipients.length });
     await systemStep(trx, orgId, (t) => consumeShareQuota(t, orgId));
     const runKey = `send:${randomUUID()}`;
@@ -404,6 +434,8 @@ export async function recipientOptions(deps: ApiDeps, actor: Actor, orgId: strin
       left join public.org_memberships m on m.role_id = r.id and m.organization_id = ${orgId}::uuid and m.status = 'active' and ${memberScopeSql(grant)}
       where r.organization_id is null or r.organization_id = ${orgId}::uuid
       group by r.key, r.name order by r.name`.execute(t);
-    return { users: members.rows.map((u) => ({ ...u, email: withEmail ? u.email : null })), roles: roles.rows };
+    const lineManagers = toCount((await sql<{ n: string }>`
+      select count(*) as n from public.org_memberships m where m.organization_id = ${orgId}::uuid and m.status = 'active' and ${IS_LINE_MANAGER}`.execute(t)).rows[0]?.n);
+    return { users: members.rows.map((u) => ({ ...u, email: withEmail ? u.email : null })), roles: roles.rows, lineManagers };
   }));
 }

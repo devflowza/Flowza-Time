@@ -87,6 +87,10 @@
       "name": "Monthly Detail Report",
       "description": "The Daily Report's detail for a whole month: per employee, every day's attendance code, IN and OUT times, worked, base and overtime hours, under time, late and early, with monthly totals and days per code."
     },
+    "irregularities_report": {
+      "name": "Irregular Cases Report",
+      "description": "Every irregular employee-day — late arrival, early departure, absence, missing check-in or check-out, short hours, unexcused — with the minutes and the status of the employee's reason, then a summary per employee."
+    },
     "monthly_timesheet": {
       "name": "Monthly Timesheet Report",
       "description": "One page per employee for a month: every day's shift, check-in and check-out, the shift's hours against the hours worked, whether the shift's hours were met (e.g. 8 hours), overtime, under time, late and early, with monthly totals."
@@ -147,7 +151,10 @@
       "summary": "Summary — attendance code per day",
       "detailed": "Detailed — IN/OUT times and hours per day"
     },
-    "weekOf": "Week containing"
+    "weekOf": "Week containing",
+    "status": "Attendance status",
+    "allStatuses": "Any status",
+    "statusHint": "Only the days with this status (missing punch = a missing check-in or check-out)."
   },
   "list": {
     "title": "My reports",
@@ -160,6 +167,8 @@
     "oneLocation": "1 location",
     "allStatuses": "All statuses",
     "allTypes": "All types",
+    "requestedFrom": "Requested from",
+    "requestedTo": "Requested to",
     "cancel": "Cancel",
     "cancelTitle": "Cancel this report?",
     "cancelHint": "Only queued reports can be cancelled.",
@@ -170,7 +179,8 @@
     "empty": "No reports yet",
     "emptyHint": "Requested reports appear here with their status; completed files can be downloaded until they expire.",
     "view": "View",
-    "download": "Download"
+    "download": "Download",
+    "teamCopy": "Your team"
   },
   "viewer": {
     "title": "View report",

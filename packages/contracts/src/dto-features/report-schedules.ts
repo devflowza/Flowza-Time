@@ -13,15 +13,19 @@ import { REPORT_TYPE_DEFINITIONS } from './reports.js';
  * session (a 5-minute signed URL minted on click); no bearer link ever leaves the application.
  */
 
-export const REPORT_SCHEDULE_CADENCES = ['monthly', 'weekly'] as const;
+/** `daily` (migration 20261019000500): every day at the run time — the morning report on yesterday's irregular cases. */
+export const REPORT_SCHEDULE_CADENCES = ['monthly', 'weekly', 'daily'] as const;
 export type ReportScheduleCadence = (typeof REPORT_SCHEDULE_CADENCES)[number];
-export const REPORT_PERIOD_RULES = ['previous_month', 'month_to_date', 'previous_week', 'custom'] as const;
+export const REPORT_PERIOD_RULES = ['previous_month', 'month_to_date', 'previous_week', 'custom', 'previous_day'] as const;
 export type ReportPeriodRule = (typeof REPORT_PERIOD_RULES)[number];
 /** Period rules a cadence may use (mirrors report_schedules_cadence_period_check). */
 export const PERIOD_RULES_BY_CADENCE: Record<ReportScheduleCadence, readonly ReportPeriodRule[]> = {
   monthly: ['previous_month', 'month_to_date', 'custom'],
   weekly: ['previous_week', 'month_to_date'],
+  daily: ['previous_day', 'month_to_date'],
 };
+/** A daily schedule has no run day; it is stored as 0 (report_schedules_run_day_check). */
+export const DAILY_SCHEDULE_RUN_DAY = 0;
 export const REPORT_DELIVERY_CHANNELS = ['in_app', 'email'] as const;
 export type ReportDeliveryChannel = (typeof REPORT_DELIVERY_CHANNELS)[number];
 /** `cancelled`: the recipient cancelled their queued copy (HR portal Prompt 6a review — minor 14). */
@@ -36,15 +40,20 @@ export const REPORT_RECIPIENT_MAX_USERS = 50;
 export const REPORT_RECIPIENT_MAX_ROLES = 10;
 /** Resolved recipients of one share / run (explicit users + holders of the chosen roles), after de-duplication. */
 export const REPORT_RECIPIENT_MAX_RESOLVED = 100;
+/**
+ * Line managers one run reaches through `recipients.lineManagers` (each copy is their team only, so a small report): counted apart
+ * from REPORT_RECIPIENT_MAX_RESOLVED, which bounds the people chosen by name or role.
+ */
+export const REPORT_RECIPIENT_MAX_LINE_MANAGERS = 500;
 /** Shares + run-now per organisation per hour (every share fans out to up to REPORT_RECIPIENT_MAX_RESOLVED generations). */
 export const REPORT_SHARES_PER_HOUR = 10;
 
 /**
- * Report types a schedule / share can carry: every available type whose period can be derived from a date range. The daily
- * report covers ONE day, which neither cadence produces, so it is shared from the Reports page as an ordinary request.
+ * Report types a schedule / share can carry: every available type whose period can be derived from a date range — the Daily
+ * Report included since the `daily` cadence (yesterday; a weekly or monthly run prints each day of the period, ≤ 62 days).
  */
 export const SCHEDULABLE_REPORT_TYPES: readonly ReportType[] = REPORT_TYPE_DEFINITIONS
-  .filter((d) => d.status === 'available' && d.key !== 'daily_attendance')
+  .filter((d) => d.status === 'available')
   .map((d) => d.key);
 
 /** Types whose period parameter is a whole month (`month`): only whole-month rules make sense for them. */
@@ -74,7 +83,13 @@ export const reportRecipientsSchema = z.object({
   userIds: z.array(uuidSchema).max(REPORT_RECIPIENT_MAX_USERS).default([]),
   /** Every active member holding one of these roles at run time (e.g. hr_admin). */
   roleKeys: z.array(z.string().trim().regex(/^[a-z][a-z0-9_]{1,63}$/)).max(REPORT_RECIPIENT_MAX_ROLES).default([]),
-}).refine((r) => r.userIds.length + r.roleKeys.length > 0, { message: 'Choose at least one recipient', path: ['userIds'] });
+  /**
+   * Every line manager at run time — an active member whose employee record is the primary manager of at least one active
+   * employee — receives a copy about THEIR team only (`scopeReportForRecipient`, scope TEAM), even without report.export, and only
+   * when the report's filters leave them at least one direct report.
+   */
+  lineManagers: z.boolean().default(false),
+}).refine((r) => r.userIds.length + r.roleKeys.length > 0 || r.lineManagers, { message: 'Choose at least one recipient', path: ['userIds'] });
 export type ReportRecipients = z.infer<typeof reportRecipientsSchema>;
 
 const channelsSchema = z.array(z.enum(REPORT_DELIVERY_CHANNELS)).min(1).max(2).transform((c) => [...new Set(c)]);
@@ -83,6 +98,7 @@ const periodRuleRefinement = (v: { cadence?: ReportScheduleCadence; periodRule?:
   if (v.cadence && v.periodRule && !PERIOD_RULES_BY_CADENCE[v.cadence].includes(v.periodRule)) ctx.addIssue({ code: 'custom', path: ['periodRule'], message: `A ${v.cadence} schedule cannot use ${v.periodRule}` });
   if (v.cadence === 'monthly' && v.runDay !== undefined && (v.runDay < 1 || v.runDay > 28)) ctx.addIssue({ code: 'custom', path: ['runDay'], message: 'Run day must be 1–28' });
   if (v.cadence === 'weekly' && v.runDay !== undefined && (v.runDay < 0 || v.runDay > 6)) ctx.addIssue({ code: 'custom', path: ['runDay'], message: 'Run day must be a weekday (0–6)' });
+  if (v.cadence === 'daily' && v.runDay !== undefined && v.runDay !== DAILY_SCHEDULE_RUN_DAY) ctx.addIssue({ code: 'custom', path: ['runDay'], message: 'A daily schedule has no run day (0)' });
   if (v.periodRule === 'custom' && (v.customFromDay == null || v.customToDay == null)) ctx.addIssue({ code: 'custom', path: ['customFromDay'], message: 'A custom period needs a from day and a to day' });
   if (v.periodRule === 'custom' && v.customFromDay != null && v.customToDay != null && v.customFromDay <= v.customToDay) {
     ctx.addIssue({ code: 'custom', path: ['customFromDay'], message: 'A custom period runs from a day of the previous month to an earlier day of the next (e.g. 26 → 25)' });
@@ -102,7 +118,7 @@ const scheduleShape = {
   format: z.enum(REPORT_FORMATS).default('pdf'),
   filters: reportScheduleFiltersSchema.default({}),
   cadence: z.enum(REPORT_SCHEDULE_CADENCES),
-  /** monthly: day of month 1–28; weekly: 0 = Sunday … 6 = Saturday. */
+  /** monthly: day of month 1–28; weekly: 0 = Sunday … 6 = Saturday; daily: 0. */
   runDay: z.coerce.number().int().min(0).max(28),
   /** Local time (organisation timezone) the run starts. */
   runTime: timeSchema.default('07:00'),
@@ -153,7 +169,7 @@ export interface ReportScheduleDto {
   periodRule: ReportPeriodRule;
   customFromDay: number | null;
   customToDay: number | null;
-  recipients: { userIds: string[]; roleKeys: string[] };
+  recipients: { userIds: string[]; roleKeys: string[]; lineManagers: boolean };
   channels: ReportDeliveryChannel[];
   isActive: boolean;
   nextRunAt: string | null;
@@ -210,6 +226,8 @@ export interface ReportDeliveryDto {
 export interface ReportRecipientOptionsDto {
   users: Array<{ userId: string; displayName: string; email: string | null; roleKey: string; roleName: string; isManager: boolean; branchCount: number | null }>;
   roles: Array<{ key: string; name: string; members: number }>;
+  /** Members who would receive a copy through "each employee's line manager" right now (primary managers with a login). */
+  lineManagers: number;
 }
 
 export interface ReportShareResultDto { jobId: string | null; runKey: string; status: 'QUEUED'; recipients: number }

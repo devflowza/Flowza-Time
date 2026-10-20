@@ -18,7 +18,7 @@ const base = () => `/api/v1/orgs/${f.orgId}`;
 
 beforeAll(async () => {
   h = await createApiHarness(`flowza_api_leave2_${process.pid}`);
-  f = await seedOrg(h.admin, 'lv2');
+  f = await seedOrg(h.admin, 'lv2', { approvalRouting: 'legacy' });
   e4 = await seedEmployee(h.admin, f.orgId, f.branchA, 4, { departmentId: f.departmentA });
   e5 = await seedEmployee(h.admin, f.orgId, f.branchA, 5, { managerEmployeeId: e4, departmentId: f.departmentA });
   e6 = await seedEmployee(h.admin, f.orgId, f.branchA, 6);

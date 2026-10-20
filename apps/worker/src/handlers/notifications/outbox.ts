@@ -9,6 +9,8 @@ import type { HandlerRegistry, JobContext } from '../types.js';
 import { pickLocale, renderEmail, renderNotification } from './templates/render.js';
 import { MISSING_PUNCH_REMINDER_JOB_TYPE, missingPunchRemindersHandler } from './missing-punch.js';
 import { NOTIFICATION_RETENTION_JOB_TYPE, notificationRetentionHandler } from './retention.js';
+import { ATTENDANCE_ALERTS_JOB_TYPE, attendanceAlertsHandler } from './attendance-alerts.js';
+import { ATTENDANCE_APPRECIATION_JOB_TYPE, appreciationHandler } from './appreciation.js';
 import { digestPayload, isDigestEvent, isRequestNotice, requestNotice, withLeaveTypeNames } from './source-facts.js';
 
 interface OutboxRow { id: string; organizationId: string | null; eventType: string; aggregateType: string; aggregateId: string | null; payload: Record<string, unknown>; actorUserId: string | null; occurredAt: Date; publishAttempts: number }
@@ -89,6 +91,14 @@ export const ROUTING: Readonly<Record<string, NotificationRouteSpec>> = {
   'shift.swap_decided': { recipients: 'users' },
   // Prompt 8: the missing check-out reminder (worker task attendance.missing-punch-reminder), the employee's own login.
   'punch.missing_out': { recipients: 'users' },
+  // Attendance alerts (attendance-alerts.ts / appreciation.ts): the employee's own login and, per the organisation's settings,
+  // their direct (primary) manager — resolved by the worker when the alert is claimed, once per employee-day and kind.
+  'attendance.late_arrival': { recipients: 'users' },
+  'attendance.early_departure': { recipients: 'users' },
+  'attendance.absence_recorded': { recipients: 'users' },
+  'attendance.absence_reminder': { recipients: 'users' },
+  'punch.missing_in': { recipients: 'users' },
+  'attendance.appreciation': { recipients: 'users' },
 };
 
 /** An event failing this many relay runs is left unpublished (visible, never purged) and no longer retried. */
@@ -465,4 +475,6 @@ export function registerNotificationHandlers(registry: HandlerRegistry): void {
   registry.register({ jobType: 'DELIVER_NOTIFICATIONS', handler: deliverNotifications, timeoutMs: 120_000 });
   registry.register({ jobType: MISSING_PUNCH_REMINDER_JOB_TYPE, handler: missingPunchRemindersHandler, timeoutMs: 600_000 });
   registry.register({ jobType: NOTIFICATION_RETENTION_JOB_TYPE, handler: notificationRetentionHandler, timeoutMs: 1_800_000 });
+  registry.register({ jobType: ATTENDANCE_ALERTS_JOB_TYPE, handler: attendanceAlertsHandler, timeoutMs: 600_000 });
+  registry.register({ jobType: ATTENDANCE_APPRECIATION_JOB_TYPE, handler: appreciationHandler, timeoutMs: 1_800_000 });
 }

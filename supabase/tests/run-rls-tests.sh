@@ -22,6 +22,8 @@ psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_email_
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_approvals.sql"
 # Enterprise (20261007000100): shift requests, round-the-clock scheduling, global attendance policies — self-contained, every block rolls back
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_enterprise.sql"
+# short leave (20261019000310): permission types, requests, reduced hours — self-contained, every block rolls back
+psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_short_leave.sql"
 # location hierarchy (20261010000100): levels, the tree, place references — self-contained, every block rolls back
 psql -U postgres -d "$DB" -v ON_ERROR_STOP=1 -f "$ROOT/supabase/tests/rls_locations.sql"
 # security gate (HR portal Prompt 10): the data API login (PostgREST / pg_graphql) reads and writes nothing

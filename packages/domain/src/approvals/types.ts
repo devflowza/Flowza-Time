@@ -66,10 +66,29 @@ export interface ResolutionContext {
   permissionHolderUserIds: (permission: string) => readonly string[];
   /** The colleague an approver delegates to today (entity type already applied), or null. */
   delegateOf: (userId: string) => string | null;
+  /**
+   * The organisation's routing policy (`organization_settings.approvals.managerUnavailable`): when the primary AND the
+   * secondary manager of the subject cannot act (no login, membership not active, on approved leave), a MANAGER level is
+   * taken by the next manager up the reporting line (`next_level`) before the HR admins — or goes straight to the HR admins
+   * (`hr`, the behaviour before the setting existed). Optional: absent = `hr`.
+   */
+  managerFallback?: 'next_level' | 'hr';
+  /**
+   * The approvers of a request about somebody at the top of the organisation (no manager at all — `chain` is empty) on a
+   * manager-type level (MANAGER, SECONDARY_MANAGER, MANAGER_CHAIN), before the HR admins — the organisation's named approver
+   * (`approvals.topLevel = named_user`, e.g. the Director General). Optional: absent / empty = none.
+   */
+  topLevelApproverUserIds?: readonly string[];
+  /**
+   * The organisation admins (role `org_admin`): the rung after the HR admins and before the owner, so an organisation
+   * without an HR admin still routes to the people who administer it instead of an owner account nobody watches.
+   * Optional: absent = none.
+   */
+  orgAdminUserIds?: readonly string[];
 }
 
 export interface ResolvedActor { userId: string; viaDelegationOf: string | null }
-export type ResolutionPath = 'primary' | 'secondary' | 'hr_admin' | 'owner' | 'department_head' | 'branch_manager' | 'role' | 'permission' | 'user' | `chain_step_${number}` | 'chain_top' | 'unresolved';
+export type ResolutionPath = 'primary' | 'secondary' | 'hr_admin' | 'org_admin' | 'owner' | 'top_level' | 'department_head' | 'branch_manager' | 'role' | 'permission' | 'user' | `chain_step_${number}` | 'chain_top' | 'unresolved';
 export interface StepResolution {
   actors: ResolvedActor[];
   path: ResolutionPath;

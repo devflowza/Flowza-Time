@@ -378,8 +378,8 @@ describe('calculateDailyRecord — holidays, weekly off, leave', () => {
     expect(capped.overtimeMinutes).toBe(300);
   });
 
-  it('holiday with work under the default policy (record) keeps the minutes without overtime; ignore zeroes them', () => {
-    const recorded = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00') }));
+  it('holiday with work under the record policy keeps the minutes without overtime; ignore zeroes them', () => {
+    const recorded = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00'), settings: { nonWorkingDay: { action: 'record' } } }));
     expect(recorded).toMatchObject({ status: 'HOLIDAY', workedMinutes: 480, overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_HOLIDAY', 'NON_WORKING_DAY_WORK'] });
     expect(recorded.trace.steps.find((s) => s.step === 'nonWorkingDay')?.values).toMatchObject({ action: 'record', worked: 480 });
     const ignored = calculateDailyRecord(input({ holiday, events: day('09:00', '17:00'), settings: { nonWorkingDay: { action: 'ignore' } } }));
@@ -393,10 +393,35 @@ describe('calculateDailyRecord — holidays, weekly off, leave', () => {
     const r = calculateDailyRecord(input({ attendanceDate: FRIDAY, events, settings: { nonWorkingDay: { action: 'overtime' } } }));
     expect(r).toMatchObject({ status: 'WEEKLY_OFF', workedMinutes: 300, overtimeMinutes: 300, overtimeCategory: 'WEEKLY_OFF' });
     expect(r.flags).toEqual(['OVERTIME', 'WORKED_ON_WEEKLY_OFF', 'NON_WORKING_DAY_WORK']);
-    const recorded = calculateDailyRecord(input({ attendanceDate: FRIDAY, events }));
+    const recorded = calculateDailyRecord(input({ attendanceDate: FRIDAY, events, settings: { nonWorkingDay: { action: 'record' } } }));
     expect(recorded).toMatchObject({ status: 'WEEKLY_OFF', workedMinutes: 300, overtimeMinutes: 0, overtimeCategory: null, flags: ['WORKED_ON_WEEKLY_OFF', 'NON_WORKING_DAY_WORK'] });
     expect(r.trace.inputs.weeklyOff).toBe(true);
     expect(calculateDailyRecord(input({ attendanceDate: FRIDAY })).status).toBe('WEEKLY_OFF');
+  });
+
+  it('customer review: by default the hours worked on a weekly off are overtime, without any setting', () => {
+    const r = calculateDailyRecord(input({ attendanceDate: FRIDAY, events: [punch(FRIDAY, '10:00'), punch(FRIDAY, '15:00')] }));
+    expect(r).toMatchObject({ status: 'WEEKLY_OFF', workedMinutes: 300, overtimeMinutes: 300, overtimeCategory: 'WEEKLY_OFF' });
+    expect(r.flags).toEqual(['OVERTIME', 'WORKED_ON_WEEKLY_OFF', 'NON_WORKING_DAY_WORK']);
+    // the rule set's switch still decides: weekly-off work that does not count as overtime stays recorded hours
+    expect(calculateDailyRecord(input({ attendanceDate: FRIDAY, events: [punch(FRIDAY, '10:00'), punch(FRIDAY, '15:00')], rules: rules({ weeklyOffWorkCountsAsOvertime: false }) }))).toMatchObject({ workedMinutes: 300, overtimeMinutes: 0 });
+  });
+
+  it('engine 1.5.0: work on a weekly off outside the shift\'s punch window is attributed to the off day, not dropped', () => {
+    // the 09:00–17:00 shift's window opens at 05:00: work from 00:30 to 04:30 is outside every window (Thursday's closes at 23:00)
+    const night = [punch(FRIDAY, '00:30'), punch(FRIDAY, '04:30')];
+    const r = calculateDailyRecord(input({ attendanceDate: FRIDAY, events: night }));
+    expect(r).toMatchObject({ status: 'WEEKLY_OFF', workedMinutes: 240, overtimeMinutes: 240, overtimeCategory: 'WEEKLY_OFF', punchCount: 2 });
+    expect(r.flags).not.toContain('OUT_OF_WINDOW');
+    expect(r.trace.steps.find((s) => s.step === 'attribution.nonWorkingDay')).toBeDefined();
+    expect(r.trace.engineVersion).toBe('attendance-engine/1.5.0');
+    // a holiday likewise; a punch on another calendar day is never pulled in
+    const hol = calculateDailyRecord(input({ holiday, events: [punch(DATE, '01:00'), punch(DATE, '04:00'), punch(D1, '02:00')] }));
+    expect(hol).toMatchObject({ status: 'HOLIDAY', workedMinutes: 180, overtimeCategory: 'HOLIDAY', punchCount: 2 });
+    // the same punches on a working day stay out of window
+    const working = calculateDailyRecord(input({ events: [punch(DATE, '01:00'), punch(DATE, '04:00')] }));
+    expect(working.punchCount).toBe(0);
+    expect(working.flags).toContain('OUT_OF_WINDOW');
   });
 
   it('holiday takes precedence over weekly off and leave', () => {

@@ -1,6 +1,7 @@
 import type { ApprovalEntity } from '@flowza/contracts';
 import type { Trx } from '@flowza/database';
 import type { Actor } from '../../lib/service.js';
+import { loadApprovalSettings } from '../approvals/context.js';
 import { emitTargeted, recordEvent } from '../approvals/engine.js';
 import { orgToday } from '../features/recalc.js';
 import { dv } from '../features/sql-helpers.js';
@@ -9,17 +10,20 @@ import { dv } from '../features/sql-helpers.js';
  * The line-manager routing of the portal's requests (attendance notes, regularisations, shift swaps — HR portal Prompt 4).
  *
  * Without a workflow the engine seats ONE MANAGER level: the primary manager, or — when they cannot act (no login, on leave
- * today) — the secondary, then HR admins, then the owner. Right after that submit the secondary manager is added to the
- * primary's seat as a stand-in (`via_delegation_of` = the primary, resolution path `secondary`): either of the two decides for
- * the reporting line, and because they share ONE seat a rejection by either is final, exactly as with a single manager.
- * Only for a request the engine routed to the primary manager (no workflow, level 1, path `primary`); never the subject nor
- * another party to the request (a swap's colleague — review P0-2).
+ * today) — the secondary, then (per `approvals.managerUnavailable`) the next manager up, HR admins, org admins, the owner.
+ * The secondary manager is a BACKUP by default (`approvals.secondaryManager = backup`: customer review — the request goes to
+ * the immediate manager only, the secondary hears of it only when the primary cannot act). With `alongside`, right after that
+ * submit the secondary manager is added to the primary's seat as a stand-in (`via_delegation_of` = the primary, resolution
+ * path `secondary`): either of the two decides for the reporting line, and because they share ONE seat a rejection by either
+ * is final, exactly as with a single manager. Only for a request the engine routed to the primary manager (no workflow,
+ * level 1, path `primary`); never the subject nor another party to the request (a swap's colleague — review P0-2).
  * Runs in a system step (the approval tables are written by the platform only).
  */
 export async function seatSecondaryManager(t: Trx, actor: Actor, orgId: string, input: { requestId: string; entityType: ApprovalEntity; entityId: string; employeeId: string; secondaryManagerEmployeeId: string | null; employeeName: string | null; /** False: the caller tells the level itself (review 8-P2-8). */ notify?: boolean }): Promise<string | null> {
   if (!input.secondaryManagerEmployeeId || input.secondaryManagerEmployeeId === input.employeeId) return null;
   const req = await t.selectFrom('approvalRequests').select(['id', 'status', 'workflowId', 'currentStep', 'subjectUserId', 'requestedBy', 'coSubjectEmployeeIds', 'coSubjectUserIds']).where('organizationId', '=', orgId).where('id', '=', input.requestId).executeTakeFirst();
   if (!req || req.status !== 'PENDING' || req.workflowId !== null || req.currentStep !== 1) return null;
+  if ((await loadApprovalSettings(t, orgId)).secondaryManager !== 'alongside') return null;
   // a party to the request (a swap's colleague — review P0-2) never stands in, whichever manager they are
   if (req.coSubjectEmployeeIds?.includes(input.secondaryManagerEmployeeId)) return null;
   const step = await t.selectFrom('approvalSteps').select(['id', 'approverType', 'approverUserId', 'resolutionPath']).where('requestId', '=', req.id).where('stepNo', '=', 1).executeTakeFirst();

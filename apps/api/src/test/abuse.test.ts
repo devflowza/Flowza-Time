@@ -307,6 +307,8 @@ describe('exports', () => {
     { method: 'GET', path: `/attendance/regularisations/export?from=${isoToday(-30)}&to=${isoToday()}` },
     { method: 'GET', path: `/attendance/notes/report/export?from=${isoToday(-30)}&to=${isoToday()}` },
     { method: 'POST', path: '/attendance/summary/export', body: { month } },
+    // the daily register's current view as a queued Daily Report (2026-10-19)
+    { method: 'POST', path: '/attendance/daily/export', body: { date: isoToday(-1) } },
     { method: 'GET', path: `/reports/${randomUUID()}/download` },
     { method: 'POST', path: '/employees/bulk', body: { action: 'export', format: 'csv' } },
   ];

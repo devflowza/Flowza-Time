@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { MEMBERSHIP_STATUSES, ORG_STATUSES, RECORD_STATUSES } from './enums.js';
 import { addressSchema, codeSchema, contactSchema, countryCodeSchema, currencyCodeSchema, emailSchema, isoDateTimeSchema, timeSchema, timezoneSchema, uuidSchema, weeklyOffDaysSchema } from './common.js';
 import { PERMISSIONS } from './permissions.js';
+import { hrmsIntegrationSettingsSchema } from './hrms.js';
 
 export const organizationDtoSchema = z.object({
   id: uuidSchema,
@@ -135,9 +136,13 @@ export const attendanceMissedPunchSettingsSchema = z.object({
   singlePunchSplitTime: timeSchema.default('12:00'),
 });
 
-/** Work on a weekly off / holiday: record it (status stays WEEKLY_OFF/HOLIDAY, minutes kept), ignore it (zero minutes), or count it as overtime. */
+/**
+ * Work on a weekly off / holiday: count it as overtime (default — customer review: hours worked on a weekly off are overtime,
+ * calculated and recorded automatically; the rule set's weekly-off / holiday overtime switches and daily cap still apply),
+ * record it (status stays WEEKLY_OFF/HOLIDAY, minutes kept, no overtime) or ignore it (zero minutes).
+ */
 export const attendanceNonWorkingDaySettingsSchema = z.object({
-  action: z.enum(['record', 'ignore', 'overtime']).default('record'),
+  action: z.enum(['record', 'ignore', 'overtime']).default('overtime'),
 });
 
 /** Unexcused days (absent / late / missing punch left unexplained after the grace period) and their pay effect. */
@@ -156,7 +161,22 @@ export const attendanceUnexcusedSettingsSchema = z.object({
    * bereavement, adoption and compassionate leave. A leave type flagged `is_special` is never charged whatever this list says.
    */
   excludeLeaveTypeCodes: z.array(leaveTypeCodeSchema).max(50).default(['SL', 'ML', 'PTL', 'HJ', 'MARRIAGE', 'BEREAVEMENT', 'ADOPTION', 'COMPASSIONATE']),
+  /**
+   * Days after an attendance date during which the employee may still give a reason for it in the portal (1–60); null = no
+   * deadline. The deadline is `attendance date + excuseDeadlineDays` (inclusive, the employee's local date): the absence
+   * notice and its reminder state it, and a NEW reason for a day past it is refused (HR can still record or excuse the day).
+   * Independent of `graceDays` / the day-close grace, which decide when an unexplained day is marked.
+   */
+  excuseDeadlineDays: z.number().int().min(1).max(60).nullable().default(null),
 });
+
+/** The deadline (inclusive, `YYYY-MM-DD`) to give a reason for `attendanceDate`, or null when the organisation sets none. */
+export function excuseDeadlineOf(attendanceDate: string, excuseDeadlineDays: number | null | undefined): string | null {
+  if (excuseDeadlineDays === null || excuseDeadlineDays === undefined || !/^\d{4}-\d{2}-\d{2}$/.test(attendanceDate)) return null;
+  const d = new Date(`${attendanceDate}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + excuseDeadlineDays);
+  return d.toISOString().slice(0, 10);
+}
 
 /** Whether the portal insists on a reason for a late / absent day (Prompt 4 reads it). */
 export const attendanceNotesSettingsSchema = z.object({
@@ -237,11 +257,101 @@ export function resolveLeaveSettings(raw: unknown): LeaveSettings {
 }
 
 /**
+ * `organization_settings.approvals` — who decides a request when no approval workflow applies to it, and who stands in for
+ * the line manager. Workflows (Approvals → Workflows) still win wherever one applies; these keys shape the default routing
+ * and the manager levels of every workflow alike.
+ *  - `defaultRouting`: leave, comp-off and attendance corrections without a workflow go to the requester's LINE MANAGER
+ *    (default — the reporting line, like attendance notes and regularisations), or to every holder of the approve permission
+ *    in reach of the employee (`permission_holders`: HR decides, the behaviour before this setting existed).
+ *  - `secondaryManager`: the secondary manager is a BACKUP who decides only when the primary manager cannot (on approved
+ *    leave, no login — default), or decides ALONGSIDE the primary manager on every request of the reporting line.
+ *  - `managerUnavailable`: when neither manager can act, the NEXT MANAGER UP the reporting line decides (default), or the
+ *    request goes straight to the HR admins.
+ *  - `topLevel`: a request about somebody with no manager at all (the top of the organisation) goes to the HR admins
+ *    (then the organisation admins, then the owner — default), to one NAMED approver (`topLevelUserId`, e.g. the Director
+ *    General), or is APPROVED AUTOMATICALLY (only where no workflow applies; recorded on the request's timeline).
+ *  - `handOverWhenAway`: a request already waiting for a manager who goes on approved leave afterwards is handed to the
+ *    backup (the secondary manager, else per `managerUnavailable`) by the hourly approvals sweep — the manager keeps the seat.
+ * The stored group is `approvalSettingsSchema.partial()`; read it through `resolveApprovalSettings`.
+ */
+export const APPROVAL_DEFAULT_ROUTINGS = ['line_manager', 'permission_holders'] as const;
+export const APPROVAL_SECONDARY_MANAGER_MODES = ['backup', 'alongside'] as const;
+export const APPROVAL_MANAGER_UNAVAILABLE_MODES = ['next_level_manager', 'hr_admins'] as const;
+export const APPROVAL_TOP_LEVEL_MODES = ['hr_admins', 'named_user', 'auto_approve'] as const;
+export const approvalSettingsSchema = z.object({
+  defaultRouting: z.enum(APPROVAL_DEFAULT_ROUTINGS).default('line_manager'),
+  secondaryManager: z.enum(APPROVAL_SECONDARY_MANAGER_MODES).default('backup'),
+  managerUnavailable: z.enum(APPROVAL_MANAGER_UNAVAILABLE_MODES).default('next_level_manager'),
+  topLevel: z.enum(APPROVAL_TOP_LEVEL_MODES).default('hr_admins'),
+  /** The named approver of `topLevel = named_user` (an active member; the API refuses anybody else). */
+  topLevelUserId: uuidSchema.nullable().default(null),
+  handOverWhenAway: z.boolean().default(true),
+});
+export type ApprovalSettings = z.output<typeof approvalSettingsSchema>;
+export const DEFAULT_APPROVAL_SETTINGS: ApprovalSettings = approvalSettingsSchema.parse({});
+/** Effective approval routing settings from whatever the row holds; a malformed key falls back to its default (never throws). */
+export function resolveApprovalSettings(raw: unknown): ApprovalSettings {
+  const stored = raw !== null && typeof raw === 'object' && !Array.isArray(raw) ? (raw as Record<string, unknown>) : {};
+  const kept: Record<string, unknown> = {};
+  for (const [key, schema] of Object.entries(approvalSettingsSchema.shape)) {
+    const one = (schema as z.ZodType).safeParse(stored[key]);
+    if (one.success && one.data !== undefined) kept[key] = one.data;
+  }
+  return approvalSettingsSchema.parse(kept);
+}
+
+/**
+ * A late-arrival / early-departure alert (customer requirement "lateness and early departure notifications"): sent once per
+ * employee-day and kind, for today or yesterday only (never for a historical recalculation), to the employee and / or their
+ * direct (primary) manager, when the day's late / early minutes reach `minMinutes`.
+ */
+export const attendanceAlertSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  notifyEmployee: z.boolean().default(true),
+  notifyManager: z.boolean().default(true),
+  minMinutes: z.number().int().min(1).max(600).default(1),
+});
+/** The absence notice: a working day judged ABSENT (its window closed) is told to the employee and / or their manager once. */
+export const absenceAlertSettingsSchema = z.object({
+  enabled: z.boolean().default(true),
+  notifyEmployee: z.boolean().default(true),
+  notifyManager: z.boolean().default(true),
+});
+/** What disqualifies an employee from the weekly thank-you message (each criterion on = such a day disqualifies). */
+export const appreciationCriteriaSchema = z.object({
+  noLate: z.boolean().default(true),
+  noEarlyDeparture: z.boolean().default(true),
+  noAbsence: z.boolean().default(true),
+  noMissingPunch: z.boolean().default(true),
+  noUnexcused: z.boolean().default(true),
+});
+export const APPRECIATION_DEFAULT_MESSAGE_EN = 'Thank you for your punctuality and commitment this week. Your dedication makes a real difference to the team!';
+export const APPRECIATION_DEFAULT_MESSAGE_AR = 'شكرًا لالتزامك وانضباطك في المواعيد هذا الأسبوع. تفانيك يصنع فرقًا حقيقيًا للفريق!';
+/**
+ * Weekly appreciation ("thank-you") messages: once a week, on `weekday` (0 = Sunday … 6 = Saturday) from `hour` (0–23,
+ * organisation time), the PREVIOUS seven days are reviewed and every employee with a login who worked at least
+ * `minWorkedDays` days and has none of the selected kinds of day receives the message in their language. Leave, holidays
+ * and weekly offs neither count nor disqualify. Off by default.
+ */
+export const appreciationSettingsSchema = z.object({
+  enabled: z.boolean().default(false),
+  weekday: z.number().int().min(0).max(6).default(4),
+  hour: z.number().int().min(0).max(23).default(14),
+  criteria: appreciationCriteriaSchema.prefault({}),
+  minWorkedDays: z.number().int().min(1).max(7).default(5),
+  messageEn: z.string().trim().min(1).max(500).default(APPRECIATION_DEFAULT_MESSAGE_EN),
+  messageAr: z.string().trim().min(1).max(500).default(APPRECIATION_DEFAULT_MESSAGE_AR),
+});
+export type AppreciationSettings = z.output<typeof appreciationSettingsSchema>;
+
+/**
  * `organization_settings.notifications` — the organisation's switches (HR portal Prompt 8; written with
  * `notification.manage`). A switch governs the E-MAIL of the notification types it covers (the notification catalogue's
  * `orgSetting`): off ⇒ no e-mail for those types, the in-app notice is still written — the inbox is part of the product.
  * `missingPunchReminder` additionally switches the reminder itself on or off (it exists only to nudge), and
- * `missingPunchReminderHours` is how long after the shift end an open check-in is reminded. The stored group is
+ * `missingPunchReminderHours` is how long after the shift end an open check-in is reminded. The attendance alert keys
+ * (`lateArrivalAlert`, `earlyDepartureAlert`, `absenceAlert`, `absenceReminder`, `missingCheckIn*`, `appreciation`) switch the
+ * worker's automatic attendance notices on or off, say who hears them, and govern their e-mail the same way. The stored group is
  * `notificationSettingsSchema.partial()`; read it through `resolveNotificationSettings`.
  */
 export const notificationSettingsSchema = z.object({
@@ -257,6 +367,19 @@ export const notificationSettingsSchema = z.object({
   missingPunchReminder: z.boolean().default(true),
   missingPunchReminderHours: z.number().int().min(1).max(12).default(2),
   reportScheduledDelivery: z.boolean().default(true),
+  // ----- attendance alerts (customer requirements: lateness / early departure, absence handling, missing check-in, thanks) ---
+  // Nested groups use `.prefault({})` so a row saved before a group existed resolves to the group's full defaults.
+  lateArrivalAlert: attendanceAlertSettingsSchema.prefault({}),
+  earlyDepartureAlert: attendanceAlertSettingsSchema.prefault({}),
+  absenceAlert: absenceAlertSettingsSchema.prefault({}),
+  /** One reminder, the day before the excuse deadline (`attendance.unexcused.excuseDeadlineDays`), for absences still unexplained. */
+  absenceReminder: z.boolean().default(true),
+  /** Remind an employee who has not checked in `missingCheckInReminderMinutes` after the expected shift start (off by default). */
+  missingCheckInReminder: z.boolean().default(false),
+  missingCheckInReminderMinutes: z.number().int().min(15).max(240).default(30),
+  /** Also tell the employee's direct (primary) manager about the missing check-in. */
+  missingCheckInNotifyManager: z.boolean().default(false),
+  appreciation: appreciationSettingsSchema.prefault({}),
 });
 export type NotificationSettings = z.output<typeof notificationSettingsSchema>;
 export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = notificationSettingsSchema.parse({});
@@ -297,7 +420,10 @@ export const organizationSettingsSchema = z.object({
     allowedEmailDomains: z.array(z.string().min(3).max(253)).max(20).default([]),
     exportRequiresReason: z.boolean().default(false),
   }).partial().default({}),
-  integrations: z.object({}).partial().default({}),
+  integrations: z.object({
+    /** HR system feed (docs/integrations/hrms.md); written only by PUT /orgs/:orgId/integrations/hrms (integration.manage). */
+    hrms: hrmsIntegrationSettingsSchema.prefault({}),
+  }).partial().default({}),
   dashboard: z.object({
     /** Colour style of the app shell and the dashboard: sidebar, accents and chart palette. */
     theme: z.enum(DASHBOARD_THEMES).default('emerald'),
@@ -311,6 +437,12 @@ export const organizationSettingsSchema = z.object({
     showQuote: z.boolean().default(true),
     /** Highlight card (headline + link to reports) next to the KPI tiles. */
     showHighlight: z.boolean().default(true),
+    /**
+     * Statistics widgets (migration 20261019000500): the day's attendance per department and the month-to-date indicators. No
+     * `.default()` on purpose — an absent value means "shown", and saving the group without them never rewrites them.
+     */
+    showDepartmentBreakdown: z.boolean(),
+    showMonthToDate: z.boolean(),
   }).partial().default({}),
   reports: z.object({
     /** How hour columns print: 9.45 = 9 h 45 min (the GCC payroll notation the sample reports use) or 9:45. */
@@ -321,9 +453,10 @@ export const organizationSettingsSchema = z.object({
     showLegend: z.boolean().default(true),
   }).partial().default({}),
   leave: leaveSettingsSchema.partial().default({}),
+  approvals: approvalSettingsSchema.partial().default({}),
 });
 export type OrganizationSettings = z.infer<typeof organizationSettingsSchema>;
-export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard', 'leave'] as const;
+export const SETTINGS_GROUPS = ['general', 'attendance', 'sync', 'notifications', 'security', 'integrations', 'reports', 'dashboard', 'leave', 'approvals'] as const;
 export type SettingsGroup = (typeof SETTINGS_GROUPS)[number];
 
 export const branchInputSchema = z.object({

@@ -70,11 +70,31 @@ function rungSeat(rung: ChainRung | undefined, ctx: ResolutionContext): { actors
   return { actors: [], which: null, reason: `primary manager: ${p.reason ?? 'unavailable'}; secondary manager: ${s.reason ?? 'unavailable'}` };
 }
 
+const MANAGER_TYPES: ReadonlySet<ApprovalStepSpec['approverType']> = new Set(['MANAGER', 'SECONDARY_MANAGER', 'MANAGER_CHAIN']);
+
+/**
+ * The organisation's named approver for somebody at the top of the organisation (no manager at all) on a manager-type level
+ * (`approvals.topLevel = named_user`). Null when the policy does not apply, so the level resolves as it always did.
+ */
+function topLevel(step: ApprovalStepSpec, ctx: ResolutionContext): Partial | null {
+  if (!MANAGER_TYPES.has(step.approverType) || ctx.chain.length > 0 || !ctx.topLevelApproverUserIds?.length) return null;
+  return { actors: expand(ctx.topLevelApproverUserIds, ctx), path: 'top_level', reason: 'the requester has no manager: the organisation\'s top-level approver' };
+}
+
 function base(step: ApprovalStepSpec, ctx: ResolutionContext): Partial {
+  const top = topLevel(step, ctx);
+  if (top) return top;
   switch (step.approverType) {
     case 'MANAGER': {
       const r = rungSeat(ctx.chain[0], ctx);
-      return { actors: r.actors, path: r.which ?? 'unresolved', reason: r.reason };
+      if (r.actors.length || ctx.managerFallback !== 'next_level') return { actors: r.actors, path: r.which ?? 'unresolved', reason: r.reason };
+      // neither manager of the subject can act: the next manager up the reporting line takes the level (each rung with its
+      // own secondary manager as the substitute) before the request leaves the line for HR
+      for (let k = 1; k < ctx.chain.length; k += 1) {
+        const up = rungSeat(ctx.chain[k], ctx);
+        if (up.actors.length) return { actors: up.actors, path: `chain_step_${k + 1}`, reason: `line manager unavailable (${r.reason ?? 'unavailable'}); next manager up the reporting line used` };
+      }
+      return { actors: [], path: 'unresolved', reason: r.reason };
     }
     case 'SECONDARY_MANAGER': {
       const s = candidate(ctx.chain[0]?.secondary ?? null, ctx);
@@ -175,8 +195,8 @@ function finish(actors: ResolvedActor[], path: ResolutionPath, reason: string | 
 
 /**
  * Resolve one workflow level to the people who may decide it (see the ladders in @flowza/contracts). The ladder always
- * ends in the HR admins and then the owner, so a request is never stranded because a manager left; only an organisation
- * with nobody in the owner role produces `unresolved` (the caller refuses the submission — Finance B-85).
+ * ends in the HR admins, the organisation admins and then the owner, so a request is never stranded because a manager left;
+ * only an organisation with nobody in the owner role produces `unresolved` (the caller refuses the submission — Finance B-85).
  */
 export function resolveStepActors(step: ApprovalStepSpec, ctx: ResolutionContext): StepResolution {
   const b = base(step, ctx);
@@ -186,6 +206,10 @@ export function resolveStepActors(step: ApprovalStepSpec, ctx: ResolutionContext
   if (step.approverType !== 'HR_ADMIN') {
     const hr = segregate(expand(ctx.hrAdminUserIds, ctx), ctx);
     if (hr.actors.length > 0) return finish(hr.actors, 'hr_admin', joinReasons(why, 'fell back to HR admins', hr.reason), step);
+  }
+  if (ctx.orgAdminUserIds?.length) {
+    const admins = segregate(expand(ctx.orgAdminUserIds, ctx), ctx);
+    if (admins.actors.length > 0) return finish(admins.actors, 'org_admin', joinReasons(why, 'fell back to the organisation admins', admins.reason), step);
   }
   const owners = segregate(expand(ctx.ownerUserIds, ctx), ctx, { lastResort: true });
   if (owners.actors.length > 0) return finish(owners.actors, 'owner', joinReasons(why, 'fell back to the owner', owners.reason), step);

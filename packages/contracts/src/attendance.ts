@@ -11,6 +11,65 @@ export const ramadanModeSchema = z.object({
 });
 export type RamadanMode = z.infer<typeof ramadanModeSchema>;
 
+/**
+ * How a grace margin is applied to a late arrival (grace in) and an early departure (grace out) — engine 1.5.0:
+ *   deduct    the grace is taken off: 10 min grace, arrived 15 min late → 5 min late (engine ≤ 1.4.0; the default);
+ *   tolerance the grace is a tolerance: within it nothing counts, beyond it every minute from the scheduled time counts
+ *             (10 min grace, arrived 15 min late → 15 min late).
+ * A FLEXIBLE shift's check-out — the shortfall against its required minutes — has followed the tolerance rule since engine
+ * 1.3.0 (field report: the early departure must match the minutes the day lacks); it keeps it in both modes, so the default
+ * changes no existing figure. Arrivals after a flexible shift's core start follow the mode like a fixed shift.
+ */
+export const GRACE_MODES = ['deduct', 'tolerance'] as const;
+export type GraceMode = (typeof GRACE_MODES)[number];
+
+export const SPECIAL_PERIOD_AUDIENCES = ['all', 'flagged_employees'] as const;
+/** At most this many approved working-hours periods per rule set. */
+export const MAX_SPECIAL_PERIODS = 20;
+/**
+ * Approved (seasonal) working hours — a circular that changes the working day for a date range: summer hours, a national
+ * event, a ministry decision (engine 1.5.0). On a date inside [from, to] (inclusive, the branch's local date):
+ *   FIXED shifts     `startTime` replaces the shift start and `endTime` its end (at or before the start = the next day). With
+ *                    only a start the shift keeps its length; `scheduledMinutes` sets the minutes to work — without an end time
+ *                    the end becomes start + scheduled minutes + unpaid breaks (like Ramadan hours).
+ *   FLEXIBLE shifts  `scheduledMinutes` are the day's required minutes (a flexible day has no clock times to replace).
+ * The punch windows stay the shift's own. `appliesTo: flagged_employees` limits the period to employees whose custom field
+ * `specialHoursEligible` is true. A period takes precedence over Ramadan hours on the dates both cover; the day is flagged
+ * SPECIAL_HOURS.
+ */
+export const specialHoursPeriodSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+  /** The circular / decision number the period implements (kept for the audit trail and the trace). */
+  reference: z.string().trim().max(120).optional(),
+  from: isoDateSchema,
+  to: isoDateSchema,
+  startTime: timeSchema.optional(),
+  endTime: timeSchema.optional(),
+  scheduledMinutes: z.number().int().min(60).max(900).optional(),
+  appliesTo: z.enum(SPECIAL_PERIOD_AUDIENCES).default('all'),
+}).superRefine((p, ctx) => {
+  if (p.to < p.from) ctx.addIssue({ code: 'custom', path: ['to'], message: 'The last day cannot be before the first day' });
+  if (!p.startTime && !p.endTime && p.scheduledMinutes === undefined) ctx.addIssue({ code: 'custom', path: ['scheduledMinutes'], message: 'Set the working hours, the scheduled minutes or both' });
+  if (p.startTime && p.endTime && p.startTime.slice(0, 5) === p.endTime.slice(0, 5)) ctx.addIssue({ code: 'custom', path: ['endTime'], message: 'The end must differ from the start' });
+});
+export type SpecialHoursPeriod = z.infer<typeof specialHoursPeriodSchema>;
+
+/** The periods that overlap an earlier one (by first day, then position), as [index, the period it overlaps]. */
+export function overlappingSpecialPeriods(periods: ReadonlyArray<{ name: string; from: string; to: string }>): Array<[number, string]> {
+  const order = periods.map((p, i) => ({ p, i })).sort((a, b) => a.p.from.localeCompare(b.p.from) || a.i - b.i);
+  const out: Array<[number, string]> = [];
+  let last: { to: string; name: string } | null = null;
+  for (const { p, i } of order) {
+    if (last && p.from <= last.to) out.push([i, last.name]);
+    if (!last || p.to > last.to) last = { to: p.to, name: p.name };
+  }
+  return out;
+}
+/** A rule set's approved working-hours periods: at most MAX_SPECIAL_PERIODS, none overlapping another. */
+export const specialPeriodsSchema = z.array(specialHoursPeriodSchema).max(MAX_SPECIAL_PERIODS).superRefine((periods, ctx) => {
+  for (const [i, other] of overlappingSpecialPeriods(periods)) ctx.addIssue({ code: 'custom', path: [i, 'from'], message: `Overlaps the period “${other}”` });
+});
+
 /** Disciplinary escalation steps of an attendance policy (Enterprise, attendance_policies). */
 export const DISCIPLINE_ACTIONS = ['NOTIFY_MANAGER', 'VERBAL_WARNING', 'WRITTEN_WARNING', 'FINAL_WARNING', 'HR_REVIEW'] as const;
 export type DisciplineAction = (typeof DISCIPLINE_ACTIONS)[number];
@@ -132,6 +191,15 @@ export const attendanceRuleSetInputSchema = z.object({
   weeklyOffWorkCountsAsOvertime: z.boolean().default(true),
   holidayWorkCountsAsOvertime: z.boolean().default(true),
   ramadanMode: ramadanModeSchema.default({ enabled: false, appliesTo: 'all' }),
+  /** Deduct the grace (default, engine ≤ 1.4.0) or treat it as a tolerance (see GRACE_MODES). */
+  graceMode: z.enum(GRACE_MODES).default('deduct'),
+  /** Approved / seasonal working hours ("circulars"), see specialHoursPeriodSchema. A PATCH replaces the list as a whole. */
+  specialPeriods: specialPeriodsSchema.default([]),
+  /**
+   * Short leave (engine 1.5.0): out-of-office time inside the scheduled hours that no approved short leave covers is "lost
+   * time"; the first this-many minutes of it per day are tolerated (0–120, e.g. 20). PAIRED / DIRECTIONAL punching only.
+   */
+  outOfOfficeAllowanceMinutes: z.number().int().min(0).max(120).default(0),
   /** `.default` (not `.prefault`) so a PATCH without `policy` keeps the stored one (updateSchemaOf strips top-level defaults). */
   policy: attendancePolicySectionsSchema.default(() => attendancePolicySectionsSchema.parse({})),
 });
@@ -175,6 +243,20 @@ export const attendanceDailyRecordDtoSchema = z.object({
   lopDays: z.number().default(0),
   /** True when the day carries an unrevoked UNEXCUSED mark. */
   unexcused: z.boolean().default(false),
+  /**
+   * Short leave (engine 1.5.0): scheduled minutes not worked that an approved (non-work) short leave covered. The three figures
+   * are always sent by the API (0 when nothing applies); optional in the type so records built before them keep compiling.
+   */
+  excusedMinutes: z.number().int().optional(),
+  /** Minutes of an approved official assignment / remote work credited to `workedMinutes` (part of it, not on top). */
+  creditedMinutes: z.number().int().optional(),
+  /** Out-of-office minutes inside the scheduled hours that no approved short leave covers, beyond the policy's allowance. */
+  lostMinutes: z.number().int().optional(),
+  /**
+   * Shortfall ("Short"): scheduled − worked minutes when a worked day fell short of its shift's hours, 0 otherwise — the reports'
+   * UT, derived with the same rule (`shortfallMinutes`, @flowza/domain reports/derive.ts), never stored separately.
+   */
+  shortfallMinutes: z.number().int().default(0),
 });
 export type AttendanceDailyRecordDto = z.infer<typeof attendanceDailyRecordDtoSchema>;
 

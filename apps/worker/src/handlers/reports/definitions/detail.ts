@@ -3,7 +3,7 @@ import { DASH, deriveHours, eachDateInclusive, hoursColonMinutes } from '@flowza
 import { errors } from '@flowza/shared';
 import { asDate, chunk, isoDate } from '../../attendance/common.js';
 import type { ReportContext } from '../context.js';
-import { codeInputOf, loadRecords, type DailyRecord } from '../data/records.js';
+import { codeInputOf, loadRecords, matchesStatusFilter, type DailyRecord } from '../data/records.js';
 import { loadRoster, loadShiftAndPolicy, type RosterEmployee } from '../data/roster.js';
 import { cell, countRows, EMPTY_CELL, num, type ReportColumn, type ReportDocument, type ReportRow, type ReportSection } from '../model.js';
 import { TONE_OF_GROUP } from './daily.js';
@@ -58,7 +58,9 @@ export const employeeAttendance: ReportDefinition = {
     if (days.length > 366) throw errors.validation('The period may not exceed one year.');
     const ids = ctx.scope.employeeIds ?? [];
     const roster = ids.length ? await loadRoster(trx, ctx, { employeeIds: ids }) : [];
-    const records = await loadRecords(trx, ctx, { from, to, employeeIds: roster.map((e) => e.id) });
+    // a `status` keeps only the days with that status (the days without a record go too): "every absence of these people"
+    const status = ctx.params.status;
+    const records = (await loadRecords(trx, ctx, { from, to, employeeIds: roster.map((e) => e.id) })).filter((r) => matchesStatusFilter(r, status));
     const shiftPolicy = await loadShiftAndPolicy(trx, ctx, roster, to);
     const remarks = await loadRemarks(trx, ctx, roster.map((e) => e.id), from, to);
     const byEmployee = new Map<string, Map<string, DailyRecord>>();
@@ -66,7 +68,7 @@ export const employeeAttendance: ReportDefinition = {
 
     const sections: ReportSection[] = roster.map((e: RosterEmployee, i) => {
       const own = byEmployee.get(e.id) ?? new Map<string, DailyRecord>();
-      const rows = days.map((d) => detailRow(ctx, d, own.get(d), remarks.get(`${e.id}|${d}`)));
+      const rows = (status ? days.filter((d) => own.has(d)) : days).map((d) => detailRow(ctx, d, own.get(d), remarks.get(`${e.id}|${d}`)));
       const totals = { worked: 0, ot1: 0, ot2: 0, ut: 0 };
       for (const r of own.values()) { const h = deriveHours(r); if (h.worked !== null) { totals.worked += h.worked; totals.ot1 += h.ot1 ?? 0; totals.ot2 += h.ot2 ?? 0; totals.ut += h.ut ?? 0; } }
       rows.push({ kind: 'total', cells: [EMPTY_CELL, EMPTY_CELL, EMPTY_CELL, EMPTY_CELL, EMPTY_CELL, EMPTY_CELL, num(totals.worked, ctx.hours(totals.worked, { zeroAsValue: true }), { mono: true, bold: true }), num(totals.ot1, ctx.hours(totals.ot1, { zeroAsValue: true }), { mono: true, bold: true }), num(totals.ot2, ctx.hours(totals.ot2, { zeroAsValue: true }), { mono: true, bold: true }), num(totals.ut, ctx.hours(totals.ut, { zeroAsValue: true }), { mono: true, bold: true }), EMPTY_CELL] });

@@ -506,7 +506,15 @@ export async function installMockBackend(page: Page, opts: MockBackendOptions = 
     [`/orgs/${ORG_ID}/dashboard/summary`]: { data: dashboardFixture },
     [`/orgs/${ORG_ID}/dashboard/trends`]: (url: URL) => ({ data: trendsFixture(url) }),
     [`/orgs/${ORG_ID}/dashboard/branches`]: { data: dashboardBranchesFixture },
+    // statistics and indicators (2026-10-19)
+    [`/orgs/${ORG_ID}/dashboard/departments`]: { data: [
+      { departmentId: '88888888-8888-4888-8888-000000000001', departmentName: 'Operations', employees: 210, present: 188, absent: 16, late: 9, onLeave: 6, missingPunch: 3, attendanceRate: 92.2 },
+      { departmentId: null, departmentName: null, employees: 40, present: 31, absent: 8, late: 2, onLeave: 1, missingPunch: 1, attendanceRate: 79.5 },
+    ] },
+    [`/orgs/${ORG_ID}/dashboard/month-to-date`]: (url: URL) => { const to = url.searchParams.get('date') ?? new Date().toISOString().slice(0, 10); return { data: { from: `${to.slice(0, 7)}-01`, to, workingDays: 4800, presentDays: 4512, absentDays: 288, lateDays: 196, lateMinutes: 4310, earlyDepartureDays: 41, missingPunchDays: 37, leaveDays: 120, shortfallMinutes: 7350, overtimeMinutes: 2210, attendanceRate: 94, avgWorkedMinutes: 468 } }; },
     [`/orgs/${ORG_ID}/holidays`]: { data: [] },
+    // short leave (2026-10-19): the portal card on /my/leave — no type configured, nothing requested this month
+    [`/orgs/${ORG_ID}/me/time-off`]: (url: URL) => ({ data: { month: url.searchParams.get('month') ?? new Date().toISOString().slice(0, 7), types: [], usage: [], requests: [], allowances: [] } }),
     // approval engine v2: the dashboard's queue card (scope mine, pending) and the approver's delegations banner
     [`/orgs/${ORG_ID}/approvals`]: page_([]),
     [`/orgs/${ORG_ID}/approval-delegations`]: { data: [] },

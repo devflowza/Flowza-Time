@@ -77,6 +77,33 @@
     "empty": "No branches yet",
     "emptyHint": "Add a branch under Organisation to see it here."
   },
+  "departments": {
+    "title": "Attendance by department",
+    "subtitle": "The day's attendance rate, lateness and absence per department",
+    "department": "Department",
+    "none": "No department",
+    "rate": "Attendance %",
+    "present": "Present",
+    "late": "Late",
+    "absent": "Absent",
+    "empty": "No attendance records for this day",
+    "emptyHint": "Departments appear once the day's records are calculated."
+  },
+  "mtd": {
+    "title": "Month to date",
+    "subtitle": "{{from}} – {{to}}",
+    "attendanceRate": "Attendance rate (MTD)",
+    "attendanceRateHint": "{{present}} of {{working}} working days",
+    "late": "Late arrivals",
+    "lateHint": "{{minutes}} late in total",
+    "absences": "Absences",
+    "absencesHint": "{{count}} missing punches",
+    "avgWorked": "Average worked",
+    "avgWorkedHint": "per worked day",
+    "shortfall": "Short hours",
+    "shortfallHint": "{{count}} early departures",
+    "noData": "—"
+  },
   "approvals": {
     "title": "Pending approvals",
     "viewAll": "View all",

@@ -23,6 +23,7 @@ export function flatten(doc: ReportDocument): FlatTable {
   const header = [...fieldLabels, ...(superLabel ? [superLabel] : []), ...(headingLabel ? [headingLabel] : []), ...doc.columns.map(columnLabel)];
   const rows: FlatTable['rows'] = [];
   for (const s of doc.sections) {
+    if (s.sheet) continue;
     const leading = [...fieldLabels.map((label) => (s.fields ?? []).find((f) => f.label.replace(/:$/, '') === label)?.value ?? ''), ...(superLabel ? [s.superHeading ?? ''] : []), ...(headingLabel ? [s.heading?.value ?? ''] : [])];
     for (const r of s.rows) {
       if ((r.kind ?? 'data') !== 'data') continue;
@@ -30,6 +31,21 @@ export function flatten(doc: ReportDocument): FlatTable {
     }
   }
   return { header, rows };
+}
+
+/**
+ * The sections a spreadsheet keeps apart (`ReportSection.sheet`), one table per sheet name in document order: each section's own
+ * columns as the header (no leading columns — a summary is not grouped), data rows only.
+ */
+export function flattenSheets(doc: ReportDocument): Array<{ name: string; table: FlatTable }> {
+  const out = new Map<string, FlatTable>();
+  for (const s of doc.sections) {
+    if (!s.sheet) continue;
+    const table = out.get(s.sheet) ?? { header: sectionColumns(doc, s).map(columnLabel), rows: [] };
+    for (const r of s.rows) if ((r.kind ?? 'data') === 'data') table.rows.push({ leading: [], cells: r.cells, values: r.cells.map(spreadsheetValue) });
+    out.set(s.sheet, table);
+  }
+  return [...out.entries()].map(([name, table]) => ({ name, table }));
 }
 
 /** Sections that carry their own columns (a document may mix) — the flattener uses the document's; renderers may need this. */

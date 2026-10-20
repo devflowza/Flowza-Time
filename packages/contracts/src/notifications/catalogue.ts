@@ -29,12 +29,29 @@ export interface NotificationContext {
   timezone: string;
 }
 
-/** Boolean switches of `organization_settings.notifications`. */
-export type NotificationOrgSwitch = { [K in keyof NotificationSettings]: NotificationSettings[K] extends boolean ? K : never }[keyof NotificationSettings];
+/**
+ * Switches of `organization_settings.notifications`: a boolean key, or a group whose `enabled` flag is its switch (the
+ * attendance alert groups — `lateArrivalAlert`, `appreciation`, …).
+ */
+export type NotificationOrgSwitch = { [K in keyof NotificationSettings]: NotificationSettings[K] extends boolean ? K : NotificationSettings[K] extends { enabled: boolean } ? K : never }[keyof NotificationSettings];
 /** Settings → Notifications lists the switches in this order. */
 export const NOTIFICATION_ORG_SWITCHES = [
   'approvalPending', 'dailyDigest', 'leaveUpdates', 'attendanceNotes', 'punchFlagged', 'missingPunchReminder', 'deviceOffline', 'syncFailed', 'reportReady', 'reportScheduledDelivery',
 ] as const satisfies readonly NotificationOrgSwitch[];
+/**
+ * The attendance alert switches (Settings → Notifications → Attendance alerts, with their own options): each turns its alert
+ * off entirely (the worker emits nothing) and governs the e-mail of its type like any other switch.
+ */
+export const NOTIFICATION_ALERT_SWITCHES = [
+  'lateArrivalAlert', 'earlyDepartureAlert', 'absenceAlert', 'absenceReminder', 'missingCheckInReminder', 'appreciation',
+] as const satisfies readonly NotificationOrgSwitch[];
+/** Is the organisation switch on? A boolean switch by its value, a group by its `enabled` flag; anything unreadable is on. */
+export function notificationSwitchOn(settings: Partial<Pick<NotificationSettings, NotificationOrgSwitch>>, key: NotificationOrgSwitch): boolean {
+  const v: unknown = settings[key];
+  if (v === false) return false;
+  if (v !== null && typeof v === 'object' && (v as { enabled?: unknown }).enabled === false) return false;
+  return true;
+}
 
 /**
  * How a template variable is read from the payload (and whitelisted into `notifications.data`):
@@ -157,6 +174,12 @@ const entry = (s: EntrySpec): NotificationCatalogueEntry => ({
 const approvalRoute = (p: NotificationPayload): NotificationRoute => route({ entityType: approvalEntity(p), entityId: R.id(p['entityId']), requestId: approvalRequestId(p), date: R.date(p['date']), employeeId: R.id(p['employeeId']) });
 const approvalLink = (p: NotificationPayload) => path('/approvals', { request: approvalRequestId(p) });
 const decisionOf = (p: NotificationPayload, allowed: readonly string[]): string | null => { const d = R.code(p['decision']); return d && allowed.includes(d) ? d : null; };
+/** An attendance alert about one employee-day: the employee's own day in the portal, else the register for their manager. */
+const dayAlertRoute = (p: NotificationPayload): NotificationRoute => route({ entityType: 'EMPLOYEE', entityId: R.id(p['employeeId']), date: R.date(p['attendanceDate']), employeeId: R.id(p['employeeId']) });
+const dayAlertRegister = (p: NotificationPayload) => path('/attendance', { employeeId: R.id(p['employeeId']), date: R.date(p['attendanceDate']) });
+const dayAlertLink = (p: NotificationPayload, ctx: NotificationContext) => (ctx.audience === 'subject' ? path('/my/attendance', { date: R.date(p['attendanceDate']) }) : dayAlertRegister(p));
+const selfOrManager = (_p: NotificationPayload, ctx: NotificationContext) => (ctx.audience === 'subject' ? 'self' : 'manager');
+const ALERT_RECIPIENTS = 'payload.userIds — the employee and / or their direct (primary) manager, per the alert\'s settings';
 
 const ENTRIES: readonly NotificationCatalogueEntry[] = [
   // ----- approval engine v2 (Prompt 2): targeted at the resolved people of a request ---------------------------------------------
@@ -176,9 +199,10 @@ const ENTRIES: readonly NotificationCatalogueEntry[] = [
     deepLink: (p) => (p['kind'] === 'digest' ? '/approvals' : approvalLink(p)),
   }),
   entry({
-    type: 'approval.escalated', category: 'APPROVAL', recipients: 'payload.userIds — the escalation target added to an overdue level (next level, HR admins or owners)',
+    type: 'approval.escalated', category: 'APPROVAL', recipients: 'payload.userIds — the escalation target added to an overdue level (next level, HR admins or owners), or the backup of a manager who went on leave (`kind: absence`)',
     inAppAlways: true, orgSetting: 'approvalPending', oneClick: true,
-    vars: { ...APPROVAL_VARS, dueAt: 'datetime' }, route: approvalRoute, deepLink: approvalLink,
+    vars: { ...APPROVAL_VARS, dueAt: 'datetime', kind: 'code' }, variants: { absence: {} }, variant: (p) => (p['kind'] === 'absence' ? 'absence' : null),
+    route: approvalRoute, deepLink: approvalLink,
   }),
   entry({
     type: 'approval.decided', category: 'APPROVAL', recipients: 'payload.userIds — the requester and the person concerned (not the decider; not the subject when the entity hook tells them itself)',
@@ -276,6 +300,40 @@ const ENTRIES: readonly NotificationCatalogueEntry[] = [
     // review 8-P2-4: /my exists in the live bundle and in this one (its check-in card carries the Check out button); /my/checkin
     // is new, and this notice is generated by the worker for every device user as soon as it deploys
     deepLink: () => '/my',
+  }),
+  // attendance alerts (customer requirements): written by the worker once per employee-day and kind (ledger attendance_alerts),
+  // for today or yesterday only — never for a historical recalculation
+  entry({
+    type: 'attendance.late_arrival', category: 'ATTENDANCE', recipients: `${ALERT_RECIPIENTS} (the recompute that first makes the day LATE, else the attendance-alerts sweep)`,
+    orgSetting: 'lateArrivalAlert', vars: { employeeName: 'text', attendanceDate: 'date', minutes: 'number', firstInAt: 'datetime', expectedStartAt: 'datetime' },
+    variants: { self: {}, manager: {} }, variant: selfOrManager, route: dayAlertRoute, deepLink: dayAlertLink,
+  }),
+  entry({
+    type: 'attendance.early_departure', category: 'ATTENDANCE', recipients: `${ALERT_RECIPIENTS} (once the day is judged and its scheduled end has passed)`,
+    orgSetting: 'earlyDepartureAlert', vars: { employeeName: 'text', attendanceDate: 'date', minutes: 'number', lastOutAt: 'datetime', expectedEndAt: 'datetime' },
+    variants: { self: {}, manager: {} }, variant: selfOrManager, route: dayAlertRoute, deepLink: dayAlertLink,
+  }),
+  entry({
+    type: 'attendance.absence_recorded', category: 'ATTENDANCE', recipients: `${ALERT_RECIPIENTS} (a working day judged ABSENT after its window closed)`,
+    orgSetting: 'absenceAlert', vars: { employeeName: 'text', attendanceDate: 'date', deadline: 'date', payEffectDays: 'number' },
+    variants: { self: {}, manager: {} }, variant: selfOrManager, route: dayAlertRoute, deepLink: dayAlertLink,
+  }),
+  entry({
+    type: 'attendance.absence_reminder', category: 'ATTENDANCE', recipients: 'payload.userIds — the employee (the day before the excuse deadline of an absence still unexplained)',
+    orgSetting: 'absenceReminder', vars: { attendanceDate: 'date', deadline: 'date' },
+    route: dayAlertRoute, deepLink: (p) => path('/my/attendance', { date: R.date(p['attendanceDate']) }),
+  }),
+  entry({
+    type: 'punch.missing_in', category: 'ATTENDANCE', recipients: `${ALERT_RECIPIENTS} (worker task attendance.alerts, once per employee-day)`,
+    orgSetting: 'missingCheckInReminder', vars: { employeeName: 'text', attendanceDate: 'date', expectedStartAt: 'datetime', minutes: 'number' },
+    // the employee's check-in card is on /my (as for punch.missing_out); the manager opens the register
+    variants: { self: {}, manager: {} }, variant: selfOrManager, route: dayAlertRoute, deepLink: (p, ctx) => (ctx.audience === 'subject' ? '/my' : dayAlertRegister(p)),
+  }),
+  entry({
+    type: 'attendance.appreciation', category: 'ATTENDANCE', recipients: 'payload.userIds — the employee (weekly thank-you message, once per employee and week)',
+    orgSetting: 'appreciation', vars: { message: 'text', messageAr: 'text', periodStart: 'date', periodEnd: 'date', workedDays: 'number' },
+    route: (p) => route({ entityType: 'EMPLOYEE', entityId: R.id(p['employeeId']), date: R.date(p['periodEnd']), employeeId: R.id(p['employeeId']) }),
+    deepLink: () => '/my/attendance',
   }),
   entry({
     type: 'shift.swap_requested', category: 'ATTENDANCE', recipients: 'payload.userIds — the colleague named in the swap',
@@ -480,7 +538,7 @@ export function decideNotificationChannels(input: {
   else if (resolved.entry.userConfigurable && !resolved.inAppAlways && preferences.IN_APP === false) { inApp = false; reasons.inApp = 'preference'; }
   let email = requested.email && resolved.entry.defaultChannels.includes('EMAIL');
   if (!email) reasons.email = 'not_requested';
-  else if (resolved.orgSetting && orgSettings[resolved.orgSetting] === false) { email = false; reasons.email = 'org_switch'; }
+  else if (resolved.orgSetting && !notificationSwitchOn(orgSettings, resolved.orgSetting)) { email = false; reasons.email = 'org_switch'; }
   else if (resolved.entry.userConfigurable && preferences.EMAIL === false) { email = false; reasons.email = 'preference'; }
   return { inApp, email, reasons };
 }
@@ -553,6 +611,7 @@ export function approvalContextFacts(context: ApprovalContextDto | null | undefi
     case 'SHIFT_SWAP': return { ...none, date: R.date(context.swap.swapDate) };
     case 'SHIFT_CHANGE': return { ...none, date: R.date(context.change.fromDate), endDate: R.date(context.change.toDate) };
     case 'COMP_OFF': return { ...none, date: R.date(context.compOff.workedOn) };
+    case 'SHORT_LEAVE': return { ...none, date: R.date(context.shortLeave.date), leaveTypeName: R.text(context.shortLeave.typeName) };
     default: return none;
   }
 }

@@ -1,3 +1,4 @@
+import { sql } from 'kysely';
 import type { EmploymentStatus } from '@flowza/contracts';
 import { loadLocationChains, loadPolicyRows, toPolicyCandidate, type Trx } from '@flowza/database';
 import { naturalCompare, resolvePolicy, resolveShift, type EngineShiftAssignment, type EngineShiftPattern } from '@flowza/domain';
@@ -59,6 +60,17 @@ export async function loadRoster(trx: Trx, ctx: ReportContext, opts: RosterOptio
     }
   }
   return sortByEmployeeNumber(out);
+}
+
+/**
+ * Employees whose name (either script) or employee number contains `search` — the daily register's search box, applied to a
+ * report the register exported. Case-insensitive; LIKE wildcards in the text are matched literally.
+ */
+export async function searchEmployeeIds(trx: Trx, ctx: ReportContext, search: string): Promise<Set<string>> {
+  const like = `%${search.trim().replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
+  const rows = await trx.selectFrom('employees as e').select('e.id').where('e.organizationId', '=', ctx.organizationId)
+    .where((eb) => eb.or([eb('e.displayName', 'ilike', like), eb('e.displayNameAr', 'ilike', like), eb(sql<string>`e.employee_number::text`, 'ilike', like)])).execute();
+  return new Set(rows.map((r) => r.id));
 }
 
 export function sortByEmployeeNumber<T extends { employeeNumber: string }>(items: readonly T[]): T[] {

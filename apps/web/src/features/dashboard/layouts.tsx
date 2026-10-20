@@ -17,10 +17,13 @@ import { ActivityCard, RecentAttendanceCard } from './widgets/activity-card';
 import { DevicesCard } from './widgets/devices-card';
 import { SyncCard } from './widgets/sync-card';
 import { HighlightCard, QuoteCard } from './widgets/rail-cards';
+import { DepartmentsCard, MonthToDateCard } from './widgets/statistics-cards';
 
 /** Everything a layout needs, gathered once by the page so the three layouts stay declarative. */
 export interface DashboardData {
   date: string;
+  /** The location filter of the page (docs/locations.md); the statistics widgets follow it. */
+  locationId?: string | null;
   isToday: boolean;
   summary: DashboardSummary | undefined;
   summaryLoading: boolean;
@@ -111,6 +114,23 @@ function Rail({ d, className }: { d: DashboardData; className?: string }) {
 }
 const railIsEmpty = (d: DashboardData) => !d.settings.showHighlight && !d.settings.showQuote && visibleTeamWidgets(d.viewer).length === 0 && !d.can('holiday.view');
 
+/**
+ * Statistics and indicators (2026-10-19): the day per department and the month to date, each behind its Settings → Dashboard toggle.
+ * Nothing at all when both are off (and nothing is fetched).
+ */
+function StatisticsRow({ d }: { d: DashboardData }) {
+  const departments = d.settings.showDepartmentBreakdown;
+  const mtd = d.settings.showMonthToDate;
+  if (!departments && !mtd) return null;
+  const both = departments && mtd;
+  return (
+    <div className={cn('grid gap-4', both && 'lg:grid-cols-5')} data-testid="statistics-row">
+      {departments ? <DepartmentsCard className={both ? 'lg:col-span-3' : undefined} date={d.date} locationId={d.locationId ?? null} /> : null}
+      {mtd ? <MonthToDateCard className={both ? 'lg:col-span-2' : undefined} date={d.date} locationId={d.locationId ?? null} /> : null}
+    </div>
+  );
+}
+
 /** Balanced: today's numbers, the trend, who is where, branches and recent activity, with approvals and holidays on the side. */
 export function OverviewLayout({ d }: { d: DashboardData }) {
   const tiles = useTiles(d);
@@ -129,6 +149,7 @@ export function OverviewLayout({ d }: { d: DashboardData }) {
             <BranchesCard rows={d.branches} loading={d.branchesLoading} error={d.branchesError} onRetry={d.retryBranches} canManage={d.can('branch.view')} />
             {d.can('attendance.view') ? <ActivityCard date={d.date} enabled /> : null}
           </div>
+          <StatisticsRow d={d} />
         </div>
         <Rail d={d} className="xl:col-span-3" />
       </div>
@@ -158,6 +179,7 @@ export function OperationsLayout({ d }: { d: DashboardData }) {
             </div>
           ) : null}
           <BranchesCard rows={d.branches} loading={d.branchesLoading} error={d.branchesError} onRetry={d.retryBranches} canManage={d.can('branch.view')} />
+          <StatisticsRow d={d} />
         </div>
         <Rail d={d} className="xl:col-span-3" />
       </div>
@@ -176,6 +198,7 @@ export function ExecutiveLayout({ d }: { d: DashboardData }) {
         <BranchesCard className="lg:col-span-3" rows={d.branches} loading={d.branchesLoading} error={d.branchesError} onRetry={d.retryBranches} canManage={d.can('branch.view')} limit={10} />
         <TodayCard className="lg:col-span-2" summary={d.summary} loading={d.summaryLoading} stacked />
       </div>
+      <StatisticsRow d={d} />
     </div>
   );
 }

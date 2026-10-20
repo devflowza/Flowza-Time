@@ -217,7 +217,7 @@ describe('day-close sweep', () => {
     const r6 = await record(E4, '2026-03-06');
     expect(r6.status).toBe('WEEKLY_OFF');
     expect(r6.flags).toEqual(expect.arrayContaining(['WORKED_ON_WEEKLY_OFF', 'NON_WORKING_DAY_WORK']));
-    expect([r6.workedMinutes, r6.overtimeMinutes]).toEqual([240, 0]); // nonWorkingDay.action = record (default): minutes kept, no overtime
+    expect([r6.workedMinutes, r6.overtimeMinutes, r6.overtimeCategory]).toEqual([240, 240, 'WEEKLY_OFF']); // nonWorkingDay.action = overtime (default since the customer review): the hours are overtime
 
     // the sweep no longer sees the recomputed days (their flags carry the marks)
     expect(await sweep()).toMatchObject({ marked: 0, candidates: 6 });

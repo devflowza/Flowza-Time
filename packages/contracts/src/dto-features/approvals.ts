@@ -3,6 +3,7 @@ import { APPROVAL_DECISIONS, APPROVAL_ENTITIES, APPROVAL_ESCALATION_TARGETS, APP
 import { PERMISSIONS } from '../permissions.js';
 import { booleanQuerySchema, isoDateSchema, paginationQuerySchema, uuidSchema } from '../common.js';
 import { updateSchemaOf } from './devices.js';
+import type { ShortLeaveContextDto } from './short-leave.js';
 
 // ----- workflows ---------------------------------------------------------------------------------------------------------
 
@@ -259,7 +260,9 @@ export type ApprovalContextDto =
   | { kind: 'SHIFT_CHANGE'; summary: string | null; change: { id: string; kind: ShiftChangeKind; fromDate: string; toDate: string; employeeName: string | null; requestedShiftName: string | null; currentShiftName: string | null; reason: string; status: ShiftChangeStatus } }
   | { kind: 'GENERIC'; entityType: ApprovalEntity; summary: string | null }
   // leave v2 (Prompt 7): a comp-off credit request — the worked day, its type, the minutes and the days it earns
-  | { kind: 'COMP_OFF'; compOff: { id: string; workedOn: string; workedOnType: string; workedMinutes: number; recordedMinutes: number | null; daysEarned: number; location: string; summary: string; status: string } };
+  | { kind: 'COMP_OFF'; compOff: { id: string; workedOn: string; workedOnType: string; workedMinutes: number; recordedMinutes: number | null; daysEarned: number; location: string; summary: string; status: string } }
+  // short leave (20261019000310): an hourly permission / official assignment / remote work window on one day
+  | { kind: 'SHORT_LEAVE'; summary: string | null; shortLeave: ShortLeaveContextDto };
 
 /**
  * How the caller would decide the current level: in their own seat (`actor`), in the seat of somebody who delegates to them

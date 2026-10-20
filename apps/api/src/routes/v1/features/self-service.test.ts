@@ -7,7 +7,7 @@ const DAY = '2026-01-12'; // a Monday
 
 beforeAll(async () => {
   h = await createApiHarness(`flowza_api_self_${process.pid}`);
-  f = await seedOrg(h.admin, 'self');
+  f = await seedOrg(h.admin, 'self', { approvalRouting: 'legacy' });
   for (const [date, status, flags] of [[DAY, 'PRESENT', ['LATE']], ['2026-01-13', 'ABSENT', []], ['2026-01-16', 'WEEKLY_OFF', []]] as const) {
     await h.admin.insertInto('attendanceDailyRecords').values({ organizationId: f.orgId, employeeId: f.e1, attendanceDate: date, branchId: f.branchA, departmentId: f.departmentA, timezone: 'Asia/Muscat', engineVersion: 'test', status, flags: [...flags], workedMinutes: status === 'PRESENT' ? 480 : 0, lateMinutes: flags.length ? 12 : 0, trace: JSON.stringify({ punches: [] }) }).execute();
   }

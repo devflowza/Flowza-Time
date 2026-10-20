@@ -1,12 +1,12 @@
 import { useMemo } from 'react';
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { z } from 'zod';
-import type { AttendanceRuleSetInput, HolidayInput, ShiftAssignmentInput, ShiftInput, ShiftPatternInput, holidayCalendarInputSchema } from '@flowza/contracts';
+import type { AttendanceRuleSetInput, HolidayCopyYearInput, HolidayInput, ShiftAssignmentInput, ShiftInput, ShiftPatternInput, holidayCalendarInputSchema } from '@flowza/contracts';
 import type { ComboboxOption } from '@/components/forms';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
 import { qk } from '@/lib/query-keys';
 import { useCan, useOrgId } from '@/features/me/use-me';
-import type { HolidayCalendarDto, HolidayDto, RuleSetDto, ShiftAssignmentDto, ShiftDto, ShiftPatternDto, ShiftResolution, WithRecalc } from './types';
+import type { HolidayCalendarDto, HolidayDto, HolidayYearCopyDto, RuleSetDto, ShiftAssignmentDto, ShiftDto, ShiftPatternDto, ShiftResolution, WithRecalc } from './types';
 
 export type ListQuery = Record<string, string | number | boolean | undefined>;
 export type HolidayCalendarInput = z.infer<typeof holidayCalendarInputSchema>;
@@ -99,11 +99,13 @@ export function useHolidayMutations() {
   const qc = useQueryClient();
   // a holiday changes attendance days (the API queues their recalculation): the attendance views refetch too
   const invalidate = () => { for (const e of ['holidays', 'holiday-calendars', 'attendance-daily', 'attendance-monthly']) void qc.invalidateQueries({ queryKey: qk.entity(orgId, e) }); };
-  const createCalendar = useMutation({ mutationFn: async (input: HolidayCalendarInput) => (await api.post<Envelope<HolidayCalendarDto>>(`/orgs/${orgId}/holiday-calendars`, input)).data, onSuccess: invalidate });
-  const updateCalendar = useMutation({ mutationFn: async ({ id, input }: { id: string; input: Partial<HolidayCalendarInput> }) => (await api.patch<Envelope<HolidayCalendarDto>>(`/orgs/${orgId}/holiday-calendars/${id}`, input)).data, onSuccess: invalidate });
-  const removeCalendar = useMutation({ mutationFn: (id: string) => api.delete<void>(`/orgs/${orgId}/holiday-calendars/${id}`), onSuccess: invalidate });
-  const createHoliday = useMutation({ mutationFn: async (input: HolidayInput) => (await api.post<Envelope<HolidayDto>>(`/orgs/${orgId}/holidays`, input)).data, onSuccess: invalidate });
-  const updateHoliday = useMutation({ mutationFn: async ({ id, input }: { id: string; input: Partial<HolidayInput> }) => (await api.patch<Envelope<HolidayDto>>(`/orgs/${orgId}/holidays/${id}`, input)).data, onSuccess: invalidate });
-  const removeHoliday = useMutation({ mutationFn: (id: string) => api.delete<void>(`/orgs/${orgId}/holidays/${id}`), onSuccess: invalidate });
-  return { createCalendar, updateCalendar, removeCalendar, createHoliday, updateHoliday, removeHoliday };
+  // every write answers with the recalculation it queued for past days (`recalculationJobId`, a queue job id: /attendance?tab=recalc)
+  const createCalendar = useMutation({ mutationFn: async (input: HolidayCalendarInput) => (await api.post<Envelope<WithRecalc<HolidayCalendarDto>>>(`/orgs/${orgId}/holiday-calendars`, input)).data, onSuccess: invalidate });
+  const updateCalendar = useMutation({ mutationFn: async ({ id, input }: { id: string; input: Partial<HolidayCalendarInput> }) => (await api.patch<Envelope<WithRecalc<HolidayCalendarDto>>>(`/orgs/${orgId}/holiday-calendars/${id}`, input)).data, onSuccess: invalidate });
+  const removeCalendar = useMutation({ mutationFn: async (id: string) => (await api.delete<Envelope<{ recalculationJobId: string | null }> | undefined>(`/orgs/${orgId}/holiday-calendars/${id}`))?.data ?? { recalculationJobId: null }, onSuccess: invalidate });
+  const copyYear = useMutation({ mutationFn: async ({ calendarId, input }: { calendarId: string; input: HolidayCopyYearInput }) => (await api.post<Envelope<HolidayYearCopyDto>>(`/orgs/${orgId}/holiday-calendars/${calendarId}/copy-year`, input)).data, onSuccess: invalidate });
+  const createHoliday = useMutation({ mutationFn: async (input: HolidayInput) => (await api.post<Envelope<WithRecalc<HolidayDto>>>(`/orgs/${orgId}/holidays`, input)).data, onSuccess: invalidate });
+  const updateHoliday = useMutation({ mutationFn: async ({ id, input }: { id: string; input: Partial<HolidayInput> }) => (await api.patch<Envelope<WithRecalc<HolidayDto>>>(`/orgs/${orgId}/holidays/${id}`, input)).data, onSuccess: invalidate });
+  const removeHoliday = useMutation({ mutationFn: async (id: string) => (await api.delete<Envelope<{ recalculationJobId: string | null }> | undefined>(`/orgs/${orgId}/holidays/${id}`))?.data ?? { recalculationJobId: null }, onSuccess: invalidate });
+  return { createCalendar, updateCalendar, removeCalendar, copyYear, createHoliday, updateHoliday, removeHoliday };
 }

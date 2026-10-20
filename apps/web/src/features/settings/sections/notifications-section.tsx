@@ -10,6 +10,7 @@ import { toNumber } from '@/features/organization/form-utils';
 import { NotificationPreferencesCard } from '@/features/notifications/preferences/notification-preferences-card';
 import { useSettingsGroup, useSettingsMutations } from '../api';
 import { SectionError, SectionSkeleton, SettingsSection, SwitchRow } from '../components/settings-section';
+import { AttendanceAlertFields } from './attendance-alert-fields';
 
 const schema = organizationSettingsSchema.shape.notifications.unwrap();
 type Values = z.input<typeof schema>;
@@ -17,8 +18,9 @@ type Output = z.output<typeof schema>;
 
 /**
  * Settings → Notifications: the member's own preferences (in-app / e-mail per category), then the organisation's switches —
- * which notices the organisation also sends by e-mail (in-app notices are always written) and the missing check-out
- * reminder. The organisation group is written with `notification.manage` (HR portal Prompt 8).
+ * which notices the organisation also sends by e-mail (in-app notices are always written), the missing check-out
+ * reminder, and the attendance alerts (late / early / absence / missing check-in / weekly appreciation). The organisation
+ * group is written with `notification.manage` (HR portal Prompt 8).
  */
 export default function NotificationsSection() {
   const q = useSettingsGroup('notifications');
@@ -45,6 +47,7 @@ function NotificationsForm({ initial }: { initial: OrganizationSettings['notific
       <FormField label={t('notifications.missingPunchReminderHours')} htmlFor="ntf-missingPunchReminderHours" hint={t('notifications.missingPunchReminderHoursHint')} error={errors.missingPunchReminderHours?.message}>
         <Input id="ntf-missingPunchReminderHours" type="number" min={1} max={12} step={1} dir="ltr" className="tnum sm:w-40" {...register('missingPunchReminderHours', { setValueAs: toNumber })} aria-invalid={!!errors.missingPunchReminderHours} />
       </FormField>
+      <AttendanceAlertFields control={control} register={register} errors={errors} readOnly={readOnly} appreciationSaved={initial.appreciation?.enabled === true} dirty={isDirty} />
       {readOnly ? <p className="text-xs text-muted-foreground">{t('notifications.readOnly')}</p> : null}
     </SettingsSection>
   );

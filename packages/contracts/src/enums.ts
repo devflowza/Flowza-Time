@@ -81,7 +81,12 @@ export type AttendanceStatus = (typeof ATTENDANCE_STATUSES)[number];
 export const ATTENDANCE_FLAGS = ['LATE', 'EARLY_DEPARTURE', 'OVERTIME', 'MISSING_IN', 'MISSING_OUT', 'MANUAL_CORRECTION', 'OUT_OF_WINDOW', 'WORKED_ON_HOLIDAY', 'WORKED_ON_WEEKLY_OFF', 'HALF_DAY_LEAVE', 'DUPLICATE_PUNCHES_COLLAPSED', 'RAMADAN_HOURS', 'CROSS_MIDNIGHT', 'NO_SHIFT', 'UNDER_HOURS',
   'UNEXCUSED', 'EXCUSED', 'LOP', 'PAY_EFFECT_HALF', 'PAY_EFFECT_FULL', 'OUTSIDE_GEOFENCE', 'SELF_SERVICE_PUNCH', 'NON_WORKING_DAY_WORK',
   // engine 1.4.0 (Enterprise): arrival beyond the policy's very-late threshold; a day worked on two shifts (double shift)
-  'VERY_LATE', 'DOUBLE_SHIFT'] as const;
+  'VERY_LATE', 'DOUBLE_SHIFT',
+  // engine 1.5.0: the day ran on approved special working hours (a rule set's `specialPeriods`, e.g. a summer-hours circular)
+  'SPECIAL_HOURS',
+  // engine 1.5.0 (short leave): an approved personal / special short leave, an official assignment, remote work, reduced daily
+  // hours (nursing hour, disability) and out-of-office time beyond the allowance that no approved short leave covers
+  'SHORT_LEAVE', 'OFFICIAL_ASSIGNMENT', 'REMOTE_WORK', 'REDUCED_HOURS', 'LOST_TIME'] as const;
 export type AttendanceFlag = (typeof ATTENDANCE_FLAGS)[number];
 
 /** Kinds of `attendance_day_marks` rows: a reviewed verdict on one employee-day (HR portal Prompt 3). */
@@ -143,7 +148,7 @@ export type CorrectionType = (typeof CORRECTION_TYPES)[number];
 export const CORRECTION_STATUSES = ['PENDING', 'APPROVED', 'REJECTED', 'CANCELLED', 'APPLIED'] as const;
 export type CorrectionStatus = (typeof CORRECTION_STATUSES)[number];
 
-export const APPROVAL_ENTITIES = ['ATTENDANCE_CORRECTION', 'OVERTIME', 'MISSING_PUNCH', 'SHIFT_CHANGE', 'MANUAL_ATTENDANCE', 'LEAVE', 'ATTENDANCE_NOTE', 'SHIFT_SWAP', 'COMP_OFF', 'REGULARISATION', 'OVERTIME_CLAIM'] as const;
+export const APPROVAL_ENTITIES = ['ATTENDANCE_CORRECTION', 'OVERTIME', 'MISSING_PUNCH', 'SHIFT_CHANGE', 'MANUAL_ATTENDANCE', 'LEAVE', 'ATTENDANCE_NOTE', 'SHIFT_SWAP', 'COMP_OFF', 'REGULARISATION', 'OVERTIME_CLAIM', 'SHORT_LEAVE'] as const;
 export type ApprovalEntity = (typeof APPROVAL_ENTITIES)[number];
 
 /** Status of a request, a step or an actor row. Requests never carry SKIPPED (a step/actor that never got to decide). */
@@ -174,7 +179,7 @@ export type ReportFormat = (typeof REPORT_FORMATS)[number];
 export const REPORT_STATUSES = ['QUEUED', 'RUNNING', 'COMPLETED', 'FAILED', 'EXPIRED', 'CANCELLED'] as const;
 export type ReportStatus = (typeof REPORT_STATUSES)[number];
 
-export const REPORT_TYPES = ['daily_attendance', 'monthly_attendance', 'employee_attendance', 'branch_attendance', 'department_attendance', 'late_report', 'absence_report', 'overtime_report', 'missing_punch_report', 'device_sync_report', 'device_health_report', 'audit_report', 'payroll_summary', 'employee_directory', 'leave_report', 'attendance_summary', 'weekly_attendance', 'weekly_in_out', 'monthly_summary', 'monthly_detail', 'monthly_timesheet'] as const;
+export const REPORT_TYPES = ['daily_attendance', 'monthly_attendance', 'employee_attendance', 'branch_attendance', 'department_attendance', 'late_report', 'absence_report', 'overtime_report', 'missing_punch_report', 'device_sync_report', 'device_health_report', 'audit_report', 'payroll_summary', 'employee_directory', 'leave_report', 'attendance_summary', 'weekly_attendance', 'weekly_in_out', 'monthly_summary', 'monthly_detail', 'monthly_timesheet', 'irregularities_report'] as const;
 export type ReportType = (typeof REPORT_TYPES)[number];
 
 export const IMPORT_STATUSES = ['UPLOADED', 'VALIDATING', 'VALIDATED', 'IMPORTING', 'COMPLETED', 'FAILED', 'CANCELLED'] as const;

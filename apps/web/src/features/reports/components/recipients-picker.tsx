@@ -1,14 +1,15 @@
 import { useMemo } from 'react';
 import { useTranslation } from 'react-i18next';
-import { UserPlus, UsersRound, X } from 'lucide-react';
+import { Network, UserPlus, UsersRound, X } from 'lucide-react';
 import { REPORT_RECIPIENT_MAX_ROLES, REPORT_RECIPIENT_MAX_USERS } from '@flowza/contracts';
-import { Badge, ErrorState, Skeleton } from '@/components/ui';
+import { Badge, ErrorState, Label, Skeleton, Switch } from '@/components/ui';
 import { Combobox } from '@/components/forms';
 import { cn } from '@/lib/utils';
 import '../schedules-i18n';
 import { useReportRecipients } from '../schedules-api';
 
-export interface RecipientsValue { userIds: string[]; roleKeys: string[] }
+/** `lineManagers`: every line manager receives a copy about their own team (resolved at run time). */
+export interface RecipientsValue { userIds: string[]; roleKeys: string[]; lineManagers?: boolean }
 
 /**
  * Recipients of a share or a schedule (HR portal Prompt 6a): line managers, whole roles (e.g. every HR admin — resolved at run
@@ -32,6 +33,14 @@ export function RecipientsPicker({ value, onChange, id = 'recipients', invalid }
   const chip = (on: boolean) => cn('inline-flex items-center gap-1 rounded-full border px-2.5 py-1 text-xs transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring', on ? 'border-primary bg-primary text-primary-foreground' : 'bg-card hover:bg-accent');
   return (
     <div className={cn('space-y-3 rounded-md border p-3', invalid && 'border-destructive')} id={id} data-testid="recipients-picker">
+      {/* the morning report to each direct manager (2026-10-19): one copy per line manager, about their own team only */}
+      <div className="flex items-start gap-3 rounded-md bg-muted/40 p-2.5">
+        <Switch id={`${id}-line-managers`} checked={value.lineManagers ?? false} onCheckedChange={(on) => onChange({ ...value, lineManagers: on })} aria-describedby={`${id}-line-managers-hint`} />
+        <div className="min-w-0 space-y-0.5">
+          <Label htmlFor={`${id}-line-managers`} className="flex items-center gap-1.5 text-sm font-medium"><Network className="size-3.5 text-muted-foreground" aria-hidden /> {t('recipients.lineManagers')}</Label>
+          <p id={`${id}-line-managers-hint`} className="text-xs text-muted-foreground">{t('recipients.lineManagersHint')}{q.data ? ` ${t('recipients.lineManagersCount', { count: q.data.lineManagers ?? 0 })}` : ''}</p>
+        </div>
+      </div>
       {managers.length ? (
         <div className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground">{t('recipients.managers')}</p>

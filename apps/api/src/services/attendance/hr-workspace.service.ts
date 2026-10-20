@@ -418,6 +418,7 @@ function figuresDto(f: AttendanceSummaryDbFigures): AttendanceSummaryFigures {
     presentDays: f.presentDays, lateDays: f.lateDays, halfDays: f.halfDays, leaveDays: f.leaveDays, absentDays: f.absentDays, missingPunchDays: f.missingPunchDays, holidayDays: f.holidayDays,
     weeklyOffDays: f.weeklyOffDays, daysWorked: f.daysWorked, workedMinutes: f.workedMinutes, overtimeMinutes: f.overtimeMinutes, averageWorkedMinutes: f.averageWorkedMinutes, lopDays: f.lopDays,
     unexcusedDays: f.unexcusedDays, pendingDays: f.pendingDays, recordCount: f.recordCount, notCalculatedDays: f.notCalculatedDays,
+    lostMinutes: f.lostMinutes, shortLeaveMinutes: f.shortLeaveMinutes,
   };
 }
 

@@ -1,5 +1,5 @@
 import type { Hono } from 'hono';
-import { dashboardBranchesQuerySchema, dashboardSummaryQuerySchema, dashboardTrendsQuerySchema } from '@flowza/contracts';
+import { dashboardBranchesQuerySchema, dashboardDepartmentsQuerySchema, dashboardMonthToDateQuerySchema, dashboardSummaryQuerySchema, dashboardTrendsQuerySchema } from '@flowza/contracts';
 import type { AppEnv } from '../../middleware/request-context.js';
 import type { ApiDeps } from '../../deps.js';
 import { ok } from '../../lib/http.js';
@@ -11,4 +11,7 @@ export function registerDashboardRoutes(v1: Hono<AppEnv>, deps: ApiDeps): void {
   v1.get('/orgs/:orgId/dashboard/summary', async (c) => ok(c, await dash.summary(deps, actorOf(c, deps), param(c, 'orgId'), query(c, dashboardSummaryQuerySchema))));
   v1.get('/orgs/:orgId/dashboard/trends', async (c) => ok(c, await dash.trends(deps, actorOf(c, deps), param(c, 'orgId'), query(c, dashboardTrendsQuerySchema))));
   v1.get('/orgs/:orgId/dashboard/branches', async (c) => ok(c, await dash.branches(deps, actorOf(c, deps), param(c, 'orgId'), query(c, dashboardBranchesQuerySchema))));
+  // statistics and indicators (2026-10-19): the day per department, and the month to date
+  v1.get('/orgs/:orgId/dashboard/departments', async (c) => ok(c, await dash.departments(deps, actorOf(c, deps), param(c, 'orgId'), query(c, dashboardDepartmentsQuerySchema))));
+  v1.get('/orgs/:orgId/dashboard/month-to-date', async (c) => ok(c, await dash.monthToDate(deps, actorOf(c, deps), param(c, 'orgId'), query(c, dashboardMonthToDateQuerySchema))));
 }

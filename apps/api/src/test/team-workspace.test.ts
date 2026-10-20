@@ -25,7 +25,7 @@ async function punch(employeeId: string, branchId: string, at: string, eventType
 }
 
 beforeAll(async () => {
-  h = await createApiHarness(`flowza_api_team_ws_${process.pid}`); f = await seedOrg(h.admin, 'teamws', { modules: ['shift_requests'] });
+  h = await createApiHarness(`flowza_api_team_ws_${process.pid}`); f = await seedOrg(h.admin, 'teamws', { modules: ['shift_requests'], approvalRouting: 'legacy' });
   e4 = await seedEmployee(h.admin, f.orgId, f.branchA, 4);
   e9 = await seedEmployee(h.admin, f.orgId, f.branchB, 9);
   e5 = await seedEmployee(h.admin, f.orgId, f.branchA, 5, { managerEmployeeId: e4 });
@@ -137,8 +137,9 @@ describe('GET /team/leave', () => {
     const r = await h.request('GET', `${base()}/team/leave?from=${isoToday(-45)}&to=${isoToday(10)}`, { token: lineManager });
     expect(r.status).toBe(200);
     const statuses = r.body.data.entries.map((x: { employeeId: string; status: string }) => `${x.employeeId === e5 ? 'e5' : x.employeeId === e6 ? 'e6' : 'other'}:${x.status}`).sort();
-    // (e6's approved day of 2026-09-02 from the board test is in the range too; the rejected one and e7's never are)
-    expect(statuses).toEqual(['e5:APPROVED', 'e5:PENDING', 'e6:APPROVED']);
+    // (e6's approved day D2 from the board test is listed while it is in the range — a fixed date, so not on every run;
+    // the rejected one and e7's never are)
+    expect(statuses).toEqual(['e5:APPROVED', 'e5:PENDING', ...('2026-09-02' >= isoToday(-45) ? ['e6:APPROVED'] : [])]);
     expect(r.body.data.upcoming.map((x: { status: string; endDate: string }) => x.endDate >= r.body.data.today)).not.toContain(false);
     expect(r.body.data.upcoming.some((x: { employeeId: string }) => x.employeeId === e7)).toBe(false);
     expect((await h.request('GET', `${base()}/team/leave?from=${isoToday(-45)}&to=${isoToday(40)}`, { token: lineManager })).status).toBe(400);

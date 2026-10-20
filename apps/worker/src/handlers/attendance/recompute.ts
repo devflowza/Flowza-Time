@@ -6,6 +6,7 @@ import { calculateDailyRecord, type DailyCalculationResult } from '@flowza/domai
 import type { HandlerRegistry, JobContext } from '../types.js';
 import { asDate, parsePayload, recomputePayloadSchema } from './common.js';
 import { loadDailyInputs, type LoadedDailyInputs } from './load-inputs.js';
+import { notifyRecordAlerts } from '../notifications/attendance-alerts.js';
 
 type DailyRecordRow = Selectable<DB['attendanceDailyRecords']>;
 
@@ -19,6 +20,8 @@ export interface RecomputeOptions {
   bypassLock?: boolean;
   jobId?: string | null;
   triggeredBy?: string | null;
+  /** Where a failing attendance alert is reported (the alert is skipped; the recompute is never failed by it). */
+  log?: JobContext['log'];
 }
 
 export type RecomputeOutcomeKind = 'created' | 'updated' | 'unchanged' | 'skipped_locked' | 'skipped_missing';
@@ -36,6 +39,8 @@ interface Comparable {
   expectedStartAt: string | null; expectedEndAt: string | null; scheduledMinutes: number; firstInAt: string | null; lastOutAt: string | null;
   workedMinutes: number; breakMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; overtimeMinutes: number; overtimeCategory: string | null;
   status: AttendanceStatus; flags: string[]; punchCount: number; hasCorrection: boolean; engineVersion: string;
+  /** Short leave figures (engine 1.5.0). */
+  excusedMinutes: number; creditedMinutes: number; lostMinutes: number;
 }
 const ts = (v: Date | string | null): string | null => (v === null ? null : (v instanceof Date ? v : new Date(v)).toISOString());
 
@@ -80,6 +85,7 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
     expectedStartAt: ts(result.expectedStartAt), expectedEndAt: ts(result.expectedEndAt), scheduledMinutes: result.scheduledMinutes, firstInAt: ts(result.firstInAt), lastOutAt: ts(result.lastOutAt),
     workedMinutes: result.workedMinutes, breakMinutes: result.breakMinutes, lateMinutes: result.lateMinutes, earlyDepartureMinutes: result.earlyDepartureMinutes, overtimeMinutes: result.overtimeMinutes, overtimeCategory: result.overtimeCategory,
     status, flags, punchCount: result.punchCount, hasCorrection, engineVersion: result.trace.engineVersion,
+    excusedMinutes: result.excusedMinutes ?? 0, creditedMinutes: result.creditedMinutes ?? 0, lostMinutes: result.lostMinutes ?? 0,
   };
   const columns = {
     branchId: next.branchId, departmentId: next.departmentId, shiftId: next.shiftId, shiftAssignmentId: next.shiftAssignmentId, ruleSetId: next.ruleSetId, timezone: next.timezone,
@@ -87,12 +93,14 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
     firstInAt: result.firstInAt ? new Date(result.firstInAt) : null, lastOutAt: result.lastOutAt ? new Date(result.lastOutAt) : null,
     workedMinutes: next.workedMinutes, breakMinutes: next.breakMinutes, lateMinutes: next.lateMinutes, earlyDepartureMinutes: next.earlyDepartureMinutes, overtimeMinutes: next.overtimeMinutes, overtimeCategory: next.overtimeCategory,
     status: next.status, flags: next.flags, punchCount: next.punchCount, hasCorrection: next.hasCorrection, engineVersion: next.engineVersion, trace: JSON.stringify(result.trace), computedAt: opts.now,
+    excusedMinutes: next.excusedMinutes, creditedMinutes: next.creditedMinutes, lostMinutes: next.lostMinutes,
   };
   const eventPayload = { employeeId, date, status: next.status, flags: next.flags, branchId: next.branchId };
 
   if (!existing) {
     const inserted = await trx.insertInto('attendanceDailyRecords').values({ organizationId, employeeId, attendanceDate: date, calculationVersion: 1, ...columns }).returning('id').executeTakeFirstOrThrow();
     await emitDomainEvent(trx, { organizationId, eventType: 'attendance.created', aggregateType: 'attendance_daily_record', aggregateId: inserted.id, payload: eventPayload, actorUserId: opts.triggeredBy ?? null });
+    await recordAlerts(trx, opts, result, next);
     return { outcome: 'created', recordId: inserted.id, version: 1, status: next.status, branchId: next.branchId };
   }
 
@@ -101,6 +109,7 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
     expectedStartAt: ts(existing.expectedStartAt), expectedEndAt: ts(existing.expectedEndAt), scheduledMinutes: existing.scheduledMinutes, firstInAt: ts(existing.firstInAt), lastOutAt: ts(existing.lastOutAt),
     workedMinutes: existing.workedMinutes, breakMinutes: existing.breakMinutes, lateMinutes: existing.lateMinutes, earlyDepartureMinutes: existing.earlyDepartureMinutes, overtimeMinutes: existing.overtimeMinutes, overtimeCategory: existing.overtimeCategory,
     status: existing.status, flags: existing.flags, punchCount: existing.punchCount, hasCorrection: existing.hasCorrection, engineVersion: existing.engineVersion,
+    excusedMinutes: existing.excusedMinutes, creditedMinutes: existing.creditedMinutes, lostMinutes: existing.lostMinutes,
   };
   if (JSON.stringify(previous) === JSON.stringify(next)) return { outcome: 'unchanged', recordId: existing.id, version: existing.calculationVersion, status: existing.status, branchId: existing.branchId };
 
@@ -111,7 +120,30 @@ async function writeRecord(trx: Trx, opts: RecomputeOptions, loaded: LoadedDaily
   }).execute();
   await trx.updateTable('attendanceDailyRecords').set({ ...columns, calculationVersion: version }).where('id', '=', existing.id).execute();
   await emitDomainEvent(trx, { organizationId, eventType: 'attendance.updated', aggregateType: 'attendance_daily_record', aggregateId: existing.id, payload: { ...eventPayload, previousStatus: existing.status, version, reason: opts.reason }, actorUserId: opts.triggeredBy ?? null });
+  await recordAlerts(trx, opts, result, next);
   return { outcome: 'updated', recordId: existing.id, version, status: next.status, branchId: next.branchId };
+}
+
+/**
+ * The automatic attendance notices of a record that was just created or changed (late arrival, early departure, absence —
+ * notifications/attendance-alerts.ts): only for today / yesterday, once per employee-day and kind (the ledger), never for a
+ * historical recalculation. Under a savepoint: a failing alert is skipped (the 15-minute sweep catches it up) and never fails
+ * the recompute.
+ */
+async function recordAlerts(trx: Trx, opts: RecomputeOptions, result: DailyCalculationResult, next: Comparable): Promise<void> {
+  await sql`savepoint attendance_alerts`.execute(trx);
+  try {
+    await notifyRecordAlerts(trx, opts.organizationId, {
+      employeeId: opts.employeeId, attendanceDate: opts.date, timezone: result.timezone, status: next.status, flags: next.flags,
+      lateMinutes: next.lateMinutes, earlyDepartureMinutes: next.earlyDepartureMinutes,
+      firstInAt: result.firstInAt ? new Date(result.firstInAt) : null, lastOutAt: result.lastOutAt ? new Date(result.lastOutAt) : null,
+      expectedStartAt: result.expectedStartAt ? new Date(result.expectedStartAt) : null, expectedEndAt: result.expectedEndAt ? new Date(result.expectedEndAt) : null,
+    }, opts.now);
+    await sql`release savepoint attendance_alerts`.execute(trx);
+  } catch (err) {
+    await sql`rollback to savepoint attendance_alerts`.execute(trx);
+    opts.log?.warn(event('attendance_alert_failed', { organizationId: opts.organizationId, employeeId: opts.employeeId, date: opts.date, jobId: opts.jobId ?? null, err: (err as Error).message }));
+  }
 }
 
 /** JSON-safe copy of the previous row for the history snapshot. */
@@ -153,7 +185,7 @@ async function applyCorrections(trx: Trx, organizationId: string, employeeId: st
 export async function recomputeDailyHandler({ job, deps, log }: JobContext) {
   const p = parsePayload(recomputePayloadSchema, job.payload);
   const outcome = await withContext(deps.db, { kind: 'system', organizationId: p.organizationId, jobId: job.id }, (trx) =>
-    recomputeDaily(trx, { organizationId: p.organizationId, employeeId: p.employeeId, date: p.date, now: deps.now(), reason: p.reason, bypassLock: p.bypassLock, jobId: job.id, triggeredBy: p.triggeredBy ?? null }));
+    recomputeDaily(trx, { organizationId: p.organizationId, employeeId: p.employeeId, date: p.date, now: deps.now(), reason: p.reason, bypassLock: p.bypassLock, jobId: job.id, triggeredBy: p.triggeredBy ?? null, log }));
   log.info(event('attendance_recomputed', { employeeId: p.employeeId, date: p.date, reason: p.reason, ...outcome }));
   return outcome;
 }

@@ -133,10 +133,17 @@ export async function enableModules(admin: Database, orgId: string, keys: readon
 }
 
 /** `modules`: Enterprise modules to switch on through an override (the default trial plan does not include them). */
-export async function seedOrg(admin: Database, tag: string, opts: { plan?: string | null; modules?: readonly string[] } = {}): Promise<OrgFixture> {
+/**
+ * The approval routing of the organisations before Settings → Approvals existed: leave / comp-off / corrections without a
+ * workflow go to the holders of the approve permission, the secondary manager decides alongside the primary, and a line
+ * manager who cannot act hands over to HR. Suites written against that routing opt in with `seedOrg(…, { approvalRouting: 'legacy' })`.
+ */
+export const LEGACY_APPROVAL_ROUTING = { defaultRouting: 'permission_holders', secondaryManager: 'alongside', managerUnavailable: 'hr_admins', topLevel: 'hr_admins', topLevelUserId: null } as const;
+
+export async function seedOrg(admin: Database, tag: string, opts: { plan?: string | null; modules?: readonly string[]; approvalRouting?: 'default' | 'legacy' } = {}): Promise<OrgFixture> {
   const orgId = uuid('a');
   await admin.insertInto('organizations').values({ id: orgId, companyCode: `ORG-${tag}`, legalName: `Org ${tag}`, displayName: `Org ${tag}`, timezone: 'Asia/Muscat' }).execute();
-  await admin.insertInto('organizationSettings').values({ organizationId: orgId }).onConflict((oc) => oc.doNothing()).execute();
+  await admin.insertInto('organizationSettings').values({ organizationId: orgId, ...(opts.approvalRouting === 'legacy' ? { approvals: JSON.stringify(LEGACY_APPROVAL_ROUTING) } : {}) }).onConflict((oc) => oc.doNothing()).execute();
   if (opts.plan !== null) await admin.insertInto('subscriptions').values({ organizationId: orgId, planId: opts.plan ?? PLAN_TRIAL, status: 'active' }).execute();
   const branchA = uuid('b'); const branchB = uuid('b');
   await admin.insertInto('branches').values([{ id: branchA, organizationId: orgId, code: 'A', name: 'Branch A', timezone: 'Asia/Muscat' }, { id: branchB, organizationId: orgId, code: 'B', name: 'Branch B', timezone: 'Asia/Muscat' }]).execute();

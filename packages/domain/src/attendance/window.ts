@@ -6,8 +6,9 @@ import type { EngineShift } from './types.js';
  * Punch window of one attendance date (§G.3).
  *
  * - FIXED shifts: `scheduledStart`/`scheduledEnd` are the shift start/end instants; the window is
- *   `[start − punchInWindowBeforeMinutes, end + punchOutWindowAfterMinutes)`. When `endTime <= startTime`
- *   the shift crosses midnight and `scheduledEnd` falls on the next calendar day.
+ *   `[start − punchInWindowBeforeMinutes, end + flexStartMinutes + punchOutWindowAfterMinutes)` — a flexible start band
+ *   (engine 1.5.0) moves the expected end up to `flexStartMinutes` later, and the check-out margin counts from there. When
+ *   `endTime <= startTime` the shift crosses midnight and `scheduledEnd` falls on the next calendar day.
  * - FLEXIBLE shifts: the attendance day runs from `dayBoundary` (local) to `dayBoundary` of the next day;
  *   `scheduledStart` is the day boundary (used for attribution) and `scheduledEnd` the next boundary.
  * - No shift: the calendar day `[00:00, 00:00 next day)` in the branch timezone.
@@ -83,7 +84,7 @@ export function computePunchWindow(shift: EngineShift | null, attendanceDate: st
     scheduledStart: start,
     scheduledEnd: end,
     windowStart: start.minus({ minutes: shift.punchInWindowBeforeMinutes }),
-    windowEnd: end.plus({ minutes: shift.punchOutWindowAfterMinutes }),
+    windowEnd: end.plus({ minutes: shift.punchOutWindowAfterMinutes + Math.max(0, shift.flexStartMinutes ?? 0) }),
     crossesMidnight: overnight,
   };
 }

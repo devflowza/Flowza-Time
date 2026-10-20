@@ -5,7 +5,7 @@
 
 import type { ColumnType } from "kysely";
 
-export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "ATTENDANCE_NOTE" | "COMP_OFF" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "OVERTIME_CLAIM" | "REGULARISATION" | "SHIFT_CHANGE" | "SHIFT_SWAP";
+export type ApprovalEntity = "ATTENDANCE_CORRECTION" | "ATTENDANCE_NOTE" | "COMP_OFF" | "LEAVE" | "MANUAL_ATTENDANCE" | "MISSING_PUNCH" | "OVERTIME" | "OVERTIME_CLAIM" | "REGULARISATION" | "SHIFT_CHANGE" | "SHIFT_SWAP" | "SHORT_LEAVE";
 
 export type ApprovalStatus = "APPROVED" | "CANCELLED" | "INVALIDATED" | "PENDING" | "REJECTED" | "SKIPPED";
 
@@ -200,6 +200,7 @@ export interface ApiKeys {
   name: string;
   organizationId: string;
   revokedAt: Timestamp | null;
+  revokedBy: string | null;
   scopes: Generated<string[]>;
 }
 
@@ -340,6 +341,15 @@ export interface ApprovalWorkflows {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface AttendanceAlerts {
+  alertDate: Timestamp;
+  employeeId: string;
+  kind: string;
+  organizationId: string;
+  recipients: Generated<number>;
+  sentAt: Generated<Timestamp>;
+}
+
 export interface AttendanceCorrections {
   appliedAt: Timestamp | null;
   appliedBy: string | null;
@@ -388,10 +398,18 @@ export interface AttendanceDailyRecords {
   calculationVersion: Generated<number>;
   computedAt: Generated<Timestamp>;
   createdAt: Generated<Timestamp>;
+  /**
+   * Minutes of an approved official assignment / remote work credited to worked_minutes (part of it, engine 1.5.0).
+   */
+  creditedMinutes: Generated<number>;
   departmentId: string | null;
   earlyDepartureMinutes: Generated<number>;
   employeeId: string;
   engineVersion: string;
+  /**
+   * Scheduled minutes not worked that an approved (non-work) short leave covered (engine 1.5.0).
+   */
+  excusedMinutes: Generated<number>;
   expectedEndAt: Timestamp | null;
   expectedStartAt: Timestamp | null;
   firstInAt: Timestamp | null;
@@ -401,6 +419,10 @@ export interface AttendanceDailyRecords {
   lastOutAt: Timestamp | null;
   lateMinutes: Generated<number>;
   lockedAt: Timestamp | null;
+  /**
+   * Out-of-office minutes inside the scheduled hours no approved short leave covers, beyond the rule set allowance (engine 1.5.0).
+   */
+  lostMinutes: Generated<number>;
   organizationId: string;
   overtimeCategory: string | null;
   overtimeMinutes: Generated<number>;
@@ -624,6 +646,10 @@ export interface AttendanceRuleSets {
   employeeGroupId: string | null;
   extra: Generated<Json>;
   graceInMinutes: Generated<number>;
+  /**
+   * deduct: the grace is taken off a late arrival / early departure (default). tolerance: within the grace nothing counts, beyond it every minute from the scheduled time (engine 1.5.0).
+   */
+  graceMode: Generated<string>;
   graceOutMinutes: Generated<number>;
   halfDayThresholdMinutes: Generated<number>;
   holidayWorkCountsAsOvertime: Generated<boolean>;
@@ -634,6 +660,10 @@ export interface AttendanceRuleSets {
   missingPunchBehavior: Generated<MissingPunchBehavior>;
   name: string;
   organizationId: string;
+  /**
+   * Out-of-office minutes per day inside the scheduled hours tolerated before they count as lost time (engine 1.5.0; PAIRED / DIRECTIONAL punching).
+   */
+  outOfOfficeAllowanceMinutes: Generated<number>;
   overtimeEnabled: Generated<boolean>;
   overtimeMaxMinutesPerDay: number | null;
   overtimeMinBlockMinutes: Generated<number>;
@@ -655,6 +685,10 @@ export interface AttendanceRuleSets {
    * Policy scope: days worked on this shift. Null = any.
    */
   shiftId: string | null;
+  /**
+   * Approved / seasonal working hours ("circulars"): [{name, reference?, from, to, startTime?, endTime?, scheduledMinutes?, appliesTo}] — @flowza/contracts specialPeriodsSchema; precedence over ramadan_mode.
+   */
+  specialPeriods: Generated<Json>;
   updatedAt: Generated<Timestamp>;
   version: Generated<number>;
   weeklyOffWorkCountsAsOvertime: Generated<boolean>;
@@ -1108,6 +1142,23 @@ export interface EmployeeGroups {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface EmployeeHourAllowances {
+  branchId: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  employeeId: string;
+  id: Generated<string>;
+  kind: string;
+  minutesPerDay: number;
+  notes: string | null;
+  organizationId: string;
+  position: Generated<string>;
+  reference: string | null;
+  updatedAt: Generated<Timestamp>;
+  validFrom: Timestamp;
+  validTo: Timestamp | null;
+}
+
 export interface EmployeeIdentityDocuments {
   branchId: string | null;
   createdAt: Generated<Timestamp>;
@@ -1289,6 +1340,10 @@ export interface Geofences {
 }
 
 export interface HolidayCalendars {
+  /**
+   * From 1 December (organisation time) next year's occurrence of every recurring holiday is created in this calendar, once per holiday (worker task holidays.rollover).
+   */
+  autoRollover: Generated<boolean>;
   countryCode: string | null;
   createdAt: Generated<Timestamp>;
   id: Generated<string>;
@@ -1310,6 +1365,14 @@ export interface Holidays {
   name: string;
   nameAr: string | null;
   organizationId: string;
+  /**
+   * Same Gregorian date every year (National Day…): copied by "Copy to next year" and the yearly rollover. Moon-sighted holidays are not recurring.
+   */
+  recursYearly: Generated<boolean>;
+  /**
+   * When the next year's occurrence of this recurring holiday was created (or found) by the rollover or "Copy to next year" — the rollover's ledger.
+   */
+  rolledOverAt: Timestamp | null;
   type: Generated<HolidayType>;
 }
 
@@ -1325,6 +1388,7 @@ export interface ImportJobRows {
 }
 
 export interface ImportJobs {
+  apiKeyId: string | null;
   confirmedAt: Timestamp | null;
   confirmedBy: string | null;
   createdAt: Generated<Timestamp>;
@@ -1332,12 +1396,22 @@ export interface ImportJobs {
   errorRows: Generated<number>;
   filePath: string;
   id: Generated<string>;
+  /**
+   * Idempotency-Key of an HRMS batch: a retry with the same key and body is answered with this batch, a different body is refused (409).
+   */
+  idempotencyKey: string | null;
   importedRows: Generated<number>;
   options: Generated<Json>;
   organizationId: string;
   originalFilename: string | null;
   queueJobId: Int8 | null;
+  reference: string | null;
   requestedBy: string | null;
+  requestHash: string | null;
+  /**
+   * upload = the import page; hrms = a batch an HR system sent with an organisation API key (docs/integrations/hrms.md).
+   */
+  source: Generated<string>;
   status: Generated<ImportStatus>;
   summary: Json | null;
   totalRows: Generated<number>;
@@ -1699,6 +1773,10 @@ export interface Organizations {
 }
 
 export interface OrganizationSettings {
+  /**
+   * Approval routing: default routing without a workflow (line manager / permission holders), secondary manager as backup or alongside, fallback when no manager can act, top-of-organisation requests (approvalSettingsSchema in @flowza/contracts).
+   */
+  approvals: Generated<Json>;
   attendance: Generated<Json>;
   dashboard: Generated<Json>;
   general: Generated<Json>;
@@ -2062,6 +2140,10 @@ export interface Shifts {
    */
   dayBoundary: Generated<string>;
   endTime: string | null;
+  /**
+   * FIXED only: flexible start band in minutes after the start — start anywhere in it without being late; the expected end moves with the start (engine 1.5.0). 0 = off.
+   */
+  flexStartMinutes: Generated<number>;
   graceInMinutes: number | null;
   graceOutMinutes: number | null;
   id: Generated<string>;
@@ -2234,6 +2316,53 @@ export interface Teams {
   updatedAt: Generated<Timestamp>;
 }
 
+export interface TimeOffRequests {
+  approvalRequestId: string | null;
+  branchId: string | null;
+  cancelledAt: Timestamp | null;
+  cancelledBy: string | null;
+  cancelReason: string | null;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  decidedAt: Timestamp | null;
+  decidedBy: string | null;
+  decisionNote: string | null;
+  employeeId: string;
+  endTime: string;
+  id: Generated<string>;
+  minutes: number;
+  organizationId: string;
+  reason: string;
+  requestDate: Timestamp;
+  startTime: string;
+  status: Generated<string>;
+  timeOffTypeId: string;
+  updatedAt: Generated<Timestamp>;
+}
+
+export interface TimeOffTypes {
+  applicableGender: Generated<string>;
+  category: string;
+  code: string;
+  /**
+   * The approved window counts as worked time (credited to the daily record) — official assignments and remote work.
+   */
+  countsAsWork: Generated<boolean>;
+  createdAt: Generated<Timestamp>;
+  createdBy: string | null;
+  id: Generated<string>;
+  maxMinutesPerRequest: number | null;
+  monthlyQuotaCount: number | null;
+  monthlyQuotaMinutes: number | null;
+  name: string;
+  nameAr: string | null;
+  organizationId: string;
+  portalVisible: Generated<boolean>;
+  requiresApproval: Generated<boolean>;
+  status: Generated<RecordStatus>;
+  updatedAt: Generated<Timestamp>;
+}
+
 export interface UsageQuotas {
   count: Generated<number>;
   metric: string;
@@ -2276,6 +2405,7 @@ export interface DB {
   approvalStepActors: ApprovalStepActors;
   approvalSteps: ApprovalSteps;
   approvalWorkflows: ApprovalWorkflows;
+  attendanceAlerts: AttendanceAlerts;
   attendanceCorrections: AttendanceCorrections;
   attendanceDailyRecordHistory: AttendanceDailyRecordHistory;
   attendanceDailyRecords: AttendanceDailyRecords;
@@ -2314,6 +2444,7 @@ export interface DB {
   employeeBranchDeployments: EmployeeBranchDeployments;
   employeeGroupMemberships: EmployeeGroupMemberships;
   employeeGroups: EmployeeGroups;
+  employeeHourAllowances: EmployeeHourAllowances;
   employeeIdentityDocuments: EmployeeIdentityDocuments;
   employeeProviderIdentities: EmployeeProviderIdentities;
   employees: Employees;
@@ -2381,6 +2512,8 @@ export interface DB {
   syncLogs: SyncLogs;
   teamMembers: TeamMembers;
   teams: Teams;
+  timeOffRequests: TimeOffRequests;
+  timeOffTypes: TimeOffTypes;
   usageQuotas: UsageQuotas;
   usageRecords: UsageRecords;
   userProfiles: UserProfiles;

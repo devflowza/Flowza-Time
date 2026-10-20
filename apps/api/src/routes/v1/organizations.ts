@@ -3,13 +3,14 @@ import { createOwnOrganizationSchema, updateOrganizationSchema, type SettingsGro
 import { errors } from '@flowza/shared';
 import type { AppEnv } from '../../middleware/request-context.js';
 import type { ApiDeps } from '../../deps.js';
-import { created, ok } from '../../lib/http.js';
+import { accepted, created, ok } from '../../lib/http.js';
 import { body, param } from '../../lib/validate.js';
 import { actorOf } from '../../lib/service.js';
 import { isSettingsGroup } from '../../lib/settings.js';
 import { idempotency } from '../../middleware/idempotency.js';
 import * as orgs from '../../services/organizations.service.js';
 import * as billing from '../../services/billing.service.js';
+import { queueAppreciationNow } from '../../services/attendance-alerts.service.js';
 
 function groupParam(c: Context<AppEnv>): SettingsGroup {
   const g = param(c, 'group');
@@ -27,6 +28,11 @@ export function registerOrganizationRoutes(v1: Hono<AppEnv>, deps: ApiDeps): voi
   v1.put('/orgs/:orgId/settings/:group', async (c) => {
     const payload = await c.req.json().catch(() => ({}));
     return ok(c, await orgs.putSettingsGroup(deps, actorOf(c, deps), param(c, 'orgId'), groupParam(c), payload));
+  });
+  // Settings → Notifications → Weekly appreciation: "Send now for last week" (notification.manage) — a queued worker job (202)
+  v1.post('/orgs/:orgId/notifications/appreciation/send', idempotency(), async (c) => {
+    const queued = await queueAppreciationNow(deps, actorOf(c, deps), param(c, 'orgId'));
+    return accepted(c, queued.jobId, 'Appreciation messages queued.');
   });
   // the tenant's own plan, price, usage and modules (organization.view) and invoices (organization.manage) — migration 20260929000600
   v1.get('/orgs/:orgId/subscription', async (c) => ok(c, await billing.getTenantSubscription(deps, actorOf(c, deps), param(c, 'orgId'))));

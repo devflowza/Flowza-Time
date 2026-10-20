@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { dueOccurrence, isSelfScopedReport, latestScheduleRunAtOrBefore, nextScheduleRun, periodParameters, schedulePeriod, scopeReportForRecipient } from './schedule.js';
+import { dueOccurrence, isSelfScopedReport, isTeamScopedReport, latestScheduleRunAtOrBefore, nextScheduleRun, periodParameters, schedulePeriod, scopeReportForRecipient, TEAM_SCOPE_PARAMETER } from './schedule.js';
 
 const at = (iso: string) => new Date(iso);
 
@@ -193,5 +193,106 @@ describe('scopeReportForRecipient', () => {
       expect(isSelfScopedReport('employee_directory', { selfEmployeeId: 'e-a', employeeIds: ['e-a'] }, 'e-a')).toBe(false);
       expect(isSelfScopedReport('monthly_attendance', { selfEmployeeId: 'e-a', employeeIds: ['e-a'] }, null)).toBe(false);
     });
+  });
+});
+
+describe('daily cadence (migration 20261019000500: the morning report on yesterday)', () => {
+  const daily = { cadence: 'daily' as const, runDay: 0, runTime: '07:30', timezone: 'Asia/Muscat' };
+  it('runs every day at the run time on the organisation wall clock', () => {
+    // 2026-10-19 02:00Z = 06:00 Muscat → today 07:30 local = 03:30Z
+    expect(nextScheduleRun(daily, at('2026-10-19T02:00:00Z')).toISOString()).toBe('2026-10-19T03:30:00.000Z');
+    // exactly at the run time → strictly after, tomorrow
+    expect(nextScheduleRun(daily, at('2026-10-19T03:30:00Z')).toISOString()).toBe('2026-10-20T03:30:00.000Z');
+    // 22:00Z on the 19th is already the 20th in Muscat (02:00 local) → the 20th's run
+    expect(nextScheduleRun(daily, at('2026-10-19T22:00:00Z')).toISOString()).toBe('2026-10-20T03:30:00.000Z');
+    // across the month and year end
+    expect(nextScheduleRun(daily, at('2026-12-31T04:00:00Z')).toISOString()).toBe('2027-01-01T03:30:00.000Z');
+  });
+  it('keeps the wall-clock time across a DST change', () => {
+    const london = { cadence: 'daily' as const, runDay: 0, runTime: '07:00', timezone: 'Europe/London' };
+    // Sunday 25 Oct 2026 07:00 GMT (clocks went back at 02:00 BST) = 07:00Z; the day before it was 06:00Z
+    expect(nextScheduleRun(london, at('2026-10-24T06:30:00Z')).toISOString()).toBe('2026-10-25T07:00:00.000Z');
+  });
+  it('a late run covers the latest occurrence and counts the missed days', () => {
+    const due = dueOccurrence(daily, at('2026-10-15T03:30:00Z'), at('2026-10-19T05:00:00Z'));
+    expect(due).toEqual({ scheduledFor: at('2026-10-19T03:30:00Z'), missed: 4 });
+    expect(latestScheduleRunAtOrBefore(daily, at('2026-10-19T03:29:00Z')).toISOString()).toBe('2026-10-18T03:30:00.000Z');
+  });
+  it('previous_day = yesterday in the organisation zone, as one day', () => {
+    expect(schedulePeriod({ periodRule: 'previous_day' }, at('2026-10-19T03:30:00Z'), 'Asia/Muscat')).toEqual({ from: '2026-10-18', to: '2026-10-18' });
+    // 21:00Z on the 18th is 01:00 on the 19th in Muscat: yesterday is still the 18th
+    expect(schedulePeriod({ periodRule: 'previous_day' }, at('2026-10-18T21:00:00Z'), 'Asia/Muscat')).toEqual({ from: '2026-10-18', to: '2026-10-18' });
+    expect(schedulePeriod({ periodRule: 'previous_day' }, at('2027-01-01T03:30:00Z'), 'Asia/Muscat')).toEqual({ from: '2026-12-31', to: '2026-12-31' });
+  });
+  it('maps yesterday onto the Daily Report and the range reports', () => {
+    const y = { from: '2026-10-18', to: '2026-10-18' };
+    expect(periodParameters('daily_attendance', y)).toEqual({ from: '2026-10-18', to: '2026-10-18' });
+    expect(periodParameters('irregularities_report', y)).toEqual({ from: '2026-10-18', to: '2026-10-18' });
+    expect(periodParameters('late_report', y)).toEqual({ from: '2026-10-18', to: '2026-10-18' });
+  });
+});
+
+describe('scopeReportForRecipient — each employee\'s line manager (recipients.lineManagers)', () => {
+  const emps = new Map([['e-a', 'b-a'], ['e-b', 'b-b']]);
+  const team = [
+    { employeeId: 'e-a', branchId: 'b-a', departmentId: 'd-1' },
+    { employeeId: 'e-b', branchId: 'b-b', departmentId: 'd-2' },
+  ];
+  // the system Line Manager role: report.view and attendance.view_team, no report.export
+  const manager = {
+    userId: 'm', permissions: ['report.view', 'attendance.view_team', 'attendance.view_own'], allBranches: false, branchIds: [] as string[], teamEmployeeIds: ['e-b', 'e-a'],
+    self: { employeeId: 'e-m', branchId: 'b-a', departmentId: 'd-1' }, lineManager: { only: true, team },
+  };
+  it('a manager without report.export receives the report about their direct reports, marked as their team copy', () => {
+    const d = scopeReportForRecipient(manager, 'irregularities_report', { from: '2026-10-18', to: '2026-10-18' }, emps);
+    expect(d).toEqual({ ok: true, kind: 'TEAM', parameters: { from: '2026-10-18', to: '2026-10-18', employeeIds: ['e-a', 'e-b'], [TEAM_SCOPE_PARAMETER]: 'e-m' }, branchId: null, branchCount: null, employeeCount: 2 });
+    expect(isTeamScopedReport('irregularities_report', (d as { parameters: Record<string, unknown> }).parameters, 'e-m', manager.teamEmployeeIds)).toBe(true);
+  });
+  it('never wider than the team: the sender\'s filters only remove people, and injected scope keys are dropped', () => {
+    const d = scopeReportForRecipient(manager, 'daily_attendance', { from: '2026-10-18', branchScope: ['b-z'], branchIds: ['b-z'], selfEmployeeId: 'e-m', employeeIds: ['e-a', 'e-x'] }, emps);
+    expect(d).toMatchObject({ ok: true, kind: 'TEAM', parameters: { employeeIds: ['e-a'], [TEAM_SCOPE_PARAMETER]: 'e-m' } });
+    const p = (d as { parameters: Record<string, unknown> }).parameters;
+    expect([p['branchScope'], p['branchIds'], p['selfEmployeeId']]).toEqual([undefined, undefined, undefined]);
+    expect(scopeReportForRecipient(manager, 'late_report', { branchId: 'b-b' }, emps)).toMatchObject({ ok: true, parameters: { branchId: 'b-b', employeeIds: ['e-b'] } });
+    expect(scopeReportForRecipient(manager, 'late_report', { departmentId: 'd-1' }, emps)).toMatchObject({ ok: true, parameters: { departmentId: 'd-1', employeeIds: ['e-a'] } });
+  });
+  it('is skipped when the filters leave none of their reports, or they have no team at all', () => {
+    expect(scopeReportForRecipient(manager, 'late_report', { departmentId: 'd-9' }, emps)).toEqual({ ok: false, reason: 'no_team_in_scope' });
+    expect(scopeReportForRecipient(manager, 'late_report', { employeeIds: ['e-x'] }, emps)).toEqual({ ok: false, reason: 'no_team_in_scope' });
+    expect(scopeReportForRecipient({ ...manager, teamEmployeeIds: [] }, 'late_report', {}, emps)).toEqual({ ok: false, reason: 'no_team' });
+    // a placement the worker supplied for somebody outside the team is ignored
+    expect(scopeReportForRecipient({ ...manager, teamEmployeeIds: ['e-a'] }, 'late_report', {}, emps)).toMatchObject({ ok: true, parameters: { employeeIds: ['e-a'] } });
+    // without their own employee record there is no team to mark the copy with
+    expect(scopeReportForRecipient({ ...manager, self: null }, 'late_report', {}, emps)).toEqual({ ok: false, reason: 'no_team' });
+  });
+  it('needs report.view and the team read; never the directory or the audit trail', () => {
+    expect(scopeReportForRecipient({ ...manager, permissions: ['attendance.view_team'] }, 'late_report', {}, emps)).toEqual({ ok: false, reason: 'missing_permission:report.view' });
+    expect(scopeReportForRecipient({ ...manager, permissions: ['report.view'] }, 'late_report', {}, emps)).toEqual({ ok: false, reason: 'missing_permission:attendance.view_team' });
+    expect(scopeReportForRecipient(manager, 'leave_report', { leaveTypeCode: 'AL' }, emps)).toEqual({ ok: false, reason: 'missing_permission:leave.view_team' });
+    expect(scopeReportForRecipient({ ...manager, permissions: [...manager.permissions, 'leave.view_team'] }, 'leave_report', { leaveTypeCode: 'AL' }, emps)).toMatchObject({ ok: true, kind: 'TEAM' });
+    expect(scopeReportForRecipient(manager, 'employee_directory', {}, emps)).toEqual({ ok: false, reason: 'report_type_not_for_team' });
+    expect(scopeReportForRecipient({ ...manager, permissions: [...manager.permissions, 'audit.view'] }, 'audit_report', {}, emps)).toEqual({ ok: false, reason: 'report_type_not_for_team' });
+  });
+  it('an organisation-wide HR member reached only as a line manager still gets just their team', () => {
+    const hr = { ...manager, permissions: ['report.view', 'report.export', 'attendance.view'], allBranches: true };
+    expect(scopeReportForRecipient(hr, 'late_report', {}, emps)).toMatchObject({ ok: true, kind: 'TEAM', parameters: { employeeIds: ['e-a', 'e-b'] } });
+    // addressed by name or role as well: their own (wider) access decides
+    expect(scopeReportForRecipient({ ...hr, lineManager: { only: false, team } }, 'late_report', {}, emps)).toMatchObject({ ok: true, kind: 'ORGANIZATION' });
+  });
+  it('addressed by role as well: a manager whose role gives them only themselves gets the team copy instead', () => {
+    const both = { ...manager, lineManager: { only: false, team } };
+    expect(scopeReportForRecipient(both, 'monthly_attendance', { month: '2026-09' }, emps)).toMatchObject({ ok: true, kind: 'TEAM', parameters: { employeeIds: ['e-a', 'e-b'] } });
+    // not a line manager in this run: the self copy, as before
+    expect(scopeReportForRecipient({ ...manager, lineManager: null }, 'monthly_attendance', { month: '2026-09' }, emps)).toMatchObject({ ok: true, kind: 'SELF' });
+  });
+  it('isTeamScopedReport needs the marker to be the caller and every employee to be in their team now', () => {
+    const p = { [TEAM_SCOPE_PARAMETER]: 'e-m', employeeIds: ['e-a', 'e-b'] };
+    expect(isTeamScopedReport('late_report', p, 'e-m', ['e-a', 'e-b'])).toBe(true);
+    expect(isTeamScopedReport('late_report', p, 'e-m', ['e-a'])).toBe(false);
+    expect(isTeamScopedReport('late_report', p, 'e-x', ['e-a', 'e-b'])).toBe(false);
+    expect(isTeamScopedReport('late_report', { ...p, employeeIds: [] }, 'e-m', ['e-a'])).toBe(false);
+    expect(isTeamScopedReport('late_report', { employeeIds: ['e-a'] }, 'e-m', ['e-a'])).toBe(false);
+    expect(isTeamScopedReport('employee_directory', p, 'e-m', ['e-a', 'e-b'])).toBe(false);
+    expect(isTeamScopedReport('late_report', p, null, ['e-a', 'e-b'])).toBe(false);
   });
 });

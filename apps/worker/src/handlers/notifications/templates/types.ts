@@ -49,7 +49,7 @@ export interface LocaleTemplates {
     financeDirection: { pull: string; push: string; sync: string };
     payEffect: { half: string; one: string; other: string };
   };
-  plurals: { days: PluralForms; attendanceDays: PluralForms; hours: PluralForms; approvals: PluralForms; balances: PluralForms; punches: PluralForms };
+  plurals: { days: PluralForms; attendanceDays: PluralForms; hours: PluralForms; approvals: PluralForms; balances: PluralForms; punches: PluralForms; minutes: PluralForms };
   entities: Record<ApprovalEntity, string>;
   reportTypes: Record<ReportType, string>;
   syncJobTypes: Record<SyncJobType, string>;

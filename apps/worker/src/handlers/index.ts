@@ -8,11 +8,13 @@ import { registerApprovalHandlers } from './approvals/index.js';
 import { registerLeaveHandlers } from './leave/index.js';
 import { registerMemberHandlers } from './members/index.js';
 import { registerSchedulingHandlers } from './scheduling/index.js';
+import { registerHolidayHandlers } from './holidays/index.js';
+import { registerImportHandlers } from './imports/index.js';
 
 /**
  * Registers every job handler. Handler modules live in ./<area>/ and export `register<Area>Handlers(registry)`:
  *   maintenance (ENSURE_PARTITIONS, REAP_STALE, PRUNE_QUEUE_ARCHIVE, RETENTION, USAGE_METERING)
- *   notifications (RELAY_OUTBOX, DELIVER_NOTIFICATIONS, MISSING_PUNCH_REMINDERS, NOTIFICATION_RETENTION)
+ *   notifications (RELAY_OUTBOX, DELIVER_NOTIFICATIONS, MISSING_PUNCH_REMINDERS, NOTIFICATION_RETENTION, ATTENDANCE_ALERTS, ATTENDANCE_APPRECIATION)
  *   sync (PULL_ATTENDANCE, PUSH_EMPLOYEE(S), PULL_EMPLOYEES, DEVICE_HEALTH_CHECK, RECONCILIATION, TEST_CONNECTION, DELETE_EMPLOYEE, WEBHOOK_EVENT)
  *   attendance (NORMALIZE_RAW, RECOMPUTE_DAILY, RECALCULATE_RANGE, BUILD_PERIOD_SUMMARY)
  *   reports (GENERATE_REPORT, EXPORT_EMPLOYEES) — see ./reports and docs/reports.md
@@ -21,6 +23,8 @@ import { registerSchedulingHandlers } from './scheduling/index.js';
  *   members (SEND_INVITATION_EMAIL: e-mails an invitation with a token minted at send time, hash only)
  *   scheduling (BRANCH_DEPLOYMENT_CLEANUP: the daily deployment sweep — takes an employee off a host branch's terminals once a
  *               temporary deployment is over or cancelled, and enrols them there on its first day)
+ *   holidays (HOLIDAY_ROLLOVER: from 1 December, next year's occurrence of every recurring holiday of an auto-rollover calendar)
+ *   imports (EXECUTE_IMPORT: applies a confirmed employee / org-unit import or an HR system batch — docs/integrations/hrms.md)
  */
 export function buildHandlerRegistry(): HandlerRegistry {
   const registry = new HandlerRegistry();
@@ -33,5 +37,7 @@ export function buildHandlerRegistry(): HandlerRegistry {
   registerLeaveHandlers(registry);
   registerMemberHandlers(registry);
   registerSchedulingHandlers(registry);
+  registerHolidayHandlers(registry);
+  registerImportHandlers(registry);
   return registry;
 }

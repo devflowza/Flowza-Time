@@ -1,5 +1,5 @@
 import { useTranslation } from 'react-i18next';
-import { ArrowLeftRight, CalendarOff, Clock, FileQuestion, MessageSquareText, Repeat } from 'lucide-react';
+import { ArrowLeftRight, CalendarOff, Clock, Clock3, FileQuestion, MessageSquareText, Repeat } from 'lucide-react';
 import type { ApprovalContextDto, ApprovalEntity, ApprovalRequestDto, ApprovalRequestStatus, ApprovalStepDto } from '@flowza/contracts';
 import { Badge } from '@/components/ui';
 import { cn } from '@/lib/utils';
@@ -12,6 +12,7 @@ import { AttendanceStatusBadge, FlagChips } from '@/features/attendance/componen
 import { fmtTime } from '@/lib/format';
 import { CompOffApprovalContext } from '@/features/leave/components/comp-off-context';
 import { ShiftChangeApprovalContext } from '@/features/shift-requests/components/approval-context';
+import { ShortLeaveApprovalContext } from '@/features/leave/short-leave/components/approval-context';
 
 const STATUS_TONE: Record<string, 'warning' | 'success' | 'danger' | 'neutral'> = { PENDING: 'warning', APPROVED: 'success', REJECTED: 'danger', CANCELLED: 'neutral', INVALIDATED: 'neutral', SKIPPED: 'neutral' };
 
@@ -22,8 +23,8 @@ export function RequestStatusBadge({ status }: { status: ApprovalRequestStatus |
 
 export function EntityIcon({ entityType, className }: { entityType: ApprovalEntity; className?: string }) {
   const Icon = entityType === 'LEAVE' || entityType === 'COMP_OFF' ? CalendarOff : entityType === 'ATTENDANCE_CORRECTION' || entityType === 'MISSING_PUNCH' || entityType === 'REGULARISATION' ? Clock
-    : entityType === 'ATTENDANCE_NOTE' ? MessageSquareText : entityType === 'SHIFT_SWAP' ? ArrowLeftRight : entityType === 'SHIFT_CHANGE' ? Repeat : FileQuestion;
-  const tone = entityType === 'LEAVE' || entityType === 'COMP_OFF' ? 'bg-chart-leave/12 text-chart-leave' : 'bg-chart-late/12 text-chart-late';
+    : entityType === 'ATTENDANCE_NOTE' ? MessageSquareText : entityType === 'SHIFT_SWAP' ? ArrowLeftRight : entityType === 'SHIFT_CHANGE' ? Repeat : entityType === 'SHORT_LEAVE' ? Clock3 : FileQuestion;
+  const tone = entityType === 'LEAVE' || entityType === 'COMP_OFF' || entityType === 'SHORT_LEAVE' ? 'bg-chart-leave/12 text-chart-leave' : 'bg-chart-late/12 text-chart-late';
   return <span className={cn('flex size-8 shrink-0 items-center justify-center rounded-lg', tone, className)} aria-hidden><Icon className="size-4" /></span>;
 }
 
@@ -74,6 +75,8 @@ export function ApprovalContext({ context, timezone, compact = false }: { contex
   if (context.kind === 'COMP_OFF') return <CompOffApprovalContext c={context.compOff} compact={compact} />;
   // Enterprise (shift_requests): a shift change or an additional (double) shift over a range
   if (context.kind === 'SHIFT_CHANGE') return <ShiftChangeApprovalContext context={context} compact={compact} />;
+  // short leave (20261019000310): an hourly permission / official assignment / remote work window on one day
+  if (context.kind === 'SHORT_LEAVE') return <ShortLeaveApprovalContext c={context.shortLeave} compact={compact} />;
   return <p className="text-sm text-muted-foreground">{context.summary ?? t('context.noDetails')}</p>;
 }
 

@@ -1,10 +1,11 @@
 import type { DateTime } from 'luxon';
-import { ATTENDANCE_FLAGS, DEFAULT_ATTENDANCE_SETTINGS, type AttendanceFlag, type AttendanceRules, type AttendanceStatus } from '@flowza/contracts';
+import { ATTENDANCE_FLAGS, DEFAULT_ATTENDANCE_SETTINGS, type AttendanceFlag, type AttendanceRules, type AttendanceStatus, type GraceMode, type SpecialHoursPeriod } from '@flowza/contracts';
 import { addDays, dayOfWeek, minutesBetween } from '@flowza/shared';
-import { attributeEvents } from './attribute.js';
+import { attributeEvents, sortEvents } from './attribute.js';
 import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
 import { carryOvernightCheckOuts, openCheckIn, overnightMaxSpanMinutes } from './overnight.js';
 import { roundMinutes, roundPunches } from './rounding.js';
+import { applyTimeOff } from './time-off.js';
 import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EnginePunchPayload, type EngineShift, type TraceStep } from './types.js';
 import { assertTimezone, computePunchWindow, localInstant, parseInstant, toUtcIso, type PunchWindow } from './window.js';
 
@@ -88,6 +89,8 @@ interface Schedule {
    * for. False when the shift has core hours (arriving after the core start is late) and for every other kind.
    */
   checkInAnyTime: boolean;
+  /** FIXED with a flexible start band (engine 1.5.0): the latest on-time start; null without a band. */
+  flexStartUntil: DateTime | null;
 }
 
 /** Everything `measureWork` needs besides the punches themselves. */
@@ -133,7 +136,8 @@ const local = (dt: DateTime): string => dt.toISO({ suppressMilliseconds: true, i
  * change the computed status, so a record stays reproducible from raw + corrections + marks.
  */
 export function calculateDailyRecord(input: DailyCalculationInput): DailyCalculationResult {
-  return applyDayMarks(calculateCore(input), input.dayMarks ?? []);
+  // short leave / reduced hours / lost time (engine 1.5.0) adjust the computed day before the reviewed marks are folded in
+  return applyDayMarks(applyTimeOff(calculateCore(input), input), input.dayMarks ?? []);
 }
 
 function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
@@ -166,7 +170,7 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   // that day even after its day boundary (engine 1.3.0, overnight.ts).
   const shiftOn = new Map<string, EngineShift | null>([[addDays(date, -1), previousShift], [date, shift], [addDays(date, 1), nextShift]]);
   const { attribution, carries } = carryOvernightCheckOuts(attributeEvents(input.events, windows), windows, (d) => shiftOn.get(d) ?? null);
-  const attributed = attribution.byDate.get(date) ?? [];
+  let attributed = attribution.byDate.get(date) ?? [];
   const tracePunches = new Map<string, TracePunch>();
   /** Attribution decisions worth keeping next to the interpretation note (§G.6: every punch with its attribution). */
   const attributionNotes = new Map<string, string>();
@@ -200,6 +204,21 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
     rec.step('attribution.overnight', c.to === date
       ? `check-out after the day boundary closes the check-in of ${local(parseInstant(c.checkIn.punchedAt, zone))} (${c.spanMinutes} min): kept on ${date}`
       : `the first check-out of ${date} closes the open check-in of ${c.to}: attributed there`, { from: c.from, to: c.to, checkIn: c.checkIn.id, events: c.events.map((e) => e.id), spanMinutes: c.spanMinutes });
+  }
+  // 2a. Work on a weekly off / full holiday at any hour (engine 1.5.0, customer review): the off day keeps its shift's punch
+  // window, which need not cover hours worked outside the shift — so a punch on that calendar day that NO window claims belongs
+  // to the off day, exactly as a day without a shift takes the punches no shift window contains. A neighbouring day never
+  // claims such a punch (no window of its own contains it), so nothing is counted twice.
+  if (outOfWindowOnDate > 0 && isNonWorkingDay(input)) {
+    const claimed = attribution.decisions.filter((d) => d.reason === 'OUT_OF_WINDOW' && parseInstant(d.punchedAt, zone).toISODate() === date).map((d) => d.eventId);
+    const events = input.events.filter((e) => claimed.includes(e.id));
+    attributed = sortEvents([...attributed, ...events]);
+    for (const e of events) {
+      const entry = tracePunches.get(e.id);
+      if (entry) tracePunches.set(e.id, { ...entry, role: 'IGNORED', note: 'outside the shift window on a non-working day → kept on that day' });
+    }
+    rec.step('attribution.nonWorkingDay', `${events.length} punch(es) on non-working day ${date} outside the shift window: attributed to ${date}`, { events: events.map((e) => e.id) });
+    outOfWindowOnDate -= events.length;
   }
   if (outOfWindowOnDate > 0) {
     rec.flag('OUT_OF_WINDOW');
@@ -413,6 +432,11 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
 
 /* ------------------------------------------------------------------------------------------------ */
 
+/** A weekly off or a full-day holiday: nothing is expected, work done is recorded (and may be overtime). */
+function isNonWorkingDay(input: DailyCalculationInput): boolean {
+  return (!!input.holiday && !input.holiday.isHalfDay) || input.weeklyOffDays.includes(dayOfWeek(input.attendanceDate));
+}
+
 function classifyDay(input: DailyCalculationInput, rec: Recorder): DayType {
   if (input.holiday && !input.holiday.isHalfDay) {
     rec.step('dayType', `holiday "${input.holiday.name}" → HOLIDAY`, { holidayId: input.holiday.id });
@@ -441,6 +465,29 @@ function halfDayPart(input: DailyCalculationInput, rec: Recorder): HalfDayOff {
   if (input.holiday?.isHalfDay) {
     rec.step('halfDay', `half-day holiday "${input.holiday.name}" → second half off, expectations halved`, { holidayId: input.holiday.id });
     return 'SECOND_HALF';
+  }
+  return null;
+}
+
+/**
+ * Minutes that count once the grace is applied (engine 1.5.0, contracts GRACE_MODES): `deduct` takes the grace off every late
+ * arrival / early departure; `tolerance` forgives one within the grace and counts every minute of one beyond it.
+ */
+export function applyGrace(minutes: number, grace: number, mode: GraceMode): number {
+  if (minutes <= 0) return 0;
+  if (mode === 'tolerance') return minutes > grace ? minutes : 0;
+  return Math.max(0, minutes - grace);
+}
+
+/**
+ * The approved working-hours period (rule set `specialPeriods`, engine 1.5.0) covering the date for this employee, if any. The
+ * contract refuses overlapping periods; should stored ones overlap anyway, the first in the list wins (deterministic).
+ */
+export function specialPeriodOn(rules: AttendanceRules, date: string, eligible: boolean): SpecialHoursPeriod | null {
+  for (const p of rules.specialPeriods ?? []) {
+    if (date < p.from || date > p.to) continue;
+    if (p.appliesTo !== 'all' && !eligible) continue;
+    return p;
   }
   return null;
 }
@@ -484,8 +531,44 @@ function buildSchedule(input: DailyCalculationInput, window: PunchWindow, halfDa
   }
   const baseScheduled = scheduled;
 
+  // Approved working hours (engine 1.5.0): a circular's start / end / minutes for a date range. They take precedence over
+  // Ramadan hours on the dates both cover — the circular is the more specific decision for those days.
+  let special = shift && window.kind !== 'NONE' ? specialPeriodOn(input.rules, date, input.specialHoursEligible === true) : null;
+  if (special && window.kind === 'FLEXIBLE' && special.scheduledMinutes === undefined) {
+    rec.step('specialHours', `period "${special.name}" sets clock times only: a flexible shift has none to replace → not applied`, { period: special.name, reference: special.reference ?? null });
+    special = null;
+  }
   const ramadan = ramadanApplies(input);
-  if (ramadan !== null && window.kind !== 'NONE') {
+  if (special && shift) {
+    const label = `"${special.name}"${special.reference ? ` (${special.reference})` : ''}`;
+    const before = { expectedStart: iso(expectedStart), expectedEnd: iso(expectedEnd), scheduledMinutes: scheduled };
+    // a double shift keeps its clock times (its gap is a timed break): only the period's minutes apply to it
+    const composite = (shift.segments?.length ?? 0) > 1;
+    if (window.kind === 'FIXED' && expectedStart && expectedEnd) {
+      const span = minutesBetween(expectedStart, expectedEnd);
+      const startTime = composite ? undefined : special.startTime;
+      const endTime = composite ? undefined : special.endTime;
+      if (startTime) expectedStart = localInstant(date, startTime, zone);
+      if (endTime) {
+        expectedEnd = localInstant(date, endTime, zone);
+        // an end at or before the start is the next day's (an overnight period)
+        if (expectedEnd <= expectedStart) expectedEnd = localInstant(date, endTime, zone, 1);
+      } else if (special.scheduledMinutes !== undefined) expectedEnd = expectedStart.plus({ minutes: special.scheduledMinutes + unpaidFixed });
+      else expectedEnd = expectedStart.plus({ minutes: span }); // a new start only: the shift keeps its length
+      scheduled = special.scheduledMinutes ?? Math.max(0, minutesBetween(expectedStart, expectedEnd) - unpaidFixed);
+    } else if (special.scheduledMinutes !== undefined) {
+      scheduled = special.scheduledMinutes;
+    }
+    rec.flag('SPECIAL_HOURS');
+    const times = window.kind === 'FIXED' && expectedStart && expectedEnd ? `, expected ${toUtcIso(expectedStart)}–${toUtcIso(expectedEnd)}` : '';
+    const note = composite && (special.startTime || special.endTime) ? ' (double shift: clock times kept, minutes applied)' : window.kind === 'FLEXIBLE' ? ' (required minutes)' : '';
+    rec.step('specialHours', `approved working hours ${label} ${special.from}…${special.to}: scheduled ${before.scheduledMinutes} → ${scheduled} min${times}${note}`, {
+      period: special.name, reference: special.reference ?? null, from: special.from, to: special.to, appliesTo: special.appliesTo,
+      startTime: special.startTime ?? null, endTime: special.endTime ?? null, periodScheduledMinutes: special.scheduledMinutes ?? null,
+      before, expectedStart: iso(expectedStart), expectedEnd: iso(expectedEnd), scheduledMinutes: scheduled,
+    });
+    if (ramadan !== null) rec.step('ramadan', `Ramadan hours not applied: the approved working hours ${label} take precedence`, { ramadanScheduledMinutes: ramadan, supersededBy: special.name });
+  } else if (ramadan !== null && window.kind !== 'NONE') {
     const reduced = Math.min(scheduled, ramadan);
     if (expectedStart && window.kind === 'FIXED') expectedEnd = expectedStart.plus({ minutes: reduced + unpaidFixed });
     rec.flag('RAMADAN_HOURS');
@@ -502,6 +585,27 @@ function buildSchedule(input: DailyCalculationInput, window: PunchWindow, halfDa
     }
     rec.step('halfDay.schedule', `${halfDayOff} off: scheduled ${scheduled} → ${half} min`, { expectedStart: iso(expectedStart), expectedEnd: iso(expectedEnd), scheduledMinutes: half });
     scheduled = half;
+  }
+
+  // Flexible start band (FIXED, engine 1.5.0): the employee may start anywhere from the expected start to the end of the band;
+  // the expected start follows the (rounded) check-in inside the band and the expected end moves by the same amount, so the
+  // day keeps its length. Before the band the day starts at the band start (early-in), after it at the band end (late counts
+  // from there). A double shift keeps its clock (composeDoubleShift stores no band).
+  const flexBand = shift && window.kind === 'FIXED' && !((shift.segments?.length ?? 0) > 1) ? Math.max(0, shift.flexStartMinutes ?? 0) : 0;
+  let flexStartUntil: DateTime | null = null;
+  if (flexBand > 0 && expectedStart && expectedEnd) {
+    const bandStart = expectedStart;
+    const bandEnd = bandStart.plus({ minutes: flexBand });
+    flexStartUntil = bandEnd;
+    const startAt = anchorIn === null || anchorIn <= bandStart ? bandStart : anchorIn < bandEnd ? anchorIn : bandEnd;
+    const moved = startAt.diff(bandStart);
+    const movedMinutes = Math.round(moved.as('minutes'));
+    expectedStart = startAt;
+    expectedEnd = expectedEnd.plus(moved);
+    rec.step('schedule.flexStart', anchorIn
+      ? `flexible start ${local(bandStart)}–${local(bandEnd)}: checked in ${local(anchorIn)} → expected ${toUtcIso(expectedStart)}–${toUtcIso(expectedEnd)}${movedMinutes > 0 ? ` (${movedMinutes} min later)` : ''}`
+      : `flexible start ${local(bandStart)}–${local(bandEnd)}: no check-in → expected from the band start`,
+    { flexStartMinutes: flexBand, bandStart: iso(bandStart), bandEnd: iso(bandEnd), checkIn: iso(anchorIn), movedMinutes, expectedStart: iso(expectedStart), expectedEnd: iso(expectedEnd) });
   }
 
   let checkInAnyTime = false;
@@ -521,7 +625,7 @@ function buildSchedule(input: DailyCalculationInput, window: PunchWindow, halfDa
     }
   }
 
-  return { kind: window.kind, expectedStart, expectedEnd, scheduledMinutes: scheduled, baseScheduledMinutes: baseScheduled, ratio: baseScheduled > 0 ? scheduled / baseScheduled : 1, unpaidFixedBreakMinutes: unpaidFixed, halfDayOff, checkInAnyTime };
+  return { kind: window.kind, expectedStart, expectedEnd, scheduledMinutes: scheduled, baseScheduledMinutes: baseScheduled, ratio: baseScheduled > 0 ? scheduled / baseScheduled : 1, unpaidFixedBreakMinutes: unpaidFixed, halfDayOff, checkInAnyTime, flexStartUntil };
 }
 
 /** Punch rounding, breaks, worked, late/early and regular overtime for a day with at least one punch. */
@@ -551,9 +655,10 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
     rec.step('worked', `${span} min span − ${breakMinutes} min unpaid breaks = ${rawWorked}${workedMinutes !== rawWorked ? ` → rounded ${rules.workedRoundingMode} ${rules.workedRoundingMinutes} = ${workedMinutes}` : ''} min`, { spanMinutes: span, rawWorkedMinutes: rawWorked, workedMinutes });
   }
 
-  // Late / early departure relative to expected start/end (core hours for FLEXIBLE).
+  // Late / early departure relative to expected start/end (core hours for FLEXIBLE), the grace applied per the rule set's mode.
   const graceIn = shift?.graceInMinutes ?? rules.graceInMinutes;
   const graceOut = shift?.graceOutMinutes ?? rules.graceOutMinutes;
+  const graceMode: GraceMode = rules.graceMode ?? 'deduct';
   let lateMinutes = 0;
   let earlyDepartureMinutes = 0;
   if (!punctuality) {
@@ -562,10 +667,14 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
   if (punctuality && firstIn && schedule.checkInAnyTime) {
     rec.step('late', 'FLEXIBLE without core hours: the employee may check in at any time → never late', { checkInAnyTime: true });
   } else if (punctuality && firstIn && schedule.expectedStart && !assumed.firstIn) {
-    lateMinutes = Math.max(0, minutesBetween(schedule.expectedStart.plus({ minutes: graceIn }), firstIn));
+    // with a flexible start band the expected start is the check-in inside the band, else the band's end: late counts from there
+    const afterExpected = minutesBetween(schedule.expectedStart, firstIn);
+    lateMinutes = applyGrace(afterExpected, graceIn, graceMode);
     const flagged = lateMinutes > rules.lateThresholdMinutes;
     if (flagged) rec.flag('LATE');
-    rec.step('late', `IN ${toUtcIso(firstIn)} vs expected ${toUtcIso(schedule.expectedStart)} + ${graceIn} min grace → ${lateMinutes} min late${flagged ? ' (flagged)' : lateMinutes > 0 ? ` (≤ threshold ${rules.lateThresholdMinutes}, not flagged)` : ''}`, { graceInMinutes: graceIn, lateMinutes, thresholdMinutes: rules.lateThresholdMinutes, flagged });
+    const graceNote = graceMode === 'tolerance' ? `${graceIn} min grace (tolerance: ${afterExpected > graceIn ? 'beyond it, every minute counts' : 'within it'})` : `${graceIn} min grace`;
+    const band = schedule.flexStartUntil ? ` (flexible start until ${toUtcIso(schedule.flexStartUntil)})` : '';
+    rec.step('late', `IN ${toUtcIso(firstIn)} vs expected ${toUtcIso(schedule.expectedStart)}${band} + ${graceNote} → ${lateMinutes} min late${flagged ? ' (flagged)' : lateMinutes > 0 ? ` (≤ threshold ${rules.lateThresholdMinutes}, not flagged)` : ''}`, { graceInMinutes: graceIn, graceMode, minutesAfterExpectedStart: afterExpected, lateMinutes, thresholdMinutes: rules.lateThresholdMinutes, flagged });
     // engine 1.4.0: very late is measured from the scheduled start (the policy says "after 09:00", not "after the grace"), and
     // only ever on top of LATE: an arrival inside the late tolerance (grace + threshold) is never very late
     const veryLateAfter = rules.policy.late.veryLateAfterMinutes;
@@ -583,15 +692,18 @@ function measureWork(ctx: WorkContext, interpretation: Interpretation, schedule:
     const beforeEnd = Math.max(0, minutesBetween(lastOut, schedule.expectedEnd));
     const shortOfRequired = firstIn && schedule.halfDayOff === null ? Math.max(0, schedule.scheduledMinutes - workedMinutes) : 0;
     const shortfall = Math.max(beforeEnd, shortOfRequired);
-    earlyDepartureMinutes = shortfall > graceOut ? shortfall : 0;
+    // the tolerance rule in both grace modes (contracts GRACE_MODES): deducting the grace here would undo the 1.3.0 field fix
+    earlyDepartureMinutes = applyGrace(shortfall, graceOut, 'tolerance');
     const flagged = earlyDepartureMinutes > rules.earlyDepartureThresholdMinutes;
     if (flagged) rec.flag('EARLY_DEPARTURE');
-    rec.step('earlyDeparture', `OUT ${toUtcIso(lastOut)}: ${shortfall} min short (${shortOfRequired} min of the ${schedule.scheduledMinutes} required, ${beforeEnd} min before the expected check-out ${toUtcIso(schedule.expectedEnd)}) → ${shortfall > graceOut ? 'beyond' : 'within'} the ${graceOut} min grace → ${earlyDepartureMinutes} min early${flagged ? ' (flagged)' : ''}`, { graceOutMinutes: graceOut, shortfallMinutes: shortfall, shortOfRequiredMinutes: shortOfRequired, beforeExpectedEndMinutes: beforeEnd, earlyDepartureMinutes, thresholdMinutes: rules.earlyDepartureThresholdMinutes, flagged });
+    rec.step('earlyDeparture', `OUT ${toUtcIso(lastOut)}: ${shortfall} min short (${shortOfRequired} min of the ${schedule.scheduledMinutes} required, ${beforeEnd} min before the expected check-out ${toUtcIso(schedule.expectedEnd)}) → ${shortfall > graceOut ? 'beyond' : 'within'} the ${graceOut} min grace → ${earlyDepartureMinutes} min early${flagged ? ' (flagged)' : ''}`, { graceOutMinutes: graceOut, graceMode: 'tolerance', ruleSetGraceMode: graceMode, shortfallMinutes: shortfall, shortOfRequiredMinutes: shortOfRequired, beforeExpectedEndMinutes: beforeEnd, earlyDepartureMinutes, thresholdMinutes: rules.earlyDepartureThresholdMinutes, flagged });
   } else if (punctuality && lastOut && schedule.expectedEnd && !assumed.lastOut) {
-    earlyDepartureMinutes = Math.max(0, minutesBetween(lastOut, schedule.expectedEnd.minus({ minutes: graceOut })));
+    const beforeExpected = minutesBetween(lastOut, schedule.expectedEnd);
+    earlyDepartureMinutes = applyGrace(beforeExpected, graceOut, graceMode);
     const flagged = earlyDepartureMinutes > rules.earlyDepartureThresholdMinutes;
     if (flagged) rec.flag('EARLY_DEPARTURE');
-    rec.step('earlyDeparture', `OUT ${toUtcIso(lastOut)} vs expected ${toUtcIso(schedule.expectedEnd)} − ${graceOut} min grace → ${earlyDepartureMinutes} min early${flagged ? ' (flagged)' : ''}`, { graceOutMinutes: graceOut, earlyDepartureMinutes, thresholdMinutes: rules.earlyDepartureThresholdMinutes, flagged });
+    const graceNote = graceMode === 'tolerance' ? `${graceOut} min grace (tolerance: ${beforeExpected > graceOut ? 'beyond it, every minute counts' : 'within it'})` : `${graceOut} min grace`;
+    rec.step('earlyDeparture', `OUT ${toUtcIso(lastOut)} vs expected ${toUtcIso(schedule.expectedEnd)} − ${graceNote} → ${earlyDepartureMinutes} min early${flagged ? ' (flagged)' : ''}`, { graceOutMinutes: graceOut, graceMode, minutesBeforeExpectedEnd: beforeExpected, earlyDepartureMinutes, thresholdMinutes: rules.earlyDepartureThresholdMinutes, flagged });
   }
 
   // Regular overtime (§G.5).

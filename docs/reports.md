@@ -55,6 +55,32 @@ under the report's name; `inline` lets the browser show it). The web report view
 (first 500 rows); Excel files download. Report notices link to `/reports?view=<id>` (or `/my/reports?view=<id>` for an
 employee's own copy) — the file is always fetched through the reader's session, never a mailed bearer link.
 
+## Daily schedules, line managers and irregular cases (2026-10-19, migration 20261019000500)
+
+Customer requirement: "a morning report on irregular cases to the direct manager, and a monthly report for the Director General".
+
+- **`irregularities_report` — Irregular Cases Report** (`definitions/irregularities.ts`): one row per employee-day that is irregular
+  (`irregularitiesOf`, `packages/domain/src/reports/derive.ts`): late (LATE / VERY_LATE), early departure, absent, missing check-in /
+  check-out, short hours (the engine's UNDER_HOURS, or a present day short of its base — never on a missing-punch day, whose hours
+  are unknown) or unexcused; with the late / early / short minutes and the employee's reason (the latest attendance note of the day:
+  category and review status — never the free text). Grouped by department, employees in natural order, then date; a **Summary per
+  employee** follows — on its own worksheet in XLSX and below the list in CSV (`ReportSection.sheet`, `flattenSheets`), after a page
+  break in PDF. Filters: branch, department, employees, location, `status`. Schedulable daily / weekly / monthly.
+- **Daily cadence**: `cadence: 'daily'` runs every day at `runTime` in the organisation's zone (`run_day` stored 0) and covers
+  `previous_day` (yesterday) or `month_to_date`. The Daily Report is schedulable now too (a weekly / monthly run prints each day of the
+  period, ≤ 62 days). For the Director General: a `monthly` schedule (previous month) to named users or a role.
+- **`recipients.lineManagers`** ("Each employee's line manager (their team only)"): at every run each active member whose employee
+  record is the PRIMARY manager of at least one active employee receives a copy about their own team (`scopeReportForRecipient` →
+  `scopeToLineTeam`, scope TEAM): `employeeIds` = their direct reports (the team of `app.team_employee_ids()`) narrowed by the
+  sender's branch / department / employee filters — never wider; `no_team_in_scope` when none is left. They need report.view and a
+  team read (attendance.view_team) but not report.export: the copy carries the server-written `teamManagerEmployeeId`, and the
+  download admits it to that manager while every employee of the copy is still their direct report (`isTeamScopedReport`). Line
+  managers are capped apart (`REPORT_RECIPIENT_MAX_LINE_MANAGERS` = 500) from the people chosen by name or role (100). A manager also
+  chosen by name or role gets their own (wider) access, or the team copy when that access would give them only themselves.
+- **Search options**: the Daily, Detail, Late, Absence and Irregular cases reports honour `status` (as the register filters it:
+  `MISSING_PUNCH` = the MISSING_IN / MISSING_OUT flag); the Daily Report also `shiftId`, `flag` and `search` (name in either script or
+  employee number) — which is how `POST /attendance/daily/export` turns the register's current view into a file.
+
 ## Code layout
 
 | Path | Role |
@@ -114,6 +140,7 @@ employee's own copy) — the file is always fetched through the reader's session
 | — | Monthly Attendance Summary (the attendance summary page as a file) | `monthly_summary` | available (HR portal Prompt 6a review) |
 | — | Monthly Detail Report (the Daily Report's detail for a whole month) | `monthly_detail` | available |
 | — | Monthly Timesheet Report (each employee's month, a row per day: check-in/out against the shift's hours) | `monthly_timesheet` | available |
+| — | Irregular Cases Report (each irregular employee-day with minutes and the reason's status, then a summary per employee) | `irregularities_report` | available (2026-10-19) |
 
 The **Daily Report** takes an optional `to` (HR portal Prompt 6a review, ATT-21): each day of a range of at most
 `DAILY_REPORT_MAX_DAYS` (62) days, the date heading each day's departments (a Date column in spreadsheets); the API, the

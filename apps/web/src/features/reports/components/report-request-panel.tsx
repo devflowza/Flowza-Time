@@ -5,7 +5,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { useNavigate } from 'react-router';
 import { useTranslation } from 'react-i18next';
 import { BarChart3, Lock, Send, Share2 } from 'lucide-react';
-import { createReportRequestSchema, DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, MONTHLY_ATTENDANCE_LAYOUTS, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
+import { ATTENDANCE_STATUSES, createReportRequestSchema, DAILY_REPORT_MAX_DAYS, dailyReportRangeTooLong, MONTHLY_ATTENDANCE_LAYOUTS, type CreateReportRequest, type ReportFormat } from '@flowza/contracts';
 import type { z } from 'zod';
 import { Badge, Button, Card, CardContent, CardDescription, CardHeader, CardTitle, ErrorState, FormField, Input, Select, SelectContent, SelectItem, SelectTrigger, SelectValue, Skeleton } from '@/components/ui';
 import { Combobox } from '@/components/forms';
@@ -29,6 +29,7 @@ import '../schedules-i18n';
 
 type FormValues = z.input<typeof createReportRequestSchema>;
 const isEmpty = (v: unknown) => v === undefined || v === null || v === '' || (Array.isArray(v) && v.length === 0);
+const ANY_STATUS = '__any__';
 
 function useDeviceOptions() {
   const orgId = useOrgId();
@@ -128,6 +129,15 @@ function ReportForm({ def, onQueued, onShare }: { def: ReportTypeDef; onQueued: 
             <Select value={field.value ?? 'attendance'} onValueChange={field.onChange}>
               <SelectTrigger id="rp-scope"><SelectValue /></SelectTrigger>
               <SelectContent>{(['attendance', 'all'] as const).map((v) => <SelectItem key={v} value={v}>{t(`request.scopes.${v}`)}</SelectItem>)}</SelectContent>
+            </Select>
+          )} />
+        </FormField> : null}
+        {/* the status search (2026-10-19): the Daily, Detail, Late, Absence and Irregular cases reports keep only the days with it */}
+        {params.has('status') ? <FormField label={t('request.status')} htmlFor="rp-status" optional hint={t('request.statusHint')} error={pErr?.['status']?.message}>
+          <Controller control={control} name="parameters.status" render={({ field }) => (
+            <Select value={field.value ?? ANY_STATUS} onValueChange={(v) => field.onChange(v === ANY_STATUS ? undefined : v)}>
+              <SelectTrigger id="rp-status"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value={ANY_STATUS}>{t('request.allStatuses')}</SelectItem>{ATTENDANCE_STATUSES.map((s) => <SelectItem key={s} value={s}>{t(`attendance:status.${s}`)}</SelectItem>)}</SelectContent>
             </Select>
           )} />
         </FormField> : null}

@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import type {
   AttendanceCalendarRowDto, AttendancePreviewDto, AttendancePreviewInput, AttendanceRecordEditInput, AttendanceRecordEditResultDto, AttendanceSummaryExportDto, AttendanceSummaryExportInput, AttendanceSummaryFigures,
-  AttendanceSummaryRowDto, AttendanceTimelineDto, BulkAttendanceStatusInput, BulkStatusResultDto, ManualStatusDto, UnmatchedActionResultDto, UnmatchedAssignInput, UnmatchedIgnoreInput,
+  AttendanceSummaryRowDto, AttendanceTimelineDto, BulkAttendanceStatusInput, BulkStatusResultDto, DailyRegisterExportDto, DailyRegisterExportInput, ManualStatusDto, UnmatchedActionResultDto, UnmatchedAssignInput, UnmatchedIgnoreInput,
   UnmatchedPunchGroupDto, UnmatchedRestoreInput,
 } from '@flowza/contracts';
 import { api, type Envelope, type PageEnvelope } from '@/lib/api-client';
@@ -87,4 +87,17 @@ export function useWorkspaceMutations() {
   const ignore = useMutation({ mutationFn: async (input: UnmatchedIgnoreInput) => (await api.post<Envelope<UnmatchedActionResultDto>>(`/orgs/${orgId}/attendance/unmatched/ignore`, input)).data, onSuccess: invalidateTriage });
   const restore = useMutation({ mutationFn: async (input: UnmatchedRestoreInput) => (await api.post<Envelope<UnmatchedActionResultDto>>(`/orgs/${orgId}/attendance/unmatched/restore`, input)).data, onSuccess: invalidateTriage });
   return { editRecord, bulkStatus, exportSummary, assign, ignore, restore };
+}
+
+/**
+ * The daily register's current view as a spreadsheet (2026-10-19): a queued `daily_attendance` report — 202 with the report id and
+ * the QUEUE job id (not a sync job: the toast points at Reports, where the file is downloaded).
+ */
+export function useRegisterExport() {
+  const orgId = useOrgId();
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: async (input: DailyRegisterExportInput) => (await api.post<Envelope<DailyRegisterExportDto>>(`/orgs/${orgId}/attendance/daily/export`, input, { idempotencyKey: crypto.randomUUID() })).data,
+    onSuccess: () => { void qc.invalidateQueries({ queryKey: qk.entity(orgId, 'reports') }); },
+  });
 }

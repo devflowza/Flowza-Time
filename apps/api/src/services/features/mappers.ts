@@ -1,5 +1,6 @@
 import { deviceCapabilitiesSchema, lopDaysOf, type AttendanceDailyRecordDto, type DayMarkDto, type DeviceCommandDto, type DeviceDto, type DeviceGroupDto, type DeviceLogDto, type PendingDeviceDto, type ReportRequestDto, type SyncJobDto, type SyncJobItemDto } from '@flowza/contracts';
 import type { DayMarkRow } from '@flowza/database';
+import { shortfallMinutes } from '@flowza/domain';
 import { isoDate, isoDateTime, isoDateTimeOrNull, jsonArray, jsonObject, numberOrNull } from '../../lib/mappers.js';
 
 export const DEVICE_COLUMNS = [
@@ -78,10 +79,12 @@ export function toSyncItemDto(r: SyncItemRow): SyncJobItemDto {
   };
 }
 
-export const DAILY_RECORD_COLUMNS = ['r.id', 'r.employeeId', 'e.employeeNumber', 'e.displayName as employeeName', 'r.attendanceDate', 'r.branchId', 'b.name as branchName', 'r.departmentId', 'dp.name as departmentName', 'r.shiftId', 's.name as shiftName', 'r.timezone', 'r.expectedStartAt', 'r.expectedEndAt', 'r.scheduledMinutes', 'r.firstInAt', 'r.lastOutAt', 'r.workedMinutes', 'r.breakMinutes', 'r.lateMinutes', 'r.earlyDepartureMinutes', 'r.overtimeMinutes', 'r.overtimeCategory', 'r.status', 'r.flags', 'r.punchCount', 'r.hasCorrection', 'r.calculationVersion', 'r.computedAt', 'r.lockedAt'] as const;
+export const DAILY_RECORD_COLUMNS = ['r.id', 'r.employeeId', 'e.employeeNumber', 'e.displayName as employeeName', 'r.attendanceDate', 'r.branchId', 'b.name as branchName', 'r.departmentId', 'dp.name as departmentName', 'r.shiftId', 's.name as shiftName', 'r.timezone', 'r.expectedStartAt', 'r.expectedEndAt', 'r.scheduledMinutes', 'r.firstInAt', 'r.lastOutAt', 'r.workedMinutes', 'r.breakMinutes', 'r.lateMinutes', 'r.earlyDepartureMinutes', 'r.overtimeMinutes', 'r.overtimeCategory', 'r.status', 'r.flags', 'r.punchCount', 'r.hasCorrection', 'r.calculationVersion', 'r.computedAt', 'r.lockedAt', 'r.excusedMinutes', 'r.creditedMinutes', 'r.lostMinutes'] as const;
 export interface DailyRecordRow {
   id: string; employeeId: string; employeeNumber: string; employeeName: string; attendanceDate: Date | string; branchId: string; branchName: string | null; departmentId: string | null; departmentName: string | null; shiftId: string | null; shiftName: string | null; timezone: string; expectedStartAt: Date | null; expectedEndAt: Date | null;
   scheduledMinutes: number; firstInAt: Date | null; lastOutAt: Date | null; workedMinutes: number; breakMinutes: number; lateMinutes: number; earlyDepartureMinutes: number; overtimeMinutes: number; overtimeCategory: string | null; status: AttendanceDailyRecordDto['status']; flags: string[]; punchCount: number; hasCorrection: boolean; calculationVersion: number; computedAt: Date; lockedAt: Date | null;
+  /** Short leave figures (engine 1.5.0); optional for rows selected without them. */
+  excusedMinutes?: number; creditedMinutes?: number; lostMinutes?: number;
 }
 export function toDailyRecordDto(r: DailyRecordRow): AttendanceDailyRecordDto & { branchName: string | null; departmentName: string | null } {
   const flags = jsonArray<string>(r.flags);
@@ -91,6 +94,10 @@ export function toDailyRecordDto(r: DailyRecordRow): AttendanceDailyRecordDto & 
     earlyDepartureMinutes: r.earlyDepartureMinutes, overtimeMinutes: r.overtimeMinutes, overtimeCategory: r.overtimeCategory, status: r.status, flags, punchCount: r.punchCount, hasCorrection: r.hasCorrection, calculationVersion: r.calculationVersion, computedAt: isoDateTime(r.computedAt), lockedAt: isoDateTimeOrNull(r.lockedAt),
     // policy-parity marks (HR portal Prompt 3): derived from the flags with the same rule the engine and the reports use
     lopDays: lopDaysOf(flags), unexcused: flags.includes('UNEXCUSED'),
+    // short leave (engine 1.5.0)
+    excusedMinutes: r.excusedMinutes ?? 0, creditedMinutes: r.creditedMinutes ?? 0, lostMinutes: r.lostMinutes ?? 0,
+    // the reports' UT (2026-10-19 "show shortfall hours and the difference in minutes"): one rule, @flowza/domain reports/derive.ts
+    shortfallMinutes: shortfallMinutes({ status: r.status, flags, firstInAt: r.firstInAt, lastOutAt: r.lastOutAt, workedMinutes: r.workedMinutes, scheduledMinutes: r.scheduledMinutes, overtimeMinutes: r.overtimeMinutes, overtimeCategory: r.overtimeCategory }),
   };
 }
 

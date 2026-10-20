@@ -53,6 +53,7 @@ const VARIANT_INPUT: Record<string, { payload?: Record<string, unknown>; audienc
   'approval.pending#reassigned': { payload: { reassigned: true } },
   'approval.reminder#reminder': { payload: { kind: 'reminder' } },
   'approval.reminder#digest': { payload: { kind: 'digest' } },
+  'approval.escalated#absence': { payload: { kind: 'absence' } },
   'approval.decided#APPROVED': { payload: { decision: 'APPROVED' } },
   'approval.decided#REJECTED': { payload: { decision: 'REJECTED' } },
   'approval.decided#CANCELLED': { payload: { decision: 'CANCELLED' } },
@@ -74,6 +75,14 @@ const VARIANT_INPUT: Record<string, { payload?: Record<string, unknown>; audienc
   'attendance.regularisation_decided#rejected': { payload: { decision: 'rejected' } },
   'punch.missing_out#shift': { payload: { endSource: 'shift' } },
   'punch.missing_out#default': { payload: { endSource: 'default' } },
+  'attendance.late_arrival#self': { audience: 'subject' },
+  'attendance.late_arrival#manager': { audience: 'other' },
+  'attendance.early_departure#self': { audience: 'subject' },
+  'attendance.early_departure#manager': { audience: 'other' },
+  'attendance.absence_recorded#self': { audience: 'subject' },
+  'attendance.absence_recorded#manager': { audience: 'other' },
+  'punch.missing_in#self': { audience: 'subject' },
+  'punch.missing_in#manager': { audience: 'other' },
   'shift.swap_decided#approved': { payload: { decision: 'approved' } },
   'shift.swap_decided#rejected': { payload: { decision: 'rejected' } },
   'leave.comment_added#employee': { payload: { audience: 'employee' } },
@@ -112,6 +121,16 @@ function expectedLink(key: string): string {
     'sync.failed': `/sync/${ID.syncJob}`,
     'sync.completed': `/sync/${ID.syncJob}`,
     'subscription.limit_reached': '/settings/subscription',
+    'attendance.late_arrival#self': '/my/attendance?date=2026-09-15',
+    'attendance.late_arrival#manager': `/attendance?employeeId=${ID.employee}&date=2026-09-15`,
+    'attendance.early_departure#self': '/my/attendance?date=2026-09-15',
+    'attendance.early_departure#manager': `/attendance?employeeId=${ID.employee}&date=2026-09-15`,
+    'attendance.absence_recorded#self': '/my/attendance?date=2026-09-15',
+    'attendance.absence_recorded#manager': `/attendance?employeeId=${ID.employee}&date=2026-09-15`,
+    'attendance.absence_reminder': '/my/attendance?date=2026-09-15',
+    'punch.missing_in#self': '/my',
+    'punch.missing_in#manager': `/attendance?employeeId=${ID.employee}&date=2026-09-15`,
+    'attendance.appreciation': '/my/attendance',
   };
   if (table[key]) return table[key]!;
   const byType: Record<string, string> = {
@@ -248,6 +267,28 @@ describe('notification templates', () => {
     expect(reminder.body).toBe('Pending for 24 hours · 14 Sep 2026');
     expect(r('attendance.unexcused_marked', { dates: ['2026-09-10'], count: 1, autoDeduct: true, employeeName: 'Omar' }, 'subject').title).toBe('Your attendance: 1 attendance day marked unexcused');
     expect(r('attendance.unexcused_marked', { dates: ['2026-09-10'], count: 1, employeeName: 'Omar' }, 'other').title).toBe('Omar: 1 attendance day marked unexcused');
+  });
+
+  it('attendance alerts: minutes and times in the texts, the deadline and deduction only when known, the thank-you text in the reader\'s language', () => {
+    const r = (type: string, data: Record<string, unknown>, audience: NotificationAudience = 'other', locale: NotificationLocale = 'en') => renderNotification({ type, data, locale, timezone: TZ, orgName: 'Acme', audience, now: NOW });
+    const late = { employeeName: 'Omar', attendanceDate: '2026-09-15', minutes: 25, firstInAt: '2026-09-15T04:25:00Z', expectedStartAt: '2026-09-15T04:00:00Z' };
+    expect(r('attendance.late_arrival', late, 'subject').title).toBe('You arrived late (15 Sep 2026)');
+    expect(r('attendance.late_arrival', late, 'subject').body).toBe('25 minutes late · You checked in at 08:25 · Your shift started at 08:00 · If there was a reason, add it to the day so that your manager can review it');
+    expect(r('attendance.late_arrival', { ...late, minutes: 1 }).body).toBe('1 minute late · Checked in at 08:25 · Shift started at 08:00');
+    expect(r('attendance.late_arrival', late, 'other', 'ar').body).toContain('25 دقيقة');
+    expect(r('attendance.early_departure', { employeeName: 'Omar', attendanceDate: '2026-09-15', minutes: 90, lastOutAt: '2026-09-15T11:30:00Z', expectedEndAt: '2026-09-15T13:00:00Z' }).body).toBe('90 minutes early · Checked out at 15:30 · Shift ended at 17:00');
+    const absent = (extra: Record<string, unknown>) => r('attendance.absence_recorded', { attendanceDate: '2026-09-15', ...extra }, 'subject').body;
+    expect(absent({ deadline: '2026-09-18', payEffectDays: 0.5 })).toBe('No attendance was recorded for the day · Give a reason by 18 Sep 2026 so that your manager can review it · Half a day may be deducted per the attendance policy if the day stays unexplained');
+    // no deadline set, no automatic deduction: those sentences are left out
+    expect(absent({})).toBe('No attendance was recorded for the day');
+    expect(r('attendance.absence_reminder', { attendanceDate: '2026-09-15', deadline: '2026-09-17' }, 'subject').title).toBe('Last day tomorrow: give a reason for 15 Sep 2026');
+    const thanks = { message: 'Thank you, team!', messageAr: 'شكرًا يا فريق!', periodStart: '2026-09-08', periodEnd: '2026-09-14', workedDays: 5 };
+    expect(r('attendance.appreciation', thanks, 'subject').body).toBe('Thank you, team! · Days worked: 5 (8 Sep 2026 → 14 Sep 2026)');
+    expect(r('attendance.appreciation', thanks, 'subject', 'ar').body).toContain('شكرًا يا فريق!');
+    expect(r('attendance.appreciation', thanks, 'subject', 'ar').body).not.toContain('Thank you, team!');
+    // only one language written: it is used for both
+    expect(r('attendance.appreciation', { ...thanks, messageAr: undefined }, 'subject', 'ar').body).toContain('Thank you, team!');
+    expect(r('punch.missing_in', { attendanceDate: '2026-09-15', expectedStartAt: '2026-09-15T04:00:00Z', minutes: 30 }, 'subject').body).toBe('Your shift started at 08:00 · Check in now, or ask for a correction if you are already at work');
   });
 
   it('interpolation: values are inserted once (never re-expanded), a missing strict part is dropped, fallbacks apply', () => {

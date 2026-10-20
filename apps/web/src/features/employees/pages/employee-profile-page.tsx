@@ -20,6 +20,7 @@ import { toastJobQueued } from '../job-toast';
 import { LEFT_EMPLOYMENT } from '../org-chart/use-assign-manager';
 import { AttendanceGrantsCard } from '@/features/attendance-review/components/attendance-grants-card';
 import { PortalAccessCard } from '@/features/users/components/portal-access-card';
+import { HourAllowancesCard } from '@/features/leave/short-leave/components/hour-allowances-card';
 import { lazyPage } from '@/lib/lazy-page';
 
 // The activity view is the only part of the profile that charts, and Recharts is a 118 kB (gzipped) vendor chunk:
@@ -106,7 +107,7 @@ export default function EmployeeProfilePage() {
               <TabsContent value="overview"><OverviewTab key={e.updatedAt} employee={e} />{!isOwn && !e.deletedAt ? <AttendanceGrantsCard employeeId={e.id} directReport={!!ownEmployeeId && (e.managerEmployeeId === ownEmployeeId || e.secondaryManagerEmployeeId === ownEmployeeId)} /> : null}{!isOwn && selfServiceOn ? <PortalAccessCard employeeId={e.id} employeeName={e.displayName} /> : null}</TabsContent>
               <TabsContent value="history">{tab === 'history' ? <HistoryTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="devices">{tab === 'devices' ? <DevicesTab employeeId={e.id} employee={{ name: e.displayName, number: e.employeeNumber, deviceUserId: e.deviceUserId }} /> : null}</TabsContent>
-              <TabsContent value="attendance">{tab === 'attendance' ? <AttendanceTab employeeId={e.id} /> : null}</TabsContent>
+              <TabsContent value="attendance">{tab === 'attendance' ? <><AttendanceTab employeeId={e.id} />{!isOwn ? <HourAllowancesCard employeeId={e.id} /> : null}</> : null}</TabsContent>
               <TabsContent value="activity">{tab === 'activity' ? <Suspense fallback={<Skeleton className="h-96 w-full" />}><ActivityTab employeeId={e.id} /></Suspense> : null}</TabsContent>
               <TabsContent value="documents">{tab === 'documents' ? <DocumentsTab employeeId={e.id} /> : null}</TabsContent>
               <TabsContent value="danger">{tab === 'danger' ? <DangerZone employee={e} /> : null}</TabsContent>

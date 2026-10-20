@@ -12,6 +12,7 @@ import { isoDateTime } from '../lib/mappers.js';
 import { BRANCH_COLUMNS, DEPARTMENT_COLUMNS, DESIGNATION_COLUMNS, TEAM_COLUMNS, toBranchDto, toDepartmentDto, toDesignationDto, toTeamDto, type DepartmentRow, type TeamRow } from './structure.mappers.js';
 import { placeBranch } from './locations.service.js';
 import { recalcTodayForLocationChange } from './features/recalc.js';
+import { defaultCalendarId, recalcCalendarSwitch } from './features/schedule.service.js';
 
 type BranchInput = z.infer<typeof branchInputSchema>;
 type DepartmentInput = z.infer<typeof departmentInputSchema>;
@@ -111,6 +112,13 @@ export async function updateBranch(deps: ApiDeps, actor: Actor, orgId: string, i
       await recalcTodayForLocationChange(deps, trx, actor, orgId, { branchIds: [id] }, 'Branch moved in the location tree');
     }
     const after = await loadBranch(trx, orgId, id);
+    // another holiday calendar (its own, or the default through none): the past days of the holidays of the calendar it left and
+    // of the one it follows now are recomputed for the branch
+    if (fields.holidayCalendarId !== undefined && (before.holidayCalendarId ?? null) !== (after.holidayCalendarId ?? null)) {
+      const fallback = await defaultCalendarId(trx, orgId);
+      const was = before.holidayCalendarId ?? fallback; const now = after.holidayCalendarId ?? fallback;
+      if (was !== now) await recalcCalendarSwitch(deps, trx, actor, orgId, { calendarIds: [was, now], branchIds: [id] }, `branch ${after.code} holiday calendar changed`);
+    }
     await audit(trx, actor, orgId, 'branch.updated', 'branch', { entityId: id, branchId: id, ...diffObjects(before as unknown as Record<string, unknown>, after as unknown as Record<string, unknown>) });
     return after;
   });

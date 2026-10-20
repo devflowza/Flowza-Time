@@ -68,7 +68,8 @@
     "SHIFT_SWAP": "Shift swap",
     "COMP_OFF": "Compensatory off",
     "REGULARISATION": "Regularisation",
-    "OVERTIME_CLAIM": "Overtime claim"
+    "OVERTIME_CLAIM": "Overtime claim",
+    "SHORT_LEAVE": "Short leave"
   },
   "status": {
     "PENDING": "Pending",
@@ -113,7 +114,9 @@
     "reassigned": "Reassigned",
     "chain": "Manager, level {{n}}",
     "unresolved": "Unresolved",
-    "legacy": "Carried over"
+    "legacy": "Carried over",
+    "org_admin": "Organisation admin",
+    "top_level": "Top-level approver"
   },
   "context": {
     "leaveDays_one": "{{count}} day",
@@ -262,7 +265,7 @@
   },
   "workflows": {
     "title": "Approval workflows",
-    "subtitle": "Who approves what, in which order. A branch-specific workflow wins over an organisation-wide one, and the highest tier a request reaches applies. Without a workflow, HR's own entries apply at once and everybody else's go to the holders of the approve permission.",
+    "subtitle": "Who approves what, in which order. A branch-specific workflow wins over an organisation-wide one, and the highest tier a request reaches applies. Without a workflow, HR's own entries apply at once and everybody else's follow Settings → Approvals (by default the requester's line manager).",
     "add": "Add workflow",
     "edit": "Edit workflow",
     "dialogHint": "Up to 5 levels, decided in order.",
@@ -276,7 +279,7 @@
     "isDefault": "Active routing",
     "isDefaultHint": "New requests in its scope use this workflow.",
     "minUnits": "From (units)",
-    "minUnitsHint": "Tier: applies from this size up (leave days, overtime minutes). Empty = any size.",
+    "minUnitsHint": "Tier: applies from this size up (leave days, overtime or short leave minutes). Empty = any size.",
     "appliesTo": "Only for",
     "appliesBranches": "Branches",
     "appliesDepartments": "Departments",
@@ -350,5 +353,41 @@
     "approved_other": "{{count}} requests approved",
     "refused_one": "{{count}} request could not be approved",
     "refused_other": "{{count}} requests could not be approved"
+  },
+  "routing": {
+    "title": "Approval routing",
+    "hint": "Who decides a request when no approval workflow applies to it, and who stands in for the line manager. A workflow (Approvals → Workflows) still wins wherever one applies.",
+    "defaultRouting": "Leave, comp-off and attendance corrections without a workflow go to",
+    "defaultRoutingHint": "Attendance reasons, regularisations and shift requests always go to the line manager.",
+    "defaultRoutingOptions": {
+      "line_manager": "The requester's line manager",
+      "permission_holders": "Everybody who holds the approve permission (HR)"
+    },
+    "secondaryManager": "Secondary manager",
+    "secondaryManagerHint": "The secondary manager is set on the employee record.",
+    "secondaryManagerOptions": {
+      "backup": "Backup only — decides when the line manager is on leave or has no login",
+      "alongside": "Decides alongside the line manager on every request"
+    },
+    "managerUnavailable": "When neither manager can act",
+    "managerUnavailableHint": "For example the line manager is on approved leave today and no secondary manager is set.",
+    "managerUnavailableOptions": {
+      "next_level_manager": "The next manager up the reporting line",
+      "hr_admins": "The HR admins"
+    },
+    "topLevel": "Requests from the top of the organisation",
+    "topLevelHint": "For somebody with no manager on their employee record (for example the CEO or Director General).",
+    "topLevelOptions": {
+      "hr_admins": "HR admins (then organisation admins, then the owner)",
+      "named_user": "A named approver",
+      "auto_approve": "Approve automatically (recorded on the request)"
+    },
+    "topLevelUser": "Approver",
+    "topLevelUserHint": "When this person is the requester, the HR admins decide instead.",
+    "selectUser": "Choose a member",
+    "topLevelUserRequired": "Choose the approver.",
+    "ladder": "When nobody above can decide, a request always ends with the HR admins, then the organisation admins, then the owner — it is never left without an approver.",
+    "handOverWhenAway": "Hand pending requests over when the manager goes on leave",
+    "handOverWhenAwayHint": "A request already waiting for a manager who is on approved leave today is also sent to their backup (the secondary manager, else as chosen above). The manager keeps it too."
   }
 }

@@ -279,3 +279,53 @@ describe('resolveStepActors — four-eyes (review 5-O3)', () => {
     expect(users(resolveStepActors(step({ approverType: 'HR_ADMIN' }), ctx()))).toEqual([U.hr1, U.hr2]);
   });
 });
+
+describe('resolveStepActors — organisation routing policy (approvals settings)', () => {
+  const away = (u: string) => cand(u, `e-${u}`, true, 'on approved leave');
+  it('managerFallback next_level: neither manager can act → the next manager up the line, before HR', () => {
+    const c = ctx({ managerFallback: 'next_level', chain: [{ primary: away(U.manager), secondary: null }, { primary: cand(U.grand), secondary: null }] });
+    const r = resolveStepActors(step(), c);
+    expect(users(r)).toEqual([U.grand]);
+    expect(r.path).toBe('chain_step_2');
+    expect(r.reason).toMatch(/on approved leave.*next manager up/);
+  });
+  it('managerFallback next_level: the secondary manager still comes first, and an away next level is skipped too', () => {
+    expect(users(resolveStepActors(step(), ctx({ managerFallback: 'next_level', chain: [{ primary: away(U.manager), secondary: cand(U.secondary) }, { primary: cand(U.grand), secondary: null }] })))).toEqual([U.secondary]);
+    const skip = resolveStepActors(step(), ctx({ managerFallback: 'next_level', chain: [{ primary: away(U.manager), secondary: away(U.secondary) }, { primary: away(U.grand), secondary: null }, { primary: cand(U.great), secondary: null }] }));
+    expect(users(skip)).toEqual([U.great]);
+    expect(skip.path).toBe('chain_step_3');
+  });
+  it('managerFallback hr (or absent): the line manager being away goes straight to the HR admins, as before', () => {
+    const chain = [{ primary: away(U.manager), secondary: null }, { primary: cand(U.grand), secondary: null }];
+    expect(resolveStepActors(step(), ctx({ managerFallback: 'hr', chain })).path).toBe('hr_admin');
+    expect(resolveStepActors(step(), ctx({ chain })).path).toBe('hr_admin');
+  });
+  it('managerFallback next_level with nobody up the line: HR admins, then org admins, then the owner', () => {
+    const c = ctx({ managerFallback: 'next_level', chain: [{ primary: away(U.manager), secondary: null }] });
+    expect(resolveStepActors(step(), c).path).toBe('hr_admin');
+    const admins = resolveStepActors(step(), { ...c, hrAdminUserIds: [], orgAdminUserIds: [U.named] });
+    expect(users(admins)).toEqual([U.named]);
+    expect(admins.path).toBe('org_admin');
+    expect(resolveStepActors(step(), { ...c, hrAdminUserIds: [], orgAdminUserIds: [] }).path).toBe('owner');
+  });
+  it('the organisation admins are never the subject: an admin applying for themselves falls through to the owner', () => {
+    const r = resolveStepActors(step(), ctx({ chain: [], hrAdminUserIds: [], orgAdminUserIds: [U.subject] }));
+    expect(users(r)).toEqual([U.owner]);
+  });
+  it('top-level approver: a requester with no manager at all goes to the named approver on manager-type levels', () => {
+    const c = ctx({ chain: [], topLevelApproverUserIds: [U.named] });
+    for (const approverType of ['MANAGER', 'SECONDARY_MANAGER', 'MANAGER_CHAIN'] as const) {
+      const r = resolveStepActors(step({ approverType, chainLevel: 2 }), c);
+      expect(users(r)).toEqual([U.named]);
+      expect(r.path).toBe('top_level');
+    }
+    // other level types are untouched, and somebody with a manager never reaches the named approver
+    expect(resolveStepActors(step({ approverType: 'HR_ADMIN' }), c).path).toBe('hr_admin');
+    expect(users(resolveStepActors(step(), ctx({ topLevelApproverUserIds: [U.named] })))).toEqual([U.manager]);
+  });
+  it('top-level approver who is the requester themselves (the Director General applies): HR admins decide', () => {
+    const r = resolveStepActors(step(), ctx({ chain: [], subjectUserId: U.named, requestedBy: U.named, topLevelApproverUserIds: [U.named] }));
+    expect(r.path).toBe('hr_admin');
+    expect(users(r)).toEqual([U.hr1, U.hr2]);
+  });
+});

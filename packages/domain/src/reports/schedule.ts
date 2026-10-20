@@ -10,7 +10,7 @@ import { isValidTimezone } from '@flowza/shared';
 
 export interface ScheduleTiming {
   cadence: ReportScheduleCadence;
-  /** monthly: day of month 1–28; weekly: 0 = Sunday … 6 = Saturday. */
+  /** monthly: day of month 1–28; weekly: 0 = Sunday … 6 = Saturday; daily: ignored (stored 0). */
   runDay: number;
   /** `HH:mm` or `HH:mm:ss`, local time. */
   runTime: string;
@@ -39,16 +39,17 @@ function clock(runTime: string): { hour: number; minute: number } {
 /** Luxon weekday (1 = Monday … 7 = Sunday) of a 0 = Sunday … 6 = Saturday day number. */
 const luxonWeekday = (day: number): number => (((day % 7) + 7) % 7 === 0 ? 7 : ((day % 7) + 7) % 7);
 
-/** The occurrence of the schedule in the month / week that contains `local` (it may lie before or after `local`). */
+/** The occurrence of the schedule in the month / week / day that contains `local` (it may lie before or after `local`). */
 function occurrenceAround(t: ScheduleTiming, local: DateTime): DateTime {
   const { hour, minute } = clock(t.runTime);
+  if (t.cadence === 'daily') return local.set({ hour, minute, second: 0, millisecond: 0 });
   if (t.cadence === 'monthly') return local.set({ day: Math.min(28, Math.max(1, t.runDay)), hour, minute, second: 0, millisecond: 0 });
   const target = luxonWeekday(t.runDay);
   return local.set({ hour, minute, second: 0, millisecond: 0 }).plus({ days: target - local.weekday });
 }
 
 const step = (t: ScheduleTiming, dt: DateTime, n: number): DateTime => {
-  const moved = t.cadence === 'monthly' ? dt.plus({ months: n }).set({ day: Math.min(28, Math.max(1, t.runDay)) }) : dt.plus({ weeks: n });
+  const moved = t.cadence === 'monthly' ? dt.plus({ months: n }).set({ day: Math.min(28, Math.max(1, t.runDay)) }) : t.cadence === 'daily' ? dt.plus({ days: n }) : dt.plus({ weeks: n });
   const { hour, minute } = clock(t.runTime);
   // re-anchor the wall-clock time after the move (a DST change between the two dates must not drift the run time)
   return moved.set({ hour, minute, second: 0, millisecond: 0 });
@@ -90,7 +91,8 @@ export function dueOccurrence(t: ScheduleTiming, storedNextRunAt: Date, now: Dat
  *  - month_to_date: the first of the month up to YESTERDAY (a run on the 1st therefore covers the whole previous month);
  *  - previous_week: the whole week before the run's week (weeks start on `firstDayOfWeek`);
  *  - custom: the last complete cut-off period `customFromDay` of one month → `customToDay` of the next (e.g. 26 → 25),
- *    i.e. the one ending before the run's date.
+ *    i.e. the one ending before the run's date;
+ *  - previous_day: yesterday (the daily cadence's morning report).
  */
 export function schedulePeriod(rule: SchedulePeriodRule, scheduledFor: Date, timezone: string): ReportPeriod {
   const local = DateTime.fromJSDate(scheduledFor, { zone: zoneOf(timezone) }).startOf('day');
@@ -110,6 +112,10 @@ export function schedulePeriod(rule: SchedulePeriodRule, scheduledFor: Date, tim
       const weekStart = local.minus({ days: offset });
       const from = weekStart.minus({ weeks: 1 });
       return { from: iso(from), to: iso(from.plus({ days: 6 })) };
+    }
+    case 'previous_day': {
+      const day = iso(local.minus({ days: 1 }));
+      return { from: day, to: day };
     }
     case 'custom': {
       const fromDay = Math.min(28, Math.max(1, rule.customFromDay ?? 26));
@@ -167,7 +173,15 @@ export interface RecipientGrant {
    * branch and department: what a recipient without report access may still receive — a copy of the report about themselves.
    */
   self?: { employeeId: string; branchId: string; departmentId: string | null } | null;
+  /**
+   * Set when the run addresses line managers (`recipients.lineManagers`) and this recipient is one: the branch and department of
+   * each direct report (only members of `teamEmployeeIds` are ever used), so the copy can be narrowed to the report's filters.
+   * `only` = the recipient was not also addressed by name or by role.
+   */
+  lineManager?: { only: boolean; team: readonly TeamMemberPlacement[] } | null;
 }
+
+export interface TeamMemberPlacement { employeeId: string; branchId: string; departmentId: string | null }
 
 /** Line-manager variants of the organisation-wide read permissions a report type can require. */
 export const TEAM_PERMISSION_VARIANTS: Readonly<Record<string, string>> = {
@@ -185,8 +199,20 @@ export type RecipientScopeKind = 'ORGANIZATION' | 'BRANCHES' | 'TEAM' | 'SELF';
  */
 export const SELF_SCOPE_REPORT_TYPES: ReadonlySet<ReportType> = new Set<ReportType>([
   'daily_attendance', 'employee_attendance', 'monthly_attendance', 'weekly_attendance', 'weekly_in_out', 'attendance_summary', 'monthly_summary', 'monthly_detail', 'monthly_timesheet',
-  'late_report', 'absence_report', 'missing_punch_report', 'leave_report',
+  'late_report', 'absence_report', 'missing_punch_report', 'leave_report', 'irregularities_report',
 ]);
+/**
+ * Report types a line manager may receive about their TEAM through `recipients.lineManagers`: the same attendance layouts (about
+ * people the manager already sees under attendance.view_team), never the employee directory or the audit trail.
+ */
+export const TEAM_SCOPE_REPORT_TYPES: ReadonlySet<ReportType> = SELF_SCOPE_REPORT_TYPES;
+/**
+ * The marker a line manager's team copy carries (server-written only, like SELF_SCOPE_PARAMETER): the manager's own employee
+ * record. The download of such a copy re-checks it, and that every employee of the copy is still in the caller's team.
+ */
+export const TEAM_SCOPE_PARAMETER = 'teamManagerEmployeeId';
+/** Line-manager read permissions that admit a team copy (the organisation-wide one admits it too; the copy stays the team). */
+export const TEAM_SCOPE_PERMISSIONS: readonly string[] = ['attendance.view_team', 'attendance.view'];
 /** The permission that lets a member see their own attendance — and so receive a report about it. */
 export const SELF_SCOPE_PERMISSION = 'attendance.view_own';
 /**
@@ -194,6 +220,18 @@ export const SELF_SCOPE_PERMISSION = 'attendance.view_own';
  * with `reportParametersSchema`, which strips unknown keys). The download of such a copy re-checks it against the caller.
  */
 export const SELF_SCOPE_PARAMETER = 'selfEmployeeId';
+
+/**
+ * True when `parameters` describe a line manager's team copy for the manager `employeeId` whose every employee is still in
+ * `teamEmployeeIds` (a report about somebody who left the team since is no longer theirs to open without report.export).
+ */
+export function isTeamScopedReport(reportType: string, parameters: Record<string, unknown>, employeeId: string | null | undefined, teamEmployeeIds: readonly string[]): boolean {
+  if (!employeeId || !TEAM_SCOPE_REPORT_TYPES.has(reportType as ReportType) || parameters[TEAM_SCOPE_PARAMETER] !== employeeId) return false;
+  const ids = parameters['employeeIds'];
+  if (!Array.isArray(ids) || ids.length === 0) return false;
+  const team = new Set(teamEmployeeIds);
+  return ids.every((id) => typeof id === 'string' && id !== employeeId && team.has(id));
+}
 
 /** True when `parameters` describe a copy about exactly `employeeId` (the marker and the employee filter agree). */
 export function isSelfScopedReport(reportType: string, parameters: Record<string, unknown>, employeeId: string | null | undefined): boolean {
@@ -214,7 +252,9 @@ export type RecipientScopeDecision =
  *  - an explicit branch / employee filter must sit inside the recipient's scope (never widened, and never silently narrowed
  *    into a different report than the sender chose);
  *  - a branch-restricted recipient gets their branch scope injected (`branchScope` / `branchIds` / `branchId`), so the
- *    worker's report scope can only ever narrow to what the recipient may see.
+ *    worker's report scope can only ever narrow to what the recipient may see;
+ *  - a line manager reached through `recipients.lineManagers` (`grant.lineManager`) gets the copy about their direct reports
+ *    (`scopeToLineTeam`) — without report.export, never wider than the team.
  */
 export function scopeReportForRecipient(
   grant: RecipientGrant,
@@ -224,6 +264,24 @@ export function scopeReportForRecipient(
 ): RecipientScopeDecision {
   const def = REPORT_TYPE_DEFINITIONS.find((d) => d.key === reportType);
   if (!def || def.status !== 'available') return { ok: false, reason: 'report_type_unavailable' };
+  // addressed only as a line manager: their team's copy, whatever wider access they may hold (the sender chose "their team")
+  if (grant.lineManager?.only) return scopeToLineTeam(grant, reportType, parameters);
+  const decision = scopeForMember(grant, def, reportType, parameters, employeeBranches);
+  // addressed by name or role AND as a line manager: when their own access gives them nothing better than themselves, the team
+  if (grant.lineManager && (!decision.ok || decision.kind === 'SELF')) {
+    const team = scopeToLineTeam(grant, reportType, parameters);
+    if (team.ok) return team;
+  }
+  return decision;
+}
+
+function scopeForMember(
+  grant: RecipientGrant,
+  def: (typeof REPORT_TYPE_DEFINITIONS)[number],
+  reportType: ReportType,
+  parameters: Record<string, unknown>,
+  employeeBranches: ReadonlyMap<string, string>,
+): RecipientScopeDecision {
   // A recipient without report access (an employee) is not refused outright: they receive the report about THEMSELVES when the
   // type allows it — the sender's choice narrowed to the one person the recipient may see, never widened.
   for (const p of ['report.view', 'report.export']) if (!grant.permissions.includes(p)) return scopeToSelf(grant, reportType, parameters) ?? { ok: false, reason: `missing_permission:${p}` };
@@ -288,4 +346,43 @@ function scopeToSelf(grant: RecipientGrant, reportType: ReportType, parameters: 
   out['employeeIds'] = [self.employeeId];
   out[SELF_SCOPE_PARAMETER] = self.employeeId;
   return { ok: true, kind: 'SELF', parameters: out, branchId: null, branchCount: null, employeeCount: 1 };
+}
+
+/**
+ * A line manager's copy (`recipients.lineManagers`): the report narrowed to their direct reports — never wider than the team, and
+ * never than the sender's filters (branch, department, employees, which only remove people). Needs report.view (the copy opens on
+ * the Reports page) and, for every organisation-wide read the type requires, that permission or its team variant; report.export
+ * is NOT required — the download admits a team copy to its manager (`isTeamScopedReport`). A manager none of whose reports is left
+ * by the filters is skipped (`no_team_in_scope`): the report is not about them.
+ */
+function scopeToLineTeam(grant: RecipientGrant, reportType: ReportType, parameters: Record<string, unknown>): RecipientScopeDecision {
+  const def = REPORT_TYPE_DEFINITIONS.find((d) => d.key === reportType);
+  const lm = grant.lineManager;
+  if (!def || def.status !== 'available') return { ok: false, reason: 'report_type_unavailable' };
+  if (!lm) return { ok: false, reason: 'not_line_manager' };
+  if (!TEAM_SCOPE_REPORT_TYPES.has(reportType)) return { ok: false, reason: 'report_type_not_for_team' };
+  if (!grant.permissions.includes('report.view')) return { ok: false, reason: 'missing_permission:report.view' };
+  for (const p of def.permissions) {
+    if (p === 'report.view' || grant.permissions.includes(p)) continue;
+    const variant = TEAM_PERMISSION_VARIANTS[p];
+    if (variant && grant.permissions.includes(variant)) continue;
+    return { ok: false, reason: `missing_permission:${variant ?? p}` };
+  }
+  const managerEmployeeId = grant.self?.employeeId ?? null;
+  const team = new Set(grant.teamEmployeeIds ?? []);
+  // a placement outside the team is ignored, the manager's own record never counts as their report
+  let members = lm.team.filter((m) => team.has(m.employeeId) && m.employeeId !== managerEmployeeId);
+  if (!managerEmployeeId || members.length === 0) return { ok: false, reason: 'no_team' };
+  const requested = Array.isArray(parameters['employeeIds']) ? (parameters['employeeIds'] as unknown[]).filter((x): x is string => typeof x === 'string') : [];
+  if (requested.length) { const wanted = new Set(requested); members = members.filter((m) => wanted.has(m.employeeId)); }
+  if (typeof parameters['branchId'] === 'string') members = members.filter((m) => m.branchId === parameters['branchId']);
+  if (typeof parameters['departmentId'] === 'string') members = members.filter((m) => m.departmentId === parameters['departmentId']);
+  if (members.length === 0) return { ok: false, reason: 'no_team_in_scope' };
+  const out: Record<string, unknown> = { ...parameters };
+  delete out['branchScope']; delete out['branchIds']; delete out['finalizedFigures']; delete out[SELF_SCOPE_PARAMETER];
+  if (reportType === 'monthly_summary') out['finalizedFigures'] = grant.permissions.includes('payroll.view');
+  const ids = [...new Set(members.map((m) => m.employeeId))].sort();
+  out['employeeIds'] = ids;
+  out[TEAM_SCOPE_PARAMETER] = managerEmployeeId;
+  return { ok: true, kind: 'TEAM', parameters: out, branchId: null, branchCount: null, employeeCount: ids.length };
 }

@@ -11,18 +11,19 @@
     "period": "الفترة المشمولة", "periodInvalid": "هذه الفترة لا تناسب التقرير أو التكرار.",
     "customFrom": "من يوم (الشهر السابق)", "customTo": "إلى يوم", "customInvalid": "تبدأ الفترة من يوم في الشهر السابق وتنتهي في يوم أبكر منه (مثل 26 ← 25).",
     "filters": "عوامل التصفية", "active": "نشط", "when": "الموعد", "nextRun": "التشغيل التالي", "lastRun": "آخر تشغيل", "never": "لم يُشغَّل بعد",
-    "lastSummary": "أُرسل {{queued}} · تُخطّي {{skipped}}", "recipientCount": "أشخاص: {{users}} · أدوار: {{roles}}",
+    "lastSummary": "أُرسل {{queued}} · تُخطّي {{skipped}}", "recipientLineManagers": "كل مدير مباشر", "recipientCount": "أشخاص: {{users}} · أدوار: {{roles}}",
     "pausedBadge": "متوقف", "paused": "أُوقف الجدول مؤقتًا", "resumed": "استُؤنف الجدول",
     "runNow": "تشغيل الآن", "runQueued": "أُدرج التشغيل", "runQueuedHint": "يشمل {{from}} ← {{to}}.",
     "created": "تم إنشاء الجدول", "saved": "تم حفظ الجدول", "deleted": "تم حذف الجدول",
     "deleteTitle": "حذف هذا الجدول؟", "deleteHint": "سيتوقف «{{name}}» عن التشغيل. تبقى التقارير المرسلة لدى مستلميها."
   },
-  "cadence": { "monthly": "شهري", "weekly": "أسبوعي", "monthlyOn": "شهريًا في اليوم {{day}} الساعة {{time}}", "weeklyOn": "كل {{day}} الساعة {{time}}" },
-  "period": { "previous_month": "الشهر السابق", "month_to_date": "من بداية الشهر حتى الآن", "previous_week": "الأسبوع السابق", "custom": "فترة قطع مخصصة", "customRange": "اليوم {{from}} ← اليوم {{to}}" },
+  "cadence": { "monthly": "شهري", "weekly": "أسبوعي", "daily": "يومي", "monthlyOn": "شهريًا في اليوم {{day}} الساعة {{time}}", "weeklyOn": "كل {{day}} الساعة {{time}}", "dailyOn": "كل يوم الساعة {{time}}" },
+  "period": { "previous_month": "الشهر السابق", "month_to_date": "من بداية الشهر حتى الآن", "previous_week": "الأسبوع السابق", "custom": "فترة قطع مخصصة", "previous_day": "أمس", "customRange": "اليوم {{from}} ← اليوم {{to}}" },
   "runStatus": { "success": "أُرسل", "partial": "أُرسل جزئيًا", "failed": "فشل", "skipped": "لم يُرسل شيء" },
   "recipients": {
     "label": "المستلمون", "required": "اختر مستلمًا واحدًا على الأقل.", "managers": "المديرون", "roles": "الأدوار", "people": "الأشخاص",
     "addPerson": "إضافة شخص…", "remove": "إزالة {{name}}",
+    "lineManagers": "المدير المباشر لكل موظف (فريقه فقط)", "lineManagersHint": "يستلم كل مدير مباشر نسخة عن الموظفين التابعين له مباشرة فقط — دون الحاجة إلى صلاحية التصدير. يُتخطّى المدير الذي لا يتبعه أحد ضمن عوامل تصفية التقرير.", "lineManagersCount": "{{count}} مدير مباشر حاليًا",
     "scopeNote": "يحصل كل مستلم على التقرير الخاص بالبيانات التي يمكنه الوصول إليها — المدير عن فريقه، ومدير الفرع عن فروعه. الموظف الذي لا يملك صلاحية التقارير يستلم التقرير الخاص به فقط، ويُتخطّى غيره ممن لا يملك الصلاحية."
   },
   "channels": { "label": "طريقة الإرسال", "in_app": "إشعار داخل التطبيق", "email": "البريد الإلكتروني", "required": "اختر قناة واحدة على الأقل." },
@@ -40,7 +41,7 @@
   "scope": { "organization": "المنظمة بأكملها", "branches": "فروع: {{count}}", "team": "فريقه ({{count}})", "self": "سجلّه الخاص" },
   "skip": {
     "missing_permission": "لا يملك صلاحية هذا التقرير ({{detail}})", "outside_scope": "عوامل التصفية خارج نطاق صلاحياته", "no_branch_access": "لا صلاحية على أي فرع", "outside_self": "التقرير عن أشخاص آخرين (يمكنه استلام سجله الخاص فقط)",
-    "no_team": "لا يوجد فريق للتقرير عنه", "report_type_unavailable": "التقرير غير متاح", "recipient_cap": "تجاوز الحد الأقصى للمستلمين"
+    "no_team": "لا يوجد فريق للتقرير عنه", "no_team_in_scope": "لا يوجد أحد من فريقه ضمن هذا التقرير", "report_type_not_for_team": "لا يُرسل هذا التقرير إلى المديرين المباشرين", "not_line_manager": "ليس مديرًا مباشرًا", "report_type_unavailable": "التقرير غير متاح", "recipient_cap": "تجاوز الحد الأقصى للمستلمين"
   },
   "download": { "noExport": "تنزيل التقارير يتطلب صلاحية التصدير.", "locked": "التصدير غير مسموح" }
 }

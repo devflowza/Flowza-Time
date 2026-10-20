@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { IMPORT_STATUSES } from '../enums.js';
 import { isoDateTimeSchema, jsonObjectSchema, paginationQuerySchema, uuidSchema } from '../common.js';
+import { IMPORT_KINDS, IMPORT_SOURCES } from '../hrms.js';
 
 export const IMPORT_ROW_STATUSES = ['valid', 'invalid', 'imported', 'skipped', 'failed'] as const;
 export type ImportRowStatus = (typeof IMPORT_ROW_STATUSES)[number];
@@ -8,8 +9,10 @@ export type ImportRowStatus = (typeof IMPORT_ROW_STATUSES)[number];
 /** JSON upload body (alternative to multipart/form-data with a `file` field). */
 export const importUploadSchema = z.object({
   fileName: z.string().trim().min(1).max(200),
-  /** Base64-encoded file content (CSV). */
+  /** Base64-encoded file content (CSV, or an Excel .xlsx workbook — its first sheet is read). */
   contentBase64: z.string().min(1).max(20 * 1024 * 1024),
+  /** What the file holds: employees (default) or organisational units (departments). */
+  kind: z.enum(IMPORT_KINDS).default('EMPLOYEES'),
   options: z.object({
     /** Update existing employees matched by employee number instead of reporting them as duplicates. */
     updateExisting: z.boolean().default(false),
@@ -35,6 +38,8 @@ export const importJobDtoSchema = z.object({
   id: uuidSchema,
   organizationId: uuidSchema,
   type: z.string(),
+  /** `upload` (the import page) or `hrms` (a batch an HR system sent with an API key). */
+  source: z.enum(IMPORT_SOURCES).optional(),
   originalFilename: z.string().nullable(),
   status: z.enum(IMPORT_STATUSES),
   totalRows: z.number().int(),
@@ -56,5 +61,5 @@ export const importJobDtoSchema = z.object({
 });
 export type ImportJobDto = z.infer<typeof importJobDtoSchema>;
 
-export const importJobListQuerySchema = paginationQuerySchema.extend({ status: z.enum(IMPORT_STATUSES).optional() });
+export const importJobListQuerySchema = paginationQuerySchema.extend({ status: z.enum(IMPORT_STATUSES).optional(), kind: z.enum(IMPORT_KINDS).optional() });
 export const importJobRowsQuerySchema = paginationQuerySchema.extend({ status: z.enum(IMPORT_ROW_STATUSES).optional() });

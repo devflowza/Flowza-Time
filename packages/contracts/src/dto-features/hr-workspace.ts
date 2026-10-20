@@ -253,6 +253,9 @@ export interface AttendanceSummaryFigures {
   recordCount: number;
   /** Days of employment in the month, up to yesterday, that have no calculated record yet (a recalculation fills them). */
   notCalculatedDays: number;
+  /** Short leave (engine 1.5.0): lost out-of-office minutes and the minutes approved short leave took. Optional for older payloads. */
+  lostMinutes?: number;
+  shortLeaveMinutes?: number;
 }
 export interface AttendanceSummaryRowDto extends AttendanceSummaryFigures {
   employeeId: string;

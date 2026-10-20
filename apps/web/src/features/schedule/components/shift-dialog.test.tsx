@@ -158,6 +158,46 @@ describe('ShiftDialog', () => {
     await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/orgs/org-1/shifts/s5', expect.objectContaining({ breaks: [], punchInWindowBeforeMinutes: 240, punchOutWindowAfterMinutes: 360, graceInMinutes: null, graceOutMinutes: null, color: null })));
   });
 
+  it('a fixed shift\'s flexible start: off by default, explained in the shift\'s own times when on, and saved', async () => {
+    apiMock.post.mockResolvedValue({ data: { id: 's10' } });
+    renderWithProviders(<ShiftDialog open onOpenChange={() => {}} shift={null} />);
+    const flexSwitch = screen.getByRole('switch', { name: 'Flexible start' });
+    expect(flexSwitch).not.toBeChecked();
+    expect(screen.getByText('Off: lateness counts from the start time.')).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/^Code/), { target: { value: 'EARLY' } });
+    fireEvent.change(screen.getByLabelText(/^Name\*?$/), { target: { value: 'Early' } });
+    fireEvent.change(screen.getByLabelText(/Start time/), { target: { value: '07:00' } });
+    fireEvent.change(screen.getByLabelText(/End time/), { target: { value: '14:00' } });
+    fireEvent.click(flexSwitch);
+    const minutes = screen.getByLabelText('Start up to (min after the start time)');
+    expect(minutes).toHaveValue(60); // starts from a one-hour band
+    fireEvent.change(minutes, { target: { value: '120' } });
+    expect(await screen.findByText('Start between 07:00 and 09:00; starting at 09:00 → expected end 16:00.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Create' }));
+    await waitFor(() => expect(apiMock.post).toHaveBeenCalledTimes(1));
+    expect(apiMock.post.mock.calls[0]![1]).toMatchObject({ type: 'FIXED', startTime: '07:00', endTime: '14:00', flexStartMinutes: 120 });
+  });
+
+  it('a saved band opens switched on; switching it off saves 0, and a flexible shift never carries one', async () => {
+    apiMock.patch.mockResolvedValue({ data: { id: 's11' } });
+    const shift = { id: 's11', code: 'EARLY', name: 'Early', nameAr: null, type: 'FIXED', startTime: '07:00', endTime: '14:00', requiredMinutes: null, coreStart: null, coreEnd: null, dayBoundary: '00:00', breaks: [], punchInWindowBeforeMinutes: 240, punchOutWindowAfterMinutes: 360, graceInMinutes: null, graceOutMinutes: null, flexStartMinutes: 90, color: null, status: 'active', crossesMidnight: false, createdAt: '', updatedAt: '' };
+    renderWithProviders(<ShiftDialog open onOpenChange={() => {}} shift={shift} />);
+    expect(screen.getByRole('switch', { name: 'Flexible start' })).toBeChecked();
+    expect(screen.getByLabelText('Start up to (min after the start time)')).toHaveValue(90);
+    fireEvent.click(screen.getByRole('switch', { name: 'Flexible start' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/orgs/org-1/shifts/s11', expect.objectContaining({ flexStartMinutes: 0 })));
+
+    apiMock.patch.mockClear();
+    fireEvent.click(screen.getByRole('switch', { name: 'Flexible start' })); // back on (90 restored)…
+    fireEvent.keyDown(screen.getByRole('combobox', { name: /Type/ }), { key: 'ArrowDown' });
+    fireEvent.click(await screen.findByRole('option', { name: 'Flexible' })); // …but the shift becomes flexible
+    expect(screen.queryByRole('switch', { name: 'Flexible start' })).not.toBeInTheDocument();
+    fireEvent.change(await screen.findByRole('spinbutton', { name: 'Required time – hours' }), { target: { value: '7' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Save' }));
+    await waitFor(() => expect(apiMock.patch).toHaveBeenCalledWith('/orgs/org-1/shifts/s11', expect.objectContaining({ type: 'FLEXIBLE', flexStartMinutes: 0 })));
+  });
+
   it('refuses a switched-on grace without minutes', async () => {
     renderWithProviders(<ShiftDialog open onOpenChange={() => {}} shift={null} />);
     fireEvent.change(screen.getByLabelText(/^Code/), { target: { value: 'G' } });

@@ -84,6 +84,9 @@ function DashboardForm({ initial }: { initial: OrganizationSettings['dashboard']
         <Controller control={control} name="showGreeting" render={({ field }) => <SwitchRow id="dash-greeting" label={t('dashboard.showGreeting')} hint={t('dashboard.showGreetingHint')} control={<Switch id="dash-greeting" checked={field.value ?? true} onCheckedChange={field.onChange} disabled={readOnly} />} />} />
         <Controller control={control} name="showHighlight" render={({ field }) => <SwitchRow id="dash-highlight" label={t('dashboard.showHighlight')} hint={t('dashboard.showHighlightHint')} control={<Switch id="dash-highlight" checked={field.value ?? true} onCheckedChange={field.onChange} disabled={readOnly} />} />} />
         <Controller control={control} name="showQuote" render={({ field }) => <SwitchRow id="dash-quote" label={t('dashboard.showQuote')} hint={t('dashboard.showQuoteHint')} control={<Switch id="dash-quote" checked={field.value ?? true} onCheckedChange={field.onChange} disabled={readOnly} />} />} />
+        {/* statistics and indicators (2026-10-19): absent in the stored group = shown */}
+        <Controller control={control} name="showDepartmentBreakdown" render={({ field }) => <SwitchRow id="dash-departments" label={t('dashboard.showDepartmentBreakdown')} hint={t('dashboard.showDepartmentBreakdownHint')} control={<Switch id="dash-departments" checked={field.value ?? true} onCheckedChange={field.onChange} disabled={readOnly} />} />} />
+        <Controller control={control} name="showMonthToDate" render={({ field }) => <SwitchRow id="dash-mtd" label={t('dashboard.showMonthToDate')} hint={t('dashboard.showMonthToDateHint')} control={<Switch id="dash-mtd" checked={field.value ?? true} onCheckedChange={field.onChange} disabled={readOnly} />} />} />
       </fieldset>
     </SettingsSection>
   );

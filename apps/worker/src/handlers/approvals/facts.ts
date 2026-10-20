@@ -46,6 +46,12 @@ export async function approvalEntityFacts(trx: Trx, orgId: string, entityType: A
       const r = await trx.selectFrom('compOffCredits').select('workedOn').where('organizationId', '=', orgId).where('id', '=', entityId).executeTakeFirst();
       return { ...NONE, date: day(r?.workedOn) };
     }
+    case 'SHORT_LEAVE': {
+      // the day of the window and the permission type's names (the notice says "Personal permission · 12 Oct")
+      const r = await trx.selectFrom('timeOffRequests as r').leftJoin('timeOffTypes as t', 't.id', 'r.timeOffTypeId').select(['r.requestDate', 't.name', 't.nameAr'])
+        .where('r.organizationId', '=', orgId).where('r.id', '=', entityId).executeTakeFirst();
+      return r ? { ...NONE, date: day(r.requestDate), leaveTypeName: text(r.name), leaveTypeNameAr: text(r.nameAr) } : NONE;
+    }
     default:
       return NONE;
   }
