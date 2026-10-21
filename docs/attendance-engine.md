@@ -58,7 +58,10 @@ Records inside a locked period are skipped and listed in the recalculation summa
    `CROSS_MIDNIGHT`, no `MISSING_OUT`, and the next day does not see a stray check-out. Until that limit has passed the
    check-in day stays `PENDING`; a check-out later than that (a forgotten one) stays on its own day as before. A check-out
    with no open check-in behind it still belongs to the day it falls on;
-   `UNDER_HOURS` when worked < `minFullDayMinutes`; `HALF_DAY` when worked < `halfDayThresholdMinutes`.
+   `UNDER_HOURS` when worked < `minFullDayMinutes`; `HALF_DAY` when worked < `halfDayThresholdMinutes`. Both thresholds
+   scale with a reduced day and are **capped by the shift's scheduled minutes** (`statusThresholds`): a day never requires
+   more than its shift schedules, so a 4-hour or 5-minute shift worked in full is `PRESENT`, not `HALF_DAY`; the half-day
+   threshold keeps its proportion of the (capped) full day.
 4. No punches: `ABSENT` when `autoAbsentWithoutPunches` and the day is over (`now` past the window end); otherwise `PENDING`.
    **Callers must pass `now`** when computing the current day; without it the day is treated as finished (historical recompute).
    **A working day without a resolved shift** follows the same rule as any working day — one rule for the daily register,
