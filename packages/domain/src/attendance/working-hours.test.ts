@@ -17,7 +17,7 @@ const early = fixedShift({ startTime: '07:00', endTime: '14:00', flexStartMinute
 const period = (over: Partial<SpecialHoursPeriod> = {}): SpecialHoursPeriod => ({ name: 'Summer hours', reference: 'Circular 12/2026', from: '2026-03-01', to: '2026-03-31', appliesTo: 'all', ...over });
 
 describe('engine version', () => {
-  it('is 1.5.0', () => expect(ENGINE_VERSION).toBe('attendance-engine/1.5.0'));
+  it('is 1.5.1', () => expect(ENGINE_VERSION).toBe('attendance-engine/1.5.1'));
 });
 
 describe('flexible start band on a FIXED shift', () => {

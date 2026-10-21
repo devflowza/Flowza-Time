@@ -5,6 +5,7 @@ import { attributeEvents, sortEvents } from './attribute.js';
 import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
 import { carryOvernightCheckOuts, openCheckIn, overnightMaxSpanMinutes } from './overnight.js';
 import { roundMinutes, roundPunches } from './rounding.js';
+import { dayThresholds } from './thresholds.js';
 import { applyTimeOff } from './time-off.js';
 import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EnginePunchPayload, type EngineShift, type TraceStep } from './types.js';
 import { assertTimezone, computePunchWindow, localInstant, parseInstant, toUtcIso, type PunchWindow } from './window.js';
@@ -209,9 +210,9 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
   // window, which need not cover hours worked outside the shift — so a punch on that calendar day that NO window claims belongs
   // to the off day, exactly as a day without a shift takes the punches no shift window contains. A neighbouring day never
   // claims such a punch (no window of its own contains it), so nothing is counted twice.
+  const unclaimedIds = attribution.decisions.filter((d) => d.reason === 'OUT_OF_WINDOW' && parseInstant(d.punchedAt, zone).toISODate() === date).map((d) => d.eventId);
   if (outOfWindowOnDate > 0 && isNonWorkingDay(input)) {
-    const claimed = attribution.decisions.filter((d) => d.reason === 'OUT_OF_WINDOW' && parseInstant(d.punchedAt, zone).toISODate() === date).map((d) => d.eventId);
-    const events = input.events.filter((e) => claimed.includes(e.id));
+    const events = input.events.filter((e) => unclaimedIds.includes(e.id));
     attributed = sortEvents([...attributed, ...events]);
     for (const e of events) {
       const entry = tracePunches.get(e.id);
@@ -219,6 +220,26 @@ function calculateCore(input: DailyCalculationInput): DailyCalculationResult {
     }
     rec.step('attribution.nonWorkingDay', `${events.length} punch(es) on non-working day ${date} outside the shift window: attributed to ${date}`, { events: events.map((e) => e.id) });
     outOfWindowOnDate -= events.length;
+  }
+  // 2a-bis. A working day whose punches ALL lie outside every window (engine 1.5.1, field report: a manager punched in and out
+  // after the shift's punch-out margin and the day came out ABSENT with 0 punches and 0 worked minutes although the employee
+  // was there). Nothing else claims those punches, so when they make a complete in → out pair they are the day's work: they are
+  // attributed to the calendar day they fall on and the day keeps the OUT_OF_WINDOW flag for review. A day that also has punches
+  // inside its window keeps the stray ones out of the record as before (the in-window punches are the day), and a lone punch
+  // proves no attendance: both stay flagged only.
+  if (outOfWindowOnDate > 0 && attributed.length === 0) {
+    const events = sortEvents(input.events.filter((e) => unclaimedIds.includes(e.id)));
+    const collapsed = collapseDuplicates(events, rules.duplicatePunchWindowSeconds);
+    const probe = interpretPunches(collapsed.kept, rules.punchInterpretation, zone, collapsed.duplicates);
+    if (probe.firstIn !== null && probe.lastOut !== null && !probe.missingIn && !probe.missingOut) {
+      attributed = events;
+      for (const e of events) {
+        const entry = tracePunches.get(e.id);
+        attributionNotes.set(e.id, 'outside every punch window, no other punch that day → kept on its calendar day');
+        if (entry) tracePunches.set(e.id, { ...entry, role: 'IGNORED', note: attributionNotes.get(e.id) ?? entry.note });
+      }
+      rec.step('attribution.outOfWindowWork', `${events.length} punch(es) on ${date} fall outside every punch window and are the only punches of the day: attributed to ${date} (flagged OUT_OF_WINDOW)`, { events: events.map((e) => e.id) });
+    }
   }
   if (outOfWindowOnDate > 0) {
     rec.flag('OUT_OF_WINDOW');
@@ -920,11 +941,11 @@ function classifyWorkingStatus(workedMinutes: number, schedule: Schedule, rules:
     rec.step('status', `PRESENT (no shift: ${workedMinutes} worked minutes, no thresholds)`, { status: 'PRESENT', workedMinutes });
     return 'PRESENT';
   }
-  const minFullDay = Math.round(rules.minFullDayMinutes * schedule.ratio);
-  const halfDayThreshold = Math.round(rules.halfDayThresholdMinutes * schedule.ratio);
+  const { minFullDay, halfDay: halfDayThreshold } = dayThresholds(rules, schedule.scheduledMinutes, schedule.ratio);
   if (workedMinutes < minFullDay) {
     rec.flag('UNDER_HOURS');
-    rec.step('underHours', `${workedMinutes} worked < ${minFullDay} min full day${schedule.ratio !== 1 ? ` (${rules.minFullDayMinutes} × ${schedule.ratio})` : ''} → UNDER_HOURS`, { workedMinutes, minFullDayMinutes: minFullDay });
+    const capped = minFullDay === schedule.scheduledMinutes && schedule.scheduledMinutes < Math.round(rules.minFullDayMinutes * schedule.ratio);
+    rec.step('underHours', `${workedMinutes} worked < ${minFullDay} min full day${capped ? ` (the ${schedule.scheduledMinutes} min scheduled; the rule set asks ${rules.minFullDayMinutes})` : schedule.ratio !== 1 ? ` (${rules.minFullDayMinutes} × ${schedule.ratio})` : ''} → UNDER_HOURS`, { workedMinutes, minFullDayMinutes: minFullDay });
   }
   if (halfDayOff !== null) {
     rec.step('status', `half-day leave/holiday with ${workedMinutes} worked minutes → HALF_DAY`, { status: 'HALF_DAY', workedMinutes });

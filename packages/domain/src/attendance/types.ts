@@ -243,5 +243,10 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * assignment, remote work) are credited to the worked minutes, reduced hours (nursing, disability) shrink the schedule, and
  * out-of-office time inside the schedule no window covers is lost time beyond the rule set's allowance (PAIRED / DIRECTIONAL).
  * Flags SHORT_LEAVE, OFFICIAL_ASSIGNMENT, REMOTE_WORK, REDUCED_HOURS, LOST_TIME. A day without any keeps its figures.
+ * 1.5.1 — Field-report fixes: (a) a working day whose punches ALL fall outside every punch window and make a complete in → out pair
+ * is attributed to its calendar day (flag OUT_OF_WINDOW kept) instead of ABSENT with 0 punches; a day with punches inside its window,
+ * or a lone out-of-window punch, is unchanged. (b) A day never demands more than it schedules: the full-day threshold is capped at the
+ * scheduled minutes and a shift shorter than the half-day threshold uses half its schedule, so a completed short shift is PRESENT,
+ * not HALF_DAY / UNDER_HOURS. Shifts at or above the rule set's thresholds are unchanged.
  */
-export const ENGINE_VERSION = 'attendance-engine/1.5.0';
+export const ENGINE_VERSION = 'attendance-engine/1.5.1';
