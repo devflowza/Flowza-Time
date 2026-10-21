@@ -3,7 +3,8 @@
 Bringing a fresh environment up — role passwords, secrets, the API and the workers, the auth URLs, the first
 platform admin and the first organisation, in the order they unblock each other — is [`docs/go-live.md`](go-live.md),
 which doubles as the record of how the live deployment was built and of what remains undone on it. This file describes
-the shape of a deployment; that one is the procedure and the history.
+the shape of a deployment; that one is the procedure and the history. A customer-hosted installation with no cloud
+(Morpho at HQ, remote sites over VPN or offline) is planned in [`docs/on-prem.md`](on-prem.md).
 
 ## Topology
 | Component | Where | Notes |
