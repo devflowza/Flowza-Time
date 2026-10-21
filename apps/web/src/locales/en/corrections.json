@@ -5,7 +5,7 @@
   "fields": {
     "employee": "Employee", "selectEmployee": "Select an employee", "attendanceDate": "Attendance date", "type": "Correction type",
     "originalEvent": "Original event", "originalEventHint": "Non-voided events from the day before to the day after the attendance date.", "eventsUnavailable": "Events could not be loaded.", "selectEvent": "Select an event", "selectEmployeeFirst": "Select an employee first", "noEvents": "No events around this date",
-    "punchDate": "Punch date", "punchTime": "Punch time ({{zone}})", "eventType": "Event type", "storedAs": "Stored as {{utc}} (entered in {{zone}})", "enterTime": "Enter the time as shown on the clock in {{zone}}.",
+    "punchDate": "Punch date", "punchDateHint": "Must be the attendance date (or the next day for an overnight shift).", "punchDateRange": "The punch date must be the attendance date, or the next day for an overnight shift.", "punchDateFuture": "A punch cannot be dated in the future.", "punchTime": "Punch time ({{zone}})", "eventType": "Event type", "storedAs": "Stored as {{utc}} (entered in {{zone}})", "enterTime": "Enter the time as shown on the clock in {{zone}}.",
     "proposedStatus": "New status", "selectStatus": "Select a status", "reason": "Reason", "reasonHint": "At least 3 characters. Shown to approvers and kept in the audit log."
   },
   "typeHint": {
