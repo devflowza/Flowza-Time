@@ -7,7 +7,7 @@ import type { SelfPunchDirection, SelfPunchPreviewDto, SelfPunchRefusal, SelfPun
 import { PageHeader } from '@/components/layout/page-header';
 import { Badge, Button, Card, CardContent, EmptyState, ErrorState, Skeleton } from '@/components/ui';
 import { ApiError } from '@/lib/api-client';
-import { fmtDateTime, fmtMinutes, fmtTime } from '@/lib/format';
+import { fmtDate, fmtDateTime, fmtMinutes, fmtTime } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
 import { useOrgId } from '@/features/me/use-me';
 import { AttendanceStatusBadge, FlagChips } from '@/features/attendance/components/badges';
@@ -103,6 +103,8 @@ export default function CheckInPage() {
   // when the organisation turns it off); a requirement without a way to meet it stays a visible blocker
   const selfieOnly = !!s?.selfieAvailable && s.blockers.includes('SELFIE_REQUIRED');
   const hardBlockers = (s?.blockers ?? []).filter((b) => b !== 'SELFIE_REQUIRED' || !s?.selfieAvailable);
+  // "not active" names its cause and date (exit date passed / status left / not joined yet) when the API says which
+  const refusalText = (r: string): string => (r === 'NOT_ACTIVE' && s?.employment ? t(`checkin.notActive.${s.employment.cause}`, { date: s.employment.date ? fmtDate(s.employment.date) : '' }) : t(`checkin.refusal.${r}`, { defaultValue: r }));
   const previewMutate = preview.mutate;
   const previewSeq = useRef(0);
 
@@ -199,14 +201,14 @@ export default function CheckInPage() {
             {hardBlockers.length > 0 ? (
               <div role="alert" className="flex gap-3 rounded-lg border border-red-200 bg-red-50 p-3 text-sm text-red-900 dark:border-red-900 dark:bg-red-950/50 dark:text-red-100">
                 <ShieldOff className="mt-0.5 size-5 shrink-0" aria-hidden />
-                <div><p className="font-semibold">{t('checkin.blockedTitle')}</p><ul className="list-disc ps-4">{hardBlockers.map((b) => <li key={b}>{t(`checkin.refusal.${b}`, { defaultValue: b })}</li>)}</ul></div>
+                <div><p className="font-semibold">{t('checkin.blockedTitle')}</p><ul className="list-disc ps-4">{hardBlockers.map((b) => <li key={b}>{refusalText(b)}</li>)}</ul></div>
               </div>
             ) : null}
             {geoError ? <LocationProblem kind={geoError} /> : null}
             {previewResult ? <VerdictBanner verdict={previewResult.verdict} /> : locating ? <Skeleton className="h-16 w-full" /> : null}
             {previewResult?.outOfWindow && punchWindow ? <p className="text-sm text-amber-800 dark:text-amber-200">{t('checkin.outOfWindow', { start: punchWindow.start, end: punchWindow.end })}</p> : null}
-            {refusals.filter((r) => r !== 'OUTSIDE_GEOFENCE' && r !== 'MOCK_LOCATION').map((r) => <p key={r} role="alert" className="text-sm text-destructive">{t(`checkin.refusal.${r}`, { defaultValue: r })}</p>)}
-            {refusal ? <p role="alert" data-testid="punch-refusal" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{t(`checkin.refusal.${refusal.reason}`, { defaultValue: refusal.message })}</p> : null}
+            {refusals.filter((r) => r !== 'OUTSIDE_GEOFENCE' && r !== 'MOCK_LOCATION').map((r) => <p key={r} role="alert" className="text-sm text-destructive">{refusalText(r)}</p>)}
+            {refusal ? <p role="alert" data-testid="punch-refusal" className="rounded-md border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{refusal.reason === 'NOT_ACTIVE' ? refusal.message : t(`checkin.refusal.${refusal.reason}`, { defaultValue: refusal.message })}</p> : null}
 
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <MapPin className="size-4" aria-hidden />

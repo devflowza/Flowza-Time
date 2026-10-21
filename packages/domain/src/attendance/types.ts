@@ -246,7 +246,7 @@ export interface ShiftResolution { assignment: EngineShiftAssignment | null; shi
  * 1.5.1 — Field-report fixes: (a) a working day whose punches ALL fall outside every punch window and make a complete in → out pair
  * is attributed to its calendar day (flag OUT_OF_WINDOW kept) instead of ABSENT with 0 punches; a day with punches inside its window,
  * or a lone out-of-window punch, is unchanged. (b) A day never demands more than it schedules: the full-day threshold is capped at the
- * scheduled minutes and a shift shorter than the half-day threshold uses half its schedule, so a completed short shift is PRESENT,
+ * scheduled minutes and the half-day threshold keeps its proportion of it (`statusThresholds`), so a completed short shift is PRESENT,
  * not HALF_DAY / UNDER_HOURS. Shifts at or above the rule set's thresholds are unchanged.
  */
 export const ENGINE_VERSION = 'attendance-engine/1.5.1';

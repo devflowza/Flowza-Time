@@ -89,6 +89,28 @@ describe('calculateDailyRecord — fixed shift basics', () => {
     expect(graced.flags).not.toContain('EARLY_DEPARTURE');
   });
 
+  it('a shift shorter than the rule-set thresholds is PRESENT once its scheduled minutes are worked (no HALF_DAY / UNDER_HOURS)', () => {
+    // 09:25–09:30 = 5 scheduled minutes against the 420 / 240 minute defaults
+    const shift = fixedShift({ startTime: '09:25', endTime: '09:30' });
+    const full = calculateDailyRecord(input({ shift, events: day('09:25', '09:30') }));
+    expect(full).toMatchObject({ status: 'PRESENT', scheduledMinutes: 5, workedMinutes: 5 });
+    expect(full.flags).not.toContain('UNDER_HOURS');
+    // the thresholds keep their proportion of the shift: 240/420 of 5 minutes rounds to 3
+    const short = calculateDailyRecord(input({ shift, events: day('09:25', '09:27') }));
+    expect(short).toMatchObject({ status: 'HALF_DAY', workedMinutes: 2 });
+    expect(short.flags).toContain('UNDER_HOURS');
+    const most = calculateDailyRecord(input({ shift, events: day('09:25', '09:29') }));
+    expect(most).toMatchObject({ status: 'PRESENT', workedMinutes: 4 });
+    expect(most.flags).toContain('UNDER_HOURS');
+  });
+
+  it('a 4-hour shift worked in full is PRESENT even though the full-day rule is 420 minutes', () => {
+    const shift = fixedShift({ startTime: '09:00', endTime: '13:00' });
+    const r = calculateDailyRecord(input({ shift, events: day('09:00', '13:00') }));
+    expect(r).toMatchObject({ status: 'PRESENT', scheduledMinutes: 240, workedMinutes: 240 });
+    expect(r.flags).not.toContain('UNDER_HOURS');
+  });
+
   it('flags UNDER_HOURS and HALF_DAY per thresholds', () => {
     const under = calculateDailyRecord(input({ events: day('09:00', '15:00') }));
     expect(under).toMatchObject({ status: 'PRESENT', workedMinutes: 360 });

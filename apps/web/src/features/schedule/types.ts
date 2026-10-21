@@ -8,7 +8,7 @@ export interface ShiftDto {
 }
 export type PatternEntry = { day: number; shiftId: string } | { day: number; off: true };
 export interface ShiftPatternDto { id: string; code: string; name: string; cycleLengthDays: number; sequence: PatternEntry[]; anchorDate: string; status: string; createdAt: string; updatedAt: string }
-export interface ShiftAssignmentDto { id: string; targetType: string; targetId: string; targetName: string | null; branchId: string | null; shiftId: string | null; shiftName: string | null; shiftPatternId: string | null; patternName: string | null; effectiveFrom: string; effectiveTo: string | null; createdBy: string | null; createdAt: string }
+export interface ShiftAssignmentDto { id: string; targetType: string; targetId: string; targetName: string | null; branchId: string | null; shiftId: string | null; shiftName: string | null; shiftPatternId: string | null; patternName: string | null; effectiveFrom: string; effectiveTo: string | null; createdBy: string | null; createdAt: string; /** Whether the caller may end or remove it (absent from an older API: everybody holding shift.assign). */ canManage?: boolean }
 export interface ShiftResolution {
   employeeId: string; date: string; source: string | null; isPatternOff: boolean; patternDay: number | null;
   assignment: { id: string; targetType: string; targetId: string; shiftId: string | null; shiftPatternId: string | null; effectiveFrom: string; effectiveTo: string | null } | null;

@@ -78,6 +78,14 @@ export const SELF_PUNCH_REFUSALS = ['WEB_CHECKIN_DISABLED', 'MOBILE_CHECKIN_DISA
   'CHECKIN_METHOD_NOT_ALLOWED'] as const;
 export type SelfPunchRefusal = (typeof SELF_PUNCH_REFUSALS)[number];
 
+/** Why an employee cannot punch because their employment is not in force today (`blockers` holds NOT_ACTIVE). */
+export interface EmploymentBlockDto {
+  /** LEFT: the status is terminated / resigned. EXITED: the exit date has passed. NOT_STARTED: the joining date is ahead. */
+  cause: 'LEFT' | 'EXITED' | 'NOT_STARTED';
+  /** The exit date (LEFT, EXITED; null when the status says they left without one) or the joining date (NOT_STARTED). */
+  date: string | null;
+}
+
 export interface SelfPunchStatusDto {
   date: string;
   timezone: string;
@@ -100,6 +108,8 @@ export interface SelfPunchStatusDto {
   canCheckOut: boolean;
   /** Reasons a punch would be refused before any location is known (disabled channels, IP outside the allow-list, selfie required). */
   blockers: SelfPunchRefusal[];
+  /** Present with the NOT_ACTIVE blocker: which of the employment dates / status ended or has not started the employment. Absent from an older API. */
+  employment?: EmploymentBlockDto | null;
   policy: Pick<AttendanceSettings['selfService'], 'webCheckIn' | 'mobileCheckIn' | 'requireGeofence' | 'allowSelfieCheckIn' | 'checkInWindow' | 'checkOutWindow' | 'outOfWindowAction' | 'duplicatePunchSeconds'> & { ipRestricted: boolean };
   grant: { openAttendance: boolean; selfieRequired: boolean };
   /** Whether the selfie check-in is available to the caller (organisation switch + grant). */

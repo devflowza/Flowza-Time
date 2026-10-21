@@ -9,7 +9,7 @@ import { Button, Dialog, DialogContent, DialogDescription, DialogFooter, DialogH
 import { Combobox } from '@/components/forms';
 import { todayIso } from '@/lib/format';
 import { toast, toastError } from '@/lib/toast';
-import { useOrgId, useOrgTimezone } from '@/features/me/use-me';
+import { useEmployeeId, useOrgId, useOrgTimezone } from '@/features/me/use-me';
 import { useTeams } from '@/features/organization/api';
 import { useBranchOptions, useDepartmentOptions } from '@/features/organization/lookups';
 import { useEmployeeOptions } from '@/features/employees/api';
@@ -19,8 +19,12 @@ import { useAssignmentMutations, usePatterns, useShiftOptions } from '../api';
 type FormValues = z.input<typeof shiftAssignmentInputSchema>;
 type Mode = 'shift' | 'pattern';
 
-/** Assign a shift or a rotational pattern to an organisation / branch / department / team / employee for an effective range. */
-export function AssignmentDialog({ open, onOpenChange, preset }: { open: boolean; onOpenChange: (o: boolean) => void; preset?: Partial<FormValues> }) {
+/**
+ * Assign a shift or a rotational pattern to an organisation / branch / department / team / employee for an effective range.
+ * `teamOnly` (a line manager: `shift.assign_team` without `shift.assign`): employees only, and only the caller's direct reports —
+ * the directory they can read is their own record + their reports, so their own record is left out of the choices.
+ */
+export function AssignmentDialog({ open, onOpenChange, preset, teamOnly = false }: { open: boolean; onOpenChange: (o: boolean) => void; preset?: Partial<FormValues>; teamOnly?: boolean }) {
   const { t } = useTranslation('schedule');
   const { t: tc } = useTranslation();
   const tz = useOrgTimezone();
@@ -33,6 +37,7 @@ export function AssignmentDialog({ open, onOpenChange, preset }: { open: boolean
   const departments = useDepartmentOptions();
   const teams = useTeams({ pageSize: 200, sort: 'name', status: 'active' });
   const employees = useEmployeeOptions();
+  const ownEmployeeId = useEmployeeId();
   const [mode, setMode] = useState<Mode>(preset?.shiftPatternId ? 'pattern' : 'shift');
   const form = useForm<FormValues, unknown, ShiftAssignmentInput>({ resolver: zodResolver(shiftAssignmentInputSchema), defaultValues: { targetType: 'EMPLOYEE', targetId: '', effectiveFrom: todayIso(tz), effectiveTo: null, ...preset } });
   const { register, control, setValue, formState: { errors, isSubmitting } } = form;
@@ -43,10 +48,10 @@ export function AssignmentDialog({ open, onOpenChange, preset }: { open: boolean
       case 'BRANCH': return { options: branches.options, loading: branches.isLoading, search: undefined };
       case 'DEPARTMENT': return { options: departments.options, loading: departments.isLoading, search: undefined };
       case 'TEAM': return { options: (teams.data?.data ?? []).map((tm) => ({ value: tm.id, label: tm.name, description: tm.branchName ?? tm.code })), loading: teams.isLoading, search: undefined };
-      case 'EMPLOYEE': return { options: employees.options, loading: employees.isLoading, search: employees.setSearch };
+      case 'EMPLOYEE': return { options: teamOnly ? employees.options.filter((o) => o.value !== ownEmployeeId) : employees.options, loading: employees.isLoading, search: employees.setSearch };
       default: return { options: [], loading: false, search: undefined };
     }
-  }, [targetType, branches, departments, teams.data, teams.isLoading, employees]);
+  }, [targetType, branches, departments, teams.data, teams.isLoading, employees, teamOnly, ownEmployeeId]);
   const patternOptions = useMemo(() => (patterns.data ?? []).map((p) => ({ value: p.id, label: p.name, description: t('patterns.cycleDays', { count: p.cycleLengthDays }) })), [patterns.data, t]);
   const rootError = (errors as Record<string, { message?: string } | undefined>)['']?.message ?? (errors as { root?: { message?: string } }).root?.message;
 
@@ -64,13 +69,13 @@ export function AssignmentDialog({ open, onOpenChange, preset }: { open: boolean
         <DialogHeader><DialogTitle>{t('assignments.add')}</DialogTitle><DialogDescription>{t('assignments.dialogHint')}</DialogDescription></DialogHeader>
         <form onSubmit={onSubmit} className="space-y-4" noValidate>
           <div className="grid gap-4 sm:grid-cols-2">
-            <FormField label={t('assignments.targetType')} htmlFor="as-ttype" required error={errors.targetType?.message}>
-              <Controller control={control} name="targetType" render={({ field }) => (
+            <FormField label={t('assignments.targetType')} htmlFor="as-ttype" required error={errors.targetType?.message} hint={teamOnly ? t('assignments.teamOnlyHint') : undefined}>
+              {teamOnly ? <Input id="as-ttype" value={t('assignments.targets.EMPLOYEE')} readOnly /> : <Controller control={control} name="targetType" render={({ field }) => (
                 <Select value={field.value ?? 'EMPLOYEE'} onValueChange={(v) => { field.onChange(v); setValue('targetId', v === 'ORGANIZATION' ? orgId : ''); }}>
                   <SelectTrigger id="as-ttype"><SelectValue /></SelectTrigger>
                   <SelectContent>{ASSIGNMENT_TARGETS.map((s) => <SelectItem key={s} value={s}>{t(`assignments.targets.${s}`)}</SelectItem>)}</SelectContent>
                 </Select>
-              )} />
+              )} />}
             </FormField>
             <FormField label={t('assignments.target')} htmlFor="as-target" required error={errors.targetId?.message}>
               {targetType === 'ORGANIZATION' ? <Input id="as-target" value={t('assignments.wholeOrganisation')} readOnly /> : (

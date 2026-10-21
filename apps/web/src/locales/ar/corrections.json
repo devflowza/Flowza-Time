@@ -5,7 +5,7 @@
   "fields": {
     "employee": "الموظف", "selectEmployee": "اختر موظفاً", "attendanceDate": "تاريخ الحضور", "type": "نوع التصحيح",
     "originalEvent": "الحدث الأصلي", "originalEventHint": "الأحداث غير الملغاة من اليوم السابق إلى اليوم التالي لتاريخ الحضور.", "eventsUnavailable": "تعذّر تحميل الأحداث.", "selectEvent": "اختر حدثاً", "selectEmployeeFirst": "اختر موظفاً أولاً", "noEvents": "لا توجد أحداث حول هذا التاريخ",
-    "punchDate": "تاريخ البصمة", "punchTime": "وقت البصمة ({{zone}})", "eventType": "نوع الحدث", "storedAs": "يُحفظ كـ {{utc}} (أُدخل بتوقيت {{zone}})", "enterTime": "أدخل الوقت كما يظهر على الساعة بتوقيت {{zone}}.",
+    "punchDate": "تاريخ البصمة", "punchDateHint": "يجب أن يكون تاريخ الحضور (أو اليوم التالي للوردية الليلية).", "punchDateRange": "يجب أن يكون تاريخ البصمة هو تاريخ الحضور، أو اليوم التالي للوردية الليلية.", "punchDateFuture": "لا يمكن أن يكون تاريخ البصمة في المستقبل.", "punchTime": "وقت البصمة ({{zone}})", "eventType": "نوع الحدث", "storedAs": "يُحفظ كـ {{utc}} (أُدخل بتوقيت {{zone}})", "enterTime": "أدخل الوقت كما يظهر على الساعة بتوقيت {{zone}}.",
     "proposedStatus": "الحالة الجديدة", "selectStatus": "اختر حالة", "reason": "السبب", "reasonHint": "3 أحرف على الأقل. يظهر للمعتمدين ويُحفظ في سجل التدقيق."
   },
   "typeHint": {

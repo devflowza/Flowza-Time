@@ -5,7 +5,7 @@ import { copyCalendarYear, resolvePolicyFor, type Trx } from '@flowza/database';
 import { policySpecificity, resolveShift, type EngineShiftAssignment, type EngineShiftPattern, type MembershipGrant } from '@flowza/domain';
 import { addDays, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
-import { branchFilter, requireBranchAccess, requirePermission } from '../../lib/authorize.js';
+import { branchFilter, hasPermission, isTeamMember, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
 import { type Actor, audit, diffObjects, runUser, withSystemScope } from '../../lib/service.js';
 import { likeContains, pageOf, toCount } from '../../lib/pagination.js';
 import { isoDate, isoDateOrNull, isoDateTime, jsonArray, jsonObject } from '../../lib/mappers.js';
@@ -164,7 +164,7 @@ export async function deletePattern(deps: ApiDeps, actor: Actor, orgId: string, 
 
 // ----- assignments -------------------------------------------------------------------------------------------------------------
 
-export interface ShiftAssignmentDto { id: string; targetType: string; targetId: string; targetName: string | null; branchId: string | null; shiftId: string | null; shiftName: string | null; shiftPatternId: string | null; patternName: string | null; effectiveFrom: string; effectiveTo: string | null; createdBy: string | null; createdAt: string }
+export interface ShiftAssignmentDto { id: string; targetType: string; targetId: string; targetName: string | null; branchId: string | null; shiftId: string | null; shiftName: string | null; shiftPatternId: string | null; patternName: string | null; effectiveFrom: string; effectiveTo: string | null; createdBy: string | null; createdAt: string; /** Whether the CALLER may end or remove this assignment (their branch scope, or a direct report for a line manager). */ canManage?: boolean }
 const ASSIGNMENT_COLUMNS = ['a.id', 'a.targetType', 'a.targetId', 'a.branchId', 'a.shiftId', 's.name as shiftName', 'a.shiftPatternId', 'p.name as patternName', 'a.effectiveFrom', 'a.effectiveTo', 'a.createdBy', 'a.createdAt'] as const;
 function assignmentQuery(trx: Trx, orgId: string) {
   return trx.selectFrom('shiftAssignments as a').leftJoin('shifts as s', 's.id', 'a.shiftId').leftJoin('shiftPatterns as p', 'p.id', 'a.shiftPatternId').where('a.organizationId', '=', orgId);
@@ -197,6 +197,7 @@ async function resolveTargetBranch(trx: Trx, orgId: string, targetType: string, 
 
 export async function listAssignments(deps: ApiDeps, actor: Actor, orgId: string, q: { page: number; pageSize: number; targetType?: string; targetId?: string; shiftId?: string; branchId?: string; activeOn?: string }) {
   const grant = requirePermission(actor.principal, orgId, 'shift.view');
+  const access: AssignAccess = { grant, full: hasPermission(grant, 'shift.assign'), team: hasPermission(grant, 'shift.assign_team') };
   const scope = branchFilter(grant, q.branchId);
   return runUser(deps.db, actor, async (trx) => {
     let base = assignmentQuery(trx, orgId);
@@ -211,14 +212,45 @@ export async function listAssignments(deps: ApiDeps, actor: Actor, orgId: string
     // (field report 2026-10-02: after "Assign" the new row hid among twenty others starting on 1 Sep, ordered by random id)
     const rows = (await base.select(ASSIGNMENT_COLUMNS).orderBy('a.effectiveFrom', 'desc').orderBy('a.createdAt', 'desc').orderBy('a.id').limit(page.pageSize).offset(page.offset).execute()) as AssignmentRow[];
     const names = await targetNames(trx, orgId, rows);
-    return { data: rows.map((r) => toAssignmentDto(r, names)), total };
+    return { data: rows.map((r) => ({ ...toAssignmentDto(r, names), canManage: canManageAssignment(access, r) })), total };
   });
 }
+/**
+ * Who may write shift assignments. `shift.assign` assigns anybody in the caller's branch scope; `shift.assign_team` (the Line
+ * Manager role) assigns EMPLOYEE targets that are the caller's direct reports and nothing else — the same scope the database's
+ * policy on shift_assignments enforces again.
+ */
+interface AssignAccess { grant: MembershipGrant; full: boolean; team: boolean }
+function assignAccess(actor: Actor, orgId: string): AssignAccess {
+  const grant = requireMembership(actor.principal, orgId);
+  const full = hasPermission(grant, 'shift.assign');
+  const team = hasPermission(grant, 'shift.assign_team');
+  if (!full && !team) throw errors.forbidden('Missing permission: shift.assign.');
+  return { grant, full, team };
+}
+const TEAM_ONLY_MESSAGE = 'You can assign shifts to the employees who report to you directly, and only to them.';
+/** A new assignment: a direct report (team key), else the target's branch must be in the caller's scope (`shift.assign`). */
+function requireAssignOnTarget(a: AssignAccess, t: { targetType: string; targetId: string; branchId: string | null }): void {
+  if (a.team && t.targetType === 'EMPLOYEE' && isTeamMember(a.grant, t.targetId)) return;
+  if (!a.full) throw errors.forbidden(TEAM_ONLY_MESSAGE);
+  if (t.branchId) requireBranchAccess(a.grant, t.branchId); else if (!a.grant.allBranches) throw errors.forbidden('Branch-scoped users can only assign shifts to employees or branches in their scope.');
+}
+/** An existing assignment (end it, remove it): a direct report's (team key), else its branch must be in the caller's scope. */
+function requireAssignOnExisting(a: AssignAccess, row: { targetType: string; targetId: string; branchId: string | null }): void {
+  if (a.team && row.targetType === 'EMPLOYEE' && isTeamMember(a.grant, row.targetId)) return;
+  if (!a.full) throw errors.forbidden(TEAM_ONLY_MESSAGE);
+  requireBranchAccess(a.grant, row.branchId);
+}
+/** The non-throwing twin of `requireAssignOnExisting`: what the list tells the UI about each row. */
+function canManageAssignment(a: AssignAccess, row: { targetType: string; targetId: string; branchId: string | null }): boolean {
+  if (a.team && row.targetType === 'EMPLOYEE' && isTeamMember(a.grant, row.targetId)) return true;
+  return a.full && (a.grant.allBranches || row.branchId === null || a.grant.branchIds.includes(row.branchId));
+}
 export async function createAssignment(deps: ApiDeps, actor: Actor, orgId: string, input: ShiftAssignmentInput): Promise<ShiftAssignmentDto & { recalculationJobId: string | null }> {
-  const grant = requirePermission(actor.principal, orgId, 'shift.assign');
+  const access = assignAccess(actor, orgId);
   return runUser(deps.db, actor, async (trx) => {
     const target = await resolveTargetBranch(trx, orgId, input.targetType, input.targetId);
-    if (target.branchId) requireBranchAccess(grant, target.branchId); else if (!grant.allBranches) throw errors.forbidden('Branch-scoped users can only assign shifts to employees or branches in their scope.');
+    requireAssignOnTarget(access, { targetType: input.targetType, targetId: input.targetId, branchId: target.branchId });
     if (input.shiftId) await loadShift(trx, orgId, input.shiftId);
     if (input.shiftPatternId && !(await trx.selectFrom('shiftPatterns').select('id').where('organizationId', '=', orgId).where('id', '=', input.shiftPatternId).executeTakeFirst())) throw errors.validation('Shift pattern not found.', { issues: [{ path: 'shiftPatternId', message: 'Unknown pattern' }] });
     if (input.effectiveTo && input.effectiveTo < input.effectiveFrom) throw lastDayError();
@@ -230,11 +262,11 @@ export async function createAssignment(deps: ApiDeps, actor: Actor, orgId: strin
   });
 }
 export async function updateAssignment(deps: ApiDeps, actor: Actor, orgId: string, id: string, input: { effectiveTo: string | null }): Promise<ShiftAssignmentDto & { recalculationJobId: string | null }> {
-  const grant = requirePermission(actor.principal, orgId, 'shift.assign');
+  const access = assignAccess(actor, orgId);
   return runUser(deps.db, actor, async (trx) => {
     const before = (await assignmentQuery(trx, orgId).select(ASSIGNMENT_COLUMNS).where('a.id', '=', id).executeTakeFirst()) as AssignmentRow | undefined;
     if (!before) throw errors.notFound('Shift assignment', id);
-    requireBranchAccess(grant, before.branchId);
+    requireAssignOnExisting(access, before);
     if (input.effectiveTo !== null && input.effectiveTo < isoDate(before.effectiveFrom)) throw lastDayError();
     await trx.updateTable('shiftAssignments').set({ effectiveTo: assignmentEndToStored(input.effectiveTo) }).where('id', '=', id).execute();
     const oldTo = assignmentEndFromStored(before.effectiveTo); const newTo = input.effectiveTo;
@@ -247,11 +279,11 @@ export async function updateAssignment(deps: ApiDeps, actor: Actor, orgId: strin
   });
 }
 export async function deleteAssignment(deps: ApiDeps, actor: Actor, orgId: string, id: string): Promise<{ recalculationJobId: string | null }> {
-  const grant = requirePermission(actor.principal, orgId, 'shift.assign');
+  const access = assignAccess(actor, orgId);
   return runUser(deps.db, actor, async (trx) => {
     const before = (await assignmentQuery(trx, orgId).select(ASSIGNMENT_COLUMNS).where('a.id', '=', id).executeTakeFirst()) as AssignmentRow | undefined;
     if (!before) throw errors.notFound('Shift assignment', id);
-    requireBranchAccess(grant, before.branchId);
+    requireAssignOnExisting(access, before);
     await trx.deleteFrom('shiftAssignments').where('id', '=', id).execute();
     await audit(trx, actor, orgId, 'shift.unassigned', 'shift_assignment', { entityId: id, branchId: before.branchId, oldValue: toAssignmentDto(before, new Map()) });
     const target = await resolveTargetBranch(trx, orgId, before.targetType, before.targetId).catch(() => ({ branchId: before.branchId, employeeIds: null }));

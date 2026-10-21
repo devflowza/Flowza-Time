@@ -30,7 +30,7 @@
   },
   "assignments": {
     "add": "تعيين وردية", "dialogHint": "التعيين الأكثر تحديداً هو الذي يُطبَّق: موظف › فريق › قسم › فرع › منظمة. تُرفض النطاقات المتداخلة لنفس الهدف.", "created": "تم إنشاء التعيين", "recalcHint": "تتم إعادة حساب التواريخ السابقة.",
-    "targetType": "تعيين إلى", "target": "الهدف", "targets": { "ORGANIZATION": "المنظمة", "BRANCH": "فرع", "DEPARTMENT": "قسم", "TEAM": "فريق", "EMPLOYEE": "موظف" }, "allTargets": "كل الأهداف", "wholeOrganisation": "المنظمة كاملة", "selectTarget": "اختر…",
+    "teamOnlyHint": "يمكنك تعيين الورديات للموظفين الذين يتبعونك مباشرةً (المدير المباشر أو الثانوي).", "targetType": "تعيين إلى", "target": "الهدف", "targets": { "ORGANIZATION": "المنظمة", "BRANCH": "فرع", "DEPARTMENT": "قسم", "TEAM": "فريق", "EMPLOYEE": "موظف" }, "allTargets": "كل الأهداف", "wholeOrganisation": "المنظمة كاملة", "selectTarget": "اختر…",
     "mode": "الجدول", "modes": { "shift": "وردية واحدة", "pattern": "نمط تناوب" }, "shift": "الوردية", "selectShift": "اختر وردية", "pattern": "النمط", "selectPattern": "اختر نمطاً", "shiftOrPattern": "الوردية / النمط",
     "effectiveFrom": "ساري من", "effectiveFromHint": "التواريخ السابقة تؤدي إلى إعادة الحساب.", "effectiveTo": "ساري إلى (آخر يوم)", "effectiveToHint": "يشمل هذا اليوم: يبقى التعيين سارياً فيه. اتركه فارغاً بلا نهاية.", "effectiveToBeforeFrom": "لا يمكن أن يسبق آخر يوم أولَ يوم.", "assign": "تعيين", "effective": "السريان", "openEnded": "مفتوح", "active": "ساري", "activeOn": "ساري في", "allBranches": "كل الفروع",
     "end": "إنهاء التعيين", "endTitle": "إنهاء هذا التعيين؟", "endHint": "التاريخ المحدد هو آخر يوم في التعيين: يسري حتى نهايته. يُعاد حساب الحضور بعده.", "ended": "تم إنهاء التعيين",

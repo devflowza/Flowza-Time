@@ -109,6 +109,16 @@ describe('CheckInPage', () => {
     expect(await screen.findByTestId('punch-state')).toHaveTextContent('Checked out at 08:27');
   });
 
+  it('says why the employment is not active — the exit date that passed — instead of a bare "not active"', async () => {
+    mockGeolocation('denied');
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ blockers: ['NOT_ACTIVE'], canCheckIn: false, employment: { cause: 'EXITED', date: '2026-10-15' } }) } });
+    apiMock.post.mockResolvedValue({ data: preview({ refusals: ['NOT_ACTIVE'] }) });
+    renderWithProviders(<CheckInPage />);
+    expect((await screen.findAllByText(/Your exit date \(.*2026.*\) has passed\. If you still work here, ask HR to clear the exit date on your profile\./)).length).toBeGreaterThan(0);
+    expect(screen.queryByText('Your employee record is not active.')).not.toBeInTheDocument();
+    expect(screen.getByTestId('punch-button')).toBeDisabled();
+  });
+
   it('once checked in, says when the employee may check out (flexible: check-in + required hours) and how long is left', async () => {
     mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
     // checked in 19:11 Muscat on an 8-hour flexible shift; the engine put the expected check-out at 03:11

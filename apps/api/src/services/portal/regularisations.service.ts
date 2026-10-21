@@ -5,10 +5,11 @@ import { addDays, AppError, errors } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { type Actor, audit, runUser, withSystemScope } from '../../lib/service.js';
 import { isoDate, isoDateTime, isoDateTimeOrNull } from '../../lib/mappers.js';
+import { requirePunchOnAttendanceDay } from '../attendance/correction-guards.js';
 import { cancelForEntity, submit } from '../approvals/engine.js';
 import { systemStep } from '../features/context.js';
 import { dv } from '../features/sql-helpers.js';
-import { attendancePolicy, isPeriodLocked, isWorking, loadEmployeeCtx, localDate, localInstant, lockEmployee, portalSelf, type EmployeeCtx } from './common.js';
+import { attendancePolicy, employmentBlock, employmentBlockText, isPeriodLocked, loadEmployeeCtx, localInstant, lockEmployee, portalSelf, type EmployeeCtx } from './common.js';
 import { seatSecondaryManager } from './line-manager.js';
 import { resolveDays } from './shift-resolve.js';
 import { loadRegularisation, REGULARISATION_COLUMNS, type RegularisationRow } from './regularisation-effects.js';
@@ -84,16 +85,13 @@ export async function submitRegularisation(deps: ApiDeps, actor: Actor, orgId: s
     const emp = await loadEmployeeCtx(trx, orgId, self.employeeId);
     const now = new Date();
     const today = localInstant(now, emp.timezone).date;
-    if (!isWorking(emp, today)) throw errors.forbidden('Your employment is not active.');
+    const employment = employmentBlock(emp, today);
+    if (employment) throw errors.forbidden(employmentBlockText(employment));
     if (input.date > today) throw errors.validation('A day can be regularised once it has started.', { issues: [{ path: 'date', message: 'Future date' }] });
     if (input.date < emp.joiningDate) throw errors.validation('This date is before your joining date.', { issues: [{ path: 'date', message: 'Before joining date' }] });
-    // proposed times belong to the day (a night shift may reach into the next / previous calendar day) and are not in the future
+    // proposed times belong to the day (the next calendar day too when the day's shift is overnight) and are not in the future
     for (const [key, value] of [['proposedInAt', input.proposedInAt], ['proposedOutAt', input.proposedOutAt]] as const) {
-      if (!value) continue;
-      const at = new Date(value);
-      if (at.getTime() > now.getTime() + 5 * 60_000) throw errors.validation('A proposed time cannot be in the future.', { issues: [{ path: key, message: 'In the future' }] });
-      const d = localDate(at, emp.timezone);
-      if (d < addDays(input.date, -1) || d > addDays(input.date, 1)) throw errors.validation('The proposed time must fall on (or next to) the regularised day.', { issues: [{ path: key, message: 'Outside the day' }] });
+      if (value) await requirePunchOnAttendanceDay(trx, orgId, emp.id, input.date, value, now, key);
     }
     const branchId = (await withSystemScope(trx, orgId, (t) => effectiveBranchOn(t, orgId, emp.id, input.date))) ?? emp.branchId;
     if (await isPeriodLocked(trx, orgId, branchId, input.date)) throw errors.periodLocked('The attendance period of this date is locked.');

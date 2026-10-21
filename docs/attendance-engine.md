@@ -58,7 +58,10 @@ Records inside a locked period are skipped and listed in the recalculation summa
    `CROSS_MIDNIGHT`, no `MISSING_OUT`, and the next day does not see a stray check-out. Until that limit has passed the
    check-in day stays `PENDING`; a check-out later than that (a forgotten one) stays on its own day as before. A check-out
    with no open check-in behind it still belongs to the day it falls on;
-   `UNDER_HOURS` when worked < `minFullDayMinutes`; `HALF_DAY` when worked < `halfDayThresholdMinutes`.
+   `UNDER_HOURS` when worked < `minFullDayMinutes`; `HALF_DAY` when worked < `halfDayThresholdMinutes`. Both thresholds
+   scale with a reduced day and are **capped by the shift's scheduled minutes** (`statusThresholds`): a day never requires
+   more than its shift schedules, so a 4-hour or 5-minute shift worked in full is `PRESENT`, not `HALF_DAY`; the half-day
+   threshold keeps its proportion of the (capped) full day.
 4. No punches: `ABSENT` when `autoAbsentWithoutPunches` and the day is over (`now` past the window end); otherwise `PENDING`.
    **Callers must pass `now`** when computing the current day; without it the day is treated as finished (historical recompute).
    **A working day without a resolved shift** follows the same rule as any working day — one rule for the daily register,
@@ -102,10 +105,10 @@ Records inside a locked period are skipped and listed in the recalculation summa
      keeps `OUT_OF_WINDOW` so HR can review it; trace step `attribution.outOfWindowWork`. Unchanged: a day that also has punches
      inside its window (the stray ones stay out of the record), a lone out-of-window punch (`ABSENT` + `OUT_OF_WINDOW`), and a
      punch of another calendar day (never pulled in). Weekly offs and holidays already behaved this way (1.5.0).
-   - **A day never demands more than it schedules.** The rule set's `minFullDayMinutes` is capped at the day's scheduled minutes
-     and, for a shift shorter than `halfDayThresholdMinutes`, the half-day threshold is half the schedule (`thresholds.ts`,
-     shared with the short-leave status step). A completed 3 h shift is `PRESENT`, not `HALF_DAY` + `UNDER_HOURS`. Shifts at or
-     above the thresholds (the normal 8 h day: 420 / 240) keep their figures.
+   - **A day never demands more than it schedules.** The full-day threshold is capped at the day's scheduled minutes and the
+     half-day threshold keeps its proportion of it (`statusThresholds`, shared with the short-leave status step; see step 3). A
+     completed 3 h shift is `PRESENT`, not `HALF_DAY` + `UNDER_HOURS`. Shifts at or above the thresholds (the normal 8 h day:
+     420 / 240) keep their figures.
    - Overtime is unchanged: by default every minute worked after the shift end counts (a late arrival who stays on is `LATE` +
      `OVERTIME`); with `overtimeRequiresScheduledHours` only the part beyond the scheduled minutes counts, i.e. overtime starts
      once the default hours are completed.

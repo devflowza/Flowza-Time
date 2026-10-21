@@ -1,8 +1,8 @@
 import { ATTENDANCE_FLAGS, type AttendanceFlag, type AttendanceStatus } from '@flowza/contracts';
 import { minutesBetween } from '@flowza/shared';
 import { collapseDuplicates, interpretPunches, scheduledBreakMinutes } from './interpret.js';
+import { statusThresholds } from './thresholds.js';
 import type { DailyCalculationInput, DailyCalculationResult, EngineHourAllowance, EngineShift, EngineTimeOff, TraceStep } from './types.js';
-import { dayThresholds } from './thresholds.js';
 import { computePunchWindow, localInstant, type PunchWindow } from './window.js';
 
 /**
@@ -137,7 +137,7 @@ export function applyTimeOff(result: DailyCalculationResult, input: DailyCalcula
     } else {
       const base = baseScheduledMinutes(shift, window);
       const ratio = base > 0 ? scheduledMinutes / base : 1;
-      const { minFullDay, halfDay: halfDayThreshold } = dayThresholds(rules, scheduledMinutes, ratio);
+      const { minFullDay, halfDay: halfDayThreshold } = statusThresholds(rules, scheduledMinutes, ratio);
       const effective = workedMinutes + excusedMinutes;
       if (complete && (status === 'PRESENT' || status === 'HALF_DAY')) {
         status = effective < halfDayThreshold ? 'HALF_DAY' : 'PRESENT';
