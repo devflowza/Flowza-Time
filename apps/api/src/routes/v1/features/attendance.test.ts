@@ -116,6 +116,26 @@ describe('attendance reads', () => {
 });
 
 describe('corrections and approvals', () => {
+  it('refuses a punch that does not belong to the attendance day or lies in the future', async () => {
+    const file = (attendanceDate: string, proposedPunchedAt: string) => h.request('POST', `${base()}/attendance/corrections`, { token: f.hrAdmin, body: { employeeId: f.e1, attendanceDate, type: 'ADD_PUNCH', proposedPunchedAt, reason: 'Punch date check' } });
+    // a month after the attendance date (the field report: 20 Oct attendance, punch on 20 Dec)
+    const month = await file(DAY, '2026-09-03T14:00:00Z');
+    expect(month.status).toBe(400);
+    expect(month.body).toMatchObject({ code: 'VALIDATION_ERROR', details: { issues: [{ path: 'proposedPunchedAt', message: 'Not on the attendance date' }] } });
+    expect(month.body.message).toMatch(/punch date \(2026-09-03\) must be the attendance date \(2026-08-03\)/);
+    // the day before / after (a day shift is not overnight)
+    expect((await file(DAY, '2026-08-02T14:00:00Z')).status).toBe(400);
+    expect((await file(DAY, '2026-08-04T14:00:00Z')).status).toBe(400);
+    // a punch (and attendance day) that has not happened yet (the punch's own future check is unit-tested in the domain)
+    const future = new Date(Date.now() + 36 * 3_600_000);
+    const futureDate = future.toISOString().slice(0, 10);
+    const ahead = await file(futureDate, future.toISOString());
+    expect(ahead.status).toBe(400);
+    expect(ahead.body.details.issues[0]).toMatchObject({ path: expect.any(String) });
+    // nothing was filed
+    expect(await h.admin.selectFrom('attendanceCorrections').select('id').where('organizationId', '=', f.orgId).where('reason', '=', 'Punch date check').execute()).toHaveLength(0);
+  });
+
   it('routes a correction from a requester without approve rights to hr_admin and applies it on approval', async () => {
     const r = await h.request('POST', `${base()}/attendance/corrections`, { token: f.hrUser, body: { employeeId: f.e1, attendanceDate: DAY, type: 'ADD_PUNCH', proposedPunchedAt: `${DAY}T13:05:00Z`, reason: 'Forgot to punch out' } });
     expect(r.status).toBe(201);

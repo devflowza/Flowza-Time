@@ -103,6 +103,7 @@ route-driven tests that also cover tables and routes added later — see [Testin
 | report | report.view | x | x | x | x | x | x | x | x | x | |
 | role | role.manage | x | x | | | | | | | | |
 | shift | shift.assign | x | x | x | x | x | x | | | | |
+| shift | shift.assign_team | x | x | x | x | x | x | x | | | |
 | shift | shift.manage | x | x | x | x | | | | | | |
 | shift | shift.request_swap | x | x | | | x | | x | | | x |
 | shift | shift.view | x | x | x | x | x | x | x | x | x | |

@@ -5,6 +5,7 @@ import { attributeEvents, sortEvents } from './attribute.js';
 import { collapseDuplicates, computeBreaks, duplicatesAgainstUsedPunch, interpretPunches, scheduledBreakMinutes, type Interpretation } from './interpret.js';
 import { carryOvernightCheckOuts, openCheckIn, overnightMaxSpanMinutes } from './overnight.js';
 import { roundMinutes, roundPunches } from './rounding.js';
+import { statusThresholds } from './thresholds.js';
 import { applyTimeOff } from './time-off.js';
 import { ENGINE_VERSION, type CalculationTrace, type DailyCalculationInput, type DailyCalculationResult, type EngineDayMark, type EngineEvent, type EnginePunchPayload, type EngineShift, type TraceStep } from './types.js';
 import { assertTimezone, computePunchWindow, localInstant, parseInstant, toUtcIso, type PunchWindow } from './window.js';
@@ -920,11 +921,11 @@ function classifyWorkingStatus(workedMinutes: number, schedule: Schedule, rules:
     rec.step('status', `PRESENT (no shift: ${workedMinutes} worked minutes, no thresholds)`, { status: 'PRESENT', workedMinutes });
     return 'PRESENT';
   }
-  const minFullDay = Math.round(rules.minFullDayMinutes * schedule.ratio);
-  const halfDayThreshold = Math.round(rules.halfDayThresholdMinutes * schedule.ratio);
+  const { minFullDay, halfDay: halfDayThreshold } = statusThresholds(rules, schedule.scheduledMinutes, schedule.ratio);
+  const cappedAtShift = minFullDay < Math.round(rules.minFullDayMinutes * schedule.ratio);
   if (workedMinutes < minFullDay) {
     rec.flag('UNDER_HOURS');
-    rec.step('underHours', `${workedMinutes} worked < ${minFullDay} min full day${schedule.ratio !== 1 ? ` (${rules.minFullDayMinutes} × ${schedule.ratio})` : ''} → UNDER_HOURS`, { workedMinutes, minFullDayMinutes: minFullDay });
+    rec.step('underHours', `${workedMinutes} worked < ${minFullDay} min full day${cappedAtShift ? ` (the shift schedules ${schedule.scheduledMinutes} min, less than the ${rules.minFullDayMinutes} min rule)` : schedule.ratio !== 1 ? ` (${rules.minFullDayMinutes} × ${schedule.ratio})` : ''} → UNDER_HOURS`, { workedMinutes, minFullDayMinutes: minFullDay });
   }
   if (halfDayOff !== null) {
     rec.step('status', `half-day leave/holiday with ${workedMinutes} worked minutes → HALF_DAY`, { status: 'HALF_DAY', workedMinutes });

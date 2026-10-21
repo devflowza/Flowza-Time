@@ -65,6 +65,30 @@ describe('CorrectionDialog', () => {
     await waitFor(() => expect(onOpenChange).toHaveBeenCalledWith(false));
   });
 
+  it('refuses a punch date that is not the attendance date (or the next day) and one in the future, without calling the API', async () => {
+    renderWithProviders(<CorrectionDialog open onOpenChange={() => {}} preset={{ employeeId: EMP, employeeName: 'Ali', attendanceDate: '2024-03-01' }} />);
+    await screen.findByLabelText(/Punch time \(Asia\/Dubai\)/);
+    fireEvent.change(screen.getByLabelText(/Punch time/), { target: { value: '08:30' } });
+    fireEvent.change(screen.getByLabelText(/^Reason/), { target: { value: 'Forgot to badge in' } });
+
+    // a month later
+    fireEvent.change(screen.getByLabelText(/^Punch date/), { target: { value: '2024-04-01' } });
+    expect(screen.getByText('The punch date must be the attendance date, or the next day for an overnight shift.')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: 'Submit request' }));
+    await Promise.resolve();
+    expect(apiMock.post).not.toHaveBeenCalled();
+
+    // the next day is allowed here (the API decides on the shift); the day before is not
+    fireEvent.change(screen.getByLabelText(/^Punch date/), { target: { value: '2024-03-02' } });
+    expect(screen.queryByText(/must be the attendance date/)).not.toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText(/^Punch date/), { target: { value: '2024-02-29' } });
+    expect(screen.getByText(/must be the attendance date/)).toBeInTheDocument();
+
+    // in the future
+    fireEvent.change(screen.getByLabelText(/^Punch date/), { target: { value: '2999-01-01' } });
+    expect(screen.getByText('A punch cannot be dated in the future.')).toBeInTheDocument();
+  });
+
   it('switches fields with the correction type: SET_STATUS needs a status, REMOVE_PUNCH an existing event', async () => {
     renderWithProviders(<CorrectionDialog open onOpenChange={() => {}} preset={{ employeeId: EMP, attendanceDate: '2024-03-01', timezone: 'Asia/Muscat' }} />);
     const typeTrigger = await screen.findByRole('combobox', { name: /Correction type/ });

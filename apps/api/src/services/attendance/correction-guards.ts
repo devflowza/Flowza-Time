@@ -1,7 +1,7 @@
 import { DateTime } from 'luxon';
 import type { CreateCorrectionInput } from '@flowza/contracts';
-import type { Trx } from '@flowza/database';
-import type { MembershipGrant } from '@flowza/domain';
+import { loadDailyInputs, type Trx } from '@flowza/database';
+import { checkPunchOnAttendanceDay, computePunchWindow, punchDayMessage, type MembershipGrant } from '@flowza/domain';
 import { errors, isValidTimezone } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { hasPermission, requireBranchAccess, requireMembership } from '../../lib/authorize.js';
@@ -21,6 +21,9 @@ import { dv } from '../features/sql-helpers.js';
  *  - Defect 6 — a correction that sets a status or places a punch is refused for a date after today in the organisation's
  *    timezone, before the employee's joining date and after their exit date: such a record would count in summaries for a day
  *    the person could not have worked.
+ *  - Punch day — the punch an ADD_PUNCH / EDIT_PUNCH proposes must fall on the attendance date (the next day too when the day's
+ *    shift is overnight) and not in the future: a punch dated a month later is never attributed to the day by the engine, so
+ *    the approved correction would change nothing.
  */
 
 /** Correction types that create or re-date attendance (REMOVE_PUNCH only takes an existing punch away and stays allowed). */
@@ -72,6 +75,24 @@ export function requireDateInEmployment(date: string, today: string, employee: {
 }
 
 /**
+ * VALIDATION_ERROR when the proposed punch does not belong to the attendance day (its date in the branch zone is not the
+ * attendance date, nor the next day of an overnight shift) or lies in the future. The day's shift and zone are the ones the
+ * engine computes the day with (`loadDailyInputs`), read in the organisation's system scope after the caller could see the
+ * employee.
+ */
+export async function requirePunchOnAttendanceDay(trx: Trx, orgId: string, employeeId: string, attendanceDate: string, punchedAt: string, now: Date = new Date(), path = 'proposedPunchedAt'): Promise<void> {
+  const loaded = await withSystemScope(trx, orgId, (t) => loadDailyInputs(t, orgId, employeeId, attendanceDate, now));
+  if (!loaded) return;
+  const window = computePunchWindow(loaded.input.shift, attendanceDate, loaded.timezone);
+  const verdict = checkPunchOnAttendanceDay({ punchedAt, attendanceDate, timezone: loaded.timezone, window, now });
+  if (verdict.ok) return;
+  throw errors.validation(punchDayMessage(verdict, attendanceDate), {
+    issues: [{ path, message: verdict.problem === 'IN_FUTURE' ? 'In the future' : 'Not on the attendance date' }],
+    attendanceDate, punchDate: verdict.punchDate, allowedDates: verdict.allowedDates,
+  });
+}
+
+/**
  * Called first by `createCorrection` (attendance.service.ts). A caller who could not file a correction at all, or cannot see the
  * employee, is left to `createCorrection`'s own answers (FORBIDDEN / "Employee not found.") so nothing new is revealed here.
  */
@@ -85,5 +106,6 @@ export async function preValidateCorrection(deps: ApiDeps, actor: Actor, orgId: 
     if (!emp || emp.deletedAt) return;
     if (!own) await requireDayBranchAccess(trx, orgId, grant, emp, input.attendanceDate);
     if (DATED_CORRECTION_TYPES.has(input.type)) requireDateInEmployment(input.attendanceDate, await organizationToday(trx, orgId), emp);
+    if ((input.type === 'ADD_PUNCH' || input.type === 'EDIT_PUNCH') && input.proposedPunchedAt) await requirePunchOnAttendanceDay(trx, orgId, emp.id, input.attendanceDate, input.proposedPunchedAt);
   });
 }

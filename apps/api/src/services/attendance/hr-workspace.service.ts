@@ -10,7 +10,7 @@ import {
   type UnmatchedPunchGroupDto, type UnmatchedPunchesQuery, type UnmatchedRestoreInput, type UnmatchedSuggestionDto,
 } from '@flowza/contracts';
 import { attendanceSummaryCount, attendanceSummaryRows, attendanceSummaryTotals, loadDailyInputs, type AttendanceSummaryDbFigures, type AttendanceSummaryScope, type LoadedDailyInputs, type Trx } from '@flowza/database';
-import { calculateDailyRecord, type DailyCalculationResult, type EngineEvent, type MembershipGrant } from '@flowza/domain';
+import { calculateDailyRecord, checkPunchOnAttendanceDay, computePunchWindow, punchDayMessage, type DailyCalculationResult, type EngineEvent, type MembershipGrant } from '@flowza/domain';
 import { AppError, errors, event } from '@flowza/shared';
 import type { ApiDeps } from '../../deps.js';
 import { branchFilter, hasPermission, requireBranchAccess, requireMembership, requirePermission } from '../../lib/authorize.js';
@@ -37,7 +37,6 @@ import { requireDayBranchAccess } from './correction-guards.js';
  * exactly what the recompute will see even when the caller's role cannot read, say, raw payloads or leave records.
  */
 
-const FUTURE_TOLERANCE_MS = 5 * 60_000;
 const TIMELINE_RAW_LIMIT = 500;
 const IGNORED_LOOKBACK_DAYS = 180;
 const SUMMARY_EXPORTS_PER_HOUR = 30;
@@ -160,16 +159,15 @@ async function planDay(trx: Trx, orgId: string, grant: MembershipGrant, input: {
   const inPunch = ins[0] ?? null;
   const outPunch = outs[outs.length - 1] ?? null;
 
-  // proposed times: inside the engine's event window of the date, not in the future, check-out after check-in
-  const windowStart = DateTime.fromISO(input.date, { zone: loaded.timezone }).minus({ days: 1 }).startOf('day');
-  const windowEnd = DateTime.fromISO(input.date, { zone: loaded.timezone }).plus({ days: 2 }).startOf('day');
+  // proposed times: on the attendance date (the next day too on an overnight shift), not in the future, check-out after check-in
+  const window = computePunchWindow(loaded.input.shift, input.date, loaded.timezone);
   for (const [key, value] of [['inAt', input.inAt], ['outAt', input.outAt]] as const) {
     if (!value) continue;
-    const at = Date.parse(value);
-    if (at < windowStart.toMillis() || at >= windowEnd.toMillis()) throw errors.validation('The time must fall within the attendance day (from the day before to the day after).', { issues: [{ path: key, message: 'Outside the attendance day' }] });
-    if (at > now.getTime() + FUTURE_TOLERANCE_MS) {
+    const verdict = checkPunchOnAttendanceDay({ punchedAt: value, attendanceDate: input.date, timezone: loaded.timezone, window, now });
+    if (verdict.problem === 'WRONG_DAY') throw errors.validation(punchDayMessage(verdict, input.date), { issues: [{ path: key, message: 'Outside the attendance day' }], attendanceDate: input.date, punchDate: verdict.punchDate, allowedDates: verdict.allowedDates });
+    if (verdict.problem === 'IN_FUTURE') {
       const label = key === 'inAt' ? 'check-in' : 'check-out';
-      throw errors.validation(`The ${label} ${DateTime.fromMillis(at, { zone: loaded.timezone }).toFormat('ccc dd LLL HH:mm')} has not happened yet: a punch can only be recorded once it has happened.`, { issues: [{ path: key, message: 'In the future' }] });
+      throw errors.validation(`The ${label} ${DateTime.fromMillis(Date.parse(value), { zone: loaded.timezone }).toFormat('ccc dd LLL HH:mm')} has not happened yet: a punch can only be recorded once it has happened.`, { issues: [{ path: key, message: 'In the future' }] });
     }
   }
   const effectiveIn = input.removeIn ? null : input.inAt ?? current.firstInAt;

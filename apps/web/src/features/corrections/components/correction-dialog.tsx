@@ -48,6 +48,8 @@ export function CorrectionDialog({ open, onOpenChange, preset, onCreated }: { op
   const needsEvent = type === 'EDIT_PUNCH' || type === 'REMOVE_PUNCH';
   const [punchDate, setPunchDate] = useState(preset?.attendanceDate ?? todayIso(orgTz));
   const [punchTime, setPunchTime] = useState('');
+  // the punch belongs to the attendance day (the next one for an overnight shift — the API knows the shift) and is not in the future
+  const punchDateProblem = !needsPunch || !punchDate || !attendanceDate ? null : punchDate > todayIso(zone) ? t('fields.punchDateFuture') : punchDate < attendanceDate || punchDate > (DateTime.fromISO(attendanceDate).plus({ days: 1 }).toISODate() ?? attendanceDate) ? t('fields.punchDateRange') : null;
   const syncPunchedAt = (d = punchDate, tm = punchTime) => setValue('proposedPunchedAt', localToUtcIso(d, tm, zone) ?? undefined, { shouldValidate: false });
 
   const range = useMemo(() => { const d = DateTime.fromISO(attendanceDate ?? ''); return d.isValid ? { from: d.minus({ days: 1 }).toISODate()!, to: d.plus({ days: 1 }).toISODate()! } : { from: undefined, to: undefined }; }, [attendanceDate]);
@@ -56,6 +58,7 @@ export function CorrectionDialog({ open, onOpenChange, preset, onCreated }: { op
   const employeeOptions = useMemo(() => (preset?.employeeId && !employees.options.some((o) => o.value === preset.employeeId) ? [{ value: preset.employeeId, label: preset.employeeName ?? preset.employeeId }, ...employees.options] : employees.options), [employees.options, preset]);
 
   const submit = form.handleSubmit(async (values) => {
+    if (punchDateProblem) return;
     try {
       const payload: CreateCorrectionInput = { ...values, originalEventId: needsEvent ? values.originalEventId : undefined, proposedPunchedAt: needsPunch ? values.proposedPunchedAt : undefined, proposedEventType: needsPunch ? values.proposedEventType : undefined, proposedStatus: type === 'SET_STATUS' ? values.proposedStatus : undefined };
       const res = await create.mutateAsync(payload);
@@ -96,8 +99,8 @@ export function CorrectionDialog({ open, onOpenChange, preset, onCreated }: { op
 
           {needsPunch ? (
             <div className="grid gap-4 rounded-md border bg-muted/30 p-3 sm:grid-cols-3">
-              <FormField label={t('fields.punchDate')} htmlFor="cor-pdate" required>
-                <Input id="cor-pdate" type="date" dir="ltr" value={punchDate} onChange={(e) => { setPunchDate(e.target.value); syncPunchedAt(e.target.value, punchTime); }} />
+              <FormField label={t('fields.punchDate')} htmlFor="cor-pdate" required error={punchDateProblem ?? undefined} hint={punchDateProblem ? undefined : t('fields.punchDateHint')}>
+                <Input id="cor-pdate" type="date" dir="ltr" value={punchDate} aria-invalid={!!punchDateProblem} onChange={(e) => { setPunchDate(e.target.value); syncPunchedAt(e.target.value, punchTime); }} />
               </FormField>
               <FormField label={t('fields.punchTime', { zone })} htmlFor="cor-ptime" required error={errors.proposedPunchedAt?.message}>
                 <Input id="cor-ptime" type="time" step={60} dir="ltr" className="tnum" value={punchTime} onChange={(e) => { setPunchTime(e.target.value); syncPunchedAt(punchDate, e.target.value); }} aria-invalid={!!errors.proposedPunchedAt} />
