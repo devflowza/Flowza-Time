@@ -14,7 +14,7 @@ import { systemStep } from '../features/context.js';
 import { ensureCompOffTypeRow, seedDefaultLeaveTypes } from '../features/leave-defaults.js';
 import { cancelForEntity, decideWithin, isRequestSubject, recordEvent, submit } from '../approvals/engine.js';
 import { bookCompOffForLeave } from '../approvals/hooks/leave.js';
-import { assertNoOverlap, checkLeaveRangeLock, evaluateLeaveRequest, isCompOffType, loadLeaveEmployee, lockEmployeeLeave, ownRowWrite } from './common.js';
+import { assertNoOverlap, assertNoPunchesOnLeaveDays, checkLeaveRangeLock, evaluateLeaveRequest, isCompOffType, loadLeaveEmployee, lockEmployeeLeave, ownRowWrite } from './common.js';
 import { ACTIVE_LEAVE, UNDECIDED_LEAVE, recalcLeaveRange, resubmitLeave, seatedStep, waitingForByRequest } from './lifecycle.js';
 
 /**
@@ -250,6 +250,7 @@ export async function createLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     // review P2-11: one writer of an employee's leave at a time, so a concurrent twin meets the friendly overlap 409 below
     await lockEmployeeLeave(trx, input.employeeId);
     await assertNoOverlap(trx, orgId, input.employeeId, { startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay, halfDayPart });
+    await assertNoPunchesOnLeaveDays(trx, orgId, emp, { startDate: input.startDate, endDate: input.endDate, isHalfDay: input.isHalfDay });
     const own = !!grant.employeeId && grant.employeeId === input.employeeId;
     // written in the organisation's system step after these checks: leave_records is system-write-only since the security
     // gate (Prompt 10); review P0-2's rule (never a row about oneself from one's own session) is part of it
@@ -347,6 +348,7 @@ export async function updateLeaveRecord(deps: ApiDeps, actor: Actor, orgId: stri
     if (becomesActive) {
       await lockEmployeeLeave(trx, before.employeeId); // review P2-11
       await assertNoOverlap(trx, orgId, before.employeeId, { startDate: start, endDate: end, isHalfDay, halfDayPart }, id);
+      await assertNoPunchesOnLeaveDays(trx, orgId, { id: before.employeeId, branchId: before.branchId }, { startDate: start, endDate: end, isHalfDay });
     }
 
     let warnings: LeaveWarningDto[] = [];

@@ -6,7 +6,7 @@
  * compatibility of every leave call the current web makes.
  */
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { auditRows, createApiHarness, domainEvents, isoToday, queueJobs, ROLE, seedEmployee, seedMembership, seedOrg, seedUser, uuid, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
+import { auditRows, createApiHarness, domainEvents, isoToday, queueJobs, ROLE, seedDevice, seedEmployee, seedMembership, seedOrg, seedUser, uuid, type ApiHarness, type OrgFixture } from '../../../test/features-harness.js';
 
 vi.setConfig({ testTimeout: 60_000, hookTimeout: 240_000 });
 let h: ApiHarness; let f: OrgFixture;
@@ -191,6 +191,74 @@ describe('request validation matrix', () => {
       expect(clash.status).toBe(409);
       expect(clash.body.code).toBe('CONFLICT');
     }
+  });
+});
+
+describe('leave on days with attendance punches', () => {
+  /** A normalised punch of e5 (Branch A runs on Asia/Muscat, UTC+4) at this UTC instant. */
+  async function punchAt(iso: string, extra: { voided?: boolean } = {}) {
+    await h.admin.insertInto('attendanceEvents').values({ organizationId: f.orgId, employeeId: e5, branchId: f.branchA, punchedAt: new Date(iso), eventType: 'PUNCH_IN', source: 'DEVICE', voidedAt: extra.voided ? new Date() : null }).execute();
+  }
+  const refusal = (r: { status: number; body: { code?: string; details?: { code?: string; dates?: string[] } } }, dates: string[]) => {
+    expect(r.status).toBe(409);
+    expect(r.body.code).toBe('CONFLICT');
+    expect(r.body.details).toMatchObject({ code: 'PUNCHES_ON_LEAVE_DAYS', dates });
+  };
+
+  it('refuses a full day of leave on a day the employee punched, in the portal and in HR\'s record, and names the days', async () => {
+    await clearWorkflows();
+    const worked = nextRange(1).startDate;
+    const range = nextRange(3);
+    await punchAt(`${worked}T04:00:00Z`); // 08:00 local
+    await punchAt(`${addDays(range.startDate, 1)}T05:00:00Z`);
+    refusal(await applyAs(staff5, { leaveTypeId: T['CL'], startDate: worked, endDate: worked }), [worked]);
+    // a range that merely contains a punched day is refused too, naming that day only
+    refusal(await applyAs(staff5, { leaveTypeId: T['CL'], ...range }), [addDays(range.startDate, 1)]);
+    refusal(await h.request('POST', `${base()}/leave-records`, { token: f.hrAdmin, body: { employeeId: e5, leaveTypeId: T['CL'], startDate: worked, endDate: worked } }), [worked]);
+    // nothing was stored
+    expect(await h.admin.selectFrom('leaveRecords').select('id').where('employeeId', '=', e5).where('startDate', '=', worked as never).execute()).toHaveLength(0);
+    // HR moving a filed leave onto a punched day is refused as well
+    const free = nextRange(1).startDate;
+    const filed = await h.request('POST', `${base()}/leave-records`, { token: f.hrAdmin, body: { employeeId: e5, leaveTypeId: T['CL'], startDate: free, endDate: free } });
+    expect(filed.status).toBe(201);
+    refusal(await h.request('PATCH', `${base()}/leave-records/${filed.body.data.id}`, { token: f.hrAdmin, body: { startDate: worked, endDate: worked } }), [worked]);
+  });
+
+  it('judges the day in the branch\'s zone, sees a raw punch the normaliser has not processed yet, and ignores voided punches and other days', async () => {
+    await clearWorkflows();
+    const d = nextRange(1).startDate;
+    // 20:30 UTC on d−1 is 00:30 on d in Muscat → d; 20:30 UTC on d is already d+1
+    await punchAt(`${addDays(d, -1)}T20:30:00Z`);
+    refusal(await applyAs(staff5, { leaveTypeId: T['CL'], startDate: d, endDate: d }), [d]);
+    const free = nextRange(1).startDate;
+    await punchAt(`${free}T04:00:00Z`, { voided: true });
+    await punchAt(`${addDays(free, 1)}T20:30:00Z`); // 00:30 on free+2
+    const device = await seedDevice(h.admin, f.orgId, f.branchA);
+    const raw = (n: number, at: string, status: 'pending' | 'quarantined') => h.admin.insertInto('attendanceRawTransactions').values({ organizationId: f.orgId, employeeId: e5, branchId: f.branchA, deviceId: device, providerKey: 'mock', deviceEmployeeId: '1005', punchedAt: new Date(at), direction: 'in', source: 'SELF_SERVICE', dedupeHash: `leave-punch-${process.pid}-${n}`, processingStatus: status }).execute();
+    await raw(1, `${addDays(free, 1)}T04:00:00Z`, 'quarantined'); // never attendance
+    expect((await applyAs(staff5, { leaveTypeId: T['CL'], startDate: free, endDate: free })).status).toBe(201);
+    const pendingDay = nextRange(1).startDate;
+    await raw(2, `${pendingDay}T05:00:00Z`, 'pending'); // a punch made a moment ago: no event yet
+    refusal(await applyAs(staff5, { leaveTypeId: T['CL'], startDate: pendingDay, endDate: pendingDay }), [pendingDay]);
+  });
+
+  it('allows a half day over punches (the other half is worked) and judges an edit only when its days change', async () => {
+    await clearWorkflows();
+    const worked = nextRange(1).startDate;
+    await punchAt(`${worked}T04:00:00Z`);
+    const half = await applyAs(staff5, { leaveTypeId: T['CL'], startDate: worked, endDate: worked, isHalfDay: true, halfDayPart: 'SECOND_HALF' });
+    expect(half.status).toBe(201);
+    // making it a full day is a change of the days → refused; changing only the reason is not
+    const full = await h.request('PATCH', `${base()}/me/leave/${half.body.data.id}`, { token: staff5, body: { isHalfDay: false } });
+    refusal(full, [worked]);
+    expect((await h.request('PATCH', `${base()}/me/leave/${half.body.data.id}`, { token: staff5, body: { reason: 'Appointment' } })).status).toBe(200);
+    // moving a pending request onto a punched day is refused as well
+    const free = nextRange(1).startDate;
+    const punched = nextRange(1).startDate;
+    await punchAt(`${punched}T04:00:00Z`);
+    const other = await applyAs(staff5, { leaveTypeId: T['CL'], startDate: free, endDate: free });
+    expect(other.status).toBe(201);
+    refusal(await h.request('PATCH', `${base()}/me/leave/${other.body.data.id}`, { token: staff5, body: { startDate: punched, endDate: punched } }), [punched]);
   });
 });
 
