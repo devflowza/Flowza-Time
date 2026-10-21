@@ -121,8 +121,8 @@ export async function evaluateLeaveRequest(trx: Trx, orgId: string, input: Evalu
   const { employee } = input;
   if (input.endDate < input.startDate) throw errors.validation('endDate must be on/after startDate.', { issues: [{ path: 'endDate', message: 'Before startDate' }] });
   if (input.isHalfDay && input.startDate !== input.endDate) throw errors.validation('Half-day leave must be a single day.', { issues: [{ path: 'endDate', message: 'Must equal startDate' }] });
-  if (input.startDate < employee.joiningDate) throw errors.validation('Leave cannot start before the joining date.', { issues: [{ path: 'startDate', message: 'Before joining date' }] });
-  if (employee.exitDate && input.endDate > employee.exitDate) throw errors.validation('Leave cannot end after the exit date.', { issues: [{ path: 'endDate', message: 'After exit date' }] });
+  if (input.startDate < employee.joiningDate) throw errors.validation(`Leave cannot start before the joining date (${employee.joiningDate}).`, { issues: [{ path: 'startDate', message: 'Before joining date' }], joiningDate: employee.joiningDate });
+  if (employee.exitDate && input.endDate > employee.exitDate) throw errors.validation(`Leave cannot end after the exit date (${employee.exitDate}). If this employee is still working here, HR needs to clear the exit date on their profile.`, { issues: [{ path: 'endDate', message: 'After exit date' }], exitDate: employee.exitDate });
   return withSystemScope(trx, orgId, async (t) => {
     const type = (await loadLeaveTypePolicies(t, orgId)).find((x) => x.id === input.leaveTypeId);
     if (!type) throw errors.validation('Leave type not found or archived.', { issues: [{ path: 'leaveTypeId', message: 'Unknown leave type' }] });

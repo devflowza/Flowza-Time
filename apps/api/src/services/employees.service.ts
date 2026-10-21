@@ -379,6 +379,33 @@ async function assertBulkEffectiveFrom(trx: Trx, orgId: string, employees: Reado
 }
 
 /**
+ * An employee is either still employed or has left: a status that is not terminated / resigned together with an exit date that
+ * has passed makes the engine mark every day after it EXITED, refuses their check-in ("not active") and their leave ("cannot end
+ * after the exit date") while every list still shows them Active. Two rules keep the record consistent:
+ *  - re-activating a leaver (terminated / resigned → anything else) releases the exit date that ended the employment, unless the
+ *    request sets one (a date still ahead means a planned departure and stays);
+ *  - a request that changes the status or the exit date may not leave a non-leaver with an exit date in the past — it names the
+ *    two ways out instead of saving a record nobody can work under.
+ * An unrelated edit of a record that is already inconsistent is not blocked (the same message tells HR how to repair it).
+ */
+async function reconcileExitDate(
+  trx: Trx, orgId: string,
+  before: { employmentStatus: EmployeeDto['employmentStatus']; exitDate: Date | null },
+  input: { exitDate?: string | null | undefined; employmentStatus?: EmployeeDto['employmentStatus'] | undefined },
+  nextStatus: EmployeeDto['employmentStatus'],
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const beforeExit = before.exitDate === null ? null : isoDate(before.exitDate);
+  const today = await orgToday(trx, orgId);
+  if (input.exitDate === undefined && hasLeft(before.employmentStatus) && !hasLeft(nextStatus) && beforeExit !== null && beforeExit < today) patch['exitDate'] = null;
+  const nextExit = patch['exitDate'] !== undefined ? (patch['exitDate'] as string | null) : beforeExit;
+  const changed = nextStatus !== before.employmentStatus || (input.exitDate !== undefined && input.exitDate !== beforeExit);
+  if (changed && !hasLeft(nextStatus) && nextExit !== null && nextExit < today) {
+    throw errors.validation(`The exit date ${nextExit} has passed, so this employee could not check in or apply for leave. Clear the exit date to keep them ${nextStatus.replace('_', ' ')}, or set the status to Terminated or Resigned.`, { issues: [{ path: 'exitDate', message: 'Exit date has passed' }], exitDate: nextExit, employmentStatus: nextStatus });
+  }
+}
+
+/**
  * The days a change of joining / exit date moves between NOT_JOINED / EXITED and calculated attendance (2026-10-02 field report:
  * a joining date moved from 2 Oct back to 1 Sep left every September day "Not joined" and out of the monthly summary): from the
  * earlier to the later of the old and the new date (an open exit date counts as today), never past today — the days after it
@@ -495,6 +522,7 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     };
     // re-activating an employee who left takes a user again: refused past the user limit
     if (hasLeft(before.employmentStatus) && !hasLeft(nextSnapshot.employmentStatus)) await assertUserCapacity(trx, orgId, 1);
+    await reconcileExitDate(trx, orgId, before, input, nextSnapshot.employmentStatus, patch);
     const transition = snapshotChanged(snapshotOf(before), nextSnapshot);
     if (transition) {
       const effectiveFrom = requestedFrom ?? (await orgToday(trx, orgId));
@@ -504,7 +532,7 @@ export async function updateEmployee(deps: ApiDeps, actor: Actor, orgId: string,
     await trx.updateTable('employees').set(patch as never).where('organizationId', '=', orgId).where('id', '=', id).execute();
     // a changed joining / exit date: the days in between are recalculated in this transaction (AGENTS.md rule 5)
     const beforeDates = { joiningDate: isoDate(before.joiningDate), exitDate: before.exitDate === null ? null : isoDate(before.exitDate) };
-    const afterDates = { joiningDate, exitDate: input.exitDate === undefined ? beforeDates.exitDate : input.exitDate };
+    const afterDates = { joiningDate, exitDate: patch['exitDate'] === undefined ? beforeDates.exitDate : (patch['exitDate'] as string | null) };
     if (afterDates.joiningDate < beforeDates.joiningDate) await startHistoryOnJoining(trx, orgId, id, afterDates.joiningDate);
     const recalcRange = employmentDatesRecalcRange(beforeDates, afterDates, await orgToday(trx, orgId));
     if (recalcRange) {
@@ -616,7 +644,8 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
       return runUser(deps.db, actor, async (trx) => {
         if (input.action === 'assign_branch') await assertReferences(trx, orgId, { branchId: input.branchId });
         if (input.action === 'assign_department') await assertReferences(trx, orgId, { departmentId: input.departmentId });
-        const effectiveFrom = input.effectiveFrom ?? (await orgToday(trx, orgId));
+        const today = await orgToday(trx, orgId);
+        const effectiveFrom = input.effectiveFrom ?? today;
         const employees = await visibleEmployees(trx, orgId, grant, input.employeeIds, { lock: true });
         // re-activating leavers takes users again: all of them fit under the user limit, or the whole change is refused
         if (input.action === 'set_status' && !hasLeft(input.employmentStatus)) {
@@ -638,7 +667,9 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
         const workLocationsCleared: Array<{ employeeId: string; workLocationId: string }> = [];
         for (const { e, next } of plans) {
           await applyHistoryTransition(trx, orgId, e.id, next, effectiveFrom, `Bulk ${input.action}`, actor.userId, isoDate(e.joiningDate));
-          await trx.updateTable('employees').set({ branchId: next.branchId, departmentId: next.departmentId, employmentStatus: next.employmentStatus, updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', e.id).execute();
+          // re-activating a leaver releases the exit date that ended the employment (an exit date still ahead stays)
+          const releaseExit = hasLeft(e.employmentStatus) && !hasLeft(next.employmentStatus) && e.exitDate !== null && isoDate(e.exitDate) < today;
+          await trx.updateTable('employees').set({ branchId: next.branchId, departmentId: next.departmentId, employmentStatus: next.employmentStatus, ...(releaseExit ? { exitDate: null } : {}), updatedBy: actor.userId }).where('organizationId', '=', orgId).where('id', '=', e.id).execute();
           if (e.workLocationId && next.branchId !== e.branchId) workLocationsCleared.push({ employeeId: e.id, workLocationId: e.workLocationId });
           await emitDomainEvent(trx, { organizationId: orgId, eventType: 'employee.updated', aggregateType: 'employee', aggregateId: e.id, payload: { bulk: input.action, transition: true, branchId: next.branchId }, actorUserId: actor.userId, requestId: actor.requestId });
           changed.push(e.id);
@@ -722,7 +753,7 @@ export async function bulkAction(deps: ApiDeps, actor: Actor, orgId: string, inp
 async function visibleEmployees(trx: Trx, orgId: string, grant: MembershipGrant, ids: string[], opts: { lock?: boolean } = {}) {
   const unique = [...new Set(ids.map((id) => id.toLowerCase()))];
   if (opts.lock) await lockEmployees(trx, orgId, unique);
-  const rows = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'secondaryManagerEmployeeId', 'employmentType', 'employmentStatus', 'joiningDate', 'workLocationId']).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('id', 'in', unique).orderBy('id').execute();
+  const rows = await trx.selectFrom('employees').select(['id', 'employeeNumber', 'branchId', 'departmentId', 'designationId', 'managerEmployeeId', 'secondaryManagerEmployeeId', 'employmentType', 'employmentStatus', 'joiningDate', 'exitDate', 'workLocationId']).where('organizationId', '=', orgId).where('deletedAt', 'is', null).where('id', 'in', unique).orderBy('id').execute();
   if (rows.length !== unique.length) throw errors.validation('One or more employees were not found or are outside your branch scope.', { missing: unique.filter((id) => !rows.some((r) => r.id === id)) });
   for (const r of rows) requireBranchAccess(grant, r.branchId);
   return rows;

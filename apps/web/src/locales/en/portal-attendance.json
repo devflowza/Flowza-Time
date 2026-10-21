@@ -83,6 +83,11 @@
     "windowIn": "Check-in window {{start}}–{{end}}",
     "windowOut": "Check-out window {{start}}–{{end}}",
     "blockedTitle": "You can't punch from here right now",
+    "notActive": {
+      "LEFT": "Your employment has ended. If this is a mistake, ask HR to check your employee record.",
+      "EXITED": "Your exit date ({{date}}) has passed. If you still work here, ask HR to clear the exit date on your profile.",
+      "NOT_STARTED": "Your employment starts on {{date}}."
+    },
     "refusal": {
       "WEB_CHECKIN_DISABLED": "Web check-in is turned off for your organisation.",
       "MOBILE_CHECKIN_DISABLED": "Mobile check-in is turned off for your organisation.",

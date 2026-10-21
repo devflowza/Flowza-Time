@@ -1,6 +1,6 @@
 import { sql } from 'kysely';
 import { DateTime } from 'luxon';
-import { resolveAttendanceSettings, type AttendanceSettings, type DomainEventType, type Permission } from '@flowza/contracts';
+import { resolveAttendanceSettings, type AttendanceSettings, type DomainEventType, type EmploymentBlockDto, type Permission } from '@flowza/contracts';
 import { emitDomainEvent, type Trx } from '@flowza/database';
 import type { MembershipGrant } from '@flowza/domain';
 import { errors } from '@flowza/shared';
@@ -82,6 +82,24 @@ export function isWorking(e: EmployeeCtx, today: string): boolean {
   return !(e.exitDate && e.exitDate < today);
 }
 
+/**
+ * Why the employee cannot work today, when they cannot: the status says they left (LEFT), the exit date has passed (EXITED —
+ * the day reads "Exited" in the attendance register), or they have not joined yet (NOT_STARTED). Null while employed. The
+ * check-in page and the refusal name the cause and the date, so "not active" is never the whole answer.
+ */
+export function employmentBlock(e: EmployeeCtx, today: string): EmploymentBlockDto | null {
+  if (e.employmentStatus === 'terminated' || e.employmentStatus === 'resigned') return { cause: 'LEFT', date: e.exitDate };
+  if (e.exitDate && e.exitDate < today) return { cause: 'EXITED', date: e.exitDate };
+  if (today < e.joiningDate) return { cause: 'NOT_STARTED', date: e.joiningDate };
+  return null;
+}
+
+/** "Not active" with its cause and date: the employee and the support desk see which of the employment dates / status is the reason. */
+export function employmentBlockText(e: EmploymentBlockDto): string {
+  if (e.cause === 'NOT_STARTED') return `Your employment starts on ${e.date}.`;
+  if (e.cause === 'EXITED') return `Your exit date (${e.date}) has passed. If you still work here, ask HR to clear the exit date on your profile.`;
+  return `Your employment has ended${e.date ? ` (exit date ${e.date})` : ''}.`;
+}
 /** The organisation's effective attendance policy (defaults filled in), read in its system scope. */
 export async function attendancePolicy(trx: Trx, orgId: string): Promise<AttendanceSettings> {
   return withSystemScope(trx, orgId, async (t) => resolveAttendanceSettings((await loadSettings(t, orgId)).attendance));

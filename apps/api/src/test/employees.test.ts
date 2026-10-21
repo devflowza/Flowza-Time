@@ -406,3 +406,57 @@ describe('employees entered after they joined (field report 2026-10-02, bug 1)',
     }
   });
 });
+
+describe('exit date and employment status stay consistent (field report 2026-10-21: "Exited" on an active employee)', () => {
+  const today = async () => (await sql<{ d: string }>`select (now() at time zone timezone)::date::text as d from public.organizations where id = ${F.orgA}::uuid`.execute(api.tdb.adminDb)).rows[0]!.d;
+  const daysAgo = (base: string, n: number) => new Date(Date.parse(`${base}T00:00:00Z`) - n * 86_400_000).toISOString().slice(0, 10);
+  const patch = (id: string, body: Record<string, unknown>) => api.request('PATCH', `/orgs/${F.orgA}/employees/${id}`, { user: F.ownerA, body });
+
+  it('refuses an exit date in the past on an employee who is still active, naming the two ways out', async () => {
+    const t = await today();
+    const created = await api.request('POST', `/orgs/${F.orgA}/employees`, { user: F.ownerA, body: { employeeNumber: 'E-EXIT1', firstName: 'Exit', lastName: 'One', joiningDate: '2025-01-01', branchId: F.branchHQ } });
+    expect(created.status).toBe(201);
+    const id = created.json.data.id as string;
+    const refused = await patch(id, { exitDate: daysAgo(t, 3) });
+    expect(refused.status).toBe(400);
+    expect(refused.json).toMatchObject({ code: 'VALIDATION_ERROR', details: { issues: [{ path: 'exitDate', message: 'Exit date has passed' }] } });
+    expect(refused.json.message).toMatch(/Clear the exit date .* or set the status to Terminated or Resigned/);
+    // a date still ahead is a planned departure and is fine; so is a past date together with the leaver status
+    expect((await patch(id, { exitDate: '2099-12-31' })).status).toBe(200);
+    expect((await patch(id, { exitDate: daysAgo(t, 3), employmentStatus: 'resigned' })).json.data).toMatchObject({ employmentStatus: 'resigned', exitDate: daysAgo(t, 3) });
+  });
+
+  it('re-activating a leaver releases the exit date that ended the employment (single and bulk)', async () => {
+    const t = await today();
+    const make = async (n: string) => {
+      const c = await api.request('POST', `/orgs/${F.orgA}/employees`, { user: F.ownerA, body: { employeeNumber: n, firstName: 'Back', lastName: n, joiningDate: '2025-01-01', branchId: F.branchHQ } });
+      expect(c.status).toBe(201);
+      const id = c.json.data.id as string;
+      expect((await patch(id, { employmentStatus: 'terminated', exitDate: daysAgo(t, 5), effectiveFrom: daysAgo(t, 5) })).status).toBe(200);
+      return id;
+    };
+    const single = await make('E-EXIT2');
+    const back = await patch(single, { employmentStatus: 'active', effectiveFrom: t });
+    expect(back.status).toBe(200);
+    expect(back.json.data).toMatchObject({ employmentStatus: 'active', exitDate: null });
+    // …and the days since the exit date are recalculated, so they stop reading "Exited"
+    const requests = await api.tdb.adminDb.selectFrom('attendanceRecalculationRequests').select([sql<string>`from_date::text`.as('fromDate')]).where('organizationId', '=', F.orgA).where(sql<boolean>`${single}::uuid = any(employee_ids)`).execute();
+    expect(requests.some((r) => r.fromDate === daysAgo(t, 5))).toBe(true);
+
+    const bulk = await make('E-EXIT3');
+    const res = await api.request('POST', `/orgs/${F.orgA}/employees/bulk`, { user: F.ownerA, body: { action: 'set_status', employeeIds: [bulk], employmentStatus: 'active', effectiveFrom: t } });
+    expect(res.status).toBe(200);
+    const stored = await api.tdb.adminDb.selectFrom('employees').select(['employmentStatus', sql<string | null>`exit_date::text`.as('exitDate')]).where('id', '=', bulk).executeTakeFirstOrThrow();
+    expect(stored).toMatchObject({ employmentStatus: 'active', exitDate: null });
+  });
+
+  it('keeps an exit date that is still ahead when a leaver is re-activated', async () => {
+    const t = await today();
+    const c = await api.request('POST', `/orgs/${F.orgA}/employees`, { user: F.ownerA, body: { employeeNumber: 'E-EXIT4', firstName: 'Notice', lastName: 'Four', joiningDate: '2025-01-01', branchId: F.branchHQ } });
+    const id = c.json.data.id as string;
+    expect((await patch(id, { employmentStatus: 'terminated', effectiveFrom: daysAgo(t, 1) })).status).toBe(200);
+    const res = await patch(id, { employmentStatus: 'active', exitDate: '2099-06-30', effectiveFrom: t });
+    expect(res.status).toBe(200);
+    expect(res.json.data).toMatchObject({ employmentStatus: 'active', exitDate: '2099-06-30' });
+  });
+});

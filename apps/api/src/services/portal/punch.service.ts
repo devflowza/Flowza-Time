@@ -4,7 +4,7 @@ import { sql } from 'kysely';
 import { DateTime } from 'luxon';
 import {
   GEOFENCE_VERDICTS, SELFIE_MAX_BYTES, SELF_SERVICE_PROVIDER_KEY,
-  type AttendanceFlag, type AttendanceGrantsDto, type AttendanceGrantsInput, type AttendancePolicySections, type AttendanceSettings, type AttendanceStatus, type GeofenceVerdict,
+  type AttendanceFlag, type AttendanceGrantsDto, type AttendanceGrantsInput, type AttendancePolicySections, type AttendanceSettings, type AttendanceStatus, type EmploymentBlockDto, type GeofenceVerdict,
   type SelfieCheckinDto, type SelfieReviewInput, type SelfiePhotoDto, type SelfPunchChannel, type SelfPunchDirection, type SelfPunchDto, type SelfPunchPreviewDto,
   type SelfPunchRefusal, type SelfPunchResultDto, type SelfPunchStatusDto, type SelfieCheckinStatus,
 } from '@flowza/contracts';
@@ -20,7 +20,7 @@ import { moduleEnabledFor } from '../../middleware/module-gate.js';
 import { systemStep } from '../features/context.js';
 import { enqueueNormalize, ingestRawTransactions } from '../features/ingest.js';
 import {
-  type EmployeeCtx, attendancePolicy, emitToUsers, inLocalWindow, isPeriodLocked, isWorking, lineManagerUserIds, loadEmployeeCtx, localInstant, lockEmployee, portalSelf, reviewerRole, userIdsOfEmployees,
+  type EmployeeCtx, attendancePolicy, emitToUsers, inLocalWindow, employmentBlock, employmentBlockText, isPeriodLocked, lineManagerUserIds, loadEmployeeCtx, localInstant, lockEmployee, portalSelf, reviewerRole, userIdsOfEmployees,
 } from './common.js';
 import { evaluateForEmployee, fencesForBranch, fencesForEmployee, selfFences, toVerdictDto } from './geofences.service.js';
 import { resolveDays } from './shift-resolve.js';
@@ -213,7 +213,7 @@ const selfieAvailableNow = (ctx: PunchContext): boolean => ctx.settings.selfServ
 async function standingRefusals(trx: Trx, orgId: string, ctx: PunchContext, channel: SelfPunchChannel, ip: string | null, at: Date): Promise<SelfPunchRefusal[]> {
   const out: SelfPunchRefusal[] = [];
   const today = localInstant(at, ctx.emp.timezone).date;
-  if (!isWorking(ctx.emp, today) || today < ctx.emp.joiningDate) out.push('NOT_ACTIVE');
+  if (employmentBlock(ctx.emp, today)) out.push('NOT_ACTIVE');
   if (channel === 'web' && !ctx.settings.selfService.webCheckIn) out.push('WEB_CHECKIN_DISABLED');
   if (channel === 'mobile' && !ctx.settings.selfService.mobileCheckIn) out.push('MOBILE_CHECKIN_DISABLED');
   // the attendance policy restricts what the organisation allows (never the other way round)
@@ -290,7 +290,8 @@ const REFUSAL_TEXT: Record<SelfPunchRefusal, string> = {
 export function refusalError(refusals: readonly SelfPunchRefusal[], extra: Record<string, unknown> = {}): AppError {
   const reason = refusals[0]!;
   const details = { reason, refusals: [...refusals], ...extra };
-  const message = REFUSAL_TEXT[reason];
+  const employment = extra['employment'] as EmploymentBlockDto | undefined;
+  const message = reason === 'NOT_ACTIVE' && employment ? employmentBlockText(employment) : REFUSAL_TEXT[reason];
   if (reason === 'DUPLICATE_PUNCH') return new AppError('CONFLICT', message, { details });
   if (reason === 'ALREADY_CHECKED_IN' || reason === 'NOT_CHECKED_IN') return new AppError('INVALID_STATE', message, { details });
   if (reason === 'PERIOD_LOCKED') return new AppError('PERIOD_LOCKED', message, { details });
@@ -322,7 +323,7 @@ export async function getPunchStatus(deps: ApiDeps, actor: Actor, orgId: string,
       date: local.date, timezone: ctx.emp.timezone, serverTime: now.toISOString(),
       punches: recent.filter((r) => r.punchedAt.getTime() >= todayStart).map(toPunchDto),
       today: record ? { status: record.status as AttendanceStatus, flags: (record.flags ?? []) as AttendanceFlag[], firstInAt: isoDateTimeOrNull(record.firstInAt), lastOutAt: isoDateTimeOrNull(record.lastOutAt), workedMinutes: Number(record.workedMinutes ?? 0), expectedEndAt: isoDateTimeOrNull(record.expectedEndAt), scheduledMinutes: Number(record.scheduledMinutes ?? 0) } : null,
-      lastDirection, canCheckIn: !blocked && lastDirection !== 'in', canCheckOut: !blocked && lastDirection !== 'out', blockers,
+      lastDirection, canCheckIn: !blocked && lastDirection !== 'in', canCheckOut: !blocked && lastDirection !== 'out', blockers, employment: employmentBlock(ctx.emp, local.date),
       policy: {
         webCheckIn: ctx.settings.selfService.webCheckIn, mobileCheckIn: ctx.settings.selfService.mobileCheckIn, requireGeofence: ctx.settings.selfService.requireGeofence,
         allowSelfieCheckIn: ctx.settings.selfService.allowSelfieCheckIn, checkInWindow: ctx.settings.selfService.checkInWindow, checkOutWindow: ctx.settings.selfService.checkOutWindow,
@@ -354,7 +355,7 @@ export async function previewPunch(deps: ApiDeps, actor: Actor, orgId: string, i
   });
 }
 
-type PunchOutcome = { kind: 'ok'; result: SelfPunchResultDto } | { kind: 'refused'; refusals: SelfPunchRefusal[]; verdict: GeofenceVerdict };
+type PunchOutcome = { kind: 'ok'; result: SelfPunchResultDto } | { kind: 'refused'; refusals: SelfPunchRefusal[]; verdict: GeofenceVerdict; employment: EmploymentBlockDto | null };
 
 export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: { direction: SelfPunchDirection; channel: SelfPunchChannel; lat?: number | undefined; lng?: number | undefined; accuracy?: number | undefined; isMock?: boolean | undefined; clientQueuedAt?: string | undefined; idempotencyKey: string }): Promise<SelfPunchResultDto> {
   const self = portalSelf(actor, orgId, 'attendance.checkin');
@@ -383,7 +384,7 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
         await emitToUsers(trx, actor, orgId, 'attendance.punch_flagged', { type: 'employee', id: ctx.emp.id }, await lineManagerUserIds(trx, orgId, ctx.emp),
           { employeeId: ctx.emp.id, employeeName: ctx.emp.displayName, outcome: 'denied', verdict: a.evaluation.verdict, reason: a.evaluation.reason, geofenceName: a.evaluation.geofenceName, distanceM: a.evaluation.distanceM, direction: input.direction, at: now.toISOString() });
       }
-      return { kind: 'refused', refusals: a.refusals, verdict: a.verdict };
+      return { kind: 'refused', refusals: a.refusals, verdict: a.verdict, employment: employmentBlock(ctx.emp, localInstant(now, ctx.emp.timezone).date) };
     }
     const payload = {
       channel: input.channel, lat: location.lat, lng: location.lng, accuracy: location.accuracy, geofenceId: verdictDto.geofenceId, geofenceName: verdictDto.geofenceName, verdict: a.verdict, verdictReason: a.evaluation.reason,
@@ -414,7 +415,7 @@ export async function punch(deps: ApiDeps, actor: Actor, orgId: string, input: {
       result: { replayed: false, punch: { id: written.rawId, punchedAt: now.toISOString(), direction: input.direction, source: 'SELF_SERVICE', channel: input.channel, verdict: a.verdict, deviceName: 'FlowZa Self-Service', processingStatus: 'pending' }, verdict: verdictDto, outOfWindow: a.outOfWindow, flagged: a.flagged },
     };
   });
-  if (outcome.kind === 'refused') throw refusalError(outcome.refusals, { verdict: outcome.verdict, direction: input.direction });
+  if (outcome.kind === 'refused') throw refusalError(outcome.refusals, { verdict: outcome.verdict, direction: input.direction, ...(outcome.employment ? { employment: outcome.employment } : {}) });
   return outcome.result;
 }
 
@@ -575,7 +576,8 @@ export async function submitSelfie(deps: ApiDeps, actor: Actor, orgId: string, i
     if (!ctx.grants.openAttendance && !ctx.grants.selfieRequired) throw new AppError('FORBIDDEN', 'Selfie check-in needs an attendance grant from your manager.', { details: { reason: 'SELFIE_NOT_GRANTED' } });
     const now = new Date();
     const today = localInstant(now, ctx.emp.timezone).date;
-    if (!isWorking(ctx.emp, today)) throw refusalError(['NOT_ACTIVE']);
+    const employment = employmentBlock(ctx.emp, today);
+    if (employment) throw refusalError(['NOT_ACTIVE'], { employment });
     if (await isPeriodLocked(trx, orgId, ctx.emp.branchId, today)) throw refusalError(['PERIOD_LOCKED']);
     // the same duplicate guard as a punch: a second selfie of the same direction within `duplicatePunchSeconds` is a double tap
     const dupSeconds = ctx.settings.selfService.duplicatePunchSeconds;

@@ -179,6 +179,35 @@ describe('self-service check-in / check-out', () => {
     expect(after.body.data.fences).toEqual([expect.objectContaining({ name: 'HQ', scope: 'org' })]);
     expect(after.body.data.policy).toMatchObject({ webCheckIn: true, requireGeofence: 'block', ipRestricted: false });
   });
+
+  it('names why an employee is "not active": the exit date passed, the status left, or the joining date is ahead (field report 2026-10-21)', async () => {
+    const day = (n: number) => DateTime.now().setZone('Asia/Muscat').plus({ days: n }).toISODate()!;
+    const setEmployee = (patch: Record<string, unknown>) => h.admin.updateTable('employees').set(patch).where('id', '=', f.e1).execute();
+    const original = await h.admin.selectFrom('employees').select(['joiningDate', 'exitDate', 'employmentStatus']).where('id', '=', f.e1).executeTakeFirstOrThrow();
+    try {
+      // an active employee whose exit date has passed (the "Exited" chip on the check-in page)
+      await setEmployee({ exitDate: day(-3) });
+      const status = await h.request('GET', `${base()}/me/punch/status`, { token: f.employeeUser });
+      expect(status.body.data.blockers).toContain('NOT_ACTIVE');
+      expect(status.body.data.employment).toEqual({ cause: 'EXITED', date: day(-3) });
+      expect(status.body.data.canCheckIn).toBe(false);
+      const refused = await punch({ direction: 'in', ...OFFICE, accuracy: 10 }, {}, f.employeeUser);
+      expect(refused.status).toBe(403);
+      expect(refused.body.details).toMatchObject({ reason: 'NOT_ACTIVE', employment: { cause: 'EXITED', date: day(-3) } });
+      expect(refused.body.message).toBe(`Your exit date (${day(-3)}) has passed. If you still work here, ask HR to clear the exit date on your profile.`);
+
+      await setEmployee({ exitDate: null, employmentStatus: 'resigned' });
+      expect((await h.request('GET', `${base()}/me/punch/status`, { token: f.employeeUser })).body.data.employment).toEqual({ cause: 'LEFT', date: null });
+
+      await setEmployee({ employmentStatus: original.employmentStatus, joiningDate: day(5) });
+      expect((await h.request('GET', `${base()}/me/punch/status`, { token: f.employeeUser })).body.data.employment).toEqual({ cause: 'NOT_STARTED', date: day(5) });
+    } finally {
+      await setEmployee({ joiningDate: original.joiningDate, exitDate: original.exitDate, employmentStatus: original.employmentStatus });
+    }
+    const ok = await h.request('GET', `${base()}/me/punch/status`, { token: f.employeeUser });
+    expect(ok.body.data.employment).toBeNull();
+    expect(ok.body.data.blockers).not.toContain('NOT_ACTIVE');
+  });
 });
 
 describe('selfie check-in and attendance grants', () => {
