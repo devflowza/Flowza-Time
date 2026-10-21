@@ -99,6 +99,16 @@ describe('CheckInPage', () => {
     expect(screen.getByTestId('punch-button')).toBeDisabled();
   });
 
+  it('names the LATEST punch in the header — the API lists today\'s punches newest first', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    const punch = (id: string, punchedAt: string, direction: string) => ({ id, punchedAt, direction, source: 'SELF_SERVICE', channel: 'web' as const, verdict: 'allowed' as const, deviceName: null, processingStatus: 'processed' });
+    // in 08:20 Muscat, out 08:27: the newest (the out) comes first, as the endpoint sends them
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ lastDirection: 'out', canCheckIn: true, canCheckOut: false, punches: [punch('p2', '2026-09-27T04:27:00Z', 'out'), punch('p1', '2026-09-27T04:20:00Z', 'in')] }) } });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    renderWithProviders(<CheckInPage />);
+    expect(await screen.findByTestId('punch-state')).toHaveTextContent('Checked out at 08:27');
+  });
+
   it('once checked in, says when the employee may check out (flexible: check-in + required hours) and how long is left', async () => {
     mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
     // checked in 19:11 Muscat on an 8-hour flexible shift; the engine put the expected check-out at 03:11
