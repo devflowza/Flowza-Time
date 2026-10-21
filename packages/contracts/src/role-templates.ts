@@ -38,7 +38,7 @@ export const ROLE_TEMPLATES: Readonly<Record<RoleTemplateKey, RoleTemplate>> = {
     permissions: [
       'dashboard.view', 'employee.view_team', 'attendance.view_team', 'attendance.view_own', 'attendance.approve', 'attendance.correct',
       'attendance.checkin', 'attendance.note', 'attendance.request_correction', 'leave.view_team', 'leave.approve', 'leave.request',
-      'holiday.view', 'shift.view', 'report.view', 'approval.delegate',
+      'holiday.view', 'shift.view', 'shift.assign_team', 'report.view', 'approval.delegate',
     ],
   },
   /** Read-only HR: sees employees, structure, attendance and leave, and runs reports; changes nothing. */

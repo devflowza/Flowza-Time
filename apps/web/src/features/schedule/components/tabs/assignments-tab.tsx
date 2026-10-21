@@ -27,7 +27,9 @@ export function AssignmentsTab() {
   const tz = useOrgTimezone();
   const navigate = useNavigate();
   const can = useCan();
-  const canAssign = can('shift.assign');
+  // a line manager (shift.assign_team) assigns to their direct reports only; the API says per row what the caller may change
+  const canAssignAll = can('shift.assign');
+  const canAssign = canAssignAll || can('shift.assign_team');
   const table = useTabTable();
   const f = table.state.filters;
   const query = useMemo(() => ({ page: table.state.page, pageSize: table.state.pageSize, targetType: f['targetType'], shiftId: f['shiftId'], branchId: f['branchId'], activeOn: f['activeOn'] }), [table.state.page, table.state.pageSize, f]);
@@ -48,8 +50,8 @@ export function AssignmentsTab() {
     { id: 'branch', header: tc('common.branch'), cell: ({ row }) => row.original.branchId ? branches.byId.get(row.original.branchId)?.name ?? '—' : <span className="text-xs text-muted-foreground">{t('assignments.allBranches')}</span> },
     // effectiveTo is the assignment's last day (inclusive): it is still active on that day
     { id: 'range', header: t('assignments.effective'), cell: ({ row }) => { const a = row.original; const today = todayIso(tz); const active = a.effectiveFrom <= today && (!a.effectiveTo || a.effectiveTo >= today); return <span className={`whitespace-nowrap text-xs tnum ${active ? '' : 'text-muted-foreground'}`}>{fmtDate(a.effectiveFrom)} → {a.effectiveTo ? fmtDate(a.effectiveTo) : t('assignments.openEnded')}{active ? <Badge variant="success" className="ms-2">{t('assignments.active')}</Badge> : null}</span>; } },
-    { id: 'actions', header: '', cell: ({ row }) => canAssign ? <RowActions actions={[{ key: 'end', label: t('assignments.end'), icon: <CalendarX2 />, disabled: !!row.original.effectiveTo && row.original.effectiveTo < todayIso(tz), onSelect: () => { setEndDate(todayIso(tz)); setEnding(row.original); } }, { key: 'delete', label: tc('common.delete'), icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(row.original) }]} /> : null },
-  ], [t, tc, tz, shifts.byId, branches.byId, canAssign]);
+    { id: 'actions', header: '', cell: ({ row }) => (row.original.canManage ?? canAssignAll) ? <RowActions actions={[{ key: 'end', label: t('assignments.end'), icon: <CalendarX2 />, disabled: !!row.original.effectiveTo && row.original.effectiveTo < todayIso(tz), onSelect: () => { setEndDate(todayIso(tz)); setEnding(row.original); } }, { key: 'delete', label: tc('common.delete'), icon: <Trash2 />, destructive: true, onSelect: () => setDeleting(row.original) }]} /> : null },
+  ], [t, tc, tz, shifts.byId, branches.byId, canAssignAll]);
 
   return (
     <div className="grid gap-4 xl:grid-cols-[1fr_360px]">
@@ -76,7 +78,7 @@ export function AssignmentsTab() {
         />
       </div>
       <ResolveShiftCard />
-      <AssignmentDialog key={String(createOpen)} open={createOpen} onOpenChange={setCreateOpen} />
+      <AssignmentDialog key={String(createOpen)} open={createOpen} onOpenChange={setCreateOpen} teamOnly={!canAssignAll} />
       <ConfirmDialog open={!!ending} onOpenChange={(o) => !o && setEnding(null)} title={t('assignments.endTitle')} description={t('assignments.endHint')} confirmLabel={t('assignments.end')} loading={end.isPending}
         onConfirm={() => { if (!ending || !endDate) return; end.mutate({ id: ending.id, effectiveTo: endDate }, { onSuccess: (r) => { afterMutation(r.recalculationJobId, t('assignments.ended')); setEnding(null); }, onError: toastError }); }}>
         <div className="space-y-1.5"><Label htmlFor="as-end-date">{t('assignments.effectiveTo')}</Label><Input id="as-end-date" type="date" dir="ltr" value={endDate} min={ending?.effectiveFrom} onChange={(e) => setEndDate(e.target.value)} /><p className="text-xs text-muted-foreground">{t('assignments.effectiveToHint')}</p></div>
