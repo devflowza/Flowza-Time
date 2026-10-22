@@ -10,7 +10,7 @@ import { orgToday } from '../features/recalc.js';
 import { dv } from '../features/sql-helpers.js';
 import { systemStep } from '../features/context.js';
 import { answerInfo, cancelForEntity, submit } from '../approvals/engine.js';
-import { assertNoOverlap, checkLeaveRangeLock, evaluateLeaveRequest, isCompOffType, leaveDaysOf, loadLeaveEmployee, lockEmployeeLeave, toBalanceDto, type LeaveEmployee } from './common.js';
+import { assertNoOverlap, assertNoPunchesOnLeaveDays, checkLeaveRangeLock, evaluateLeaveRequest, isCompOffType, leaveDaysOf, loadLeaveEmployee, lockEmployeeLeave, toBalanceDto, type LeaveEmployee } from './common.js';
 import { UNDECIDED_LEAVE, recalcLeaveRange, resubmitLeave } from './lifecycle.js';
 
 /**
@@ -208,6 +208,7 @@ export async function applyLeave(deps: ApiDeps, actor: Actor, orgId: string, inp
     // review P2-11: a double click / two tabs — the second application waits for the first and gets the overlap 409
     await lockEmployeeLeave(trx, emp.id);
     await assertNoOverlap(trx, orgId, emp.id, { startDate: input.startDate, endDate: input.endDate, isHalfDay, halfDayPart });
+    await assertNoPunchesOnLeaveDays(trx, orgId, emp, { startDate: input.startDate, endDate: input.endDate, isHalfDay });
     // review P2-10 / P0-2: validated above (applicability, half day, notice, locks, overlap), written with its server-computed
     // `days` in the system context — the database refuses a direct insert of one's own leave
     const row = await systemStep(trx, orgId, (t) => t.insertInto('leaveRecords').values({
@@ -260,6 +261,8 @@ export async function editLeave(deps: ApiDeps, actor: Actor, orgId: string, id: 
     const lockB = await checkLeaveRangeLock(trx, orgId, emp.branchId, next.startDate, next.endDate, scope.grant);
     await lockEmployeeLeave(trx, emp.id); // review P2-11
     await assertNoOverlap(trx, orgId, emp.id, { startDate: next.startDate, endDate: next.endDate, isHalfDay: next.isHalfDay, halfDayPart }, id);
+    // only a change of the days (or of full ↔ half day) is judged against the punches: a reason edited later is not
+    if (next.startDate !== beforeStart || next.endDate !== beforeEnd || next.isHalfDay !== before.isHalfDay) await assertNoPunchesOnLeaveDays(trx, orgId, emp, next);
     // validated above (own filing, still undecided, the matrix, locks, overlap): written in the system context — a client's
     // own session may only withdraw (RLS + guard), so the dates and `days` cannot be changed around this validation
     const res = await systemStep(trx, orgId, (t) => t.updateTable('leaveRecords').set({ leaveTypeId: next.leaveTypeId, startDate: next.startDate, endDate: next.endDate, isHalfDay: next.isHalfDay, halfDayPart, reason: next.reason, days: ev.days, editedAt: new Date(), status: 'PENDING' })

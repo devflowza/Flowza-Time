@@ -2,7 +2,7 @@ import { sql } from 'kysely';
 import type { LeaveBalanceDto, LeaveWarningDto } from '@flowza/contracts';
 import { COMP_OFF_SYSTEM_KEY, compOffCoverage, loadLeaveBalances, loadLeaveTypePolicies, loadWorkingCalendars, type LeaveTypePolicy, type Trx } from '@flowza/database';
 import { checkLeaveRequest, countLeaveDaysByMode, leaveDaysInWindow, type LeaveBalance, type MembershipGrant } from '@flowza/domain';
-import { errors } from '@flowza/shared';
+import { addDays, errors, isValidTimezone, localDateOf, localDateTime } from '@flowza/shared';
 import { hasPermission } from '../../lib/authorize.js';
 import { withSystemScope } from '../../lib/service.js';
 import { isoDate, isoDateOrNull } from '../../lib/mappers.js';
@@ -185,6 +185,52 @@ export async function findLeaveOverlap(trx: Trx, orgId: string, employeeId: stri
 export async function assertNoOverlap(trx: Trx, orgId: string, employeeId: string, range: { startDate: string; endDate: string; isHalfDay: boolean; halfDayPart: string | null }, excludeId?: string): Promise<void> {
   const clash = await findLeaveOverlap(trx, orgId, employeeId, range, excludeId);
   if (clash) throw errors.conflict('There is already leave in this range (pending or approved). Withdraw or change it first.', { leaveRecordId: clash });
+}
+
+/** Raw punches in these states are real attendance that the normaliser has not (or not yet) turned into an event. */
+const LIVE_RAW_STATES = ['pending', 'held'] as const;
+
+/**
+ * The local dates of [startDate, endDate] on which the employee has punched — a normalised event that is not voided, or a raw
+ * punch still waiting for the normaliser (a punch made a moment ago has no event yet). Dates are those of the employee's branch
+ * zone (the organisation's, then UTC, when the branch has none), the zone the attendance engine reads the day in. Read in the
+ * system scope: a reader without attendance access must meet the same rule. At most `limit` dates, ascending.
+ */
+export async function punchedDatesInRange(trx: Trx, orgId: string, employee: { id: string; branchId: string | null }, startDate: string, endDate: string, limit = 5): Promise<string[]> {
+  return withSystemScope(trx, orgId, async (t) => {
+    let zone = employee.branchId ? (await t.selectFrom('branches').select('timezone').where('id', '=', employee.branchId).executeTakeFirst())?.timezone : undefined;
+    if (!zone || !isValidTimezone(zone)) {
+      const org = await t.selectFrom('organizations').select('timezone').where('id', '=', orgId).executeTakeFirst();
+      zone = org?.timezone && isValidTimezone(org.timezone) ? org.timezone : 'UTC';
+    }
+    const from = localDateTime(startDate, '00:00', zone).toJSDate();
+    const to = localDateTime(addDays(endDate, 1), '00:00', zone).toJSDate();
+    const [events, raws] = await Promise.all([
+      t.selectFrom('attendanceEvents').select('punchedAt').where('organizationId', '=', orgId).where('employeeId', '=', employee.id).where('voidedAt', 'is', null)
+        .where('punchedAt', '>=', from).where('punchedAt', '<', to).orderBy('punchedAt').limit(200).execute(),
+      t.selectFrom('attendanceRawTransactions').select('punchedAt').where('organizationId', '=', orgId).where('employeeId', '=', employee.id).where('processingStatus', 'in', [...LIVE_RAW_STATES])
+        .where('punchedAt', '>=', from).where('punchedAt', '<', to).orderBy('punchedAt').limit(200).execute(),
+    ]);
+    const dates = new Set([...events, ...raws].map((r) => localDateOf(r.punchedAt, zone!)));
+    return [...dates].sort().slice(0, limit);
+  });
+}
+
+/**
+ * A full day of leave cannot be filed over a day the employee attended: the day would count worked hours and a leave day at
+ * once (the daily record is LEAVE with hours on it, and the balance is charged for a day that was worked). HR corrects the
+ * attendance first (void the punches through a correction) or the leave moves to the days that are free. A half day is exempt: its
+ * other half is worked by design, and the engine halves what it expects. Called with the final range of a new or edited request,
+ * after the overlap check; a decision on an already filed request does not re-check (the request was valid when it was filed).
+ */
+export async function assertNoPunchesOnLeaveDays(trx: Trx, orgId: string, employee: { id: string; branchId: string | null }, range: { startDate: string; endDate: string; isHalfDay: boolean }): Promise<void> {
+  if (range.isHalfDay) return;
+  const dates = await punchedDatesInRange(trx, orgId, employee, range.startDate, range.endDate);
+  if (dates.length === 0) return;
+  throw errors.conflict(
+    `Leave cannot be recorded for ${dates.length === 1 ? 'a day' : 'days'} with attendance punches (${dates.join(', ')}). Choose other dates, or ask HR to correct the punches of ${dates.length === 1 ? 'that day' : 'those days'} first.`,
+    { code: 'PUNCHES_ON_LEAVE_DAYS', dates },
+  );
 }
 
 /**

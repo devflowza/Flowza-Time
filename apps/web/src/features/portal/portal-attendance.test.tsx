@@ -99,6 +99,16 @@ describe('CheckInPage', () => {
     expect(screen.getByTestId('punch-button')).toBeDisabled();
   });
 
+  it('names the LATEST punch in the header — the API lists today\'s punches newest first', async () => {
+    mockGeolocation({ latitude: 23.5881, longitude: 58.383, accuracy: 12 });
+    const punch = (id: string, punchedAt: string, direction: string) => ({ id, punchedAt, direction, source: 'SELF_SERVICE', channel: 'web' as const, verdict: 'allowed' as const, deviceName: null, processingStatus: 'processed' });
+    // in 08:20 Muscat, out 08:27: the newest (the out) comes first, as the endpoint sends them
+    mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ lastDirection: 'out', canCheckIn: true, canCheckOut: false, punches: [punch('p2', '2026-09-27T04:27:00Z', 'out'), punch('p1', '2026-09-27T04:20:00Z', 'in')] }) } });
+    apiMock.post.mockResolvedValue({ data: preview() });
+    renderWithProviders(<CheckInPage />);
+    expect(await screen.findByTestId('punch-state')).toHaveTextContent('Checked out at 08:27');
+  });
+
   it('says why the employment is not active — the exit date that passed — instead of a bare "not active"', async () => {
     mockGeolocation('denied');
     mockGet({ [`/orgs/${ORG}/me/punch/status`]: { data: status({ blockers: ['NOT_ACTIVE'], canCheckIn: false, employment: { cause: 'EXITED', date: '2026-10-15' } }) } });

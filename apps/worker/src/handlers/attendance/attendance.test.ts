@@ -230,6 +230,21 @@ describe('RECOMPUTE_DAILY', () => {
     expect(r.flags).toEqual(['OVERTIME']);
   });
 
+  it('keeps the work of a day whose punches all lie outside the punch window (a manager in and out after the margin) instead of ABSENT; a lone one stays ABSENT', async () => {
+    // the 08:00–17:00 shift's window closes at 23:00; these punches come after it (events written directly: the fixture's raw rows stay as the other tests count them)
+    const ev = (date: string, time: string, eventType: 'PUNCH_IN' | 'PUNCH_OUT') => ({ organizationId: ORG, employeeId: E1, branchId: BRANCH_A, punchedAt: at(date, time), eventType, source: 'DEVICE' as const });
+    await h.tdb.adminDb.insertInto('attendanceEvents').values([ev('2026-02-10', '23:10', 'PUNCH_IN'), ev('2026-02-10', '23:40', 'PUNCH_OUT'), ev('2026-02-11', '23:30', 'PUNCH_IN')]).execute();
+    await recompute(E1, '2026-02-10');
+    await recompute(E1, '2026-02-11');
+    const kept = await record(E1, '2026-02-10');
+    expect(kept).toMatchObject({ punchCount: 2, workedMinutes: 30 });
+    expect(kept.status).not.toBe('ABSENT');
+    expect(kept.flags).toContain('OUT_OF_WINDOW');
+    expect(iso(kept.firstInAt)).toBe('2026-02-10T19:10:00.000Z');
+    expect(iso(kept.lastOutAt)).toBe('2026-02-10T19:40:00.000Z');
+    expect(await record(E1, '2026-02-11')).toMatchObject({ status: 'ABSENT', punchCount: 0 });
+  });
+
   it('is idempotent: identical inputs → no version bump, no history, no new domain event', async () => {
     expect(await recompute(E1, '2026-03-10')).toMatchObject({ outcome: 'unchanged', version: 1 });
     const r = await record(E1, '2026-03-10');

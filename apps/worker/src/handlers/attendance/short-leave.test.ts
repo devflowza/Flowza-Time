@@ -75,7 +75,7 @@ describe('short leave in the recompute', () => {
     const out = await sys((trx) => recomputeDaily(trx, { organizationId: ORG, employeeId: E1, date: DAY, now: NOW, reason: 'RECALCULATION' }));
     expect(out.outcome).toBe('created');
     const row = await h.tdb.adminDb.selectFrom('attendanceDailyRecords').selectAll().where('employeeId', '=', E1).where('attendanceDate', '=', DAY as never).executeTakeFirstOrThrow();
-    expect(row).toMatchObject({ lostMinutes: 10, excusedMinutes: 30, creditedMinutes: 0, workedMinutes: 420, engineVersion: 'attendance-engine/1.5.0' });
+    expect(row).toMatchObject({ lostMinutes: 10, excusedMinutes: 30, creditedMinutes: 0, workedMinutes: 420, engineVersion: 'attendance-engine/1.5.1' });
     expect(row.flags).toEqual(expect.arrayContaining(['SHORT_LEAVE', 'LOST_TIME']));
     // idempotent
     expect((await sys((trx) => recomputeDaily(trx, { organizationId: ORG, employeeId: E1, date: DAY, now: NOW, reason: 'RECALCULATION' }))).outcome).toBe('unchanged');

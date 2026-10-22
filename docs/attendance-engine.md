@@ -98,6 +98,22 @@ Records inside a locked period are skipped and listed in the recalculation summa
      Flag `SPECIAL_HOURS`, trace step `specialHours`. **A period takes precedence over Ramadan hours** on the dates both cover
      (step `ramadan` says it was superseded). The punch windows stay the shift's own; half days halve the period's hours; a
      flexible start band follows the period's start.
+6d. Engine 1.5.1 (field report, no migration):
+   - **Punches outside every window.** A punch no window claims belongs to no other day, so when ALL of a working day's punches
+     lie outside its windows and make a complete in → out pair (e.g. a manager checking in and out after the shift's punch-out
+     margin), they are attributed to the calendar day they fall on instead of leaving the day `ABSENT` with 0 punches. The day
+     keeps `OUT_OF_WINDOW` so HR can review it; trace step `attribution.outOfWindowWork`. Unchanged: a day that also has punches
+     inside its window (the stray ones stay out of the record), a lone out-of-window punch (`ABSENT` + `OUT_OF_WINDOW`), and a
+     punch of another calendar day (never pulled in). Weekly offs and holidays already behaved this way (1.5.0).
+   - **A day never demands more than it schedules.** The full-day threshold is capped at the day's scheduled minutes and the
+     half-day threshold keeps its proportion of it (`statusThresholds`, shared with the short-leave status step; see step 3). A
+     completed 3 h shift is `PRESENT`, not `HALF_DAY` + `UNDER_HOURS`. Shifts at or above the thresholds (the normal 8 h day:
+     420 / 240) keep their figures.
+   - Overtime is unchanged: by default every minute worked after the shift end counts (a late arrival who stays on is `LATE` +
+     `OVERTIME`); with `overtimeRequiresScheduledHours` only the part beyond the scheduled minutes counts, i.e. overtime starts
+     once the default hours are completed.
+   - Related, in the API: a full day of leave cannot be recorded (self-service apply / edit, HR record / edit) over a day on which
+     the employee has punched — `409 CONFLICT`, `details.code = PUNCHES_ON_LEAVE_DAYS`, `details.dates`. Half days are exempt.
 7. Flags (canonical order): `LATE, EARLY_DEPARTURE, OVERTIME, MISSING_IN, MISSING_OUT, MANUAL_CORRECTION, OUT_OF_WINDOW,
    WORKED_ON_HOLIDAY, WORKED_ON_WEEKLY_OFF, HALF_DAY_LEAVE, DUPLICATE_PUNCHES_COLLAPSED, RAMADAN_HOURS, CROSS_MIDNIGHT,
    NO_SHIFT, UNDER_HOURS, …, VERY_LATE, DOUBLE_SHIFT, SPECIAL_HOURS`.

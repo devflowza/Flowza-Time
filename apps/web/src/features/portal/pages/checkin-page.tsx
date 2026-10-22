@@ -166,7 +166,8 @@ export default function CheckInPage() {
   const refusals = previewResult?.refusals ?? [];
   const blocked = hardBlockers.length > 0 || refusals.length > 0;
   const near = fix && s && s.fences.length ? nearestFence(fix, s.fences) : null;
-  const lastPunch = s?.punches.length ? s.punches[s.punches.length - 1] : null;
+  // the API lists today's punches newest first: the header names the LATEST one (picked by time, so the list order never matters)
+  const lastPunch = s?.punches.length ? s.punches.reduce((a, b) => (Date.parse(b.punchedAt) > Date.parse(a.punchedAt) ? b : a)) : null;
   const punchWindow = direction === 'in' ? s?.policy.checkInWindow : s?.policy.checkOutWindow;
   // the shift line names today's shift (resolved live), so the record's NO_SHIFT chip would only repeat it — or contradict it
   // while the record waits for its recalculation after a shift change

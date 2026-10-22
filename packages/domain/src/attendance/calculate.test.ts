@@ -436,14 +436,19 @@ describe('calculateDailyRecord — holidays, weekly off, leave', () => {
     expect(r).toMatchObject({ status: 'WEEKLY_OFF', workedMinutes: 240, overtimeMinutes: 240, overtimeCategory: 'WEEKLY_OFF', punchCount: 2 });
     expect(r.flags).not.toContain('OUT_OF_WINDOW');
     expect(r.trace.steps.find((s) => s.step === 'attribution.nonWorkingDay')).toBeDefined();
-    expect(r.trace.engineVersion).toBe('attendance-engine/1.5.0');
+    expect(r.trace.engineVersion).toBe('attendance-engine/1.5.1');
     // a holiday likewise; a punch on another calendar day is never pulled in
     const hol = calculateDailyRecord(input({ holiday, events: [punch(DATE, '01:00'), punch(DATE, '04:00'), punch(D1, '02:00')] }));
     expect(hol).toMatchObject({ status: 'HOLIDAY', workedMinutes: 180, overtimeCategory: 'HOLIDAY', punchCount: 2 });
-    // the same punches on a working day stay out of window
+    // the same punches on a working day: engine 1.5.1 keeps a complete in → out pair that no window claims (flagged for review)
+    // instead of dropping the day to ABSENT; a lone one stays out, and so do strays next to in-window punches
     const working = calculateDailyRecord(input({ events: [punch(DATE, '01:00'), punch(DATE, '04:00')] }));
-    expect(working.punchCount).toBe(0);
+    expect(working).toMatchObject({ punchCount: 2, workedMinutes: 180 });
     expect(working.flags).toContain('OUT_OF_WINDOW');
+    resetIds();
+    const lone = calculateDailyRecord(input({ events: [punch(DATE, '01:00')] }));
+    expect(lone).toMatchObject({ status: 'ABSENT', punchCount: 0 });
+    expect(lone.flags).toContain('OUT_OF_WINDOW');
   });
 
   it('holiday takes precedence over weekly off and leave', () => {
@@ -818,5 +823,75 @@ describe('calculateDailyRecord — adversarial review', () => {
     const r = calculateDailyRecord(input({ shift, events: [punch(DATE, '16:00'), punch(D1, '00:00')] }));
     expect(r).toMatchObject({ status: 'PRESENT', workedMinutes: 480, punchCount: 2 });
     expect(r.flags).toEqual(['CROSS_MIDNIGHT']);
+  });
+});
+
+describe('calculateDailyRecord — field report (engine 1.5.1)', () => {
+  beforeEach(resetIds);
+  /** The QA set-up: a five-minute shift with no punch margin, so anything punched later than 12:30 lies outside every window. */
+  const tiny = fixedShift({ startTime: '12:25', endTime: '12:30', punchInWindowBeforeMinutes: 0, punchOutWindowAfterMinutes: 0 });
+
+  it('a manager who checks in and out outside the punch windows is present with computed hours, not ABSENT with 0 punches', () => {
+    const r = calculateDailyRecord(input({ shift: tiny, events: day('13:48', '13:49', '13:49:30', '13:55') }));
+    expect(r).toMatchObject({ status: 'PRESENT', punchCount: 4, workedMinutes: 7, firstInAt: at(DATE, '13:48'), lastOutAt: at(DATE, '13:55') });
+    expect(r.flags).toEqual(expect.arrayContaining(['OUT_OF_WINDOW', 'LATE', 'OVERTIME']));
+    expect(r.trace.punches.map((p) => p.role)).not.toContain('OUT_OF_WINDOW');
+    expect(stepNames(r)).toContain('attribution.outOfWindowWork');
+  });
+
+  it('keeps the old outcome where the punches prove nothing: a lone punch, or strays next to in-window punches', () => {
+    const lone = calculateDailyRecord(input({ shift: tiny, events: day('13:48') }));
+    expect(lone).toMatchObject({ status: 'ABSENT', punchCount: 0, workedMinutes: 0 });
+    expect(lone.flags).toEqual(['OUT_OF_WINDOW']);
+    resetIds();
+    const mixed = calculateDailyRecord(input({ events: [punch(DATE, '03:00'), punch(DATE, '04:00'), ...day('09:00', '17:00')] }));
+    expect(mixed).toMatchObject({ status: 'PRESENT', punchCount: 2, workedMinutes: 480 });
+    expect(mixed.flags).toContain('OUT_OF_WINDOW');
+  });
+
+  it('never pulls in a punch of another calendar day', () => {
+    const r = calculateDailyRecord(input({ shift: tiny, events: [punch(DATE, '13:48'), punch(DATE, '13:55'), punch(D1, '13:40'), punch(D1, '13:50')] }));
+    expect(r.punchCount).toBe(2);
+    expect(r.eventIds).toEqual(['evt-001', 'evt-002']);
+  });
+
+  it('a shift is full when its own hours are worked, however short it is', () => {
+    const shift = fixedShift({ startTime: '09:00', endTime: '12:00' }); // 180 min, below the rule set's 240 half-day / 420 full-day minutes
+    const full = calculateDailyRecord(input({ shift, events: day('09:00', '12:00') }));
+    expect(full).toMatchObject({ status: 'PRESENT', workedMinutes: 180, scheduledMinutes: 180 });
+    expect(full.flags).not.toContain('UNDER_HOURS');
+    resetIds();
+    const lessThanHalf = calculateDailyRecord(input({ shift, events: day('09:00', '10:00') }));
+    expect(lessThanHalf).toMatchObject({ status: 'HALF_DAY', workedMinutes: 60 });
+    expect(lessThanHalf.flags).toContain('UNDER_HOURS');
+  });
+
+  it('shifts at or above the rule set\'s thresholds keep them (an 8 h day: 420 full, 240 half)', () => {
+    expect(calculateDailyRecord(input({ events: day('09:00', '16:30') }))).toMatchObject({ status: 'PRESENT', workedMinutes: 450 });
+    resetIds();
+    const under = calculateDailyRecord(input({ events: day('09:00', '15:30') }));
+    expect(under).toMatchObject({ status: 'PRESENT', workedMinutes: 390 });
+    expect(under.flags).toContain('UNDER_HOURS');
+    resetIds();
+    expect(calculateDailyRecord(input({ events: day('09:00', '12:30') }))).toMatchObject({ status: 'HALF_DAY', workedMinutes: 210 });
+  });
+
+  it('a late check-in that works past the shift end shows LATE and OVERTIME together', () => {
+    const r = calculateDailyRecord(input({ events: day('09:40', '18:30') }));
+    expect(r).toMatchObject({ status: 'PRESENT', lateMinutes: 30, workedMinutes: 530, overtimeMinutes: 90, overtimeCategory: 'REGULAR' });
+    expect(r.flags).toEqual(['LATE', 'OVERTIME']);
+  });
+
+  it('with overtimeRequiresScheduledHours the overtime starts once the default hours are completed', () => {
+    const strict = rules({ overtimeRequiresScheduledHours: true });
+    // 09:40 → 17:30 is 470 min: past the shift end but the 480 default minutes are not done yet → late, no overtime
+    const short = calculateDailyRecord(input({ events: day('09:40', '17:30'), rules: strict }));
+    expect(short).toMatchObject({ workedMinutes: 470, lateMinutes: 30, overtimeMinutes: 0 });
+    expect(short.flags).toEqual(['LATE']);
+    resetIds();
+    // 09:40 → 18:30 is 530 min: the 480 are done at 17:40, the 50 after them are overtime
+    const done = calculateDailyRecord(input({ events: day('09:40', '18:30'), rules: strict }));
+    expect(done).toMatchObject({ workedMinutes: 530, lateMinutes: 30, overtimeMinutes: 50, overtimeCategory: 'REGULAR' });
+    expect(done.flags).toEqual(['LATE', 'OVERTIME']);
   });
 });
